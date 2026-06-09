@@ -30,7 +30,8 @@
       "find openspec/*",
       "git status --short *",
       "mkdir -p openspec/changes/archive",
-      "mv openspec/changes/* openspec/changes/archive/*"
+      "mv openspec/changes/* openspec/changes/archive/*",
+      "regex:^npm\\s+--prefix\\s+(?!/|~|\\.\\.(?:/|$)|.*\\/\\.\\.(?:/|$))[A-Za-z0-9._/@+-]+\\s+test\\s+--\\s+--run$"
     ]
   },
   "audit": {

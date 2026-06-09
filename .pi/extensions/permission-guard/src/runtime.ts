@@ -1,4 +1,5 @@
 import { loadPermissionConfig, type PermissionConfigLoadResult } from './config.js';
+import { addProjectSafeCommandPattern } from './project-approval.js';
 import { evaluatePermission } from './policy.js';
 import { resolveApproval, type ApprovalPrompt } from './approval.js';
 import { recordAuditDecision } from './audit.js';
@@ -171,6 +172,9 @@ async function resolveRuntimeDecision(
           return choice ?? 'Deny';
         }
       : undefined,
+    projectApproval: async (pattern) => {
+      await addProjectSafeCommandPattern(ctx.cwd ?? process.cwd(), pattern);
+    },
   });
 
   consumeMainThreadApproval(approval.result.reasonCode === 'session_approval_allowed' ? approval.result.cacheKey : undefined);

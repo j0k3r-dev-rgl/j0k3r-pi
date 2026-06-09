@@ -2,7 +2,7 @@ export type PolicyDecision = 'allow' | 'ask' | 'deny';
 export type ToolMode = 'allow' | 'deny' | 'policy';
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
 export type Action = 'read' | 'list' | 'search' | 'write' | 'create' | 'edit' | 'bash';
-export type ApprovalChoice = 'Allow once' | 'Allow for session' | 'Deny';
+export type ApprovalChoice = 'Allow once' | 'Allow for session' | 'Allow for project' | 'Deny';
 export type PermissionSource = 'tool_call' | 'user_bash';
 export type RequestOrigin = 'main' | 'subagent' | 'unknown';
 
@@ -123,7 +123,7 @@ export interface PermissionRequiredPayload {
   prompt: {
     title: string;
     message: string;
-    choices: ['Allow once', 'Allow for session', 'Deny'];
+    choices: ['Allow once', 'Allow for session', 'Allow for project', 'Deny'];
     safeTarget?: string;
     safeCommandSummary?: string;
     workspaceRoot?: string;
@@ -136,6 +136,9 @@ export interface PermissionRequiredPayload {
     targetPattern?: string;
     commandPattern?: string;
     policyIdentity: string;
+  };
+  projectScope?: {
+    safeCommandPattern?: string;
   };
 }
 

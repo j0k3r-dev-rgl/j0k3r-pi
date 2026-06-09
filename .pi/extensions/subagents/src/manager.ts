@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import { getSubagent, loadSubagents, readSubagentsConfig } from './config.js';
 import { sdkSubagentRunner } from './runner.js';
 import { SubagentHistoryStore } from './history.js';
@@ -13,7 +15,7 @@ function compactOutput(text: string, limit = 800): string {
 
 const PERMISSION_REQUIRED_MARKER = 'permission_required:';
 const MAIN_THREAD_APPROVAL_REGISTRY_KEY = Symbol.for('pi.permissionGuard.mainThreadApprovals');
-const APPROVAL_CHOICES = ['Allow once', 'Allow for session', 'Deny'] as const;
+const APPROVAL_CHOICES = ['Allow once', 'Allow for session', 'Allow for project', 'Deny'] as const;
 type ApprovalChoice = typeof APPROVAL_CHOICES[number];
 
 type PermissionRequiredPayload = {
@@ -39,6 +41,9 @@ type PermissionRequiredPayload = {
     targetPattern?: string;
     commandPattern?: string;
     policyIdentity: string;
+  };
+  projectScope?: {
+    safeCommandPattern?: string;
   };
 };
 
@@ -72,6 +77,7 @@ function approvalPromptMessage(payload: PermissionRequiredPayload): string {
   if (prompt.safeTarget) lines.push('', `Target: ${prompt.safeTarget}`);
   if (prompt.safeCommandSummary) lines.push('', `Command: ${prompt.safeCommandSummary}`);
   if (prompt.workspaceRoot) lines.push('', `Workspace: ${prompt.workspaceRoot}`);
+  if (payload.projectScope?.safeCommandPattern) lines.push('', `Project safe pattern: ${payload.projectScope.safeCommandPattern}`);
   if (prompt.limitations?.length) lines.push('', ...prompt.limitations);
   return lines.join('\n');
 }
@@ -83,7 +89,7 @@ async function promptMainThreadForPermission(ctx: any, payload: PermissionRequir
   return APPROVAL_CHOICES.includes(choice) ? choice : 'Deny';
 }
 
-function registerMainThreadApproval(payload: PermissionRequiredPayload, choice: Exclude<ApprovalChoice, 'Deny'>): void {
+function registerMainThreadApproval(payload: PermissionRequiredPayload, choice: Exclude<ApprovalChoice, 'Deny' | 'Allow for project'>): void {
   const scope = payload.sessionScope;
   if (!scope) throw new Error('Subagent permission approval cannot be retried because the request did not include a session scope.');
   const mode = choice === 'Allow once' ? 'once' : 'session';
@@ -99,6 +105,39 @@ function registerMainThreadApproval(payload: PermissionRequiredPayload, choice: 
     policyIdentity: scope.policyIdentity,
     createdAt: nowIso(),
   });
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+async function addProjectSafeCommandPattern(cwd: string, pattern: string): Promise<void> {
+  const configPath = join(resolve(cwd), '.pi', 'permissions.json');
+  let root: Record<string, unknown> = {};
+  try {
+    const raw = await readFile(configPath, 'utf8');
+    const parsed = JSON.parse(raw) as unknown;
+    if (isPlainObject(parsed)) root = parsed;
+  } catch (error: unknown) {
+    if (!(typeof error === 'object' && error && 'code' in error && error.code === 'ENOENT')) throw error;
+  }
+
+  const bash = isPlainObject(root.bash) ? root.bash : {};
+  const safeCommands = Array.isArray(bash.safeCommands) && bash.safeCommands.every((item) => typeof item === 'string')
+    ? [...bash.safeCommands]
+    : [];
+  if (!safeCommands.includes(pattern)) safeCommands.push(pattern);
+  root.bash = { ...bash, safeCommands };
+
+  await mkdir(dirname(configPath), { recursive: true });
+  await writeFile(configPath, `${JSON.stringify(root, null, 2)}\n`, 'utf8');
+}
+
+async function registerProjectApproval(cwd: string, payload: PermissionRequiredPayload): Promise<void> {
+  const pattern = payload.projectScope?.safeCommandPattern;
+  if (!pattern) throw new Error('Subagent permission approval cannot be saved for the project because no safe project command pattern was provided.');
+  await addProjectSafeCommandPattern(cwd, pattern);
+  if (payload.sessionScope) registerMainThreadApproval(payload, 'Allow once');
 }
 
 function createLimiter(max: number) {
@@ -320,7 +359,8 @@ export class SubagentManager {
 
           const choice = await promptMainThreadForPermission(ctx, permissionRequired);
           if (choice === 'Deny') throw new Error(`Subagent permission denied by main user: ${permissionRequired.reasonCode ?? permissionRequired.reason ?? 'permission_required'}`);
-          registerMainThreadApproval(permissionRequired, choice);
+          if (choice === 'Allow for project') await registerProjectApproval(cwd, permissionRequired);
+          else registerMainThreadApproval(permissionRequired, choice);
           task.last_activity = `${choice} approved by main user; retrying subagent`;
           task.last_activity_at = nowIso();
           this.record(cwd, task, task.last_activity);

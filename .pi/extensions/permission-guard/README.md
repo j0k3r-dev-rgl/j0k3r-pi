@@ -35,7 +35,7 @@ Example project override:
 }
 ```
 
-`bash.safeCommands` entries support exact commands and `*` wildcards. Configured safe commands are allowed before normal ask heuristics such as network, shell syntax, default ask, or state-changing prompts. A simple `cd <workspace-relative-dir> && <safeCommand>` form is also allowed when the `cd` target stays inside the workspace and `<safeCommand>` matches `bash.safeCommands`. Hard denials still win first, including privilege escalation, obvious secret reads, configured deny commands, and destructive root/home deletes.
+`bash.safeCommands` entries support exact commands, `*` wildcards, and `regex:<pattern>` entries. Configured safe commands are allowed before normal ask heuristics such as network, shell syntax, default ask, or state-changing prompts. A simple `cd <workspace-relative-dir> && <safeCommand>` form is also allowed when the `cd` target stays inside the workspace and `<safeCommand>` matches `bash.safeCommands`. Hard denials still win first, including privilege escalation, obvious secret reads, configured deny commands, and destructive root/home deletes.
 
 ## Approval flow
 
@@ -43,9 +43,10 @@ Interactive approval choices are English and intentionally stable:
 
 - `Allow once`
 - `Allow for session`
+- `Allow for project`
 - `Deny`
 
-`Allow once` applies only to the current request. `Allow for session` creates an in-memory, session-scoped approval only for the matching action, tool, target or command, and policy identity. `Deny` blocks the current request.
+`Allow once` applies only to the current request. `Allow for session` creates an in-memory, session-scoped approval only for the matching action, tool, target or command, and policy identity. `Allow for project` is available for recognized safe bash forms and persists a project-level `bash.safeCommands` entry in `.pi/permissions.json` so matching variants can run without repeated prompts. `Deny` blocks the current request.
 
 Subagent approvals route to the main thread. If a subagent-originated request needs approval, the subagent cannot approve itself; the guard surfaces a `permission_required` payload for the orchestrator/user thread so the main user can decide.
 

@@ -283,7 +283,7 @@ describe('subagents extension', () => {
       prompt: {
         title: 'Permission required for read',
         message: 'Outside-workspace read requires approval.',
-        choices: ['Allow once', 'Allow for session', 'Deny'],
+        choices: ['Allow once', 'Allow for session', 'Allow for project', 'Deny'],
         safeTarget: '/tmp/outside.txt',
       },
       sessionScope: {
@@ -300,7 +300,7 @@ describe('subagents extension', () => {
     let runTool: any;
     registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
     const select = vi.fn(async (_message: string, choices: string[]) => {
-      expect(choices).toEqual(['Allow once', 'Allow for session', 'Deny']);
+      expect(choices).toEqual(['Allow once', 'Allow for session', 'Allow for project', 'Deny']);
       return 'Deny';
     });
 
@@ -310,6 +310,59 @@ describe('subagents extension', () => {
     expect(runner).toHaveBeenCalledOnce();
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Subagent permission denied by main user');
+  });
+
+  it('records an allow-for-project decision in project permissions and retries the subagent task successfully', async () => {
+    writeAgent('analyst');
+    const payload = {
+      type: 'permission_required',
+      requestId: 'req-project',
+      tool: 'bash',
+      action: 'bash',
+      origin: 'subagent',
+      reason: 'Bash command requires approval.',
+      reasonCode: 'bash_default_requires_approval',
+      riskLevel: 'medium',
+      prompt: {
+        title: 'Permission required for bash',
+        message: 'Bash command requires approval.',
+        choices: ['Allow once', 'Allow for session', 'Allow for project', 'Deny'],
+        safeCommandSummary: 'npm --prefix .pi/extensions/permission-guard test -- --run',
+      },
+      sessionScope: {
+        cacheKey: 'bash:test-policy:npm --prefix .pi/extensions/permission-guard test -- --run',
+        action: 'bash',
+        tool: 'bash',
+        commandPattern: 'npm --prefix .pi/extensions/permission-guard test -- --run',
+        policyIdentity: 'test-policy',
+      },
+      projectScope: {
+        safeCommandPattern: 'regex:^npm\\s+--prefix\\s+(?!/|~|\\.\\.(?:/|$)|.*\\/\\.\\.(?:/|$))[A-Za-z0-9._/@+-]+\\s+test\\s+--\\s+--run$',
+      },
+    };
+    const marker = `permission_required:${JSON.stringify(payload)}`;
+    let attempts = 0;
+    const runner = vi.fn(async () => {
+      attempts += 1;
+      if (attempts === 1) return { result: marker, model: 'mock/model', fallback_used: false };
+      const saved = JSON.parse(fs.readFileSync(path.join(tmp, '.pi', 'permissions.json'), 'utf8'));
+      expect(saved.bash.safeCommands).toContain(payload.projectScope.safeCommandPattern);
+      return { result: 'command succeeded after project approval', model: 'mock/model', fallback_used: false };
+    });
+    const manager = new SubagentManager(runner);
+    let runTool: any;
+    registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
+    const select = vi.fn(async (_message: string, choices: string[]) => {
+      expect(choices).toEqual(['Allow once', 'Allow for session', 'Allow for project', 'Deny']);
+      return 'Allow for project';
+    });
+
+    const result = await runTool.execute('1', { agent: 'analyst', task: 'run project-safe command', mode: 'task' }, undefined, undefined, { cwd: tmp, ui: { select } });
+
+    expect(select).toHaveBeenCalledOnce();
+    expect(runner).toHaveBeenCalledTimes(2);
+    expect(result.isError).toBeUndefined();
+    expect(result.details.results[0].result).toContain('command succeeded after project approval');
   });
 
   it('records a main-thread allow-once decision and retries the subagent task successfully', async () => {
@@ -330,7 +383,7 @@ describe('subagents extension', () => {
       prompt: {
         title: 'Permission required for read',
         message: 'Outside-workspace read requires approval.',
-        choices: ['Allow once', 'Allow for session', 'Deny'],
+        choices: ['Allow once', 'Allow for session', 'Allow for project', 'Deny'],
         safeTarget: '/tmp/outside.txt',
       },
       sessionScope: {
@@ -360,7 +413,7 @@ describe('subagents extension', () => {
     let runTool: any;
     registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
     const select = vi.fn(async (_message: string, choices: string[]) => {
-      expect(choices).toEqual(['Allow once', 'Allow for session', 'Deny']);
+      expect(choices).toEqual(['Allow once', 'Allow for session', 'Allow for project', 'Deny']);
       return 'Allow once';
     });
 

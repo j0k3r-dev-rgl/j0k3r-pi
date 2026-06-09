@@ -41,9 +41,20 @@ function wildcardPatternToRegExp(pattern: string): RegExp {
   return new RegExp(`^${source}$`, 'i');
 }
 
+function commandPatternToRegExp(pattern: string): RegExp | undefined {
+  if (pattern.startsWith('regex:')) {
+    try {
+      return new RegExp(pattern.slice('regex:'.length), 'i');
+    } catch {
+      return undefined;
+    }
+  }
+  return wildcardPatternToRegExp(pattern);
+}
+
 function matchesCommandPattern(command: string, patterns: string[]): string | undefined {
   const normalized = normalizeCommand(command);
-  return patterns.find((pattern) => wildcardPatternToRegExp(pattern).test(normalized));
+  return patterns.find((pattern) => commandPatternToRegExp(pattern)?.test(normalized));
 }
 
 function hasSuspiciousShellSyntax(command: string): boolean {
@@ -68,7 +79,7 @@ function simpleWorkspaceCdCommand(command: string, config: PermissionPolicyConfi
 
   const cdTarget = match[1]!;
   const innerCommand = match[2]!;
-  if (cdTarget === '..' || cdTarget.startsWith('../') || cdTarget === '~' || cdTarget.startsWith('~/')) return undefined;
+  if (cdTarget === '..' || cdTarget.startsWith('../') || cdTarget === '~' || cdTarget.startsWith('~/') || cdTarget.split('/').includes('..')) return undefined;
 
   const targetPath = isAbsolute(cdTarget) ? cdTarget : resolve(root, cdTarget);
   if (!isSameOrInside(targetPath, root)) return undefined;

@@ -71,8 +71,8 @@ describe('interactive approval and session cache', () => {
 
     await resolveApproval(config, request, decision, { prompt, sessionCache: createSessionApprovalCache({ sessionId: 'session-a' }) });
 
-    expect(APPROVAL_CHOICES).toEqual(['Allow once', 'Allow for session', 'Deny']);
-    expect(prompt).toHaveBeenCalledWith(expect.objectContaining({ choices: ['Allow once', 'Allow for session', 'Deny'] }));
+    expect(APPROVAL_CHOICES).toEqual(['Allow once', 'Allow for session', 'Allow for project', 'Deny']);
+    expect(prompt).toHaveBeenCalledWith(expect.objectContaining({ choices: ['Allow once', 'Allow for session', 'Allow for project', 'Deny'] }));
   });
 
   it('allows once without mutating the session cache', async () => {
@@ -90,6 +90,36 @@ describe('interactive approval and session cache', () => {
     expect(resolved.result).toMatchObject({ decision: 'allow', finalDecision: 'allow', reasonCode: 'approval_allow_once' });
     expect(cache.snapshot().entries).toEqual([]);
     expect(evaluatePermission(config, request, cache.snapshot())).toMatchObject({ decision: 'ask', finalDecision: 'requires_approval' });
+  });
+
+  it('stores allow-for-project by delegating a generated safe command pattern without mutating session cache', async () => {
+    const config = policy();
+    const request: PermissionRequest = {
+      id: 'bash-project-approval',
+      source: 'tool_call',
+      origin: 'main',
+      tool: 'bash',
+      action: 'bash',
+      rawInputSummary: 'bash npm --prefix .pi/extensions/permission-guard test -- --run',
+      command: { raw: 'npm --prefix .pi/extensions/permission-guard test -- --run', summary: 'npm --prefix .pi/extensions/permission-guard test -- --run' },
+      mode: 'tui',
+      hasUI: true,
+      policyIdentity: 'test-policy',
+      timestamp: '2026-06-09T00:00:00.000Z',
+    };
+    const decision = askDecision(config, request);
+    const cache = createSessionApprovalCache({ sessionId: 'session-project' });
+    const projectApproval = vi.fn(async (_pattern: string) => undefined);
+
+    const resolved = await resolveApproval(config, request, decision, {
+      prompt: async () => 'Allow for project' as const,
+      sessionCache: cache,
+      projectApproval,
+    });
+
+    expect(resolved.result).toMatchObject({ decision: 'allow', finalDecision: 'allow', reasonCode: 'approval_allow_once' });
+    expect(projectApproval).toHaveBeenCalledWith('regex:^npm\\s+--prefix\\s+(?!/|~|\\.\\.(?:/|$)|.*\\/\\.\\.(?:/|$))[A-Za-z0-9._/@+-]+\\s+test\\s+--\\s+--run$');
+    expect(cache.snapshot().entries).toEqual([]);
   });
 
   it('stores allow-for-session using a scoped cache entry that can be reused by the pure policy engine', async () => {
@@ -177,7 +207,7 @@ describe('interactive approval and session cache', () => {
       origin: 'subagent',
       requester: request.requester,
       prompt: expect.objectContaining({
-        choices: ['Allow once', 'Allow for session', 'Deny'],
+        choices: ['Allow once', 'Allow for session', 'Allow for project', 'Deny'],
         safeTarget: request.target!.normalizedAbsolute,
         limitations: expect.arrayContaining([expect.stringContaining('not a hard sandbox')]),
       }),
@@ -211,7 +241,7 @@ describe('interactive approval and session cache', () => {
       type: 'permission_required',
       requestId: 'bash-ask',
       prompt: expect.objectContaining({
-        choices: ['Allow once', 'Allow for session', 'Deny'],
+        choices: ['Allow once', 'Allow for session', 'Allow for project', 'Deny'],
         safeCommandSummary: 'curl https://example.com',
       }),
       requester: request.requester,

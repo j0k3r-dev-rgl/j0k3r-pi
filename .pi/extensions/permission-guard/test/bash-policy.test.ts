@@ -166,6 +166,22 @@ describe('bash permission policy', () => {
     });
   });
 
+  it('supports regex safe command patterns before default ask', () => {
+    const pattern = 'regex:^npm\\s+--prefix\\s+(?!/|~|\\.\\.(?:/|$)|.*\\/\\.\\.(?:/|$))[A-Za-z0-9._/@+-]+\\s+test\\s+--\\s+--run$';
+    const config = policy({ safeCommands: [pattern] });
+
+    expect(classifyBashCommand(config, bashRequest('npm --prefix .pi/extensions/permission-guard test -- --run'))).toMatchObject({
+      decision: 'allow',
+      finalDecision: 'allow',
+      reasonCode: 'bash_safe_command_allowed',
+      details: { matchedRule: pattern },
+    });
+    expect(classifyBashCommand(config, bashRequest('npm --prefix ../outside test -- --run'))).toMatchObject({
+      decision: 'ask',
+      finalDecision: 'requires_approval',
+    });
+  });
+
   it('keeps hard deny precedence over configured safe commands', () => {
     const config = policy({ safeCommands: ['sudo ls', 'cat ~/.ssh/id_rsa'] });
 

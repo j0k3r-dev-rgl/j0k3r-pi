@@ -1,3 +1,4 @@
+import { projectSafeCommandPatternFor } from './project-approval.js';
 import { buildSessionApprovalEntry, type SessionApprovalCache } from './session-cache.js';
 import type {
   ApprovalChoice,
@@ -7,12 +8,12 @@ import type {
   PermissionRequiredPayload,
 } from './types.js';
 
-export const APPROVAL_CHOICES = ['Allow once', 'Allow for session', 'Deny'] as const satisfies readonly ApprovalChoice[];
+export const APPROVAL_CHOICES = ['Allow once', 'Allow for session', 'Allow for project', 'Deny'] as const satisfies readonly ApprovalChoice[];
 
 export interface ApprovalPrompt {
   title: string;
   message: string;
-  choices: ['Allow once', 'Allow for session', 'Deny'];
+  choices: ['Allow once', 'Allow for session', 'Allow for project', 'Deny'];
   safeTarget?: string;
   safeCommandSummary?: string;
   workspaceRoot?: string;
@@ -22,6 +23,7 @@ export interface ApprovalPrompt {
 export interface ResolveApprovalOptions {
   prompt?: (prompt: ApprovalPrompt) => Promise<ApprovalChoice> | ApprovalChoice;
   sessionCache?: SessionApprovalCache;
+  projectApproval?: (pattern: string) => Promise<void> | void;
 }
 
 export interface ApprovalResolution {
@@ -103,6 +105,7 @@ export function buildPermissionRequiredPayload(
     riskLevel: decision.riskLevel,
     prompt: approvalPrompt(request, decision),
     sessionScope: sessionScope(request, decision, cacheKey),
+    projectScope: { safeCommandPattern: projectSafeCommandPatternFor(request, decision) },
   };
 }
 
@@ -142,6 +145,14 @@ export async function resolveApproval(
   const choice = await options.prompt(approvalPrompt(request, decision));
   if (choice === 'Deny') return { result: withApprovalResult(decision, false, 'approval_denied') };
   if (choice === 'Allow once') return { result: withApprovalResult(decision, true, 'approval_allow_once') };
+  if (choice === 'Allow for project') {
+    const pattern = projectSafeCommandPatternFor(request, decision);
+    if (pattern && options.projectApproval) {
+      await options.projectApproval(pattern);
+      return { result: withApprovalResult(decision, true, 'approval_allow_once') };
+    }
+    return { result: withApprovalResult(decision, true, 'approval_allow_once') };
+  }
 
   const cacheEnabled = config.approvals.sessionCache && config.approvals.allowForSession && Boolean(options.sessionCache);
   const entry = cacheEnabled ? buildSessionApprovalEntry(request, decision, options.sessionCache!.sessionId) : undefined;

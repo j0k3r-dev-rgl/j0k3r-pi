@@ -38,7 +38,7 @@ async function writeProjectPolicy(cwd: string, policy: Record<string, unknown>) 
 
 function createCtx(cwd: string, choices: ApprovalChoice[] = [], overrides: Record<string, unknown> = {}) {
   const select = vi.fn(async (_message: string, options: ApprovalChoice[]) => {
-    expect(options).toEqual(['Allow once', 'Allow for session', 'Deny']);
+    expect(options).toEqual(['Allow once', 'Allow for session', 'Allow for project', 'Deny']);
     return choices.shift() ?? 'Deny';
   });
 
@@ -92,7 +92,7 @@ describe('permission guard runtime wiring', () => {
     const handler = pi.handlers.tool_call![0] as ToolCallHandler;
     let resolveChoice!: (choice: ApprovalChoice) => void;
     const select = vi.fn(async (_message: string, options: ApprovalChoice[]) => {
-      expect(options).toEqual(['Allow once', 'Allow for session', 'Deny']);
+      expect(options).toEqual(['Allow once', 'Allow for session', 'Allow for project', 'Deny']);
       return await new Promise<ApprovalChoice>((resolve) => {
         resolveChoice = resolve;
       });
@@ -210,7 +210,7 @@ describe('permission guard runtime wiring', () => {
       origin: 'subagent',
       requester: { subagentId: 'sg-1', subagentName: 'sdd-apply', taskId: '2.10' },
       prompt: expect.objectContaining({
-        choices: ['Allow once', 'Allow for session', 'Deny'],
+        choices: ['Allow once', 'Allow for session', 'Allow for project', 'Deny'],
         safeTarget: expect.stringContaining('outside.txt'),
       }),
     }));
@@ -246,7 +246,7 @@ describe('permission guard runtime wiring', () => {
       origin: 'subagent',
       requester: { subagentId: 'sg-no-ui', subagentName: 'sdd-verify', taskId: '3.6' },
       prompt: expect.objectContaining({
-        choices: ['Allow once', 'Allow for session', 'Deny'],
+        choices: ['Allow once', 'Allow for session', 'Allow for project', 'Deny'],
         safeTarget: expect.stringContaining('outside.txt'),
       }),
     }));
@@ -301,6 +301,30 @@ describe('permission guard runtime wiring', () => {
         (globalThis as Record<symbol, unknown>)[registryKey] = previousRegistry;
       }
     }
+  });
+
+  it('persists Allow for project bash approvals as safe command patterns and reuses them for matching variants', async () => {
+    const cwd = await tempWorkspace('permission-guard-runtime-project-approval-');
+    const pi = createMockPi();
+    registerPermissionGuardRuntime(pi);
+    const handler = pi.handlers.tool_call![0] as ToolCallHandler;
+    const ctx = createCtx(cwd, ['Allow for project']);
+
+    await expect(handler({
+      toolName: 'bash',
+      toolCallId: 'tc-project-approval',
+      input: { command: 'npm --prefix .pi/extensions/permission-guard test -- --run' },
+    }, ctx)).resolves.toBeUndefined();
+
+    const saved = JSON.parse(await readFile(join(cwd, '.pi', 'permissions.json'), 'utf8'));
+    expect(saved.bash.safeCommands).toContain('regex:^npm\\s+--prefix\\s+(?!/|~|\\.\\.(?:/|$)|.*\\/\\.\\.(?:/|$))[A-Za-z0-9._/@+-]+\\s+test\\s+--\\s+--run$');
+
+    await expect(handler({
+      toolName: 'bash',
+      toolCallId: 'tc-project-approval-variant',
+      input: { command: 'npm --prefix .pi/extensions/subagents test -- --run' },
+    }, ctx)).resolves.toBeUndefined();
+    expect(ctx.ui.select).toHaveBeenCalledTimes(1);
   });
 
   it('does not handle unsupported tool_call tools', async () => {

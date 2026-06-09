@@ -16,6 +16,8 @@ describe('permission guard disclosure documentation', () => {
     expect(text).toContain('json configurable');
     expect(text).toContain('allow once');
     expect(text).toContain('allow for session');
+    expect(text).toContain('allow for project');
+    expect(text).toContain('regex:<pattern>');
     expect(text).toContain('deny');
     expect(text).toContain('subagent approvals route to the main thread');
     expect(text).toContain('audit is local and redacted');

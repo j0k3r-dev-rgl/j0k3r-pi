@@ -17,7 +17,7 @@ describe('subagent runner permission-required bridge', () => {
       prompt: {
         title: 'Permission required for read',
         message: 'Outside-workspace read requires approval.',
-        choices: ['Allow once', 'Allow for session', 'Deny'],
+        choices: ['Allow once', 'Allow for session', 'Allow for project', 'Deny'],
         safeTarget: '/tmp/outside.txt',
       },
     };
