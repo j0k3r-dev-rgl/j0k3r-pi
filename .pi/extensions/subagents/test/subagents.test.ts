@@ -317,7 +317,7 @@ describe('subagents extension', () => {
     expect(rendered).not.toContain('legacy result should not win');
   });
 
-  it('does not raw-truncate ansi-styled Pi component lines that visually fit', () => {
+  it('does not raw-truncate terminal-escaped Pi component lines that visually fit', () => {
     resetPiComponentCacheForTests();
     const packageRoot = path.join(tmp, 'fake-pi-ansi-package');
     fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true });
@@ -360,6 +360,25 @@ describe('subagents extension', () => {
       process.argv[1] = oldArgv1;
       resetPiComponentCacheForTests();
     }
+  });
+
+  it('does not add body ellipsis for hidden OSC hyperlink escapes in rendered thread lines', () => {
+    const hiddenTarget = `file:///tmp/${'x'.repeat(160)}/AGENTS.md`;
+    const oscLine = `\u001b]8;;${hiddenTarget}\u001b\\read AGENTS.md\u001b]8;;\u001b\\`;
+    const lines = renderThreadBody({
+      version: 1,
+      source: 'events',
+      items: [{ type: 'status', text: oscLine }],
+    } as any, {
+      cwd: tmp,
+      renderWidth: 40,
+      visibleWidth: (text: string) => text.replace(/\u001b\[[0-9;]*m/g, '').length,
+      truncateToWidth: (text: string, width: number) => text.length > width ? `${text.slice(0, Math.max(0, width - 1))}…` : text,
+    } as any);
+    const rendered = lines.join('\n');
+
+    expect(rendered).not.toContain('…');
+    expect(rendered.replace(/\u001b\][^\u001b]*(?:\u001b\\|\u0007)/g, '')).toContain('info: read AGENTS.md');
   });
 
   it('preserves Pi component-rendered spacing in selected thread snapshots', () => {

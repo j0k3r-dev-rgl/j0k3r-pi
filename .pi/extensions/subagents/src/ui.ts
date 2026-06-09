@@ -35,6 +35,19 @@ function formatUsage(usage?: UsageStats): string {
   return parts.join(' ');
 }
 
+const TERMINAL_ESCAPE_RE = /\u001b\][^\u001b\u0007]*(?:\u001b\\|\u0007)|\u001b\[[0-?]*[ -/]*[@-~]/g;
+
+function terminalVisibleWidth(text: string): number {
+  return [...text.replace(TERMINAL_ESCAPE_RE, '')].length;
+}
+
+function fitsWidth(text: string, width: number, visibleWidth: (text: string) => number): boolean {
+  try {
+    if (visibleWidth(text) <= width) return true;
+  } catch {}
+  return terminalVisibleWidth(text) <= width;
+}
+
 export class SubagentsHistoryPanel {
   private selected = 0;
   private scroll = 0;
@@ -108,7 +121,7 @@ export class SubagentsHistoryPanel {
     const ok = (s: string) => th?.fg?.('success', s) ?? s;
     const err = (s: string) => th?.fg?.('error', s) ?? s;
     const title = (s: string) => th?.fg?.('toolTitle', th?.bold?.(s) ?? s) ?? s;
-    const line = (s = '') => this.visibleWidth(s) <= bodyWidth ? s : this.truncateToWidth(s, bodyWidth);
+    const line = (s = '') => fitsWidth(s, bodyWidth, this.visibleWidth) ? s : this.truncateToWidth(s, bodyWidth);
     const divider = dim('─'.repeat(bodyWidth));
     const status = (task: SubagentTask) => task.status === 'completed' ? ok(task.status) : task.status === 'failed' ? err(task.status) : task.status === 'cancelled' ? warn(task.status) : accent(task.status);
 

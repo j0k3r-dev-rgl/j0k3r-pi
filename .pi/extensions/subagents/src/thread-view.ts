@@ -222,7 +222,21 @@ function renderComponent(component: unknown, width: number): string[] | undefine
   return Array.isArray(lines) ? lines.filter((line): line is string => typeof line === 'string') : undefined;
 }
 
+const TERMINAL_ESCAPE_RE = /\u001b\][^\u001b\u0007]*(?:\u001b\\|\u0007)|\u001b\[[0-?]*[ -/]*[@-~]/g;
+
+function terminalVisibleWidth(text: string): number {
+  return [...text.replace(TERMINAL_ESCAPE_RE, '')].length;
+}
+
+function fitsWidth(context: SubagentThreadRenderContext, text: string, width: number): boolean {
+  try {
+    if (context.visibleWidth(text) <= width) return true;
+  } catch {}
+  return terminalVisibleWidth(text) <= width;
+}
+
 function safeTruncate(context: SubagentThreadRenderContext, text: string, width = DEFAULT_RENDER_WIDTH): string {
+  if (fitsWidth(context, text, width)) return text;
   try {
     return context.truncateToWidth(text, width);
   } catch {
@@ -232,7 +246,7 @@ function safeTruncate(context: SubagentThreadRenderContext, text: string, width 
 
 function truncateLines(context: SubagentThreadRenderContext, lines: string[], width = DEFAULT_RENDER_WIDTH): string[] {
   const out: string[] = [];
-  for (const line of lines) out.push(context.visibleWidth(line) <= width ? line : context.truncateToWidth(line, width));
+  for (const line of lines) out.push(fitsWidth(context, line, width) ? line : context.truncateToWidth(line, width));
   return out;
 }
 

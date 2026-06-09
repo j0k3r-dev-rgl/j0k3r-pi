@@ -21,7 +21,7 @@ function matchesKey(data: string, key: string): boolean {
 }
 
 function visibleWidth(text: string): number {
-  return [...text.replace(/\u001b\[[0-9;]*m/g, '')].length;
+  return [...text.replace(/\u001b\][^\u001b\u0007]*(?:\u001b\\|\u0007)|\u001b\[[0-?]*[ -/]*[@-~]/g, '')].length;
 }
 
 function truncateToWidth(text: string, width: number): string {
