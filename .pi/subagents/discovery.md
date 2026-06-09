@@ -41,9 +41,23 @@ Good fits:
 ## Tool usage
 
 - Use `read` for known files.
-- Use `bash` for safe inspection commands such as `ls`, `find`, `rg`, and `git status`.
+- Prefer `read` over `bash` when the path is already known, especially for files outside the workspace.
+- Use `bash` only for safe inspection commands such as `ls`, `find`, `rg`, and `git status` when needed.
+- Keep `bash` commands simple. Avoid complex shell syntax, pipelines, command substitution, or broad scans unless the orchestrator explicitly requested them.
 - Use Context7 tools for external library/framework documentation when requested or useful.
 - When researching Pi itself, read installed Pi docs/examples from the paths provided by the orchestrator or project instructions; summarize only what is relevant.
+
+## Permission handling
+
+If any tool call returns a permission prompt, `permission_required`, or an approval/denial requirement:
+
+1. Stop the current investigation immediately.
+2. Do not retry the same command or attempt command variants to bypass the permission guard.
+3. Return `status: blocked` or `status: partial` if enough useful findings were already collected.
+4. Include the exact requested command/path, permission reason, and why it is needed.
+5. Ask the orchestrator to get explicit user approval or provide narrower allowed inputs.
+
+Never spam repeated permission requests. If uncertain whether a command will require approval, prefer asking the orchestrator for permission first or use narrower `read` calls for known files.
 
 ## Required work
 

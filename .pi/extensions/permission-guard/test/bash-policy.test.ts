@@ -197,21 +197,64 @@ describe('bash permission policy', () => {
     });
   });
 
-  it('allows cd into workspace followed by a configured safe command', () => {
-    const config = policy({ safeCommands: ['npm test', 'npm run typecheck'] }, '/workspace');
+  it('allows safe && compounds only when every segment is safe', () => {
+    const config = policy({ safeCommands: ['git status', 'git diff', 'npm test', 'npm run typecheck'] }, '/workspace');
 
-    expect(classifyBashCommand(config, bashRequest('cd packages/app && npm test'))).toMatchObject({
+    expect(classifyBashCommand(config, bashRequest('git status && git diff'))).toMatchObject({
       decision: 'allow',
       finalDecision: 'allow',
-      reasonCode: 'bash_safe_command_allowed',
-      details: { matchedRule: 'cd <workspace> && npm test' },
+      reasonCode: 'bash_safe_compound_command_allowed',
+      details: { matchedRule: 'git status && git diff' },
     });
-    expect(classifyBashCommand(config, bashRequest('cd .pi/extensions/subagents && npm run typecheck'))).toMatchObject({
+    expect(classifyBashCommand(config, bashRequest('cd packages/app && npm test && npm run typecheck'))).toMatchObject({
       decision: 'allow',
       finalDecision: 'allow',
-      reasonCode: 'bash_safe_command_allowed',
-      details: { matchedRule: 'cd <workspace> && npm run typecheck' },
+      reasonCode: 'bash_safe_compound_command_allowed',
+      details: { matchedRule: 'cd <workspace> && npm test && npm run typecheck' },
     });
+  });
+
+  it('asks for && compounds when any segment is not safe', () => {
+    const config = policy({ safeCommands: ['git status', 'git status *', 'npm test'] }, '/workspace');
+
+    expect(classifyBashCommand(config, bashRequest('git status && rm src/file.ts'))).toMatchObject({
+      decision: 'ask',
+      finalDecision: 'requires_approval',
+      reasonCode: 'bash_state_change_requires_approval',
+    });
+    expect(classifyBashCommand(config, bashRequest('git status && echo done'))).toMatchObject({
+      decision: 'ask',
+      finalDecision: 'requires_approval',
+      reasonCode: 'bash_shell_syntax_requires_approval',
+    });
+    expect(classifyBashCommand(config, bashRequest('cd packages/app && npm install left-pad'))).toMatchObject({
+      decision: 'ask',
+      finalDecision: 'requires_approval',
+      reasonCode: 'bash_package_install_requires_approval',
+    });
+  });
+
+  it('keeps hard deny precedence inside && compounds', () => {
+    const config = policy({ safeCommands: ['git status', 'cat ~/.ssh/id_rsa'] }, '/workspace');
+
+    expect(classifyBashCommand(config, bashRequest('git status && cat ~/.ssh/id_rsa'))).toMatchObject({
+      decision: 'deny',
+      finalDecision: 'deny',
+      reasonCode: 'bash_secret_read_denied',
+      riskLevel: 'critical',
+    });
+  });
+
+  it('keeps non-&& shell separators behind approval even when wildcard safe commands could match them', () => {
+    const config = policy({ safeCommands: ['git status', 'git diff', 'git status *', 'git diff *'] }, '/workspace');
+
+    for (const command of ['git status; git diff', 'git status --short; git diff --stat', 'git status || git diff']) {
+      expect(classifyBashCommand(config, bashRequest(command))).toMatchObject({
+        decision: 'ask',
+        finalDecision: 'requires_approval',
+        reasonCode: 'bash_shell_syntax_requires_approval',
+      });
+    }
   });
 
   it('does not allow cd chaining when the cd target escapes the workspace', () => {

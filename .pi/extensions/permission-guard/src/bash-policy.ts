@@ -57,8 +57,17 @@ function matchesCommandPattern(command: string, patterns: string[]): string | un
   return patterns.find((pattern) => commandPatternToRegExp(pattern)?.test(normalized));
 }
 
+function matchesExactSafeCommand(command: string, patterns: string[]): string | undefined {
+  const normalized = normalizeCommand(command);
+  return patterns.find((pattern) => !pattern.startsWith('regex:') && !pattern.includes('*') && normalizeCommand(pattern) === normalized);
+}
+
 function hasSuspiciousShellSyntax(command: string): boolean {
   return /[;&|`]|\$\(|<\(|>\(|\n|\r|>>?|<</.test(command);
+}
+
+function hasOnlyAndSeparators(command: string): boolean {
+  return command.includes('&&') && !/[;|`]|\$\(|<\(|>\(|\n|\r|>>?|<</.test(command) && !/(^|[^&])&([^&]|$)/.test(command);
 }
 
 function firstToken(command: string): string {
@@ -70,21 +79,20 @@ function isSameOrInside(target: string, root: string): boolean {
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 
-function simpleWorkspaceCdCommand(command: string, config: PermissionPolicyConfig, options: BashPolicyOptions): { innerCommand: string; matchedRuleLabel: string } | undefined {
+function safeWorkspaceCdSegment(command: string, config: PermissionPolicyConfig, options: BashPolicyOptions): string | undefined {
   const root = workspaceRootFor(config, options);
   if (!root) return undefined;
 
-  const match = normalizeCommand(command).match(/^cd\s+([A-Za-z0-9._/@+-]+)\s+&&\s+(.+)$/);
+  const match = normalizeCommand(command).match(/^cd\s+([A-Za-z0-9._/@+-]+)$/);
   if (!match) return undefined;
 
   const cdTarget = match[1]!;
-  const innerCommand = match[2]!;
   if (cdTarget === '..' || cdTarget.startsWith('../') || cdTarget === '~' || cdTarget.startsWith('~/') || cdTarget.split('/').includes('..')) return undefined;
 
   const targetPath = isAbsolute(cdTarget) ? cdTarget : resolve(root, cdTarget);
   if (!isSameOrInside(targetPath, root)) return undefined;
 
-  return { innerCommand, matchedRuleLabel: `cd <workspace> && ${normalizeCommand(innerCommand)}` };
+  return 'cd <workspace>';
 }
 
 function toPosixPath(path: string): string {
@@ -267,29 +275,85 @@ function askMatch(config: PermissionPolicyConfig, request: PermissionRequest, op
   return undefined;
 }
 
-function allowMatch(config: PermissionPolicyConfig, request: PermissionRequest, options: BashPolicyOptions): BashMatch | undefined {
+function segmentRequest(request: PermissionRequest, command: string): PermissionRequest {
+  return {
+    ...request,
+    rawInputSummary: `bash ${command}`,
+    command: { raw: command, summary: command },
+  };
+}
+
+function segmentNotSafeMatch(config: PermissionPolicyConfig, request: PermissionRequest, options: BashPolicyOptions): BashMatch {
+  return denyMatch(config, request, options) ?? askMatch(config, request, options) ?? {
+    decision: 'ask',
+    reason: 'Shell syntax or metacharacters require approval because the command cannot be proven safe.',
+    reasonCode: 'bash_shell_syntax_requires_approval',
+    riskLevel: 'medium',
+    matchedRule: 'shell-syntax',
+  };
+}
+
+function safeAndCompoundMatch(config: PermissionPolicyConfig, request: PermissionRequest, options: BashPolicyOptions): BashMatch | undefined {
   const command = commandText(request);
-  const matchedSafeCommand = matchesCommandPattern(command, config.bash.safeCommands);
-  if (matchedSafeCommand) {
+  if (!hasOnlyAndSeparators(command)) return undefined;
+
+  const parts = command.split('&&').map((part) => normalizeCommand(part));
+  if (parts.length < 2 || parts.some((part) => part.length === 0)) {
     return {
-      decision: 'allow',
-      reason: 'Bash command matches a configured safe command.',
-      reasonCode: 'bash_safe_command_allowed',
-      riskLevel: 'low',
-      matchedRule: matchedSafeCommand,
+      decision: 'ask',
+      reason: 'Shell syntax or metacharacters require approval because the command cannot be proven safe.',
+      reasonCode: 'bash_shell_syntax_requires_approval',
+      riskLevel: 'medium',
+      matchedRule: 'shell-syntax',
     };
   }
 
-  const cdCommand = simpleWorkspaceCdCommand(command, config, options);
-  const matchedInnerSafeCommand = cdCommand ? matchesCommandPattern(cdCommand.innerCommand, config.bash.safeCommands) : undefined;
-  if (!cdCommand || !matchedInnerSafeCommand) return undefined;
+  const labels: string[] = [];
+  for (const part of parts) {
+    const partRequest = segmentRequest(request, part);
+    const cdLabel = safeWorkspaceCdSegment(part, config, options);
+    if (cdLabel) {
+      labels.push(cdLabel);
+      continue;
+    }
+
+    const matchedSafeCommand = matchesCommandPattern(part, config.bash.safeCommands);
+    if (matchedSafeCommand) {
+      labels.push(part);
+      continue;
+    }
+
+    return segmentNotSafeMatch(config, partRequest, options);
+  }
 
   return {
     decision: 'allow',
-    reason: 'Bash command changes into the workspace and then runs a configured safe command.',
+    reason: 'Every command in the && chain is allowed by policy.',
+    reasonCode: 'bash_safe_compound_command_allowed',
+    riskLevel: 'low',
+    matchedRule: labels.join(' && '),
+  };
+}
+
+function allowMatch(config: PermissionPolicyConfig, request: PermissionRequest, options: BashPolicyOptions): BashMatch | undefined {
+  const command = commandText(request);
+
+  const compoundMatch = safeAndCompoundMatch(config, request, options);
+  if (compoundMatch) return compoundMatch;
+
+  if (command.includes('&&')) return undefined;
+
+  const matchedSafeCommand = hasSuspiciousShellSyntax(command)
+    ? matchesExactSafeCommand(command, config.bash.safeCommands)
+    : matchesCommandPattern(command, config.bash.safeCommands);
+  if (!matchedSafeCommand) return undefined;
+
+  return {
+    decision: 'allow',
+    reason: 'Bash command matches a configured safe command.',
     reasonCode: 'bash_safe_command_allowed',
     riskLevel: 'low',
-    matchedRule: cdCommand.matchedRuleLabel,
+    matchedRule: matchedSafeCommand,
   };
 }
 

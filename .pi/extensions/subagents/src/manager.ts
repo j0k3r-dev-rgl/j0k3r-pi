@@ -49,16 +49,23 @@ type PermissionRequiredPayload = {
 
 function extractPermissionRequiredPayload(text: string | undefined): PermissionRequiredPayload | undefined {
   if (!text) return undefined;
-  const index = text.indexOf(PERMISSION_REQUIRED_MARKER);
-  if (index < 0) return undefined;
-  const jsonStart = index + PERMISSION_REQUIRED_MARKER.length;
-  const lineEnd = text.slice(jsonStart).search(/\r?\n/);
-  const json = lineEnd >= 0 ? text.slice(jsonStart, jsonStart + lineEnd) : text.slice(jsonStart);
-  try {
-    const payload = JSON.parse(json) as PermissionRequiredPayload;
-    return payload?.type === 'permission_required' ? payload : undefined;
-  } catch {
-    return undefined;
+
+  let latest: PermissionRequiredPayload | undefined;
+  let searchFrom = 0;
+  while (true) {
+    const index = text.indexOf(PERMISSION_REQUIRED_MARKER, searchFrom);
+    if (index < 0) return latest;
+
+    const jsonStart = index + PERMISSION_REQUIRED_MARKER.length;
+    const lineEnd = text.slice(jsonStart).search(/\r?\n/);
+    const json = lineEnd >= 0 ? text.slice(jsonStart, jsonStart + lineEnd) : text.slice(jsonStart);
+    try {
+      const payload = JSON.parse(json) as PermissionRequiredPayload;
+      if (payload?.type === 'permission_required') latest = payload;
+    } catch {
+      // Ignore malformed markers and continue scanning for a later valid payload.
+    }
+    searchFrom = jsonStart + Math.max(json.length, 1);
   }
 }
 

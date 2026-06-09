@@ -108,10 +108,11 @@ describe('subagents extension', () => {
     expect(prompt).not.toContain('use memory tools read-only');
   });
 
-  it('loads only project sdd subagents with memory write tools and no delegation tools', () => {
+  it('loads project subagents with no delegation tools and memory writes only for sdd agents', () => {
     const repoRoot = path.resolve(process.cwd(), '..', '..', '..');
     const agents = loadSubagents(repoRoot);
     expect(agents.map((agent) => agent.name).sort()).toEqual([
+      'discovery',
       'sdd-apply',
       'sdd-archive',
       'sdd-design',
@@ -122,8 +123,13 @@ describe('subagents extension', () => {
       'sdd-verify',
     ]);
     for (const agent of agents) {
-      expect(agent.tools).toContain('memory_add');
-      expect(agent.tools).toContain('memory_update');
+      if (agent.name.startsWith('sdd-')) {
+        expect(agent.tools).toContain('memory_add');
+        expect(agent.tools).toContain('memory_update');
+      } else {
+        expect(agent.tools).not.toContain('memory_add');
+        expect(agent.tools).not.toContain('memory_update');
+      }
       expect(agent.tools.some((tool) => tool.startsWith('subagent_'))).toBe(false);
     }
   });
@@ -310,6 +316,79 @@ describe('subagents extension', () => {
     expect(runner).toHaveBeenCalledOnce();
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Subagent permission denied by main user');
+  });
+
+  it('prompts for the latest nested permission payload when subagent output contains stale permission markers', async () => {
+    writeAgent('analyst');
+    const stalePayload = {
+      type: 'permission_required',
+      requestId: 'req-stale',
+      tool: 'read',
+      action: 'read',
+      origin: 'subagent',
+      reason: 'Stale read approval.',
+      reasonCode: 'outside_workspace_read_requires_approval',
+      riskLevel: 'medium',
+      prompt: {
+        title: 'Permission required for read',
+        message: 'Stale read approval.',
+        choices: ['Allow once', 'Allow for session', 'Allow for project', 'Deny'],
+        safeTarget: '/tmp/stale.txt',
+      },
+      sessionScope: {
+        cacheKey: 'target:test-policy:read:read:/tmp/stale.txt',
+        action: 'read',
+        tool: 'read',
+        targetPattern: '/tmp/stale.txt',
+        policyIdentity: 'test-policy',
+      },
+    };
+    const latestPayload = {
+      type: 'permission_required',
+      requestId: 'req-latest',
+      tool: 'bash',
+      action: 'bash',
+      origin: 'subagent',
+      reason: 'Latest bash approval.',
+      reasonCode: 'bash_default_requires_approval',
+      riskLevel: 'medium',
+      prompt: {
+        title: 'Permission required for bash',
+        message: 'Latest bash approval.',
+        choices: ['Allow once', 'Allow for session', 'Allow for project', 'Deny'],
+        safeCommandSummary: 'find .pi/extensions/permission-guard -maxdepth 4 -type f',
+      },
+      sessionScope: {
+        cacheKey: 'bash:test-policy:find .pi/extensions/permission-guard -maxdepth 4 -type f',
+        action: 'bash',
+        tool: 'bash',
+        commandPattern: 'find .pi/extensions/permission-guard -maxdepth 4 -type f',
+        policyIdentity: 'test-policy',
+      },
+    };
+    const output = [
+      `permission_required:${JSON.stringify(stalePayload)}`,
+      'intermediate transcript',
+      `permission_required:${JSON.stringify(latestPayload)}`,
+    ].join('\n');
+    const runner = vi.fn(async () => ({ result: output, model: 'mock/model', fallback_used: false }));
+    const manager = new SubagentManager(runner);
+    let runTool: any;
+    registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
+    const select = vi.fn(async (message: string, choices: string[]) => {
+      expect(choices).toEqual(['Allow once', 'Allow for session', 'Allow for project', 'Deny']);
+      expect(message).toContain('Latest bash approval.');
+      expect(message).toContain('find .pi/extensions/permission-guard -maxdepth 4 -type f');
+      expect(message).not.toContain('/tmp/stale.txt');
+      return 'Deny';
+    });
+
+    const result = await runTool.execute('1', { agent: 'analyst', task: 'inspect permissions', mode: 'task' }, undefined, undefined, { cwd: tmp, ui: { select } });
+
+    expect(select).toHaveBeenCalledOnce();
+    expect(runner).toHaveBeenCalledOnce();
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Subagent permission denied by main user: bash_default_requires_approval');
   });
 
   it('records an allow-for-project decision in project permissions and retries the subagent task successfully', async () => {
