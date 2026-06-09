@@ -17,7 +17,7 @@ function formatTokens(count: number): string {
 }
 function formatUsage(task: SubagentTask): string {
   const usage = task.usage;
-  if (!usage) return task.model ?? '';
+  if (!usage) return '';
   const parts: string[] = [];
   if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? 's' : ''}`);
   if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
@@ -26,16 +26,20 @@ function formatUsage(task: SubagentTask): string {
   if (usage.cacheWrite) parts.push(`W${formatTokens(usage.cacheWrite)}`);
   if (usage.cost) parts.push(`$${usage.cost.toFixed(4)}`);
   if (usage.contextTokens) parts.push(`ctx:${formatTokens(usage.contextTokens)}`);
-  if (task.model) parts.push(task.model);
   return parts.join(' ');
+}
+function modelEffortLine(task: SubagentTask): string {
+  return [`model: ${task.model ?? 'default/current'}`, `effort: ${task.effort ?? 'default/current'}`].join(' · ');
 }
 function formatTask(task: SubagentTask): string {
   const when = task.last_activity_at ?? task.started_at ?? task.created_at;
   const usage = formatUsage(task);
   const lines = [
-    `${task.id} [${task.status}] ${task.agent}${usage ? ` (${usage})` : ''}`,
+    `agent: ${task.agent} · status: ${task.status} · id: ${task.id}`,
+    modelEffortLine(task),
+    usage ? `usage: ${usage}` : undefined,
     `last: ${task.last_activity ?? 'n/a'}${when ? ` at ${when}` : ''}`,
-  ];
+  ].filter(Boolean) as string[];
   const preview = clip(task.output_preview ?? task.result ?? task.error);
   if (preview) lines.push(`preview: ${preview}`);
   return lines.join('\n');
@@ -45,10 +49,11 @@ function progressText(tasks: SubagentTask[], frame = 0): string {
   const spinner = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'][frame % 10];
   const active = tasks.find((task) => task.status === 'running') ?? tasks[0];
   if (!active) return `${spinner} Starting subagent…`;
+  const usage = formatUsage(active);
   return [
-    `${spinner} subagent ${active.agent} ${active.status} (${active.id})`,
-    `↳ ${clip(active.last_activity ?? 'starting', 160)}${formatUsage(active) ? ` · ${formatUsage(active)}` : ''}`,
-    `↳ ${clip(active.output_preview ?? active.task, 160)}`,
+    `${spinner} agent: ${active.agent} · status: ${active.status} · effort: ${active.effort ?? 'default/current'}`,
+    `↳ model: ${active.model ?? 'starting'}${usage ? ` · usage: ${usage}` : ''}`,
+    `↳ ${clip(active.last_activity ?? active.task ?? active.id, 160)}`,
   ].join('\n');
 }
 
@@ -128,7 +133,7 @@ export function registerSubagentTools(pi: any, manager: SubagentManager): void {
       const uninstallCancel = isBackground ? () => {} : installDoubleEscapeCancel(ctx, manager, () => { cancelledByDoubleEscape = true; });
       try {
         emit();
-        const result = await manager.run(params, ctx, _signal, isBackground ? undefined : (tasks) => { latestTasks = tasks; emit(); });
+        const result = await manager.run(params, { ...ctx, pi }, _signal, isBackground ? undefined : (tasks) => { latestTasks = tasks; emit(); });
         if (cancelledByDoubleEscape) throw new Error('Subagent run cancelled by double escape');
         const failedTasks = (result.results ?? []).filter((task) => task.status === 'failed' || task.status === 'cancelled');
         const text = result.mode === 'background'
@@ -164,7 +169,12 @@ export function registerSubagentTools(pi: any, manager: SubagentManager): void {
       const failed = result?.isError || task?.status === 'failed' || task?.status === 'cancelled';
       const status = failed ? (theme.fg?.('error', task?.status ?? 'failed') ?? (task?.status ?? 'failed')) : (theme.fg?.('success', task?.status ?? 'done') ?? (task?.status ?? 'done'));
       const usage = task ? formatUsage(task) : '';
-      const summary = task ? `${status} ${task.agent} ${theme.fg?.('dim', task.id) ?? task.id}${usage ? ` ${theme.fg?.('dim', usage) ?? usage}` : ''}` : status;
+      const summary = task
+        ? [
+          `agent: ${theme.fg?.('accent', task.agent) ?? task.agent} · status: ${status} · effort: ${theme.fg?.('accent', task.effort ?? 'default/current') ?? (task.effort ?? 'default/current')}`,
+          `${theme.fg?.('dim', `model: ${task.model ?? 'default/current'} · id: ${task.id}`) ?? `model: ${task.model ?? 'default/current'} · id: ${task.id}`}${usage ? `\n${theme.fg?.('dim', `usage: ${usage}`) ?? `usage: ${usage}`}` : ''}`,
+        ].join('\n')
+        : status;
       const preview = clip(task?.result ?? task?.error ?? task?.output_preview ?? result?.content?.[0]?.text, 220);
       return textComponent(preview ? `${summary}\n${theme.fg?.('dim', preview) ?? preview}` : summary);
     },

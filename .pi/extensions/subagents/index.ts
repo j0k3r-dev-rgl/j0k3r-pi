@@ -105,7 +105,7 @@ export default function subagentsExtension(pi: any): void {
 
   pi.registerCommand?.('subagents', {
     description: 'Show subagent history panel',
-    handler: async (_args: string, ctx: any) => showSubagentsPanel(ctx),
+    handler: async (_args: string, ctx: any) => showSubagentsPanel({ ...ctx, pi }),
   });
 
 }

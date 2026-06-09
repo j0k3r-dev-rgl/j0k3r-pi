@@ -2,6 +2,7 @@ export type SubagentMode = 'task' | 'background';
 export type SubagentStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export type ModelRef = { provider: string; id: string };
+export type ThinkingEffort = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
 export type SubagentDefinition = {
   name: string;
@@ -9,11 +10,13 @@ export type SubagentDefinition = {
   filePath: string;
   instructions: string;
   model?: ModelRef;
+  effort?: ThinkingEffort;
   tools: string[];
 };
 
 export type SubagentsConfig = {
   default_model?: ModelRef;
+  default_effort?: ThinkingEffort;
   timeout_ms: number;
   stall_timeout_ms: number;
   max_concurrency: number;
@@ -55,6 +58,7 @@ export type SubagentTask = {
   transcript?: string;
   usage?: UsageStats;
   model?: string;
+  effort?: ThinkingEffort;
   fallback_used?: boolean;
   error?: string;
   result?: string;
@@ -68,5 +72,5 @@ export type SubagentRunner = (input: {
   ctx: any;
   config: SubagentsConfig;
   signal: AbortSignal;
-  onActivity?: (activity: { message: string; output?: string; prompt?: string; transcript?: string; usage?: UsageStats }) => void;
-}) => Promise<{ result: string; model?: string; fallback_used?: boolean; usage?: UsageStats }>;
+  onActivity?: (activity: { message: string; output?: string; prompt?: string; transcript?: string; usage?: UsageStats; effort?: ThinkingEffort }) => void;
+}) => Promise<{ result: string; model?: string; effort?: ThinkingEffort; fallback_used?: boolean; usage?: UsageStats }>;

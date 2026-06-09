@@ -1,4 +1,4 @@
-import type { ModelRef, SubagentDefinition, SubagentRunner, SubagentsConfig, UsageStats } from './types.js';
+import type { ModelRef, SubagentDefinition, SubagentRunner, SubagentsConfig, UsageStats, ThinkingEffort } from './types.js';
 
 function modelLabel(model: any): string | undefined {
   if (!model) return undefined;
@@ -174,7 +174,7 @@ async function promptWithInactivity(
   prompt: string,
   stallTimeoutMs: number,
   signal: AbortSignal,
-  onActivity?: (activity: { message: string; output?: string; prompt?: string; transcript?: string; usage?: UsageStats }) => void,
+  onActivity?: (activity: { message: string; output?: string; prompt?: string; transcript?: string; usage?: UsageStats; effort?: ThinkingEffort }) => void,
 ): Promise<{ result: string; usage: UsageStats }> {
   let output = '';
   let permissionRequiredOutput = '';
@@ -240,26 +240,33 @@ function collectAssistantText(messages: any[]): string {
   return parts.join('\n').trim();
 }
 
-async function createSession(model: any, cwd: string, tools: string[]) {
+async function createSession(model: any, cwd: string, tools: string[], effort?: ThinkingEffort) {
   const moduleName = '@earendil-works/pi-coding-agent';
   const { createAgentSession, SessionManager } = await import(moduleName) as any;
-  return createAgentSession({ cwd, model, tools, sessionManager: SessionManager.inMemory() });
+  return createAgentSession({ cwd, model, thinkingLevel: effort, tools, sessionManager: SessionManager.inMemory() });
+}
+
+function currentEffort(ctx: any): ThinkingEffort | undefined {
+  const effort = ctx?.pi?.getThinkingLevel?.() ?? ctx?.getThinkingLevel?.() ?? ctx?.thinkingLevel;
+  return typeof effort === 'string' ? effort as ThinkingEffort : undefined;
 }
 
 export const sdkSubagentRunner: SubagentRunner = async ({ definition, task, context, cwd, ctx, config, signal, onActivity }) => {
   const preferredRef = definition.model ?? config.default_model;
   const preferred = resolveModel(ctx, preferredRef) ?? ctx?.model;
   const current = ctx?.model;
+  const effort = definition.effort ?? config.default_effort ?? currentEffort(ctx);
   const tools = definition.tools?.length ? definition.tools : config.default_tools;
   const prompt = buildPrompt(definition, task, context, tools);
-  onActivity?.({ message: 'orchestrator prompt prepared', prompt, transcript: `# orchestrator prompt\n\n${prompt}\n` });
+  onActivity?.({ message: 'orchestrator prompt prepared', prompt, transcript: `# orchestrator prompt\n\n${prompt}\n`, effort });
 
   async function attempt(model: any) {
-    onActivity?.({ message: `starting model ${modelLabel(model) ?? 'unknown'}`, prompt });
-    const { session } = await createSession(model, cwd, tools);
+    onActivity?.({ message: `starting ${definition.name} with model ${modelLabel(model) ?? 'unknown'}${effort ? ` effort ${effort}` : ''}`, prompt, effort });
+    const { session } = await createSession(model, cwd, tools, effort);
     const unregisterPermissionSession = registerPermissionSubagentSession(session, definition);
     try {
-      return await promptWithInactivity(session, prompt, config.stall_timeout_ms, signal, onActivity);
+      const { result, usage } = await promptWithInactivity(session, prompt, config.stall_timeout_ms, signal, onActivity);
+      return { result, usage };
     } finally {
       unregisterPermissionSession();
     }
@@ -267,15 +274,15 @@ export const sdkSubagentRunner: SubagentRunner = async ({ definition, task, cont
 
   try {
     const { result, usage } = await attempt(preferred);
-    return { result, usage, model: modelLabel(preferred), fallback_used: false };
+    return { result, usage, model: modelLabel(preferred), effort, fallback_used: false };
   } catch (error) {
     if (signal.aborted) throw new Error('Subagent was aborted');
     const preferredLabel = modelLabel(preferred) ?? 'unknown';
     const currentLabel = modelLabel(current) ?? 'unknown';
-    onActivity?.({ message: `failed/stalled on ${preferredLabel}; falling back to ${currentLabel}` });
+    onActivity?.({ message: `failed/stalled on ${preferredLabel}; falling back to ${currentLabel}`, effort });
     ctx?.ui?.notify?.(`Subagent ${definition.name} failed/stalled on ${preferredLabel}: ${error instanceof Error ? error.message : String(error)}. Falling back to current model ${currentLabel}.`, 'warning');
     if (!current || current === preferred) throw error;
     const { result, usage } = await attempt(current);
-    return { result, usage, model: currentLabel, fallback_used: true };
+    return { result, usage, model: currentLabel, effort, fallback_used: true };
   }
 };

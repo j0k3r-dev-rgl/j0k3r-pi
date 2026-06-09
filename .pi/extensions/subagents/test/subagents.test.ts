@@ -7,7 +7,8 @@ import { loadSubagents, parseFrontmatter, readSubagentsConfig } from '../src/con
 import { buildPrompt } from '../src/runner.js';
 import { SubagentManager } from '../src/manager.js';
 import { registerSubagentTools } from '../src/tools.js';
-import type { SubagentRunner } from '../src/types.js';
+import { SubagentsHistoryPanel } from '../src/ui.js';
+import type { SubagentRunner, SubagentTask } from '../src/types.js';
 
 let tmp: string;
 beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-subagents-test-')); fs.mkdirSync(path.join(tmp, '.pi', 'subagents'), { recursive: true }); });
@@ -42,13 +43,16 @@ describe('subagents extension', () => {
     expect(parsed.body).toContain('# Body');
   });
 
-  it('loads agent names from markdown files and config default model', () => {
-    writeAgent('analyst');
-    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ default_model: 'openai/gpt-5.2', stall_timeout_ms: 10 }));
+  it('loads agent names from markdown files and config default model/effort', () => {
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents', 'analyst.md'), `---\nname: analyst\ndescription: analyst agent\nmodel: anthropic/claude-sonnet-4-5\neffort: high\ntools:\n  - read\n---\n# Agent`);
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ default_model: 'openai/gpt-5.2', default_effort: 'medium', stall_timeout_ms: 10 }));
     const agents = loadSubagents(tmp);
     const config = readSubagentsConfig(tmp);
     expect(agents.map((a) => a.name)).toEqual(['analyst']);
+    expect(agents[0].model).toEqual({ provider: 'anthropic', id: 'claude-sonnet-4-5' });
+    expect(agents[0].effort).toBe('high');
     expect(config.default_model).toEqual({ provider: 'openai', id: 'gpt-5.2' });
+    expect(config.default_effort).toBe('medium');
     expect(config.stall_timeout_ms).toBe(10);
   });
 
@@ -134,12 +138,13 @@ describe('subagents extension', () => {
     }
   });
 
-  it('runs one subagent as task and waits for result', async () => {
+  it('runs one subagent as task and exposes the active effort', async () => {
     writeAgent('analyst');
     const manager = new SubagentManager(mockRunner());
-    const result = await manager.run({ agent: 'analyst', task: 'check scope', mode: 'task' }, { cwd: tmp });
+    const result = await manager.run({ agent: 'analyst', task: 'check scope', mode: 'task' }, { cwd: tmp, pi: { getThinkingLevel: () => 'high' } });
     expect(result.results?.[0].status).toBe('completed');
     expect(result.results?.[0].result).toContain('analyst handled check scope');
+    expect(result.results?.[0].effort).toBe('high');
   });
 
   it('runs multiple subagents in one task call', async () => {
@@ -249,11 +254,12 @@ describe('subagents extension', () => {
     expect(freshManager.listSessionTasks(tmp)).toEqual([]);
   });
 
-  it('persists subagent usage stats for token display', async () => {
+  it('persists subagent usage stats and effort for display', async () => {
     writeAgent('analyst');
     const runner: SubagentRunner = async () => ({
       result: 'usage-aware result',
       model: 'mock/model',
+      effort: 'xhigh',
       fallback_used: false,
       usage: { input: 1200, output: 300, cacheRead: 40, cacheWrite: 5, cost: 0.01, contextTokens: 1545, turns: 1 },
     });
@@ -263,6 +269,38 @@ describe('subagents extension', () => {
     const freshManager = new SubagentManager(mockRunner());
     const persisted = freshManager.getTask(id, tmp);
     expect(persisted?.usage).toEqual({ input: 1200, output: 300, cacheRead: 40, cacheWrite: 5, cost: 0.01, contextTokens: 1545, turns: 1 });
+    expect(persisted?.effort).toBe('xhigh');
+  });
+
+  it('renders agent, model, and effort as explicit labels in tool results', async () => {
+    writeAgent('analyst');
+    const manager = new SubagentManager(async () => ({ result: 'clear render', model: 'mock/model', effort: 'high', fallback_used: false }));
+    let runTool: any;
+    registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
+    const result = await runTool.execute('1', { agent: 'analyst', task: 'render clearly', mode: 'task' }, undefined, undefined, { cwd: tmp });
+    const rendered = runTool.renderResult(result, { isPartial: false }, { fg: (_name: string, text: string) => text }).render(200).join('\n');
+    expect(rendered).toContain('agent: analyst');
+    expect(rendered).toContain('model: mock/model');
+    expect(rendered).toContain('effort: high');
+  });
+
+  it('renders agent, model, and effort as explicit labels in the history panel', () => {
+    const task: SubagentTask = {
+      id: 'subtask_analyst_1',
+      agent: 'analyst',
+      mode: 'task',
+      status: 'running',
+      task: 'render panel clearly',
+      created_at: new Date().toISOString(),
+      last_activity: 'started',
+      model: 'mock/model',
+      effort: 'xhigh',
+    };
+    const panel = new SubagentsHistoryPanel([task], { fg: (_name: string, text: string) => text }, () => undefined, () => false, (text) => text.length, (text, width) => text.length > width ? text.slice(0, width) : text);
+    const rendered = panel.render(160).join('\n');
+    expect(rendered).toContain('agent: analyst');
+    expect(rendered).toContain('model: mock/model');
+    expect(rendered).toContain('effort: xhigh');
   });
 
   it('returns an error tool result when any task-mode subagent fails', async () => {

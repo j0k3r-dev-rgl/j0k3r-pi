@@ -77,6 +77,50 @@ describe('subagent runner permission-required bridge', () => {
     expect(session.prompt).toHaveBeenCalledOnce();
   });
 
+  it('passes the resolved thinking effort to nested SDK sessions and reports it', async () => {
+    vi.resetModules();
+    const session = {
+      subscribe: vi.fn(() => vi.fn()),
+      prompt: vi.fn(async () => undefined),
+      messages: [{ role: 'assistant', content: 'done' }],
+      dispose: vi.fn(async () => undefined),
+    };
+    const createAgentSession = vi.fn(() => ({ session }));
+
+    vi.doMock('@earendil-works/pi-coding-agent', () => ({
+      SessionManager: { inMemory: () => ({}) },
+      createAgentSession,
+    }));
+
+    const { sdkSubagentRunner } = await import('../src/runner.js');
+    const definition: SubagentDefinition = {
+      name: 'sdd-design',
+      description: 'design executor',
+      filePath: '/tmp/sdd-design.md',
+      instructions: 'return a concise result',
+      effort: 'high',
+      tools: ['read'],
+    };
+    const config: SubagentsConfig = {
+      timeout_ms: 10_000,
+      stall_timeout_ms: 10_000,
+      max_concurrency: 1,
+      default_tools: ['read'],
+    };
+
+    const result = await sdkSubagentRunner({
+      definition,
+      task: 'design work',
+      cwd: '/workspace',
+      ctx: { model: { provider: 'test', id: 'model' }, pi: { getThinkingLevel: () => 'low' } },
+      config,
+      signal: new AbortController().signal,
+    });
+
+    expect(createAgentSession).toHaveBeenCalledWith(expect.objectContaining({ thinkingLevel: 'high' }));
+    expect(result.effort).toBe('high');
+  });
+
   it('registers nested SDK sessions as subagent permission requesters while the prompt runs', async () => {
     vi.resetModules();
     const registryKey = Symbol.for('pi.permissionGuard.subagentSessions');

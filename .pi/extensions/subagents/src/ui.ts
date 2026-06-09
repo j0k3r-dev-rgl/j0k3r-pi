@@ -21,8 +21,8 @@ function formatTokens(count: number): string {
   return `${(count / 1000000).toFixed(1)}M`;
 }
 
-function formatUsage(usage?: UsageStats, model?: string): string {
-  if (!usage) return model ?? '';
+function formatUsage(usage?: UsageStats): string {
+  if (!usage) return '';
   const parts: string[] = [];
   if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? 's' : ''}`);
   if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
@@ -31,7 +31,6 @@ function formatUsage(usage?: UsageStats, model?: string): string {
   if (usage.cacheWrite) parts.push(`W${formatTokens(usage.cacheWrite)}`);
   if (usage.cost) parts.push(`$${usage.cost.toFixed(4)}`);
   if (usage.contextTokens) parts.push(`ctx:${formatTokens(usage.contextTokens)}`);
-  if (model) parts.push(model);
   return parts.join(' ');
 }
 
@@ -121,10 +120,12 @@ export class SubagentsHistoryPanel {
     }
 
     const task = tasks[this.selected]!;
-    const usage = formatUsage(task.usage, task.model);
-    lines.push(line(`${accent(`${this.selected + 1}/${tasks.length}`)}  ${status(task)}  ${accent(task.agent)}  ${dim(fmtDuration(task))}  ${dim(task.id)}${usage ? `  ${dim(usage)}` : ''}`));
-    lines.push(line(`${dim('last')} ${task.last_activity ?? 'n/a'} ${dim(task.last_activity_at ?? '')}`));
-    lines.push(line(`${dim('task')} ${clip(task.task, bodyWidth - 6)}`));
+    const usage = formatUsage(task.usage);
+    lines.push(line(`${accent(`${this.selected + 1}/${tasks.length}`)}  ${dim('agent:')} ${accent(task.agent)}  ${dim('status:')} ${status(task)}  ${dim('effort:')} ${accent(task.effort ?? 'default/current')}`));
+    lines.push(line(`${dim('model:')} ${task.model ?? 'default/current'}  ${dim('id:')} ${task.id}  ${dim('duration:')} ${fmtDuration(task)}`));
+    if (usage) lines.push(line(`${dim('usage:')} ${usage}`));
+    lines.push(line(`${dim('last:')} ${task.last_activity ?? 'n/a'} ${dim(task.last_activity_at ?? '')}`));
+    lines.push(line(`${dim('task:')} ${clip(task.task, bodyWidth - 6)}`));
     lines.push(this.taskStrip(bodyWidth));
     lines.push(divider);
 
@@ -150,7 +151,7 @@ export class SubagentsHistoryPanel {
     const chips: string[] = [];
     for (let i = start; i < Math.min(tasks.length, start + max); i++) {
       const task = tasks[i]!;
-      const label = `${i === this.selected ? '●' : '○'} ${task.agent}:${task.status}${task.usage ? ` ${formatUsage(task.usage)}` : ''}`;
+      const label = `${i === this.selected ? '●' : '○'} ${task.agent}:${task.status}${task.effort ? ` effort:${task.effort}` : ''}`;
       chips.push(i === this.selected ? (this.theme?.fg?.('accent', label) ?? label) : (this.theme?.fg?.('dim', label) ?? label));
     }
     return this.truncateToWidth(chips.join('  '), width);
@@ -192,9 +193,10 @@ export class SubagentsHistoryPanel {
   }
 
   private executionFlowFor(task: SubagentTask): string {
-    const usage = formatUsage(task.usage, task.model);
+    const usage = formatUsage(task.usage);
     const parts = [
-      `subagent ${task.agent} ${task.status}${usage ? ` · ${usage}` : ''}`,
+      `agent: ${task.agent} · status: ${task.status} · effort: ${task.effort ?? 'default/current'}`,
+      `model: ${task.model ?? 'default/current'}${usage ? ` · usage: ${usage}` : ''}`,
       '',
       `Preparing for response`,
       '',

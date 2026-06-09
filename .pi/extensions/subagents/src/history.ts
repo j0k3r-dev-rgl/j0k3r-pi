@@ -60,6 +60,7 @@ export class SubagentHistoryStore {
         usage_context_tokens INTEGER,
         usage_turns INTEGER,
         model TEXT,
+        effort TEXT,
         fallback_used INTEGER,
         error TEXT,
         result TEXT
@@ -86,6 +87,7 @@ export class SubagentHistoryStore {
     ensureColumn(db, 'subagent_tasks', 'usage_cost', 'REAL');
     ensureColumn(db, 'subagent_tasks', 'usage_context_tokens', 'INTEGER');
     ensureColumn(db, 'subagent_tasks', 'usage_turns', 'INTEGER');
+    ensureColumn(db, 'subagent_tasks', 'effort', 'TEXT');
     this.dbs.set(file, db);
     return db;
   }
@@ -96,8 +98,8 @@ export class SubagentHistoryStore {
         id, cwd, agent, mode, status, task, context, created_at, started_at, ended_at,
         last_activity_at, last_activity, output_preview, prompt, transcript,
         usage_input, usage_output, usage_cache_read, usage_cache_write, usage_cost, usage_context_tokens, usage_turns,
-        model, fallback_used, error, result
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        model, effort, fallback_used, error, result
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         status=excluded.status,
         started_at=excluded.started_at,
@@ -115,6 +117,7 @@ export class SubagentHistoryStore {
         usage_context_tokens=excluded.usage_context_tokens,
         usage_turns=excluded.usage_turns,
         model=excluded.model,
+        effort=excluded.effort,
         fallback_used=excluded.fallback_used,
         error=excluded.error,
         result=excluded.result
@@ -142,6 +145,7 @@ export class SubagentHistoryStore {
       task.usage?.contextTokens ?? null,
       task.usage?.turns ?? null,
       value(task.model),
+      value(task.effort),
       task.fallback_used === undefined ? null : task.fallback_used ? 1 : 0,
       value(task.error),
       value(task.result),
@@ -195,6 +199,7 @@ function rowToTask(row: any): SubagentTask {
       turns: row.usage_turns ?? 0,
     },
     model: row.model ?? undefined,
+    effort: row.effort ?? undefined,
     fallback_used: row.fallback_used === null || row.fallback_used === undefined ? undefined : Boolean(row.fallback_used),
     error: row.error ?? undefined,
     result: row.result ?? undefined,

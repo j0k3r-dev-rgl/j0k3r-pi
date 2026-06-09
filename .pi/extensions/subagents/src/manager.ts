@@ -4,13 +4,18 @@ import { dirname, join, resolve } from 'node:path';
 import { getSubagent, loadSubagents, readSubagentsConfig } from './config.js';
 import { sdkSubagentRunner } from './runner.js';
 import { SubagentHistoryStore } from './history.js';
-import type { SubagentRunInput, SubagentRunner, SubagentTask } from './types.js';
+import type { SubagentRunInput, SubagentRunner, SubagentTask, ThinkingEffort } from './types.js';
 
 function nowIso(): string { return new Date().toISOString(); }
 function taskId(agent: string): string { return `subtask_${agent}_${Date.now()}_${randomUUID().replace(/-/g, '').slice(0, 8)}`; }
 function compactOutput(text: string, limit = 800): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
   return normalized.length > limit ? `…${normalized.slice(-limit)}` : normalized;
+}
+
+function currentEffort(ctx: any): ThinkingEffort | undefined {
+  const effort = ctx?.pi?.getThinkingLevel?.() ?? ctx?.getThinkingLevel?.() ?? ctx?.thinkingLevel;
+  return typeof effort === 'string' ? effort as ThinkingEffort : undefined;
 }
 
 const PERMISSION_REQUIRED_MARKER = 'permission_required:';
@@ -179,7 +184,7 @@ export class SubagentManager {
   ) {}
 
   listAgents(cwd: string) {
-    return loadSubagents(cwd).map((a) => ({ name: a.name, description: a.description, filePath: a.filePath, tools: a.tools, model: a.model }));
+    return loadSubagents(cwd).map((a) => ({ name: a.name, description: a.description, filePath: a.filePath, tools: a.tools, model: a.model, effort: a.effort }));
   }
 
   listTasks(cwd?: string) {
@@ -270,6 +275,7 @@ export class SubagentManager {
     const definition = getSubagent(cwd, agentName);
     if (!definition) throw new Error(`Subagent not found: ${agentName}`);
     const config = readSubagentsConfig(cwd);
+    const effort = definition.effort ?? config.default_effort ?? currentEffort(ctx);
     const id = taskId(definition.name);
     const controller = new AbortController();
     const task: SubagentTask = {
@@ -279,6 +285,7 @@ export class SubagentManager {
       status: 'queued',
       task: taskText,
       context,
+      effort,
       created_at: nowIso(),
       last_activity_at: nowIso(),
       last_activity: 'queued',
@@ -324,6 +331,7 @@ export class SubagentManager {
               if (activity.prompt) task.prompt = activity.prompt;
               if (activity.transcript) task.transcript = activity.transcript;
               if (activity.usage) task.usage = activity.usage;
+              if (activity.effort) task.effort = activity.effort;
               this.record(cwd, task, activity.message);
               onTaskUpdate?.();
             },
@@ -360,6 +368,7 @@ export class SubagentManager {
           task.last_activity_at = nowIso();
           task.usage = result.usage ?? task.usage;
           task.model = result.model;
+          task.effort = result.effort ?? task.effort;
           task.fallback_used = result.fallback_used;
           this.record(cwd, task, task.last_activity);
           onTaskUpdate?.();
@@ -383,6 +392,7 @@ export class SubagentManager {
         task.last_activity_at = nowIso();
         task.usage = result.usage ?? task.usage;
         task.model = result.model;
+        task.effort = result.effort ?? task.effort;
         task.fallback_used = result.fallback_used;
         task.ended_at = task.last_activity_at;
         this.record(cwd, task, 'completed');

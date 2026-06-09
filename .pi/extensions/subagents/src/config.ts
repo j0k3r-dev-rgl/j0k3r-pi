@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { ModelRef, SubagentDefinition, SubagentsConfig } from './types.js';
+import type { ModelRef, SubagentDefinition, SubagentsConfig, ThinkingEffort } from './types.js';
 
 const DEFAULT_TOOLS = ['read', 'memory_context', 'memory_search', 'memory_recall', 'memory_get'];
 const DEFAULT_MAX_CONCURRENCY = 5;
@@ -82,12 +82,21 @@ function parseModel(value: any): ModelRef | undefined {
   return undefined;
 }
 
+const THINKING_EFFORTS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+
+function parseEffort(value: any): ThinkingEffort | undefined {
+  if (!value || value === 'default') return undefined;
+  const effort = String(value).trim().toLowerCase();
+  return THINKING_EFFORTS.has(effort) ? effort as ThinkingEffort : undefined;
+}
+
 export function readSubagentsConfig(cwd: string): SubagentsConfig {
   const globalRaw = readJson(path.join(agentDir(), 'subagents.json'));
   const projectRaw = readJson(path.join(cwd, '.pi', 'subagents.json'));
   const raw = { ...globalRaw, ...projectRaw };
   return {
     default_model: parseModel(raw.default_model),
+    default_effort: parseEffort(raw.default_effort ?? raw.default_thinking_level ?? raw.thinkingLevel),
     timeout_ms: positiveInteger(raw.timeout_ms, DEFAULT_TIMEOUT_MS),
     stall_timeout_ms: positiveInteger(raw.stall_timeout_ms, DEFAULT_STALL_TIMEOUT_MS),
     max_concurrency: positiveInteger(raw.max_concurrency, DEFAULT_MAX_CONCURRENCY),
@@ -106,7 +115,7 @@ function loadSubagentsFromDir(dir: string): SubagentDefinition[] {
       const name = String(data.name || path.basename(file, '.md')).trim().toLowerCase();
       const description = String(data.description || `${name} subagent`).trim();
       const tools = sanitizeTools(Array.isArray(data.tools) ? data.tools.map(String) : DEFAULT_TOOLS);
-      return { name, description, filePath, instructions: body.trim(), model: parseModel(data.model), tools };
+      return { name, description, filePath, instructions: body.trim(), model: parseModel(data.model), effort: parseEffort(data.effort ?? data.thinking_level ?? data.thinkingLevel), tools };
     });
 }
 
