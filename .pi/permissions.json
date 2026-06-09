@@ -1,0 +1,43 @@
+{
+  "outsideWorkspace": {
+    "read": "allow",
+    "list": "allow",
+    "search": "allow",
+    "write": "ask",
+    "create": "ask",
+    "rememberApprovals": "session"
+  },
+  "secrets": {
+    "mode": "deny"
+  },
+  "bash": {
+    "outsideWorkspaceFilesystem": "ask",
+    "network": "ask",
+    "safeCommands": [
+      "git status",
+      "git diff",
+      "npm test",
+      "npm run typecheck",
+      "cd .pi/extensions/permission-guard && npm test -- --run",
+      "cd .pi/extensions/permission-guard && npm run typecheck",
+      "cd .pi/extensions/subagents && npm test -- --run",
+      "cd .pi/extensions/subagents && npm run typecheck",
+      "npm --prefix .pi/extensions/permission-guard test -- --run",
+      "npm --prefix .pi/extensions/permission-guard run typecheck",
+      "npm --prefix .pi/extensions/subagents test -- --run",
+      "npm --prefix .pi/extensions/subagents run typecheck",
+      "ls openspec/*",
+      "find openspec/*",
+      "git status --short *",
+      "mkdir -p openspec/changes/archive",
+      "mv openspec/changes/* openspec/changes/archive/*"
+    ]
+  },
+  "audit": {
+    "enabled": true,
+    "logAllowed": false,
+    "logDenied": true,
+    "logApprovals": true,
+    "redactPaths": true
+  }
+}
