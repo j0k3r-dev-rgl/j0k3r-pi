@@ -28,6 +28,23 @@ Rules:
 - Do not create PRD/OpenSpec artifacts or delegate SDD subagents until the clean-worktree decision is resolved.
 - This gate does not apply to tiny inline answers or low-risk inspections that do not create artifacts or change code.
 
+### Pre-SDD mode gate and discovery
+
+Before starting any new PRD/SDD/OpenSpec flow, ask the user which execution mode to use unless they already stated it:
+
+- `interactive`: confirm before each SDD phase and before writing/updating artifacts;
+- `normal`: proceed phase-by-phase with concise checkpoints at major transitions;
+- `defaults`: use project defaults and ask only when blocked or when a decision materially affects scope, persistence, or implementation approval.
+
+Do not launch SDD subagents or create/update PRD/OpenSpec artifacts for a new flow until this mode is resolved.
+
+Use the `discovery` subagent for isolated research before committing to SDD. Discovery may inspect code, project docs, Pi docs/examples, and Context7 documentation, but it must not create OpenSpec artifacts, modify source code, or update active SDD flow memory. Use discovery when the user asks to investigate, compare, inspect, or understand an idea/risk/API before deciding whether to create a PRD/SDD.
+
+Distinguish discovery from `sdd-explore`:
+
+- `discovery` = pre-SDD or standalone research with a recommendation about next workflow;
+- `sdd-explore` = formal first phase of an approved/named SDD change.
+
 ### 1. Inline workflow
 
 Use for tiny, obvious, low-risk changes or simple answers.
@@ -59,6 +76,8 @@ Do not invoke the SDD subagent pipeline for simple fixes unless the user explici
 
 ### 3. Full SDD feature workflow
 
+Load the `sdd-workflow` skill before starting or continuing substantial PRD/SDD/OpenSpec work, before launching any `sdd-*` subagent, or when SDD flow selection is unclear.
+
 Use the SDD subagent pipeline for named features/changes, architectural changes, multi-file work, risky refactors, unclear requirements, or work that benefits from durable artifacts and handoff between phases.
 
 Do NOT use full SDD for:
@@ -76,8 +95,11 @@ Triggers that SHOULD use full SDD:
 - the user wants persistent SDD artifacts.
 
 Pi documentation delegation rule:
-- For large or architectural Pi changes that require reading substantial Pi documentation/examples, the orchestrator must not load long docs directly unless answering a narrow inline question. Route to `sdd-explore` and instruct the subagent which Pi docs/examples to read and summarize. The orchestrator should consume the exploration artifact/report, then continue with the SDD pipeline. This prevents unnecessary context bloat while still satisfying Pi documentation requirements.
-- If the user asks to be guided on a new Pi feature, permission system, extension, SDK integration, sandboxing, or policy mechanism, treat it as SDD explore/proposal by default unless the user explicitly asks for only a brief conceptual answer.
+- For large or architectural Pi changes that require reading substantial Pi documentation/examples, the orchestrator must not load long docs directly unless answering a narrow inline question.
+- Before SDD mode is approved/resolved, route isolated Pi research to `discovery` and instruct it which Pi docs/examples to read and summarize.
+- After SDD mode is approved/resolved for a named change, route formal SDD investigation to `sdd-explore`.
+- The orchestrator should consume the discovery/exploration artifact or report, then decide the next step. This prevents unnecessary context bloat while still satisfying Pi documentation requirements.
+- If the user asks to be guided on a new Pi feature, permission system, extension, SDK integration, sandboxing, or policy mechanism, ask whether they want discovery first or a PRD/SDD flow unless they explicitly ask for only a brief conceptual answer.
 
 Default full SDD sequence:
 1. `sdd-explore`
@@ -111,8 +133,9 @@ Use this routing table:
 |---|---|---|---|
 | Direct answer or tiny inspection | No code change or very low risk | Inline | none |
 | Small localized code fix | Clear scope, cheap validation, no durable artifact value | Simple TDD | none by default |
-| Explore an idea before committing | User asks to investigate/compare/understand a feature or risk | SDD explore-only | `sdd-explore` |
-| Plan a named feature/change | Feature needs requirements/design/tasks, but implementation is not yet approved | SDD planning chain | `sdd-explore` → `sdd-proposal` → `sdd-spec` → `sdd-design` → `sdd-task` |
+| Explore an idea before committing | User asks to investigate/compare/understand a feature, code area, docs, API, or risk before PRD/SDD | Discovery | `discovery` |
+| Formal SDD exploration | SDD mode is resolved and the user approved a named SDD change | SDD explore-only | `sdd-explore` |
+| Plan a named feature/change | Feature needs requirements/design/tasks, SDD mode is resolved, but implementation is not yet approved | SDD planning chain | `sdd-explore` → `sdd-proposal` → `sdd-spec` → `sdd-design` → `sdd-task` |
 | Implement a planned SDD change | Existing proposal/spec/design/tasks exist and user asks to implement or continue apply | SDD apply-only or apply batch | `sdd-apply` |
 | Validate an implementation | Existing SDD artifacts and code changes exist, or user asks to verify | SDD verify-only | `sdd-verify` |
 | Continue an active SDD flow | Active SDD memory/OpenSpec state exists or user says continue | SDD continue router | inspect state, then run the next missing phase |
