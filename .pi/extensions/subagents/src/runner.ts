@@ -1,5 +1,8 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { resolveEffectiveSubagentProfile } from './profile-resolver.js';
-import type { EffectiveSubagentProfile, ModelRef, SubagentDefinition, SubagentRunner, SubagentsConfig, UsageStats, ThinkingEffort } from './types.js';
+import { boundThreadSnapshot } from './thread-view.js';
+import type { EffectiveSubagentProfile, ModelRef, SubagentDefinition, SubagentRunner, SubagentsConfig, UsageStats, ThinkingEffort, SubagentThreadItem, SubagentThreadSnapshot, SubagentToolItem, SubagentToolResultPayload } from './types.js';
 
 function modelLabel(model: any): string | undefined {
   if (!model) return undefined;
@@ -76,6 +79,217 @@ function shortJson(value: unknown, limit = 900): string {
 }
 
 const PERMISSION_REQUIRED_MARKER = 'permission_required:';
+const SNAPSHOT_TEXT_LIMIT = 4000;
+
+function debugLog(cwd: string | undefined, scope: string, data: unknown): void {
+  try {
+    const root = cwd ?? process.cwd();
+    const file = path.join(root, '.pi', 'subagents-debug.log');
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    fs.appendFileSync(file, `${new Date().toISOString()} ${scope} ${JSON.stringify(data, (_key, value) => value instanceof Error ? { name: value.name, message: value.message, stack: value.stack } : value).slice(0, 4000)}\n`);
+  } catch {}
+}
+
+function truncateSnapshotText(text: string | undefined, limit = SNAPSHOT_TEXT_LIMIT): string | undefined {
+  if (text === undefined) return undefined;
+  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
+}
+
+function eventToolCallId(event: any): string | undefined {
+  return event?.toolCallId ?? event?.tool_call_id ?? event?.toolUseId ?? event?.id;
+}
+
+function resultTextFromContent(content: unknown): string | undefined {
+  if (!Array.isArray(content)) return undefined;
+  const text = content
+    .map((part) => {
+      if (!part || typeof part !== 'object') return '';
+      const record = part as Record<string, unknown>;
+      return typeof record.text === 'string' ? record.text : typeof record.data === 'string' ? record.data : '';
+    })
+    .filter(Boolean)
+    .join('\n');
+  return text || undefined;
+}
+
+function resultPayload(result: unknown, isError = false): SubagentToolResultPayload {
+  let text = '';
+  let details: unknown;
+  if (typeof result === 'string') text = result;
+  else if (result && typeof result === 'object') {
+    const record = result as Record<string, unknown>;
+    details = record.details;
+    const candidate = resultTextFromContent(record.content) ?? record.output ?? record.text ?? record.error ?? record.stderr ?? record.stdout;
+    text = typeof candidate === 'string' ? candidate : shortJson(result, SNAPSHOT_TEXT_LIMIT);
+  } else if (result !== undefined) text = String(result);
+  const bounded = truncateSnapshotText(text, SNAPSHOT_TEXT_LIMIT) ?? '';
+  return { content: bounded ? [{ type: 'text', text: bounded }] : [], details, isError, preview: bounded };
+}
+
+function isBashTool(name: string): boolean {
+  return name === 'bash' || name === 'shell' || name === 'command' || name === 'exec';
+}
+
+export class ThreadSnapshotBuilder {
+  private readonly createdAt = new Date().toISOString();
+  private readonly items: SubagentThreadItem[] = [];
+  private readonly toolIndex = new Map<string, number>();
+  private streamedAssistant = '';
+  private streamedThinking = '';
+
+  constructor(prompt?: string, context?: string) {
+    if (prompt?.trim()) this.items.push({ type: 'user', id: 'delegated-prompt', label: 'delegated_task', text: truncateSnapshotText(prompt) ?? '' });
+    if (context?.trim()) this.items.push({ type: 'user', id: 'delegated-context', label: 'context', text: truncateSnapshotText(context) ?? '' });
+  }
+
+  update(event: any): void {
+    const now = new Date().toISOString();
+    const messageEvent = event?.assistantMessageEvent;
+    const textDelta = event?.type === 'message_update'
+      ? typeof messageEvent?.delta === 'string'
+        ? messageEvent.delta
+        : messageEvent?.type === 'text_delta' && typeof messageEvent.delta === 'string'
+          ? messageEvent.delta
+          : undefined
+      : undefined;
+    const thinkingDelta = event?.type === 'message_update' && messageEvent?.type === 'thinking_delta' && typeof messageEvent.delta === 'string'
+      ? messageEvent.delta
+      : undefined;
+    if (textDelta !== undefined || thinkingDelta !== undefined) {
+      if (textDelta) this.streamedAssistant += textDelta;
+      if (thinkingDelta) this.streamedThinking += thinkingDelta;
+      const existing = this.items.find((item) => item.type === 'assistant' && item.id === 'streaming-assistant') as any;
+      const content: any[] = [];
+      const thinking = truncateSnapshotText(this.streamedThinking) ?? '';
+      const text = truncateSnapshotText(this.streamedAssistant) ?? '';
+      if (thinking) content.push({ type: 'thinking', text: thinking, thinking });
+      if (text) content.push({ type: 'text', text });
+      if (!content.length) return;
+      if (existing) existing.message.content = content;
+      else this.items.push({ type: 'assistant', id: 'streaming-assistant', message: { role: 'assistant', content } });
+      return;
+    }
+    if (event?.type === 'tool_execution_start') {
+      const name = event.toolName ?? event.name ?? 'tool';
+      const tool_call_id = eventToolCallId(event);
+      if (isBashTool(name)) {
+        const command = String((event.args ?? event.input ?? {}).command ?? formatToolCall(name, event.args ?? event.input ?? {}));
+        const item: any = { type: 'bash', id: tool_call_id, tool_call_id, command: truncateSnapshotText(command) ?? '', status: 'running' };
+        this.toolIndex.set(tool_call_id ?? `item-${this.items.length}`, this.items.length);
+        this.items.push(item);
+        return;
+      }
+      const item: SubagentToolItem = { type: 'tool', id: tool_call_id, tool_call_id, name, arguments: event.args ?? event.input ?? {}, status: 'running', started_at: now };
+      this.toolIndex.set(tool_call_id ?? `item-${this.items.length}`, this.items.length);
+      this.items.push(item);
+      return;
+    }
+    if (event?.type === 'tool_execution_update') {
+      const id = eventToolCallId(event);
+      const index = id ? this.toolIndex.get(id) : undefined;
+      if (index === undefined) return;
+      const item: any = this.items[index];
+      const payload = resultPayload(event.partialResult, false);
+      if (item.type === 'bash') item.output = truncateSnapshotText([item.output, payload.preview].filter(Boolean).join('\n'));
+      else if (item.type === 'tool') item.result = payload;
+      if (item.type === 'tool') item.status = 'partial';
+      return;
+    }
+    if (event?.type === 'tool_execution_end') {
+      const id = eventToolCallId(event);
+      const name = event.toolName ?? event.name ?? 'tool';
+      const index = id ? this.toolIndex.get(id) : undefined;
+      const payload = resultPayload(event.result ?? event.output ?? event.error, Boolean(event.isError));
+      if (index === undefined) {
+        this.items.push({ type: 'tool_result', id, tool_call_id: id, name, result: payload });
+        return;
+      }
+      const item: any = this.items[index];
+      if (item.type === 'bash') {
+        const result = event.result && typeof event.result === 'object' ? event.result as Record<string, unknown> : {};
+        const output = payload.preview ?? '';
+        item.output = truncateSnapshotText(output);
+        item.truncated = typeof output === 'string' && output.endsWith('…');
+        item.exitCode = typeof result.exitCode === 'number' ? result.exitCode : undefined;
+        item.status = event.isError ? 'failed' : 'completed';
+      } else if (item.type === 'tool') {
+        item.status = event.isError ? 'failed' : 'completed';
+        item.result = payload;
+        item.ended_at = now;
+      }
+    }
+  }
+
+  snapshot(source: SubagentThreadSnapshot['source'] = 'events'): SubagentThreadSnapshot | undefined {
+    return boundThreadSnapshot({ version: 1, created_at: this.createdAt, updated_at: new Date().toISOString(), source, items: this.items }, { textLimit: SNAPSHOT_TEXT_LIMIT });
+  }
+
+  finalize(messages: any[]): SubagentThreadSnapshot | undefined {
+    const messageItems = assistantItemsFromMessages(messages);
+    const initialItems: SubagentThreadItem[] = this.items.filter((item) => item.type === 'user');
+    const eventItems = this.items.filter((item) => item.type !== 'user' && !(item.type === 'assistant' && item.id === 'streaming-assistant'));
+    const items: SubagentThreadItem[] = [...initialItems, ...(messageItems.length ? interleaveMessagesWithToolRows(messageItems, eventItems) : eventItems)];
+    const source = messageItems.length && eventItems.length ? 'mixed' : messageItems.length ? 'session_messages' : 'events';
+    return boundThreadSnapshot({ version: 1, created_at: this.createdAt, updated_at: new Date().toISOString(), source, items }, { textLimit: SNAPSHOT_TEXT_LIMIT });
+  }
+}
+
+function assistantToolCallIds(item: SubagentThreadItem): Set<string> {
+  const ids = new Set<string>();
+  if (item.type !== 'assistant') return ids;
+  for (const part of item.message.content) if (part.type === 'toolCall') ids.add(part.id);
+  return ids;
+}
+
+function toolRowId(item: SubagentThreadItem): string | undefined {
+  if (item.type === 'tool' || item.type === 'tool_result') return item.tool_call_id ?? item.id;
+  if (item.type === 'bash') return item.tool_call_id ?? item.id;
+  return undefined;
+}
+
+function interleaveMessagesWithToolRows(messageItems: SubagentThreadItem[], eventItems: SubagentThreadItem[]): SubagentThreadItem[] {
+  const used = new Set<number>();
+  const ordered: SubagentThreadItem[] = [];
+  for (const messageItem of messageItems) {
+    ordered.push(messageItem);
+    const ids = assistantToolCallIds(messageItem);
+    if (!ids.size) continue;
+    for (let index = 0; index < eventItems.length; index++) {
+      if (used.has(index)) continue;
+      const id = toolRowId(eventItems[index]!);
+      if (id && ids.has(id)) {
+        ordered.push(eventItems[index]!);
+        used.add(index);
+      }
+    }
+  }
+  for (let index = 0; index < eventItems.length; index++) if (!used.has(index)) ordered.push(eventItems[index]!);
+  return ordered;
+}
+
+function assistantItemsFromMessages(messages: any[]): SubagentThreadItem[] {
+  const items: SubagentThreadItem[] = [];
+  for (const msg of messages) {
+    if (msg?.role !== 'assistant') continue;
+    if (typeof msg.content === 'string') {
+      if (msg.content.trim()) items.push({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: truncateSnapshotText(msg.content) ?? '' }], usage: msg.usage } });
+      continue;
+    }
+    if (!Array.isArray(msg.content)) continue;
+    const content = msg.content.flatMap((part: any) => {
+      if (part?.type === 'text' && typeof part.text === 'string') return [{ type: 'text' as const, text: truncateSnapshotText(part.text) ?? '' }];
+      if (part?.type === 'thinking') {
+        const thinking = typeof part.thinking === 'string' ? part.thinking : typeof part.text === 'string' ? part.text : '';
+        return thinking ? [{ type: 'thinking' as const, text: truncateSnapshotText(thinking), thinking: truncateSnapshotText(thinking) }] : [];
+      }
+      if ((part?.type === 'toolCall' || part?.type === 'tool_call') && typeof part.name === 'string') return [{ type: 'toolCall' as const, id: String(part.id ?? part.toolCallId ?? part.tool_call_id ?? part.name), name: part.name, arguments: part.arguments ?? part.args ?? part.input ?? {} }];
+      return [];
+    });
+    if (content.length) items.push({ type: 'assistant', id: msg.id, message: { role: 'assistant', content, stopReason: msg.stopReason, errorMessage: msg.errorMessage, usage: msg.usage } });
+  }
+  return items;
+}
+
 const SUBAGENT_SESSION_REGISTRY_KEY = Symbol.for('pi.permissionGuard.subagentSessions');
 
 type SubagentPermissionSessionMetadata = {
@@ -149,7 +363,12 @@ function formatToolCall(name: string, args: any): string {
 }
 
 function eventTranscript(event: any): string {
-  const delta = event?.assistantMessageEvent?.delta;
+  const messageEvent = event?.assistantMessageEvent;
+  const delta = typeof messageEvent?.delta === 'string'
+    ? messageEvent.delta
+    : messageEvent?.type === 'text_delta' && typeof messageEvent.delta === 'string'
+      ? messageEvent.delta
+      : undefined;
   if (event?.type === 'message_update' && typeof delta === 'string') return delta;
 
   const permissionRequired = extractPermissionRequiredText(event);
@@ -179,16 +398,31 @@ async function promptWithInactivity(
   prompt: string,
   stallTimeoutMs: number,
   signal: AbortSignal,
-  onActivity?: (activity: { message: string; output?: string; prompt?: string; transcript?: string; usage?: UsageStats; effort?: ThinkingEffort }) => void,
-): Promise<{ result: string; usage: UsageStats }> {
+  onActivity?: (activity: { message: string; output?: string; prompt?: string; transcript?: string; usage?: UsageStats; effort?: ThinkingEffort; thread_snapshot?: SubagentThreadSnapshot }) => void,
+  delegatedContext?: string,
+  cwd?: string,
+): Promise<{ result: string; usage: UsageStats; thread_snapshot?: SubagentThreadSnapshot }> {
   let output = '';
+  const snapshotBuilder = new ThreadSnapshotBuilder(prompt, delegatedContext);
   let permissionRequiredOutput = '';
   let usage = emptyUsage();
   let transcript = `# orchestrator prompt\n\n${prompt}\n\n# subagent execution\n`;
   let lastActivity = Date.now();
-  onActivity?.({ message: 'session started', prompt, transcript, usage });
+  onActivity?.({ message: 'session started', prompt, transcript, usage, thread_snapshot: snapshotBuilder.snapshot() });
   const unsubscribe = session.subscribe?.((event: any) => {
     lastActivity = Date.now();
+    debugLog(cwd, 'runner_event', {
+      type: event?.type,
+      messageRole: event?.message?.role,
+      assistantEventType: event?.assistantMessageEvent?.type,
+      hasDelta: typeof event?.assistantMessageEvent?.delta === 'string',
+      toolName: event?.toolName,
+      toolCallId: event?.toolCallId,
+      isError: event?.isError,
+      resultKeys: event?.result && typeof event.result === 'object' ? Object.keys(event.result) : undefined,
+    });
+    snapshotBuilder.update(event);
+    const thread_snapshot = snapshotBuilder.snapshot();
     const transcriptChunk = eventTranscript(event);
     transcript += transcriptChunk;
     const permissionRequired = extractPermissionRequiredText(event);
@@ -197,22 +431,31 @@ async function promptWithInactivity(
     }
     if (permissionRequired && !output.includes(permissionRequired)) {
       output += `${output ? '\n' : ''}${permissionRequired}`;
-      onActivity?.({ message: 'permission required', output, transcript, usage });
+      onActivity?.({ message: 'permission required', output, transcript, usage, thread_snapshot });
     }
-    const delta = event?.assistantMessageEvent?.delta;
+    const messageEvent = event?.assistantMessageEvent;
+    const delta = typeof messageEvent?.delta === 'string'
+      ? messageEvent.delta
+      : messageEvent?.type === 'text_delta' && typeof messageEvent.delta === 'string'
+        ? messageEvent.delta
+        : undefined;
     if (event?.type === 'message_end' && event.message?.role === 'assistant') usage = addUsage(usage, event.message.usage);
     if (event?.type === 'message_update' && typeof delta === 'string') {
       output += delta;
-      onActivity?.({ message: 'streaming response', output, transcript, usage });
+      onActivity?.({ message: 'streaming response', output, transcript, usage, thread_snapshot });
+      return;
+    }
+    if (event?.type === 'message_update' && messageEvent?.type === 'thinking_delta') {
+      onActivity?.({ message: 'streaming thinking', output, transcript, usage, thread_snapshot });
       return;
     }
     const message = activityMessage(event, transcriptChunk);
-    if (message) onActivity?.({ message, transcript, usage });
+    if (message) onActivity?.({ message, transcript, usage, thread_snapshot });
   }) ?? (() => {});
   const interval = setInterval(() => {
     if (Date.now() - lastActivity > stallTimeoutMs) {
       transcript += `\n\n--- stall ---\nstalled for ${stallTimeoutMs}ms; aborting session\n`;
-      onActivity?.({ message: `stalled for ${stallTimeoutMs}ms; aborting session`, output, transcript, usage });
+      onActivity?.({ message: `stalled for ${stallTimeoutMs}ms; aborting session`, output, transcript, usage, thread_snapshot: snapshotBuilder.snapshot() });
       session.abort?.().catch?.(() => {});
     }
   }, Math.min(5000, Math.max(500, stallTimeoutMs / 4)));
@@ -223,8 +466,10 @@ async function promptWithInactivity(
       collected = collected ? `${permissionRequiredOutput}\n\n${collected}` : permissionRequiredOutput;
     }
     transcript += `\n\n# final assistant text\n\n${collected}`;
-    onActivity?.({ message: 'collected final response', output: collected, transcript, usage });
-    return { result: collected, usage };
+    const thread_snapshot = snapshotBuilder.finalize(session.messages ?? []);
+    debugLog(cwd, 'runner_final_snapshot', { source: thread_snapshot?.source, items: thread_snapshot?.items.map((item) => ({ type: item.type, label: (item as any).label, name: (item as any).name, status: (item as any).status, assistantContent: item.type === 'assistant' ? item.message.content.map((part: any) => part.type) : undefined })) });
+    onActivity?.({ message: 'collected final response', output: collected, transcript, usage, thread_snapshot });
+    return { result: collected, usage, thread_snapshot };
   } finally {
     clearInterval(interval);
     unsubscribe();
@@ -274,16 +519,16 @@ export const sdkSubagentRunner: SubagentRunner = async ({ definition, task, cont
     const { session } = await createSession(model, cwd, tools, effort);
     const unregisterPermissionSession = registerPermissionSubagentSession(session, definition);
     try {
-      const { result, usage } = await promptWithInactivity(session, prompt, config.stall_timeout_ms, signal, onActivity);
-      return { result, usage };
+      const { result, usage, thread_snapshot } = await promptWithInactivity(session, prompt, config.stall_timeout_ms, signal, onActivity, context, cwd);
+      return { result, usage, thread_snapshot };
     } finally {
       unregisterPermissionSession();
     }
   }
 
   try {
-    const { result, usage } = await attempt(preferred);
-    return { result, usage, model: modelLabel(preferred) ?? modelRefLabel(profile.model.value), effort, fallback_used: false };
+    const { result, usage, thread_snapshot } = await attempt(preferred);
+    return { result, usage, thread_snapshot, model: modelLabel(preferred) ?? modelRefLabel(profile.model.value), effort, fallback_used: false };
   } catch (error) {
     if (signal.aborted) throw new Error('Subagent was aborted');
     const preferredLabel = modelLabel(preferred) ?? modelRefLabel(profile.model.value) ?? 'unknown';
@@ -292,7 +537,7 @@ export const sdkSubagentRunner: SubagentRunner = async ({ definition, task, cont
     const message = error instanceof Error ? error.message : String(error);
     ctx?.ui?.notify?.(`Subagent ${definition.name} failed/stalled on selected model ${preferredLabel}: ${message}. Falling back to current model ${currentLabel}.`, 'warning');
     if (!current || current === preferred) throw new Error(`Subagent ${definition.name} failed on selected model ${preferredLabel}: ${message}`);
-    const { result, usage } = await attempt(current);
-    return { result, usage, model: currentLabel, effort, fallback_used: true };
+    const { result, usage, thread_snapshot } = await attempt(current);
+    return { result, usage, thread_snapshot, model: currentLabel, effort, fallback_used: true };
   }
 };

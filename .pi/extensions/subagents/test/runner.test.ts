@@ -352,3 +352,131 @@ describe('subagent runner permission-required bridge', () => {
     }
   });
 });
+
+describe('subagent runner thread snapshots', () => {
+  const definition: SubagentDefinition = {
+    name: 'sdd-apply',
+    description: 'implementation executor',
+    filePath: '/tmp/sdd-apply.md',
+    instructions: 'return a concise result',
+    tools: ['bash', 'memory_search', 'custom_tool'],
+  };
+  const config: SubagentsConfig = {
+    timeout_ms: 10_000,
+    stall_timeout_ms: 10_000,
+    max_concurrency: 1,
+    default_tools: ['bash', 'memory_search', 'custom_tool'],
+    model_profiles: {},
+  };
+
+  async function runWithSession(session: any) {
+    vi.resetModules();
+    vi.doMock('@earendil-works/pi-coding-agent', () => ({
+      SessionManager: { inMemory: () => ({}) },
+      createAgentSession: vi.fn(() => ({ session })),
+    }));
+    const { sdkSubagentRunner } = await import('../src/runner.js');
+    const activities: any[] = [];
+    const result = await sdkSubagentRunner({
+      definition,
+      task: 'capture a thread snapshot',
+      cwd: '/workspace',
+      ctx: { model: { provider: 'test', id: 'model' } },
+      config,
+      signal: new AbortController().signal,
+      onActivity: (activity) => activities.push(activity),
+    });
+    return { result, activities };
+  }
+
+  it('emits and returns bounded snapshots for assistant text, paired bash output, tool errors, and custom fallback tools without changing result or usage', async () => {
+    const largeOutput = 'x'.repeat(6000);
+    let subscriber: ((event: unknown) => void) | undefined;
+    const session = {
+      subscribe: vi.fn((callback: (event: unknown) => void) => {
+        subscriber = callback;
+        return vi.fn();
+      }),
+      prompt: vi.fn(async () => {
+        subscriber?.({ type: 'message_update', assistantMessageEvent: { delta: 'streamed ' } });
+        subscriber?.({ type: 'tool_execution_start', toolCallId: 'bash-1', toolName: 'bash', args: { command: 'printf hello' } });
+        subscriber?.({ type: 'tool_execution_update', toolCallId: 'bash-1', toolName: 'bash', partialResult: { output: 'hello\n' } });
+        subscriber?.({ type: 'tool_execution_end', toolCallId: 'bash-1', toolName: 'bash', isError: false, result: { output: largeOutput, exitCode: 0 } });
+        subscriber?.({ type: 'tool_execution_start', toolCallId: 'mem-1', toolName: 'memory_search', args: { query: 'prior decisions' } });
+        subscriber?.({ type: 'tool_execution_end', toolCallId: 'mem-1', toolName: 'memory_search', isError: true, result: { content: [{ type: 'text', text: 'memory unavailable' }] } });
+        subscriber?.({ type: 'tool_execution_start', toolCallId: 'custom-1', toolName: 'custom_tool', args: { value: 42 } });
+        subscriber?.({ type: 'tool_execution_end', toolCallId: 'custom-1', toolName: 'custom_tool', isError: false, result: { text: 'custom result' } });
+      }),
+      messages: [{ role: 'assistant', content: [{ type: 'text', text: 'final answer' }] }],
+      dispose: vi.fn(async () => undefined),
+    };
+
+    const { result, activities } = await runWithSession(session);
+
+    expect(result.result).toBe('final answer');
+    expect(result.usage).toMatchObject({ input: 0, output: 0, turns: 0 });
+    expect(activities.some((activity) => activity.thread_snapshot?.items?.length > 0)).toBe(true);
+    expect(result.thread_snapshot).toMatchObject({ version: 1, source: 'mixed' });
+    expect(result.thread_snapshot?.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'assistant', message: expect.objectContaining({ content: [expect.objectContaining({ type: 'text', text: 'final answer' })] }) }),
+      expect.objectContaining({ type: 'bash', tool_call_id: 'bash-1', command: 'printf hello', status: 'completed' }),
+      expect.objectContaining({ type: 'tool', tool_call_id: 'mem-1', name: 'memory_search', status: 'failed', result: expect.objectContaining({ isError: true, preview: expect.stringContaining('memory unavailable') }) }),
+      expect.objectContaining({ type: 'tool', tool_call_id: 'custom-1', name: 'custom_tool', status: 'completed', result: expect.objectContaining({ preview: expect.stringContaining('custom result') }) }),
+    ]));
+    const bashItem = result.thread_snapshot?.items.find((item: any) => item.type === 'bash') as any;
+    expect(bashItem.output.length).toBeLessThan(4500);
+    expect(bashItem.truncated).toBe(true);
+  });
+
+  it('interleaves final session tool-call messages with matching tool rows before final assistant text', async () => {
+    let subscriber: ((event: unknown) => void) | undefined;
+    const session = {
+      subscribe: vi.fn((callback: (event: unknown) => void) => {
+        subscriber = callback;
+        return vi.fn();
+      }),
+      prompt: vi.fn(async () => {
+        subscriber?.({ type: 'tool_execution_start', toolCallId: 'read-1', toolName: 'read', args: { path: 'AGENTS.md' } });
+        subscriber?.({ type: 'tool_execution_end', toolCallId: 'read-1', toolName: 'read', isError: false, result: { content: [{ type: 'text', text: '# Agent Guide' }] } });
+      }),
+      messages: [
+        { role: 'assistant', content: [{ type: 'toolCall', id: 'read-1', name: 'read', arguments: { path: 'AGENTS.md' } }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'final after tools' }] },
+      ],
+      dispose: vi.fn(async () => undefined),
+    };
+
+    const { result } = await runWithSession(session);
+    const labels = result.thread_snapshot?.items.map((item: any) => item.type === 'assistant'
+      ? `assistant:${item.message.content.map((part: any) => part.type === 'toolCall' ? `toolCall:${part.name}` : part.text).join('|')}`
+      : `${item.type}:${item.name}`);
+
+    expect(labels).toEqual(['user:undefined', 'assistant:toolCall:read', 'tool:read', 'assistant:final after tools']);
+    expect(result.thread_snapshot?.items[0]).toMatchObject({ type: 'user', label: 'delegated_task' });
+    expect(JSON.stringify(result.thread_snapshot)).toContain('# Agent Guide');
+  });
+
+  it('finalizes assistant text from session messages when available while preserving streamed activity snapshots', async () => {
+    let subscriber: ((event: unknown) => void) | undefined;
+    const session = {
+      subscribe: vi.fn((callback: (event: unknown) => void) => {
+        subscriber = callback;
+        return vi.fn();
+      }),
+      prompt: vi.fn(async () => {
+        subscriber?.({ type: 'message_update', assistantMessageEvent: { delta: 'draft text' } });
+      }),
+      messages: [{ role: 'assistant', content: 'final from messages' }],
+      dispose: vi.fn(async () => undefined),
+    };
+
+    const { result, activities } = await runWithSession(session);
+
+    expect(activities.find((activity) => activity.message === 'streaming response')?.thread_snapshot?.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'assistant' }),
+    ]));
+    expect(result.result).toBe('final from messages');
+    expect(result.thread_snapshot?.source).toBe('session_messages');
+    expect(JSON.stringify(result.thread_snapshot)).toContain('final from messages');
+  });
+});

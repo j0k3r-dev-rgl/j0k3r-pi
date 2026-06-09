@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import type { SubagentTask } from './types.js';
+import { boundThreadSnapshot } from './thread-view.js';
+import type { SubagentTask, SubagentThreadSnapshot } from './types.js';
 
 const require = createRequire(import.meta.url);
 
@@ -18,11 +19,18 @@ function dbPath(cwd: string): string {
 }
 
 function value(text: string | undefined): string | null { return text ?? null; }
-function ensureColumn(db: Db, table: string, column: string, definition: string): void {
-  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as any[];
-  if (!rows.some((row) => row.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+function snapshotJson(snapshot: SubagentTask['thread_snapshot']): string | null {
+  const bounded = boundThreadSnapshot(snapshot);
+  return bounded ? JSON.stringify(bounded) : null;
 }
-
+function parseSnapshotJson(text: unknown): SubagentThreadSnapshot | undefined {
+  if (typeof text !== 'string' || !text.trim()) return undefined;
+  try {
+    return boundThreadSnapshot(JSON.parse(text));
+  } catch {
+    return undefined;
+  }
+}
 export class SubagentHistoryStore {
   private dbs = new Map<string, Db>();
 
@@ -45,6 +53,7 @@ export class SubagentHistoryStore {
         task TEXT NOT NULL,
         context TEXT,
         created_at TEXT NOT NULL,
+        session_id TEXT,
         started_at TEXT,
         ended_at TEXT,
         last_activity_at TEXT,
@@ -65,7 +74,8 @@ export class SubagentHistoryStore {
         effort_source TEXT,
         fallback_used INTEGER,
         error TEXT,
-        result TEXT
+        result TEXT,
+        thread_snapshot_json TEXT
       );
       CREATE TABLE IF NOT EXISTS subagent_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,18 +90,6 @@ export class SubagentHistoryStore {
       CREATE INDEX IF NOT EXISTS idx_subagent_tasks_created ON subagent_tasks(created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_subagent_events_task ON subagent_events(task_id, created_at);
     `);
-    ensureColumn(db, 'subagent_tasks', 'prompt', 'TEXT');
-    ensureColumn(db, 'subagent_tasks', 'transcript', 'TEXT');
-    ensureColumn(db, 'subagent_tasks', 'usage_input', 'INTEGER');
-    ensureColumn(db, 'subagent_tasks', 'usage_output', 'INTEGER');
-    ensureColumn(db, 'subagent_tasks', 'usage_cache_read', 'INTEGER');
-    ensureColumn(db, 'subagent_tasks', 'usage_cache_write', 'INTEGER');
-    ensureColumn(db, 'subagent_tasks', 'usage_cost', 'REAL');
-    ensureColumn(db, 'subagent_tasks', 'usage_context_tokens', 'INTEGER');
-    ensureColumn(db, 'subagent_tasks', 'usage_turns', 'INTEGER');
-    ensureColumn(db, 'subagent_tasks', 'effort', 'TEXT');
-    ensureColumn(db, 'subagent_tasks', 'model_source', 'TEXT');
-    ensureColumn(db, 'subagent_tasks', 'effort_source', 'TEXT');
     this.dbs.set(file, db);
     return db;
   }
@@ -99,13 +97,14 @@ export class SubagentHistoryStore {
   upsertTask(cwd: string, task: SubagentTask): void {
     this.db(cwd).prepare(`
       INSERT INTO subagent_tasks (
-        id, cwd, agent, mode, status, task, context, created_at, started_at, ended_at,
+        id, cwd, agent, mode, status, task, context, created_at, session_id, started_at, ended_at,
         last_activity_at, last_activity, output_preview, prompt, transcript,
         usage_input, usage_output, usage_cache_read, usage_cache_write, usage_cost, usage_context_tokens, usage_turns,
-        model, effort, model_source, effort_source, fallback_used, error, result
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        model, effort, model_source, effort_source, fallback_used, error, result, thread_snapshot_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         status=excluded.status,
+        session_id=excluded.session_id,
         started_at=excluded.started_at,
         ended_at=excluded.ended_at,
         last_activity_at=excluded.last_activity_at,
@@ -126,7 +125,8 @@ export class SubagentHistoryStore {
         effort_source=excluded.effort_source,
         fallback_used=excluded.fallback_used,
         error=excluded.error,
-        result=excluded.result
+        result=excluded.result,
+        thread_snapshot_json=excluded.thread_snapshot_json
     `).run(
       task.id,
       cwd,
@@ -136,6 +136,7 @@ export class SubagentHistoryStore {
       task.task,
       value(task.context),
       task.created_at,
+      value(task.session_id),
       value(task.started_at),
       value(task.ended_at),
       value(task.last_activity_at),
@@ -157,6 +158,7 @@ export class SubagentHistoryStore {
       task.fallback_used === undefined ? null : task.fallback_used ? 1 : 0,
       value(task.error),
       value(task.result),
+      snapshotJson(task.thread_snapshot),
     );
   }
 
@@ -179,6 +181,12 @@ export class SubagentHistoryStore {
       SELECT * FROM subagent_tasks WHERE cwd = ? ORDER BY created_at DESC LIMIT ?
     `).all(cwd, limit).map(rowToTask);
   }
+
+  listSessionTasks(cwd: string, sessionId: string, limit = 100): SubagentTask[] {
+    return this.db(cwd).prepare(`
+      SELECT * FROM subagent_tasks WHERE cwd = ? AND session_id = ? ORDER BY created_at DESC LIMIT ?
+    `).all(cwd, sessionId, limit).map(rowToTask);
+  }
 }
 
 function rowToTask(row: any): SubagentTask {
@@ -190,6 +198,7 @@ function rowToTask(row: any): SubagentTask {
     task: row.task,
     context: row.context ?? undefined,
     created_at: row.created_at,
+    session_id: row.session_id ?? undefined,
     started_at: row.started_at ?? undefined,
     ended_at: row.ended_at ?? undefined,
     last_activity_at: row.last_activity_at ?? undefined,
@@ -213,5 +222,6 @@ function rowToTask(row: any): SubagentTask {
     fallback_used: row.fallback_used === null || row.fallback_used === undefined ? undefined : Boolean(row.fallback_used),
     error: row.error ?? undefined,
     result: row.result ?? undefined,
+    thread_snapshot: parseSnapshotJson(row.thread_snapshot_json),
   };
 }

@@ -18,6 +18,13 @@ function modelRefLabel(model: ModelRef | undefined): string | undefined {
   return model ? `${model.provider}/${model.id}` : undefined;
 }
 
+function sessionIdFromContext(ctx: any): string | undefined {
+  const direct = ctx?.sessionManager?.getSessionId?.() ?? ctx?.sessionId;
+  if (typeof direct === 'string' && direct.length > 0) return direct;
+  const file = ctx?.sessionManager?.getSessionFile?.();
+  return typeof file === 'string' && file.length > 0 ? file : undefined;
+}
+
 const PERMISSION_REQUIRED_MARKER = 'permission_required:';
 const MAIN_THREAD_APPROVAL_REGISTRY_KEY = Symbol.for('pi.permissionGuard.mainThreadApprovals');
 const APPROVAL_CHOICES = ['Allow once', 'Allow for session', 'Allow for project', 'Deny'] as const;
@@ -195,10 +202,14 @@ export class SubagentManager {
     return [...active, ...persisted].sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
 
-  listSessionTasks(cwd?: string) {
-    return [...this.tasks.values()]
-      .filter((task) => !cwd || this.taskCwds.get(task.id) === cwd)
+  listSessionTasks(cwd?: string, sessionId?: string) {
+    const active = [...this.tasks.values()]
+      .filter((task) => (!cwd || this.taskCwds.get(task.id) === cwd) && (!sessionId || task.session_id === sessionId))
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
+    if (!cwd || !sessionId) return active;
+    const activeIds = new Set(active.map((task) => task.id));
+    const persisted = this.history.listSessionTasks(cwd, sessionId).filter((task) => !activeIds.has(task.id));
+    return [...active, ...persisted].sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
 
   getTask(id: string, cwd?: string) {
@@ -272,6 +283,7 @@ export class SubagentManager {
     limiter = createLimiter(1),
   ): string {
     const cwd = ctx?.cwd ?? process.cwd();
+    const session_id = sessionIdFromContext(ctx);
     const definition = getSubagent(cwd, agentName);
     if (!definition) throw new Error(`Subagent not found: ${agentName}`);
     const config = readSubagentsConfig(cwd);
@@ -290,6 +302,7 @@ export class SubagentManager {
       model_source: effectiveProfile.model.source,
       effort_source: effectiveProfile.effort.source,
       created_at: nowIso(),
+      session_id,
       last_activity_at: nowIso(),
       last_activity: 'queued',
     };
@@ -336,6 +349,7 @@ export class SubagentManager {
               if (activity.transcript) task.transcript = activity.transcript;
               if (activity.usage) task.usage = activity.usage;
               if (activity.effort) task.effort = activity.effort;
+              if (activity.thread_snapshot) task.thread_snapshot = activity.thread_snapshot;
               this.record(cwd, task, activity.message);
               onTaskUpdate?.();
             },
@@ -374,6 +388,7 @@ export class SubagentManager {
           task.model = result.model;
           task.effort = result.effort ?? task.effort;
           task.fallback_used = result.fallback_used;
+          if (result.thread_snapshot) task.thread_snapshot = result.thread_snapshot;
           this.record(cwd, task, task.last_activity);
           onTaskUpdate?.();
 
@@ -398,6 +413,7 @@ export class SubagentManager {
         task.model = result.model;
         task.effort = result.effort ?? task.effort;
         task.fallback_used = result.fallback_used;
+        if (result.thread_snapshot) task.thread_snapshot = result.thread_snapshot;
         task.ended_at = task.last_activity_at;
         this.record(cwd, task, 'completed');
         onTaskUpdate?.();

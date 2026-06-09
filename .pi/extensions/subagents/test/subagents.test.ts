@@ -2,15 +2,20 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import extension from '../index.js';
 import { loadSubagents, parseFrontmatter, readSubagentsConfig, resetGlobalSubagentModelProfileField, saveGlobalSubagentModelProfile } from '../src/config.js';
 import { resolveEffectiveSubagentProfile } from '../src/profile-resolver.js';
-import { buildPrompt } from '../src/runner.js';
+import { buildPrompt, ThreadSnapshotBuilder } from '../src/runner.js';
 import { buildModelProfileRows, buildNonTuiModelProfilesMessage, commitStagedModelProfiles, groupAvailableModelsByProvider, runSubagentModelsCommand, stageModelProfileEdit } from '../src/model-profiles-ui.js';
+import { SubagentHistoryStore } from '../src/history.js';
 import { SubagentManager } from '../src/manager.js';
 import { registerSubagentTools } from '../src/tools.js';
 import { SubagentsHistoryPanel } from '../src/ui.js';
+import { boundThreadSnapshot, isValidThreadSnapshot, renderThreadBody, resetPiComponentCacheForTests } from '../src/thread-view.js';
 import type { EffectiveSubagentProfile, SubagentModelProfiles, SubagentRunner, SubagentTask } from '../src/types.js';
+
+const require = createRequire(import.meta.url);
 
 let tmp: string;
 beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-subagents-test-')); fs.mkdirSync(path.join(tmp, '.pi', 'subagents'), { recursive: true }); });
@@ -27,6 +32,20 @@ function mockRunner(delay = 0): SubagentRunner {
   };
 }
 
+function statusSnapshot(text: string) {
+  return { version: 1 as const, source: 'events' as const, items: [{ type: 'status' as const, text }] };
+}
+
+function renderText(snapshot: unknown, overrides: Partial<Parameters<typeof renderThreadBody>[1]> = {}): string {
+  const context = {
+    cwd: tmp,
+    visibleWidth: (text: string) => text.replace(/\u001b\[[0-9;]*m/g, '').length,
+    truncateToWidth: (text: string, width: number) => text.length > width ? `${text.slice(0, Math.max(0, width - 1))}…` : text,
+    ...overrides,
+  };
+  return renderThreadBody(snapshot, context).join('\n').replace(/\u001b\[[0-9;]*m/g, '').replace(/\s+/g, ' ').trim();
+}
+
 function withAgentDir<T>(agentDir: string, run: () => T): T {
   const old = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = agentDir;
@@ -39,6 +58,473 @@ function withAgentDir<T>(agentDir: string, run: () => T): T {
 }
 
 describe('subagents extension', () => {
+  it('validates and bounds v1 subagent thread snapshots safely', () => {
+    const snapshot = {
+      version: 1,
+      source: 'events',
+      items: [
+        { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'hello from assistant' }] } },
+        { type: 'tool', name: 'read', status: 'completed', arguments: { path: 'README.md' }, result: { content: [{ type: 'text', text: 'file body' }], isError: false } },
+        { type: 'bash', command: 'npm test', output: 'passed', status: 'completed', exitCode: 0 },
+        { type: 'error', text: 'safe error row' },
+      ],
+    };
+
+    expect(isValidThreadSnapshot(snapshot)).toBe(true);
+    expect(renderThreadBody(snapshot as any, { visibleWidth: (text) => text.length, truncateToWidth: (text, width) => text.slice(0, width), cwd: tmp }).join('\n')).toContain('hello from assistant');
+    expect(renderThreadBody(snapshot as any, { visibleWidth: (text) => text.length, truncateToWidth: (text, width) => text.slice(0, width), cwd: tmp }).join('\n')).toContain('read completed');
+
+    const bounded = boundThreadSnapshot({ version: 1, source: 'events', items: [{ type: 'status', text: 'x'.repeat(5000) }] } as any, { textLimit: 32 });
+    expect(bounded?.items[0]).toMatchObject({ type: 'status', text: expect.stringMatching(/…$/) });
+    expect((bounded?.items[0] as any).text.length).toBeLessThanOrEqual(32);
+  });
+
+  it('rejects malformed, missing, and future subagent thread snapshots', () => {
+    expect(isValidThreadSnapshot(undefined)).toBe(false);
+    expect(isValidThreadSnapshot(null)).toBe(false);
+    expect(isValidThreadSnapshot({ version: 2, source: 'events', items: [] })).toBe(false);
+    expect(isValidThreadSnapshot({ version: 1, source: 'events', items: [{ type: 'future', text: 'nope' }] })).toBe(false);
+    expect(isValidThreadSnapshot({ version: 1, source: 'events', items: [{ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text' }] } }] })).toBe(false);
+  });
+
+  it('loads Pi message components from the running Pi package and renders them at the requested width', () => {
+    const packageRoot = path.join(tmp, 'fake-pi-package');
+    fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({ name: '@earendil-works/pi-coding-agent', main: 'index.cjs' }));
+    fs.writeFileSync(path.join(packageRoot, 'dist', 'cli.js'), '#!/usr/bin/env node\n');
+    const shimDir = path.join(tmp, 'bin-message');
+    fs.mkdirSync(shimDir);
+    fs.symlinkSync(path.join(packageRoot, 'dist', 'cli.js'), path.join(shimDir, 'pi'));
+    fs.writeFileSync(path.join(packageRoot, 'index.cjs'), `
+      exports.getMarkdownTheme = () => ({ fakeMarkdownTheme: true });
+      exports.AssistantMessageComponent = class {
+        constructor(message, hideThinkingBlock, markdownTheme) { this.message = message; this.markdownTheme = markdownTheme; }
+        render(width) { return ['pi-assistant:' + width + ':' + this.markdownTheme.fakeMarkdownTheme + ':' + this.message.content[0].text]; }
+      };
+      exports.UserMessageComponent = class {
+        constructor(text, markdownTheme) { this.text = text; this.markdownTheme = markdownTheme; }
+        render(width) { return ['pi-user:' + width + ':' + this.markdownTheme.fakeMarkdownTheme + ':' + this.text]; }
+      };
+    `);
+    const oldArgv1 = process.argv[1];
+    process.argv[1] = path.join(shimDir, 'pi');
+    try {
+      const lines = renderThreadBody({
+        version: 1,
+        source: 'events',
+        items: [
+          { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'from pi component' }] } },
+          { type: 'user', text: 'user component text', label: 'user' },
+        ],
+      } as any, {
+        cwd: tmp,
+        renderWidth: 42,
+        visibleWidth: (text: string) => text.length,
+        truncateToWidth: (text: string, width: number) => text.length > width ? text.slice(0, width) : text,
+      } as any);
+
+      expect(lines.join('\n')).toContain('pi-assistant:42:true:from pi component');
+      expect(lines.join('\n')).toContain('pi-user:42:true:user component text');
+    } finally {
+      process.argv[1] = oldArgv1;
+      resetPiComponentCacheForTests();
+    }
+  });
+
+  it('includes the delegated orchestrator prompt and context as first user rows in thread snapshots', () => {
+    const builder = new ThreadSnapshotBuilder('delegated prompt body', 'orchestrator context body');
+    const snapshot = builder.snapshot();
+
+    expect(snapshot?.items[0]).toMatchObject({ type: 'user', label: 'delegated_task', text: 'delegated prompt body' });
+    expect(snapshot?.items[1]).toMatchObject({ type: 'user', label: 'context', text: 'orchestrator context body' });
+  });
+
+  it('renders built-in tool rows with Pi ToolExecutionComponent from exported per-tool definitions', () => {
+    resetPiComponentCacheForTests();
+    const packageRoot = path.join(tmp, 'fake-pi-tools-package');
+    fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({ name: '@earendil-works/pi-coding-agent', main: 'index.cjs' }));
+    fs.writeFileSync(path.join(packageRoot, 'dist', 'cli.js'), '#!/usr/bin/env node\n');
+    const shimDir = path.join(tmp, 'bin-tools');
+    fs.mkdirSync(shimDir);
+    fs.symlinkSync(path.join(packageRoot, 'dist', 'cli.js'), path.join(shimDir, 'pi'));
+    fs.writeFileSync(path.join(packageRoot, 'index.cjs'), `
+      exports.createReadToolDefinition = (cwd) => ({ name: 'read', cwd });
+      exports.ToolExecutionComponent = class {
+        constructor(name, id, args, options, definition, tui, cwd) { this.name = name; this.args = args; this.definition = definition; this.cwd = cwd; }
+        markExecutionStarted() {}
+        setArgsComplete() {}
+        updateResult(result) { this.result = result; }
+        setExpanded() {}
+        render(width) { return ['pi-tool:' + width + ':' + this.name + ':' + this.definition.cwd + ':' + this.args.path + ':' + this.result.content[0].text]; }
+      };
+    `);
+    const oldArgv1 = process.argv[1];
+    process.argv[1] = path.join(shimDir, 'pi');
+    try {
+      const lines = renderThreadBody({
+        version: 1,
+        source: 'events',
+        items: [{ type: 'tool', name: 'read', status: 'completed', arguments: { path: 'AGENTS.md' }, result: { content: [{ type: 'text', text: 'file result' }], isError: false } }],
+      } as any, {
+        cwd: tmp,
+        tui: { requestRender() {} },
+        renderWidth: 200,
+        visibleWidth: (text: string) => text.length,
+        truncateToWidth: (text: string, width: number) => text.length > width ? text.slice(0, width) : text,
+      } as any);
+
+      expect(lines.join('\n')).toContain(`pi-tool:200:read:${tmp}:AGENTS.md:file result`);
+      expect(lines.join('\n')).not.toContain('read completed ·');
+    } finally {
+      process.argv[1] = oldArgv1;
+      resetPiComponentCacheForTests();
+    }
+  });
+
+  it('does not render assistant toolCall parts as raw requested text when tool rows exist', () => {
+    const snapshot = {
+      version: 1,
+      source: 'mixed',
+      items: [
+        { type: 'assistant', message: { role: 'assistant', content: [
+          { type: 'toolCall', id: 'call-read', name: 'read', arguments: { path: 'AGENTS.md' } },
+          { type: 'text', text: 'Summary after reading files.' },
+        ] } },
+        { type: 'tool', tool_call_id: 'call-read', name: 'read', status: 'completed', arguments: { path: 'AGENTS.md' }, result: { content: [{ type: 'text', text: '# Agent Guide' }], isError: false } },
+      ],
+    };
+
+    const text = renderText(snapshot as any);
+
+    expect(text).toContain('Summary after reading files.');
+    expect(text).toContain('read');
+    expect(text).toContain('AGENTS.md');
+    expect(text).toContain('# Agent Guide');
+    expect(text).not.toContain('tool read requested');
+  });
+
+  it('renders structured thread body rows with safe generic fallbacks', () => {
+    const snapshot = {
+      version: 1,
+      source: 'events',
+      items: [
+        { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'assistant explains the plan' }] } },
+        { type: 'tool', name: 'memory_search', status: 'completed', arguments: { query: 'thread view' }, result: { content: [{ type: 'text', text: 'memory result text' }], isError: false } },
+        { type: 'bash', command: 'npm test -- --run', output: 'vitest passed', status: 'completed', exitCode: 0 },
+        { type: 'tool', name: 'edit', status: 'completed', arguments: { path: 'src/thread-view.ts' }, result: { content: [{ type: 'text', text: 'updated one file' }], isError: false } },
+        { type: 'tool', name: 'read', status: 'completed', arguments: { path: 'README.md' }, result: { content: [{ type: 'text', text: 'read preview' }], isError: false } },
+        { type: 'tool', name: 'custom_tool', status: 'failed', arguments: { value: 'custom args' }, result: { content: [{ type: 'text', text: 'custom failure text' }], isError: true } },
+        { type: 'custom', customType: 'extension.event', fallbackText: 'custom fallback text' },
+        { type: 'error', text: 'renderer-safe error row' },
+      ],
+    };
+
+    const text = renderText(snapshot as any);
+
+    expect(text).toContain('assistant explains the plan');
+    expect(text).toContain('memory_search');
+    expect(text).toContain('thread view');
+    expect(text).toContain('bash');
+    expect(text).toContain('npm test -- --run');
+    expect(text).toContain('vitest passed');
+    expect(text).toContain('edit');
+    expect(text).toContain('src/thread-view.ts');
+    expect(text).toContain('read');
+    expect(text).toContain('README.md');
+    expect(text).toContain('custom_tool');
+    expect(text).toContain('failed');
+    expect(text).toContain('custom failure text');
+    expect(text).toContain('custom fallback text');
+    expect(text).toContain('renderer-safe error row');
+  });
+
+  it('bounds malformed thread items and continues rendering later rows', () => {
+    const snapshot = {
+      version: 1,
+      source: 'events',
+      items: [
+        { type: 'status', text: 'before malformed' },
+        { type: 'tool', name: `bad_tool_${'x'.repeat(160)}`, status: 'completed', arguments: { circular: true } },
+        { type: 'future_tool_shape', raw: { name: 'future_custom', text: 'malformed item text' } },
+        { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'after malformed still visible' }] } },
+      ],
+    };
+    (snapshot.items[1] as any).arguments.self = (snapshot.items[1] as any).arguments;
+
+    const text = renderText(snapshot as any, { truncateToWidth: (line, width) => {
+      if (line.includes('bad_tool')) throw new Error('forced renderer failure');
+      return line.length > width ? line.slice(0, width) : line;
+    } });
+
+    expect(text).toContain('thread item unavailable');
+    expect(text).toContain('malformed thread item');
+    expect(text).toContain('after malformed still visible');
+  });
+
+  it('uses bounded body widths for long rendered rows', () => {
+    const widths: number[] = [];
+    const text = renderText({
+      version: 1,
+      source: 'events',
+      items: [{ type: 'bash', command: `node ${'x'.repeat(180)}`, output: 'done', status: 'completed', exitCode: 0 }],
+    } as any, {
+      truncateToWidth: (line, width) => {
+        widths.push(width);
+        return line.length > 72 ? `${line.slice(0, 71)}…` : line;
+      },
+    });
+
+    expect(Math.max(...widths)).toBeLessThanOrEqual(100);
+    expect(text).toContain('…');
+  });
+
+  it('keeps legacy history panel fallback when thread_snapshot is missing or invalid', () => {
+    const baseTask: SubagentTask = {
+      id: 'subtask_legacy_1',
+      agent: 'analyst',
+      mode: 'task',
+      status: 'failed',
+      task: 'legacy task',
+      created_at: new Date().toISOString(),
+      transcript: 'legacy transcript line',
+      result: 'legacy result line',
+      error: 'legacy error line',
+    };
+    const makePanel = (task: SubagentTask) => new SubagentsHistoryPanel([task], { fg: (_name: string, text: string) => text }, () => undefined, () => false, (text) => text.length, (text, width) => text.length > width ? text.slice(0, width) : text);
+
+    expect(makePanel(baseTask).render(160).join('\n')).toContain('legacy transcript line');
+    expect(makePanel({ ...baseTask, thread_snapshot: { version: 1, source: 'events', items: [{ type: 'future', text: 'ignore me' }] } as any }).render(160).join('\n')).toContain('legacy error line');
+  });
+
+  it('renders valid thread snapshots before legacy transcript text in the history panel', () => {
+    const task: SubagentTask = {
+      id: 'subtask_thread_1',
+      agent: 'analyst',
+      mode: 'task',
+      status: 'completed',
+      task: 'thread task',
+      created_at: new Date().toISOString(),
+      transcript: 'legacy transcript should not win',
+      result: 'legacy result should not win',
+      thread_snapshot: { version: 1, source: 'events', items: [{ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'structured snapshot wins' }] } }] },
+    };
+    const panel = new SubagentsHistoryPanel([task], { fg: (_name: string, text: string) => text }, () => undefined, () => false, (text) => text.length, (text, width) => text.length > width ? text.slice(0, width) : text);
+    const rendered = panel.render(160).join('\n');
+
+    expect(rendered).toContain('structured snapshot wins');
+    expect(rendered).not.toContain('legacy transcript should not win');
+    expect(rendered).not.toContain('legacy result should not win');
+  });
+
+  it('does not raw-truncate ansi-styled Pi component lines that visually fit', () => {
+    resetPiComponentCacheForTests();
+    const packageRoot = path.join(tmp, 'fake-pi-ansi-package');
+    fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({ name: '@earendil-works/pi-coding-agent', main: 'index.cjs' }));
+    fs.writeFileSync(path.join(packageRoot, 'dist', 'cli.js'), '#!/usr/bin/env node\n');
+    const shimDir = path.join(tmp, 'bin-ansi');
+    fs.mkdirSync(shimDir);
+    fs.symlinkSync(path.join(packageRoot, 'dist', 'cli.js'), path.join(shimDir, 'pi'));
+    fs.writeFileSync(path.join(packageRoot, 'index.cjs'), `
+      exports.createReadToolDefinition = (cwd) => ({ name: 'read', cwd });
+      exports.ToolExecutionComponent = class {
+        constructor() {}
+        markExecutionStarted() {}
+        setArgsComplete() {}
+        updateResult() {}
+        setExpanded() {}
+        render() { return ['\\x1b[42m│\\x1b[0m \\x1b[42mread\\x1b[0m    \\x1b[42mAGENTS.md\\x1b[0m \\x1b[42m│\\x1b[0m']; }
+      };
+    `);
+    const oldArgv1 = process.argv[1];
+    process.argv[1] = path.join(shimDir, 'pi');
+    try {
+      const task: SubagentTask = {
+        id: 'subtask_component_ansi',
+        agent: 'analyst',
+        mode: 'task',
+        status: 'completed',
+        task: 'preserve ansi component line',
+        created_at: new Date().toISOString(),
+        thread_snapshot: { version: 1, source: 'events', items: [{ type: 'tool', name: 'read', status: 'completed', arguments: { path: 'AGENTS.md' }, result: { content: [{ type: 'text', text: 'body' }], isError: false } }] },
+      };
+      const visible = (text: string) => text.replace(/\u001b\[[0-9;]*m/g, '').length;
+      const panel = new SubagentsHistoryPanel([task], { fg: (_name: string, text: string) => text }, () => undefined, () => false, visible, (text, width) => text.length > width ? text.slice(0, width) : text, { cwd: tmp, tui: { requestRender() {} } });
+      const rendered = panel.render(40).join('\n');
+
+      expect(rendered).toContain('\u001b[42m');
+      expect(rendered).toContain('\u001b[0m');
+      expect(rendered.replace(/\u001b\[[0-9;]*m/g, '')).toContain('│ read    AGENTS.md │');
+    } finally {
+      process.argv[1] = oldArgv1;
+      resetPiComponentCacheForTests();
+    }
+  });
+
+  it('preserves Pi component-rendered spacing in selected thread snapshots', () => {
+    resetPiComponentCacheForTests();
+    const packageRoot = path.join(tmp, 'fake-pi-panel-package');
+    fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({ name: '@earendil-works/pi-coding-agent', main: 'index.cjs' }));
+    fs.writeFileSync(path.join(packageRoot, 'dist', 'cli.js'), '#!/usr/bin/env node\n');
+    const shimDir = path.join(tmp, 'bin-panel');
+    fs.mkdirSync(shimDir);
+    fs.symlinkSync(path.join(packageRoot, 'dist', 'cli.js'), path.join(shimDir, 'pi'));
+    fs.writeFileSync(path.join(packageRoot, 'index.cjs'), `
+      exports.createReadToolDefinition = (cwd) => ({ name: 'read', cwd });
+      exports.ToolExecutionComponent = class {
+        constructor() {}
+        markExecutionStarted() {}
+        setArgsComplete() {}
+        updateResult() {}
+        setExpanded() {}
+        render() { return ['╭──── read tool ────╮', '│ read    AGENTS.md │']; }
+      };
+    `);
+    const oldArgv1 = process.argv[1];
+    process.argv[1] = path.join(shimDir, 'pi');
+    try {
+      const task: SubagentTask = {
+        id: 'subtask_component_spacing',
+        agent: 'analyst',
+        mode: 'task',
+        status: 'completed',
+        task: 'preserve component spacing',
+        created_at: new Date().toISOString(),
+        thread_snapshot: { version: 1, source: 'events', items: [{ type: 'tool', name: 'read', status: 'completed', arguments: { path: 'AGENTS.md' }, result: { content: [{ type: 'text', text: 'body' }], isError: false } }] },
+      };
+      const panel = new SubagentsHistoryPanel([task], { fg: (_name: string, text: string) => text }, () => undefined, () => false, (text) => text.length, (text, width) => text.length > width ? text.slice(0, width) : text, { cwd: tmp, tui: { requestRender() {} } });
+      const rendered = panel.render(160).join('\n');
+
+      expect(rendered).toContain('╭──── read tool ────╮');
+      expect(rendered).toContain('│ read    AGENTS.md │');
+      expect(rendered).not.toContain('│ read AGENTS.md │');
+    } finally {
+      process.argv[1] = oldArgv1;
+      resetPiComponentCacheForTests();
+    }
+  });
+
+  it('preserves panel chrome while rendering selected thread snapshots', () => {
+    const task: SubagentTask = {
+      id: 'subtask_thread_2',
+      agent: 'reviewer',
+      mode: 'task',
+      status: 'running',
+      task: 'keep shell visible',
+      created_at: new Date().toISOString(),
+      last_activity: 'rendering snapshot',
+      model: 'mock/model',
+      effort: 'high',
+      thread_snapshot: { version: 1, source: 'events', items: [{ type: 'status', text: 'thread body visible' }] },
+    };
+    const panel = new SubagentsHistoryPanel([task], { fg: (_name: string, text: string) => text, bold: (text: string) => text }, () => undefined, () => false, (text) => text.length, (text, width) => text.length > width ? text.slice(0, width) : text);
+    const rendered = panel.render(120).join('\n');
+
+    expect(rendered).toContain('subagents');
+    expect(rendered).toContain('agent: reviewer');
+    expect(rendered).toContain('status: running');
+    expect(rendered).toContain('model: mock/model');
+    expect(rendered).toContain('task: keep shell visible');
+    expect(rendered).toContain('● reviewer:running effort:high');
+    expect(rendered).toContain('thread body visible');
+  });
+
+  it('uses the configured available height instead of a fixed overlay viewport', () => {
+    const task: SubagentTask = {
+      id: 'subtask_viewport_height',
+      agent: 'analyst',
+      mode: 'task',
+      status: 'completed',
+      task: 'bounded viewport',
+      created_at: new Date().toISOString(),
+      thread_snapshot: {
+        version: 1,
+        source: 'events',
+        items: Array.from({ length: 80 }, (_, i) => ({ type: 'status' as const, text: `viewport line ${String(i).padStart(2, '0')}` })),
+      },
+    };
+    const panel = new SubagentsHistoryPanel([task], { fg: (_name: string, text: string) => text }, () => undefined, () => false, (text) => text.length, (text, width) => text.length > width ? text.slice(0, width) : text, {}, () => 60);
+    const lines = panel.render(100);
+
+    expect(lines).toHaveLength(60);
+    expect(lines.at(-1)).toMatch(/\d+-\d+\/80/);
+  });
+
+  it('preserves keyboard scrolling for long thread snapshot bodies', () => {
+    const keys: Record<string, string> = { down: 'j', up: 'k', pageDown: 'f', pageUp: 'b', home: 'g', end: 'G' };
+    const task: SubagentTask = {
+      id: 'subtask_thread_scroll',
+      agent: 'analyst',
+      mode: 'task',
+      status: 'completed',
+      task: 'scroll long thread',
+      created_at: new Date().toISOString(),
+      thread_snapshot: {
+        version: 1,
+        source: 'events',
+        items: Array.from({ length: 160 }, (_, i) => ({ type: 'status' as const, text: `thread line ${String(i).padStart(3, '0')}` })),
+      },
+    };
+    const panel = new SubagentsHistoryPanel([task], { fg: (_name: string, text: string) => text }, () => undefined, (data, key) => data === keys[key], (text) => text.length, (text, width) => text.length > width ? text.slice(0, width) : text);
+    const body = () => panel.render(120).join('\n');
+
+    expect(body()).toContain('thread line 159');
+    expect(body()).not.toContain('thread line 000');
+    panel.handleInput('g');
+    expect(body()).toContain('thread line 000');
+    panel.handleInput('j');
+    expect(body()).toContain('thread line 001');
+    panel.handleInput('f');
+    expect(body()).toContain('thread line 013');
+    panel.handleInput('b');
+    expect(body()).toContain('thread line 001');
+    panel.handleInput('G');
+    expect(body()).toContain('thread line 159');
+    expect(body()).not.toContain('thread line 000');
+    panel.handleInput('g');
+    expect(body()).toContain('thread line 000');
+    panel.handleInput('k');
+    expect(body()).toContain('thread line 000');
+  });
+
+  it('follows newly appended thread lines only while the viewer is at the bottom', () => {
+    const keys: Record<string, string> = { up: 'k', end: 'G' };
+    const snapshot = {
+      version: 1 as const,
+      source: 'events' as const,
+      items: Array.from({ length: 80 }, (_, i) => ({ type: 'status' as const, text: `tail line ${String(i).padStart(3, '0')}` })),
+    };
+    const task: SubagentTask = {
+      id: 'subtask_thread_autotail',
+      agent: 'analyst',
+      mode: 'task',
+      status: 'running',
+      task: 'auto tail thread',
+      created_at: new Date().toISOString(),
+      thread_snapshot: snapshot,
+    };
+    const panel = new SubagentsHistoryPanel([task], { fg: (_name: string, text: string) => text }, () => undefined, (data, key) => data === keys[key], (text) => text.length, (text, width) => text.length > width ? text.slice(0, width) : text);
+    const body = () => panel.render(120).join('\n');
+
+    expect(body()).toContain('tail line 079');
+    snapshot.items.push({ type: 'status', text: 'tail line 080' });
+    expect(body()).toContain('tail line 080');
+
+    panel.handleInput('k');
+    expect(body()).toContain('tail line 079');
+    expect(body()).not.toContain('tail line 080');
+    snapshot.items.push({ type: 'status', text: 'tail line 081' });
+    expect(body()).toContain('tail line 079');
+    expect(body()).not.toContain('tail line 081');
+
+    panel.handleInput('G');
+    expect(body()).toContain('tail line 081');
+    snapshot.items.push({ type: 'status', text: 'tail line 082' });
+    expect(body()).toContain('tail line 082');
+  });
+
   it('registers agent-facing tools only', () => {
     const tools: string[] = [], commands: string[] = [];
     extension({ registerTool: (tool: any) => tools.push(tool.name), registerCommand: (name: string) => commands.push(name) });
@@ -568,6 +1054,40 @@ describe('subagents extension', () => {
     expect(completed?.output_preview).toBe('final review');
   });
 
+  it('does not use sqlite schema migrations for subagent history', () => {
+    const source = fs.readFileSync(path.resolve(process.cwd(), 'src', 'history.ts'), 'utf8');
+    expect(source).not.toContain('ALTER TABLE');
+    expect(source).not.toContain('ensureColumn');
+  });
+
+  it('lists persisted current-session tasks after manager reload while excluding other sessions', () => {
+    const history = new SubagentHistoryStore();
+    const sessionTask: SubagentTask = {
+      id: 'subtask_session_current',
+      agent: 'analyst',
+      mode: 'task',
+      status: 'completed',
+      task: 'current session task',
+      created_at: new Date().toISOString(),
+      session_id: 'session-current',
+      result: 'current result',
+    } as any;
+    const otherTask: SubagentTask = {
+      ...sessionTask,
+      id: 'subtask_session_other',
+      task: 'other session task',
+      session_id: 'session-other',
+    } as any;
+    history.upsertTask(tmp, sessionTask);
+    history.upsertTask(tmp, otherTask);
+
+    const manager = new SubagentManager(mockRunner(), history);
+    const listed = manager.listSessionTasks(tmp, 'session-current');
+
+    expect(listed.map((task) => task.id)).toContain('subtask_session_current');
+    expect(listed.map((task) => task.id)).not.toContain('subtask_session_other');
+  });
+
   it('retrieves completed tasks from sqlite history when not in memory', async () => {
     writeAgent('analyst');
     const manager = new SubagentManager(mockRunner());
@@ -578,6 +1098,65 @@ describe('subagents extension', () => {
     expect(persisted?.status).toBe('completed');
     expect(persisted?.result).toContain('analyst handled persisted work');
     expect(freshManager.listSessionTasks(tmp)).toEqual([]);
+  });
+
+  it('copies activity and final thread snapshots onto tasks and persists final snapshots through history reload', async () => {
+    writeAgent('analyst');
+    const activitySnapshot = statusSnapshot('activity snapshot from runner');
+    const finalSnapshot = statusSnapshot('final snapshot from runner');
+    const seenUpdates: SubagentTask[][] = [];
+    const runner: SubagentRunner = async ({ onActivity }) => {
+      onActivity?.({ message: 'snapshot activity', thread_snapshot: activitySnapshot });
+      return { result: 'snapshot result', model: 'mock/model', fallback_used: false, thread_snapshot: finalSnapshot };
+    };
+    const manager = new SubagentManager(runner);
+
+    const result = await manager.run(
+      { agent: 'analyst', task: 'persist snapshots', mode: 'task' },
+      { cwd: tmp },
+      undefined,
+      (tasks) => seenUpdates.push(tasks.map((task) => ({ ...task }))),
+    );
+
+    expect(seenUpdates.flat().some((task) => task.thread_snapshot?.items[0]?.type === 'status' && task.thread_snapshot.items[0].text === 'activity snapshot from runner')).toBe(true);
+    expect(result.results?.[0].thread_snapshot).toEqual(finalSnapshot);
+
+    const freshManager = new SubagentManager(mockRunner());
+    const persisted = freshManager.getTask(result.task_ids[0], tmp);
+    expect(persisted?.thread_snapshot).toEqual(finalSnapshot);
+  });
+
+  it('persists only bounded valid thread snapshots and ignores corrupt history snapshot JSON', () => {
+    const store = new SubagentHistoryStore();
+    const task: SubagentTask = {
+      id: 'subtask_history_snapshot_1',
+      agent: 'analyst',
+      mode: 'task',
+      status: 'completed',
+      task: 'history snapshot',
+      created_at: new Date().toISOString(),
+      transcript: 'legacy transcript survives corrupt snapshots',
+      result: 'legacy result survives corrupt snapshots',
+      thread_snapshot: statusSnapshot('x'.repeat(5000)),
+    };
+
+    store.upsertTask(tmp, task);
+    const bounded = store.getTask(tmp, task.id)?.thread_snapshot;
+    expect(bounded?.items[0]).toMatchObject({ type: 'status', text: expect.stringMatching(/…$/) });
+    expect((bounded?.items[0] as any).text.length).toBeLessThanOrEqual(4000);
+
+    const { DatabaseSync } = require('node:sqlite') as any;
+    const db = new DatabaseSync(path.join(tmp, '.pi', 'subagents-history.sqlite'));
+    // Old `.pi/subagents-history.sqlite` data may be deleted/reset; v1 deliberately does not migrate flat transcripts into snapshots.
+    db.prepare('UPDATE subagent_tasks SET thread_snapshot_json = ? WHERE id = ?').run('{not valid json', task.id);
+    const corruptLoaded = store.getTask(tmp, task.id);
+    expect(corruptLoaded?.thread_snapshot).toBeUndefined();
+    expect(corruptLoaded?.transcript).toContain('legacy transcript survives corrupt snapshots');
+
+    db.prepare('UPDATE subagent_tasks SET thread_snapshot_json = ? WHERE id = ?').run(JSON.stringify({ version: 1, source: 'events', items: [{ type: 'future', text: 'ignored' }] }), task.id);
+    const invalidLoaded = store.getTask(tmp, task.id);
+    expect(invalidLoaded?.thread_snapshot).toBeUndefined();
+    expect(invalidLoaded?.result).toContain('legacy result survives corrupt snapshots');
   });
 
   it('persists subagent usage stats and effort for display', async () => {
@@ -623,6 +1202,25 @@ describe('subagents extension', () => {
     expect(rendered).toContain('agent: analyst');
     expect(rendered).toContain('model: mock/model');
     expect(rendered).toContain('effort: high');
+  });
+
+  it('keeps subagent_run command results compact when tasks include large thread snapshots', async () => {
+    writeAgent('analyst');
+    const manager = new SubagentManager(async () => ({
+      result: 'compact result',
+      model: 'mock/model',
+      fallback_used: false,
+      thread_snapshot: statusSnapshot('oversized snapshot text '.repeat(400)),
+    }));
+    let runTool: any;
+    registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
+
+    const result = await runTool.execute('1', { agent: 'analyst', task: 'compact snapshots', mode: 'task' }, undefined, undefined, { cwd: tmp });
+    const serialized = JSON.stringify(result);
+
+    expect(result.content[0].text).toContain('Completed 1 subagent task');
+    expect(serialized).not.toContain('thread_snapshot');
+    expect(serialized).not.toContain('oversized snapshot text oversized snapshot text oversized snapshot text');
   });
 
   it('renders agent, model, and effort as explicit labels in the history panel', () => {

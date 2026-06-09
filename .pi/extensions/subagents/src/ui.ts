@@ -1,4 +1,5 @@
-import type { SubagentTask, UsageStats } from './types.js';
+import { isValidThreadSnapshot, renderThreadBody } from './thread-view.js';
+import type { SubagentTask, SubagentThreadRenderContext, UsageStats } from './types.js';
 
 function clip(text: string | undefined, limit: number): string {
   if (!text) return '';
@@ -38,6 +39,7 @@ export class SubagentsHistoryPanel {
   private selected = 0;
   private scroll = 0;
   private followTail = true;
+  private lastMaxScroll = 0;
 
   constructor(
     private tasksProvider: SubagentTask[] | (() => SubagentTask[]),
@@ -46,6 +48,8 @@ export class SubagentsHistoryPanel {
     private matchesKey: (data: string, key: string) => boolean,
     private visibleWidth: (text: string) => number,
     private truncateToWidth: (text: string, width: number) => string,
+    private renderContext: Partial<SubagentThreadRenderContext> = {},
+    private maxLinesProvider: number | (() => number) = 42,
   ) {}
 
   invalidate(): void {}
@@ -68,7 +72,7 @@ export class SubagentsHistoryPanel {
     }
     if (this.matchesKey(data, 'down')) {
       this.scroll += 1;
-      this.followTail = false;
+      this.followTail = this.scroll >= this.lastMaxScroll;
     }
     if (this.matchesKey(data, 'up')) {
       this.scroll = Math.max(0, this.scroll - 1);
@@ -76,7 +80,7 @@ export class SubagentsHistoryPanel {
     }
     if (this.matchesKey(data, 'pageDown')) {
       this.scroll += 12;
-      this.followTail = false;
+      this.followTail = this.scroll >= this.lastMaxScroll;
     }
     if (this.matchesKey(data, 'pageUp')) {
       this.scroll = Math.max(0, this.scroll - 12);
@@ -86,15 +90,17 @@ export class SubagentsHistoryPanel {
       this.scroll = 0;
       this.followTail = false;
     }
-    if (this.matchesKey(data, 'end')) this.followTail = true;
+    if (this.matchesKey(data, 'end')) {
+      this.scroll = Number.MAX_SAFE_INTEGER;
+      this.followTail = true;
+    }
   }
 
   render(width: number): string[] {
     const w = Math.max(40, width);
     const bodyWidth = w;
-    // Pi custom components currently receive width but not terminal height. Emit enough
-    // lines for the overlay to occupy a full-height terminal; the overlay clips to 100%.
-    const maxLines = 120;
+    const configuredMaxLines = typeof this.maxLinesProvider === 'function' ? this.maxLinesProvider() : this.maxLinesProvider;
+    const maxLines = Math.max(12, Math.floor(Number.isFinite(configuredMaxLines) ? configuredMaxLines : 42));
     const th = this.theme;
     const accent = (s: string) => th?.fg?.('accent', s) ?? s;
     const dim = (s: string) => th?.fg?.('dim', s) ?? s;
@@ -102,7 +108,7 @@ export class SubagentsHistoryPanel {
     const ok = (s: string) => th?.fg?.('success', s) ?? s;
     const err = (s: string) => th?.fg?.('error', s) ?? s;
     const title = (s: string) => th?.fg?.('toolTitle', th?.bold?.(s) ?? s) ?? s;
-    const line = (s = '') => this.truncateToWidth(s, bodyWidth);
+    const line = (s = '') => this.visibleWidth(s) <= bodyWidth ? s : this.truncateToWidth(s, bodyWidth);
     const divider = dim('─'.repeat(bodyWidth));
     const status = (task: SubagentTask) => task.status === 'completed' ? ok(task.status) : task.status === 'failed' ? err(task.status) : task.status === 'cancelled' ? warn(task.status) : accent(task.status);
 
@@ -129,14 +135,19 @@ export class SubagentsHistoryPanel {
     lines.push(this.taskStrip(bodyWidth));
     lines.push(divider);
 
-    const transcript = this.executionFlowFor(task);
-    const wrapped = this.wrap(transcript, bodyWidth);
+    const structuredBody = isValidThreadSnapshot(task.thread_snapshot);
+    const bodyLines = this.bodyLinesFor(task, bodyWidth);
+    // Pi components already return width-bounded visual lines. Do not re-wrap or
+    // restyle structured thread snapshots, otherwise component spacing, borders,
+    // ANSI styling, and tool differentiation collapse into plain text.
+    const wrapped = structuredBody ? bodyLines : this.wrap(bodyLines.join('\n'), bodyWidth);
     const bodyHeight = Math.max(5, maxLines - lines.length - 2);
     const maxScroll = Math.max(0, wrapped.length - bodyHeight);
-    if (this.followTail && (task.status === 'running' || task.status === 'queued')) this.scroll = maxScroll;
+    if (this.followTail || (this.lastMaxScroll > 0 && this.scroll >= this.lastMaxScroll)) this.scroll = maxScroll;
     if (this.scroll > maxScroll) this.scroll = maxScroll;
+    this.lastMaxScroll = maxScroll;
     const visible = wrapped.slice(this.scroll, this.scroll + bodyHeight);
-    for (const raw of visible) lines.push(this.renderFlowLine(raw, bodyWidth));
+    for (const raw of visible) lines.push(structuredBody ? line(raw) : this.renderFlowLine(raw, bodyWidth));
 
     while (lines.length < maxLines - 1) lines.push('');
     const position = wrapped.length > bodyHeight ? ` ${this.scroll + 1}-${Math.min(wrapped.length, this.scroll + bodyHeight)}/${wrapped.length}` : '';
@@ -190,6 +201,21 @@ export class SubagentsHistoryPanel {
       return th?.fg?.('dim', clipped) ?? clipped;
     }
     return this.truncateToWidth(raw, width);
+  }
+
+  private bodyLinesFor(task: SubagentTask, width: number): string[] {
+    if (isValidThreadSnapshot(task.thread_snapshot)) {
+      const rendered = renderThreadBody(task.thread_snapshot, {
+        ...this.renderContext,
+        theme: this.renderContext.theme ?? this.theme,
+        cwd: this.renderContext.cwd ?? process.cwd(),
+        visibleWidth: this.renderContext.visibleWidth ?? this.visibleWidth,
+        truncateToWidth: this.renderContext.truncateToWidth ?? this.truncateToWidth,
+        renderWidth: width,
+      });
+      return rendered.length ? rendered : [''];
+    }
+    return [this.executionFlowFor(task)];
   }
 
   private executionFlowFor(task: SubagentTask): string {

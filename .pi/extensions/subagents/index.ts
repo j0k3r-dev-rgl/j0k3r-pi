@@ -29,6 +29,13 @@ function truncateToWidth(text: string, width: number): string {
   return chars.length > width ? chars.slice(0, Math.max(0, width - 1)).join('') + '…' : text;
 }
 
+function currentSessionId(ctx: any): string | undefined {
+  const direct = ctx?.sessionManager?.getSessionId?.() ?? ctx?.sessionId;
+  if (typeof direct === 'string' && direct.length > 0) return direct;
+  const file = ctx?.sessionManager?.getSessionFile?.();
+  return typeof file === 'string' && file.length > 0 ? file : undefined;
+}
+
 function completionMessage(task: any): string {
   const result = task.result ?? task.error ?? task.output_preview ?? '(no result captured)';
   return [
@@ -64,6 +71,7 @@ export default function subagentsExtension(pi: any): void {
 
   async function showSubagentsPanel(ctx: any) {
     const cwd = ctx?.cwd ?? process.cwd();
+    const sessionId = currentSessionId(ctx);
     let refresh: NodeJS.Timeout | undefined;
     await ctx.ui.custom(
       (tui: any, theme: any, _keybindings: any, done: () => void) => {
@@ -72,12 +80,24 @@ export default function subagentsExtension(pi: any): void {
           done();
         };
         const panel = new SubagentsHistoryPanel(
-          () => manager.listSessionTasks(cwd).slice(0, 100),
+          () => manager.listSessionTasks(cwd, sessionId).slice(0, 100),
           theme,
           close,
           matchesKey,
           visibleWidth,
           truncateToWidth,
+          {
+            theme,
+            tui,
+            cwd,
+            visibleWidth,
+            truncateToWidth,
+            getToolDefinition: (name: string) => ctx?.pi?.getToolDefinition?.(name) ?? ctx?.pi?.tools?.get?.(name) ?? ctx?.tools?.get?.(name),
+            getMessageRenderer: (customType: string) => ctx?.pi?.getMessageRenderer?.(customType) ?? ctx?.pi?.customMessageRenderers?.get?.(customType) ?? ctx?.customMessageRenderers?.get?.(customType),
+            showImages: ctx?.showImages,
+            imageWidthCells: ctx?.imageWidthCells,
+          },
+          () => Math.max(12, process.stdout.rows || 42),
         );
         refresh = setInterval(() => tui.requestRender?.(), 1000);
         return {
@@ -86,16 +106,7 @@ export default function subagentsExtension(pi: any): void {
           handleInput: (data: string) => { panel.handleInput(data); tui.requestRender?.(); },
         };
       },
-      {
-        overlay: true,
-        overlayOptions: {
-          width: '100%',
-          minWidth: 40,
-          maxHeight: '100%',
-          anchor: 'center',
-          margin: 0,
-        },
-      },
+      undefined,
     );
   }
 

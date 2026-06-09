@@ -63,6 +63,121 @@ export type UsageStats = {
   turns: number;
 };
 
+export type SubagentThreadSnapshot = {
+  version: 1;
+  created_at?: string;
+  updated_at?: string;
+  source: 'events' | 'session_messages' | 'mixed';
+  items: SubagentThreadItem[];
+};
+
+export type SubagentThreadItem =
+  | SubagentAssistantItem
+  | SubagentUserItem
+  | SubagentToolItem
+  | SubagentToolResultItem
+  | SubagentBashItem
+  | SubagentCustomItem
+  | SubagentStatusItem
+  | SubagentErrorItem;
+
+export type SubagentAssistantItem = {
+  type: 'assistant';
+  id?: string;
+  message: {
+    role: 'assistant';
+    content: Array<
+      | { type: 'text'; text: string }
+      | { type: 'thinking'; text?: string; thinking?: string }
+      | { type: 'toolCall'; id: string; name: string; arguments: unknown }
+    >;
+    stopReason?: string;
+    errorMessage?: string;
+    usage?: unknown;
+  };
+};
+
+export type SubagentUserItem = {
+  type: 'user';
+  id?: string;
+  text: string;
+  label?: 'delegated_task' | 'context' | 'prompt' | 'user';
+};
+
+export type SubagentToolResultPayload = {
+  content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+  details?: unknown;
+  isError: boolean;
+  preview?: string;
+};
+
+export type SubagentToolItem = {
+  type: 'tool';
+  id?: string;
+  tool_call_id?: string;
+  name: string;
+  arguments?: unknown;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'partial';
+  result?: SubagentToolResultPayload;
+  started_at?: string;
+  ended_at?: string;
+};
+
+export type SubagentToolResultItem = {
+  type: 'tool_result';
+  id?: string;
+  tool_call_id?: string;
+  name?: string;
+  result: SubagentToolResultPayload;
+};
+
+export type SubagentBashItem = {
+  type: 'bash';
+  id?: string;
+  tool_call_id?: string;
+  command: string;
+  output?: string;
+  exitCode?: number;
+  cancelled?: boolean;
+  truncated?: boolean;
+  fullOutputPath?: string;
+  status?: 'running' | 'completed' | 'failed' | 'cancelled';
+};
+
+export type SubagentCustomItem = {
+  type: 'custom';
+  id?: string;
+  customType: string;
+  content?: unknown;
+  display?: boolean;
+  fallbackText?: string;
+};
+
+export type SubagentStatusItem = {
+  type: 'status';
+  text: string;
+  severity?: 'info' | 'success' | 'warning';
+};
+
+export type SubagentErrorItem = {
+  type: 'error';
+  text: string;
+};
+
+export type SubagentThreadRenderContext = {
+  theme?: any;
+  tui?: any;
+  cwd: string;
+  visibleWidth: (text: string) => number;
+  truncateToWidth: (text: string, width: number) => string;
+  renderWidth?: number;
+  getToolDefinition?: (name: string) => unknown;
+  getMessageRenderer?: (customType: string) => unknown;
+  showImages?: boolean;
+  imageWidthCells?: number;
+  toolOutputExpanded?: boolean;
+};
+
 export type SubagentTask = {
   id: string;
   agent: string;
@@ -71,6 +186,7 @@ export type SubagentTask = {
   task: string;
   context?: string;
   created_at: string;
+  session_id?: string;
   started_at?: string;
   ended_at?: string;
   last_activity_at?: string;
@@ -86,6 +202,7 @@ export type SubagentTask = {
   fallback_used?: boolean;
   error?: string;
   result?: string;
+  thread_snapshot?: SubagentThreadSnapshot;
 };
 
 export type SubagentRunner = (input: {
@@ -97,5 +214,5 @@ export type SubagentRunner = (input: {
   config: SubagentsConfig;
   signal: AbortSignal;
   effectiveProfile?: EffectiveSubagentProfile;
-  onActivity?: (activity: { message: string; output?: string; prompt?: string; transcript?: string; usage?: UsageStats; effort?: ThinkingEffort }) => void;
-}) => Promise<{ result: string; model?: string; effort?: ThinkingEffort; fallback_used?: boolean; usage?: UsageStats }>;
+  onActivity?: (activity: { message: string; output?: string; prompt?: string; transcript?: string; usage?: UsageStats; effort?: ThinkingEffort; thread_snapshot?: SubagentThreadSnapshot }) => void;
+}) => Promise<{ result: string; model?: string; effort?: ThinkingEffort; fallback_used?: boolean; usage?: UsageStats; thread_snapshot?: SubagentThreadSnapshot }>;

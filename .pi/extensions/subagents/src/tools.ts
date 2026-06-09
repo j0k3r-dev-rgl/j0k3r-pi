@@ -91,6 +91,20 @@ function taskFromDetails(result: any): SubagentTask | undefined {
   return result?.details?.tasks?.[0] ?? result?.details?.results?.[0] ?? result?.details?.task;
 }
 
+function compactTaskForToolResult(task: SubagentTask): SubagentTask {
+  const { thread_snapshot: _threadSnapshot, ...compact } = task;
+  return compact;
+}
+
+function compactResultDetails<T extends Record<string, any>>(details: T): T {
+  return {
+    ...details,
+    task: details.task ? compactTaskForToolResult(details.task) : details.task,
+    tasks: Array.isArray(details.tasks) ? details.tasks.map(compactTaskForToolResult) : details.tasks,
+    results: Array.isArray(details.results) ? details.results.map(compactTaskForToolResult) : details.results,
+  };
+}
+
 export function registerSubagentTools(pi: any, manager: SubagentManager): void {
   pi.registerTool({
     name: 'subagent_list_agents',
@@ -124,7 +138,7 @@ export function registerSubagentTools(pi: any, manager: SubagentManager): void {
       const emit = () => {
         if (!active || isBackground) return;
         try {
-          onUpdate?.({ content: [{ type: 'text', text: progressText(latestTasks, frame) }], details: { tasks: latestTasks, frame: frame++ } });
+          onUpdate?.({ content: [{ type: 'text', text: progressText(latestTasks, frame) }], details: { tasks: latestTasks.map(compactTaskForToolResult), frame: frame++ } });
         } catch {
           active = false;
         }
@@ -139,7 +153,8 @@ export function registerSubagentTools(pi: any, manager: SubagentManager): void {
         const text = result.mode === 'background'
           ? `Started ${result.task_ids.length} background subagent task(s):\n${result.task_ids.join('\n')}`
           : `Completed ${result.task_ids.length} subagent task(s):\n${(result.results ?? []).map(formatTask).join('\n\n')}`;
-        return failedTasks.length ? { ...fail(`${failedTasks.length} subagent task(s) failed or were cancelled.\n\n${failedTasks.map(formatTask).join('\n\n')}`), details: result as any } : ok(text, result as any);
+        const details = compactResultDetails(result as any);
+        return failedTasks.length ? { ...fail(`${failedTasks.length} subagent task(s) failed or were cancelled.\n\n${failedTasks.map(formatTask).join('\n\n')}`), details } : ok(text, details);
       } catch (e) { return fail(e); }
       finally {
         active = false;
@@ -189,7 +204,7 @@ export function registerSubagentTools(pi: any, manager: SubagentManager): void {
       try {
         const task = manager.getTask(params.task_id, ctx?.cwd ?? process.cwd());
         if (!task) throw new Error('Subagent task not found');
-        return ok(formatTask(task), { task });
+        return ok(formatTask(task), { task: compactTaskForToolResult(task) });
       } catch (e) { return fail(e); }
     },
   });
@@ -204,7 +219,7 @@ export function registerSubagentTools(pi: any, manager: SubagentManager): void {
         const task = manager.getTask(params.task_id, ctx?.cwd ?? process.cwd());
         if (!task) throw new Error('Subagent task not found');
         const text = task.result ?? task.error ?? task.output_preview ?? formatTask(task);
-        return ok(text, { task });
+        return ok(text, { task: compactTaskForToolResult(task) });
       } catch (e) { return fail(e); }
     },
   });
@@ -217,7 +232,7 @@ export function registerSubagentTools(pi: any, manager: SubagentManager): void {
     async execute(_id: string, _params: any, _signal: any, _onUpdate: any, ctx: any) {
       try {
         const tasks = manager.listTasks(ctx?.cwd ?? process.cwd());
-        return ok(tasks.length ? `Listed ${tasks.length} subagent task(s):\n\n${tasks.map(formatTask).join('\n\n')}` : 'Listed 0 subagent task(s).', { tasks });
+        return ok(tasks.length ? `Listed ${tasks.length} subagent task(s):\n\n${tasks.map(formatTask).join('\n\n')}` : 'Listed 0 subagent task(s).', { tasks: tasks.map(compactTaskForToolResult) });
       } catch (e) { return fail(e); }
     },
   });
@@ -228,7 +243,7 @@ export function registerSubagentTools(pi: any, manager: SubagentManager): void {
     description: 'Cancel a running delegated subagent task.',
     parameters: Type.Object({ task_id: Type.String() }),
     async execute(_id: string, params: any) {
-      try { const task = manager.cancel(params.task_id); return ok(formatTask(task), { task }); } catch (e) { return fail(e); }
+      try { const task = manager.cancel(params.task_id); return ok(formatTask(task), { task: compactTaskForToolResult(task) }); } catch (e) { return fail(e); }
     },
   });
 }
