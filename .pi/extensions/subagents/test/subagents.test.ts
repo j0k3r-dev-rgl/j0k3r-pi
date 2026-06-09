@@ -508,6 +508,56 @@ describe('subagents extension', () => {
     expect(body()).toContain('thread line 000');
   });
 
+  it('scrolls selected thread snapshots with SGR mouse wheel input', () => {
+    const task: SubagentTask = {
+      id: 'subtask_thread_mouse_scroll_sgr',
+      agent: 'analyst',
+      mode: 'task',
+      status: 'completed',
+      task: 'mouse scroll long thread',
+      created_at: new Date().toISOString(),
+      thread_snapshot: {
+        version: 1,
+        source: 'events',
+        items: Array.from({ length: 160 }, (_, i) => ({ type: 'status' as const, text: `mouse sgr line ${String(i).padStart(3, '0')}` })),
+      },
+    };
+    const panel = new SubagentsHistoryPanel([task], { fg: (_name: string, text: string) => text }, () => undefined, () => false, (text) => text.length, (text, width) => text.length > width ? text.slice(0, width) : text);
+    const body = () => panel.render(120).join('\n');
+
+    expect(body()).toContain('mouse sgr line 159');
+    panel.handleInput('\x1b[<64;10;5M');
+    expect(body()).toContain('mouse sgr line 158');
+    expect(body()).not.toContain('mouse sgr line 159');
+    panel.handleInput('\x1b[<65;10;5M');
+    expect(body()).toContain('mouse sgr line 159');
+  });
+
+  it('scrolls selected thread snapshots with legacy X10 mouse wheel input', () => {
+    const task: SubagentTask = {
+      id: 'subtask_thread_mouse_scroll_x10',
+      agent: 'analyst',
+      mode: 'task',
+      status: 'completed',
+      task: 'mouse scroll x10 long thread',
+      created_at: new Date().toISOString(),
+      thread_snapshot: {
+        version: 1,
+        source: 'events',
+        items: Array.from({ length: 160 }, (_, i) => ({ type: 'status' as const, text: `mouse x10 line ${String(i).padStart(3, '0')}` })),
+      },
+    };
+    const panel = new SubagentsHistoryPanel([task], { fg: (_name: string, text: string) => text }, () => undefined, () => false, (text) => text.length, (text, width) => text.length > width ? text.slice(0, width) : text);
+    const body = () => panel.render(120).join('\n');
+
+    expect(body()).toContain('mouse x10 line 159');
+    panel.handleInput(`\x1b[M${String.fromCharCode(32 + 64)}!!`);
+    expect(body()).toContain('mouse x10 line 158');
+    expect(body()).not.toContain('mouse x10 line 159');
+    panel.handleInput(`\x1b[M${String.fromCharCode(32 + 65)}!!`);
+    expect(body()).toContain('mouse x10 line 159');
+  });
+
   it('follows newly appended thread lines only while the viewer is at the bottom', () => {
     const keys: Record<string, string> = { up: 'k', end: 'G' };
     const snapshot = {
@@ -552,6 +602,28 @@ describe('subagents extension', () => {
     expect(tools).toContain('subagent_status');
     expect(tools).toContain('subagent_result');
     expect(commands).toEqual(['subagents', 'subagent-models']);
+  });
+
+  it('enables mouse tracking while the subagents history panel is open and disables it on close', async () => {
+    let subagentsCommand: any;
+    const writes: string[] = [];
+    extension({
+      registerTool: () => undefined,
+      registerCommand: (name: string, command: any) => { if (name === 'subagents') subagentsCommand = command; },
+    });
+
+    await subagentsCommand.handler('', {
+      cwd: tmp,
+      ui: {
+        custom: async (factory: any) => {
+          const component = factory({ terminal: { write: (text: string) => writes.push(text) }, requestRender() {} }, { fg: (_name: string, text: string) => text }, {}, () => undefined);
+          component.handleInput('\x1b');
+        },
+      },
+    });
+
+    expect(writes.join('')).toContain('\x1b[?1000h\x1b[?1006h');
+    expect(writes.join('')).toContain('\x1b[?1006l\x1b[?1000l');
   });
 
   it('parses markdown agents with frontmatter', () => {

@@ -48,6 +48,14 @@ function fitsWidth(text: string, width: number, visibleWidth: (text: string) => 
   return terminalVisibleWidth(text) <= width;
 }
 
+function mouseWheelDelta(data: string): -1 | 1 | undefined {
+  const sgr = data.match(/^\u001b\[<(\d+);\d+;\d+M$/);
+  const urxvt = data.match(/^\u001b\[(\d+);\d+;\d+M$/);
+  const button = sgr || urxvt ? Number((sgr ?? urxvt)![1]) : data.startsWith('\u001b[M') && data.length >= 6 ? data.charCodeAt(3) - 32 : undefined;
+  if (button === undefined || !Number.isFinite(button) || (button & 64) === 0) return undefined;
+  return (button & 1) === 0 ? -1 : 1;
+}
+
 export class SubagentsHistoryPanel {
   private selected = 0;
   private scroll = 0;
@@ -71,6 +79,17 @@ export class SubagentsHistoryPanel {
     const tasks = this.tasks();
     if (this.matchesKey(data, 'escape') || this.matchesKey(data, 'ctrl+c') || this.matchesKey(data, 'q')) {
       this.done();
+      return;
+    }
+    const wheel = mouseWheelDelta(data);
+    if (wheel === -1) {
+      this.scroll = Math.max(0, this.scroll - 1);
+      this.followTail = false;
+      return;
+    }
+    if (wheel === 1) {
+      this.scroll += 1;
+      this.followTail = this.scroll >= this.lastMaxScroll;
       return;
     }
     if (this.matchesKey(data, 'right')) {

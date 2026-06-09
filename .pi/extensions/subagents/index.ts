@@ -36,6 +36,12 @@ function currentSessionId(ctx: any): string | undefined {
   return typeof file === 'string' && file.length > 0 ? file : undefined;
 }
 
+function setMouseTracking(tui: any, enabled: boolean): void {
+  const write = tui?.terminal?.write?.bind(tui.terminal);
+  if (typeof write !== 'function') return;
+  write(enabled ? '\u001b[?1000h\u001b[?1006h' : '\u001b[?1006l\u001b[?1000l');
+}
+
 function completionMessage(task: any): string {
   const result = task.result ?? task.error ?? task.output_preview ?? '(no result captured)';
   return [
@@ -75,8 +81,10 @@ export default function subagentsExtension(pi: any): void {
     let refresh: NodeJS.Timeout | undefined;
     await ctx.ui.custom(
       (tui: any, theme: any, _keybindings: any, done: () => void) => {
+        setMouseTracking(tui, true);
         const close = () => {
           if (refresh) clearInterval(refresh);
+          setMouseTracking(tui, false);
           done();
         };
         const panel = new SubagentsHistoryPanel(
