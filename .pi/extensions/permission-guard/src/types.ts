@@ -8,6 +8,7 @@ export type RequestOrigin = 'main' | 'subagent' | 'unknown';
 
 export interface PermissionPolicyConfig {
   enabled: boolean;
+  bypassAll: boolean;
   workspace: {
     root?: string;
     allowRead: PolicyDecision;

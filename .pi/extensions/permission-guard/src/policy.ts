@@ -248,6 +248,19 @@ export function evaluatePermission(
   request: PermissionRequest,
   sessionCacheSnapshot?: SessionApprovalSnapshot,
 ): PermissionDecisionResult {
+  if (config.bypassAll) {
+    return decisionResult({
+      config,
+      request,
+      decision: 'allow',
+      reason: 'Permission guard bypassAll is enabled by JSON policy.',
+      reasonCode: 'permission_guard_bypass_all',
+      riskLevel: 'critical',
+      matchedLayer: 'disabled',
+      target: request.target,
+    });
+  }
+
   if (!config.enabled) {
     return decisionResult({
       config,

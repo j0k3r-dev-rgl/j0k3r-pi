@@ -35,6 +35,16 @@ Example project override:
 }
 ```
 
+Emergency/all-access bypass:
+
+```json
+{
+  "bypassAll": true
+}
+```
+
+When `bypassAll` is `true`, every supported permission check is allowed immediately without prompts, including outside-workspace reads/writes and risky bash commands. Keep it `false` by default and enable it only when you intentionally trust the current session and environment.
+
 `bash.safeCommands` entries support exact commands, `*` wildcards, and `regex:<pattern>` entries. Configured safe commands are allowed before normal ask heuristics such as network, shell syntax, default ask, or state-changing prompts. A simple `cd <workspace-relative-dir> && <safeCommand>` form is also allowed when the `cd` target stays inside the workspace and `<safeCommand>` matches `bash.safeCommands`. Hard denials still win first, including privilege escalation, obvious secret reads, configured deny commands, and destructive root/home deletes.
 
 ## Approval flow

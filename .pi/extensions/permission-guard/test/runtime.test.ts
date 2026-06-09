@@ -67,6 +67,21 @@ describe('permission guard runtime wiring', () => {
     expect(pi.handlers.user_bash).toHaveLength(1);
   });
 
+  it('bypasses every permission check without prompting when bypassAll is true', async () => {
+    const cwd = await tempWorkspace('permission-guard-runtime-bypass-all-');
+    await writeProjectPolicy(cwd, { bypassAll: true });
+    const pi = createMockPi();
+    registerPermissionGuardRuntime(pi);
+    const toolHandler = pi.handlers.tool_call![0] as ToolCallHandler;
+    const userBashHandler = pi.handlers.user_bash![0] as UserBashHandler;
+    const ctx = createCtx(cwd);
+
+    await expect(toolHandler({ toolName: 'read', toolCallId: 'tc-bypass-read', input: { path: '../outside.txt' } }, ctx)).resolves.toBeUndefined();
+    await expect(toolHandler({ toolName: 'bash', toolCallId: 'tc-bypass-bash', input: { command: 'sudo ls /' } }, ctx)).resolves.toBeUndefined();
+    await expect(userBashHandler({ command: 'sudo ls /', cwd }, ctx)).resolves.toBeUndefined();
+    expect(ctx.ui.select).not.toHaveBeenCalled();
+  });
+
   it('blocks denied built-in tool calls before execution and audits safely even when audit writing fails', async () => {
     const cwd = await tempWorkspace('permission-guard-runtime-deny-');
     const auditPathAsDirectory = await mkdtemp(join(tmpdir(), 'permission-guard-runtime-audit-dir-'));

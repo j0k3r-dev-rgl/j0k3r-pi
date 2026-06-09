@@ -28,6 +28,7 @@ describe('permission guard config loading', () => {
     expect(result.warnings).toEqual([]);
     expect(result.config).toMatchObject({
       enabled: true,
+      bypassAll: false,
       workspace: {
         allowRead: 'allow',
         allowWrite: 'allow',
@@ -80,8 +81,9 @@ describe('permission guard config loading', () => {
     });
   });
 
-  it('keeps the guard enabled by default in exported defaults', () => {
+  it('keeps the guard enabled and bypass disabled by default in exported defaults', () => {
     expect(builtInPermissionPolicy.enabled).toBe(true);
+    expect(builtInPermissionPolicy.bypassAll).toBe(false);
   });
 
   it('loads global JSON before project JSON so project overrides win', async () => {
@@ -189,13 +191,14 @@ describe('permission guard config loading', () => {
     expect(JSON.stringify(result.config)).not.toContain(sentinel);
   });
 
-  it('accepts enabled: false without changing audit defaults', async () => {
+  it('accepts enabled: false and bypassAll: true without changing audit defaults', async () => {
     const { cwd, homeDir } = await tempWorkspace('permission-guard-disabled-');
-    await writeJson(join(cwd, '.pi', 'permissions.json'), { enabled: false });
+    await writeJson(join(cwd, '.pi', 'permissions.json'), { enabled: false, bypassAll: true });
 
     const result = await loadPermissionConfig({ cwd, env: {}, homeDir });
 
     expect(result.config.enabled).toBe(false);
+    expect(result.config.bypassAll).toBe(true);
     expect(result.config.audit).toMatchObject({
       enabled: true,
       logAllowed: false,

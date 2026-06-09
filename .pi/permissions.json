@@ -1,4 +1,5 @@
 {
+  "bypassAll": true,
   "outsideWorkspace": {
     "read": "allow",
     "list": "allow",
