@@ -3,12 +3,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import extension from '../index.js';
-import { loadSubagents, parseFrontmatter, readSubagentsConfig } from '../src/config.js';
+import { loadSubagents, parseFrontmatter, readSubagentsConfig, resetGlobalSubagentModelProfileField, saveGlobalSubagentModelProfile } from '../src/config.js';
+import { resolveEffectiveSubagentProfile } from '../src/profile-resolver.js';
 import { buildPrompt } from '../src/runner.js';
+import { buildModelProfileRows, buildNonTuiModelProfilesMessage, commitStagedModelProfiles, groupAvailableModelsByProvider, runSubagentModelsCommand, stageModelProfileEdit } from '../src/model-profiles-ui.js';
 import { SubagentManager } from '../src/manager.js';
 import { registerSubagentTools } from '../src/tools.js';
 import { SubagentsHistoryPanel } from '../src/ui.js';
-import type { SubagentRunner, SubagentTask } from '../src/types.js';
+import type { EffectiveSubagentProfile, SubagentModelProfiles, SubagentRunner, SubagentTask } from '../src/types.js';
 
 let tmp: string;
 beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-subagents-test-')); fs.mkdirSync(path.join(tmp, '.pi', 'subagents'), { recursive: true }); });
@@ -25,6 +27,17 @@ function mockRunner(delay = 0): SubagentRunner {
   };
 }
 
+function withAgentDir<T>(agentDir: string, run: () => T): T {
+  const old = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    return run();
+  } finally {
+    if (old === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = old;
+  }
+}
+
 describe('subagents extension', () => {
   it('registers agent-facing tools only', () => {
     const tools: string[] = [], commands: string[] = [];
@@ -33,7 +46,7 @@ describe('subagents extension', () => {
     expect(tools).toContain('subagent_list_agents');
     expect(tools).toContain('subagent_status');
     expect(tools).toContain('subagent_result');
-    expect(commands).toEqual(['subagents']);
+    expect(commands).toEqual(['subagents', 'subagent-models']);
   });
 
   it('parses markdown agents with frontmatter', () => {
@@ -80,6 +93,289 @@ describe('subagents extension', () => {
     expect(agents.map((a) => `${a.name}:${a.description}`).sort()).toEqual(['analyst:project analyst', 'reviewer:global reviewer']);
     expect(config.max_concurrency).toBe(2);
     expect(config.default_tools).toEqual(['read']);
+  });
+
+  it('loads model_profiles from global and project config with invalid fields ignored', () => {
+    const agentDir = path.join(tmp, 'global-agent');
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.writeFileSync(path.join(agentDir, 'subagents.json'), JSON.stringify({
+      model_profiles: {
+        analyst: { model: 'anthropic/claude-sonnet-4-5', effort: 'high' },
+        invalidEffort: { model: 'openai/gpt-5.2', effort: 'extreme' },
+        invalidModel: { model: 'missing-provider', effort: 'low' },
+      },
+    }));
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({
+      model_profiles: {
+        reviewer: { model: { provider: 'openai', id: 'gpt-5.2-codex' }, effort: 'medium' },
+      },
+    }));
+
+    const config = withAgentDir(agentDir, () => readSubagentsConfig(tmp));
+
+    expect(config.model_profiles).toEqual({
+      analyst: { model: { provider: 'anthropic', id: 'claude-sonnet-4-5' }, effort: 'high' },
+      invalidEffort: { model: { provider: 'openai', id: 'gpt-5.2' } },
+      invalidModel: { effort: 'low' },
+      reviewer: { model: { provider: 'openai', id: 'gpt-5.2-codex' }, effort: 'medium' },
+    });
+  });
+
+  it('defaults missing model_profiles to an empty map and preserves legacy config behavior', () => {
+    const agentDir = path.join(tmp, 'isolated-global-agent');
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({
+      default_model: 'openai/gpt-5.2',
+      default_effort: 'medium',
+      timeout_ms: 123,
+      stall_timeout_ms: 45,
+      max_concurrency: 3,
+      default_tools: ['read', 'subagent_run', 'memory_search'],
+    }));
+
+    const config = withAgentDir(agentDir, () => readSubagentsConfig(tmp));
+
+    expect(config.model_profiles).toEqual({});
+    expect(config.default_model).toEqual({ provider: 'openai', id: 'gpt-5.2' });
+    expect(config.default_effort).toBe('medium');
+    expect(config.timeout_ms).toBe(123);
+    expect(config.stall_timeout_ms).toBe(45);
+    expect(config.max_concurrency).toBe(3);
+    expect(config.default_tools).toEqual(['read', 'memory_search']);
+  });
+
+  it('deep-merges model_profiles with project field precedence while scalar config precedence is unchanged', () => {
+    const agentDir = path.join(tmp, 'global-agent');
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.writeFileSync(path.join(agentDir, 'subagents.json'), JSON.stringify({
+      default_model: 'global/model',
+      default_effort: 'low',
+      timeout_ms: 100,
+      stall_timeout_ms: 200,
+      max_concurrency: 1,
+      default_tools: ['read'],
+      model_profiles: {
+        analyst: { model: 'global/analyst', effort: 'low' },
+        reviewer: { effort: 'minimal' },
+      },
+    }));
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({
+      default_model: 'project/model',
+      default_effort: 'high',
+      timeout_ms: 300,
+      stall_timeout_ms: 400,
+      max_concurrency: 2,
+      default_tools: ['memory_search'],
+      model_profiles: {
+        analyst: { effort: 'xhigh' },
+        reviewer: { model: 'project/reviewer' },
+      },
+    }));
+
+    const config = withAgentDir(agentDir, () => readSubagentsConfig(tmp));
+
+    expect(config.model_profiles).toEqual({
+      analyst: { model: { provider: 'global', id: 'analyst' }, effort: 'xhigh' },
+      reviewer: { model: { provider: 'project', id: 'reviewer' }, effort: 'minimal' },
+    });
+    expect(config.default_model).toEqual({ provider: 'project', id: 'model' });
+    expect(config.default_effort).toBe('high');
+    expect(config.timeout_ms).toBe(300);
+    expect(config.stall_timeout_ms).toBe(400);
+    expect(config.max_concurrency).toBe(2);
+    expect(config.default_tools).toEqual(['memory_search']);
+  });
+
+  it('saves global model profiles without dropping supported or unknown config keys', () => {
+    const agentDir = path.join(tmp, 'global-agent');
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.writeFileSync(path.join(agentDir, 'subagents.json'), JSON.stringify({
+      default_model: 'openai/gpt-5.2',
+      timeout_ms: 600,
+      future_unknown_key: { keep: true },
+      model_profiles: { reviewer: { effort: 'medium' } },
+    }));
+
+    saveGlobalSubagentModelProfile({ agentName: 'analyst', profile: { model: { provider: 'anthropic', id: 'claude-sonnet-4-5' }, effort: 'high' }, agentDir });
+
+    const text = fs.readFileSync(path.join(agentDir, 'subagents.json'), 'utf8');
+    expect(text.endsWith('\n')).toBe(true);
+    expect(JSON.parse(text)).toEqual({
+      default_model: 'openai/gpt-5.2',
+      timeout_ms: 600,
+      future_unknown_key: { keep: true },
+      model_profiles: {
+        reviewer: { effort: 'medium' },
+        analyst: { model: 'anthropic/claude-sonnet-4-5', effort: 'high' },
+      },
+    });
+  });
+
+  it('creates global config and removes empty profile entries after resets', () => {
+    const agentDir = path.join(tmp, 'global-agent');
+    saveGlobalSubagentModelProfile({ agentName: 'analyst', profile: { model: { provider: 'openai', id: 'gpt-5.2' } }, agentDir });
+    resetGlobalSubagentModelProfileField({ agentName: 'analyst', field: 'model', agentDir });
+
+    const text = fs.readFileSync(path.join(agentDir, 'subagents.json'), 'utf8');
+    expect(text.endsWith('\n')).toBe(true);
+    expect(JSON.parse(text)).toEqual({});
+  });
+
+  it('resolves effective subagent profile with independent precedence and provenance labels', () => {
+    const definition = {
+      name: 'analyst',
+      description: 'analyst',
+      filePath: 'analyst.md',
+      instructions: '# Analyst',
+      model: { provider: 'definition', id: 'model' },
+      effort: 'medium' as const,
+      tools: ['read'],
+    };
+    const config = {
+      default_model: { provider: 'default', id: 'model' },
+      default_effort: 'low' as const,
+      timeout_ms: 1,
+      stall_timeout_ms: 1,
+      max_concurrency: 1,
+      default_tools: ['read'],
+      model_profiles: { analyst: { model: { provider: 'profile', id: 'model' } } },
+    };
+
+    const resolved = resolveEffectiveSubagentProfile({
+      agentName: 'analyst',
+      definition,
+      config,
+      ctx: { model: { provider: 'orchestrator', id: 'model' }, pi: { getThinkingLevel: () => 'xhigh' } },
+    });
+
+    expect(resolved.model).toMatchObject({ value: { provider: 'profile', id: 'model' }, source: 'profile', label: 'profile: profile/model' });
+    expect(resolved.effort).toMatchObject({ value: 'medium', source: 'definition', label: 'definition: medium' });
+  });
+
+  it('resolves definition defaults and orchestrator fallbacks independently', () => {
+    const baseDefinition = { name: 'reviewer', description: 'reviewer', filePath: 'reviewer.md', instructions: '# Reviewer', tools: ['read'] };
+    const config = { timeout_ms: 1, stall_timeout_ms: 1, max_concurrency: 1, default_tools: ['read'], model_profiles: { reviewer: { effort: 'high' as const } } };
+
+    expect(resolveEffectiveSubagentProfile({
+      agentName: 'reviewer',
+      definition: baseDefinition,
+      config,
+      ctx: { model: { provider: 'orchestrator', id: 'model' }, thinkingLevel: 'low' },
+    })).toMatchObject({
+      model: { value: { provider: 'orchestrator', id: 'model' }, source: 'orchestrator', label: 'orchestrator: orchestrator/model' },
+      effort: { value: 'high', source: 'profile', label: 'profile: high' },
+    });
+
+    expect(resolveEffectiveSubagentProfile({
+      agentName: 'reviewer',
+      definition: baseDefinition,
+      config: { ...config, default_model: { provider: 'default', id: 'model' }, default_effort: 'minimal' as const, model_profiles: {} },
+      ctx: { model: { provider: 'orchestrator', id: 'model' }, thinkingLevel: 'low' },
+    })).toMatchObject({
+      model: { value: { provider: 'default', id: 'model' }, source: 'default', label: 'default: default/model' },
+      effort: { value: 'minimal', source: 'default', label: 'default: minimal' },
+    });
+  });
+
+  it('builds model profile rows for loaded agents and known SDD phases with labels', () => {
+    writeAgent('analyst');
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({
+      model_profiles: {
+        analyst: { model: 'missing/provider-model', effort: 'high' },
+        'sdd-spec': { effort: 'medium' },
+      },
+    }));
+    const definitions = loadSubagents(tmp);
+    const config = readSubagentsConfig(tmp);
+    const rows = buildModelProfileRows({
+      definitions,
+      config,
+      ctx: { model: { provider: 'openai', id: 'gpt-5.2' }, thinkingLevel: 'low' },
+      availableModels: [{ provider: 'openai', id: 'gpt-5.2' }],
+    });
+
+    expect(rows.map((row) => row.name)).toEqual(expect.arrayContaining(['analyst', 'sdd-explore', 'sdd-spec', 'sdd-apply', 'sdd-verify']));
+    expect(rows.find((row) => row.name === 'analyst')).toMatchObject({
+      explicitProfile: { model: { provider: 'missing', id: 'provider-model' }, effort: 'high' },
+      modelLabel: 'profile: missing/provider-model (unavailable)',
+      effortLabel: 'profile: high',
+    });
+    expect(rows.find((row) => row.name === 'sdd-explore')).toMatchObject({ modelLabel: 'orchestrator: openai/gpt-5.2', effortLabel: 'orchestrator: low' });
+    expect(rows.find((row) => row.name === 'sdd-spec')).toMatchObject({ effortLabel: 'profile: medium' });
+  });
+
+  it('groups available models by provider for provider and model selection', () => {
+    expect(groupAvailableModelsByProvider([
+      { provider: 'openai', id: 'gpt-5.2' },
+      { provider: 'anthropic', name: 'claude-sonnet-4-5' },
+      { provider: { id: 'openai' }, model: 'gpt-5.2-codex' },
+    ])).toEqual({
+      anthropic: [{ provider: 'anthropic', id: 'claude-sonnet-4-5', label: 'claude-sonnet-4-5' }],
+      openai: [
+        { provider: 'openai', id: 'gpt-5.2', label: 'gpt-5.2' },
+        { provider: 'openai', id: 'gpt-5.2-codex', label: 'gpt-5.2-codex' },
+      ],
+    });
+  });
+
+  it('stages selected row edits and reset operations without changing other rows', () => {
+    let staged: SubagentModelProfiles = {
+      analyst: { model: { provider: 'openai', id: 'gpt-5.2' }, effort: 'high' as const },
+      reviewer: { effort: 'medium' as const },
+    };
+
+    staged = stageModelProfileEdit(staged, { agentName: 'analyst', model: { provider: 'anthropic', id: 'claude-sonnet-4-5' }, effort: 'low' });
+    expect(staged.analyst).toEqual({ model: { provider: 'anthropic', id: 'claude-sonnet-4-5' }, effort: 'low' });
+    expect(staged.reviewer).toEqual({ effort: 'medium' });
+
+    staged = stageModelProfileEdit(staged, { agentName: 'analyst', reset: 'model' });
+    expect(staged.analyst).toEqual({ effort: 'low' });
+    staged = stageModelProfileEdit(staged, { agentName: 'analyst', reset: 'effort' });
+    expect(staged.analyst).toEqual({});
+    staged = stageModelProfileEdit(staged, { agentName: 'reviewer', reset: 'row' });
+    expect(staged.reviewer).toEqual({});
+  });
+
+  it('commits staged model profile saves and leaves config unchanged on cancel', () => {
+    const agentDir = path.join(tmp, 'global-agent');
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.writeFileSync(path.join(agentDir, 'subagents.json'), JSON.stringify({
+      default_model: 'openai/gpt-5.2',
+      model_profiles: {
+        analyst: { model: 'openai/gpt-5.2', effort: 'high' },
+        reviewer: { effort: 'medium' },
+      },
+    }));
+    const beforeCancel = fs.readFileSync(path.join(agentDir, 'subagents.json'), 'utf8');
+    expect(commitStagedModelProfiles({ agentDir, stagedProfiles: { analyst: {} }, save: false })).toMatch(/Cancelled/);
+    expect(fs.readFileSync(path.join(agentDir, 'subagents.json'), 'utf8')).toBe(beforeCancel);
+
+    const message = commitStagedModelProfiles({
+      agentDir,
+      stagedProfiles: {
+        analyst: { effort: 'low' },
+        reviewer: {},
+        'sdd-apply': { model: { provider: 'anthropic', id: 'claude-sonnet-4-5' } },
+      },
+      save: true,
+    });
+
+    expect(message).toContain('Saved subagent model profiles');
+    expect(JSON.parse(fs.readFileSync(path.join(agentDir, 'subagents.json'), 'utf8'))).toEqual({
+      default_model: 'openai/gpt-5.2',
+      model_profiles: {
+        analyst: { effort: 'low' },
+        'sdd-apply': { model: 'anthropic/claude-sonnet-4-5' },
+      },
+    });
+  });
+
+  it('returns non-TUI fallback text with the global subagents config path', async () => {
+    const message = buildNonTuiModelProfilesMessage('/home/example/.pi/agent');
+    expect(message).toContain('subagent model profiles require Pi TUI');
+    expect(message).toContain('/home/example/.pi/agent/subagents.json');
+
+    await expect(runSubagentModelsCommand({ cwd: tmp })).resolves.toContain(path.join(os.homedir(), '.pi', 'agent', 'subagents.json'));
   });
 
   it('filters delegation tools from subagent tool allowlists', () => {
@@ -145,6 +441,36 @@ describe('subagents extension', () => {
     expect(result.results?.[0].status).toBe('completed');
     expect(result.results?.[0].result).toContain('analyst handled check scope');
     expect(result.results?.[0].effort).toBe('high');
+  });
+
+  it('resolves task metadata before running and passes the same effective profile to the runner', async () => {
+    writeAgent('analyst');
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({
+      model_profiles: { analyst: { model: 'profile/model', effort: 'xhigh' } },
+    }));
+    const seenUpdates: SubagentTask[][] = [];
+    let runnerProfile: EffectiveSubagentProfile | undefined;
+    const runner: SubagentRunner = async ({ effectiveProfile }) => {
+      runnerProfile = effectiveProfile;
+      return { result: 'profiled result', model: effectiveProfile?.model.label.replace(/^profile: /, ''), effort: effectiveProfile?.effort.value, fallback_used: false };
+    };
+    const manager = new SubagentManager(runner);
+
+    const result = await manager.run(
+      { agent: 'analyst', task: 'profiled work', mode: 'task' },
+      { cwd: tmp, model: { provider: 'orchestrator', id: 'model' }, thinkingLevel: 'low' },
+      undefined,
+      (tasks) => seenUpdates.push(tasks.map((task) => ({ ...task }))),
+    );
+
+    const queued = seenUpdates.flat().find((task) => task.status === 'queued');
+    expect(queued).toMatchObject({ model: 'profile/model', effort: 'xhigh', model_source: 'profile', effort_source: 'profile' });
+    expect(runnerProfile).toMatchObject({
+      agent: 'analyst',
+      model: { value: { provider: 'profile', id: 'model' }, source: 'profile', label: 'profile: profile/model' },
+      effort: { value: 'xhigh', source: 'profile', label: 'profile: xhigh' },
+    });
+    expect(result.results?.[0]).toMatchObject({ model: 'profile/model', effort: 'xhigh', model_source: 'profile', effort_source: 'profile' });
   });
 
   it('runs multiple subagents in one task call', async () => {
@@ -270,6 +596,21 @@ describe('subagents extension', () => {
     const persisted = freshManager.getTask(id, tmp);
     expect(persisted?.usage).toEqual({ input: 1200, output: 300, cacheRead: 40, cacheWrite: 5, cost: 0.01, contextTokens: 1545, turns: 1 });
     expect(persisted?.effort).toBe('xhigh');
+  });
+
+  it('persists effective model and effort source metadata for rendering', async () => {
+    writeAgent('analyst');
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ model_profiles: { analyst: { effort: 'high' } } }));
+    const manager = new SubagentManager(async ({ effectiveProfile }) => ({
+      result: 'source-aware result',
+      model: effectiveProfile?.model.label.replace(/^orchestrator: /, ''),
+      effort: effectiveProfile?.effort.value,
+      fallback_used: false,
+    }));
+    const result = await manager.run({ agent: 'analyst', task: 'source metadata', mode: 'task' }, { cwd: tmp, model: { provider: 'mock', id: 'model' } });
+    const freshManager = new SubagentManager(mockRunner());
+    const persisted = freshManager.getTask(result.task_ids[0], tmp);
+    expect(persisted).toMatchObject({ model: 'mock/model', effort: 'high', model_source: 'orchestrator', effort_source: 'profile' });
   });
 
   it('renders agent, model, and effort as explicit labels in tool results', async () => {

@@ -1,8 +1,13 @@
-import type { ModelRef, SubagentDefinition, SubagentRunner, SubagentsConfig, UsageStats, ThinkingEffort } from './types.js';
+import { resolveEffectiveSubagentProfile } from './profile-resolver.js';
+import type { EffectiveSubagentProfile, ModelRef, SubagentDefinition, SubagentRunner, SubagentsConfig, UsageStats, ThinkingEffort } from './types.js';
 
 function modelLabel(model: any): string | undefined {
   if (!model) return undefined;
   return `${model.provider ?? 'unknown'}/${model.id ?? model.name ?? 'unknown'}`;
+}
+
+function modelRefLabel(ref: ModelRef | undefined): string | undefined {
+  return ref ? `${ref.provider}/${ref.id}` : undefined;
 }
 
 function resolveModel(ctx: any, ref?: ModelRef): any | undefined {
@@ -246,16 +251,20 @@ async function createSession(model: any, cwd: string, tools: string[], effort?: 
   return createAgentSession({ cwd, model, thinkingLevel: effort, tools, sessionManager: SessionManager.inMemory() });
 }
 
-function currentEffort(ctx: any): ThinkingEffort | undefined {
-  const effort = ctx?.pi?.getThinkingLevel?.() ?? ctx?.getThinkingLevel?.() ?? ctx?.thinkingLevel;
-  return typeof effort === 'string' ? effort as ThinkingEffort : undefined;
+function selectedModel(input: { ctx: any; definition: SubagentDefinition; profile: EffectiveSubagentProfile }): any | undefined {
+  const ref = input.profile.model.value;
+  if (!ref) return input.ctx?.model;
+  if (input.profile.model.source === 'orchestrator') return input.ctx?.model ?? resolveModel(input.ctx, ref);
+  const resolved = resolveModel(input.ctx, ref);
+  if (!resolved) throw new Error(`Subagent ${input.definition.name} could not resolve selected model ${modelRefLabel(ref)} (${input.profile.model.source}).`);
+  return resolved;
 }
 
-export const sdkSubagentRunner: SubagentRunner = async ({ definition, task, context, cwd, ctx, config, signal, onActivity }) => {
-  const preferredRef = definition.model ?? config.default_model;
-  const preferred = resolveModel(ctx, preferredRef) ?? ctx?.model;
+export const sdkSubagentRunner: SubagentRunner = async ({ definition, task, context, cwd, ctx, config, signal, effectiveProfile, onActivity }) => {
+  const profile = effectiveProfile ?? resolveEffectiveSubagentProfile({ agentName: definition.name, definition, config, ctx });
+  const preferred = selectedModel({ ctx, definition, profile });
   const current = ctx?.model;
-  const effort = definition.effort ?? config.default_effort ?? currentEffort(ctx);
+  const effort = profile.effort.value;
   const tools = definition.tools?.length ? definition.tools : config.default_tools;
   const prompt = buildPrompt(definition, task, context, tools);
   onActivity?.({ message: 'orchestrator prompt prepared', prompt, transcript: `# orchestrator prompt\n\n${prompt}\n`, effort });
@@ -274,14 +283,15 @@ export const sdkSubagentRunner: SubagentRunner = async ({ definition, task, cont
 
   try {
     const { result, usage } = await attempt(preferred);
-    return { result, usage, model: modelLabel(preferred), effort, fallback_used: false };
+    return { result, usage, model: modelLabel(preferred) ?? modelRefLabel(profile.model.value), effort, fallback_used: false };
   } catch (error) {
     if (signal.aborted) throw new Error('Subagent was aborted');
-    const preferredLabel = modelLabel(preferred) ?? 'unknown';
+    const preferredLabel = modelLabel(preferred) ?? modelRefLabel(profile.model.value) ?? 'unknown';
     const currentLabel = modelLabel(current) ?? 'unknown';
     onActivity?.({ message: `failed/stalled on ${preferredLabel}; falling back to ${currentLabel}`, effort });
-    ctx?.ui?.notify?.(`Subagent ${definition.name} failed/stalled on ${preferredLabel}: ${error instanceof Error ? error.message : String(error)}. Falling back to current model ${currentLabel}.`, 'warning');
-    if (!current || current === preferred) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    ctx?.ui?.notify?.(`Subagent ${definition.name} failed/stalled on selected model ${preferredLabel}: ${message}. Falling back to current model ${currentLabel}.`, 'warning');
+    if (!current || current === preferred) throw new Error(`Subagent ${definition.name} failed on selected model ${preferredLabel}: ${message}`);
     const { result, usage } = await attempt(current);
     return { result, usage, model: currentLabel, effort, fallback_used: true };
   }

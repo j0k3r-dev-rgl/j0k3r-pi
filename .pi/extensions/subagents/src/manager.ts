@@ -4,7 +4,8 @@ import { dirname, join, resolve } from 'node:path';
 import { getSubagent, loadSubagents, readSubagentsConfig } from './config.js';
 import { sdkSubagentRunner } from './runner.js';
 import { SubagentHistoryStore } from './history.js';
-import type { SubagentRunInput, SubagentRunner, SubagentTask, ThinkingEffort } from './types.js';
+import { resolveEffectiveSubagentProfile } from './profile-resolver.js';
+import type { ModelRef, SubagentRunInput, SubagentRunner, SubagentTask } from './types.js';
 
 function nowIso(): string { return new Date().toISOString(); }
 function taskId(agent: string): string { return `subtask_${agent}_${Date.now()}_${randomUUID().replace(/-/g, '').slice(0, 8)}`; }
@@ -13,9 +14,8 @@ function compactOutput(text: string, limit = 800): string {
   return normalized.length > limit ? `…${normalized.slice(-limit)}` : normalized;
 }
 
-function currentEffort(ctx: any): ThinkingEffort | undefined {
-  const effort = ctx?.pi?.getThinkingLevel?.() ?? ctx?.getThinkingLevel?.() ?? ctx?.thinkingLevel;
-  return typeof effort === 'string' ? effort as ThinkingEffort : undefined;
+function modelRefLabel(model: ModelRef | undefined): string | undefined {
+  return model ? `${model.provider}/${model.id}` : undefined;
 }
 
 const PERMISSION_REQUIRED_MARKER = 'permission_required:';
@@ -275,7 +275,7 @@ export class SubagentManager {
     const definition = getSubagent(cwd, agentName);
     if (!definition) throw new Error(`Subagent not found: ${agentName}`);
     const config = readSubagentsConfig(cwd);
-    const effort = definition.effort ?? config.default_effort ?? currentEffort(ctx);
+    const effectiveProfile = resolveEffectiveSubagentProfile({ agentName: definition.name, definition, config, ctx });
     const id = taskId(definition.name);
     const controller = new AbortController();
     const task: SubagentTask = {
@@ -285,7 +285,10 @@ export class SubagentManager {
       status: 'queued',
       task: taskText,
       context,
-      effort,
+      model: modelRefLabel(effectiveProfile.model.value),
+      effort: effectiveProfile.effort.value,
+      model_source: effectiveProfile.model.source,
+      effort_source: effectiveProfile.effort.source,
       created_at: nowIso(),
       last_activity_at: nowIso(),
       last_activity: 'queued',
@@ -324,6 +327,7 @@ export class SubagentManager {
             ctx,
             config,
             signal: controller.signal,
+            effectiveProfile,
             onActivity: (activity) => {
               task.last_activity_at = nowIso();
               task.last_activity = activity.message;

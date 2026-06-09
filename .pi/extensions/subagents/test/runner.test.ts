@@ -59,6 +59,7 @@ describe('subagent runner permission-required bridge', () => {
       stall_timeout_ms: 10_000,
       max_concurrency: 1,
       default_tools: ['read'],
+      model_profiles: {},
     };
     const activities: Array<{ transcript?: string; output?: string; message: string }> = [];
 
@@ -75,6 +76,176 @@ describe('subagent runner permission-required bridge', () => {
     expect(result.result).toContain(marker);
     expect(activities.map((activity) => activity.transcript ?? activity.output ?? '').join('\n')).toContain(marker);
     expect(session.prompt).toHaveBeenCalledOnce();
+  });
+
+  it('passes profile model and effort to nested SDK sessions and reports them', async () => {
+    vi.resetModules();
+    const session = {
+      subscribe: vi.fn(() => vi.fn()),
+      prompt: vi.fn(async () => undefined),
+      messages: [{ role: 'assistant', content: 'done' }],
+      dispose: vi.fn(async () => undefined),
+    };
+    const createAgentSession = vi.fn(() => ({ session }));
+
+    vi.doMock('@earendil-works/pi-coding-agent', () => ({
+      SessionManager: { inMemory: () => ({}) },
+      createAgentSession,
+    }));
+
+    const { sdkSubagentRunner } = await import('../src/runner.js');
+    const definition: SubagentDefinition = {
+      name: 'sdd-apply',
+      description: 'apply executor',
+      filePath: '/tmp/sdd-apply.md',
+      instructions: 'return a concise result',
+      tools: ['read'],
+    };
+    const config: SubagentsConfig = {
+      timeout_ms: 10_000,
+      stall_timeout_ms: 10_000,
+      max_concurrency: 1,
+      default_tools: ['read'],
+      model_profiles: { 'sdd-apply': { model: { provider: 'profile', id: 'model' }, effort: 'xhigh' } },
+    };
+    const profileModel = { provider: 'profile', id: 'model' };
+
+    const result = await sdkSubagentRunner({
+      definition,
+      task: 'apply work',
+      cwd: '/workspace',
+      ctx: {
+        model: { provider: 'orchestrator', id: 'model' },
+        modelRegistry: { find: vi.fn((provider: string, id: string) => provider === 'profile' && id === 'model' ? profileModel : undefined) },
+        pi: { getThinkingLevel: () => 'low' },
+      },
+      config,
+      signal: new AbortController().signal,
+    });
+
+    expect(createAgentSession).toHaveBeenCalledWith(expect.objectContaining({ model: profileModel, thinkingLevel: 'xhigh' }));
+    expect(result).toMatchObject({ model: 'profile/model', effort: 'xhigh', fallback_used: false });
+  });
+
+  it('inherits missing profile fields from the remaining fallback chain', async () => {
+    vi.resetModules();
+    const session = {
+      subscribe: vi.fn(() => vi.fn()),
+      prompt: vi.fn(async () => undefined),
+      messages: [{ role: 'assistant', content: 'done' }],
+      dispose: vi.fn(async () => undefined),
+    };
+    const createAgentSession = vi.fn(() => ({ session }));
+
+    vi.doMock('@earendil-works/pi-coding-agent', () => ({
+      SessionManager: { inMemory: () => ({}) },
+      createAgentSession,
+    }));
+
+    const { sdkSubagentRunner } = await import('../src/runner.js');
+    const definition: SubagentDefinition = {
+      name: 'sdd-design',
+      description: 'design executor',
+      filePath: '/tmp/sdd-design.md',
+      instructions: 'return a concise result',
+      model: { provider: 'frontmatter', id: 'model' },
+      tools: ['read'],
+    };
+    const config: SubagentsConfig = {
+      timeout_ms: 10_000,
+      stall_timeout_ms: 10_000,
+      max_concurrency: 1,
+      default_tools: ['read'],
+      model_profiles: { 'sdd-design': { effort: 'high' } },
+    };
+    const frontmatterModel = { provider: 'frontmatter', id: 'model' };
+
+    await sdkSubagentRunner({
+      definition,
+      task: 'design work',
+      cwd: '/workspace',
+      ctx: { modelRegistry: { find: vi.fn(() => frontmatterModel) }, model: { provider: 'orchestrator', id: 'model' }, thinkingLevel: 'low' },
+      config,
+      signal: new AbortController().signal,
+    });
+
+    expect(createAgentSession).toHaveBeenCalledWith(expect.objectContaining({ model: frontmatterModel, thinkingLevel: 'high' }));
+  });
+
+  it('keeps no-profile default-config and orchestrator-inherited behavior unchanged', async () => {
+    vi.resetModules();
+    const session = {
+      subscribe: vi.fn(() => vi.fn()),
+      prompt: vi.fn(async () => undefined),
+      messages: [{ role: 'assistant', content: 'done' }],
+      dispose: vi.fn(async () => undefined),
+    };
+    const createAgentSession = vi.fn(() => ({ session }));
+
+    vi.doMock('@earendil-works/pi-coding-agent', () => ({
+      SessionManager: { inMemory: () => ({}) },
+      createAgentSession,
+    }));
+
+    const { sdkSubagentRunner } = await import('../src/runner.js');
+    const definition: SubagentDefinition = {
+      name: 'reviewer',
+      description: 'reviewer executor',
+      filePath: '/tmp/reviewer.md',
+      instructions: 'return a concise result',
+      tools: ['read'],
+    };
+    const defaultModel = { provider: 'default', id: 'model' };
+    const config: SubagentsConfig = {
+      default_model: { provider: 'default', id: 'model' },
+      default_effort: 'medium',
+      timeout_ms: 10_000,
+      stall_timeout_ms: 10_000,
+      max_concurrency: 1,
+      default_tools: ['read'],
+      model_profiles: {},
+    };
+
+    await sdkSubagentRunner({
+      definition,
+      task: 'review work',
+      cwd: '/workspace',
+      ctx: { modelRegistry: { find: vi.fn(() => defaultModel) }, model: { provider: 'orchestrator', id: 'model' }, thinkingLevel: 'low' },
+      config,
+      signal: new AbortController().signal,
+    });
+
+    expect(createAgentSession).toHaveBeenLastCalledWith(expect.objectContaining({ model: defaultModel, thinkingLevel: 'medium' }));
+
+    createAgentSession.mockClear();
+    await sdkSubagentRunner({
+      definition,
+      task: 'review work',
+      cwd: '/workspace',
+      ctx: { model: { provider: 'orchestrator', id: 'model' }, thinkingLevel: 'low' },
+      config: { ...config, default_model: undefined, default_effort: undefined },
+      signal: new AbortController().signal,
+    });
+
+    expect(createAgentSession).toHaveBeenLastCalledWith(expect.objectContaining({ model: { provider: 'orchestrator', id: 'model' }, thinkingLevel: 'low' }));
+  });
+
+  it('reports unresolved profile models with the subagent name and selected model', async () => {
+    vi.resetModules();
+    vi.doMock('@earendil-works/pi-coding-agent', () => ({
+      SessionManager: { inMemory: () => ({}) },
+      createAgentSession: vi.fn(),
+    }));
+
+    const { sdkSubagentRunner } = await import('../src/runner.js');
+    await expect(sdkSubagentRunner({
+      definition: { name: 'sdd-apply', description: 'apply executor', filePath: '/tmp/sdd-apply.md', instructions: 'return a concise result', tools: ['read'] },
+      task: 'apply work',
+      cwd: '/workspace',
+      ctx: { modelRegistry: { find: vi.fn(() => undefined) }, model: { provider: 'orchestrator', id: 'model' } },
+      config: { timeout_ms: 10_000, stall_timeout_ms: 10_000, max_concurrency: 1, default_tools: ['read'], model_profiles: { 'sdd-apply': { model: { provider: 'missing', id: 'model' } } } },
+      signal: new AbortController().signal,
+    })).rejects.toThrow('Subagent sdd-apply could not resolve selected model missing/model');
   });
 
   it('passes the resolved thinking effort to nested SDK sessions and reports it', async () => {
@@ -106,6 +277,7 @@ describe('subagent runner permission-required bridge', () => {
       stall_timeout_ms: 10_000,
       max_concurrency: 1,
       default_tools: ['read'],
+      model_profiles: {},
     };
 
     const result = await sdkSubagentRunner({
@@ -157,6 +329,7 @@ describe('subagent runner permission-required bridge', () => {
         stall_timeout_ms: 10_000,
         max_concurrency: 1,
         default_tools: ['read'],
+        model_profiles: {},
       };
 
       await sdkSubagentRunner({

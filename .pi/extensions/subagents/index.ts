@@ -1,5 +1,6 @@
 import { SubagentManager } from './src/manager.js';
 import { registerSubagentTools } from './src/tools.js';
+import { runSubagentModelsCommand } from './src/model-profiles-ui.js';
 import { SubagentsHistoryPanel } from './src/ui.js';
 
 function matchesKey(data: string, key: string): boolean {
@@ -106,6 +107,11 @@ export default function subagentsExtension(pi: any): void {
   pi.registerCommand?.('subagents', {
     description: 'Show subagent history panel',
     handler: async (_args: string, ctx: any) => showSubagentsPanel({ ...ctx, pi }),
+  });
+
+  pi.registerCommand?.('subagent-models', {
+    description: 'Configure subagent and SDD phase model profiles',
+    handler: async (_args: string, ctx: any) => runSubagentModelsCommand({ ...ctx, pi }),
   });
 
 }

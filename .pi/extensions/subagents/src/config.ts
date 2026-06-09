@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { ModelRef, SubagentDefinition, SubagentsConfig, ThinkingEffort } from './types.js';
+import type { ModelRef, SubagentDefinition, SubagentModelProfile, SubagentModelProfiles, SubagentsConfig, ThinkingEffort } from './types.js';
 
 const DEFAULT_TOOLS = ['read', 'memory_context', 'memory_search', 'memory_recall', 'memory_get'];
 const DEFAULT_MAX_CONCURRENCY = 5;
@@ -59,8 +59,16 @@ function agentDir(): string {
   return process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent');
 }
 
+function subagentsConfigPath(dir = agentDir()): string {
+  return path.join(dir, 'subagents.json');
+}
+
 function readJson(file: string): any {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function positiveNumber(value: any, fallback: number): number {
@@ -72,36 +80,116 @@ function positiveInteger(value: any, fallback: number): number {
   return Math.max(1, Math.floor(positiveNumber(value, fallback)));
 }
 
-function parseModel(value: any): ModelRef | undefined {
+export function parseModel(value: any): ModelRef | undefined {
   if (!value || value === 'default') return undefined;
   if (typeof value === 'string') {
-    const [provider, id] = value.split('/');
+    const parts = value.split('/');
+    if (parts.length !== 2) return undefined;
+    const [provider, id] = parts.map((part) => part.trim());
     return provider && id ? { provider, id } : undefined;
   }
-  if (typeof value === 'object' && typeof value.provider === 'string' && typeof value.id === 'string') return { provider: value.provider, id: value.id };
+  if (isPlainObject(value) && typeof value.provider === 'string' && typeof value.id === 'string') {
+    const provider = value.provider.trim();
+    const id = value.id.trim();
+    return provider && id ? { provider, id } : undefined;
+  }
   return undefined;
 }
 
 const THINKING_EFFORTS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']);
 
-function parseEffort(value: any): ThinkingEffort | undefined {
+export function parseEffort(value: any): ThinkingEffort | undefined {
   if (!value || value === 'default') return undefined;
   const effort = String(value).trim().toLowerCase();
   return THINKING_EFFORTS.has(effort) ? effort as ThinkingEffort : undefined;
 }
 
+function parseModelProfile(value: unknown): SubagentModelProfile | undefined {
+  if (!isPlainObject(value)) return undefined;
+  const profile: SubagentModelProfile = {};
+  const model = parseModel(value.model);
+  const effort = parseEffort(value.effort ?? value.thinking_level ?? value.thinkingLevel);
+  if (model) profile.model = model;
+  if (effort) profile.effort = effort;
+  return Object.keys(profile).length ? profile : undefined;
+}
+
+function parseModelProfiles(value: unknown): SubagentModelProfiles {
+  if (!isPlainObject(value)) return {};
+  const profiles: SubagentModelProfiles = {};
+  for (const [name, rawProfile] of Object.entries(value)) {
+    const normalizedName = name.trim();
+    if (!normalizedName) continue;
+    const profile = parseModelProfile(rawProfile);
+    if (profile) profiles[normalizedName] = profile;
+  }
+  return profiles;
+}
+
+function mergeModelProfiles(globalRaw: unknown, projectRaw: unknown): SubagentModelProfiles {
+  const globalProfiles = parseModelProfiles(globalRaw);
+  const projectProfiles = parseModelProfiles(projectRaw);
+  const merged: SubagentModelProfiles = { ...globalProfiles };
+  for (const [name, projectProfile] of Object.entries(projectProfiles)) {
+    merged[name] = { ...(merged[name] ?? {}), ...projectProfile };
+  }
+  return merged;
+}
+
+function serializeModelRef(model: ModelRef): string {
+  return `${model.provider}/${model.id}`;
+}
+
+function cleanProfile(profile: SubagentModelProfile): Record<string, string> | undefined {
+  const cleaned: Record<string, string> = {};
+  if (profile.model) cleaned.model = serializeModelRef(profile.model);
+  if (profile.effort) cleaned.effort = profile.effort;
+  return Object.keys(cleaned).length ? cleaned : undefined;
+}
+
 export function readSubagentsConfig(cwd: string): SubagentsConfig {
-  const globalRaw = readJson(path.join(agentDir(), 'subagents.json'));
+  const globalRaw = readJson(subagentsConfigPath());
   const projectRaw = readJson(path.join(cwd, '.pi', 'subagents.json'));
   const raw = { ...globalRaw, ...projectRaw };
   return {
     default_model: parseModel(raw.default_model),
     default_effort: parseEffort(raw.default_effort ?? raw.default_thinking_level ?? raw.thinkingLevel),
+    model_profiles: mergeModelProfiles(globalRaw.model_profiles, projectRaw.model_profiles),
     timeout_ms: positiveInteger(raw.timeout_ms, DEFAULT_TIMEOUT_MS),
     stall_timeout_ms: positiveInteger(raw.stall_timeout_ms, DEFAULT_STALL_TIMEOUT_MS),
     max_concurrency: positiveInteger(raw.max_concurrency, DEFAULT_MAX_CONCURRENCY),
     default_tools: sanitizeTools(Array.isArray(raw.default_tools) ? raw.default_tools.map(String) : DEFAULT_TOOLS),
   };
+}
+
+export function saveGlobalSubagentModelProfile(input: { agentName: string; profile: SubagentModelProfile; agentDir?: string }): void {
+  const file = subagentsConfigPath(input.agentDir);
+  const root = readJson(file);
+  const writableRoot: Record<string, unknown> = isPlainObject(root) ? { ...root } : {};
+  const modelProfiles = isPlainObject(writableRoot.model_profiles) ? { ...writableRoot.model_profiles } : {};
+  const agentName = input.agentName.trim().toLowerCase();
+  const cleaned = cleanProfile(input.profile);
+  if (agentName && cleaned) modelProfiles[agentName] = cleaned;
+  if (Object.keys(modelProfiles).length) writableRoot.model_profiles = modelProfiles;
+  else delete writableRoot.model_profiles;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(writableRoot, null, 2)}\n`, 'utf8');
+}
+
+export function resetGlobalSubagentModelProfileField(input: { agentName: string; field: 'model' | 'effort'; agentDir?: string }): void {
+  const file = subagentsConfigPath(input.agentDir);
+  const root = readJson(file);
+  const writableRoot: Record<string, unknown> = isPlainObject(root) ? { ...root } : {};
+  const modelProfiles = isPlainObject(writableRoot.model_profiles) ? { ...writableRoot.model_profiles } : {};
+  const agentName = input.agentName.trim().toLowerCase();
+  const existing = isPlainObject(modelProfiles[agentName]) ? { ...modelProfiles[agentName] } : {};
+  delete existing[input.field];
+  if (Object.keys(existing).length) modelProfiles[agentName] = existing;
+  else delete modelProfiles[agentName];
+  if (Object.keys(modelProfiles).length) writableRoot.model_profiles = modelProfiles;
+  else delete writableRoot.model_profiles;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(writableRoot, null, 2)}\n`, 'utf8');
 }
 
 function loadSubagentsFromDir(dir: string): SubagentDefinition[] {
