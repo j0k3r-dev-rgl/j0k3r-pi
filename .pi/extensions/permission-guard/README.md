@@ -35,7 +35,7 @@ Example project override:
 }
 ```
 
-`bash.safeCommands` entries support exact commands and `*` wildcards. Configured safe commands are allowed before normal ask heuristics such as network, shell syntax, default ask, or state-changing prompts. Hard denials still win first, including privilege escalation, obvious secret reads, configured deny commands, and destructive root/home deletes.
+`bash.safeCommands` entries support exact commands and `*` wildcards. Configured safe commands are allowed before normal ask heuristics such as network, shell syntax, default ask, or state-changing prompts. A simple `cd <workspace-relative-dir> && <safeCommand>` form is also allowed when the `cd` target stays inside the workspace and `<safeCommand>` matches `bash.safeCommands`. Hard denials still win first, including privilege escalation, obvious secret reads, configured deny commands, and destructive root/home deletes.
 
 ## Approval flow
 

@@ -181,6 +181,36 @@ describe('bash permission policy', () => {
     });
   });
 
+  it('allows cd into workspace followed by a configured safe command', () => {
+    const config = policy({ safeCommands: ['npm test', 'npm run typecheck'] }, '/workspace');
+
+    expect(classifyBashCommand(config, bashRequest('cd packages/app && npm test'))).toMatchObject({
+      decision: 'allow',
+      finalDecision: 'allow',
+      reasonCode: 'bash_safe_command_allowed',
+      details: { matchedRule: 'cd <workspace> && npm test' },
+    });
+    expect(classifyBashCommand(config, bashRequest('cd .pi/extensions/subagents && npm run typecheck'))).toMatchObject({
+      decision: 'allow',
+      finalDecision: 'allow',
+      reasonCode: 'bash_safe_command_allowed',
+      details: { matchedRule: 'cd <workspace> && npm run typecheck' },
+    });
+  });
+
+  it('does not allow cd chaining when the cd target escapes the workspace', () => {
+    const config = policy({ safeCommands: ['npm test'] }, '/workspace');
+
+    expect(classifyBashCommand(config, bashRequest('cd .. && npm test'))).toMatchObject({
+      decision: 'ask',
+      finalDecision: 'requires_approval',
+    });
+    expect(classifyBashCommand(config, bashRequest('cd /tmp && npm test'))).toMatchObject({
+      decision: 'ask',
+      finalDecision: 'requires_approval',
+    });
+  });
+
   it('rejects safe-command lookalikes containing shell metacharacters', () => {
     expect(classifyBashCommand(policy(), bashRequest('git status && echo done'))).toMatchObject({
       decision: 'ask',

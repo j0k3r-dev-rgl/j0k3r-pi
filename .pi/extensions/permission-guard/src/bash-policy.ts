@@ -1,4 +1,4 @@
-import { isAbsolute, relative, sep } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { PermissionDecisionResult, PermissionPolicyConfig, PermissionRequest, PolicyDecision, RiskLevel } from './types.js';
 
 export interface BashPolicyOptions {
@@ -57,6 +57,23 @@ function firstToken(command: string): string {
 function isSameOrInside(target: string, root: string): boolean {
   const rel = relative(root, target);
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+function simpleWorkspaceCdCommand(command: string, config: PermissionPolicyConfig, options: BashPolicyOptions): { innerCommand: string; matchedRuleLabel: string } | undefined {
+  const root = workspaceRootFor(config, options);
+  if (!root) return undefined;
+
+  const match = normalizeCommand(command).match(/^cd\s+([A-Za-z0-9._/@+-]+)\s+&&\s+(.+)$/);
+  if (!match) return undefined;
+
+  const cdTarget = match[1]!;
+  const innerCommand = match[2]!;
+  if (cdTarget === '..' || cdTarget.startsWith('../') || cdTarget === '~' || cdTarget.startsWith('~/')) return undefined;
+
+  const targetPath = isAbsolute(cdTarget) ? cdTarget : resolve(root, cdTarget);
+  if (!isSameOrInside(targetPath, root)) return undefined;
+
+  return { innerCommand, matchedRuleLabel: `cd <workspace> && ${normalizeCommand(innerCommand)}` };
 }
 
 function toPosixPath(path: string): string {
@@ -239,17 +256,29 @@ function askMatch(config: PermissionPolicyConfig, request: PermissionRequest, op
   return undefined;
 }
 
-function allowMatch(config: PermissionPolicyConfig, request: PermissionRequest): BashMatch | undefined {
+function allowMatch(config: PermissionPolicyConfig, request: PermissionRequest, options: BashPolicyOptions): BashMatch | undefined {
   const command = commandText(request);
   const matchedSafeCommand = matchesCommandPattern(command, config.bash.safeCommands);
-  if (!matchedSafeCommand) return undefined;
+  if (matchedSafeCommand) {
+    return {
+      decision: 'allow',
+      reason: 'Bash command matches a configured safe command.',
+      reasonCode: 'bash_safe_command_allowed',
+      riskLevel: 'low',
+      matchedRule: matchedSafeCommand,
+    };
+  }
+
+  const cdCommand = simpleWorkspaceCdCommand(command, config, options);
+  const matchedInnerSafeCommand = cdCommand ? matchesCommandPattern(cdCommand.innerCommand, config.bash.safeCommands) : undefined;
+  if (!cdCommand || !matchedInnerSafeCommand) return undefined;
 
   return {
     decision: 'allow',
-    reason: 'Bash command matches a configured safe command.',
+    reason: 'Bash command changes into the workspace and then runs a configured safe command.',
     reasonCode: 'bash_safe_command_allowed',
     riskLevel: 'low',
-    matchedRule: matchedSafeCommand,
+    matchedRule: cdCommand.matchedRuleLabel,
   };
 }
 
@@ -291,7 +320,7 @@ export function classifyBashCommand(
 ): PermissionDecisionResult {
   const match =
     denyMatch(config, request, options) ??
-    allowMatch(config, request) ??
+    allowMatch(config, request, options) ??
     askMatch(config, request, options) ??
     defaultMatch(config);
 
