@@ -456,6 +456,71 @@ describe('subagent runner thread snapshots', () => {
     expect(JSON.stringify(result.thread_snapshot)).toContain('# Agent Guide');
   });
 
+  it('persists streamed model thinking in sequence with tool rows in the final thread snapshot', async () => {
+    let subscriber: ((event: unknown) => void) | undefined;
+    const session = {
+      subscribe: vi.fn((callback: (event: unknown) => void) => {
+        subscriber = callback;
+        return vi.fn();
+      }),
+      prompt: vi.fn(async () => {
+        subscriber?.({ type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'first reasoning before reading' } });
+        subscriber?.({ type: 'tool_execution_start', toolCallId: 'read-1', toolName: 'read', args: { path: 'AGENTS.md' } });
+        subscriber?.({ type: 'tool_execution_end', toolCallId: 'read-1', toolName: 'read', isError: false, result: { content: [{ type: 'text', text: '# Agent Guide' }] } });
+        subscriber?.({ type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'second reasoning after reading' } });
+      }),
+      messages: [
+        { role: 'assistant', content: [{ type: 'toolCall', id: 'read-1', name: 'read', arguments: { path: 'AGENTS.md' } }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'final answer after sequential thinking' }] },
+      ],
+      dispose: vi.fn(async () => undefined),
+    };
+
+    const { result } = await runWithSession(session);
+    const labels = result.thread_snapshot?.items.map((item: any) => {
+      if (item.type === 'assistant') return `assistant:${item.message.content.map((part: any) => part.type === 'thinking' ? `thinking:${part.thinking}` : part.type === 'toolCall' ? `toolCall:${part.name}` : `text:${part.text}`).join('|')}`;
+      if (item.type === 'tool') return `tool:${item.name}`;
+      return `${item.type}:${item.label}`;
+    });
+
+    expect(labels).toEqual([
+      'user:delegated_task',
+      'assistant:thinking:first reasoning before reading',
+      'assistant:toolCall:read',
+      'tool:read',
+      'assistant:thinking:second reasoning after reading',
+      'assistant:text:final answer after sequential thinking',
+    ]);
+  });
+
+  it('preserves streamed model thinking in the final thread snapshot when final messages omit it', async () => {
+    let subscriber: ((event: unknown) => void) | undefined;
+    const session = {
+      subscribe: vi.fn((callback: (event: unknown) => void) => {
+        subscriber = callback;
+        return vi.fn();
+      }),
+      prompt: vi.fn(async () => {
+        subscriber?.({ type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'thinking through the file plan' } });
+        subscriber?.({ type: 'message_update', assistantMessageEvent: { delta: 'draft text that should not replace final' } });
+      }),
+      messages: [{ role: 'assistant', content: [{ type: 'text', text: 'final answer after thinking' }] }],
+      dispose: vi.fn(async () => undefined),
+    };
+
+    const { result, activities } = await runWithSession(session);
+
+    expect(activities.find((activity) => activity.message === 'streaming thinking')?.thread_snapshot?.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'assistant', message: expect.objectContaining({ content: [expect.objectContaining({ type: 'thinking', thinking: expect.stringContaining('thinking through the file plan') })] }) }),
+    ]));
+    expect(result.result).toBe('final answer after thinking');
+    expect(result.thread_snapshot?.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'assistant', message: expect.objectContaining({ content: [expect.objectContaining({ type: 'thinking', thinking: expect.stringContaining('thinking through the file plan') })] }) }),
+      expect.objectContaining({ type: 'assistant', message: expect.objectContaining({ content: [expect.objectContaining({ type: 'text', text: 'final answer after thinking' })] }) }),
+    ]));
+    expect(JSON.stringify(result.thread_snapshot)).not.toContain('draft text that should not replace final');
+  });
+
   it('finalizes assistant text from session messages when available while preserving streamed activity snapshots', async () => {
     let subscriber: ((event: unknown) => void) | undefined;
     const session = {
