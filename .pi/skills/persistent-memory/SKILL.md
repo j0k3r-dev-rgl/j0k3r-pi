@@ -82,7 +82,7 @@ Ask before saving:
 - global or general user preferences;
 - large `project_profile` rewrites;
 - anything that contradicts existing memory;
-- policy changes that affect future agents.
+- policy changes that affect future agents, including workflow rules about when agents may investigate, implement, commit, or persist artifacts.
 
 Confidence:
 
@@ -193,7 +193,7 @@ Before closing a substantial session or after the user confirms an important dir
 - a command that was verified;
 - a `project_profile` change.
 
-Important decisions/learnings/todos should be saved as separate durable memories when appropriate, but do not save everything automatically.
+Important decisions/learnings/todos should be saved as separate durable memories when appropriate, but do not save everything automatically. If a memory would change future agent behavior, save it only after the user confirms that policy decision.
 
 ## Response style
 

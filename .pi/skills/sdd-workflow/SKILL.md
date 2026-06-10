@@ -13,6 +13,7 @@ Use this skill when starting, continuing, validating, or closing PRD/SDD/OpenSpe
 - Choose the lightest safe workflow.
 - Do not create SDD/OpenSpec artifacts or launch SDD subagents for a new flow until the SDD mode gate is resolved.
 - Use discovery for isolated research before deciding to start formal SDD.
+- Treat investigation/discovery as read-only diagnosis, not permission to solve or implement.
 - Use SDD subagents as phase executors only; the main agent remains the orchestrator.
 - Strict TDD still applies to implementation work.
 - Prefer `hybrid` artifact storage for named SDD features unless the user requests otherwise.
@@ -82,6 +83,18 @@ Choose the lightest workflow that safely fits the request.
 
 When uncertain between simple TDD and SDD, prefer the lighter workflow unless the risk or artifact value is clear. Ask one concise clarification if scope, persistence, or approval is unclear.
 
+## Investigation and decision gate
+
+When the user asks to investigate, inspect, review, analyze, diagnose, compare, "look at", or "see what happens", default to read-only investigation.
+
+Rules:
+
+- Investigation/discovery/exploration is not implementation approval.
+- Do not edit files, add tests, refactor, change configuration, update OpenSpec artifacts, or save durable memory unless that action is explicitly part of the approved workflow.
+- After investigation, report the cause or likely cause, evidence, uncertainty, impact, options, and recommended next step.
+- Ask the user to choose whether to implement an option, keep researching, defer, or pick another solution.
+- Never auto-chain from discovery/exploration into `sdd-apply` or simple TDD implementation without explicit user approval for the selected path.
+
 ## Discovery vs sdd-explore
 
 Use `discovery` when research is standalone or pre-SDD:
@@ -89,7 +102,8 @@ Use `discovery` when research is standalone or pre-SDD:
 - no OpenSpec artifacts;
 - no SDD memory update;
 - no source code edits;
-- output is a bounded research report and next-workflow recommendation.
+- output is a bounded research report, options, and next-workflow recommendation;
+- the orchestrator must present the report to the user and wait for the user's decision before implementation.
 
 Use `sdd-explore` only after the user approved a named SDD flow and the execution mode is resolved:
 
@@ -271,11 +285,12 @@ Then choose next missing phase:
 
 Always separate these approvals:
 
-- permission to research;
+- permission to research/read-only investigate;
 - permission to start formal PRD/SDD;
 - execution mode;
 - artifact store when not obvious;
-- implementation approval;
+- permission to persist artifacts or durable memory when not already part of the approved workflow;
+- implementation/remediation approval for the selected option;
 - archive/closure approval.
 
 In `interactive` mode, ask before every phase and artifact write/update.

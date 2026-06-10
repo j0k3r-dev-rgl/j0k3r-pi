@@ -24,13 +24,19 @@ There are no slash commands required for SDD. The orchestrator decides the flow 
 |---|---|---|---|
 | Direct answer or tiny inspection | No code change or very low risk | Inline | none |
 | Small localized code fix | Clear scope, cheap validation, no durable artifact value | Simple TDD | none by default |
-| Explore an idea before committing | User asks to investigate/compare/understand a feature or risk | SDD explore-only | `sdd-explore` |
+| Explore an idea before committing | User asks to investigate/compare/understand a feature or risk before approving SDD | Discovery | `discovery` |
 | Plan a named feature/change | Feature needs requirements/design/tasks, but implementation is not yet approved | SDD planning chain | `sdd-explore` → `sdd-proposal` → `sdd-spec` → `sdd-design` → `sdd-task` |
 | Implement a planned SDD change | Existing proposal/spec/design/tasks exist and user asks to implement or continue apply | SDD apply-only or apply batch | `sdd-apply` |
 | Validate an implementation | Existing SDD artifacts and code changes exist, or user asks to verify | SDD verify-only | `sdd-verify` |
 | Continue an active SDD flow | Active SDD memory/OpenSpec state exists or user says continue | SDD continue router | inspect state, then run the next missing phase |
 | Close a verified SDD change | Verification passed and user wants closure/archive/source-of-truth sync | SDD archive-only | `sdd-archive` |
 | Large/risky feature from scratch | Named feature, multi-module/risky/unclear requirements, or explicit SDD/OpenSpec intent | Full SDD feature chain | planning chain → approved `sdd-apply` → `sdd-verify` → optional `sdd-archive` |
+
+### Investigation and SDD entry guard
+
+Investigation is not implementation approval. When the user asks to investigate, inspect, analyze, diagnose, compare, or understand an issue, use read-only discovery by default, report findings/options, and wait for the user's decision before implementing or creating formal SDD artifacts.
+
+Use `sdd-explore` only after the user approves a named SDD/OpenSpec flow and the execution mode is resolved. Pre-SDD research belongs to `discovery`.
 
 ### Apply-only guard
 
