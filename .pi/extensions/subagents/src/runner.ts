@@ -130,13 +130,27 @@ function isBashTool(name: string): boolean {
   return name === 'bash' || name === 'shell' || name === 'command' || name === 'exec';
 }
 
+function parseRawToolJson(text: string): { keys: string[]; kind: string } | undefined {
+  const trimmed = text.trim();
+  if (!trimmed || !((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']')))) return undefined;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (!parsed || typeof parsed !== 'object') return undefined;
+    return { kind: Array.isArray(parsed) ? 'array' : 'object', keys: Array.isArray(parsed) ? [] : Object.keys(parsed).slice(0, 20) };
+  } catch {
+    return undefined;
+  }
+}
+
 export class ThreadSnapshotBuilder {
+  private cwd?: string;
   private readonly createdAt = new Date().toISOString();
   private readonly items: SubagentThreadItem[] = [];
   private readonly toolIndex = new Map<string, number>();
   private streamingAssistantSequence = 0;
 
-  constructor(prompt?: string, context?: string) {
+  constructor(prompt?: string, context?: string, cwd?: string) {
+    this.cwd = cwd;
     if (prompt?.trim()) this.items.push({ type: 'user', id: 'delegated-prompt', label: 'delegated_task', text: truncateSnapshotText(prompt) ?? '' });
     if (context?.trim()) this.items.push({ type: 'user', id: 'delegated-context', label: 'context', text: truncateSnapshotText(context) ?? '' });
   }
@@ -161,6 +175,7 @@ export class ThreadSnapshotBuilder {
     if (event?.type === 'tool_execution_start') {
       const name = event.toolName ?? event.name ?? 'tool';
       const tool_call_id = eventToolCallId(event);
+      this.dropTrailingRawToolJson(name, tool_call_id);
       if (isBashTool(name)) {
         const command = String((event.args ?? event.input ?? {}).command ?? formatToolCall(name, event.args ?? event.input ?? {}));
         const item: any = { type: 'bash', id: tool_call_id, tool_call_id, command: truncateSnapshotText(command) ?? '', status: 'running' };
@@ -224,6 +239,19 @@ export class ThreadSnapshotBuilder {
     const items: SubagentThreadItem[] = [...initialItems, ...(messageItems.length ? interleaveMessagesWithToolRows(messageItems, eventItems) : eventItems)];
     const source = messageItems.length && eventItems.length ? 'mixed' : messageItems.length ? 'session_messages' : 'events';
     return boundThreadSnapshot({ version: 1, created_at: this.createdAt, updated_at: new Date().toISOString(), source, items }, { textLimit: SNAPSHOT_TEXT_LIMIT });
+  }
+
+  private dropTrailingRawToolJson(toolName?: string, toolCallId?: string): void {
+    const item = this.items.at(-1) as SubagentThreadItem | undefined;
+    if (item?.type !== 'assistant' || !item.id?.startsWith('streaming-assistant-')) return;
+    const textParts = item.message.content.filter((part): part is { type: 'text'; text: string } => part.type === 'text');
+    const hasNonText = item.message.content.some((part) => part.type !== 'text');
+    if (hasNonText || !textParts.length) return;
+    const text = textParts.map((part) => part.text).join('');
+    const parsed = parseRawToolJson(text);
+    if (!parsed) return;
+    this.items.pop();
+    debugLog(this.cwd, 'live_raw_tool_json_dropped', { toolName, toolCallId, jsonKind: parsed.kind, keys: parsed.keys, textLength: text.length });
   }
 
   private appendAssistantDelta(textDelta?: string, thinkingDelta?: string): void {
@@ -447,7 +475,7 @@ async function promptWithInactivity(
   cwd?: string,
 ): Promise<{ result: string; usage: UsageStats; thread_snapshot?: SubagentThreadSnapshot }> {
   let output = '';
-  const snapshotBuilder = new ThreadSnapshotBuilder(prompt, delegatedContext);
+  const snapshotBuilder = new ThreadSnapshotBuilder(prompt, delegatedContext, cwd);
   let permissionRequiredOutput = '';
   let usage = emptyUsage();
   let transcript = `# orchestrator prompt\n\n${prompt}\n\n# subagent execution\n`;
@@ -470,6 +498,7 @@ async function promptWithInactivity(
     const transcriptChunk = eventTranscript(event);
     transcript += transcriptChunk;
     const permissionRequired = extractPermissionRequiredText(event);
+    if (permissionRequired) debugLog(cwd, 'permission_marker_detected', { eventType: event?.type, toolName: event?.toolName, toolCallId: eventToolCallId(event), markerLength: permissionRequired.length });
     if (permissionRequired && !permissionRequiredOutput.includes(permissionRequired)) {
       permissionRequiredOutput += `${permissionRequiredOutput ? '\n' : ''}${permissionRequired}`;
     }

@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import type { SubagentDefinition, SubagentsConfig } from '../src/types.js';
 
 describe('subagent runner permission-required bridge', () => {
@@ -62,20 +65,27 @@ describe('subagent runner permission-required bridge', () => {
       model_profiles: {},
     };
     const activities: Array<{ transcript?: string; output?: string; message: string }> = [];
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-subagent-runner-permission-'));
+    try {
+      const result = await sdkSubagentRunner({
+        definition,
+        task: 'read outside workspace',
+        cwd,
+        ctx: { model: { provider: 'test', id: 'model' } },
+        config,
+        signal: new AbortController().signal,
+        onActivity: (activity) => activities.push(activity),
+      });
 
-    const result = await sdkSubagentRunner({
-      definition,
-      task: 'read outside workspace',
-      cwd: '/workspace',
-      ctx: { model: { provider: 'test', id: 'model' } },
-      config,
-      signal: new AbortController().signal,
-      onActivity: (activity) => activities.push(activity),
-    });
-
-    expect(result.result).toContain(marker);
-    expect(activities.map((activity) => activity.transcript ?? activity.output ?? '').join('\n')).toContain(marker);
-    expect(session.prompt).toHaveBeenCalledOnce();
+      expect(result.result).toContain(marker);
+      expect(activities.map((activity) => activity.transcript ?? activity.output ?? '').join('\n')).toContain(marker);
+      const log = fs.readFileSync(path.join(cwd, '.pi', 'subagents-debug.log'), 'utf8');
+      expect(log).toContain('permission_marker_detected');
+      expect(log).toContain('read');
+      expect(session.prompt).toHaveBeenCalledOnce();
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
   });
 
   it('passes profile model and effort to nested SDK sessions and reports them', async () => {
@@ -369,7 +379,7 @@ describe('subagent runner thread snapshots', () => {
     model_profiles: {},
   };
 
-  async function runWithSession(session: any) {
+  async function runWithSession(session: any, cwd = '/workspace') {
     vi.resetModules();
     vi.doMock('@earendil-works/pi-coding-agent', () => ({
       SessionManager: { inMemory: () => ({}) },
@@ -380,7 +390,7 @@ describe('subagent runner thread snapshots', () => {
     const result = await sdkSubagentRunner({
       definition,
       task: 'capture a thread snapshot',
-      cwd: '/workspace',
+      cwd,
       ctx: { model: { provider: 'test', id: 'model' } },
       config,
       signal: new AbortController().signal,
@@ -426,6 +436,44 @@ describe('subagent runner thread snapshots', () => {
     const bashItem = result.thread_snapshot?.items.find((item: any) => item.type === 'bash') as any;
     expect(bashItem.output.length).toBeLessThan(4500);
     expect(bashItem.truncated).toBe(true);
+  });
+
+  it('logs when streamed raw tool-call json is dropped from live thread snapshots', async () => {
+    let subscriber: ((event: unknown) => void) | undefined;
+    const session = {
+      subscribe: vi.fn((callback: (event: unknown) => void) => {
+        subscriber = callback;
+        return vi.fn();
+      }),
+      prompt: vi.fn(async () => {
+        subscriber?.({ type: 'message_update', assistantMessageEvent: { delta: '{"query":"subagent renderer raw tool json","limit":3}' } });
+        subscriber?.({ type: 'tool_execution_start', toolCallId: 'mem-1', toolName: 'memory_search', args: { query: 'subagent renderer raw tool json', limit: 3 } });
+        subscriber?.({ type: 'tool_execution_end', toolCallId: 'mem-1', toolName: 'memory_search', isError: false, result: { content: [{ type: 'text', text: 'Found 3 memory result(s).' }] } });
+      }),
+      messages: [{ role: 'assistant', content: [{ type: 'text', text: 'final answer' }] }],
+      dispose: vi.fn(async () => undefined),
+    };
+
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-subagent-runner-json-'));
+    try {
+      const { activities } = await runWithSession(session, cwd);
+      const afterToolStart = activities.find((activity) => activity.message === 'memory_search');
+      expect(afterToolStart?.thread_snapshot).toBeDefined();
+      const visibleAssistantText = afterToolStart?.thread_snapshot?.items
+        .filter((item: any) => item.type === 'assistant')
+        .flatMap((item: any) => item.message.content.map((part: any) => part.text ?? part.thinking ?? ''))
+        .join('\n') ?? '';
+      expect(visibleAssistantText).not.toContain('{"query"');
+      expect(afterToolStart?.thread_snapshot?.items).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'tool', name: 'memory_search', status: 'running', arguments: expect.objectContaining({ query: 'subagent renderer raw tool json' }) }),
+      ]));
+      const log = fs.readFileSync(path.join(cwd, '.pi', 'subagents-debug.log'), 'utf8');
+      expect(log).toContain('live_raw_tool_json_dropped');
+      expect(log).toContain('memory_search');
+      expect(log).toContain('query');
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
   });
 
   it('interleaves final session tool-call messages with matching tool rows before final assistant text', async () => {

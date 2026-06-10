@@ -262,15 +262,20 @@ function assistantText(item: SubagentAssistantItem): string[] {
 }
 
 function renderAssistantItem(item: SubagentAssistantItem, context: SubagentThreadRenderContext, width: number): string[] {
+  const visibleContent = item.message.content.filter((part) => part.type !== 'toolCall');
+  if (!visibleContent.length && !item.message.errorMessage) return [];
+  const displayItem: SubagentAssistantItem = visibleContent.length === item.message.content.length
+    ? item
+    : { ...item, message: { ...item.message, content: visibleContent } };
   const componentCtor = loadPiComponents()?.AssistantMessageComponent;
   if (typeof componentCtor === 'function') {
     try {
       const markdownTheme = loadPiComponents()?.getMarkdownTheme?.() ?? context.theme;
-      const rendered = renderComponent(new componentCtor(item.message, false, markdownTheme, 'Thinking...'), width);
+      const rendered = renderComponent(new componentCtor(displayItem.message, false, markdownTheme, 'Thinking...'), width);
       if (rendered?.some((line) => line.trim())) return rendered;
     } catch (error) { debugLog(context, 'assistant_component_error', { error }); }
   }
-  return assistantText(item);
+  return assistantText(displayItem);
 }
 
 function renderUserItem(item: SubagentUserItem, context: SubagentThreadRenderContext, width: number): string[] {
@@ -307,6 +312,44 @@ function builtInToolDefinition(name: string, cwd: string): unknown {
   try { return createToolDefinition(name, cwd); } catch { return undefined; }
 }
 
+function argString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : value === undefined || value === null ? '' : String(value).trim();
+}
+
+function pathRangeSummary(input: Record<string, unknown>): string {
+  const file = argString(input.path ?? input.file_path ?? input.file);
+  if (!file) return '';
+  const offset = Number(input.offset ?? 1);
+  const limit = Number(input.limit);
+  if (Number.isFinite(limit) && limit > 0) return `${file}:${Number.isFinite(offset) && offset > 0 ? offset : 1}-${(Number.isFinite(offset) && offset > 0 ? offset : 1) + limit - 1}`;
+  if (Number.isFinite(offset) && offset > 1) return `${file}:${offset}`;
+  return file;
+}
+
+function memoryArgumentSummary(name: string, input: Record<string, unknown>): string {
+  if (name === 'memory_search') return argString(input.query);
+  if (name === 'memory_recall') return [argString(input.context), argString(input.query)].filter(Boolean).join(' · ');
+  if (name === 'memory_get' || name === 'memory_update' || name === 'memory_archive') return argString(input.id);
+  if (name === 'memory_list') return [argString(input.scope), argString(input.kind), argString(input.project_name)].filter(Boolean).join(' · ');
+  if (name === 'memory_add') return argString(input.title ?? input.summary ?? input.kind);
+  if (name === 'memory_project_profile') return argString(input.action);
+  if (name === 'memory_session_start') return argString(input.title);
+  if (name === 'memory_session_prompt_add' || name === 'memory_session_finish') return argString(input.session_id);
+  if (name === 'memory_migrate_project') return input.dry_run === false ? 'apply' : 'dry run';
+  if (name === 'memory_export' || name === 'memory_import') return argString(input.path);
+  return argString(input.query ?? input.id ?? input.action ?? input.kind ?? input.title ?? input.summary);
+}
+
+function toolArgumentSummary(name: string, args: unknown): string {
+  const input = isRecord(args) ? args : {};
+  if (name === 'read') return pathRangeSummary(input);
+  if (name === 'edit' || name === 'write') return argString(input.path ?? input.file_path ?? input.file);
+  if (name === 'bash') return argString(input.command).split('\n')[0] ?? '';
+  if (name.startsWith('memory_')) return memoryArgumentSummary(name, input);
+  if (['grep', 'find', 'ls'].includes(name)) return [argString(input.pattern ?? input.query ?? input.name), argString(input.path ?? input.cwd)].filter(Boolean).join(' · ');
+  return jsonPreview(args);
+}
+
 function renderToolItem(item: SubagentToolItem, context: SubagentThreadRenderContext, width: number): string[] {
   const toolDefinition = context.getToolDefinition?.(item.name) ?? builtInToolDefinition(item.name, context.cwd);
   const componentCtor = loadPiComponents()?.ToolExecutionComponent;
@@ -325,7 +368,7 @@ function renderToolItem(item: SubagentToolItem, context: SubagentThreadRenderCon
     debugLog(context, 'tool_component_unavailable_fallback', { name: item.name, status: item.status, hasComponentCtor: typeof componentCtor === 'function', hasToolDefinition: Boolean(toolDefinition), hasTui: Boolean(context.tui) });
   }
   const result = item.result ? payloadText(item.result) : '';
-  const args = jsonPreview(item.arguments);
+  const args = toolArgumentSummary(item.name, item.arguments);
   const state = item.result?.isError ? 'failed' : item.status;
   const fallback = [`${item.name} ${state}${args ? ` · ${args}` : ''}`, ...(result ? [result] : [])];
   debugLog(context, 'tool_fallback_rendered', { name: item.name, status: item.status, fallbackPreview: fallback.join('\n').slice(0, 1000) });

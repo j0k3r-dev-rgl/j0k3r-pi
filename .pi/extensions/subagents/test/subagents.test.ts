@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import extension from '../index.js';
+import extension, { resolveRegisteredToolDefinition } from '../index.js';
 import { loadSubagents, parseFrontmatter, readSubagentsConfig, resetGlobalSubagentModelProfileField, saveGlobalSubagentModelProfile } from '../src/config.js';
 import { resolveEffectiveSubagentProfile } from '../src/profile-resolver.js';
 import { buildPrompt, ThreadSnapshotBuilder } from '../src/runner.js';
@@ -143,6 +143,58 @@ describe('subagents extension', () => {
     expect(snapshot?.items[1]).toMatchObject({ type: 'user', label: 'context', text: 'orchestrator context body' });
   });
 
+  it('resolves registered extension tool definitions from pi/context arrays and maps', () => {
+    const memoryTool = { name: 'memory_search', label: 'Memory Search' };
+    const readTool = { name: 'read', label: 'Read' };
+
+    expect(resolveRegisteredToolDefinition({}, { tools: [memoryTool] }, 'memory_search')).toBe(memoryTool);
+    expect(resolveRegisteredToolDefinition({ tools: new Map([['memory_search', memoryTool]]) }, {}, 'memory_search')).toBe(memoryTool);
+    expect(resolveRegisteredToolDefinition({ pi: { getToolDefinition: (name: string) => name === 'read' ? readTool : undefined } }, { tools: [memoryTool] }, 'read')).toBe(readTool);
+  });
+
+  it('renders extension tool rows with Pi ToolExecutionComponent when the context supplies a tool definition', () => {
+    resetPiComponentCacheForTests();
+    const packageRoot = path.join(tmp, 'fake-pi-extension-tools-package');
+    fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({ name: '@earendil-works/pi-coding-agent', main: 'index.cjs' }));
+    fs.writeFileSync(path.join(packageRoot, 'dist', 'cli.js'), '#!/usr/bin/env node\n');
+    const shimDir = path.join(tmp, 'bin-extension-tools');
+    fs.mkdirSync(shimDir);
+    fs.symlinkSync(path.join(packageRoot, 'dist', 'cli.js'), path.join(shimDir, 'pi'));
+    fs.writeFileSync(path.join(packageRoot, 'index.cjs'), `
+      exports.ToolExecutionComponent = class {
+        constructor(name, id, args, options, definition) { this.name = name; this.args = args; this.definition = definition; }
+        markExecutionStarted() {}
+        setArgsComplete() {}
+        updateResult(result) { this.result = result; }
+        setExpanded() {}
+        render(width) { return ['pi-extension-tool:' + width + ':' + this.name + ':' + this.definition.label + ':' + this.args.query + ':' + this.result.content[0].text]; }
+      };
+    `);
+    const oldArgv1 = process.argv[1];
+    process.argv[1] = path.join(shimDir, 'pi');
+    try {
+      const lines = renderThreadBody({
+        version: 1,
+        source: 'events',
+        items: [{ type: 'tool', name: 'memory_search', status: 'completed', arguments: { query: 'thread view' }, result: { content: [{ type: 'text', text: 'Found 1 memory result(s).' }], isError: false } }],
+      } as any, {
+        cwd: tmp,
+        tui: { requestRender() {} },
+        getToolDefinition: (name: string) => name === 'memory_search' ? { name, label: 'Memory Search' } : undefined,
+        renderWidth: 180,
+        visibleWidth: (text: string) => text.length,
+        truncateToWidth: (text: string, width: number) => text.length > width ? text.slice(0, width) : text,
+      } as any);
+
+      expect(lines.join('\n')).toContain('pi-extension-tool:180:memory_search:Memory Search:thread view:Found 1 memory result(s).');
+      expect(lines.join('\n')).not.toContain('memory_search completed ·');
+    } finally {
+      process.argv[1] = oldArgv1;
+      resetPiComponentCacheForTests();
+    }
+  });
+
   it('renders built-in tool rows with Pi ToolExecutionComponent from exported per-tool definitions', () => {
     resetPiComponentCacheForTests();
     const packageRoot = path.join(tmp, 'fake-pi-tools-package');
@@ -206,6 +258,72 @@ describe('subagents extension', () => {
     expect(text).toContain('AGENTS.md');
     expect(text).toContain('# Agent Guide');
     expect(text).not.toContain('tool read requested');
+  });
+
+  it('filters assistant toolCall parts before using Pi assistant components to avoid duplicate raw JSON', () => {
+    resetPiComponentCacheForTests();
+    const packageRoot = path.join(tmp, 'fake-pi-toolcall-filter-package');
+    fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({ name: '@earendil-works/pi-coding-agent', main: 'index.cjs' }));
+    fs.writeFileSync(path.join(packageRoot, 'dist', 'cli.js'), '#!/usr/bin/env node\n');
+    const shimDir = path.join(tmp, 'bin-toolcall-filter');
+    fs.mkdirSync(shimDir);
+    fs.symlinkSync(path.join(packageRoot, 'dist', 'cli.js'), path.join(shimDir, 'pi'));
+    fs.writeFileSync(path.join(packageRoot, 'index.cjs'), `
+      exports.getMarkdownTheme = () => ({});
+      exports.createReadToolDefinition = () => ({ name: 'read' });
+      exports.AssistantMessageComponent = class {
+        constructor(message) { this.message = message; }
+        render() { return this.message.content.map((part) => part.type === 'toolCall' ? 'raw-tool-json:' + JSON.stringify(part.arguments) : 'assistant-text:' + part.text); }
+      };
+      exports.ToolExecutionComponent = class {
+        constructor(name, id, args) { this.name = name; this.args = args; }
+        markExecutionStarted() {}
+        setArgsComplete() {}
+        updateResult(result) { this.result = result; }
+        setExpanded() {}
+        render() { return ['pi-tool-row:' + this.name + ':' + this.args.path]; }
+      };
+    `);
+    const oldArgv1 = process.argv[1];
+    process.argv[1] = path.join(shimDir, 'pi');
+    try {
+      const text = renderText({
+        version: 1,
+        source: 'mixed',
+        items: [
+          { type: 'assistant', message: { role: 'assistant', content: [
+            { type: 'toolCall', id: 'call-read', name: 'read', arguments: { path: 'AGENTS.md' } },
+            { type: 'text', text: 'final answer' },
+          ] } },
+          { type: 'tool', tool_call_id: 'call-read', name: 'read', status: 'completed', arguments: { path: 'AGENTS.md' }, result: { content: [{ type: 'text', text: '# Agent Guide' }], isError: false } },
+        ],
+      } as any, { tui: { requestRender() {} } });
+
+      expect(text).toContain('assistant-text:final answer');
+      expect(text).toContain('pi-tool-row:read:AGENTS.md');
+      expect(text).not.toContain('raw-tool-json');
+      expect(text).not.toContain('{"path":"AGENTS.md"}');
+    } finally {
+      process.argv[1] = oldArgv1;
+      resetPiComponentCacheForTests();
+    }
+  });
+
+  it('renders memory tool fallback as a concise tool call instead of raw JSON arguments', () => {
+    const text = renderText({
+      version: 1,
+      source: 'events',
+      items: [
+        { type: 'tool', name: 'memory_search', status: 'completed', arguments: { query: 'subagent memory tools render', limit: 3, scopes: ['project', 'general', 'global'], compact: true }, result: { content: [{ type: 'text', text: 'Found 3 memory result(s).' }], isError: false } },
+      ],
+    } as any);
+
+    expect(text).toContain('memory_search completed');
+    expect(text).toContain('subagent memory tools render');
+    expect(text).toContain('Found 3 memory result(s).');
+    expect(text).not.toContain('{"query"');
+    expect(text).not.toContain('"scopes"');
   });
 
   it('renders structured thread body rows with safe generic fallbacks', () => {

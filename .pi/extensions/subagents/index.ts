@@ -42,6 +42,23 @@ function setMouseTracking(tui: any, enabled: boolean): void {
   write(enabled ? '\u001b[?1000h\u001b[?1006h' : '\u001b[?1006l\u001b[?1000l');
 }
 
+function toolFromRegistry(registry: any, name: string): unknown {
+  if (!registry) return undefined;
+  if (typeof registry.get === 'function') return registry.get(name);
+  if (Array.isArray(registry)) return registry.find((tool) => tool?.name === name);
+  if (typeof registry === 'object') return registry[name];
+  return undefined;
+}
+
+export function resolveRegisteredToolDefinition(ctx: any, pi: any, name: string): unknown {
+  return ctx?.pi?.getToolDefinition?.(name)
+    ?? pi?.getToolDefinition?.(name)
+    ?? ctx?.getToolDefinition?.(name)
+    ?? toolFromRegistry(ctx?.pi?.tools, name)
+    ?? toolFromRegistry(pi?.tools, name)
+    ?? toolFromRegistry(ctx?.tools, name);
+}
+
 function completionMessage(task: any): string {
   const result = task.result ?? task.error ?? task.output_preview ?? '(no result captured)';
   return [
@@ -100,7 +117,7 @@ export default function subagentsExtension(pi: any): void {
             cwd,
             visibleWidth,
             truncateToWidth,
-            getToolDefinition: (name: string) => ctx?.pi?.getToolDefinition?.(name) ?? ctx?.pi?.tools?.get?.(name) ?? ctx?.tools?.get?.(name),
+            getToolDefinition: (name: string) => resolveRegisteredToolDefinition(ctx, pi, name),
             getMessageRenderer: (customType: string) => ctx?.pi?.getMessageRenderer?.(customType) ?? ctx?.pi?.customMessageRenderers?.get?.(customType) ?? ctx?.customMessageRenderers?.get?.(customType),
             showImages: ctx?.showImages,
             imageWidthCells: ctx?.imageWidthCells,
