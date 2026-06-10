@@ -172,6 +172,300 @@ export function buildNoChangesModelProfilesMessage(agentDir?: string): string {
   return `No subagent model profile changes to save. Nothing written to ${globalSubagentsConfigPath(agentDir)}.`;
 }
 
+export type SubagentModelProfilesModalResult =
+  | { action: 'save'; dirtyProfiles: SubagentModelProfiles }
+  | { action: 'cancel' };
+
+type ModalView = 'main' | 'model-provider' | 'model-model' | 'effort';
+
+type ModalComponent = {
+  render(width: number): string[];
+  handleInput(data: string): void;
+  invalidate(): void;
+};
+
+type ModalInput = {
+  rows: ModelProfileRow[];
+  availableModels?: any[];
+  tui?: { requestRender?: () => void };
+  done: (result: SubagentModelProfilesModalResult) => void;
+};
+
+function stripTerminalEscapes(text: string): string {
+  return text.replace(/\u001b\[[0-9;]*m/g, '').replace(/\u001b\][^\u001b]*(?:\u001b\\|\u0007)/g, '');
+}
+
+function visibleWidth(text: string): number {
+  return stripTerminalEscapes(text).length;
+}
+
+function truncateToVisibleWidth(text: string, width: number): string {
+  if (width <= 0) return '';
+  if (visibleWidth(text) <= width) return text;
+  if (width === 1) return '…';
+  let output = '';
+  let visible = 0;
+  for (let index = 0; index < text.length;) {
+    if (text[index] === '\u001b') {
+      const csi = text.slice(index).match(/^\u001b\[[0-9;]*m/);
+      if (csi) {
+        output += csi[0];
+        index += csi[0].length;
+        continue;
+      }
+      const osc = text.slice(index).match(/^\u001b\][^\u001b]*(?:\u001b\\|\u0007)/);
+      if (osc) {
+        output += osc[0];
+        index += osc[0].length;
+        continue;
+      }
+    }
+    if (visible >= width - 1) break;
+    output += text[index];
+    visible += 1;
+    index += 1;
+  }
+  return `${output}…`;
+}
+
+function constrainLines(lines: string[], width: number): string[] {
+  const safeWidth = Math.max(1, Math.floor(width || 1));
+  return lines.map((line) => truncateToVisibleWidth(line, safeWidth));
+}
+
+function normalizeModalKey(data: string): string {
+  if (data === '\r' || data === '\n') return 'enter';
+  if (data === '\u001b') return 'esc';
+  if (data === '\u001b[A') return 'up';
+  if (data === '\u001b[B') return 'down';
+  if (data === '\u001b[H') return 'home';
+  if (data === '\u001b[F') return 'end';
+  return data;
+}
+
+function profileLabel(profile: SubagentModelProfile | undefined, field: 'model' | 'effort'): string | undefined {
+  if (!profile) return undefined;
+  if (field === 'model') return profile.model ? `${profile.model.provider}/${profile.model.id}` : undefined;
+  return profile.effort;
+}
+
+function cloneProfiles(profiles: SubagentModelProfiles): SubagentModelProfiles {
+  return Object.fromEntries(Object.entries(profiles).map(([name, profile]) => [name, cloneProfile(profile)]));
+}
+
+export function createSubagentModelProfilesModal(input: ModalInput): ModalComponent {
+  const rows = input.rows;
+  const availableByProvider = groupAvailableModelsByProvider(input.availableModels ?? []);
+  const providerNames = Object.keys(availableByProvider);
+  const baseProfiles: SubagentModelProfiles = Object.fromEntries(rows.map((row) => [row.name.trim().toLowerCase(), cloneProfile(row.explicitProfile)]));
+  let selectedIndex = 0;
+  let scrollOffset = 0;
+  let view: ModalView = 'main';
+  let pickerIndex = 0;
+  let selectedProvider: string | undefined;
+  let dirtyProfiles: SubagentModelProfiles = {};
+  let completed = false;
+
+  const selectedRow = () => rows[Math.min(Math.max(selectedIndex, 0), Math.max(0, rows.length - 1))];
+  const requestRender = () => input.tui?.requestRender?.();
+
+  const finish = (result: SubagentModelProfilesModalResult) => {
+    if (completed) return;
+    completed = true;
+    input.done(result.action === 'save' ? { action: 'save', dirtyProfiles: cloneProfiles(result.dirtyProfiles) } : result);
+  };
+
+  const clampSelection = () => {
+    selectedIndex = Math.min(Math.max(selectedIndex, 0), Math.max(0, rows.length - 1));
+    if (selectedIndex < scrollOffset) scrollOffset = selectedIndex;
+    const maxVisibleRows = 10;
+    if (selectedIndex >= scrollOffset + maxVisibleRows) scrollOffset = selectedIndex - maxVisibleRows + 1;
+    scrollOffset = Math.max(0, Math.min(scrollOffset, Math.max(0, rows.length - 1)));
+  };
+
+  const openPicker = (nextView: ModalView) => {
+    view = nextView;
+    pickerIndex = 0;
+    selectedProvider = undefined;
+  };
+
+  const applyEdit = (edit: { model?: ModelRef; effort?: ThinkingEffort; reset?: 'model' | 'effort' | 'row' }) => {
+    const row = selectedRow();
+    if (!row) return;
+    dirtyProfiles = applyDirtyProfileEdit({
+      baseProfiles,
+      dirtyProfiles,
+      edit: { agentName: row.name, ...edit },
+    });
+  };
+
+  const rowKey = (row: ModelProfileRow): string => row.name.trim().toLowerCase();
+  const hasDirtyProfileFor = (row: ModelProfileRow): boolean => Object.prototype.hasOwnProperty.call(dirtyProfiles, rowKey(row));
+  const dirtyProfileFor = (row: ModelProfileRow): SubagentModelProfile | undefined => dirtyProfiles[rowKey(row)];
+
+  const rowModelText = (row: ModelProfileRow): string => {
+    if (!hasDirtyProfileFor(row)) return row.modelLabel;
+    const dirty = dirtyProfileFor(row);
+    const label = profileLabel(dirty, 'model');
+    if (label) return `staged: ${label}`;
+    return baseProfiles[rowKey(row)]?.model ? `staged: inherit/reset model (was ${row.modelLabel})` : row.modelLabel;
+  };
+
+  const rowEffortText = (row: ModelProfileRow): string => {
+    if (!hasDirtyProfileFor(row)) return row.effortLabel;
+    const dirty = dirtyProfileFor(row);
+    const label = profileLabel(dirty, 'effort');
+    if (label) return `staged: ${label}`;
+    return baseProfiles[rowKey(row)]?.effort ? `staged: inherit/reset effort (was ${row.effortLabel})` : row.effortLabel;
+  };
+
+  const renderMain = (): string[] => {
+    const row = selectedRow();
+    const dirtyCount = Object.keys(dirtyProfiles).length;
+    const lines = [
+      `Subagent model profiles · dirty: ${dirtyCount}`,
+      'up/down j/k move · enter/m model · e effort · M reset model · E reset effort · r reset row · s save · esc/q cancel',
+    ];
+    const visibleRows = rows.slice(scrollOffset, scrollOffset + 10);
+    for (const [offset, item] of visibleRows.entries()) {
+      const index = scrollOffset + offset;
+      const marker = index === selectedIndex ? '›' : ' ';
+      const dirty = hasDirtyProfileFor(item) ? '*' : ' ';
+      lines.push(`${marker} ${dirty} ${item.name} · model ${rowModelText(item)} · effort ${rowEffortText(item)}`);
+    }
+    if (row) {
+      const dirty = dirtyProfileFor(row);
+      const isDirty = hasDirtyProfileFor(row);
+      lines.push('');
+      lines.push(`Selected: ${row.name}`);
+      lines.push(`type: ${row.kind}`);
+      lines.push(`description: ${row.description || '(none)'}`);
+      lines.push(`model: ${rowModelText(row)}`);
+      if (row.modelLabel.includes('(unavailable)')) lines.push('model availability: unavailable');
+      lines.push(`effort: ${rowEffortText(row)}`);
+      lines.push(`explicit model: ${isDirty ? (dirty?.model ? 'yes' : 'no') : (row.explicitProfile.model ? 'yes' : 'no')} · explicit effort: ${isDirty ? (dirty?.effort ? 'yes' : 'no') : (row.explicitProfile.effort ? 'yes' : 'no')}`);
+      lines.push('actions: enter/m model, e effort, M reset model, E reset effort, r reset row, s save all');
+    }
+    return lines;
+  };
+
+  const renderProviderPicker = (): string[] => {
+    const row = selectedRow();
+    const lines = [
+      `Select model provider for ${row?.name ?? '(none)'}`,
+      'enter choose · esc/q back',
+    ];
+    const items = ['inherit/reset model', ...providerNames];
+    if (!providerNames.length) lines.push('No available models found; reset remains available.');
+    for (const [index, item] of items.entries()) lines.push(`${index === pickerIndex ? '›' : ' '} ${item}`);
+    return lines;
+  };
+
+  const renderModelPicker = (): string[] => {
+    const row = selectedRow();
+    const models = selectedProvider ? (availableByProvider[selectedProvider] ?? []) : [];
+    const lines = [
+      `Select ${selectedProvider ?? ''} model for ${row?.name ?? '(none)'}`,
+      'enter choose · esc/q back',
+    ];
+    if (!models.length) lines.push('No models available for this provider.');
+    for (const [index, model] of models.entries()) lines.push(`${index === pickerIndex ? '›' : ' '} ${model.label} (${model.provider}/${model.id})`);
+    return lines;
+  };
+
+  const renderEffortPicker = (): string[] => {
+    const row = selectedRow();
+    const lines = [
+      `Select effort for ${row?.name ?? '(none)'}`,
+      'enter choose · esc/q back',
+    ];
+    const items = ['inherit/reset effort', ...EFFORT_CHOICES.filter((choice): choice is ThinkingEffort => choice !== 'inherit')];
+    for (const [index, item] of items.entries()) lines.push(`${index === pickerIndex ? '›' : ' '} ${item}`);
+    return lines;
+  };
+
+  const movePicker = (delta: number) => {
+    const length = view === 'model-provider'
+      ? 1 + providerNames.length
+      : view === 'model-model'
+        ? (selectedProvider ? (availableByProvider[selectedProvider] ?? []).length : 0)
+        : 1 + EFFORT_CHOICES.filter((choice) => choice !== 'inherit').length;
+    pickerIndex = Math.min(Math.max(pickerIndex + delta, 0), Math.max(0, length - 1));
+  };
+
+  const chooseProvider = () => {
+    if (pickerIndex === 0) {
+      applyEdit({ reset: 'model' });
+      view = 'main';
+      return;
+    }
+    selectedProvider = providerNames[pickerIndex - 1];
+    pickerIndex = 0;
+    view = 'model-model';
+  };
+
+  const chooseModel = () => {
+    const model = selectedProvider ? (availableByProvider[selectedProvider] ?? [])[pickerIndex] : undefined;
+    if (model) applyEdit({ model: { provider: model.provider, id: model.id } });
+    view = 'main';
+  };
+
+  const chooseEffort = () => {
+    const efforts = EFFORT_CHOICES.filter((choice): choice is ThinkingEffort => choice !== 'inherit');
+    if (pickerIndex === 0) applyEdit({ reset: 'effort' });
+    else {
+      const effort = efforts[pickerIndex - 1];
+      if (effort) applyEdit({ effort });
+    }
+    view = 'main';
+  };
+
+  clampSelection();
+
+  return {
+    render(width: number): string[] {
+      if (view === 'model-provider') return constrainLines(renderProviderPicker(), width);
+      if (view === 'model-model') return constrainLines(renderModelPicker(), width);
+      if (view === 'effort') return constrainLines(renderEffortPicker(), width);
+      return constrainLines(renderMain(), width);
+    },
+    handleInput(data: string): void {
+      if (completed) return;
+      const key = normalizeModalKey(data);
+      if (view !== 'main') {
+        if (key === 'esc' || key === 'q') view = 'main';
+        else if (key === 'up' || key === 'k') movePicker(-1);
+        else if (key === 'down' || key === 'j') movePicker(1);
+        else if (key === 'home' || key === 'g') pickerIndex = 0;
+        else if (key === 'end' || key === 'G') movePicker(Number.MAX_SAFE_INTEGER);
+        else if (key === 'enter') {
+          if (view === 'model-provider') chooseProvider();
+          else if (view === 'model-model') chooseModel();
+          else chooseEffort();
+        }
+        requestRender();
+        return;
+      }
+      if (key === 'up' || key === 'k') selectedIndex -= 1;
+      else if (key === 'down' || key === 'j') selectedIndex += 1;
+      else if (key === 'home' || key === 'g') selectedIndex = 0;
+      else if (key === 'end' || key === 'G') selectedIndex = rows.length - 1;
+      else if (key === 'enter' || key === 'm') openPicker('model-provider');
+      else if (key === 'e') openPicker('effort');
+      else if (key === 'M') applyEdit({ reset: 'model' });
+      else if (key === 'E') applyEdit({ reset: 'effort' });
+      else if (key === 'r') applyEdit({ reset: 'row' });
+      else if (key === 's') finish({ action: 'save', dirtyProfiles });
+      else if (key === 'esc' || key === 'q') finish({ action: 'cancel' });
+      clampSelection();
+      requestRender();
+    },
+    invalidate(): void {
+      requestRender();
+    },
+  };
+}
+
 export function buildNonTuiModelProfilesMessage(agentDir?: string): string {
   return `subagent model profiles require Pi TUI. Edit global profiles manually in ${globalSubagentsConfigPath(agentDir)} under the model_profiles key.`;
 }

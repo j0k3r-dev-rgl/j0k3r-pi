@@ -7,7 +7,7 @@ import extension from '../index.js';
 import { loadSubagents, parseFrontmatter, readSubagentsConfig, resetGlobalSubagentModelProfileField, saveGlobalSubagentModelProfile } from '../src/config.js';
 import { resolveEffectiveSubagentProfile } from '../src/profile-resolver.js';
 import { buildPrompt, ThreadSnapshotBuilder } from '../src/runner.js';
-import { applyDirtyProfileEdit, buildModelProfileRows, buildNoChangesModelProfilesMessage, buildNonTuiModelProfilesMessage, commitStagedModelProfiles, globalSubagentsConfigPath, groupAvailableModelsByProvider, runSubagentModelsCommand, stageModelProfileEdit } from '../src/model-profiles-ui.js';
+import { applyDirtyProfileEdit, buildModelProfileRows, buildNoChangesModelProfilesMessage, buildNonTuiModelProfilesMessage, commitStagedModelProfiles, createSubagentModelProfilesModal, globalSubagentsConfigPath, groupAvailableModelsByProvider, runSubagentModelsCommand, stageModelProfileEdit } from '../src/model-profiles-ui.js';
 import { SubagentHistoryStore } from '../src/history.js';
 import { SubagentManager } from '../src/manager.js';
 import { registerSubagentTools } from '../src/tools.js';
@@ -36,14 +36,18 @@ function statusSnapshot(text: string) {
   return { version: 1 as const, source: 'events' as const, items: [{ type: 'status' as const, text }] };
 }
 
+function stripAnsi(text: string): string {
+  return text.replace(/\u001b\[[0-9;]*m/g, '').replace(/\u001b\][^\u001b]*(?:\u001b\\|\u0007)/g, '');
+}
+
 function renderText(snapshot: unknown, overrides: Partial<Parameters<typeof renderThreadBody>[1]> = {}): string {
   const context = {
     cwd: tmp,
-    visibleWidth: (text: string) => text.replace(/\u001b\[[0-9;]*m/g, '').length,
+    visibleWidth: (text: string) => stripAnsi(text).length,
     truncateToWidth: (text: string, width: number) => text.length > width ? `${text.slice(0, Math.max(0, width - 1))}…` : text,
     ...overrides,
   };
-  return renderThreadBody(snapshot, context).join('\n').replace(/\u001b\[[0-9;]*m/g, '').replace(/\s+/g, ' ').trim();
+  return stripAnsi(renderThreadBody(snapshot, context).join('\n')).replace(/\s+/g, ' ').trim();
 }
 
 function withAgentDir<T>(agentDir: string, run: () => T): T {
@@ -1009,6 +1013,131 @@ describe('subagents extension', () => {
         'sdd-apply': { model: 'anthropic/claude-sonnet-4-5' },
       },
     });
+  });
+
+  it('modal navigates rows with arrow/vim/home/end keys and saves selected model identifiers', () => {
+    const completions: any[] = [];
+    let renderRequests = 0;
+    const modal = createSubagentModelProfilesModal({
+      rows: [
+        { name: 'analyst', description: 'analysis agent', kind: 'subagent', modelLabel: 'default: openai/gpt-5.2', effortLabel: 'default: medium', effectiveModel: { provider: 'openai', id: 'gpt-5.2' }, effectiveEffort: 'medium', explicitProfile: {} },
+        { name: 'reviewer', description: 'review agent', kind: 'subagent', modelLabel: 'orchestrator: openai/gpt-5.2-codex', effortLabel: 'orchestrator: low', effectiveModel: { provider: 'openai', id: 'gpt-5.2-codex' }, effectiveEffort: 'low', explicitProfile: {} },
+        { name: 'sdd-apply', description: 'apply phase', kind: 'sdd-phase', modelLabel: 'unresolved model', effortLabel: 'unresolved effort', explicitProfile: {} },
+      ],
+      availableModels: [
+        { provider: 'anthropic', id: 'claude-sonnet-4-5', label: 'Claude Sonnet' },
+        { provider: 'openai', id: 'gpt-5.2-codex', label: 'GPT Codex' },
+      ],
+      tui: { requestRender: () => { renderRequests += 1; } },
+      done: (result: any) => completions.push(result),
+    });
+
+    modal.handleInput('down');
+    expect(stripAnsi(modal.render(100).join('\n'))).toMatch(/›\s+reviewer/);
+    modal.handleInput('j');
+    expect(stripAnsi(modal.render(100).join('\n'))).toMatch(/›\s+sdd-apply/);
+    modal.handleInput('up');
+    expect(stripAnsi(modal.render(100).join('\n'))).toMatch(/›\s+reviewer/);
+    modal.handleInput('k');
+    expect(stripAnsi(modal.render(100).join('\n'))).toMatch(/›\s+analyst/);
+    modal.handleInput('end');
+    expect(stripAnsi(modal.render(100).join('\n'))).toMatch(/›\s+sdd-apply/);
+    modal.handleInput('home');
+    expect(stripAnsi(modal.render(100).join('\n'))).toMatch(/›\s+analyst/);
+    modal.handleInput('G');
+    expect(stripAnsi(modal.render(100).join('\n'))).toMatch(/›\s+sdd-apply/);
+    modal.handleInput('g');
+    expect(stripAnsi(modal.render(100).join('\n'))).toMatch(/›\s+analyst/);
+
+    modal.handleInput('enter');
+    expect(stripAnsi(modal.render(100).join('\n'))).toContain('Select model provider for analyst');
+    modal.handleInput('down');
+    modal.handleInput('enter');
+    expect(stripAnsi(modal.render(100).join('\n'))).toContain('Select anthropic model for analyst');
+    modal.handleInput('enter');
+    modal.handleInput('s');
+
+    expect(completions).toEqual([{ action: 'save', dirtyProfiles: { analyst: { model: { provider: 'anthropic', id: 'claude-sonnet-4-5' } } } }]);
+    expect(renderRequests).toBeGreaterThan(0);
+  });
+
+  it('modal handles main reset hotkeys, effort picker values, nested back, save, and cancel', () => {
+    const rows = [
+      { name: 'analyst', description: 'analysis agent', kind: 'subagent' as const, modelLabel: 'profile: openai/gpt-5.2', effortLabel: 'profile: medium', effectiveModel: { provider: 'openai', id: 'gpt-5.2' }, effectiveEffort: 'medium' as const, explicitProfile: { model: { provider: 'openai', id: 'gpt-5.2' }, effort: 'medium' as const } },
+      { name: 'reviewer', description: 'review agent', kind: 'subagent' as const, modelLabel: 'orchestrator: openai/gpt-5.2-codex', effortLabel: 'orchestrator: low', effectiveModel: { provider: 'openai', id: 'gpt-5.2-codex' }, effectiveEffort: 'low' as const, explicitProfile: {} },
+    ];
+    const saved: any[] = [];
+    const modal = createSubagentModelProfilesModal({ rows, availableModels: [{ provider: 'openai', id: 'gpt-5.2-codex', label: 'GPT Codex' }], done: (result: any) => saved.push(result) });
+
+    modal.handleInput('e');
+    const effortPicker = stripAnsi(modal.render(100).join('\n'));
+    for (const label of ['inherit/reset effort', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh']) expect(effortPicker).toContain(label);
+    for (let i = 0; i < 5; i += 1) modal.handleInput('down');
+    modal.handleInput('enter');
+    modal.handleInput('M');
+    modal.handleInput('E');
+    modal.handleInput('r');
+    modal.handleInput('down');
+    modal.handleInput('m');
+    modal.handleInput('q');
+    modal.handleInput('s');
+
+    expect(saved).toEqual([{ action: 'save', dirtyProfiles: { analyst: {} } }]);
+
+    const cancelled: any[] = [];
+    const cancelModal = createSubagentModelProfilesModal({ rows, availableModels: [], done: (result: any) => cancelled.push(result) });
+    cancelModal.handleInput('q');
+    expect(cancelled).toEqual([{ action: 'cancel' }]);
+
+    const escaped: any[] = [];
+    const escapeModal = createSubagentModelProfilesModal({ rows, availableModels: [], done: (result: any) => escaped.push(result) });
+    escapeModal.handleInput('esc');
+    expect(escaped).toEqual([{ action: 'cancel' }]);
+  });
+
+  it('modal preserves unrelated dirty rows when nested pickers are cancelled', () => {
+    const results: any[] = [];
+    const modal = createSubagentModelProfilesModal({
+      rows: [
+        { name: 'analyst', description: 'analysis agent', kind: 'subagent', modelLabel: 'default: openai/gpt-5.2', effortLabel: 'default: medium', effectiveModel: { provider: 'openai', id: 'gpt-5.2' }, effectiveEffort: 'medium', explicitProfile: {} },
+        { name: 'reviewer', description: 'review agent', kind: 'subagent', modelLabel: 'orchestrator: openai/gpt-5.2-codex', effortLabel: 'orchestrator: low', effectiveModel: { provider: 'openai', id: 'gpt-5.2-codex' }, effectiveEffort: 'low', explicitProfile: {} },
+      ],
+      availableModels: [{ provider: 'openai', id: 'gpt-5.2-codex', label: 'GPT Codex' }],
+      done: (result: any) => results.push(result),
+    });
+
+    modal.handleInput('e');
+    for (let i = 0; i < 6; i += 1) modal.handleInput('down');
+    modal.handleInput('enter');
+    modal.handleInput('down');
+    modal.handleInput('m');
+    modal.handleInput('esc');
+    modal.handleInput('s');
+
+    expect(results).toEqual([{ action: 'save', dirtyProfiles: { analyst: { effort: 'xhigh' } } }]);
+  });
+
+  it('modal keeps unavailable model text discoverable and constrains rendered width', () => {
+    const modal = createSubagentModelProfilesModal({
+      rows: [{
+        name: 'analyst',
+        description: `analysis agent with ${'very '.repeat(20)}long description`,
+        kind: 'subagent',
+        modelLabel: `profile: missing/${'model-'.repeat(20)} (unavailable)`,
+        effortLabel: 'profile: high',
+        effectiveModel: { provider: 'missing', id: `${'model-'.repeat(20)}legacy` },
+        effectiveEffort: 'high',
+        explicitProfile: { model: { provider: 'missing', id: `${'model-'.repeat(20)}legacy` }, effort: 'high' },
+      }],
+      availableModels: [],
+      done: () => undefined,
+    });
+
+    for (const width of [42, 120]) {
+      const lines = modal.render(width).map(stripAnsi);
+      expect(lines.every((line) => line.length <= width)).toBe(true);
+    }
+    expect(stripAnsi(modal.render(120).join('\n'))).toContain('unavailable');
   });
 
   it('returns non-TUI fallback text with the global subagents config path', async () => {
