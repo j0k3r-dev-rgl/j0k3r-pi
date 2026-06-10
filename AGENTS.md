@@ -27,6 +27,7 @@ Rules:
 - If there are uncommitted changes, ask the user to commit, stash, discard, or explicitly approve continuing with a dirty worktree.
 - Do not create PRD/OpenSpec artifacts or delegate SDD subagents until the clean-worktree decision is resolved.
 - This gate does not apply to tiny inline answers or low-risk inspections that do not create artifacts or change code.
+- A clean-worktree gate is not permission to create commits later; commit permission is governed by the Git commit policy below.
 
 ### Pre-SDD mode gate and discovery
 
@@ -162,6 +163,18 @@ Continue rules:
    - verification passed and closure requested → `sdd-archive`.
 
 When uncertain between simple TDD and full SDD, prefer the lighter workflow unless the risk/artifact value is clear. Ask at most one concise question if the choice affects persistence, scope, or implementation approval.
+
+## Git commit and push policy
+
+The assistant must never create commits, tags, branches, rebases, or pushes unless the user explicitly asks for that Git operation in the current conversation.
+
+Rules:
+- Do not assume that finishing code, passing automated tests, completing an SDD phase, finishing a slice/batch, or updating artifacts means the work is ready to commit.
+- Do not create checkpoint commits automatically, even during `auto-chain`, SDD apply slices, or multi-batch work.
+- Do not push automatically after committing unless the user explicitly asks to push.
+- If a workflow would benefit from a commit, recommend it and ask first; wait for an explicit affirmative instruction before running Git write operations.
+- Manual validation and user acceptance are separate from automated tests. Passing tests is not approval to commit.
+- When the user does ask for a commit, summarize the pending changes and run `git status --short` first unless already done immediately beforehand.
 
 ## Strict TDD
 

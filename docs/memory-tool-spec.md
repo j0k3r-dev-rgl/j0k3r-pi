@@ -1117,7 +1117,7 @@ Uso recomendado:
 - `before_task`: preferencias, restricciones, decisiones activas y comandos relevantes.
 - `before_edit`: arquitectura, convenciones y archivos/módulos relacionados.
 - `before_test`: comandos de test, preferencias TDD y convenciones de testing.
-- `before_commit`: convenciones de commits, checks y todos activos.
+- `before_commit`: convenciones de commits, checks y todos activos, solo cuando el usuario pidió explícitamente preparar o realizar un commit. Este contexto no autoriza commits por sí mismo.
 - `review`: decisiones, restricciones, bugs conocidos y criterios de calidad.
 - `session_end`: guía para resumir, extraer aprendizajes y decisiones.
 

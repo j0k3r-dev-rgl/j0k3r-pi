@@ -48,11 +48,11 @@ Use the narrowest recall moment only when it would add missing or fresher persis
 - start of a substantial task with insufficient context: `memory_recall(context="before_task", query="...")`
 - before editing only when architecture/conventions/constraints are unknown or stale: `memory_recall(context="before_edit", query="...")`
 - before tests/build/lint only when commands or validation conventions are unknown: `memory_recall(context="before_test", query="...")`
-- before commit/checkpoint only when commit/check policy or open todos are uncertain: `memory_recall(context="before_commit", query="...")`
+- before a user-requested commit only when commit/check policy or open todos are uncertain: `memory_recall(context="before_commit", query="...")`; this recall context is not permission to commit
 - review/risk check when prior decisions, bugs, or constraints may affect judgment: `memory_recall(context="review", query="...")`
 - session end when deciding whether to save durable outcomes: `memory_recall(context="session_end", query="...")`
 
-Aliases accepted by the tool: `task`, `edit`, `test`, `commit`, `end`.
+Aliases accepted by the tool: `task`, `edit`, `test`, `commit`, `end`. The `commit` alias means memory context for a commit the user explicitly requested; it must not trigger a commit by itself.
 
 If compact recall returns candidate IDs that seem important, call `memory_get` only for those IDs. Avoid repeated recall calls for the same task phase unless the objective changes or earlier context is clearly insufficient.
 
@@ -173,7 +173,7 @@ Use the same dry-run-first rule for imports with possible conflicts: inspect the
 
 ## Session-end policy
 
-At the end of meaningful discussion or substantial work, run a decision checkpoint and summarize:
+At the end of meaningful discussion or substantial work, run a decision checkpoint and summarize. This is a conversational/memory checkpoint, not a Git commit:
 
 - what changed;
 - confirmed decisions made;

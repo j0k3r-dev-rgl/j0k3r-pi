@@ -12,7 +12,7 @@ Use this skill when starting, continuing, validating, or closing PRD/SDD/OpenSpe
 - Keep the user in control.
 - Choose the lightest safe workflow.
 - Do not create SDD/OpenSpec artifacts or launch SDD subagents for a new flow until the SDD mode gate is resolved.
-- Use discovery for isolated research before committing to formal SDD.
+- Use discovery for isolated research before deciding to start formal SDD.
 - Use SDD subagents as phase executors only; the main agent remains the orchestrator.
 - Strict TDD still applies to implementation work.
 - Prefer `hybrid` artifact storage for named SDD features unless the user requests otherwise.
@@ -40,12 +40,14 @@ Do not load this skill for:
 Before creating PRD/OpenSpec artifacts or launching any SDD subagent:
 
 1. Run `git status --short`.
-2. If the worktree has uncommitted changes, ask the user to commit, stash, discard, or explicitly approve continuing dirty.
+2. If the worktree has uncommitted changes, ask the user how they want to resolve it: they may commit, stash, discard, or explicitly approve continuing dirty.
 3. Resolve the SDD execution mode.
 4. Resolve the change slug and artifact store if needed.
 5. Confirm implementation approval separately from planning approval.
 
 The git gate does not apply to tiny inline answers or low-risk inspections that do not create artifacts or change code.
+
+This preflight is not permission to run Git write operations. Never create commits, checkpoint commits, tags, branches, rebases, or pushes unless the user explicitly asks for that exact Git operation in the current conversation. Completing an SDD phase/slice/batch, passing tests, or updating artifacts is not approval to commit.
 
 ## Execution modes
 
@@ -277,7 +279,7 @@ Always separate these approvals:
 - archive/closure approval.
 
 In `interactive` mode, ask before every phase and artifact write/update.
-In `normal` mode, checkpoint between major phases.
+In `normal` mode, provide concise status checkpoints between major phases. A checkpoint is a conversational progress update, not a Git commit.
 In `defaults` mode, ask only for blockers or material decisions.
 
 ## Subagent orchestration checklist
