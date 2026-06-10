@@ -7,7 +7,7 @@ import extension from '../index.js';
 import { loadSubagents, parseFrontmatter, readSubagentsConfig, resetGlobalSubagentModelProfileField, saveGlobalSubagentModelProfile } from '../src/config.js';
 import { resolveEffectiveSubagentProfile } from '../src/profile-resolver.js';
 import { buildPrompt, ThreadSnapshotBuilder } from '../src/runner.js';
-import { buildModelProfileRows, buildNonTuiModelProfilesMessage, commitStagedModelProfiles, groupAvailableModelsByProvider, runSubagentModelsCommand, stageModelProfileEdit } from '../src/model-profiles-ui.js';
+import { applyDirtyProfileEdit, buildModelProfileRows, buildNoChangesModelProfilesMessage, buildNonTuiModelProfilesMessage, commitStagedModelProfiles, globalSubagentsConfigPath, groupAvailableModelsByProvider, runSubagentModelsCommand, stageModelProfileEdit } from '../src/model-profiles-ui.js';
 import { SubagentHistoryStore } from '../src/history.js';
 import { SubagentManager } from '../src/manager.js';
 import { registerSubagentTools } from '../src/tools.js';
@@ -911,6 +911,70 @@ describe('subagents extension', () => {
     expect(staged.analyst).toEqual({});
     staged = stageModelProfileEdit(staged, { agentName: 'reviewer', reset: 'row' });
     expect(staged.reviewer).toEqual({});
+  });
+
+  it('tracks only dirty model profile rows while preserving reset semantics', () => {
+    const baseProfiles: SubagentModelProfiles = {
+      analyst: { model: { provider: 'openai', id: 'gpt-5.2' }, effort: 'high' },
+      reviewer: {},
+      'sdd-apply': { effort: 'medium' },
+    };
+
+    let dirty: SubagentModelProfiles = {};
+    dirty = applyDirtyProfileEdit({
+      baseProfiles,
+      dirtyProfiles: dirty,
+      edit: { agentName: 'analyst', effort: 'low' },
+    });
+    expect(dirty).toEqual({
+      analyst: { model: { provider: 'openai', id: 'gpt-5.2' }, effort: 'low' },
+    });
+    expect(dirty).not.toHaveProperty('reviewer');
+
+    dirty = applyDirtyProfileEdit({
+      baseProfiles,
+      dirtyProfiles: dirty,
+      edit: { agentName: 'reviewer', model: { provider: 'anthropic', id: 'claude-sonnet-4-5' } },
+    });
+    expect(dirty).toEqual({
+      analyst: { model: { provider: 'openai', id: 'gpt-5.2' }, effort: 'low' },
+      reviewer: { model: { provider: 'anthropic', id: 'claude-sonnet-4-5' } },
+    });
+
+    dirty = applyDirtyProfileEdit({
+      baseProfiles,
+      dirtyProfiles: dirty,
+      edit: { agentName: 'analyst', effort: 'high' },
+    });
+    expect(dirty).toEqual({
+      reviewer: { model: { provider: 'anthropic', id: 'claude-sonnet-4-5' } },
+    });
+
+    dirty = applyDirtyProfileEdit({
+      baseProfiles,
+      dirtyProfiles: dirty,
+      edit: { agentName: 'sdd-apply', reset: 'row' },
+    });
+    expect(dirty).toEqual({
+      reviewer: { model: { provider: 'anthropic', id: 'claude-sonnet-4-5' } },
+      'sdd-apply': {},
+    });
+    expect(dirty).not.toHaveProperty('sdd-spec');
+  });
+
+  it('returns an exact no-op Save All message without writing model profiles', () => {
+    const agentDir = path.join(tmp, 'global-agent');
+    fs.mkdirSync(agentDir, { recursive: true });
+    const existingConfig = {
+      default_model: 'openai/gpt-5.2',
+      model_profiles: { analyst: { effort: 'high' } },
+    };
+    fs.writeFileSync(path.join(agentDir, 'subagents.json'), JSON.stringify(existingConfig));
+
+    const message = buildNoChangesModelProfilesMessage(agentDir);
+
+    expect(message).toBe(`No subagent model profile changes to save. Nothing written to ${globalSubagentsConfigPath(agentDir)}.`);
+    expect(JSON.parse(fs.readFileSync(path.join(agentDir, 'subagents.json'), 'utf8'))).toEqual(existingConfig);
   });
 
   it('commits staged model profile saves and leaves config unchanged on cancel', () => {

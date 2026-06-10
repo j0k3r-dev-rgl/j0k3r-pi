@@ -122,6 +122,40 @@ export function stageModelProfileEdit(
   return next;
 }
 
+function cloneProfile(profile: SubagentModelProfile = {}): SubagentModelProfile {
+  return {
+    ...(profile.model ? { model: { ...profile.model } } : {}),
+    ...(profile.effort ? { effort: profile.effort } : {}),
+  };
+}
+
+function profilesEqual(a: SubagentModelProfile = {}, b: SubagentModelProfile = {}): boolean {
+  return a.model?.provider === b.model?.provider
+    && a.model?.id === b.model?.id
+    && a.effort === b.effort;
+}
+
+export function applyDirtyProfileEdit(input: {
+  baseProfiles: SubagentModelProfiles;
+  dirtyProfiles: SubagentModelProfiles;
+  edit: { agentName: string; model?: ModelRef; effort?: ThinkingEffort; reset?: 'model' | 'effort' | 'row' };
+}): SubagentModelProfiles {
+  const agentName = input.edit.agentName.trim().toLowerCase();
+  const baseProfile = cloneProfile(input.baseProfiles[agentName]);
+  const seededProfiles: SubagentModelProfiles = {
+    [agentName]: cloneProfile(input.dirtyProfiles[agentName] ?? baseProfile),
+  };
+  const stagedProfile = cloneProfile(stageModelProfileEdit(seededProfiles, input.edit)[agentName]);
+  const nextDirtyProfiles: SubagentModelProfiles = Object.fromEntries(
+    Object.entries(input.dirtyProfiles)
+      .filter(([name]) => name !== agentName)
+      .map(([name, profile]) => [name, cloneProfile(profile)]),
+  );
+
+  if (!profilesEqual(stagedProfile, baseProfile)) nextDirtyProfiles[agentName] = stagedProfile;
+  return nextDirtyProfiles;
+}
+
 export function commitStagedModelProfiles(input: { stagedProfiles: SubagentModelProfiles; save: boolean; agentDir?: string }): string {
   if (!input.save) return `Cancelled. No changes written to ${globalSubagentsConfigPath(input.agentDir)}.`;
   for (const [agentName, profile] of Object.entries(input.stagedProfiles)) {
@@ -132,6 +166,10 @@ export function commitStagedModelProfiles(input: { stagedProfiles: SubagentModel
     }
   }
   return `Saved subagent model profiles to ${globalSubagentsConfigPath(input.agentDir)}.`;
+}
+
+export function buildNoChangesModelProfilesMessage(agentDir?: string): string {
+  return `No subagent model profile changes to save. Nothing written to ${globalSubagentsConfigPath(agentDir)}.`;
 }
 
 export function buildNonTuiModelProfilesMessage(agentDir?: string): string {
