@@ -1117,6 +1117,34 @@ describe('subagents extension', () => {
     expect(results).toEqual([{ action: 'save', dirtyProfiles: { analyst: { effort: 'xhigh' } } }]);
   });
 
+  it('modal renders a clearer framed master/detail layout with destination and dirty status', () => {
+    const modal = createSubagentModelProfilesModal({
+      rows: [
+        { name: 'analyst', description: 'analysis agent', kind: 'subagent', modelLabel: 'default: openai/gpt-5.2', effortLabel: 'default: medium', effectiveModel: { provider: 'openai', id: 'gpt-5.2' }, effectiveEffort: 'medium', explicitProfile: {} },
+        { name: 'reviewer', description: 'review agent', kind: 'subagent', modelLabel: 'orchestrator: openai/gpt-5.2-codex', effortLabel: 'orchestrator: low', effectiveModel: { provider: 'openai', id: 'gpt-5.2-codex' }, effectiveEffort: 'low', explicitProfile: {} },
+      ],
+      availableModels: [{ provider: 'openai', id: 'gpt-5.2-codex', label: 'GPT Codex' }],
+      done: () => undefined,
+    });
+
+    const initial = stripAnsi(modal.render(120).join('\n'));
+    expect(initial).toContain('╭');
+    expect(initial).toContain('Subagent model profiles');
+    expect(initial).toContain('save target: global');
+    expect(initial).toContain('pending: none');
+    expect(initial).toContain('ROWS');
+    expect(initial).toContain('DETAIL');
+    expect(initial).toContain('selected: analyst');
+    expect(initial).toContain('enter/m: choose model');
+
+    modal.handleInput('e');
+    for (let i = 0; i < 5; i += 1) modal.handleInput('down');
+    modal.handleInput('enter');
+    const dirty = stripAnsi(modal.render(120).join('\n'));
+    expect(dirty).toContain('pending: 1 change');
+    expect(dirty).toContain('* analyst');
+  });
+
   it('modal keeps unavailable model text discoverable and constrains rendered width', () => {
     const modal = createSubagentModelProfilesModal({
       rows: [{
