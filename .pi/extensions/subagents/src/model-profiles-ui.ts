@@ -492,13 +492,41 @@ async function chooseSave(ctx: any, stagedProfiles: SubagentModelProfiles, agent
 
 export async function runSubagentModelsCommand(ctx: any = {}): Promise<string> {
   const agentDir = ctx?.agentDir;
-  if (!ctx?.ui?.select) return buildNonTuiModelProfilesMessage(agentDir);
+  const hasCustomUi = typeof ctx?.ui?.custom === 'function';
+  const hasSelectUi = typeof ctx?.ui?.select === 'function';
+  if (!hasCustomUi && !hasSelectUi) return buildNonTuiModelProfilesMessage(agentDir);
 
   const cwd = ctx.cwd ?? process.cwd();
   const definitions = loadSubagents(cwd);
   const config = readSubagentsConfig(cwd);
   const availableModels = await getAvailableModels(ctx);
   const rows = buildModelProfileRows({ definitions, config, ctx, availableModels });
+
+  if (hasCustomUi) {
+    const result = await ctx.ui.custom(
+      (tui: any, _theme: any, _keybindings: any, done: (result: SubagentModelProfilesModalResult) => void) => createSubagentModelProfilesModal({
+        rows,
+        availableModels,
+        tui,
+        done,
+      }),
+      { overlay: true, overlayOptions: { anchor: 'center', width: '90%', maxHeight: '85%', minWidth: 74 } },
+    ) as SubagentModelProfilesModalResult | undefined;
+
+    if (result?.action === 'save') {
+      const hasDirtyRows = Object.keys(result.dirtyProfiles).length > 0;
+      const message = hasDirtyRows
+        ? commitStagedModelProfiles({ stagedProfiles: result.dirtyProfiles, save: true, agentDir })
+        : buildNoChangesModelProfilesMessage(agentDir);
+      ctx.ui.notify?.(message, 'info');
+      return message;
+    }
+
+    const message = commitStagedModelProfiles({ stagedProfiles: {}, save: false, agentDir });
+    ctx.ui.notify?.(message, 'warning');
+    return message;
+  }
+
   const rowChoices = rows.map(rowChoice);
   const selectedRowChoice = await ctx.ui.select('Select subagent or SDD phase to configure:', [...rowChoices, 'Cancel']);
   if (!selectedRowChoice || selectedRowChoice === 'Cancel') return commitStagedModelProfiles({ stagedProfiles: {}, save: false, agentDir });

@@ -1148,6 +1148,152 @@ describe('subagents extension', () => {
     await expect(runSubagentModelsCommand({ cwd: tmp })).resolves.toContain(path.join(os.homedir(), '.pi', 'agent', 'subagents.json'));
   });
 
+  it('subagent models command uses custom modal overlay and saves exactly dirty rows globally', async () => {
+    writeAgent('analyst');
+    writeAgent('reviewer');
+    const agentDir = path.join(tmp, 'global-agent');
+    const notifications: Array<[string, string | undefined]> = [];
+    let capturedOptions: any;
+    const custom = vi.fn(async (factory: any, options: any) => {
+      capturedOptions = options;
+      let result: any;
+      const component = factory({ requestRender() {} }, {}, {}, (value: any) => { result = value; });
+      component.handleInput('enter');
+      component.handleInput('down');
+      component.handleInput('enter');
+      component.handleInput('enter');
+      component.handleInput('down');
+      component.handleInput('e');
+      for (let i = 0; i < 5; i += 1) component.handleInput('down');
+      component.handleInput('enter');
+      component.handleInput('s');
+      return result;
+    });
+
+    const message = await withAgentDir(agentDir, () => runSubagentModelsCommand({
+      cwd: tmp,
+      agentDir,
+      modelRegistry: { getAvailable: async () => [{ provider: 'openai', id: 'gpt-5.2', label: 'GPT 5.2' }] },
+      ui: { custom, notify: (text: string, level?: string) => notifications.push([text, level]) },
+    }));
+
+    expect(custom).toHaveBeenCalledTimes(1);
+    expect(capturedOptions).toEqual({ overlay: true, overlayOptions: { anchor: 'center', width: '90%', maxHeight: '85%', minWidth: 74 } });
+    expect(message).toBe(`Saved subagent model profiles to ${globalSubagentsConfigPath(agentDir)}.`);
+    expect(notifications).toEqual([[message, 'info']]);
+    expect(JSON.parse(fs.readFileSync(path.join(agentDir, 'subagents.json'), 'utf8'))).toEqual({
+      model_profiles: {
+        analyst: { model: 'openai/gpt-5.2' },
+        reviewer: { effort: 'high' },
+      },
+    });
+  });
+
+  it('subagent models command custom Save All with no dirty rows writes nothing and notifies exact no-op message', async () => {
+    writeAgent('analyst');
+    const agentDir = path.join(tmp, 'global-agent');
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.writeFileSync(path.join(agentDir, 'subagents.json'), JSON.stringify({ model_profiles: { analyst: { effort: 'medium' } } }));
+    const before = fs.readFileSync(path.join(agentDir, 'subagents.json'), 'utf8');
+    const notifications: Array<[string, string | undefined]> = [];
+
+    const message = await withAgentDir(agentDir, () => runSubagentModelsCommand({
+      cwd: tmp,
+      agentDir,
+      modelRegistry: { getAvailable: async () => [] },
+      ui: {
+        custom: async (factory: any) => {
+          let result: any;
+          const component = factory({ requestRender() {} }, {}, {}, (value: any) => { result = value; });
+          component.handleInput('s');
+          return result;
+        },
+        notify: (text: string, level?: string) => notifications.push([text, level]),
+      },
+    }));
+
+    expect(message).toBe(`No subagent model profile changes to save. Nothing written to ${globalSubagentsConfigPath(agentDir)}.`);
+    expect(notifications).toEqual([[message, 'info']]);
+    expect(fs.readFileSync(path.join(agentDir, 'subagents.json'), 'utf8')).toBe(before);
+  });
+
+  it('subagent models command custom top-level cancel writes nothing and preserves cancel warning', async () => {
+    writeAgent('analyst');
+    const agentDir = path.join(tmp, 'global-agent');
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.writeFileSync(path.join(agentDir, 'subagents.json'), JSON.stringify({ model_profiles: { analyst: { effort: 'medium' } } }));
+    const before = fs.readFileSync(path.join(agentDir, 'subagents.json'), 'utf8');
+    const notifications: Array<[string, string | undefined]> = [];
+
+    const message = await withAgentDir(agentDir, () => runSubagentModelsCommand({
+      cwd: tmp,
+      agentDir,
+      modelRegistry: { getAvailable: async () => [] },
+      ui: {
+        custom: async (factory: any) => {
+          let result: any;
+          const component = factory({ requestRender() {} }, {}, {}, (value: any) => { result = value; });
+          component.handleInput('e');
+          component.handleInput('down');
+          component.handleInput('enter');
+          component.handleInput('q');
+          return result;
+        },
+        notify: (text: string, level?: string) => notifications.push([text, level]),
+      },
+    }));
+
+    expect(message).toBe(`Cancelled. No changes written to ${globalSubagentsConfigPath(agentDir)}.`);
+    expect(notifications).toEqual([[message, 'warning']]);
+    expect(fs.readFileSync(path.join(agentDir, 'subagents.json'), 'utf8')).toBe(before);
+  });
+
+  it('fallback select wizard remains usable when custom ui is absent', async () => {
+    writeAgent('analyst');
+    const agentDir = path.join(tmp, 'global-agent');
+    const select = vi.fn(async (prompt: string, choices: string[]) => {
+      if (prompt.startsWith('Select subagent')) return choices.find((choice) => choice.startsWith('analyst'));
+      if (prompt.startsWith('Configure analyst')) return 'Set provider/model/effort';
+      if (prompt.startsWith('Select provider')) return 'openai';
+      if (prompt.startsWith('Select model')) return 'GPT Codex';
+      if (prompt.startsWith('Select effort')) return 'high';
+      if (prompt.startsWith('Save subagent')) return 'Save';
+      return choices[0];
+    });
+
+    const message = await withAgentDir(agentDir, () => runSubagentModelsCommand({
+      cwd: tmp,
+      agentDir,
+      modelRegistry: { getAvailable: async () => [{ provider: 'openai', id: 'gpt-5.2-codex', label: 'GPT Codex' }] },
+      ui: { select },
+    }));
+
+    expect(message).toBe(`Saved subagent model profiles to ${globalSubagentsConfigPath(agentDir)}.`);
+    expect(select).toHaveBeenCalled();
+    expect(JSON.parse(fs.readFileSync(path.join(agentDir, 'subagents.json'), 'utf8'))).toEqual({
+      model_profiles: { analyst: { model: 'openai/gpt-5.2-codex', effort: 'high' } },
+    });
+  });
+
+  it('fallback select wizard cancel writes nothing and non-tui fallback remains compatible', async () => {
+    writeAgent('analyst');
+    const agentDir = path.join(tmp, 'global-agent');
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.writeFileSync(path.join(agentDir, 'subagents.json'), JSON.stringify({ model_profiles: { analyst: { effort: 'medium' } } }));
+    const before = fs.readFileSync(path.join(agentDir, 'subagents.json'), 'utf8');
+    const select = vi.fn(async (prompt: string, choices: string[]) => {
+      if (prompt.startsWith('Select subagent')) return choices.find((choice) => choice.startsWith('analyst'));
+      if (prompt.startsWith('Configure analyst')) return 'Cancel';
+      return choices[0];
+    });
+
+    const message = await withAgentDir(agentDir, () => runSubagentModelsCommand({ cwd: tmp, agentDir, ui: { select } }));
+
+    expect(message).toBe(`Cancelled. No changes written to ${globalSubagentsConfigPath(agentDir)}.`);
+    expect(fs.readFileSync(path.join(agentDir, 'subagents.json'), 'utf8')).toBe(before);
+    await expect(runSubagentModelsCommand({ cwd: tmp, agentDir, ui: {} })).resolves.toBe(buildNonTuiModelProfilesMessage(agentDir));
+  });
+
   it('filters delegation tools from subagent tool allowlists', () => {
     fs.writeFileSync(path.join(tmp, '.pi', 'subagents', 'analyst.md'), `---\nname: analyst\ntools:\n  - read\n  - subagent_run\n  - subagent_result\n  - memory_search\n---\n# Agent`);
     fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ default_tools: ['read', 'subagent_run', 'memory_search'] }));
