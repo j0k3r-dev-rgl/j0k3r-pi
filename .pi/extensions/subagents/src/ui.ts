@@ -61,6 +61,7 @@ export class SubagentsHistoryPanel {
   private scroll = 0;
   private followTail = true;
   private lastMaxScroll = 0;
+  private toolOutputExpanded = false;
 
   constructor(
     private tasksProvider: SubagentTask[] | (() => SubagentTask[]),
@@ -79,6 +80,10 @@ export class SubagentsHistoryPanel {
     const tasks = this.tasks();
     if (this.matchesKey(data, 'escape') || this.matchesKey(data, 'ctrl+c') || this.matchesKey(data, 'q')) {
       this.done();
+      return;
+    }
+    if (this.matchesKey(data, 'ctrl+o') || data === '\u000f') {
+      this.toolOutputExpanded = !this.toolOutputExpanded;
       return;
     }
     const wheel = mouseWheelDelta(data);
@@ -145,7 +150,7 @@ export class SubagentsHistoryPanel {
     const status = (task: SubagentTask) => task.status === 'completed' ? ok(task.status) : task.status === 'failed' ? err(task.status) : task.status === 'cancelled' ? warn(task.status) : accent(task.status);
 
     const lines: string[] = [];
-    lines.push(line(`${title('subagents')} ${dim('session execution flow')} ${dim('· ←/→ executions · ↑/↓ scroll · pgup/pgdn · esc/q close')}`));
+    lines.push(line(`${title('subagents')} ${dim('session execution flow')} ${dim('· ←/→ executions · ↑/↓ scroll · pgup/pgdn · ctrl+o expand · esc/q close')}`));
     lines.push(divider);
 
     const tasks = this.tasks();
@@ -244,6 +249,7 @@ export class SubagentsHistoryPanel {
         visibleWidth: this.renderContext.visibleWidth ?? this.visibleWidth,
         truncateToWidth: this.renderContext.truncateToWidth ?? this.truncateToWidth,
         renderWidth: width,
+        toolOutputExpanded: this.toolOutputExpanded,
       });
       return rendered.length ? rendered : [''];
     }

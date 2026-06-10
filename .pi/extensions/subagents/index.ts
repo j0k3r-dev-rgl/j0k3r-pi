@@ -7,6 +7,7 @@ function matchesKey(data: string, key: string): boolean {
   const keys: Record<string, string[]> = {
     escape: ['\u001b'],
     'ctrl+c': ['\u0003'],
+    'ctrl+o': ['\u000f'],
     q: ['q', 'Q'],
     up: ['\u001b[A'],
     down: ['\u001b[B'],

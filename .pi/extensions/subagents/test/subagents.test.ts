@@ -547,6 +547,50 @@ describe('subagents extension', () => {
     }
   });
 
+  it('toggles expanded tool output in selected thread snapshots with ctrl+o', () => {
+    resetPiComponentCacheForTests();
+    const packageRoot = path.join(tmp, 'fake-pi-panel-expand-package');
+    fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({ name: '@earendil-works/pi-coding-agent', main: 'index.cjs' }));
+    fs.writeFileSync(path.join(packageRoot, 'dist', 'cli.js'), '#!/usr/bin/env node\n');
+    const shimDir = path.join(tmp, 'bin-panel-expand');
+    fs.mkdirSync(shimDir);
+    fs.symlinkSync(path.join(packageRoot, 'dist', 'cli.js'), path.join(shimDir, 'pi'));
+    fs.writeFileSync(path.join(packageRoot, 'index.cjs'), `
+      exports.BashExecutionComponent = class {
+        constructor(command) { this.command = command; this.expanded = false; }
+        appendOutput(output) { this.output = output; }
+        setComplete() {}
+        setExpanded(value) { this.expanded = value; }
+        render() { return ['bash-expanded:' + this.expanded + ':' + this.command + ':' + this.output]; }
+      };
+    `);
+    const oldArgv1 = process.argv[1];
+    process.argv[1] = path.join(shimDir, 'pi');
+    try {
+      const task: SubagentTask = {
+        id: 'subtask_component_expand',
+        agent: 'analyst',
+        mode: 'task',
+        status: 'completed',
+        task: 'toggle component expansion',
+        created_at: new Date().toISOString(),
+        thread_snapshot: { version: 1, source: 'events', items: [{ type: 'bash', command: 'npm test', output: 'long output', status: 'completed', exitCode: 0 }] },
+      };
+      const keys: Record<string, string> = { 'ctrl+o': '\u000f' };
+      const panel = new SubagentsHistoryPanel([task], { fg: (_name: string, text: string) => text }, () => undefined, (data, key) => data === keys[key], (text) => text.length, (text, width) => text.length > width ? text.slice(0, width) : text, { cwd: tmp, tui: { requestRender() {} } });
+
+      expect(panel.render(160).join('\n')).toContain('bash-expanded:false:npm test:long output');
+      panel.handleInput('\u000f');
+      expect(panel.render(160).join('\n')).toContain('bash-expanded:true:npm test:long output');
+      panel.handleInput('\u000f');
+      expect(panel.render(160).join('\n')).toContain('bash-expanded:false:npm test:long output');
+    } finally {
+      process.argv[1] = oldArgv1;
+      resetPiComponentCacheForTests();
+    }
+  });
+
   it('preserves panel chrome while rendering selected thread snapshots', () => {
     const task: SubagentTask = {
       id: 'subtask_thread_2',
