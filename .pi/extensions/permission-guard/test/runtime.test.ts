@@ -322,7 +322,7 @@ describe('permission guard runtime wiring', () => {
     }
   });
 
-  it('persists Allow for project bash approvals as scoped approvals and reuses them for matching variants', async () => {
+  it('persists workspace-only Allow for project bash approvals as safeCommands', async () => {
     const cwd = await tempWorkspace('permission-guard-runtime-project-approval-');
     const pi = createMockPi();
     registerPermissionGuardRuntime(pi);
@@ -336,21 +336,15 @@ describe('permission guard runtime wiring', () => {
     }, ctx)).resolves.toBeUndefined();
 
     const saved = JSON.parse(await readFile(join(cwd, '.pi', 'permissions.json'), 'utf8'));
-    expect(saved.bash.scopedApprovals).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        version: 1,
-        normalizedCommand: 'npm --prefix .pi/extensions/permission-guard test -- --run',
-        commandSignature: expect.any(String),
-        effectSignature: expect.any(String),
-      }),
-    ]));
+    expect(saved.bash.safeCommands).toContain('regex:^npm\\s+--prefix\\s+(?!/|~|\\.\\.(?:/|$)|.*\\/\\.\\.(?:/|$))[A-Za-z0-9._/@+-]+\\s+test(?:\\s+--\\s+.*)?$');
+    expect(saved.bash.scopedApprovals ?? []).toEqual([]);
 
     await expect(handler({
       toolName: 'bash',
       toolCallId: 'tc-project-approval-variant',
       input: { command: 'npm --prefix .pi/extensions/subagents test -- --run' },
-    }, ctx)).resolves.toEqual(expect.objectContaining({ block: true }));
-    expect(ctx.ui.select).toHaveBeenCalledTimes(2);
+    }, ctx)).resolves.toBeUndefined();
+    expect(ctx.ui.select).toHaveBeenCalledTimes(1);
   });
 
   it('does not handle unsupported tool_call tools', async () => {

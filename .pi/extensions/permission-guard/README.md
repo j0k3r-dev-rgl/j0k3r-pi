@@ -190,7 +190,7 @@ Each supported tool can be set to `policy`, `allow`, or `deny`:
 |---|---|---:|---|
 | `default` | `allow`/`ask`/`deny` | `ask` | Fallback for commands that match no specific rule. |
 | `safeCommands` | string[] | `git status`, `git diff`, `npm test`, `npm run typecheck` | Legacy allow candidates for commands that still pass structured shell and scope checks. Prefer structured rules such as `workspaceReadOnly` when possible. |
-| `scopedApprovals` | object[] | `[]` | Additive project-scoped reusable bash approvals written by `Allow for project`. |
+| `scopedApprovals` | object[] | `[]` | Additive project-scoped reusable bash approvals for outside-workspace or root-scoped bash approvals written by `Allow for project`. Workspace-only command approvals are persisted to `safeCommands` instead. |
 | `denyCommands` | string[] | privilege/destructive defaults | Commands denied after hard-coded critical denials. |
 | `askCommands` | string[] | state-changing defaults | Commands that require approval. |
 | `network` | `allow`/`ask`/`deny` | `ask` | Network command policy. |
@@ -232,7 +232,9 @@ find .pi/extensions/permission-guard/src -type f | xargs rm
 
 A structured safe compound such as `cd <workspace-relative-dir> && npm test` can be allowed when every segment is proven safe and every classified path effect remains inside the approved roots.
 
-`bash.scopedApprovals` entries store a normalized command/effect signature plus allowed workspace or directory roots. They are additive and backward compatible with legacy `bash.safeCommands`, but they do not grant arbitrary command access to a directory. Reuse requires a compatible command/effect shape and roots that contain all classified path effects.
+`Allow for project` persists workspace-only bash command approvals to `bash.safeCommands` using reusable per-segment patterns rather than the full compound command. Safe `cd` segments inside the workspace are skipped because workspace directory changes are already covered by policy. For example, approving `cd .pi/extensions/subagents && npm run typecheck && npm test` can add reusable patterns for `npm run typecheck` and `npm test`, not the full `cd ... && ...` string.
+
+`bash.scopedApprovals` entries store a normalized command/effect signature plus allowed workspace or directory roots for approvals that need root scoping, especially outside-workspace commands. They are additive and backward compatible with legacy `bash.safeCommands`, but they do not grant arbitrary command access to a directory. Reuse requires a compatible command/effect shape and roots that contain all classified path effects.
 
 Folder-scoped approvals work for outside-workspace paths too. For example, if the user approves this command for the project:
 
@@ -301,7 +303,12 @@ Interactive approval choices are English and intentionally stable:
 
 `Allow for session` creates an in-memory scoped approval for the matching command/effect signature within the approved workspace or directory roots.
 
-`Allow for project` persists a project-level `bash.scopedApprovals` entry in `.pi/permissions.json`. Reuse stays limited to the approved command/effect signature and roots; out-of-scope paths ask again.
+`Allow for project` persists a reusable project-level approval in `.pi/permissions.json`:
+
+- workspace-only bash approvals are written to `bash.safeCommands` as reusable per-segment command strings or conservative regex patterns;
+- outside-workspace or root-scoped bash approvals are written to `bash.scopedApprovals`.
+
+Scoped approval reuse stays limited to the approved command/effect signature and roots; out-of-scope paths ask again.
 
 `Deny` blocks the current request.
 

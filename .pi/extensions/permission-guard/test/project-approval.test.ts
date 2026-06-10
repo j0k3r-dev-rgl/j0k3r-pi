@@ -97,12 +97,65 @@ describe('project scoped approvals', () => {
     expect(approval?.allowedRoots).not.toContainEqual(expect.objectContaining({ normalizedAbsolute: workspaceRoot }));
   });
 
-  it('writes additive bash.scopedApprovals while preserving existing fields', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'permission-guard-project-approval-'));
+  it('writes workspace-only compound bash project approvals to reusable safeCommands while skipping safe cd segments', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'permission-guard-project-approval-safe-'));
     await mkdir(join(cwd, '.pi'), { recursive: true });
     await writeFile(join(cwd, '.pi', 'permissions.json'), JSON.stringify({ bash: { safeCommands: ['git status'] }, audit: { enabled: true } }, null, 2), 'utf8');
 
-    await addProjectBashApproval(cwd, approval(cwd));
+    await addProjectBashApproval(cwd, {
+      ...approval(cwd),
+      normalizedCommand: 'cd .pi/extensions/subagents && npm run typecheck && npm test',
+      allowedRoots: [{ kind: 'directory', raw: join(cwd, '.pi/extensions/subagents'), normalizedAbsolute: join(cwd, '.pi/extensions/subagents'), resolvedRealpath: join(cwd, '.pi/extensions/subagents') }],
+    });
+
+    const saved = JSON.parse(await readFile(join(cwd, '.pi', 'permissions.json'), 'utf8'));
+    expect(saved.bash.safeCommands).toEqual([
+      'git status',
+      'regex:^npm\\s+run\\s+typecheck(?:\\s+--\\s+.*)?$',
+      'regex:^npm\\s+test(?:\\s+.*)?$',
+    ]);
+    expect(saved.bash.scopedApprovals ?? []).toEqual([]);
+    expect(saved.audit).toEqual({ enabled: true });
+  });
+
+  it('writes simple workspace bash project approvals to reusable safe command patterns', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'permission-guard-project-approval-simple-safe-'));
+    await mkdir(join(cwd, '.pi'), { recursive: true });
+    await writeFile(join(cwd, '.pi', 'permissions.json'), JSON.stringify({ bash: { safeCommands: [] } }, null, 2), 'utf8');
+
+    await addProjectBashApproval(cwd, { ...approval(cwd), normalizedCommand: 'git status --short' });
+
+    const saved = JSON.parse(await readFile(join(cwd, '.pi', 'permissions.json'), 'utf8'));
+    expect(saved.bash.safeCommands).toEqual(['regex:^git\\s+status(?:\\s+--short)?$']);
+    expect(saved.bash.scopedApprovals ?? []).toEqual([]);
+  });
+
+  it('builds outside-workspace cd approvals as scoped directory approvals even when the following command is read-only', () => {
+    const workspaceRoot = '/workspace';
+    const outsideRoot = '/home/test/sias/app';
+    const request = bashRequest(`cd ${outsideRoot} && ls`, workspaceRoot);
+    const decision = evaluatePermission(policy(workspaceRoot), request);
+
+    const approval = buildScopedBashApproval(request, decision);
+
+    expect(approval).toEqual(expect.objectContaining({
+      normalizedCommand: `cd ${outsideRoot} && ls`,
+      allowedRoots: [expect.objectContaining({
+        kind: 'directory',
+        normalizedAbsolute: outsideRoot,
+      })],
+    }));
+  });
+
+  it('writes outside-workspace bash project approvals to scopedApprovals', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'permission-guard-project-approval-scoped-'));
+    await mkdir(join(cwd, '.pi'), { recursive: true });
+    await writeFile(join(cwd, '.pi', 'permissions.json'), JSON.stringify({ bash: { safeCommands: ['git status'] }, audit: { enabled: true } }, null, 2), 'utf8');
+
+    await addProjectBashApproval(cwd, {
+      ...approval(cwd),
+      allowedRoots: [{ kind: 'directory', raw: '/home/test/sias/app', normalizedAbsolute: '/home/test/sias/app', resolvedRealpath: '/home/test/sias/app' }],
+    });
 
     const saved = JSON.parse(await readFile(join(cwd, '.pi', 'permissions.json'), 'utf8'));
     expect(saved.bash.safeCommands).toEqual(['git status']);
