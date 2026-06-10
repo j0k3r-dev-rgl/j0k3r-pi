@@ -20,11 +20,11 @@ afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 function db() { const d = openMemoryDb(':memory:'); migrate(d); return d; }
 function project(dir = tmp) { fs.mkdirSync(path.join(dir, '.pi'), { recursive: true }); fs.writeFileSync(path.join(dir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Advanced App' })); return resolveMemoryContext(dir, os.homedir(), {}); }
 
-async function lifecycleHarness() {
+async function lifecycleHarness(memoryConfig: Record<string, unknown> = {}) {
   const dbPath = path.join(tmp, 'lifecycle.sqlite');
   const projectDir = path.join(tmp, 'project');
   fs.mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
-  fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Lifecycle Advanced' }));
+  fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Lifecycle Advanced', ...memoryConfig }));
   const old = process.env.PI_MEMORY_DB_PATH;
   process.env.PI_MEMORY_DB_PATH = dbPath;
   const handlers = new Map<string, Function>();
@@ -134,8 +134,24 @@ describe('advanced lifecycle behavior', () => {
     expect(fkRows.map((row) => row.table)).toEqual(['memory_sessions']);
   });
 
-  it('falls back when semantic session summary model throws and records metadata error', async () => {
+  it('skips semantic shutdown work by default even when a model is configured', async () => {
     const h = await lifecycleHarness();
+    let authCalls = 0;
+    h.ctx.model = { provider: 'fake', id: 'slow-model' };
+    h.ctx.modelRegistry = { getApiKeyAndHeaders: async () => { authCalls += 1; throw new Error('should not be called'); } };
+    await h.handlers.get('before_agent_start')?.({ prompt: 'first turn' }, h.ctx);
+    await h.handlers.get('session_shutdown')?.({ reason: 'quit' }, h.ctx);
+    const d = openMemoryDb(h.dbPath);
+    const row = d.prepare('SELECT summary, metadata_json FROM memory_sessions LIMIT 1').get() as any;
+    const meta = JSON.parse(row.metadata_json);
+    expect(authCalls).toBe(0);
+    expect(row.summary).toContain('semantic shutdown summary disabled');
+    expect(meta.summary_source).toBe('heuristic');
+    expect(meta.summary_error).toBeNull();
+  });
+
+  it('falls back when opt-in semantic session summary model throws and records metadata error', async () => {
+    const h = await lifecycleHarness({ session_end: { semantic: true } });
     h.ctx.model = { provider: 'fake', id: 'broken-model' };
     h.ctx.modelRegistry = { getApiKeyAndHeaders: async () => { throw new Error('auth exploded'); } };
     await h.handlers.get('before_agent_start')?.({ prompt: 'first turn' }, h.ctx);

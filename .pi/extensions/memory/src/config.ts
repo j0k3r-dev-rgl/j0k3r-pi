@@ -44,16 +44,21 @@ export function readProjectMemoryConfig(cwd: string, env: NodeJS.ProcessEnv = pr
     url_env: DEFAULT_CLOUD_URL_ENV,
     token_env: DEFAULT_CLOUD_TOKEN_ENV,
   };
-  if (!configPath) return { cloud: baseCloud, warnings };
+  const baseSessionEnd = { semantic: false };
+  if (!configPath) return { session_end: baseSessionEnd, cloud: baseCloud, warnings };
 
   try {
     const raw = JSON.parse(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
     const cloudRaw = (raw.cloud && typeof raw.cloud === 'object') ? raw.cloud as Record<string, unknown> : {};
+    const sessionEndRaw = (raw.session_end && typeof raw.session_end === 'object') ? raw.session_end as Record<string, unknown> : {};
     if ('token' in cloudRaw) warnings.push('Do not store cloud.token in .pi/memory.json; use token_env.');
     const cfg: ProjectMemoryConfig = {
       project_name: typeof raw.project_name === 'string' ? raw.project_name : undefined,
       aliases: Array.isArray(raw.aliases) ? raw.aliases.filter((x): x is string => typeof x === 'string') : undefined,
       default_scope: raw.default_scope === 'general' || raw.default_scope === 'project' || raw.default_scope === 'global' ? raw.default_scope : undefined,
+      session_end: {
+        semantic: sessionEndRaw.semantic === true,
+      },
       cloud: {
         enabled: cloudRaw.enabled === true,
         organization_id: typeof cloudRaw.organization_id === 'string' ? cloudRaw.organization_id : null,
@@ -75,6 +80,6 @@ export function readProjectMemoryConfig(cwd: string, env: NodeJS.ProcessEnv = pr
     return cfg;
   } catch (error) {
     warnings.push(`Invalid .pi/memory.json: ${error instanceof Error ? error.message : String(error)}`);
-    return { cloud: baseCloud, warnings, path: configPath };
+    return { session_end: baseSessionEnd, cloud: baseCloud, warnings, path: configPath };
   }
 }

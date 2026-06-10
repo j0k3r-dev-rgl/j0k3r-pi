@@ -78,8 +78,8 @@ Implementado y validado:
 - Tools de sesión: `memory_start_chat`, `memory_session_start`, `memory_session_prompt_add`, `memory_session_finish`, `memory_recall`.
 - `memory_recall` acepta aliases `task`, `edit`, `test`, `commit`, `end`.
 - Session lifecycle: crea/reusa sesión, captura prompts, inyecta startup context una sola vez, no cierra en reload y cierra con summary estructurado.
-- Session summaries: intento semántico con modelo activo y fallback heurístico con metadata `summary_source`, `summary_model`, `summary_generated_at`, `summary_error`.
-- Project profile vivo: `memory_project_profile`, `/memory-project-profile`, auto-update al cerrar sesiones; intenta update semántico con el modelo activo, muestra preview diff y pide confirmación humana opcional para updates grandes en UI, y cae a update heurístico conservador si no hay modelo/auth o falla.
+- Session summaries: por defecto el cierre usa resumen heurístico local rápido; el intento semántico durante `session_shutdown` es opt-in con `.pi/memory.json -> session_end.semantic=true` y conserva fallback heurístico con metadata `summary_source`, `summary_model`, `summary_generated_at`, `summary_error`.
+- Project profile vivo: `memory_project_profile`, `/memory-project-profile`, auto-update al cerrar sesiones; por defecto usa update heurístico conservador. El update semántico del profile durante cierre es opt-in con `session_end.semantic=true`, muestra preview diff y pide confirmación humana opcional para updates grandes en UI, y cae a update heurístico conservador si no hay modelo/auth o falla.
 - Migración canónica: `memory_migrate_project` y `/memory-migrate-project [--apply]` migran memorias/sesiones de aliases de carpeta/git/memory.json al proyecto canónico actual, con dry-run por defecto.
 - Consolidación: `memory_consolidate` detecta duplicados por título o similitud léxica opcional (`similarity=true`), evita candidatos con riesgo básico de contradicción y, al aplicar, crea memoria consolidada, archiva duplicados y registra links `supersedes`.
 - Entidades: al guardar/actualizar memorias se extraen entidades básicas de archivos y comandos en `memory_entities`.
@@ -97,7 +97,7 @@ npm test
 npm run typecheck
 ```
 
-Último estado conocido: 40 tests pasan y typecheck pasa.
+Último estado conocido: 41 tests pasan y typecheck pasa.
 
 Decisión de desarrollo actual: no se mantiene migración legacy para esquemas locales antiguos durante esta fase; ante cambios incompatibles de schema se puede resetear la DB local de desarrollo (`~/.local/share/pi/memory/memory.sqlite*`).
 

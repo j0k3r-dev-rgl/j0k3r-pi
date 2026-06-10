@@ -24,6 +24,7 @@ export type SessionSummaryEvidence = {
   progress: Array<{ title?: string | null; summary?: string | null }>;
   validations: Array<string | null | undefined>;
   filesTouched?: string[];
+  semanticSummaryDisabled?: boolean;
 };
 
 function extractTextParts(content: unknown): string[] {
@@ -129,7 +130,7 @@ export function buildHeuristicSessionSummary(evidence: SessionSummaryEvidence): 
   const memoryLines = evidence.durableMemories.map((m) => `- ${m.kind}: ${m.title ?? m.summary ?? 'untitled'}`).join('\n') || '- none';
   const summary = [
     'summary:',
-    `  what changed: memory session closed automatically on ${evidence.reason}. captured ${evidence.promptCount} prompt(s) and ${evidence.durableMemories.length} durable memory item(s) during this session. semantic model summary was unavailable.`,
+    `  what changed: memory session closed automatically on ${evidence.reason}. captured ${evidence.promptCount} prompt(s) and ${evidence.durableMemories.length} durable memory item(s) during this session. ${evidence.semanticSummaryDisabled ? 'semantic shutdown summary disabled by configuration.' : 'semantic model summary was unavailable.'}`,
     `  decisions made: ${evidence.decisions.length ? evidence.decisions.map((m) => m.title ?? m.summary).join('; ') : 'none recorded as durable memories'}.`,
     `  progress: ${evidence.progress.length ? evidence.progress.map((m) => m.title ?? m.summary).join('; ') : 'no progress memories recorded'}.`,
     `  validations: ${evidence.validations.length ? evidence.validations.join('; ') : 'no validation command memory recorded'}.`,

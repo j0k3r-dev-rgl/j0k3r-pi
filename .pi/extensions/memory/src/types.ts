@@ -18,10 +18,15 @@ export interface ProjectCloudConfig {
   token_env: string;
 }
 
+export interface ProjectSessionEndConfig {
+  semantic: boolean;
+}
+
 export interface ProjectMemoryConfig {
   project_name?: string;
   aliases?: string[];
   default_scope?: MemoryScope;
+  session_end: ProjectSessionEndConfig;
   cloud: ProjectCloudConfig;
   warnings: string[];
   path?: string;

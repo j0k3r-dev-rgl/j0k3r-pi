@@ -98,6 +98,7 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
         ORDER BY created_at ASC
         LIMIT 50`).all(context.scope, context.project_id, session?.started_at ?? '1970-01-01T00:00:00.000Z') as any[];
       const conversationFacts = extractConversationFacts(ctx?.sessionManager?.getBranch?.() ?? ctx?.sessionManager?.getEntries?.() ?? []);
+      const semanticShutdownEnabled = context.config?.session_end.semantic === true;
       const evidence = {
         reason,
         promptCount: prompts.length,
@@ -107,13 +108,16 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
         progress: memories.filter((m) => m.kind === 'progress' || m.kind === 'project_profile'),
         validations: [...memories.filter((m) => m.kind === 'command').map((m) => m.title), ...conversationFacts.commands.filter((cmd) => /\b(test|typecheck|lint|build)\b/i.test(cmd))],
         filesTouched: conversationFacts.files,
+        semanticSummaryDisabled: !semanticShutdownEnabled,
       };
       let summaryError: string | undefined;
-      const generated = await buildSemanticSessionSummary(ctx, evidence).catch((error) => {
-        summaryError = error instanceof Error ? error.message : String(error);
-        ctx?.ui?.notify?.(`Semantic memory summary unavailable: ${summaryError}`, 'warning');
-        return null;
-      });
+      const generated = semanticShutdownEnabled
+        ? await buildSemanticSessionSummary(ctx, evidence).catch((error) => {
+          summaryError = error instanceof Error ? error.message : String(error);
+          ctx?.ui?.notify?.(`Semantic memory summary unavailable: ${summaryError}`, 'warning');
+          return null;
+        })
+        : null;
       const { summary, learned } = generated ?? buildHeuristicSessionSummary(evidence);
 
       finishMemorySession(db, {
@@ -136,10 +140,12 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
         filesTouched: evidence.filesTouched,
         todos: evidence.todos.map((m) => m.title ?? m.summary).filter(Boolean) as string[],
       };
-      const semanticProfileUpdate = await semanticUpdateProjectProfileFromSession(db, context, profileFacts, ctx).catch((error) => {
-        ctx?.ui?.notify?.(`Semantic project profile update unavailable: ${error instanceof Error ? error.message : String(error)}`, 'warning');
-        return null;
-      });
+      const semanticProfileUpdate = semanticShutdownEnabled
+        ? await semanticUpdateProjectProfileFromSession(db, context, profileFacts, ctx).catch((error) => {
+          ctx?.ui?.notify?.(`Semantic project profile update unavailable: ${error instanceof Error ? error.message : String(error)}`, 'warning');
+          return null;
+        })
+        : null;
       const profileUpdate = semanticProfileUpdate ?? autoUpdateProjectProfileFromSession(db, context, profileFacts);
       if (profileUpdate.updated) ctx?.ui?.notify?.('Project profile auto-updated from session summary.', 'info');
       sessionClosed = true;

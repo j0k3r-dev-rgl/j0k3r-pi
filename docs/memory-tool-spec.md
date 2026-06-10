@@ -138,6 +138,9 @@ Formato futuro posible:
   "project_name": "j0k3r-pi",
   "aliases": ["pi-agent-workflow"],
   "default_scope": "project",
+  "session_end": {
+    "semantic": false
+  },
   "cloud": {
     "enabled": false,
     "organization_id": "org_abc123",
@@ -149,7 +152,18 @@ Formato futuro posible:
 }
 ```
 
-### 3.3 Configuración cloud opcional
+### 3.3 Configuración de cierre de sesión
+
+La sección `session_end` controla el trabajo automático al salir.
+
+Reglas:
+
+- `session_end.semantic = false` es el default: el cierre usa resumen heurístico local y no llama al modelo, aunque haya un modelo activo.
+- `session_end.semantic = true` habilita resumen semántico y actualización semántica del `project_profile` durante `session_shutdown`.
+- Si el modo semántico está habilitado y el modelo/auth falla, debe caer a resumen/update heurístico sin bloquear la memoria local.
+- El objetivo del default es que salir de Pi sea rápido y predecible.
+
+### 3.4 Configuración cloud opcional
 
 La sección `cloud` prepara el proyecto para sincronización futura, pero no cambia el comportamiento local del MVP.
 
