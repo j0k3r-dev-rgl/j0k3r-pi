@@ -242,11 +242,12 @@ function frameModal(title: string, body: string[], width: number): string[] {
   const safeWidth = Math.max(1, Math.floor(width || 1));
   if (safeWidth < 24) return constrainLines([title, ...body], safeWidth);
   const innerWidth = safeWidth - 2;
+  const contentWidth = Math.max(1, innerWidth - 2);
   const titleText = ` ${title} `;
   const visibleTitle = truncateToVisibleWidth(titleText, Math.max(1, innerWidth));
   const top = `╭${visibleTitle}${'─'.repeat(Math.max(0, innerWidth - visibleWidth(visibleTitle)))}╮`;
   const bottom = `╰${'─'.repeat(innerWidth)}╯`;
-  return [top, ...body.map((line) => `│${padToVisibleWidth(line, innerWidth)}│`), bottom];
+  return [top, ...body.map((line) => `│ ${padToVisibleWidth(line, contentWidth)} │`), bottom];
 }
 
 function pendingLabel(count: number): string {
@@ -340,67 +341,49 @@ export function createSubagentModelProfilesModal(input: ModalInput): ModalCompon
     return baseProfiles[rowKey(row)]?.effort ? `staged: inherit/reset effort (was ${row.effortLabel})` : row.effortLabel;
   };
 
-  const selectedDetailLines = (): string[] => {
+  const selectedSummaryLine = (): string => {
     const row = selectedRow();
-    if (!row) return ['DETAIL', '(no row selected)'];
-    const dirty = dirtyProfileFor(row);
-    const isDirty = hasDirtyProfileFor(row);
-    return [
-      'DETAIL',
-      `selected: ${row.name}`,
-      `type: ${row.kind}`,
-      `description: ${row.description || '(none)'}`,
-      `model: ${rowModelText(row)}`,
-      ...(row.modelLabel.includes('(unavailable)') ? ['model availability: unavailable'] : []),
-      `effort: ${rowEffortText(row)}`,
-      `explicit model: ${isDirty ? (dirty?.model ? 'yes' : 'no') : (row.explicitProfile.model ? 'yes' : 'no')}`,
-      `explicit effort: ${isDirty ? (dirty?.effort ? 'yes' : 'no') : (row.explicitProfile.effort ? 'yes' : 'no')}`,
-      '',
-      'actions',
-      'enter/m: choose model',
-      'e: choose effort',
-      'M/E/r: reset model/effort/row',
-      's: save all · esc/q: cancel',
-    ];
+    if (!row) return 'selected: (none)';
+    const availability = row.modelLabel.includes('(unavailable)') ? ' · unavailable model' : '';
+    return `selected: ${row.name}${availability} · model: ${rowModelText(row)} · effort: ${rowEffortText(row)}`;
   };
 
-  const rowListLines = (): string[] => {
-    const lines = ['ROWS'];
+  const rowListLines = (width: number): string[] => {
+    const innerWidth = Math.max(1, Math.floor(width || 1) - 2);
     const visibleRows = rows.slice(scrollOffset, scrollOffset + 10);
+    if (innerWidth >= 92) {
+      const nameWidth = 24;
+      const effortWidth = 22;
+      const modelWidth = Math.max(18, innerWidth - nameWidth - effortWidth - 6);
+      const lines = [`${padToVisibleWidth('agent/phase', nameWidth)}  ${padToVisibleWidth('model', modelWidth)}  ${padToVisibleWidth('effort', effortWidth)}`];
+      for (const [offset, item] of visibleRows.entries()) {
+        const index = scrollOffset + offset;
+        const marker = index === selectedIndex ? '›' : ' ';
+        const dirty = hasDirtyProfileFor(item) ? '*' : ' ';
+        lines.push(`${marker} ${dirty} ${padToVisibleWidth(item.name, nameWidth - 4)}  ${padToVisibleWidth(rowModelText(item), modelWidth)}  ${padToVisibleWidth(rowEffortText(item), effortWidth)}`);
+      }
+      return lines;
+    }
+    const lines = ['agent/phase · model · effort'];
     for (const [offset, item] of visibleRows.entries()) {
       const index = scrollOffset + offset;
       const marker = index === selectedIndex ? '›' : ' ';
       const dirty = hasDirtyProfileFor(item) ? '*' : ' ';
-      lines.push(`${marker} ${dirty} ${item.name}`);
-      lines.push(`    model: ${rowModelText(item)}`);
-      lines.push(`    effort: ${rowEffortText(item)}`);
+      lines.push(`${marker} ${dirty} ${item.name} · ${rowModelText(item)} · ${rowEffortText(item)}`);
     }
     return lines;
   };
 
   const renderMain = (width: number): string[] => {
     const dirtyCount = Object.keys(dirtyProfiles).length;
-    const innerWidth = Math.max(1, Math.floor(width || 1) - 2);
-    const header = [
-      `save target: global · ${pendingLabel(dirtyCount)}`,
-      'keys: ↑/↓/j/k move · enter/m: choose model · e: effort · s: save · esc/q: cancel',
-      'resets: M model · E effort · r row',
+    const body = [
+      `target: global · ${pendingLabel(dirtyCount)}`,
+      '↑/↓/j/k move · enter/m model · e effort · M/E/r reset · s save · esc/q cancel',
       '',
+      ...rowListLines(width),
+      '',
+      selectedSummaryLine(),
     ];
-    const rowsLines = rowListLines();
-    const detailLines = selectedDetailLines();
-    const body = [...header];
-    if (innerWidth >= 94) {
-      const gap = ' │ ';
-      const leftWidth = Math.min(56, Math.max(34, Math.floor((innerWidth - visibleWidth(gap)) * 0.44)));
-      const rightWidth = Math.max(20, innerWidth - leftWidth - visibleWidth(gap));
-      const count = Math.max(rowsLines.length, detailLines.length);
-      for (let i = 0; i < count; i += 1) {
-        body.push(`${padToVisibleWidth(rowsLines[i] ?? '', leftWidth)}${gap}${padToVisibleWidth(detailLines[i] ?? '', rightWidth)}`);
-      }
-    } else {
-      body.push(...rowsLines, '', ...detailLines);
-    }
     return frameModal('Subagent model profiles', body, width);
   };
 

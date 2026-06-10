@@ -858,7 +858,7 @@ describe('subagents extension', () => {
     });
   });
 
-  it('builds model profile rows for loaded agents and known SDD phases with labels', () => {
+  it('builds model profile rows for loaded agents and known SDD phases with labels', () => withAgentDir(path.join(tmp, 'isolated-agent'), () => {
     writeAgent('analyst');
     fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({
       model_profiles: {
@@ -883,7 +883,7 @@ describe('subagents extension', () => {
     });
     expect(rows.find((row) => row.name === 'sdd-explore')).toMatchObject({ modelLabel: 'orchestrator: openai/gpt-5.2', effortLabel: 'orchestrator: low' });
     expect(rows.find((row) => row.name === 'sdd-spec')).toMatchObject({ effortLabel: 'profile: medium' });
-  });
+  }));
 
   it('groups available models by provider for provider and model selection', () => {
     expect(groupAvailableModelsByProvider([
@@ -1117,7 +1117,36 @@ describe('subagents extension', () => {
     expect(results).toEqual([{ action: 'save', dirtyProfiles: { analyst: { effort: 'xhigh' } } }]);
   });
 
-  it('modal renders a clearer framed master/detail layout with destination and dirty status', () => {
+  it('modal renders a compact model/effort editor without noisy descriptions', () => {
+    const modal = createSubagentModelProfilesModal({
+      rows: [
+        { name: 'analyst', description: 'long analysis description that should not take vertical space in the compact default view', kind: 'subagent', modelLabel: 'default: openai/gpt-5.2', effortLabel: 'default: medium', effectiveModel: { provider: 'openai', id: 'gpt-5.2' }, effectiveEffort: 'medium', explicitProfile: {} },
+        { name: 'reviewer', description: 'review agent', kind: 'subagent', modelLabel: 'orchestrator: openai/gpt-5.2-codex', effortLabel: 'orchestrator: low', effectiveModel: { provider: 'openai', id: 'gpt-5.2-codex' }, effectiveEffort: 'low', explicitProfile: {} },
+        { name: 'sdd-apply', description: 'apply phase', kind: 'sdd-phase', modelLabel: 'orchestrator: openai/gpt-5.5', effortLabel: 'orchestrator: high', effectiveModel: { provider: 'openai', id: 'gpt-5.5' }, effectiveEffort: 'high', explicitProfile: {} },
+      ],
+      availableModels: [],
+      done: () => undefined,
+    });
+
+    const lines = modal.render(120).map(stripAnsi);
+    const rendered = lines.join('\n');
+
+    expect(rendered).toContain('Subagent model profiles');
+    expect(rendered).toContain('target: global');
+    expect(rendered).toContain('pending: none');
+    expect(rendered).toContain('agent/phase');
+    expect(rendered).toContain('model');
+    expect(rendered).toContain('effort');
+    expect(lines.some((line) => line.startsWith('│ target: global'))).toBe(true);
+    expect(rendered).toContain('›   analyst');
+    expect(rendered).toContain('reviewer');
+    expect(rendered).toContain('sdd-apply');
+    expect(rendered).toContain('selected: analyst');
+    expect(rendered).not.toContain('long analysis description');
+    expect(lines.length).toBeLessThanOrEqual(12);
+  });
+
+  it('modal renders a framed compact layout with destination and dirty status', () => {
     const modal = createSubagentModelProfilesModal({
       rows: [
         { name: 'analyst', description: 'analysis agent', kind: 'subagent', modelLabel: 'default: openai/gpt-5.2', effortLabel: 'default: medium', effectiveModel: { provider: 'openai', id: 'gpt-5.2' }, effectiveEffort: 'medium', explicitProfile: {} },
@@ -1130,12 +1159,13 @@ describe('subagents extension', () => {
     const initial = stripAnsi(modal.render(120).join('\n'));
     expect(initial).toContain('╭');
     expect(initial).toContain('Subagent model profiles');
-    expect(initial).toContain('save target: global');
+    expect(initial).toContain('target: global');
     expect(initial).toContain('pending: none');
-    expect(initial).toContain('ROWS');
-    expect(initial).toContain('DETAIL');
+    expect(initial).toContain('agent/phase');
+    expect(initial).toContain('model');
+    expect(initial).toContain('effort');
     expect(initial).toContain('selected: analyst');
-    expect(initial).toContain('enter/m: choose model');
+    expect(initial).toContain('enter/m model');
 
     modal.handleInput('e');
     for (let i = 0; i < 5; i += 1) modal.handleInput('down');
