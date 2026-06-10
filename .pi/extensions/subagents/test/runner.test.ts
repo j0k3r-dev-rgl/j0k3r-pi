@@ -96,6 +96,116 @@ describe('subagent runner permission-required bridge', () => {
     }
   });
 
+  it('extracts permission requests from nested Pi tool result details', async () => {
+    vi.resetModules();
+    const payload = {
+      type: 'permission_required',
+      requestId: 'req-nested-details',
+      tool: 'read',
+      action: 'read',
+      origin: 'subagent',
+      reasonCode: 'outside_workspace_read_requires_approval',
+      prompt: { title: 'Permission required', message: 'Outside-workspace read requires approval.' },
+    };
+    let subscriber: ((event: unknown) => void) | undefined;
+    const session = {
+      subscribe: vi.fn((callback: (event: unknown) => void) => {
+        subscriber = callback;
+        return vi.fn();
+      }),
+      prompt: vi.fn(async () => {
+        subscriber?.({
+          type: 'tool_execution_end',
+          toolName: 'read',
+          isError: true,
+          result: {
+            content: [{ type: 'text', text: 'Permission approval must be collected by the main thread.' }],
+            details: {
+              block: true,
+              reason: 'Permission approval must be collected by the main thread.',
+              details: {
+                permissionRequest: { handle: 'perm_nested_details', payload, createdAt: new Date().toISOString() },
+              },
+            },
+          },
+        });
+      }),
+      messages: [{ role: 'assistant', content: 'blocked' }],
+      dispose: vi.fn(async () => undefined),
+    };
+
+    vi.doMock('@earendil-works/pi-coding-agent', () => ({
+      SessionManager: { inMemory: () => ({}) },
+      createAgentSession: vi.fn(() => ({ session })),
+    }));
+
+    const { sdkSubagentRunner } = await import('../src/runner.js');
+    const result = await sdkSubagentRunner({
+      definition: { name: 'discovery', description: 'discovery', filePath: '/tmp/discovery.md', instructions: 'try read', tools: ['read'] },
+      task: 'read outside workspace',
+      cwd: fs.mkdtempSync(path.join(os.tmpdir(), 'pi-subagent-nested-permission-')),
+      ctx: { model: { provider: 'test', id: 'model' } },
+      config: { timeout_ms: 10_000, stall_timeout_ms: 10_000, max_concurrency: 1, default_tools: ['read'], model_profiles: {} },
+      signal: new AbortController().signal,
+    });
+
+    expect(result.permission_request).toEqual(expect.objectContaining({ requestId: 'req-nested-details' }));
+    expect(result.result).not.toContain('permission_required:');
+  });
+
+  it('recovers stripped permission payloads from the shared channel when Pi drops tool result details', async () => {
+    vi.resetModules();
+    const payload = {
+      type: 'permission_required',
+      requestId: 'req-channel-fallback',
+      tool: 'read',
+      action: 'read',
+      origin: 'subagent',
+      reasonCode: 'outside_workspace_read_requires_approval',
+      prompt: { title: 'Permission required', message: 'Outside-workspace read requires approval.' },
+    };
+    let subscriber: ((event: unknown) => void) | undefined;
+    const session = {
+      subscribe: vi.fn((callback: (event: unknown) => void) => {
+        subscriber = callback;
+        return vi.fn();
+      }),
+      prompt: vi.fn(async () => {
+        const { publishPermissionRequest } = await import('../src/permission-channel.js');
+        publishPermissionRequest(payload as any);
+        subscriber?.({
+          type: 'tool_execution_end',
+          toolName: 'read',
+          isError: true,
+          result: {
+            content: [{ type: 'text', text: 'Permission approval must be collected by the main thread.' }],
+            details: {},
+          },
+        });
+      }),
+      messages: [{ role: 'assistant', content: 'blocked' }],
+      dispose: vi.fn(async () => undefined),
+    };
+
+    vi.doMock('@earendil-works/pi-coding-agent', () => ({
+      SessionManager: { inMemory: () => ({}) },
+      createAgentSession: vi.fn(() => ({ session })),
+    }));
+
+    const { sdkSubagentRunner } = await import('../src/runner.js');
+    const result = await sdkSubagentRunner({
+      definition: { name: 'discovery', description: 'discovery', filePath: '/tmp/discovery.md', instructions: 'try read', tools: ['read'] },
+      task: 'read outside workspace',
+      cwd: fs.mkdtempSync(path.join(os.tmpdir(), 'pi-subagent-channel-fallback-')),
+      ctx: { model: { provider: 'test', id: 'model' } },
+      config: { timeout_ms: 10_000, stall_timeout_ms: 10_000, max_concurrency: 1, default_tools: ['read'], model_profiles: {} },
+      signal: new AbortController().signal,
+    });
+
+    expect(result.permission_request).toEqual(expect.objectContaining({ requestId: 'req-channel-fallback' }));
+    expect(result.result).not.toContain('permission_required:');
+  });
+
   it('passes profile model and effort to nested SDK sessions and reports them', async () => {
     vi.resetModules();
     const session = {

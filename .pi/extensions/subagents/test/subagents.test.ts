@@ -62,6 +62,16 @@ function withAgentDir<T>(agentDir: string, run: () => T): T {
 }
 
 describe('subagents extension', () => {
+  it('does not statically depend on the permission-guard extension', () => {
+    const srcDir = path.join(process.cwd(), 'src');
+    const files = fs.readdirSync(srcDir, { recursive: true })
+      .filter((entry) => typeof entry === 'string' && entry.endsWith('.ts')) as string[];
+    const source = files.map((file) => fs.readFileSync(path.join(srcDir, file), 'utf8')).join('\n');
+
+    expect(source).not.toContain('../../permission-guard/');
+    expect(source).not.toContain('permission-guard/src');
+  });
+
   it('validates and bounds v1 subagent thread snapshots safely', () => {
     const snapshot = {
       version: 1,

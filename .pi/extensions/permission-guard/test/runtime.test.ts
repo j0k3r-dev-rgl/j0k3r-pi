@@ -194,6 +194,7 @@ describe('permission guard runtime wiring', () => {
       const second = await handler({ toolName: 'read', toolCallId: 'tc-subagent-approved-again', input: { path: '../outside.txt' } }, ctx);
       expect(second).toEqual(expect.objectContaining({ block: true }));
       expect((second as any).details?.permissionRequest?.handle).toEqual(expect.any(String));
+      expect((second as any).details?.permission_request).toEqual(expect.objectContaining({ type: 'permission_required', tool: 'read' }));
     } finally {
       if (previousRegistry === undefined) delete holder[registryKey];
       else holder[registryKey] = previousRegistry;
@@ -219,6 +220,7 @@ describe('permission guard runtime wiring', () => {
     expect(result).toEqual(expect.objectContaining({ block: true, reason: expect.not.stringMatching(/^permission_required:/) }));
     const published = (result as any).details?.permissionRequest;
     expect(published).toEqual(expect.objectContaining({ handle: expect.any(String), payload: expect.any(Object) }));
+    expect((result as any).details?.permission_request).toEqual(expect.objectContaining({ type: 'permission_required', tool: 'read', origin: 'subagent' }));
     expect(resolvePermissionRequest(published.handle)).toEqual(expect.objectContaining({
       type: 'permission_required',
       tool: 'read',
@@ -255,6 +257,7 @@ describe('permission guard runtime wiring', () => {
     expect(result).toEqual(expect.objectContaining({ block: true }));
     expect((result as any).reason).not.toContain('non_interactive_ask_denied');
     const published = (result as any).details?.permissionRequest;
+    expect((result as any).details?.permission_request).toEqual(expect.objectContaining({ type: 'permission_required', tool: 'read', origin: 'subagent' }));
     expect(resolvePermissionRequest(published.handle)).toEqual(expect.objectContaining({
       type: 'permission_required',
       tool: 'read',
@@ -302,6 +305,7 @@ describe('permission guard runtime wiring', () => {
       expect(result).toEqual(expect.objectContaining({ block: true }));
       expect((result as any).reason).not.toContain('non_interactive_ask_denied');
       const published = (result as any).details?.permissionRequest;
+      expect((result as any).details?.permission_request).toEqual(expect.objectContaining({ type: 'permission_required', tool: 'read', origin: 'subagent' }));
       expect(resolvePermissionRequest(published.handle)).toEqual(expect.objectContaining({
         type: 'permission_required',
         tool: 'read',

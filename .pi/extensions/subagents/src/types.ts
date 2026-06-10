@@ -1,4 +1,4 @@
-import type { PermissionRequiredPayload } from '../../permission-guard/src/types.js';
+import type { PermissionRequiredPayload } from './permission-channel.js';
 
 export type SubagentMode = 'task' | 'background';
 export type SubagentStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';

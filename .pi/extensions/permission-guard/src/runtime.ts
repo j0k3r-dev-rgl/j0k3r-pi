@@ -2,7 +2,7 @@ import { loadPermissionConfig, type PermissionConfigLoadResult } from './config.
 import { addProjectBashApproval } from './project-approval.js';
 import { evaluatePermission } from './policy.js';
 import { resolveApproval, type ApprovalPrompt } from './approval.js';
-import { recordAuditDecision } from './audit.js';
+import { recordAuditDecision, recordPermissionRequiredAudit } from './audit.js';
 import {
   consumeMainThreadApproval,
   createSessionApprovalCache,
@@ -141,8 +141,14 @@ function permissionRequiredReason(payload: PermissionRequiredPayload): string {
   return `${permissionRequiredMarker}${JSON.stringify(payload)}`;
 }
 
-function publishPermissionDetails(payload: PermissionRequiredPayload): { permissionRequest: ReturnType<typeof publishPermissionRequest> } {
-  return { permissionRequest: publishPermissionRequest(payload) };
+function publishPermissionDetails(payload: PermissionRequiredPayload): {
+  permissionRequest: ReturnType<typeof publishPermissionRequest>;
+  permission_request: PermissionRequiredPayload;
+} {
+  return {
+    permissionRequest: publishPermissionRequest(payload),
+    permission_request: payload,
+  };
 }
 
 function userBashBlockResult(result: PermissionDecisionResult, auditError?: string): { result: { output: string; exitCode: number; cancelled: boolean; truncated: boolean } } {
@@ -234,10 +240,20 @@ export function registerPermissionGuardRuntime(pi: RuntimePiLike): void {
 
     const resolved = await resolveRuntimeDecision(loadResult, request, ctx, state);
     if (resolved.permissionRequired) {
+      const permissionDetails = publishPermissionDetails(resolved.permissionRequired);
+      const audit = await recordPermissionRequiredAudit(loadResult.config, request, resolved.result);
       return {
         block: true,
         reason: 'Permission approval must be collected by the main thread.',
-        details: publishPermissionDetails(resolved.permissionRequired),
+        details: {
+          ...permissionDetails,
+          permission_transport: {
+            handlePublished: Boolean(permissionDetails.permissionRequest.handle),
+            directPayloadAttached: true,
+            auditSkipped: audit.skipped,
+            auditError: audit.auditError,
+          },
+        },
       };
     }
     if (resolved.result.finalDecision === 'deny') {

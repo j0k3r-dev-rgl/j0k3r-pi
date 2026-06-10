@@ -313,7 +313,7 @@ Background subagent tasks cannot complete interactive approval by themselves; re
 
 ## Audit
 
-Audit is local and redacted. Denials and explicit approval decisions are written to an extension-owned NDJSON audit file when audit is enabled.
+Audit is local and redacted. Denials, explicit approval decisions, and subagent `permission_required` handoff events are written to an extension-owned NDJSON audit file when audit is enabled.
 
 Default audit path:
 
@@ -329,6 +329,7 @@ Fallback:
 
 Audit safety rules:
 
+- subagent permission handoff events use decision `permission_required` and include the normal redacted target/command metadata when available;
 - paths and commands are redacted by default;
 - secret paths are hashed/redacted;
 - environment values are redacted;

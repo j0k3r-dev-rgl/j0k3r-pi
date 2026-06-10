@@ -1,9 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveEffectiveSubagentProfile } from './profile-resolver.js';
-import { resolvePermissionRequest, sanitizePermissionTransportText } from './permission-channel.js';
+import { consumeLatestPermissionRequest, resolvePermissionRequest, sanitizePermissionTransportText } from './permission-channel.js';
 import { boundThreadSnapshot } from './thread-view.js';
-import type { PermissionRequiredPayload } from '../../permission-guard/src/types.js';
+import type { PermissionRequiredPayload } from './permission-channel.js';
 import type { EffectiveSubagentProfile, ModelRef, SubagentDefinition, SubagentRunner, SubagentsConfig, UsageStats, ThinkingEffort, SubagentThreadItem, SubagentThreadSnapshot, SubagentToolItem, SubagentToolResultPayload } from './types.js';
 
 function modelLabel(model: any): string | undefined {
@@ -71,6 +71,17 @@ function addUsage(total: UsageStats, usage: any): UsageStats {
   };
 }
 
+function summarizePermissionCarrier(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return { type: typeof value };
+  const record = value as Record<string, unknown>;
+  return {
+    keys: Object.keys(record),
+    hasPermissionRequest: Object.hasOwn(record, 'permissionRequest'),
+    hasPermissionRequestSnake: Object.hasOwn(record, 'permission_request'),
+    details: record.details && typeof record.details === 'object' ? summarizePermissionCarrier(record.details) : undefined,
+  };
+}
+
 function shortJson(value: unknown, limit = 900): string {
   try {
     const text = JSON.stringify(value, (_key, val) => typeof val === 'string' && val.length > 300 ? `${val.slice(0, 300)}…` : val);
@@ -132,20 +143,37 @@ function isBashTool(name: string): boolean {
   return name === 'bash' || name === 'shell' || name === 'command' || name === 'exec';
 }
 
-function extractStructuredPermissionRequest(value: unknown): PermissionRequiredPayload | undefined {
+function permissionRequestFromCandidate(value: unknown): PermissionRequiredPayload | undefined {
   if (!value || typeof value !== 'object') return undefined;
-  const direct = value as Record<string, unknown>;
-  const nested = direct.details && typeof direct.details === 'object'
-    ? (direct.details as Record<string, unknown>).permissionRequest
-    : direct.permissionRequest;
-  if (!nested || typeof nested !== 'object') return undefined;
-  const candidate = nested as Record<string, unknown>;
+  const candidate = value as Record<string, unknown>;
+  if (candidate.type === 'permission_required') return candidate as unknown as PermissionRequiredPayload;
   const payload = candidate.payload;
   if (payload && typeof payload === 'object' && (payload as Record<string, unknown>).type === 'permission_required') {
     return payload as PermissionRequiredPayload;
   }
   const handle = candidate.handle;
   if (typeof handle === 'string') return resolvePermissionRequest(handle);
+  return undefined;
+}
+
+function extractStructuredPermissionRequest(value: unknown, seen = new Set<unknown>()): PermissionRequiredPayload | undefined {
+  if (!value || typeof value !== 'object' || seen.has(value)) return undefined;
+  seen.add(value);
+
+  const direct = value as Record<string, unknown>;
+  for (const key of ['permissionRequest', 'permission_request']) {
+    const found = permissionRequestFromCandidate(direct[key]);
+    if (found) return found;
+  }
+
+  const directFound = permissionRequestFromCandidate(value);
+  if (directFound) return directFound;
+
+  for (const child of Object.values(direct)) {
+    const found = extractStructuredPermissionRequest(child, seen);
+    if (found) return found;
+  }
+
   return undefined;
 }
 
@@ -483,6 +511,7 @@ async function promptWithInactivity(
       toolCallId: event?.toolCallId,
       isError: event?.isError,
       resultKeys: event?.result && typeof event.result === 'object' ? Object.keys(event.result) : undefined,
+      permissionCarrier: event?.type === 'tool_execution_end' ? summarizePermissionCarrier(event?.result) : undefined,
     });
     snapshotBuilder.update(event);
     const thread_snapshot = snapshotBuilder.snapshot();
@@ -491,7 +520,34 @@ async function promptWithInactivity(
     const permissionRequest = extractStructuredPermissionRequest(event?.result ?? event?.partialResult ?? event);
     if (permissionRequest) {
       latestPermissionRequest = permissionRequest;
+      debugLog(cwd, 'permission_bridge_payload_detected', {
+        requestId: permissionRequest.requestId,
+        tool: permissionRequest.tool,
+        action: permissionRequest.action,
+        origin: permissionRequest.origin,
+        reasonCode: permissionRequest.reasonCode,
+        hasSessionScope: Boolean(permissionRequest.sessionScope),
+        hasProjectScope: Boolean(permissionRequest.projectScope),
+      });
       onActivity?.({ message: 'permission required', output, transcript, usage, thread_snapshot, permission_request: latestPermissionRequest });
+    } else if (event?.type === 'tool_execution_end' && event?.isError && /Permission approval must be collected by the main thread/i.test(shortJson(event.result, 1000))) {
+      const latest = consumeLatestPermissionRequest({ origin: 'subagent' });
+      if (latest) {
+        latestPermissionRequest = latest;
+        debugLog(cwd, 'permission_bridge_payload_recovered_from_channel', {
+          requestId: latest.requestId,
+          tool: latest.tool,
+          action: latest.action,
+          origin: latest.origin,
+          reasonCode: latest.reasonCode,
+          hasSessionScope: Boolean(latest.sessionScope),
+          hasProjectScope: Boolean(latest.projectScope),
+          carrier: summarizePermissionCarrier(event.result),
+        });
+        onActivity?.({ message: 'permission required', output, transcript, usage, thread_snapshot, permission_request: latestPermissionRequest });
+      } else {
+        debugLog(cwd, 'permission_bridge_payload_missing', { toolName: event.toolName, carrier: summarizePermissionCarrier(event.result) });
+      }
     }
     const messageEvent = event?.assistantMessageEvent;
     const delta = messageEvent?.type !== 'thinking_delta' && typeof messageEvent?.delta === 'string'

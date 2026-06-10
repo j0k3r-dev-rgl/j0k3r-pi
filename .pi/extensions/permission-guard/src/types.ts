@@ -259,7 +259,7 @@ export interface AuditEvent {
   requestId: string;
   origin: RequestOrigin;
   requester?: PermissionRequest['requester'];
-  decision: 'allow' | 'deny' | 'ask' | 'approval_allow_once' | 'approval_allow_session' | 'approval_deny';
+  decision: 'allow' | 'deny' | 'ask' | 'approval_allow_once' | 'approval_allow_session' | 'approval_deny' | 'permission_required';
   tool: string;
   action: Action;
   reasonCode: string;

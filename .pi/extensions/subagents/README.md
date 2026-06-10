@@ -172,6 +172,27 @@ Effective effort resolution order:
 
 If a configured model cannot be resolved, the runner reports an error. If a selected model fails or stalls and the current orchestrator model is different, the runner falls back to the current model.
 
+## Debug and permission bridge logs
+
+Subagents write local debug/audit breadcrumbs to:
+
+```txt
+.pi/subagents-debug.log
+```
+
+The log is intended for runtime debugging of delegated sessions and permission handoff issues. Permission bridge entries include safe metadata such as task id, agent name, request id, tool/action, reason code, risk level, scope presence, and whether a structured permission payload was detected. They intentionally avoid storing raw permission payloads, file contents, or unredacted target/command strings.
+
+Useful event names:
+
+- `runner_event` — compact SDK event shape observed by the subagent runner.
+- `permission_bridge_payload_detected` — runner found a structured permission request.
+- `permission_bridge_payload_missing` — tool output looked like a permission handoff but no structured payload was found.
+- `permission_bridge_request_detected` — manager received a permission request from the runner.
+- `permission_bridge_prompt_main_thread` — manager is prompting the main user.
+- `permission_bridge_user_choice` — main user chose an approval/deny option.
+
+This debug log is separate from `permission-guard`'s redacted NDJSON audit log.
+
 ## Tools exposed to the orchestrator
 
 | Tool | Purpose |

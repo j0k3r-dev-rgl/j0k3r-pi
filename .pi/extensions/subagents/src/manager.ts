@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { appendFileSync, mkdirSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { getSubagent, loadSubagents, readSubagentsConfig } from './config.js';
@@ -6,11 +7,38 @@ import { sdkSubagentRunner } from './runner.js';
 import { SubagentHistoryStore } from './history.js';
 import { sanitizePermissionTransportText } from './permission-channel.js';
 import { resolveEffectiveSubagentProfile } from './profile-resolver.js';
-import type { PermissionRequiredPayload } from '../../permission-guard/src/types.js';
+import type { PermissionRequiredPayload } from './permission-channel.js';
 import type { ModelRef, SubagentRunInput, SubagentRunner, SubagentTask } from './types.js';
 
 function nowIso(): string { return new Date().toISOString(); }
 function taskId(agent: string): string { return `subtask_${agent}_${Date.now()}_${randomUUID().replace(/-/g, '').slice(0, 8)}`; }
+function subagentAuditLog(cwd: string | undefined, event: string, data: Record<string, unknown>): void {
+  try {
+    const root = cwd ?? process.cwd();
+    const file = join(root, '.pi', 'subagents-debug.log');
+    mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+    appendFileSync(file, `${new Date().toISOString()} ${event} ${JSON.stringify(data, (_key, value) => value instanceof Error ? { name: value.name, message: value.message } : value).slice(0, 4000)}\n`);
+  } catch {}
+}
+
+function permissionLogFields(payload: PermissionRequiredPayload | undefined): Record<string, unknown> {
+  if (!payload) return { hasPermissionRequest: false };
+  return {
+    hasPermissionRequest: true,
+    requestId: payload.requestId,
+    tool: payload.tool,
+    action: payload.action,
+    origin: payload.origin,
+    reasonCode: payload.reasonCode,
+    riskLevel: payload.riskLevel,
+    requester: payload.requester,
+    hasSessionScope: Boolean(payload.sessionScope),
+    hasProjectScope: Boolean(payload.projectScope),
+    hasSafeTarget: Boolean(payload.prompt?.safeTarget),
+    hasSafeCommandSummary: Boolean(payload.prompt?.safeCommandSummary),
+  };
+}
+
 function compactOutput(text: string, limit = 800): string {
   const normalized = sanitizePermissionTransportText(text).replace(/\s+/g, ' ').trim();
   return normalized.length > limit ? `…${normalized.slice(-limit)}` : normalized;
@@ -334,8 +362,17 @@ export class SubagentManager {
           if ((task as SubagentTask).status === 'cancelled') return;
 
           const permissionRequired = result.permission_request;
-          if (!permissionRequired) break;
-          if (mode === 'background') throw new Error('Subagent permission requires main-thread approval; rerun in task mode to approve or deny it.');
+          if (!permissionRequired) {
+            if (/Permission approval must be collected by the main thread|permission_required:/i.test(result.result ?? '')) {
+              subagentAuditLog(cwd, 'permission_bridge_payload_missing', { taskId: id, agent: definition.name, attempts: approvalsHandled, resultHasText: Boolean(result.result) });
+            }
+            break;
+          }
+          subagentAuditLog(cwd, 'permission_bridge_request_detected', { taskId: id, agent: definition.name, ...permissionLogFields(permissionRequired) });
+          if (mode === 'background') {
+            subagentAuditLog(cwd, 'permission_bridge_background_blocked', { taskId: id, agent: definition.name, ...permissionLogFields(permissionRequired) });
+            throw new Error('Subagent permission requires main-thread approval; rerun in task mode to approve or deny it.');
+          }
           approvalsHandled += 1;
           if (approvalsHandled > 5) throw new Error('Subagent permission approval retry limit exceeded.');
 
@@ -353,7 +390,9 @@ export class SubagentManager {
           this.record(cwd, task, task.last_activity);
           onTaskUpdate?.();
 
+          subagentAuditLog(cwd, 'permission_bridge_prompt_main_thread', { taskId: id, agent: definition.name, ...permissionLogFields(permissionRequired) });
           const choice = await promptMainThreadForPermission(ctx, permissionRequired);
+          subagentAuditLog(cwd, 'permission_bridge_user_choice', { taskId: id, agent: definition.name, choice, requestId: permissionRequired.requestId, reasonCode: permissionRequired.reasonCode });
           if (choice === 'Deny') throw new Error(`Subagent permission denied by main user: ${permissionRequired.reasonCode ?? permissionRequired.reason ?? 'permission_required'}`);
           if (choice === 'Allow for project') await registerProjectApproval(cwd, permissionRequired);
           else registerMainThreadApproval(permissionRequired, choice);
