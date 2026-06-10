@@ -50,9 +50,11 @@ export const builtInPermissionPolicy: PermissionPolicyConfig = {
   bash: {
     default: 'ask',
     safeCommands: ['git status', 'git diff', 'npm test', 'npm run typecheck'],
+    scopedApprovals: [],
     denyCommands: ['sudo *', 'su *', 'chmod 777 *', 'chown *', 'rm -rf /', 'rm -rf ~', 'curl * | sh', 'wget * | sh'],
     askCommands: ['rm *', 'mv *', 'cp *', 'git clean *', 'git reset *', 'npm install *', 'pnpm add *', 'pip install *'],
     network: 'ask',
+    workspaceReadOnly: 'allow',
     outsideWorkspaceFilesystem: 'ask',
     envSecretExposure: 'deny',
     maxCommandPreviewChars: 240,

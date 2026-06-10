@@ -4,13 +4,15 @@ import { dirname, join, resolve } from 'node:path';
 import { getSubagent, loadSubagents, readSubagentsConfig } from './config.js';
 import { sdkSubagentRunner } from './runner.js';
 import { SubagentHistoryStore } from './history.js';
+import { sanitizePermissionTransportText } from './permission-channel.js';
 import { resolveEffectiveSubagentProfile } from './profile-resolver.js';
+import type { PermissionRequiredPayload } from '../../permission-guard/src/types.js';
 import type { ModelRef, SubagentRunInput, SubagentRunner, SubagentTask } from './types.js';
 
 function nowIso(): string { return new Date().toISOString(); }
 function taskId(agent: string): string { return `subtask_${agent}_${Date.now()}_${randomUUID().replace(/-/g, '').slice(0, 8)}`; }
 function compactOutput(text: string, limit = 800): string {
-  const normalized = text.replace(/\s+/g, ' ').trim();
+  const normalized = sanitizePermissionTransportText(text).replace(/\s+/g, ' ').trim();
   return normalized.length > limit ? `…${normalized.slice(-limit)}` : normalized;
 }
 
@@ -25,60 +27,15 @@ function sessionIdFromContext(ctx: any): string | undefined {
   return typeof file === 'string' && file.length > 0 ? file : undefined;
 }
 
-const PERMISSION_REQUIRED_MARKER = 'permission_required:';
 const MAIN_THREAD_APPROVAL_REGISTRY_KEY = Symbol.for('pi.permissionGuard.mainThreadApprovals');
 const APPROVAL_CHOICES = ['Allow once', 'Allow for session', 'Allow for project', 'Deny'] as const;
 type ApprovalChoice = typeof APPROVAL_CHOICES[number];
 
-type PermissionRequiredPayload = {
-  type: 'permission_required';
-  requestId?: string;
-  tool?: string;
-  action?: string;
-  reason?: string;
-  reasonCode?: string;
-  prompt?: {
-    title?: string;
-    message?: string;
-    choices?: readonly string[];
-    safeTarget?: string;
-    safeCommandSummary?: string;
-    workspaceRoot?: string;
-    limitations?: readonly string[];
-  };
-  sessionScope?: {
-    cacheKey: string;
-    action: string;
-    tool: string;
-    targetPattern?: string;
-    commandPattern?: string;
-    policyIdentity: string;
-  };
-  projectScope?: {
-    safeCommandPattern?: string;
-  };
-};
-
-function extractPermissionRequiredPayload(text: string | undefined): PermissionRequiredPayload | undefined {
-  if (!text) return undefined;
-
-  let latest: PermissionRequiredPayload | undefined;
-  let searchFrom = 0;
-  while (true) {
-    const index = text.indexOf(PERMISSION_REQUIRED_MARKER, searchFrom);
-    if (index < 0) return latest;
-
-    const jsonStart = index + PERMISSION_REQUIRED_MARKER.length;
-    const lineEnd = text.slice(jsonStart).search(/\r?\n/);
-    const json = lineEnd >= 0 ? text.slice(jsonStart, jsonStart + lineEnd) : text.slice(jsonStart);
-    try {
-      const payload = JSON.parse(json) as PermissionRequiredPayload;
-      if (payload?.type === 'permission_required') latest = payload;
-    } catch {
-      // Ignore malformed markers and continue scanning for a later valid payload.
-    }
-    searchFrom = jsonStart + Math.max(json.length, 1);
-  }
+function sanitizeUnknown<T>(value: T): T {
+  if (typeof value === 'string') return sanitizePermissionTransportText(value) as T;
+  if (Array.isArray(value)) return value.map((item) => sanitizeUnknown(item)) as T;
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, sanitizeUnknown(entry)])) as T;
 }
 
 function mainThreadApprovalRegistry(): Map<string, unknown> {
@@ -93,6 +50,8 @@ function mainThreadApprovalRegistry(): Map<string, unknown> {
 function approvalPromptMessage(payload: PermissionRequiredPayload): string {
   const prompt = payload.prompt ?? {};
   const lines = [prompt.title ?? 'Permission required', '', prompt.message ?? payload.reason ?? 'A subagent requested permission.'];
+  const requester = payload.requester?.subagentName ?? payload.requester?.subagentId;
+  if (requester) lines.push('', `Requested by: ${requester}`);
   if (prompt.safeTarget) lines.push('', `Target: ${prompt.safeTarget}`);
   if (prompt.safeCommandSummary) lines.push('', `Command: ${prompt.safeCommandSummary}`);
   if (prompt.workspaceRoot) lines.push('', `Workspace: ${prompt.workspaceRoot}`);
@@ -345,11 +304,12 @@ export class SubagentManager {
               task.last_activity_at = nowIso();
               task.last_activity = activity.message;
               if (activity.output) task.output_preview = compactOutput(activity.output);
-              if (activity.prompt) task.prompt = activity.prompt;
-              if (activity.transcript) task.transcript = activity.transcript;
+              if (activity.prompt) task.prompt = sanitizePermissionTransportText(activity.prompt);
+              if (activity.transcript) task.transcript = sanitizePermissionTransportText(activity.transcript);
               if (activity.usage) task.usage = activity.usage;
               if (activity.effort) task.effort = activity.effort;
-              if (activity.thread_snapshot) task.thread_snapshot = activity.thread_snapshot;
+              if (activity.thread_snapshot) task.thread_snapshot = sanitizeUnknown(activity.thread_snapshot);
+              if (activity.permission_request) task.permission_request = activity.permission_request;
               this.record(cwd, task, activity.message);
               onTaskUpdate?.();
             },
@@ -373,22 +333,23 @@ export class SubagentManager {
           }
           if ((task as SubagentTask).status === 'cancelled') return;
 
-          const permissionRequired = extractPermissionRequiredPayload(result.result);
+          const permissionRequired = result.permission_request;
           if (!permissionRequired) break;
           if (mode === 'background') throw new Error('Subagent permission requires main-thread approval; rerun in task mode to approve or deny it.');
           approvalsHandled += 1;
           if (approvalsHandled > 5) throw new Error('Subagent permission approval retry limit exceeded.');
 
-          task.result = result.result;
+          task.result = sanitizePermissionTransportText(result.result);
           task.output_preview = compactOutput(result.result);
-          task.transcript = `${task.transcript ?? ''}\n\n# permission request surfaced to orchestrator\n\n${result.result}`.trim();
+          task.transcript = sanitizePermissionTransportText(`${task.transcript ?? ''}\n\n# permission request surfaced to orchestrator\n\n${result.result}`.trim());
           task.last_activity = 'permission required; awaiting main-thread decision';
           task.last_activity_at = nowIso();
           task.usage = result.usage ?? task.usage;
           task.model = result.model;
           task.effort = result.effort ?? task.effort;
           task.fallback_used = result.fallback_used;
-          if (result.thread_snapshot) task.thread_snapshot = result.thread_snapshot;
+          if (result.thread_snapshot) task.thread_snapshot = sanitizeUnknown(result.thread_snapshot);
+          task.permission_request = permissionRequired;
           this.record(cwd, task, task.last_activity);
           onTaskUpdate?.();
 
@@ -397,6 +358,7 @@ export class SubagentManager {
           if (choice === 'Allow for project') await registerProjectApproval(cwd, permissionRequired);
           else registerMainThreadApproval(permissionRequired, choice);
           task.last_activity = `${choice} approved by main user; retrying subagent`;
+          delete task.permission_request;
           task.last_activity_at = nowIso();
           this.record(cwd, task, task.last_activity);
           onTaskUpdate?.();
@@ -404,16 +366,17 @@ export class SubagentManager {
 
         if (!result) throw new Error('Subagent finished without a result.');
         task.status = 'completed';
-        task.result = result.result;
+        task.result = sanitizePermissionTransportText(result.result);
         task.output_preview = compactOutput(result.result);
-        task.transcript = `${task.transcript ?? ''}\n\n# response sent to orchestrator\n\n${result.result}`.trim();
+        task.transcript = sanitizePermissionTransportText(`${task.transcript ?? ''}\n\n# response sent to orchestrator\n\n${result.result}`.trim());
         task.last_activity = 'completed';
         task.last_activity_at = nowIso();
         task.usage = result.usage ?? task.usage;
         task.model = result.model;
         task.effort = result.effort ?? task.effort;
         task.fallback_used = result.fallback_used;
-        if (result.thread_snapshot) task.thread_snapshot = result.thread_snapshot;
+        if (result.thread_snapshot) task.thread_snapshot = sanitizeUnknown(result.thread_snapshot);
+        delete task.permission_request;
         task.ended_at = task.last_activity_at;
         this.record(cwd, task, 'completed');
         onTaskUpdate?.();

@@ -68,6 +68,24 @@ export function buildSessionApprovalEntry(
     targetPattern,
     commandPattern,
     policyIdentity: request.policyIdentity,
+    bashApproval: request.action === 'bash' && decision.details.shellAnalysis
+      ? {
+          version: 1,
+          id: `session-${sessionId}`,
+          createdAt: new Date().toISOString(),
+          normalizedCommand: decision.details.safeCommandSummary ?? commandPattern ?? request.command?.raw ?? '',
+          commandSignature: decision.details.shellAnalysis.commandSignature,
+          effectSignature: decision.details.shellAnalysis.effectSignature,
+          allowedRoots: decision.details.approvalScope?.allowedRoots ?? (request.executionContext ? [{
+            kind: 'workspace',
+            raw: request.executionContext.workspaceRoot,
+            normalizedAbsolute: request.executionContext.workspaceRoot,
+            resolvedRealpath: request.executionContext.workspaceRoot,
+          }] : []),
+          reasonCode: decision.reasonCode,
+          source: 'session',
+        }
+      : undefined,
   };
 }
 

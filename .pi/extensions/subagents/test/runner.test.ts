@@ -5,7 +5,7 @@ import path from 'node:path';
 import type { SubagentDefinition, SubagentsConfig } from '../src/types.js';
 
 describe('subagent runner permission-required bridge', () => {
-  it('preserves permission_required payloads from nested tool failures in the orchestrator-facing result and transcript', async () => {
+  it('preserves structured permission requests from nested tool failures while keeping result surfaces marker-free', async () => {
     vi.resetModules();
     const payload = {
       type: 'permission_required',
@@ -24,7 +24,17 @@ describe('subagent runner permission-required bridge', () => {
         safeTarget: '/tmp/outside.txt',
       },
     };
-    const marker = `permission_required:${JSON.stringify(payload)}`;
+    const structuredToolResult = {
+      block: true,
+      reason: 'Permission approval must be collected by the main thread.',
+      details: {
+        permissionRequest: {
+          handle: 'perm_test_handle',
+          payload,
+          createdAt: new Date().toISOString(),
+        },
+      },
+    };
     let subscriber: ((event: unknown) => void) | undefined;
     const session = {
       subscribe: vi.fn((callback: (event: unknown) => void) => {
@@ -37,7 +47,7 @@ describe('subagent runner permission-required bridge', () => {
           type: 'tool_execution_end',
           toolName: 'read',
           isError: true,
-          result: { block: true, reason: marker },
+          result: structuredToolResult,
         });
       }),
       messages: [{ role: 'assistant', content: 'I could not complete the read.' }],
@@ -77,11 +87,9 @@ describe('subagent runner permission-required bridge', () => {
         onActivity: (activity) => activities.push(activity),
       });
 
-      expect(result.result).toContain(marker);
-      expect(activities.map((activity) => activity.transcript ?? activity.output ?? '').join('\n')).toContain(marker);
-      const log = fs.readFileSync(path.join(cwd, '.pi', 'subagents-debug.log'), 'utf8');
-      expect(log).toContain('permission_marker_detected');
-      expect(log).toContain('read');
+      expect(result.result).not.toContain('permission_required:');
+      expect(result.permission_request).toEqual(expect.objectContaining({ requestId: 'req-subagent-read', tool: 'read' }));
+      expect(activities.map((activity) => activity.transcript ?? activity.output ?? '').join('\n')).not.toContain('permission_required:');
       expect(session.prompt).toHaveBeenCalledOnce();
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });

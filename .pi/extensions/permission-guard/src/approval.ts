@@ -1,4 +1,4 @@
-import { projectSafeCommandPatternFor } from './project-approval.js';
+import { buildScopedBashApproval, projectSafeCommandPatternFor } from './project-approval.js';
 import { buildSessionApprovalEntry, type SessionApprovalCache } from './session-cache.js';
 import type {
   ApprovalChoice,
@@ -6,6 +6,7 @@ import type {
   PermissionPolicyConfig,
   PermissionRequest,
   PermissionRequiredPayload,
+  ScopedBashApproval,
 } from './types.js';
 
 export const APPROVAL_CHOICES = ['Allow once', 'Allow for session', 'Allow for project', 'Deny'] as const satisfies readonly ApprovalChoice[];
@@ -23,7 +24,7 @@ export interface ApprovalPrompt {
 export interface ResolveApprovalOptions {
   prompt?: (prompt: ApprovalPrompt) => Promise<ApprovalChoice> | ApprovalChoice;
   sessionCache?: SessionApprovalCache;
-  projectApproval?: (pattern: string) => Promise<void> | void;
+  projectApproval?: (approval: unknown) => Promise<void> | void;
 }
 
 export interface ApprovalResolution {
@@ -33,9 +34,11 @@ export interface ApprovalResolution {
 
 function approvalPrompt(request: PermissionRequest, decision: PermissionDecisionResult): ApprovalPrompt {
   const targetOrCommand = decision.details.safeTarget ?? decision.details.safeCommandSummary ?? request.rawInputSummary;
+  const scope = decision.details.approvalScope?.allowedRoots.map((root) => root.normalizedAbsolute).join(', ');
+  const effectSummary = decision.details.pathEffects?.map((effect) => effect.safeTarget).filter(Boolean).join(', ');
   return {
     title: `Permission required for ${request.tool}`,
-    message: `${decision.reason} (${decision.reasonCode}). Requested ${request.action}: ${targetOrCommand}`,
+    message: `${decision.reason} (${decision.reasonCode}). Requested ${request.action}: ${targetOrCommand}${scope ? `. Scope: ${scope}` : ''}${effectSummary ? `. Effects: ${effectSummary}` : ''}`,
     choices: [...APPROVAL_CHOICES],
     safeTarget: decision.details.safeTarget,
     safeCommandSummary: decision.details.safeCommandSummary,
@@ -53,6 +56,7 @@ function sessionScope(request: PermissionRequest, decision: PermissionDecisionRe
     targetPattern: request.target?.normalizedAbsolute,
     commandPattern,
     policyIdentity: request.policyIdentity,
+    bashApproval: buildScopedBashApproval(request, decision),
   };
 }
 
@@ -93,6 +97,7 @@ export function buildPermissionRequiredPayload(
   decision: PermissionDecisionResult,
 ): PermissionRequiredPayload {
   const cacheKey = decision.cacheKey ?? `approval:${request.policyIdentity}:${request.tool}:${request.action}:${request.target?.normalizedAbsolute ?? request.command?.raw.trim().replace(/\s+/g, ' ') ?? request.id}`;
+  const bashApproval = buildScopedBashApproval(request, decision);
   return {
     type: 'permission_required',
     requestId: request.id,
@@ -105,7 +110,7 @@ export function buildPermissionRequiredPayload(
     riskLevel: decision.riskLevel,
     prompt: approvalPrompt(request, decision),
     sessionScope: sessionScope(request, decision, cacheKey),
-    projectScope: { safeCommandPattern: projectSafeCommandPatternFor(request, decision) },
+    projectScope: { safeCommandPattern: projectSafeCommandPatternFor(request, decision), bashApproval },
   };
 }
 
@@ -146,10 +151,11 @@ export async function resolveApproval(
   if (choice === 'Deny') return { result: withApprovalResult(decision, false, 'approval_denied') };
   if (choice === 'Allow once') return { result: withApprovalResult(decision, true, 'approval_allow_once') };
   if (choice === 'Allow for project') {
+    const bashApproval = buildScopedBashApproval(request, decision);
     const pattern = projectSafeCommandPatternFor(request, decision);
-    if (pattern && options.projectApproval) {
-      await options.projectApproval(pattern);
-      return { result: withApprovalResult(decision, true, 'approval_allow_once') };
+    if (options.projectApproval) {
+      if (bashApproval) await options.projectApproval(bashApproval);
+      else if (pattern) await options.projectApproval(pattern);
     }
     return { result: withApprovalResult(decision, true, 'approval_allow_once') };
   }

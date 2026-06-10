@@ -1,5 +1,7 @@
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import type { PermissionDecisionResult, PermissionPolicyConfig, PermissionRequest, PolicyDecision, RiskLevel } from './types.js';
+import { analyzeShellCommand } from './shell-analyzer.js';
+import { extractShellPathEffectsSync } from './shell-path-effects.js';
+import type { PermissionDecisionResult, PermissionPolicyConfig, PermissionRequest, PolicyDecision, RiskLevel, ShellAnalysisResult } from './types.js';
 
 export interface BashPolicyOptions {
   workspaceRoot?: string;
@@ -12,6 +14,7 @@ interface BashMatch {
   riskLevel: RiskLevel;
   matchedRule?: string;
   noPreview?: boolean;
+  analysis?: ShellAnalysisResult;
 }
 
 function commandText(request: PermissionRequest): string {
@@ -57,64 +60,23 @@ function matchesCommandPattern(command: string, patterns: string[]): string | un
   return patterns.find((pattern) => commandPatternToRegExp(pattern)?.test(normalized));
 }
 
-function matchesExactSafeCommand(command: string, patterns: string[]): string | undefined {
-  const normalized = normalizeCommand(command);
-  return patterns.find((pattern) => !pattern.startsWith('regex:') && !pattern.includes('*') && normalizeCommand(pattern) === normalized);
-}
-
-function hasSuspiciousShellSyntax(command: string): boolean {
-  return /[;&|`]|\$\(|<\(|>\(|\n|\r|>>?|<</.test(command);
-}
-
-function hasOnlyAndSeparators(command: string): boolean {
-  return command.includes('&&') && !/[;|`]|\$\(|<\(|>\(|\n|\r|>>?|<</.test(command) && !/(^|[^&])&([^&]|$)/.test(command);
-}
-
-function firstToken(command: string): string {
-  return normalizeCommand(command).split(' ')[0] ?? '';
-}
-
-function isSameOrInside(target: string, root: string): boolean {
-  const rel = relative(root, target);
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
-}
-
-function safeWorkspaceCdSegment(command: string, config: PermissionPolicyConfig, options: BashPolicyOptions): string | undefined {
-  const root = workspaceRootFor(config, options);
-  if (!root) return undefined;
-
-  const match = normalizeCommand(command).match(/^cd\s+([A-Za-z0-9._/@+-]+)$/);
-  if (!match) return undefined;
-
-  const cdTarget = match[1]!;
-  if (cdTarget === '..' || cdTarget.startsWith('../') || cdTarget === '~' || cdTarget.startsWith('~/') || cdTarget.split('/').includes('..')) return undefined;
-
-  const targetPath = isAbsolute(cdTarget) ? cdTarget : resolve(root, cdTarget);
-  if (!isSameOrInside(targetPath, root)) return undefined;
-
-  return 'cd <workspace>';
-}
-
-function toPosixPath(path: string): string {
-  return path.split(sep).join('/');
-}
-
-function workspaceRootFor(config: PermissionPolicyConfig, options: BashPolicyOptions): string | undefined {
-  return options.workspaceRoot ?? config.workspace.root;
-}
-
 function referencesOutsideWorkspace(command: string, config: PermissionPolicyConfig, options: BashPolicyOptions): boolean {
-  const root = workspaceRootFor(config, options);
+  const root = options.workspaceRoot ?? config.workspace.root;
   const absolutePathMatches = command.match(/(?:^|\s|[><])((?:\/[A-Za-z0-9._~+@%:,=-]+)+)/g) ?? [];
 
   for (const match of absolutePathMatches) {
     const candidate = match.trim().replace(/^[><]+/, '');
     if (!candidate.startsWith('/')) continue;
     if (!root) return true;
-    if (!isSameOrInside(candidate, root)) return true;
+    const rel = relative(root, candidate);
+    if (rel.startsWith('..') || isAbsolute(rel)) return true;
   }
 
   return false;
+}
+
+function workspaceRootFor(config: PermissionPolicyConfig, request: PermissionRequest, options: BashPolicyOptions): string {
+  return request.executionContext?.workspaceRoot ?? options.workspaceRoot ?? config.workspace.root ?? process.cwd();
 }
 
 function denyMatch(config: PermissionPolicyConfig, request: PermissionRequest, options: BashPolicyOptions): BashMatch | undefined {
@@ -127,7 +89,7 @@ function denyMatch(config: PermissionPolicyConfig, request: PermissionRequest, o
       reason: 'Privilege escalation commands are denied by policy.',
       reasonCode: 'bash_privilege_escalation_denied',
       riskLevel: 'critical',
-      matchedRule: firstToken(command),
+      matchedRule: normalized.split(' ')[0],
     };
   }
 
@@ -208,56 +170,208 @@ function denyMatch(config: PermissionPolicyConfig, request: PermissionRequest, o
   return undefined;
 }
 
-function askMatch(config: PermissionPolicyConfig, request: PermissionRequest, options: BashPolicyOptions): BashMatch | undefined {
+function safeCommandCandidate(command: string, config: PermissionPolicyConfig): string | undefined {
+  return matchesCommandPattern(command, config.bash.safeCommands);
+}
+
+function outsideEffectDecision(config: PermissionPolicyConfig): Pick<BashMatch, 'decision' | 'reasonCode' | 'reason' | 'riskLevel'> {
+  const decision = config.bash.outsideWorkspaceFilesystem;
+  return {
+    decision,
+    reason: decision === 'deny'
+      ? 'Bash command has path effects outside the workspace, which is denied by policy.'
+      : decision === 'allow'
+        ? 'Bash command has outside-workspace path effects that are allowed by policy after structured analysis.'
+        : 'Bash command has path effects outside the workspace and requires approval by policy.',
+    reasonCode: decision === 'deny' ? 'bash_outside_workspace_denied' : decision === 'allow' ? 'bash_outside_workspace_allowed' : 'bash_outside_workspace_requires_approval',
+    riskLevel: 'high',
+  };
+}
+
+function segmentSafeCompound(analysis: ShellAnalysisResult, config: PermissionPolicyConfig): string | undefined {
+  if (analysis.operators.length === 0) return undefined;
+  for (const segment of analysis.segments) {
+    if (segment.commandName === 'cd') {
+      if (!analysis.pathEffects.some((effect) => effect.segmentIndex === segment.index && effect.intent === 'cwd' && effect.classified?.insideWorkspace)) {
+        return undefined;
+      }
+      continue;
+    }
+    if (!safeCommandCandidate(segment.raw, config)) return undefined;
+  }
+  return analysis.segments.map((segment) => (segment.commandName === 'cd' ? 'cd <workspace>' : segment.raw)).join(' && ');
+}
+
+const READ_ONLY_PIPE_SOURCES = new Set(['find', 'grep', 'rg', 'ls', 'cat', 'head', 'tail']);
+const READ_ONLY_PIPE_SINKS = new Set(['sort', 'head', 'tail', 'wc', 'uniq']);
+
+function splitPipelineCommands(command: string): string[] | undefined {
+  const parts = command.split('|').map((part) => part.trim()).filter(Boolean);
+  return parts.length > 1 ? parts : undefined;
+}
+
+function firstCommandName(segment: string): string | undefined {
+  const match = /^\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s]+\s+)*([A-Za-z0-9_.-]+)/.exec(segment);
+  return match?.[1];
+}
+
+function isWorkspaceReadOnlyPipeline(analysis: ShellAnalysisResult): boolean {
+  const unsupported = new Set(analysis.unsupported);
+  if (unsupported.size !== 1 || !unsupported.has('pipe')) return false;
+  const parts = splitPipelineCommands(analysis.normalizedCommand);
+  if (!parts || parts.length !== 2) return false;
+  const source = firstCommandName(parts[0]);
+  const sink = firstCommandName(parts[1]);
+  if (!source || !sink || !READ_ONLY_PIPE_SOURCES.has(source) || !READ_ONLY_PIPE_SINKS.has(sink)) return false;
+  if (!analysis.pathEffects.length) return false;
+  return analysis.pathEffects.every((effect) =>
+    effect.intent === 'read'
+    && !effect.ambiguous
+    && effect.classified?.insideWorkspace === true
+  );
+}
+
+function isWorkspaceReadOnlySimpleCommand(analysis: ShellAnalysisResult): boolean {
+  if (analysis.unsupported.length > 0 || analysis.operators.length > 0) return false;
+  const command = analysis.segments[0]?.commandName;
+  if (!command || !['find', 'ls', 'cat', 'grep', 'head', 'tail', 'less', 'more'].includes(command)) return false;
+  if (!analysis.pathEffects.length) return false;
+  return analysis.pathEffects.every((effect) =>
+    effect.intent === 'read'
+    && !effect.ambiguous
+    && effect.classified?.insideWorkspace === true
+  );
+}
+
+function workspaceReadOnlyMatch(config: PermissionPolicyConfig, analysis: ShellAnalysisResult): BashMatch | undefined {
+  if (!isWorkspaceReadOnlyPipeline(analysis) && !isWorkspaceReadOnlySimpleCommand(analysis)) return undefined;
+  const decision = config.bash.workspaceReadOnly;
+  return {
+    decision,
+    reason: decision === 'allow'
+      ? 'Read-only bash command is limited to workspace paths and is allowed by workspace read/list/search policy.'
+      : decision === 'deny'
+        ? 'Read-only bash command is limited to workspace paths but is denied by bash.workspaceReadOnly policy.'
+        : 'Read-only bash command is limited to workspace paths and requires approval by bash.workspaceReadOnly policy.',
+    reasonCode: decision === 'allow'
+      ? 'bash_workspace_readonly_allowed'
+      : decision === 'deny'
+        ? 'bash_workspace_readonly_denied'
+        : 'bash_workspace_readonly_requires_approval',
+    riskLevel: decision === 'deny' ? 'medium' : 'low',
+    matchedRule: 'workspace-readonly-bash',
+    analysis,
+  };
+}
+
+function compoundRiskMatch(analysis: ShellAnalysisResult, config: PermissionPolicyConfig): BashMatch | undefined {
+  if (analysis.operators.length === 0) return undefined;
+  for (const segment of analysis.segments) {
+    const raw = segment.raw;
+    if (/^(?:npm\s+(?:install|i)|pnpm\s+add|yarn\s+add|pip(?:3)?\s+install|cargo\s+install|gem\s+install|go\s+install)(?:\s|$)/i.test(raw)) {
+      return { decision: 'ask', reason: 'Package installation commands require approval by policy.', reasonCode: 'bash_package_install_requires_approval', riskLevel: 'medium', matchedRule: 'package-install', analysis };
+    }
+    if (/^(?:rm|mv|cp)(?:\s|$)/i.test(raw) || /^git\s+(?:clean|reset\s+--hard)(?:\s|$)/i.test(raw)) {
+      return { decision: 'ask', reason: 'Destructive or state-changing bash command requires approval by policy.', reasonCode: 'bash_state_change_requires_approval', riskLevel: 'high', matchedRule: 'state-changing-command', analysis };
+    }
+    const configuredAsk = matchesCommandPattern(raw, config.bash.askCommands);
+    if (configuredAsk) {
+      return { decision: 'ask', reason: 'Bash command requires approval by configured policy.', reasonCode: 'bash_configured_ask', riskLevel: 'medium', matchedRule: configuredAsk, analysis };
+    }
+  }
+  return undefined;
+}
+
+function analysisMatch(config: PermissionPolicyConfig, request: PermissionRequest, options: BashPolicyOptions): BashMatch {
   const command = commandText(request);
-  const normalized = normalizeCommand(command);
-  if (/^(?:curl|wget|ssh|scp|rsync)(?:\s|$)/i.test(normalized) || /^git\s+(?:clone|fetch|pull)(?:\s|$)/i.test(normalized)) {
+  const workspaceRoot = workspaceRootFor(config, request, options);
+  const cwd = request.executionContext?.cwd ?? workspaceRoot;
+  const analysis = extractShellPathEffectsSync({
+    analysis: analyzeShellCommand({ command, cwd, config }),
+    context: { cwd, workspaceRoot, policyIdentity: request.policyIdentity },
+    config,
+  });
+
+  const workspaceReadOnly = workspaceReadOnlyMatch(config, analysis);
+  if (workspaceReadOnly) return workspaceReadOnly;
+
+  if (analysis.unsupported.length > 0 || !analysis.effectsComplete) {
+    const hasOutsideEffect = analysis.pathEffects.some((effect) => effect.classified && !effect.classified.insideWorkspace);
+    const fallback = (config.bash.outsideWorkspaceFilesystem === 'deny' && referencesOutsideWorkspace(command, config, options)) || hasOutsideEffect
+      ? outsideEffectDecision(config)
+      : {
+          decision: 'ask' as const,
+          reason: 'Unsupported shell syntax or ambiguous path effects require approval by policy.',
+          reasonCode: 'bash_unsupported_shell_requires_approval',
+          riskLevel: 'medium' as const,
+        };
+    return { ...fallback, matchedRule: analysis.unsupported.join(','), analysis };
+  }
+
+  const compoundSafeRule = segmentSafeCompound(analysis, config);
+  if (compoundSafeRule) {
     return {
-      decision: config.bash.network,
-      reason: 'Network-related bash commands require approval by policy.',
-      reasonCode: config.bash.network === 'deny' ? 'bash_network_denied' : config.bash.network === 'allow' ? 'bash_network_allowed' : 'bash_network_requires_approval',
-      riskLevel: 'medium',
-      matchedRule: 'network-command',
+      decision: 'allow',
+      reason: 'Every command in the compound sequence is allowed by policy after structured analysis.',
+      reasonCode: 'bash_safe_compound_command_allowed',
+      riskLevel: 'low',
+      matchedRule: compoundSafeRule,
+      analysis,
     };
   }
 
-  if (/^(?:npm\s+(?:install|i)|pnpm\s+add|yarn\s+add|pip(?:3)?\s+install|cargo\s+install|gem\s+install|go\s+install)(?:\s|$)/i.test(normalized)) {
+  const compoundRisk = compoundRiskMatch(analysis, config);
+  if (compoundRisk) return compoundRisk;
+
+  const hasOutsideEffect = analysis.pathEffects.some((effect) => effect.classified && !effect.classified.insideWorkspace);
+  if (hasOutsideEffect) {
+    return { ...outsideEffectDecision(config), matchedRule: 'outside-workspace-path-effect', analysis };
+  }
+
+  const safeMatch = safeCommandCandidate(command, config);
+  const simpleAllow = analysis.unsupported.length === 0 && analysis.pathEffects.every((effect) => effect.classified?.insideWorkspace ?? !effect.ambiguous);
+  if (safeMatch && simpleAllow && analysis.operators.length === 0) {
+    return {
+      decision: 'allow',
+      reason: 'Bash command matches a configured safe command after structured analysis.',
+      reasonCode: 'bash_safe_command_allowed',
+      riskLevel: 'low',
+      matchedRule: safeMatch,
+      analysis,
+    };
+  }
+
+  if (/^(?:npm\s+(?:install|i)|pnpm\s+add|yarn\s+add|pip(?:3)?\s+install|cargo\s+install|gem\s+install|go\s+install)(?:\s|$)/i.test(analysis.normalizedCommand)) {
     return {
       decision: 'ask',
       reason: 'Package installation commands require approval by policy.',
       reasonCode: 'bash_package_install_requires_approval',
       riskLevel: 'medium',
       matchedRule: 'package-install',
+      analysis,
     };
   }
 
-  if (/^(?:rm|mv|cp)(?:\s|$)/i.test(normalized) || /^git\s+(?:clean|reset\s+--hard)(?:\s|$)/i.test(normalized)) {
+  if (/^(?:rm|mv|cp)(?:\s|$)/i.test(analysis.normalizedCommand) || /^git\s+(?:clean|reset\s+--hard)(?:\s|$)/i.test(analysis.normalizedCommand)) {
     return {
       decision: 'ask',
       reason: 'Destructive or state-changing bash command requires approval by policy.',
       reasonCode: 'bash_state_change_requires_approval',
       riskLevel: 'high',
       matchedRule: 'state-changing-command',
+      analysis,
     };
   }
 
-  if (referencesOutsideWorkspace(command, config, options)) {
+  const network = /^(?:curl|wget|ssh|scp|rsync)(?:\s|$)/i.test(analysis.normalizedCommand) || /^git\s+(?:clone|fetch|pull)(?:\s|$)/i.test(analysis.normalizedCommand);
+  if (network) {
     return {
-      decision: config.bash.outsideWorkspaceFilesystem,
-      reason: 'Bash command references paths outside the workspace and requires approval by policy.',
-      reasonCode: config.bash.outsideWorkspaceFilesystem === 'deny' ? 'bash_outside_workspace_denied' : config.bash.outsideWorkspaceFilesystem === 'allow' ? 'bash_outside_workspace_allowed' : 'bash_outside_workspace_requires_approval',
+      decision: config.bash.network,
+      reason: 'Network-related bash commands require approval by policy.',
+      reasonCode: config.bash.network === 'deny' ? 'bash_network_denied' : config.bash.network === 'allow' ? 'bash_network_allowed' : 'bash_network_requires_approval',
       riskLevel: 'medium',
-      matchedRule: 'outside-workspace-path',
-    };
-  }
-
-  if (hasSuspiciousShellSyntax(command)) {
-    return {
-      decision: 'ask',
-      reason: 'Shell syntax or metacharacters require approval because the command cannot be proven safe.',
-      reasonCode: 'bash_shell_syntax_requires_approval',
-      riskLevel: 'medium',
-      matchedRule: 'shell-syntax',
+      matchedRule: 'network-command',
+      analysis,
     };
   }
 
@@ -269,97 +383,65 @@ function askMatch(config: PermissionPolicyConfig, request: PermissionRequest, op
       reasonCode: 'bash_configured_ask',
       riskLevel: 'medium',
       matchedRule: configuredAsk,
+      analysis,
     };
   }
 
-  return undefined;
-}
-
-function segmentRequest(request: PermissionRequest, command: string): PermissionRequest {
-  return {
-    ...request,
-    rawInputSummary: `bash ${command}`,
-    command: { raw: command, summary: command },
-  };
-}
-
-function segmentNotSafeMatch(config: PermissionPolicyConfig, request: PermissionRequest, options: BashPolicyOptions): BashMatch {
-  return denyMatch(config, request, options) ?? askMatch(config, request, options) ?? {
-    decision: 'ask',
-    reason: 'Shell syntax or metacharacters require approval because the command cannot be proven safe.',
-    reasonCode: 'bash_shell_syntax_requires_approval',
-    riskLevel: 'medium',
-    matchedRule: 'shell-syntax',
-  };
-}
-
-function safeAndCompoundMatch(config: PermissionPolicyConfig, request: PermissionRequest, options: BashPolicyOptions): BashMatch | undefined {
-  const command = commandText(request);
-  if (!hasOnlyAndSeparators(command)) return undefined;
-
-  const parts = command.split('&&').map((part) => normalizeCommand(part));
-  if (parts.length < 2 || parts.some((part) => part.length === 0)) {
+  if (config.bash.default === 'allow' && simpleAllow) {
     return {
-      decision: 'ask',
-      reason: 'Shell syntax or metacharacters require approval because the command cannot be proven safe.',
-      reasonCode: 'bash_shell_syntax_requires_approval',
-      riskLevel: 'medium',
-      matchedRule: 'shell-syntax',
+      decision: 'allow',
+      reason: 'Bash command does not match a more specific rule and passes structured safety gates.',
+      reasonCode: 'bash_default_allowed',
+      riskLevel: 'low',
+      matchedRule: 'bash.default',
+      analysis,
     };
   }
 
-  const labels: string[] = [];
-  for (const part of parts) {
-    const partRequest = segmentRequest(request, part);
-    const cdLabel = safeWorkspaceCdSegment(part, config, options);
-    if (cdLabel) {
-      labels.push(cdLabel);
-      continue;
-    }
-
-    const matchedSafeCommand = matchesCommandPattern(part, config.bash.safeCommands);
-    if (matchedSafeCommand) {
-      labels.push(part);
-      continue;
-    }
-
-    return segmentNotSafeMatch(config, partRequest, options);
-  }
-
   return {
-    decision: 'allow',
-    reason: 'Every command in the && chain is allowed by policy.',
-    reasonCode: 'bash_safe_compound_command_allowed',
-    riskLevel: 'low',
-    matchedRule: labels.join(' && '),
+    decision: config.bash.default === 'deny' ? 'deny' : 'ask',
+    reason: analysis.operators.length > 0
+      ? 'Compound shell syntax requires approval unless every segment is proven safe.'
+      : 'Bash command does not match a more specific allow or deny rule.',
+    reasonCode: config.bash.default === 'deny' ? 'bash_default_denied' : analysis.operators.length > 0 ? 'bash_shell_syntax_requires_approval' : 'bash_default_requires_approval',
+    riskLevel: config.bash.default === 'deny' ? 'high' : 'medium',
+    matchedRule: 'bash.default',
+    analysis,
   };
 }
 
-function allowMatch(config: PermissionPolicyConfig, request: PermissionRequest, options: BashPolicyOptions): BashMatch | undefined {
-  const command = commandText(request);
+function approvalRootsFor(request: PermissionRequest, analysis: ShellAnalysisResult | undefined): NonNullable<PermissionDecisionResult['details']['approvalScope']>['allowedRoots'] | undefined {
+  if (!analysis) return undefined;
+  const effectRoots = analysis.pathEffects
+    .filter((effect) => effect.classified && !effect.ambiguous)
+    .map((effect) => ({
+      kind: 'directory' as const,
+      raw: effect.classified!.normalizedAbsolute,
+      normalizedAbsolute: effect.classified!.normalizedAbsolute,
+      resolvedRealpath: effect.classified!.resolvedRealpath ?? effect.classified!.normalizedAbsolute,
+    }));
 
-  const compoundMatch = safeAndCompoundMatch(config, request, options);
-  if (compoundMatch) return compoundMatch;
+  if (effectRoots.length > 0) {
+    const deduped = new Map<string, (typeof effectRoots)[number]>();
+    for (const root of effectRoots) {
+      deduped.set(root.resolvedRealpath ?? root.normalizedAbsolute, root);
+    }
+    return [...deduped.values()];
+  }
 
-  if (command.includes('&&')) return undefined;
-
-  const matchedSafeCommand = hasSuspiciousShellSyntax(command)
-    ? matchesExactSafeCommand(command, config.bash.safeCommands)
-    : matchesCommandPattern(command, config.bash.safeCommands);
-  if (!matchedSafeCommand) return undefined;
-
-  return {
-    decision: 'allow',
-    reason: 'Bash command matches a configured safe command.',
-    reasonCode: 'bash_safe_command_allowed',
-    riskLevel: 'low',
-    matchedRule: matchedSafeCommand,
-  };
+  const workspaceRoot = request.executionContext?.workspaceRoot ?? analysis.pathEffects[0]?.classified?.workspaceRoot ?? process.cwd();
+  return [{
+    kind: 'workspace',
+    raw: workspaceRoot,
+    normalizedAbsolute: workspaceRoot,
+    resolvedRealpath: workspaceRoot,
+  }];
 }
 
 function resultForMatch(config: PermissionPolicyConfig, request: PermissionRequest, match: BashMatch): PermissionDecisionResult {
   const finalDecision = match.decision === 'allow' ? 'allow' : match.decision === 'deny' ? 'deny' : 'requires_approval';
   const summary = commandSummary(config, commandText(request));
+  const allowedRoots = approvalRootsFor(request, match.analysis);
 
   return {
     decision: match.decision,
@@ -372,19 +454,30 @@ function resultForMatch(config: PermissionPolicyConfig, request: PermissionReque
       matchedRule: match.matchedRule,
       matchedLayer: 'bash',
       noPreview: match.noPreview ?? false,
+      shellAnalysis: match.analysis ? {
+        commandSignature: match.analysis.commandSignature,
+        effectSignature: match.analysis.effectSignature,
+        effectsComplete: match.analysis.effectsComplete,
+        riskClasses: match.analysis.riskClasses,
+        summary: match.analysis.summary,
+      } : undefined,
+      workspaceRoot: request.executionContext?.workspaceRoot ?? match.analysis?.pathEffects[0]?.classified?.workspaceRoot,
+      pathEffects: match.analysis?.pathEffects.map((effect) => ({
+        intent: effect.intent,
+        safeTarget: effect.classified?.workspaceRelative ?? effect.classified?.normalizedAbsolute,
+        insideWorkspace: effect.classified?.insideWorkspace,
+        symlinkEscapesWorkspace: effect.classified?.symlinkEscapesWorkspace,
+      })),
+      approvalScope: match.analysis && allowedRoots ? {
+        commandSignature: match.analysis.commandSignature,
+        effectSignature: match.analysis.effectSignature,
+        allowedRoots,
+      } : undefined,
     },
-    cacheKey: match.decision === 'ask' ? `bash:${request.policyIdentity}:${normalizeCommand(commandText(request))}` : undefined,
+    cacheKey: match.decision === 'ask' && match.analysis
+      ? `bash:${request.policyIdentity}:${match.analysis.commandSignature}:${match.analysis.effectSignature}`
+      : undefined,
     audit: match.decision === 'deny' ? config.audit.enabled && config.audit.logDenied : false,
-  };
-}
-
-function defaultMatch(config: PermissionPolicyConfig): BashMatch {
-  return {
-    decision: config.bash.default,
-    reason: 'Bash command does not match a more specific allow or deny rule.',
-    reasonCode: config.bash.default === 'allow' ? 'bash_default_allowed' : config.bash.default === 'deny' ? 'bash_default_denied' : 'bash_default_requires_approval',
-    riskLevel: config.bash.default === 'allow' ? 'low' : 'medium',
-    matchedRule: 'bash.default',
   };
 }
 
@@ -393,12 +486,7 @@ export function classifyBashCommand(
   request: PermissionRequest,
   options: BashPolicyOptions = {},
 ): PermissionDecisionResult {
-  const match =
-    denyMatch(config, request, options) ??
-    allowMatch(config, request, options) ??
-    askMatch(config, request, options) ??
-    defaultMatch(config);
-
+  const match = denyMatch(config, request, options) ?? analysisMatch(config, request, options);
   return resultForMatch(config, request, match);
 }
 
@@ -440,8 +528,8 @@ export function commandClassSummary(request: PermissionRequest): string[] {
   const classes: string[] = [];
   if (/^(?:curl|wget|ssh|scp|rsync)(?:\s|$)/i.test(command) || /^git\s+(?:clone|fetch|pull)(?:\s|$)/i.test(command)) classes.push('network');
   if (/^(?:npm\s+(?:install|i)|pnpm\s+add|pip(?:3)?\s+install|cargo\s+install)(?:\s|$)/i.test(command)) classes.push('package-install');
-  if (hasSuspiciousShellSyntax(command)) classes.push('shell-syntax');
+  if (/[;&|`]|\$\(|<\(|>\(|\n|\r|>>?|<</.test(command)) classes.push('shell-syntax');
   if (/\.env|~\/\.ssh|~\/\.aws|TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL/i.test(command)) classes.push('secret-like');
   if (classes.length === 0) classes.push('unknown');
-  return classes.map(toPosixPath);
+  return classes.map((value) => value.split(sep).join('/'));
 }

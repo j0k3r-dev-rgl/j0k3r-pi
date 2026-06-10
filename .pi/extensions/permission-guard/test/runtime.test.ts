@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 import permissionGuardExtension from '../index.js';
+import { consumePermissionRequest, resolvePermissionRequest } from '../src/permission-channel.js';
 import { registerPermissionGuardRuntime } from '../src/runtime.js';
 import type { ApprovalChoice } from '../src/types.js';
 
@@ -192,14 +193,14 @@ describe('permission guard runtime wiring', () => {
       expect(registry.size).toBe(0);
       const second = await handler({ toolName: 'read', toolCallId: 'tc-subagent-approved-again', input: { path: '../outside.txt' } }, ctx);
       expect(second).toEqual(expect.objectContaining({ block: true }));
-      expect(second.reason).toMatch(/^permission_required:/);
+      expect((second as any).details?.permissionRequest?.handle).toEqual(expect.any(String));
     } finally {
       if (previousRegistry === undefined) delete holder[registryKey];
       else holder[registryKey] = previousRegistry;
     }
   });
 
-  it('surfaces subagent-originated asks as a structured permission_required payload from the guard side', async () => {
+  it('surfaces subagent-originated asks through a structured permission handle from the guard side', async () => {
     const cwd = await tempWorkspace('permission-guard-runtime-subagent-');
     const pi = createMockPi();
     registerPermissionGuardRuntime(pi);
@@ -215,10 +216,10 @@ describe('permission guard runtime wiring', () => {
     }, ctx);
 
     expect(ctx.ui.select).not.toHaveBeenCalled();
-    expect(result).toEqual(expect.objectContaining({ block: true }));
-    expect(result.reason).toMatch(/^permission_required:/);
-    const payload = JSON.parse(result.reason.slice('permission_required:'.length));
-    expect(payload).toEqual(expect.objectContaining({
+    expect(result).toEqual(expect.objectContaining({ block: true, reason: expect.not.stringMatching(/^permission_required:/) }));
+    const published = (result as any).details?.permissionRequest;
+    expect(published).toEqual(expect.objectContaining({ handle: expect.any(String), payload: expect.any(Object) }));
+    expect(resolvePermissionRequest(published.handle)).toEqual(expect.objectContaining({
       type: 'permission_required',
       tool: 'read',
       action: 'read',
@@ -229,9 +230,10 @@ describe('permission guard runtime wiring', () => {
         safeTarget: expect.stringContaining('outside.txt'),
       }),
     }));
+    expect(consumePermissionRequest(published.handle)).toEqual(expect.objectContaining({ requestId: expect.any(String) }));
   });
 
-  it('surfaces subagent-originated asks without direct UI as permission_required instead of non-interactive denial', async () => {
+  it('surfaces subagent-originated asks without direct UI through structured permission data instead of non-interactive denial', async () => {
     const cwd = await tempWorkspace('permission-guard-runtime-subagent-no-ui-');
     const pi = createMockPi();
     registerPermissionGuardRuntime(pi);
@@ -251,10 +253,9 @@ describe('permission guard runtime wiring', () => {
 
     expect(ctx.ui.select).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({ block: true }));
-    expect(result.reason).toMatch(/^permission_required:/);
-    expect(result.reason).not.toContain('non_interactive_ask_denied');
-    const payload = JSON.parse(result.reason.slice('permission_required:'.length));
-    expect(payload).toEqual(expect.objectContaining({
+    expect((result as any).reason).not.toContain('non_interactive_ask_denied');
+    const published = (result as any).details?.permissionRequest;
+    expect(resolvePermissionRequest(published.handle)).toEqual(expect.objectContaining({
       type: 'permission_required',
       tool: 'read',
       action: 'read',
@@ -299,10 +300,9 @@ describe('permission guard runtime wiring', () => {
 
       expect(ctx.ui.select).not.toHaveBeenCalled();
       expect(result).toEqual(expect.objectContaining({ block: true }));
-      expect(result.reason).toMatch(/^permission_required:/);
-      expect(result.reason).not.toContain('non_interactive_ask_denied');
-      const payload = JSON.parse(result.reason.slice('permission_required:'.length));
-      expect(payload).toEqual(expect.objectContaining({
+      expect((result as any).reason).not.toContain('non_interactive_ask_denied');
+      const published = (result as any).details?.permissionRequest;
+      expect(resolvePermissionRequest(published.handle)).toEqual(expect.objectContaining({
         type: 'permission_required',
         tool: 'read',
         action: 'read',
@@ -318,7 +318,7 @@ describe('permission guard runtime wiring', () => {
     }
   });
 
-  it('persists Allow for project bash approvals as safe command patterns and reuses them for matching variants', async () => {
+  it('persists Allow for project bash approvals as scoped approvals and reuses them for matching variants', async () => {
     const cwd = await tempWorkspace('permission-guard-runtime-project-approval-');
     const pi = createMockPi();
     registerPermissionGuardRuntime(pi);
@@ -332,14 +332,21 @@ describe('permission guard runtime wiring', () => {
     }, ctx)).resolves.toBeUndefined();
 
     const saved = JSON.parse(await readFile(join(cwd, '.pi', 'permissions.json'), 'utf8'));
-    expect(saved.bash.safeCommands).toContain('regex:^npm\\s+--prefix\\s+(?!/|~|\\.\\.(?:/|$)|.*\\/\\.\\.(?:/|$))[A-Za-z0-9._/@+-]+\\s+test\\s+--\\s+--run$');
+    expect(saved.bash.scopedApprovals).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        version: 1,
+        normalizedCommand: 'npm --prefix .pi/extensions/permission-guard test -- --run',
+        commandSignature: expect.any(String),
+        effectSignature: expect.any(String),
+      }),
+    ]));
 
     await expect(handler({
       toolName: 'bash',
       toolCallId: 'tc-project-approval-variant',
       input: { command: 'npm --prefix .pi/extensions/subagents test -- --run' },
-    }, ctx)).resolves.toBeUndefined();
-    expect(ctx.ui.select).toHaveBeenCalledTimes(1);
+    }, ctx)).resolves.toEqual(expect.objectContaining({ block: true }));
+    expect(ctx.ui.select).toHaveBeenCalledTimes(2);
   });
 
   it('does not handle unsupported tool_call tools', async () => {

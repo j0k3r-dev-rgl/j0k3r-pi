@@ -1,9 +1,9 @@
 {
-  "bypassAll": true,
+  "bypassAll": false,
   "outsideWorkspace": {
-    "read": "allow",
-    "list": "allow",
-    "search": "allow",
+    "read": "ask",
+    "list": "ask",
+    "search": "ask",
     "write": "ask",
     "create": "ask",
     "rememberApprovals": "session"
@@ -14,15 +14,9 @@
   "bash": {
     "outsideWorkspaceFilesystem": "ask",
     "network": "ask",
-    "safeCommands": [
-      "git status *",
-      "git diff *",
-      "npm test *",
-      "npm run typecheck",
-      "git status --short *",
-      "regex:^npm\\s+--prefix\\s+(?!/|~|\\.\\.(?:/|$)|.*\\/\\.\\.(?:/|$))[A-Za-z0-9._/@+-]+\\s+run\\s+typecheck$",
-      "regex:^npm\\s+--prefix\\s+(?!/|~|\\.\\.(?:/|$)|.*\\/\\.\\.(?:/|$))[A-Za-z0-9._/@+-]+\\s+test\\s+--\\s+--run$"
-    ]
+    "workspaceReadOnly": "allow",
+    "safeCommands": [],
+    "scopedApprovals": []
   },
   "audit": {
     "enabled": true,

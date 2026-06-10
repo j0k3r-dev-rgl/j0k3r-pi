@@ -1,4 +1,4 @@
-import { constants } from 'node:fs';
+import { constants, existsSync, realpathSync } from 'node:fs';
 import { access, realpath as fsRealpath } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { PermissionPolicyConfig, PermissionRequest } from './types.js';
@@ -46,10 +46,28 @@ async function realpathIfPossible(path: string): Promise<string | undefined> {
   }
 }
 
+function realpathIfPossibleSync(path: string): string | undefined {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return undefined;
+  }
+}
+
 async function findNearestExistingParent(path: string): Promise<string | undefined> {
   let current = path;
   while (true) {
     if (await exists(current)) return current;
+    const parent = dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
+}
+
+function findNearestExistingParentSync(path: string): string | undefined {
+  let current = path;
+  while (true) {
+    if (existsSync(current)) return current;
     const parent = dirname(current);
     if (parent === current) return undefined;
     current = parent;
@@ -80,6 +98,30 @@ async function resolveEffectiveRealpath(normalizedAbsolute: string): Promise<{
   };
 }
 
+function resolveEffectiveRealpathSync(normalizedAbsolute: string): {
+  exists: boolean;
+  resolvedRealpath?: string;
+  nearestExistingParent?: string;
+} {
+  const existingTargetRealpath = realpathIfPossibleSync(normalizedAbsolute);
+  if (existingTargetRealpath) {
+    return { exists: true, resolvedRealpath: existingTargetRealpath };
+  }
+
+  const nearestExistingParent = findNearestExistingParentSync(dirname(normalizedAbsolute));
+  if (!nearestExistingParent) return { exists: false };
+
+  const parentRealpath = realpathIfPossibleSync(nearestExistingParent);
+  if (!parentRealpath) return { exists: false, nearestExistingParent };
+
+  const missingPath = relative(nearestExistingParent, normalizedAbsolute);
+  return {
+    exists: false,
+    nearestExistingParent,
+    resolvedRealpath: resolve(parentRealpath, missingPath),
+  };
+}
+
 export async function classifyPathTarget(rawPath: string, options: ClassifyPathTargetOptions): Promise<ClassifiedPathTarget> {
   const workspaceRoot = resolveWorkspaceRoot(options);
   const normalizedAbsolute = isAbsolute(rawPath) ? resolve(rawPath) : resolve(workspaceRoot, rawPath);
@@ -88,6 +130,34 @@ export async function classifyPathTarget(rawPath: string, options: ClassifyPathT
 
   const targetResolution = await resolveEffectiveRealpath(normalizedAbsolute);
   const workspaceRootRealpath = (await realpathIfPossible(workspaceRoot)) ?? workspaceRoot;
+  const resolvedRealpath = targetResolution.resolvedRealpath;
+  const effectiveTarget = followSymlinks === 'realpath' && resolvedRealpath ? resolvedRealpath : normalizedAbsolute;
+  const effectiveRoot = followSymlinks === 'realpath' ? workspaceRootRealpath : workspaceRoot;
+  const insideWorkspace = isSameOrInside(effectiveTarget, effectiveRoot);
+  const symlinkEscapesWorkspace = lexicalInsideWorkspace && !insideWorkspace;
+  const workspaceRelative = insideWorkspace ? toPosixPath(relative(workspaceRoot, normalizedAbsolute)) || '.' : undefined;
+
+  return {
+    raw: rawPath,
+    normalizedAbsolute,
+    resolvedRealpath,
+    exists: targetResolution.exists,
+    nearestExistingParent: targetResolution.nearestExistingParent,
+    workspaceRoot,
+    insideWorkspace,
+    symlinkEscapesWorkspace,
+    workspaceRelative,
+  };
+}
+
+export function classifyResolvedPathTargetSync(rawPath: string, options: ClassifyPathTargetOptions): ClassifiedPathTarget {
+  const workspaceRoot = resolveWorkspaceRoot(options);
+  const normalizedAbsolute = isAbsolute(rawPath) ? resolve(rawPath) : resolve(workspaceRoot, rawPath);
+  const lexicalInsideWorkspace = isSameOrInside(normalizedAbsolute, workspaceRoot);
+  const followSymlinks = options.config.workspace.followSymlinks ?? 'realpath';
+
+  const targetResolution = resolveEffectiveRealpathSync(normalizedAbsolute);
+  const workspaceRootRealpath = realpathIfPossibleSync(workspaceRoot) ?? workspaceRoot;
   const resolvedRealpath = targetResolution.resolvedRealpath;
   const effectiveTarget = followSymlinks === 'realpath' && resolvedRealpath ? resolvedRealpath : normalizedAbsolute;
   const effectiveRoot = followSymlinks === 'realpath' ? workspaceRootRealpath : workspaceRoot;

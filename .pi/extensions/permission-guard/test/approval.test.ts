@@ -92,8 +92,9 @@ describe('interactive approval and session cache', () => {
     expect(evaluatePermission(config, request, cache.snapshot())).toMatchObject({ decision: 'ask', finalDecision: 'requires_approval' });
   });
 
-  it('stores allow-for-project by delegating a generated safe command pattern without mutating session cache', async () => {
-    const config = policy();
+  it('stores allow-for-project by delegating a scoped bash approval without mutating session cache', async () => {
+    const cwd = '/workspace';
+    const config = policy({ workspace: { root: cwd } });
     const request: PermissionRequest = {
       id: 'bash-project-approval',
       source: 'tool_call',
@@ -102,6 +103,7 @@ describe('interactive approval and session cache', () => {
       action: 'bash',
       rawInputSummary: 'bash npm --prefix .pi/extensions/permission-guard test -- --run',
       command: { raw: 'npm --prefix .pi/extensions/permission-guard test -- --run', summary: 'npm --prefix .pi/extensions/permission-guard test -- --run' },
+      executionContext: { cwd, workspaceRoot: cwd, policyIdentity: 'test-policy' },
       mode: 'tui',
       hasUI: true,
       policyIdentity: 'test-policy',
@@ -109,7 +111,7 @@ describe('interactive approval and session cache', () => {
     };
     const decision = askDecision(config, request);
     const cache = createSessionApprovalCache({ sessionId: 'session-project' });
-    const projectApproval = vi.fn(async (_pattern: string) => undefined);
+    const projectApproval = vi.fn(async (_approval: unknown) => undefined);
 
     const resolved = await resolveApproval(config, request, decision, {
       prompt: async () => 'Allow for project' as const,
@@ -118,7 +120,13 @@ describe('interactive approval and session cache', () => {
     });
 
     expect(resolved.result).toMatchObject({ decision: 'allow', finalDecision: 'allow', reasonCode: 'approval_allow_once' });
-    expect(projectApproval).toHaveBeenCalledWith('regex:^npm\\s+--prefix\\s+(?!/|~|\\.\\.(?:/|$)|.*\\/\\.\\.(?:/|$))[A-Za-z0-9._/@+-]+\\s+test\\s+--\\s+--run$');
+    expect(projectApproval).toHaveBeenCalledWith(expect.objectContaining({
+      version: 1,
+      normalizedCommand: 'npm --prefix .pi/extensions/permission-guard test -- --run',
+      commandSignature: expect.any(String),
+      effectSignature: expect.any(String),
+      allowedRoots: expect.arrayContaining([expect.objectContaining({ kind: 'directory', normalizedAbsolute: '/workspace/.pi/extensions/permission-guard' })]),
+    }));
     expect(cache.snapshot().entries).toEqual([]);
   });
 

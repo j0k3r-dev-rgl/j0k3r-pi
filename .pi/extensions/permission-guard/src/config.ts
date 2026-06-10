@@ -39,6 +39,7 @@ const policyDecisionPaths = new Set([
   'outsideWorkspace.create',
   'bash.default',
   'bash.network',
+  'bash.workspaceReadOnly',
   'bash.outsideWorkspaceFilesystem',
 ]);
 const toolModePaths = new Set(['tools.read', 'tools.write', 'tools.edit', 'tools.grep', 'tools.find', 'tools.ls', 'tools.bash']);
@@ -51,6 +52,28 @@ const stringArrayPaths = new Set([
   'bash.denyCommands',
   'bash.askCommands',
 ]);
+
+function isScopedApprovalRoot(value: unknown): value is PermissionPolicyConfig['bash']['scopedApprovals'][number]['allowedRoots'][number] {
+  return isPlainObject(value)
+    && (value.kind === 'workspace' || value.kind === 'directory')
+    && typeof value.raw === 'string'
+    && typeof value.normalizedAbsolute === 'string'
+    && (value.resolvedRealpath === undefined || typeof value.resolvedRealpath === 'string');
+}
+
+function isScopedApproval(value: unknown): value is PermissionPolicyConfig['bash']['scopedApprovals'][number] {
+  return isPlainObject(value)
+    && value.version === 1
+    && typeof value.id === 'string'
+    && typeof value.createdAt === 'string'
+    && typeof value.commandSignature === 'string'
+    && typeof value.effectSignature === 'string'
+    && typeof value.normalizedCommand === 'string'
+    && Array.isArray(value.allowedRoots)
+    && value.allowedRoots.every(isScopedApprovalRoot)
+    && (value.reasonCode === undefined || typeof value.reasonCode === 'string')
+    && (value.source === undefined || value.source === 'session' || value.source === 'project' || value.source === 'subagent');
+}
 
 async function exists(path: string): Promise<boolean> {
   try {
@@ -203,6 +226,14 @@ function validateLeaf(value: unknown, defaultValue: unknown, keyPath: string, wa
     case 'bash.envSecretExposure':
       if (value === 'deny' || value === 'ask') return value;
       warnings.push(`invalid env secret exposure mode at ${keyPath}; using built-in safe default`);
+      return defaultValue;
+    case 'bash.scopedApprovals':
+      if (Array.isArray(value)) {
+        const valid = value.filter(isScopedApproval);
+        if (valid.length !== value.length) warnings.push('invalid scoped approval entries at bash.scopedApprovals; ignoring malformed entries');
+        return valid;
+      }
+      warnings.push(`invalid scoped approval array at ${keyPath}; using built-in safe default`);
       return defaultValue;
     case 'nonInteractive.onAsk':
       if (value === 'deny' || value === 'allow') return value;

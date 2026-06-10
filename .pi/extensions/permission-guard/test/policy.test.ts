@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { builtInPermissionPolicy } from '../src/defaults.js';
 import { classifyPathTarget } from '../src/path-policy.js';
 import { evaluatePermission } from '../src/policy.js';
+import { buildScopedBashApproval } from '../src/project-approval.js';
 import type { PermissionPolicyConfig, PermissionRequest } from '../src/types.js';
 
 async function tempWorkspace(prefix: string) {
@@ -50,7 +51,7 @@ async function pathRequest(rawPath: string, cwd: string, action: PermissionReque
   };
 }
 
-function bashRequest(command: string, hasUI = true): PermissionRequest {
+function bashRequest(command: string, hasUI = true, workspaceRoot = '/workspace'): PermissionRequest {
   return {
     id: `req-${command}`,
     source: 'tool_call',
@@ -59,6 +60,7 @@ function bashRequest(command: string, hasUI = true): PermissionRequest {
     action: 'bash',
     rawInputSummary: `bash ${command}`,
     command: { raw: command, summary: command },
+    executionContext: { cwd: workspaceRoot, workspaceRoot, policyIdentity: 'test-policy' },
     mode: hasUI ? 'tui' : 'json',
     hasUI,
     policyIdentity: 'test-policy',
@@ -185,6 +187,111 @@ describe('pure permission policy engine', () => {
 
     expect(unmatched).toMatchObject({ decision: 'ask', finalDecision: 'requires_approval' });
     expect(matched).toMatchObject({ decision: 'allow', finalDecision: 'allow', reasonCode: 'session_approval_allowed' });
+  });
+
+  it('reuses scoped project bash approvals only for compatible command shapes within approved roots', () => {
+    const workspaceRoot = '/workspace';
+    const approvedRoot = '/home/test/sias/app';
+    const baseRequest = bashRequest(`find ${approvedRoot} -maxdepth 1 -mindepth 1 -print | sort`, true, workspaceRoot);
+    const baseDecision = evaluatePermission(policy({ workspace: { root: workspaceRoot } }), baseRequest);
+    const approval = buildScopedBashApproval(baseRequest, baseDecision);
+    expect(approval).toBeDefined();
+
+    const config = policy({
+      workspace: { root: workspaceRoot },
+      bash: {
+        ...structuredClone(builtInPermissionPolicy.bash),
+        scopedApprovals: [approval!],
+      },
+    });
+
+    const childPath = evaluatePermission(config, bashRequest(`find ${approvedRoot}/back -maxdepth 1 -mindepth 1 -print | sort`, true, workspaceRoot));
+    const differentRead = evaluatePermission(config, bashRequest(`cat ${approvedRoot}/file.txt`, true, workspaceRoot));
+    const differentDelete = evaluatePermission(config, bashRequest(`rm ${approvedRoot}/file.txt`, true, workspaceRoot));
+    const packageInstall = evaluatePermission(config, bashRequest('npm install', true, workspaceRoot));
+    const outsideRoot = evaluatePermission(config, bashRequest('find /home/test/other-app -maxdepth 1 -mindepth 1 -print | sort', true, workspaceRoot));
+
+    expect(childPath).toMatchObject({ decision: 'allow', reasonCode: 'project_approval_allowed', details: { matchedLayer: 'project' } });
+    expect(differentRead).toMatchObject({ decision: 'ask', finalDecision: 'requires_approval' });
+    expect(differentDelete).toMatchObject({ decision: 'ask', finalDecision: 'requires_approval' });
+    expect(packageInstall).toMatchObject({ decision: 'ask', finalDecision: 'requires_approval' });
+    expect(outsideRoot).toMatchObject({ decision: 'ask', finalDecision: 'requires_approval' });
+  });
+
+  it('does not reuse scoped bash approvals for sibling directories with the same command shape', () => {
+    const cwd = '/workspace';
+    const approvedRequest = {
+      ...bashRequest('npm --prefix .pi/extensions/permission-guard test -- --run'),
+      executionContext: { cwd, workspaceRoot: cwd, policyIdentity: 'test-policy' },
+    };
+    const approvedBase = evaluatePermission(policy({ workspace: { root: cwd } }), approvedRequest);
+    const config = policy({
+      workspace: { root: cwd },
+      bash: {
+        ...structuredClone(builtInPermissionPolicy.bash),
+        scopedApprovals: [{
+          version: 1,
+          id: 'bash_approval_npm_prefix',
+          createdAt: '2026-06-10T00:00:00.000Z',
+          normalizedCommand: 'npm --prefix .pi/extensions/permission-guard test -- --run',
+          commandSignature: approvedBase.details.shellAnalysis!.commandSignature,
+          effectSignature: approvedBase.details.shellAnalysis!.effectSignature,
+          allowedRoots: [{ kind: 'directory', raw: '/workspace/.pi/extensions/permission-guard', normalizedAbsolute: '/workspace/.pi/extensions/permission-guard', resolvedRealpath: '/workspace/.pi/extensions/permission-guard' }],
+          source: 'project',
+        }],
+      },
+    });
+
+    const sameRoot = evaluatePermission(config, approvedRequest);
+    const sibling = evaluatePermission(config, {
+      ...bashRequest('npm --prefix .pi/extensions/subagents test -- --run'),
+      executionContext: { cwd, workspaceRoot: cwd, policyIdentity: 'test-policy' },
+    });
+
+    expect(sameRoot).toMatchObject({ decision: 'allow', reasonCode: 'project_approval_allowed' });
+    expect(sibling).toMatchObject({ decision: 'ask', finalDecision: 'requires_approval' });
+  });
+
+  it('reuses compatible scoped bash approvals for child directories under the approved root', () => {
+    const cwd = '/workspace';
+    const approvedRequest = {
+      ...bashRequest('find /home/test/sias/app -maxdepth 1 -mindepth 1 -print | sort'),
+      executionContext: { cwd, workspaceRoot: cwd, policyIdentity: 'test-policy' },
+    };
+    const approvedBase = evaluatePermission(policy({ workspace: { root: cwd } }), approvedRequest);
+    const config = policy({
+      workspace: { root: cwd },
+      bash: {
+        ...structuredClone(builtInPermissionPolicy.bash),
+        scopedApprovals: [{
+          version: 1,
+          id: 'bash_approval_find_sias',
+          createdAt: '2026-06-10T00:00:00.000Z',
+          normalizedCommand: 'find /home/test/sias/app -maxdepth 1 -mindepth 1 -print | sort',
+          commandSignature: approvedBase.details.shellAnalysis!.commandSignature,
+          effectSignature: approvedBase.details.shellAnalysis!.effectSignature,
+          allowedRoots: [{ kind: 'directory', raw: '/home/test/sias/app', normalizedAbsolute: '/home/test/sias/app', resolvedRealpath: '/home/test/sias/app' }],
+          source: 'project',
+        }],
+      },
+    });
+
+    const child = evaluatePermission(config, {
+      ...bashRequest('find /home/test/sias/app/back -maxdepth 1 -mindepth 1 -print | sort'),
+      executionContext: { cwd, workspaceRoot: cwd, policyIdentity: 'test-policy' },
+    });
+    const differentCommand = evaluatePermission(config, {
+      ...bashRequest('cat /home/test/sias/app/README.md'),
+      executionContext: { cwd, workspaceRoot: cwd, policyIdentity: 'test-policy' },
+    });
+    const outside = evaluatePermission(config, {
+      ...bashRequest('find /home/test/other -maxdepth 1 -mindepth 1 -print | sort'),
+      executionContext: { cwd, workspaceRoot: cwd, policyIdentity: 'test-policy' },
+    });
+
+    expect(child).toMatchObject({ decision: 'allow', reasonCode: 'project_approval_allowed' });
+    expect(differentCommand).toMatchObject({ decision: 'ask', finalDecision: 'requires_approval' });
+    expect(outside).toMatchObject({ decision: 'ask', finalDecision: 'requires_approval' });
   });
 
   it('denies ask decisions without UI by default and allows only when configured', async () => {

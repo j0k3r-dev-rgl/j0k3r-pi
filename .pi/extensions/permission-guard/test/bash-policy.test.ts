@@ -133,7 +133,7 @@ describe('bash permission policy', () => {
     });
   });
 
-  it('allows exact safe commands before network and shell-syntax asks', () => {
+  it('allows exact safe commands before network asks and allows workspace read-only pipelines', () => {
     const config = policy({
       safeCommands: [
         'curl https://example.com',
@@ -150,8 +150,8 @@ describe('bash permission policy', () => {
     expect(classifyBashCommand(config, bashRequest('find openspec/changes/pi-permission-system -maxdepth 3 -type f | sort'))).toMatchObject({
       decision: 'allow',
       finalDecision: 'allow',
-      reasonCode: 'bash_safe_command_allowed',
-      details: { matchedRule: 'find openspec/changes/pi-permission-system -maxdepth 3 -type f | sort' },
+      reasonCode: 'bash_workspace_readonly_allowed',
+      details: { matchedRule: 'workspace-readonly-bash' },
     });
   });
 
@@ -161,8 +161,8 @@ describe('bash permission policy', () => {
     expect(classifyBashCommand(config, bashRequest('ls openspec/changes/pi-permission-system'))).toMatchObject({
       decision: 'allow',
       finalDecision: 'allow',
-      reasonCode: 'bash_safe_command_allowed',
-      details: { matchedRule: 'ls openspec/changes/*' },
+      reasonCode: 'bash_workspace_readonly_allowed',
+      details: { matchedRule: 'workspace-readonly-bash' },
     });
   });
 
@@ -245,14 +245,73 @@ describe('bash permission policy', () => {
     });
   });
 
-  it('keeps non-&& shell separators behind approval even when wildcard safe commands could match them', () => {
+  it('allows structurally safe ; and || compounds when every segment is already safe', () => {
     const config = policy({ safeCommands: ['git status', 'git diff', 'git status *', 'git diff *'] }, '/workspace');
 
     for (const command of ['git status; git diff', 'git status --short; git diff --stat', 'git status || git diff']) {
       expect(classifyBashCommand(config, bashRequest(command))).toMatchObject({
+        decision: 'allow',
+        finalDecision: 'allow',
+        reasonCode: 'bash_safe_compound_command_allowed',
+      });
+    }
+  });
+
+  it('allows recognized read-only workspace find pipelines without explicit approval when configured', () => {
+    const config = policy({ workspaceReadOnly: 'allow' }, '/workspace');
+
+    expect(classifyBashCommand(config, bashRequest('find .pi/extensions/permission-guard/src -maxdepth 1 -mindepth 1 -print | sort'))).toMatchObject({
+      decision: 'allow',
+      finalDecision: 'allow',
+      reasonCode: 'bash_workspace_readonly_allowed',
+    });
+  });
+
+  it('honors bash.workspaceReadOnly ask and deny for read-only workspace commands', () => {
+    const command = 'find .pi/extensions/permission-guard/src -maxdepth 1 -mindepth 1 -print | sort';
+
+    expect(classifyBashCommand(policy({ workspaceReadOnly: 'ask' }, '/workspace'), bashRequest(command))).toMatchObject({
+      decision: 'ask',
+      finalDecision: 'requires_approval',
+      reasonCode: 'bash_workspace_readonly_requires_approval',
+    });
+    expect(classifyBashCommand(policy({ workspaceReadOnly: 'deny' }, '/workspace'), bashRequest(command))).toMatchObject({
+      decision: 'deny',
+      finalDecision: 'deny',
+      reasonCode: 'bash_workspace_readonly_denied',
+    });
+  });
+
+  it('allows recognized read-only workspace search pipelines without explicit approval', () => {
+    const config = policy({ workspaceReadOnly: 'allow' }, '/workspace');
+
+    for (const command of [
+      'grep -R -n "workspaceReadOnly" .pi/extensions/permission-guard/src | head',
+      'rg "workspaceReadOnly" .pi/extensions/permission-guard/src | head -n 5',
+      'find .pi/extensions/permission-guard/src -type f | head',
+      'grep -R -n "workspaceReadOnly" .pi/extensions/permission-guard/src | sort',
+      'grep -R -n "workspaceReadOnly" .pi/extensions/permission-guard/src | wc -l',
+    ]) {
+      expect(classifyBashCommand(config, bashRequest(command))).toMatchObject({
+        decision: 'allow',
+        finalDecision: 'allow',
+        reasonCode: 'bash_workspace_readonly_allowed',
+      });
+    }
+  });
+
+  it('does not allow read-only pipeline approvals outside the workspace or for unsafe pipe sinks', () => {
+    const config = policy({}, '/workspace');
+
+    expect(classifyBashCommand(config, bashRequest('find /home/test/sias/app -maxdepth 1 -mindepth 1 -print | sort'))).toMatchObject({
+      decision: 'ask',
+      finalDecision: 'requires_approval',
+      reasonCode: 'bash_outside_workspace_requires_approval',
+    });
+    for (const command of ['cat README.md | sh', 'find .pi/extensions/permission-guard/src -type f | xargs rm']) {
+      expect(classifyBashCommand(config, bashRequest(command))).toMatchObject({
         decision: 'ask',
         finalDecision: 'requires_approval',
-        reasonCode: 'bash_shell_syntax_requires_approval',
       });
     }
   });

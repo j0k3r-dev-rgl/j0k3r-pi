@@ -58,6 +58,7 @@ describe('permission guard config loading', () => {
       bash: {
         default: 'ask',
         network: 'ask',
+        workspaceReadOnly: 'allow',
         outsideWorkspaceFilesystem: 'ask',
         envSecretExposure: 'deny',
       },
@@ -105,7 +106,7 @@ describe('permission guard config loading', () => {
     const projectPath = join(cwd, '.pi', 'permissions.json');
     await writeJson(projectPath, {
       audit: { logAllowed: true },
-      bash: { network: 'deny' },
+      bash: { network: 'deny', workspaceReadOnly: 'ask' },
       workspace: { allowRead: 'ask' },
     });
 
@@ -120,6 +121,7 @@ describe('permission guard config loading', () => {
     });
     expect(result.config.bash.default).toBe('ask');
     expect(result.config.bash.network).toBe('deny');
+    expect(result.config.bash.workspaceReadOnly).toBe('ask');
     expect(result.config.workspace.allowRead).toBe('ask');
     expect(result.config.workspace.allowWrite).toBe('allow');
   });
@@ -208,6 +210,33 @@ describe('permission guard config loading', () => {
       maxBytes: 5 * 1024 * 1024,
       maxFiles: 5,
     });
+  });
+
+  it('loads valid bash.scopedApprovals and ignores malformed entries with warnings', async () => {
+    const { cwd, homeDir } = await tempWorkspace('permission-guard-scoped-approvals-');
+    await writeJson(join(cwd, '.pi', 'permissions.json'), {
+      bash: {
+        scopedApprovals: [
+          {
+            version: 1,
+            id: 'bash_approval_1',
+            createdAt: '2026-06-10T00:00:00.000Z',
+            normalizedCommand: 'npm test',
+            commandSignature: 'sha256:command',
+            effectSignature: 'sha256:effect',
+            allowedRoots: [{ kind: 'workspace', raw: cwd, normalizedAbsolute: cwd, resolvedRealpath: cwd }],
+          },
+          { version: 2, broken: true },
+        ],
+      },
+    });
+
+    const result = await loadPermissionConfig({ cwd, env: {}, homeDir });
+
+    expect(result.config.bash.scopedApprovals).toEqual([
+      expect.objectContaining({ id: 'bash_approval_1', normalizedCommand: 'npm test' }),
+    ]);
+    expect(result.warnings.join('\n')).toContain('bash.scopedApprovals');
   });
 
   it('resolves relative workspace.root against ctx.cwd for global-install-ready config', async () => {

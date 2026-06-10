@@ -1,5 +1,7 @@
+import { isAbsolute, relative } from 'node:path';
 import { classifyBashCommand } from './bash-policy.js';
 import { matchesWorkspaceGlob } from './path-policy.js';
+import type { ScopedBashApproval } from './types.js';
 import { evaluateSecretDeny } from './secrets.js';
 import type { Action, PermissionDecisionResult, PermissionPolicyConfig, PermissionRequest, PolicyDecision, RiskLevel, ToolMode } from './types.js';
 
@@ -10,6 +12,7 @@ export interface SessionApprovalEntry {
   targetPattern?: string;
   commandPattern?: string;
   policyIdentity: string;
+  bashApproval?: ScopedBashApproval;
 }
 
 export interface SessionApprovalSnapshot {
@@ -179,6 +182,23 @@ function outsideDecision(config: PermissionPolicyConfig, request: PermissionRequ
   });
 }
 
+function rootContains(approvedRoot: string, requestedRoot: string): boolean {
+  if (approvedRoot === requestedRoot) return true;
+  const rel = relative(approvedRoot, requestedRoot);
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+}
+
+function approvalInScope(approval: ScopedBashApproval | undefined, result: PermissionDecisionResult): boolean {
+  if (!approval || !result.details.shellAnalysis || !result.details.approvalScope) return false;
+  if (approval.commandSignature !== result.details.shellAnalysis.commandSignature) return false;
+  if (approval.effectSignature !== result.details.shellAnalysis.effectSignature) return false;
+  const approvedRoots = approval.allowedRoots.map((root) => root.resolvedRealpath ?? root.normalizedAbsolute);
+  return result.details.approvalScope.allowedRoots.every((root) => {
+    const requestedRoot = root.resolvedRealpath ?? root.normalizedAbsolute;
+    return approvedRoots.some((approvedRoot) => rootContains(approvedRoot, requestedRoot));
+  });
+}
+
 function findSessionApproval(
   config: PermissionPolicyConfig,
   request: PermissionRequest,
@@ -195,6 +215,7 @@ function findSessionApproval(
     if (entry.policyIdentity !== request.policyIdentity) return false;
     if (entry.action !== request.action) return false;
     if (entry.tool !== request.tool) return false;
+    if (request.action === 'bash') return approvalInScope(entry.bashApproval, result);
     if (request.target) return entry.targetPattern === request.target.normalizedAbsolute;
     if (normalizedCommand) return entry.commandPattern === normalizedCommand;
     return false;
@@ -296,6 +317,21 @@ export function evaluatePermission(
             riskLevel: 'high',
             matchedLayer: 'tool',
           });
+
+  const projectApproval = request.action === 'bash'
+    ? config.bash.scopedApprovals.find((entry) => approvalInScope(entry, baseResult))
+    : undefined;
+  if (projectApproval) {
+    return {
+      ...baseResult,
+      decision: 'allow',
+      finalDecision: 'allow',
+      reason: 'A scoped project approval allows this request.',
+      reasonCode: 'project_approval_allowed',
+      details: { ...baseResult.details, matchedLayer: 'project', matchedRule: projectApproval.id },
+      audit: config.audit.enabled && config.audit.logAllowed,
+    };
+  }
 
   const entry = findSessionApproval(config, request, baseResult, sessionCacheSnapshot);
   if (entry) return applySessionApproval(config, baseResult, entry);

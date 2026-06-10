@@ -1,5 +1,5 @@
 import { loadPermissionConfig, type PermissionConfigLoadResult } from './config.js';
-import { addProjectSafeCommandPattern } from './project-approval.js';
+import { addProjectBashApproval } from './project-approval.js';
 import { evaluatePermission } from './policy.js';
 import { resolveApproval, type ApprovalPrompt } from './approval.js';
 import { recordAuditDecision } from './audit.js';
@@ -11,6 +11,7 @@ import {
   type SessionApprovalCache,
 } from './session-cache.js';
 import { mapBuiltinToolInput, type BuiltinPermissionTool } from './tool-map.js';
+import { publishPermissionRequest } from './permission-channel.js';
 import type { ApprovalChoice, PermissionDecisionResult, PermissionRequest, PermissionRequiredPayload, RequestOrigin } from './types.js';
 
 export interface RuntimePiLike {
@@ -140,6 +141,10 @@ function permissionRequiredReason(payload: PermissionRequiredPayload): string {
   return `${permissionRequiredMarker}${JSON.stringify(payload)}`;
 }
 
+function publishPermissionDetails(payload: PermissionRequiredPayload): { permissionRequest: ReturnType<typeof publishPermissionRequest> } {
+  return { permissionRequest: publishPermissionRequest(payload) };
+}
+
 function userBashBlockResult(result: PermissionDecisionResult, auditError?: string): { result: { output: string; exitCode: number; cancelled: boolean; truncated: boolean } } {
   return {
     result: {
@@ -172,8 +177,10 @@ async function resolveRuntimeDecision(
           return choice ?? 'Deny';
         }
       : undefined,
-    projectApproval: async (pattern) => {
-      await addProjectSafeCommandPattern(ctx.cwd ?? process.cwd(), pattern);
+    projectApproval: async (approval) => {
+      if (typeof approval !== 'string') {
+        await addProjectBashApproval(ctx.cwd ?? process.cwd(), approval as any);
+      }
     },
   });
 
@@ -227,7 +234,11 @@ export function registerPermissionGuardRuntime(pi: RuntimePiLike): void {
 
     const resolved = await resolveRuntimeDecision(loadResult, request, ctx, state);
     if (resolved.permissionRequired) {
-      return { block: true, reason: permissionRequiredReason(resolved.permissionRequired) };
+      return {
+        block: true,
+        reason: 'Permission approval must be collected by the main thread.',
+        details: publishPermissionDetails(resolved.permissionRequired),
+      };
     }
     if (resolved.result.finalDecision === 'deny') {
       return { block: true, reason: blockReason(resolved.result, resolved.auditError) };

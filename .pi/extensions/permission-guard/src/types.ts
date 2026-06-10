@@ -6,6 +6,99 @@ export type ApprovalChoice = 'Allow once' | 'Allow for session' | 'Allow for pro
 export type PermissionSource = 'tool_call' | 'user_bash';
 export type RequestOrigin = 'main' | 'subagent' | 'unknown';
 
+export interface BashExecutionContext {
+  cwd: string;
+  workspaceRoot: string;
+  policyIdentity: string;
+}
+
+export type ShellOperator = '&&' | '||' | ';' | 'newline';
+export type ShellUnsupportedKind =
+  | 'pipe'
+  | 'background'
+  | 'command_substitution'
+  | 'process_substitution'
+  | 'subshell'
+  | 'here_doc'
+  | 'glob_expansion'
+  | 'tilde_expansion'
+  | 'parameter_expansion'
+  | 'alias_or_function'
+  | 'source_script'
+  | 'malformed_quote'
+  | 'unsupported_redirection'
+  | 'unknown_path_effects';
+
+export interface ShellRedirection {
+  fd?: number;
+  operator: '<' | '>' | '>>';
+  rawTarget: string;
+}
+
+export interface ShellSegmentAnalysis {
+  index: number;
+  raw: string;
+  commandName?: string;
+  argv: string[];
+  envAssignments: Record<string, string>;
+  effectiveCwd: string;
+  nextCwd?: string;
+  unsupported: ShellUnsupportedKind[];
+  riskClasses: string[];
+  redirections: ShellRedirection[];
+}
+
+export type BashPathEffectIntent = 'read' | 'write' | 'create' | 'delete' | 'execute' | 'cwd' | 'unknown';
+
+export interface BashApprovalRootScope {
+  kind: 'workspace' | 'directory';
+  raw: string;
+  normalizedAbsolute: string;
+  resolvedRealpath?: string;
+}
+
+export interface ScopedBashApproval {
+  version: 1;
+  id: string;
+  createdAt: string;
+  commandSignature: string;
+  effectSignature: string;
+  normalizedCommand: string;
+  allowedRoots: BashApprovalRootScope[];
+  reasonCode?: string;
+  source?: 'session' | 'project' | 'subagent';
+}
+
+export interface BashPathEffect {
+  segmentIndex: number;
+  raw: string;
+  source: 'argument' | 'option' | 'redirection' | 'cd' | 'fallback_scan';
+  intent: BashPathEffectIntent;
+  forCreate?: boolean;
+  classified?: PermissionRequest['target'];
+  ambiguous?: boolean;
+  reason?: string;
+}
+
+export interface ShellAnalysisResult {
+  ok: boolean;
+  normalizedCommand: string;
+  commandSignature: string;
+  effectSignature: string;
+  segments: ShellSegmentAnalysis[];
+  operators: ShellOperator[];
+  pathEffects: BashPathEffect[];
+  unsupported: ShellUnsupportedKind[];
+  effectsComplete: boolean;
+  riskClasses: string[];
+  summary: {
+    command: string;
+    operators?: string;
+    paths?: string[];
+    unsupported?: string[];
+  };
+}
+
 export interface PermissionPolicyConfig {
   enabled: boolean;
   bypassAll: boolean;
@@ -38,9 +131,11 @@ export interface PermissionPolicyConfig {
   bash: {
     default: PolicyDecision;
     safeCommands: string[];
+    scopedApprovals: ScopedBashApproval[];
     denyCommands: string[];
     askCommands: string[];
     network: PolicyDecision;
+    workspaceReadOnly: PolicyDecision;
     outsideWorkspaceFilesystem: PolicyDecision;
     envSecretExposure: 'deny' | 'ask';
     maxCommandPreviewChars: number;
@@ -85,6 +180,7 @@ export interface PermissionRequest {
     workspaceRelative?: string;
   };
   command?: { raw: string; summary: string; tokens?: string[] };
+  executionContext?: BashExecutionContext;
   mode: 'tui' | 'rpc' | 'json' | 'print' | string;
   hasUI: boolean;
   policyIdentity: string;
@@ -96,8 +192,20 @@ export interface PermissionDecisionDetails {
   safeCommandSummary?: string;
   workspaceRoot?: string;
   matchedRule?: string;
-  matchedLayer: 'disabled' | 'tool' | 'secret' | 'workspace' | 'outsideWorkspace' | 'bash' | 'session' | 'nonInteractive';
+  matchedLayer: 'disabled' | 'tool' | 'secret' | 'workspace' | 'outsideWorkspace' | 'bash' | 'session' | 'project' | 'nonInteractive';
   noPreview: boolean;
+  shellAnalysis?: Pick<ShellAnalysisResult, 'commandSignature' | 'effectSignature' | 'effectsComplete' | 'riskClasses' | 'summary'>;
+  pathEffects?: Array<{
+    intent: BashPathEffectIntent;
+    safeTarget?: string;
+    insideWorkspace?: boolean;
+    symlinkEscapesWorkspace?: boolean;
+  }>;
+  approvalScope?: {
+    commandSignature: string;
+    effectSignature: string;
+    allowedRoots: BashApprovalRootScope[];
+  };
 }
 
 export interface PermissionDecisionResult {
@@ -137,9 +245,11 @@ export interface PermissionRequiredPayload {
     targetPattern?: string;
     commandPattern?: string;
     policyIdentity: string;
+    bashApproval?: ScopedBashApproval;
   };
   projectScope?: {
     safeCommandPattern?: string;
+    bashApproval?: ScopedBashApproval;
   };
 }
 

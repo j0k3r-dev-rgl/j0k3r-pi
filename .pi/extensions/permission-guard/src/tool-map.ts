@@ -1,4 +1,4 @@
-import { classifyPathTarget } from './path-policy.js';
+import { classifyPathTarget, resolveWorkspaceRoot } from './path-policy.js';
 import type { Action, PermissionPolicyConfig, PermissionRequest, PermissionSource, RequestOrigin } from './types.js';
 
 export type BuiltinPermissionTool = 'read' | 'write' | 'edit' | 'grep' | 'find' | 'ls' | 'bash' | 'user_bash';
@@ -92,6 +92,11 @@ export async function mapBuiltinToolInput(options: MapBuiltinToolInputOptions): 
       command: {
         raw: command,
         summary,
+      },
+      executionContext: {
+        cwd: options.cwd,
+        workspaceRoot: resolveWorkspaceRoot({ cwd: options.cwd, config: options.config }),
+        policyIdentity: options.policyIdentity,
       },
       mode: options.mode,
       hasUI: options.hasUI,

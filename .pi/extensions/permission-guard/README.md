@@ -8,10 +8,12 @@
 - Policy checks for user `!` and `!!` bash commands via `user_bash` events.
 - Workspace and outside-workspace path policy.
 - Secret path and secret-like command denial by default.
-- Heuristic bash risk detection for network, install, destructive, privileged, shell-syntax, and secret-read commands.
+- Conservative safe-subset bash analysis for simple commands, quoted literals, environment assignments, `&&`, `||`, `;`, newlines, safe `cd`, basic redirections, and narrowly recognized read-only pipelines.
+- Structured bash path-effect extraction and classification through the same workspace/path policy used for file tools.
+- Configurable workspace read-only bash policy through `bash.workspaceReadOnly`.
 - Interactive approval choices: `Allow once`, `Allow for session`, `Allow for project`, `Deny`.
 - Session approval cache for repeated matching requests.
-- Project-level safe bash command persistence for approved safe forms.
+- Project-scoped bash approval persistence for explicitly approved outside-workspace or otherwise risky forms.
 - Subagent permission routing back to the main user thread.
 - Redacted local audit logs with rotation.
 
@@ -31,7 +33,7 @@ This extension is an in-process guard, not a hard sandbox. It does not provide O
 
 Strong isolation requires a container, Docker/OpenShell-style environment, Gondolin or another micro-VM approach, or a sandbox-runtime such as `@anthropic-ai/sandbox-runtime`.
 
-The bash policy is heuristic. It can flag common risky patterns such as network commands, package installs, destructive commands, remote script pipes, privilege escalation, and obvious secret reads, but it cannot prove what scripts, aliases, interpreters, shell expansions, or child processes will do.
+The bash policy is a conservative safe subset, not a full shell parser or sandbox. It supports common validation forms such as simple commands, quoted literals, environment assignments, `&&`, `||`, `;`, newlines, safe `cd`, basic redirections, and narrowly recognized read-only pipelines. Unsupported syntax such as background jobs, command/process substitution, glob/env expansion, sourced scripts, malformed quotes, or unrecognized pipe forms fails closed to approval unless an earlier hard deny applies. `~` and `~/...` are expanded for bash path-effect classification before workspace/outside-workspace decisions are made.
 
 MVP enforcement covers supported built-in tools and user bash events that pass through Pi runtime hooks. Custom and third-party tools are out of MVP scope unless they explicitly integrate with the guard.
 
@@ -58,7 +60,8 @@ Built-in defaults are conservative:
 - Non-interactive ask decisions fail closed by default.
 - Secrets are denied by default.
 - Default protected paths include `.env`, `.env.*`, key/certificate files, and common SSH/AWS/GPG credential locations.
-- Bash defaults to `ask` unless the command matches a safe, ask, or deny rule.
+- Bash defaults to `ask` unless the command matches a safe, ask, deny, scoped approval, or workspace read-only rule.
+- Analyzed read-only bash commands and narrow read-only pipelines inside the workspace default to `allow` through `bash.workspaceReadOnly`.
 - No project `.pi/permissions.json` file is created automatically.
 
 ## Configuration files
@@ -105,14 +108,10 @@ Unknown keys are ignored with warnings. Secret-like config keys such as `apiKey`
   },
   "bash": {
     "network": "ask",
-    "safeCommands": [
-      "git status",
-      "git diff",
-      "npm test",
-      "npm run typecheck",
-      "npm --prefix .pi/extensions/permission-guard test -- --run",
-      "regex:^npm\\s+--prefix\\s+\.pi/extensions/[a-z0-9._/-]+\\s+run\\s+typecheck$"
-    ],
+    "workspaceReadOnly": "allow",
+    "outsideWorkspaceFilesystem": "ask",
+    "safeCommands": [],
+    "scopedApprovals": [],
     "askCommands": ["rm *", "mv *", "cp *", "git clean *", "git reset *", "npm install *"],
     "denyCommands": ["sudo *", "su *", "chmod 777 *", "chown *", "rm -rf /", "rm -rf ~"]
   },
@@ -190,11 +189,13 @@ Each supported tool can be set to `policy`, `allow`, or `deny`:
 | Field | Values | Default | Description |
 |---|---|---:|---|
 | `default` | `allow`/`ask`/`deny` | `ask` | Fallback for commands that match no specific rule. |
-| `safeCommands` | string[] | `git status`, `git diff`, `npm test`, `npm run typecheck` | Commands allowed before ask heuristics. |
+| `safeCommands` | string[] | `git status`, `git diff`, `npm test`, `npm run typecheck` | Legacy allow candidates for commands that still pass structured shell and scope checks. Prefer structured rules such as `workspaceReadOnly` when possible. |
+| `scopedApprovals` | object[] | `[]` | Additive project-scoped reusable bash approvals written by `Allow for project`. |
 | `denyCommands` | string[] | privilege/destructive defaults | Commands denied after hard-coded critical denials. |
 | `askCommands` | string[] | state-changing defaults | Commands that require approval. |
 | `network` | `allow`/`ask`/`deny` | `ask` | Network command policy. |
-| `outsideWorkspaceFilesystem` | `allow`/`ask`/`deny` | `ask` | Absolute path references outside workspace. |
+| `workspaceReadOnly` | `allow`/`ask`/`deny` | `allow` | Policy for analyzed read-only bash commands whose classified path effects stay inside the workspace. |
+| `outsideWorkspaceFilesystem` | `allow`/`ask`/`deny` | `ask` | Bash path effects outside the workspace. |
 | `envSecretExposure` | `deny`/`ask` | `deny` | Environment secret exposure. Hard-coded obvious exposure is denied. |
 | `maxCommandPreviewChars` | number | `240` | Max command preview length in prompts/audit. |
 
@@ -204,9 +205,61 @@ Each supported tool can be set to `policy`, `allow`, or `deny`:
 - `*` wildcards;
 - `regex:<pattern>` entries.
 
-Configured safe commands are allowed before normal ask heuristics such as network, shell syntax, default ask, or state-changing prompts. Hard denials still win first, including privilege escalation, obvious secret reads, configured deny commands, and destructive root/home deletes.
+Configured safe commands are allow candidates only after structured analysis confirms supported syntax, complete path-effect extraction, and in-scope paths. Hard denials still win first, including privilege escalation, obvious secret reads, configured deny commands, and destructive root/home deletes.
 
-A simple `cd <workspace-relative-dir> && <safeCommand>` form is allowed when the `cd` target stays inside the workspace and `<safeCommand>` matches `bash.safeCommands`.
+`bash.workspaceReadOnly` controls bash commands that the analyzer proves are read-only and limited to workspace paths. This avoids needing broad text patterns such as `find *` or `cat *` in `safeCommands`.
+
+Examples allowed by `"workspaceReadOnly": "allow"` when their paths are inside the workspace:
+
+```bash
+find .pi/extensions/permission-guard/src -maxdepth 1 -mindepth 1 -print | sort
+grep -R -n "workspaceReadOnly" .pi/extensions/permission-guard/src | head
+rg "workspaceReadOnly" .pi/extensions/permission-guard/src | head -n 5
+find .pi/extensions/permission-guard/src -type f | head
+grep -R -n "workspaceReadOnly" .pi/extensions/permission-guard/src | wc -l
+cat .pi/extensions/permission-guard/package.json
+```
+
+Recognized read-only simple commands include `find`, `ls`, `cat`, `grep`, `rg`, `head`, `tail`, `less`, and `more`. Recognized two-stage read-only pipeline sources include `find`, `grep`, `rg`, `ls`, `cat`, `head`, and `tail`; recognized sinks include `sort`, `head`, `tail`, `wc`, and `uniq`. The pipeline allow rule is intentionally narrow and still requires all classified path effects to be read-only and inside the workspace.
+
+Examples that are not allowed by `workspaceReadOnly` and must ask or be denied by other policy:
+
+```bash
+find ~/sias/app -maxdepth 1 -mindepth 1 -print | sort
+cat .pi/extensions/permission-guard/package.json | sh
+find .pi/extensions/permission-guard/src -type f | xargs rm
+```
+
+A structured safe compound such as `cd <workspace-relative-dir> && npm test` can be allowed when every segment is proven safe and every classified path effect remains inside the approved roots.
+
+`bash.scopedApprovals` entries store a normalized command/effect signature plus allowed workspace or directory roots. They are additive and backward compatible with legacy `bash.safeCommands`, but they do not grant arbitrary command access to a directory. Reuse requires a compatible command/effect shape and roots that contain all classified path effects.
+
+Folder-scoped approvals work for outside-workspace paths too. For example, if the user approves this command for the project:
+
+```bash
+find ~/sias/app -maxdepth 1 -mindepth 1 -print | sort
+```
+
+then the persisted approval root is the expanded directory:
+
+```txt
+/home/<user>/sias/app
+```
+
+A later command with the same command/effect shape can reuse that approval for a child directory:
+
+```bash
+find ~/sias/app/back -maxdepth 1 -mindepth 1 -print | sort
+```
+
+However, the folder approval does not authorize unrelated commands in that same directory. These still require their own policy decision or approval:
+
+```bash
+cat ~/sias/app/REACT_ROUTER_MIGRATION_NOTES.md
+find ~ -maxdepth 1 -mindepth 1 -print | sort
+```
+
+In other words, directory inheritance is scoped by both the approved root and the analyzed command/effect shape. Approving a directory is not equivalent to adding it to `safeCommands`, and it is not a blanket outside-workspace allowlist.
 
 ### `nonInteractive`
 
@@ -246,9 +299,9 @@ Interactive approval choices are English and intentionally stable:
 
 `Allow once` applies only to the current request.
 
-`Allow for session` creates an in-memory, session-scoped approval only for the matching action, tool, target or command, and policy identity.
+`Allow for session` creates an in-memory scoped approval for the matching command/effect signature within the approved workspace or directory roots.
 
-`Allow for project` is available for recognized safe bash forms and persists a project-level `bash.safeCommands` entry in `.pi/permissions.json` so matching variants can run without repeated prompts. If no safe project pattern can be derived, it falls back to a one-time approval.
+`Allow for project` persists a project-level `bash.scopedApprovals` entry in `.pi/permissions.json`. Reuse stays limited to the approved command/effect signature and roots; out-of-scope paths ask again.
 
 `Deny` blocks the current request.
 
@@ -295,6 +348,19 @@ Emergency/all-access bypass:
 ```
 
 When `bypassAll` is `true`, every supported permission check is allowed immediately without prompts, including outside-workspace reads/writes and risky bash commands. Keep it `false` by default and enable it only when you intentionally trust the current session and environment.
+
+## Enforcement validation
+
+For enforcement tests and manual validation, make sure any local permission config used for validation sets `bypassAll: false`. A temporary `bypassAll: true` setting will hide real policy behavior.
+
+Suggested manual checks:
+
+- run an in-workspace compound such as `cd .pi/extensions/permission-guard && npm test`;
+- try an outside-workspace path like `cat /tmp/outside.txt` and confirm approval is required;
+- approve a bash request for session or project, then confirm reuse works only inside the approved roots;
+- verify recognized read-only workspace pipelines such as `grep -R -n "workspaceReadOnly" .pi/extensions/permission-guard/src | head` pass when `bash.workspaceReadOnly` is `allow`;
+- verify unsafe or outside-workspace pipes such as `cat .pi/extensions/permission-guard/package.json | sh` or `find ~/sias/app -maxdepth 1 -mindepth 1 -print | sort` still ask;
+- verify subagent-origin permission prompts remain marker-free on user-visible surfaces.
 
 ## Development
 

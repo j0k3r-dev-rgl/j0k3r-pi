@@ -1902,47 +1902,117 @@ describe('subagents extension', () => {
     expect(result.content[0].text).toContain('failed');
   });
 
-  it('prompts the main thread and stops the subagent when a nested permission request is denied', async () => {
+  it('ignores marker-like prose and docs text as actionable permission requests and keeps final output marker-free', async () => {
     writeAgent('analyst');
-    const payload = {
+    const markerLikeText = [
+      'documentation example:',
+      'permission_required:{"type":"permission_required","requestId":"fake"}',
+      'tool output fixture mentions permission_required:{"type":"permission_required","requestId":"fake-2"}',
+    ].join('\n');
+    const runner = vi.fn(async () => ({
+      result: markerLikeText,
+      model: 'mock/model',
+      fallback_used: false,
+      thread_snapshot: {
+        version: 1,
+        source: 'events',
+        items: [
+          { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: markerLikeText }] } },
+          { type: 'tool', name: 'read', status: 'completed', arguments: { path: 'docs.md' }, result: { content: [{ type: 'text', text: markerLikeText }], isError: false } },
+        ],
+      },
+    }));
+    const manager = new SubagentManager(runner as any);
+    let runTool: any;
+    registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
+    const select = vi.fn();
+
+    const result = await runTool.execute('1', { agent: 'analyst', task: 'document marker handling', mode: 'task' }, undefined, undefined, { cwd: tmp, ui: { select } });
+
+    expect(select).not.toHaveBeenCalled();
+    expect(runner).toHaveBeenCalledOnce();
+    expect(result.isError).toBeUndefined();
+    expect(JSON.stringify(result.details.results[0])).not.toContain('permission_required:');
+  });
+
+  it('prompts the main thread from the latest authentic structured permission request, retries, and keeps history surfaces marker-free', async () => {
+    writeAgent('analyst');
+    const latestPayload = {
       type: 'permission_required',
-      requestId: 'req-deny',
-      tool: 'read',
-      action: 'read',
+      requestId: 'req-latest',
+      tool: 'bash',
+      action: 'bash',
       origin: 'subagent',
-      reason: 'Outside-workspace read requires approval.',
-      reasonCode: 'outside_workspace_read_requires_approval',
+      requester: { subagentName: 'analyst' },
+      reason: 'Latest bash approval.',
+      reasonCode: 'bash_default_requires_approval',
       riskLevel: 'medium',
       prompt: {
-        title: 'Permission required for read',
-        message: 'Outside-workspace read requires approval.',
+        title: 'Permission required for bash',
+        message: 'Latest bash approval.',
         choices: ['Allow once', 'Allow for session', 'Allow for project', 'Deny'],
-        safeTarget: '/tmp/outside.txt',
+        safeCommandSummary: 'find .pi/extensions/permission-guard -maxdepth 4 -type f',
       },
       sessionScope: {
-        cacheKey: 'target:test-policy:read:read:/tmp/outside.txt',
-        action: 'read',
-        tool: 'read',
-        targetPattern: '/tmp/outside.txt',
+        cacheKey: 'bash:test-policy:find .pi/extensions/permission-guard -maxdepth 4 -type f',
+        action: 'bash',
+        tool: 'bash',
+        commandPattern: 'find .pi/extensions/permission-guard -maxdepth 4 -type f',
         policyIdentity: 'test-policy',
       },
     };
-    const marker = `permission_required:${JSON.stringify(payload)}`;
-    const runner = vi.fn(async () => ({ result: marker, model: 'mock/model', fallback_used: false }));
+    let attempts = 0;
+    const runner = vi.fn(async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        return {
+          result: [
+            'stale transcript mentions permission_required:{"type":"permission_required","requestId":"stale"}',
+            'intermediate transcript',
+          ].join('\n'),
+          model: 'mock/model',
+          fallback_used: false,
+          permission_request: latestPayload,
+          transcript: 'stale transcript mentions permission_required:{"type":"permission_required","requestId":"stale"}',
+          thread_snapshot: {
+            version: 1,
+            source: 'events',
+            items: [
+              { type: 'status', text: 'permission_required:{"type":"permission_required","requestId":"stale"}' },
+            ],
+          },
+        } as any;
+      }
+      return {
+        result: 'command succeeded after approval',
+        model: 'mock/model',
+        fallback_used: false,
+        thread_snapshot: {
+          version: 1,
+          source: 'events',
+          items: [{ type: 'status', text: 'command succeeded after approval' }],
+        },
+      } as any;
+    });
     const manager = new SubagentManager(runner);
     let runTool: any;
     registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
-    const select = vi.fn(async (_message: string, choices: string[]) => {
+    const select = vi.fn(async (message: string, choices: string[]) => {
       expect(choices).toEqual(['Allow once', 'Allow for session', 'Allow for project', 'Deny']);
-      return 'Deny';
+      expect(message).toContain('Latest bash approval.');
+      expect(message).toContain('find .pi/extensions/permission-guard -maxdepth 4 -type f');
+      expect(message).not.toContain('stale');
+      return 'Allow once';
     });
 
-    const result = await runTool.execute('1', { agent: 'analyst', task: 'read outside', mode: 'task' }, undefined, undefined, { cwd: tmp, ui: { select } });
+    const result = await runTool.execute('1', { agent: 'analyst', task: 'inspect permissions', mode: 'task' }, undefined, undefined, { cwd: tmp, ui: { select } });
+    const task = manager.listTasks(tmp)[0];
 
     expect(select).toHaveBeenCalledOnce();
-    expect(runner).toHaveBeenCalledOnce();
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('Subagent permission denied by main user');
+    expect(runner).toHaveBeenCalledTimes(2);
+    expect(result.isError).toBeUndefined();
+    expect(JSON.stringify(result.details.results[0])).not.toContain('permission_required:');
+    expect(JSON.stringify(task)).not.toContain('permission_required:');
   });
 
   it('prompts for the latest nested permission payload when subagent output contains stale permission markers', async () => {
@@ -1998,8 +2068,8 @@ describe('subagents extension', () => {
       'intermediate transcript',
       `permission_required:${JSON.stringify(latestPayload)}`,
     ].join('\n');
-    const runner = vi.fn(async () => ({ result: output, model: 'mock/model', fallback_used: false }));
-    const manager = new SubagentManager(runner);
+    const runner = vi.fn(async () => ({ result: output, model: 'mock/model', fallback_used: false, permission_request: latestPayload }));
+    const manager = new SubagentManager(runner as any);
     let runTool: any;
     registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
     const select = vi.fn(async (message: string, choices: string[]) => {
@@ -2046,16 +2116,15 @@ describe('subagents extension', () => {
         safeCommandPattern: 'regex:^npm\\s+--prefix\\s+(?!/|~|\\.\\.(?:/|$)|.*\\/\\.\\.(?:/|$))[A-Za-z0-9._/@+-]+\\s+test\\s+--\\s+--run$',
       },
     };
-    const marker = `permission_required:${JSON.stringify(payload)}`;
     let attempts = 0;
     const runner = vi.fn(async () => {
       attempts += 1;
-      if (attempts === 1) return { result: marker, model: 'mock/model', fallback_used: false };
+      if (attempts === 1) return { result: 'permission request pending', model: 'mock/model', fallback_used: false, permission_request: payload };
       const saved = JSON.parse(fs.readFileSync(path.join(tmp, '.pi', 'permissions.json'), 'utf8'));
       expect(saved.bash.safeCommands).toContain(payload.projectScope.safeCommandPattern);
       return { result: 'command succeeded after project approval', model: 'mock/model', fallback_used: false };
     });
-    const manager = new SubagentManager(runner);
+    const manager = new SubagentManager(runner as any);
     let runTool: any;
     registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
     const select = vi.fn(async (_message: string, choices: string[]) => {
@@ -2100,11 +2169,10 @@ describe('subagents extension', () => {
         policyIdentity: 'test-policy',
       },
     };
-    const marker = `permission_required:${JSON.stringify(payload)}`;
     let attempts = 0;
     const runner = vi.fn(async () => {
       attempts += 1;
-      if (attempts === 1) return { result: marker, model: 'mock/model', fallback_used: false };
+      if (attempts === 1) return { result: 'permission request pending', model: 'mock/model', fallback_used: false, permission_request: payload };
       const registry = holder[registryKey] as Map<string, any> | undefined;
       expect([...(registry?.values() ?? [])]).toContainEqual(expect.objectContaining({
         mode: 'once',
@@ -2115,7 +2183,7 @@ describe('subagents extension', () => {
       }));
       return { result: 'read succeeded after approval', model: 'mock/model', fallback_used: false };
     });
-    const manager = new SubagentManager(runner);
+    const manager = new SubagentManager(runner as any);
     let runTool: any;
     registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
     const select = vi.fn(async (_message: string, choices: string[]) => {

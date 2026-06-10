@@ -1,3 +1,5 @@
+import type { PermissionRequiredPayload } from '../../permission-guard/src/types.js';
+
 export type SubagentMode = 'task' | 'background';
 export type SubagentStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
@@ -203,6 +205,7 @@ export type SubagentTask = {
   error?: string;
   result?: string;
   thread_snapshot?: SubagentThreadSnapshot;
+  permission_request?: PermissionRequiredPayload;
 };
 
 export type SubagentRunner = (input: {
@@ -214,5 +217,5 @@ export type SubagentRunner = (input: {
   config: SubagentsConfig;
   signal: AbortSignal;
   effectiveProfile?: EffectiveSubagentProfile;
-  onActivity?: (activity: { message: string; output?: string; prompt?: string; transcript?: string; usage?: UsageStats; effort?: ThinkingEffort; thread_snapshot?: SubagentThreadSnapshot }) => void;
-}) => Promise<{ result: string; model?: string; effort?: ThinkingEffort; fallback_used?: boolean; usage?: UsageStats; thread_snapshot?: SubagentThreadSnapshot }>;
+  onActivity?: (activity: { message: string; output?: string; prompt?: string; transcript?: string; usage?: UsageStats; effort?: ThinkingEffort; thread_snapshot?: SubagentThreadSnapshot; permission_request?: PermissionRequiredPayload }) => void;
+}) => Promise<{ result: string; model?: string; effort?: ThinkingEffort; fallback_used?: boolean; usage?: UsageStats; thread_snapshot?: SubagentThreadSnapshot; permission_request?: PermissionRequiredPayload }>;

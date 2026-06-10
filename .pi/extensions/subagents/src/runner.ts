@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveEffectiveSubagentProfile } from './profile-resolver.js';
+import { resolvePermissionRequest, sanitizePermissionTransportText } from './permission-channel.js';
 import { boundThreadSnapshot } from './thread-view.js';
+import type { PermissionRequiredPayload } from '../../permission-guard/src/types.js';
 import type { EffectiveSubagentProfile, ModelRef, SubagentDefinition, SubagentRunner, SubagentsConfig, UsageStats, ThinkingEffort, SubagentThreadItem, SubagentThreadSnapshot, SubagentToolItem, SubagentToolResultPayload } from './types.js';
 
 function modelLabel(model: any): string | undefined {
@@ -78,7 +80,6 @@ function shortJson(value: unknown, limit = 900): string {
   }
 }
 
-const PERMISSION_REQUIRED_MARKER = 'permission_required:';
 const SNAPSHOT_TEXT_LIMIT = 4000;
 
 function debugLog(cwd: string | undefined, scope: string, data: unknown): void {
@@ -92,7 +93,8 @@ function debugLog(cwd: string | undefined, scope: string, data: unknown): void {
 
 function truncateSnapshotText(text: string | undefined, limit = SNAPSHOT_TEXT_LIMIT): string | undefined {
   if (text === undefined) return undefined;
-  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
+  const sanitized = sanitizePermissionTransportText(text);
+  return sanitized.length > limit ? `${sanitized.slice(0, limit - 1)}…` : sanitized;
 }
 
 function eventToolCallId(event: any): string | undefined {
@@ -128,6 +130,23 @@ function resultPayload(result: unknown, isError = false): SubagentToolResultPayl
 
 function isBashTool(name: string): boolean {
   return name === 'bash' || name === 'shell' || name === 'command' || name === 'exec';
+}
+
+function extractStructuredPermissionRequest(value: unknown): PermissionRequiredPayload | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const direct = value as Record<string, unknown>;
+  const nested = direct.details && typeof direct.details === 'object'
+    ? (direct.details as Record<string, unknown>).permissionRequest
+    : direct.permissionRequest;
+  if (!nested || typeof nested !== 'object') return undefined;
+  const candidate = nested as Record<string, unknown>;
+  const payload = candidate.payload;
+  if (payload && typeof payload === 'object' && (payload as Record<string, unknown>).type === 'permission_required') {
+    return payload as PermissionRequiredPayload;
+  }
+  const handle = candidate.handle;
+  if (typeof handle === 'string') return resolvePermissionRequest(handle);
+  return undefined;
 }
 
 function parseRawToolJson(text: string): { keys: string[]; kind: string } | undefined {
@@ -393,31 +412,6 @@ function registerPermissionSubagentSession(session: any, definition: SubagentDef
   };
 }
 
-function extractPermissionRequiredText(value: unknown, seen = new Set<object>()): string | undefined {
-  if (typeof value === 'string') {
-    const index = value.indexOf(PERMISSION_REQUIRED_MARKER);
-    if (index < 0) return undefined;
-    const text = value.slice(index);
-    const lineBreak = text.search(/\r?\n/);
-    return lineBreak >= 0 ? text.slice(0, lineBreak) : text;
-  }
-  if (!value || typeof value !== 'object') return undefined;
-  if (seen.has(value)) return undefined;
-  seen.add(value);
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const extracted = extractPermissionRequiredText(item, seen);
-      if (extracted) return extracted;
-    }
-    return undefined;
-  }
-  for (const item of Object.values(value as Record<string, unknown>)) {
-    const extracted = extractPermissionRequiredText(item, seen);
-    if (extracted) return extracted;
-  }
-  return undefined;
-}
-
 function formatToolCall(name: string, args: any): string {
   const input = args ?? {};
   if (name === 'read') {
@@ -441,16 +435,13 @@ function eventTranscript(event: any): string {
     : messageEvent?.type === 'text_delta' && typeof messageEvent.delta === 'string'
       ? messageEvent.delta
       : undefined;
-  if (event?.type === 'message_update' && typeof delta === 'string') return delta;
-
-  const permissionRequired = extractPermissionRequiredText(event);
-  if (permissionRequired) return `\n${permissionRequired}\n`;
+  if (event?.type === 'message_update' && typeof delta === 'string') return sanitizePermissionTransportText(delta);
 
   if (event?.type === 'tool_execution_start') {
     const name = event.toolName ?? 'tool';
     return `\n\n${formatToolCall(name, event.args ?? event.input ?? {})}\n`;
   }
-  if (event?.type === 'tool_execution_update') return event.partialResult ? `\n${shortJson(event.partialResult, 500)}\n` : '';
+  if (event?.type === 'tool_execution_update') return event.partialResult ? `\n${sanitizePermissionTransportText(shortJson(event.partialResult, 500))}\n` : '';
   if (event?.type === 'tool_execution_end') return `\n${event.isError ? 'failed' : 'done'}\n`;
   if (event?.type === 'message_start' && event.message?.role === 'assistant') return '\n\nPreparing for response\n\n';
   return '';
@@ -470,13 +461,13 @@ async function promptWithInactivity(
   prompt: string,
   stallTimeoutMs: number,
   signal: AbortSignal,
-  onActivity?: (activity: { message: string; output?: string; prompt?: string; transcript?: string; usage?: UsageStats; effort?: ThinkingEffort; thread_snapshot?: SubagentThreadSnapshot }) => void,
+  onActivity?: (activity: { message: string; output?: string; prompt?: string; transcript?: string; usage?: UsageStats; effort?: ThinkingEffort; thread_snapshot?: SubagentThreadSnapshot; permission_request?: PermissionRequiredPayload }) => void,
   delegatedContext?: string,
   cwd?: string,
-): Promise<{ result: string; usage: UsageStats; thread_snapshot?: SubagentThreadSnapshot }> {
+): Promise<{ result: string; usage: UsageStats; thread_snapshot?: SubagentThreadSnapshot; permission_request?: PermissionRequiredPayload }> {
   let output = '';
   const snapshotBuilder = new ThreadSnapshotBuilder(prompt, delegatedContext, cwd);
-  let permissionRequiredOutput = '';
+  let latestPermissionRequest: PermissionRequiredPayload | undefined;
   let usage = emptyUsage();
   let transcript = `# orchestrator prompt\n\n${prompt}\n\n# subagent execution\n`;
   let lastActivity = Date.now();
@@ -497,14 +488,10 @@ async function promptWithInactivity(
     const thread_snapshot = snapshotBuilder.snapshot();
     const transcriptChunk = eventTranscript(event);
     transcript += transcriptChunk;
-    const permissionRequired = extractPermissionRequiredText(event);
-    if (permissionRequired) debugLog(cwd, 'permission_marker_detected', { eventType: event?.type, toolName: event?.toolName, toolCallId: eventToolCallId(event), markerLength: permissionRequired.length });
-    if (permissionRequired && !permissionRequiredOutput.includes(permissionRequired)) {
-      permissionRequiredOutput += `${permissionRequiredOutput ? '\n' : ''}${permissionRequired}`;
-    }
-    if (permissionRequired && !output.includes(permissionRequired)) {
-      output += `${output ? '\n' : ''}${permissionRequired}`;
-      onActivity?.({ message: 'permission required', output, transcript, usage, thread_snapshot });
+    const permissionRequest = extractStructuredPermissionRequest(event?.result ?? event?.partialResult ?? event);
+    if (permissionRequest) {
+      latestPermissionRequest = permissionRequest;
+      onActivity?.({ message: 'permission required', output, transcript, usage, thread_snapshot, permission_request: latestPermissionRequest });
     }
     const messageEvent = event?.assistantMessageEvent;
     const delta = messageEvent?.type !== 'thinking_delta' && typeof messageEvent?.delta === 'string'
@@ -514,35 +501,32 @@ async function promptWithInactivity(
         : undefined;
     if (event?.type === 'message_end' && event.message?.role === 'assistant') usage = addUsage(usage, event.message.usage);
     if (event?.type === 'message_update' && typeof delta === 'string') {
-      output += delta;
-      onActivity?.({ message: 'streaming response', output, transcript, usage, thread_snapshot });
+      output += sanitizePermissionTransportText(delta);
+      onActivity?.({ message: 'streaming response', output, transcript, usage, thread_snapshot, permission_request: latestPermissionRequest });
       return;
     }
     if (event?.type === 'message_update' && messageEvent?.type === 'thinking_delta') {
-      onActivity?.({ message: 'streaming thinking', output, transcript, usage, thread_snapshot });
+      onActivity?.({ message: 'streaming thinking', output, transcript, usage, thread_snapshot, permission_request: latestPermissionRequest });
       return;
     }
     const message = activityMessage(event, transcriptChunk);
-    if (message) onActivity?.({ message, transcript, usage, thread_snapshot });
+    if (message) onActivity?.({ message, transcript, usage, thread_snapshot, permission_request: latestPermissionRequest });
   }) ?? (() => {});
   const interval = setInterval(() => {
     if (Date.now() - lastActivity > stallTimeoutMs) {
       transcript += `\n\n--- stall ---\nstalled for ${stallTimeoutMs}ms; aborting session\n`;
-      onActivity?.({ message: `stalled for ${stallTimeoutMs}ms; aborting session`, output, transcript, usage, thread_snapshot: snapshotBuilder.snapshot() });
+      onActivity?.({ message: `stalled for ${stallTimeoutMs}ms; aborting session`, output, transcript, usage, thread_snapshot: snapshotBuilder.snapshot(), permission_request: latestPermissionRequest });
       session.abort?.().catch?.(() => {});
     }
   }, Math.min(5000, Math.max(500, stallTimeoutMs / 4)));
   try {
     await session.prompt(prompt, { signal });
-    let collected = collectAssistantText(session.messages ?? []) || output.trim();
-    if (permissionRequiredOutput && !collected.includes(permissionRequiredOutput)) {
-      collected = collected ? `${permissionRequiredOutput}\n\n${collected}` : permissionRequiredOutput;
-    }
+    let collected = sanitizePermissionTransportText(collectAssistantText(session.messages ?? []) || output.trim());
     transcript += `\n\n# final assistant text\n\n${collected}`;
     const thread_snapshot = snapshotBuilder.finalize(session.messages ?? []);
     debugLog(cwd, 'runner_final_snapshot', { source: thread_snapshot?.source, items: thread_snapshot?.items.map((item) => ({ type: item.type, label: (item as any).label, name: (item as any).name, status: (item as any).status, assistantContent: item.type === 'assistant' ? item.message.content.map((part: any) => part.type) : undefined })) });
-    onActivity?.({ message: 'collected final response', output: collected, transcript, usage, thread_snapshot });
-    return { result: collected, usage, thread_snapshot };
+    onActivity?.({ message: 'collected final response', output: collected, transcript, usage, thread_snapshot, permission_request: latestPermissionRequest });
+    return { result: collected, usage, thread_snapshot, permission_request: latestPermissionRequest };
   } finally {
     clearInterval(interval);
     unsubscribe();
@@ -592,16 +576,16 @@ export const sdkSubagentRunner: SubagentRunner = async ({ definition, task, cont
     const { session } = await createSession(model, cwd, tools, effort);
     const unregisterPermissionSession = registerPermissionSubagentSession(session, definition);
     try {
-      const { result, usage, thread_snapshot } = await promptWithInactivity(session, prompt, config.stall_timeout_ms, signal, onActivity, context, cwd);
-      return { result, usage, thread_snapshot };
+      const { result, usage, thread_snapshot, permission_request } = await promptWithInactivity(session, prompt, config.stall_timeout_ms, signal, onActivity, context, cwd);
+      return { result, usage, thread_snapshot, permission_request };
     } finally {
       unregisterPermissionSession();
     }
   }
 
   try {
-    const { result, usage, thread_snapshot } = await attempt(preferred);
-    return { result, usage, thread_snapshot, model: modelLabel(preferred) ?? modelRefLabel(profile.model.value), effort, fallback_used: false };
+    const { result, usage, thread_snapshot, permission_request } = await attempt(preferred);
+    return { result, usage, thread_snapshot, permission_request, model: modelLabel(preferred) ?? modelRefLabel(profile.model.value), effort, fallback_used: false };
   } catch (error) {
     if (signal.aborted) throw new Error('Subagent was aborted');
     const preferredLabel = modelLabel(preferred) ?? modelRefLabel(profile.model.value) ?? 'unknown';
@@ -610,7 +594,7 @@ export const sdkSubagentRunner: SubagentRunner = async ({ definition, task, cont
     const message = error instanceof Error ? error.message : String(error);
     ctx?.ui?.notify?.(`Subagent ${definition.name} failed/stalled on selected model ${preferredLabel}: ${message}. Falling back to current model ${currentLabel}.`, 'warning');
     if (!current || current === preferred) throw new Error(`Subagent ${definition.name} failed on selected model ${preferredLabel}: ${message}`);
-    const { result, usage, thread_snapshot } = await attempt(current);
-    return { result, usage, thread_snapshot, model: currentLabel, effort, fallback_used: true };
+    const { result, usage, thread_snapshot, permission_request } = await attempt(current);
+    return { result, usage, thread_snapshot, permission_request, model: currentLabel, effort, fallback_used: true };
   }
 };
