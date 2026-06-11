@@ -1,4 +1,4 @@
-import { buildScopedBashApproval, projectSafeCommandPatternFor } from './project-approval.js';
+import { buildProjectPathApproval, buildScopedBashApproval, projectSafeCommandPatternFor } from './project-approval.js';
 import { buildSessionApprovalEntry, type SessionApprovalCache } from './session-cache.js';
 import type {
   ApprovalChoice,
@@ -9,12 +9,19 @@ import type {
   ScopedBashApproval,
 } from './types.js';
 
-export const APPROVAL_CHOICES = ['Allow once', 'Allow for session', 'Allow for project', 'Deny'] as const satisfies readonly ApprovalChoice[];
+export const APPROVAL_CHOICES = [
+  'Allow once',
+  'Allow for session',
+  'Allow for project',
+  'Allow this file for project',
+  'Allow this folder for project',
+  'Deny',
+] as const satisfies readonly ApprovalChoice[];
 
 export interface ApprovalPrompt {
   title: string;
   message: string;
-  choices: ['Allow once', 'Allow for session', 'Allow for project', 'Deny'];
+  choices: ApprovalChoice[];
   safeTarget?: string;
   safeCommandSummary?: string;
   workspaceRoot?: string;
@@ -32,6 +39,24 @@ export interface ApprovalResolution {
   permissionRequired?: PermissionRequiredPayload;
 }
 
+function pathProjectApprovalOptions(request: PermissionRequest) {
+  return {
+    file: buildProjectPathApproval(request, 'file'),
+    folder: buildProjectPathApproval(request, 'folder'),
+  };
+}
+
+function promptChoices(request: PermissionRequest): ApprovalChoice[] {
+  const choices: ApprovalChoice[] = ['Allow once', 'Allow for session'];
+  const pathOptions = pathProjectApprovalOptions(request);
+  const hasExplicitPathProjectChoice = Boolean(pathOptions.file || pathOptions.folder);
+  if (!hasExplicitPathProjectChoice) choices.push('Allow for project');
+  if (pathOptions.file) choices.push('Allow this file for project');
+  if (pathOptions.folder) choices.push('Allow this folder for project');
+  choices.push('Deny');
+  return choices;
+}
+
 function approvalPrompt(request: PermissionRequest, decision: PermissionDecisionResult): ApprovalPrompt {
   const targetOrCommand = decision.details.safeTarget ?? decision.details.safeCommandSummary ?? request.rawInputSummary;
   const scope = decision.details.approvalScope?.allowedRoots.map((root) => root.normalizedAbsolute).join(', ');
@@ -39,7 +64,7 @@ function approvalPrompt(request: PermissionRequest, decision: PermissionDecision
   return {
     title: `Permission required for ${request.tool}`,
     message: `${decision.reason} (${decision.reasonCode}). Requested ${request.action}: ${targetOrCommand}${scope ? `. Scope: ${scope}` : ''}${effectSummary ? `. Effects: ${effectSummary}` : ''}`,
-    choices: [...APPROVAL_CHOICES],
+    choices: promptChoices(request),
     safeTarget: decision.details.safeTarget,
     safeCommandSummary: decision.details.safeCommandSummary,
     workspaceRoot: decision.details.workspaceRoot,
@@ -98,6 +123,7 @@ export function buildPermissionRequiredPayload(
 ): PermissionRequiredPayload {
   const cacheKey = decision.cacheKey ?? `approval:${request.policyIdentity}:${request.tool}:${request.action}:${request.target?.normalizedAbsolute ?? request.command?.raw.trim().replace(/\s+/g, ' ') ?? request.id}`;
   const bashApproval = buildScopedBashApproval(request, decision);
+  const pathApprovalOptions = pathProjectApprovalOptions(request);
   return {
     type: 'permission_required',
     requestId: request.id,
@@ -110,7 +136,11 @@ export function buildPermissionRequiredPayload(
     riskLevel: decision.riskLevel,
     prompt: approvalPrompt(request, decision),
     sessionScope: sessionScope(request, decision, cacheKey),
-    projectScope: { safeCommandPattern: projectSafeCommandPatternFor(request, decision), bashApproval },
+    projectScope: {
+      safeCommandPattern: projectSafeCommandPatternFor(request, decision),
+      bashApproval,
+      pathApprovalOptions: pathApprovalOptions.file || pathApprovalOptions.folder ? pathApprovalOptions : undefined,
+    },
   };
 }
 
@@ -157,6 +187,13 @@ export async function resolveApproval(
       if (bashApproval) await options.projectApproval(bashApproval);
       else if (pattern) await options.projectApproval(pattern);
     }
+    return { result: withApprovalResult(decision, true, 'approval_allow_once') };
+  }
+  if (choice === 'Allow this file for project' || choice === 'Allow this folder for project') {
+    const approval = choice === 'Allow this file for project'
+      ? buildProjectPathApproval(request, 'file')
+      : buildProjectPathApproval(request, 'folder');
+    if (approval && options.projectApproval) await options.projectApproval(approval);
     return { result: withApprovalResult(decision, true, 'approval_allow_once') };
   }
 

@@ -3,7 +3,13 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { builtInPermissionPolicy } from '../src/defaults.js';
-import { classifyPathTarget, matchesWorkspaceGlob, resolveWorkspaceRoot } from '../src/path-policy.js';
+import {
+  classifyPathTarget,
+  isPathContainedByRoot,
+  isRequestPathCoveredByApproval,
+  matchesWorkspaceGlob,
+  resolveWorkspaceRoot,
+} from '../src/path-policy.js';
 import type { PermissionPolicyConfig } from '../src/types.js';
 
 async function tempWorkspace(prefix: string) {
@@ -118,6 +124,51 @@ describe('workspace path policy', () => {
     expect(target.resolvedRealpath).toBe(await realpath(join(outside, 'secret.txt')));
     expect(target.insideWorkspace).toBe(false);
     expect(target.symlinkEscapesWorkspace).toBe(true);
+  });
+
+  it('classifies target kind for file, directory, other, and missing paths', async () => {
+    const cwd = await tempWorkspace('permission-guard-path-kind-');
+    await mkdir(join(cwd, 'docs', 'nested'), { recursive: true });
+    await writeFile(join(cwd, 'docs', 'nested', 'readme.md'), 'hello', 'utf8');
+    await symlink(join(cwd, 'docs', 'nested', 'readme.md'), join(cwd, 'docs', 'linked-readme.md'));
+
+    const fileTarget = await classifyPathTarget('docs/nested/readme.md', { cwd, config: builtInPermissionPolicy });
+    const directoryTarget = await classifyPathTarget('docs/nested', { cwd, config: builtInPermissionPolicy });
+    const otherTarget = await classifyPathTarget('docs/linked-readme.md', { cwd, config: { ...builtInPermissionPolicy, workspace: { ...builtInPermissionPolicy.workspace, followSymlinks: 'lexical' } } });
+    const missingTarget = await classifyPathTarget('docs/missing.txt', { cwd, config: builtInPermissionPolicy });
+
+    expect(fileTarget.kind).toBe('file');
+    expect(directoryTarget.kind).toBe('directory');
+    expect(otherTarget.kind).toBe('other');
+    expect(missingTarget.kind).toBe('missing');
+  });
+
+  it('uses segment-aware containment so prefix siblings and traversal are not covered', () => {
+    expect(isPathContainedByRoot('/external/docs/readme.md', '/external/docs')).toBe(true);
+    expect(isPathContainedByRoot('/external/docs/archive/2026/item.txt', '/external/docs')).toBe(true);
+    expect(isPathContainedByRoot('/external/docs-private/file.txt', '/external/docs')).toBe(false);
+    expect(isPathContainedByRoot('/external/docs/../secrets.txt', '/external/docs')).toBe(false);
+  });
+
+  it('requires realpath containment when both approval and request resolve through symlinks', async () => {
+    const cwd = await tempWorkspace('permission-guard-path-approval-containment-');
+    const outside = await mkdtemp(join(tmpdir(), 'permission-guard-path-approval-outside-'));
+    await mkdir(join(cwd, 'docs'), { recursive: true });
+    await mkdir(join(outside, 'real'), { recursive: true });
+    await writeFile(join(outside, 'real', 'note.md'), 'note', 'utf8');
+    await symlink(join(outside, 'real'), join(cwd, 'docs', 'escape'));
+
+    const safeRequest = await classifyPathTarget(join(outside, 'real', 'note.md'), { cwd, config: builtInPermissionPolicy });
+    const escapedRequest = await classifyPathTarget('docs/escape/note.md', { cwd, config: builtInPermissionPolicy });
+
+    expect(isRequestPathCoveredByApproval({
+      normalizedAbsolute: join(outside, 'real'),
+      resolvedRealpath: await realpath(join(outside, 'real')),
+    }, safeRequest)).toBe(true);
+    expect(isRequestPathCoveredByApproval({
+      normalizedAbsolute: join(cwd, 'docs'),
+      resolvedRealpath: await realpath(join(cwd, 'docs')),
+    }, escapedRequest)).toBe(false);
   });
 
   it('matches globs against normalized workspace-relative paths', async () => {

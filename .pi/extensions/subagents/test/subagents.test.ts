@@ -2140,7 +2140,7 @@ describe('subagents extension', () => {
     expect(result.content[0].text).toContain('Subagent permission denied by main user: bash_default_requires_approval');
   });
 
-  it('records an allow-for-project decision in project permissions and retries the subagent task successfully', async () => {
+  it('records an allow-for-project bash decision in project permissions and retries the subagent task successfully', async () => {
     writeAgent('analyst');
     const payload = {
       type: 'permission_required',
@@ -2190,6 +2190,88 @@ describe('subagents extension', () => {
     expect(runner).toHaveBeenCalledTimes(2);
     expect(result.isError).toBeUndefined();
     expect(result.details.results[0].result).toContain('command succeeded after project approval');
+  });
+
+  it('records subagent file and folder project approvals as pathApprovals instead of bash approvals', async () => {
+    writeAgent('analyst');
+    const filePayload = {
+      type: 'permission_required',
+      requestId: 'req-project-file',
+      tool: 'read',
+      action: 'read',
+      origin: 'subagent',
+      reason: 'Outside-workspace read requires approval.',
+      reasonCode: 'outside_workspace_read_requires_approval',
+      riskLevel: 'medium',
+      prompt: {
+        title: 'Permission required for read',
+        message: 'Outside-workspace read requires approval.',
+        choices: ['Allow once', 'Allow for session', 'Allow for project', 'Allow this file for project', 'Allow this folder for project', 'Deny'],
+        safeTarget: '/tmp/external/docs/a.txt',
+      },
+      sessionScope: {
+        cacheKey: 'target:test-policy:read:read:/tmp/external/docs/a.txt',
+        action: 'read',
+        tool: 'read',
+        targetPattern: '/tmp/external/docs/a.txt',
+        policyIdentity: 'test-policy',
+      },
+      projectScope: {
+        pathApprovalOptions: {
+          file: {
+            version: 1,
+            id: 'path-approval-file',
+            createdAt: '2026-06-10T00:00:00.000Z',
+            scope: 'file',
+            raw: '/tmp/external/docs/a.txt',
+            normalizedAbsolute: '/tmp/external/docs/a.txt',
+            resolvedRealpath: '/tmp/external/docs/a.txt',
+            tools: ['read', 'ls', 'find', 'grep'],
+            source: 'subagent',
+          },
+          folder: {
+            version: 1,
+            id: 'path-approval-folder',
+            createdAt: '2026-06-10T00:00:00.000Z',
+            scope: 'folder',
+            raw: '/tmp/external/docs',
+            normalizedAbsolute: '/tmp/external/docs',
+            resolvedRealpath: '/tmp/external/docs',
+            tools: ['read', 'ls', 'find', 'grep'],
+            source: 'subagent',
+          },
+        },
+      },
+    };
+    const payloads = [filePayload, filePayload];
+    let attempts = 0;
+    const runner = vi.fn(async () => {
+      attempts += 1;
+      if (attempts <= 2) return { result: 'permission request pending', model: 'mock/model', fallback_used: false, permission_request: payloads[attempts - 1] };
+      const saved = JSON.parse(fs.readFileSync(path.join(tmp, '.pi', 'permissions.json'), 'utf8'));
+      expect(saved.pathApprovals.scopedApprovals).toEqual(expect.arrayContaining([
+        expect.objectContaining({ scope: 'file', normalizedAbsolute: '/tmp/external/docs/a.txt' }),
+        expect.objectContaining({ scope: 'folder', normalizedAbsolute: '/tmp/external/docs' }),
+      ]));
+      expect(saved.bash?.safeCommands ?? []).toEqual([]);
+      expect(saved.bash?.scopedApprovals ?? []).toEqual([]);
+      return { result: 'command succeeded after path project approval', model: 'mock/model', fallback_used: false };
+    });
+    const manager = new SubagentManager(runner as any);
+    let runTool: any;
+    registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
+    const choices = ['Allow this file for project', 'Allow this folder for project'];
+    const select = vi.fn(async (_message: string, offered: string[]) => {
+      expect(offered).toEqual(['Allow once', 'Allow for session', 'Allow for project', 'Allow this file for project', 'Allow this folder for project', 'Deny']);
+      return choices.shift();
+    });
+
+    const result = await runTool.execute('1', { agent: 'analyst', task: 'read external file', mode: 'task' }, undefined, undefined, { cwd: tmp, ui: { select } });
+
+    expect(select).toHaveBeenCalledTimes(2);
+    expect(runner).toHaveBeenCalledTimes(3);
+    expect(result.isError).toBeUndefined();
+    expect(result.details.results[0].result).toContain('command succeeded after path project approval');
   });
 
   it('records a main-thread allow-once decision and retries the subagent task successfully', async () => {

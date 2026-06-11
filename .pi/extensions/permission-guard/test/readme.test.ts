@@ -17,8 +17,12 @@ describe('permission guard disclosure documentation', () => {
     expect(text).toContain('allow once');
     expect(text).toContain('allow for session');
     expect(text).toContain('allow for project');
+    expect(text).toContain('allow this file for project');
+    expect(text).toContain('allow this folder for project');
     expect(text).toContain('regex:<pattern>');
     expect(text).toContain('bash.scopedapprovals');
+    expect(text).toContain('pathapprovals.scopedapprovals');
+    expect(text).toContain('project-scoped external path approvals');
     expect(text).toContain('bypassall: false');
     expect(text).toContain('deny');
     expect(text).toContain('subagent approvals route to the main thread');

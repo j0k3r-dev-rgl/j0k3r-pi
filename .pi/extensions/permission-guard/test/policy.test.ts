@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -69,6 +69,7 @@ function bashRequest(command: string, hasUI = true, workspaceRoot = '/workspace'
 }
 
 describe('pure permission policy engine', () => {
+  const pathApprovalTools = ['read', 'ls', 'find', 'grep'] as const;
   it('returns a deterministic decision shape for workspace allows', async () => {
     const cwd = await tempWorkspace('permission-guard-policy-shape-');
     await writeFile(join(cwd, 'src', 'index.ts'), 'export {};', 'utf8');
@@ -292,6 +293,111 @@ describe('pure permission policy engine', () => {
     expect(child).toMatchObject({ decision: 'allow', reasonCode: 'project_approval_allowed' });
     expect(differentCommand).toMatchObject({ decision: 'ask', finalDecision: 'requires_approval' });
     expect(outside).toMatchObject({ decision: 'ask', finalDecision: 'requires_approval' });
+  });
+
+  it.each(pathApprovalTools)('reuses persisted exact file approvals for %s in the same project', async (tool) => {
+    const cwd = await tempWorkspace(`permission-guard-policy-path-file-${tool}-`);
+    const outsideRoot = await mkdtemp(join(tmpdir(), `permission-guard-policy-path-file-outside-${tool}-`));
+    const approvedFile = join(outsideRoot, 'docs', 'approved.txt');
+    await mkdir(join(outsideRoot, 'docs'), { recursive: true });
+    await writeFile(approvedFile, 'ok', 'utf8');
+    const config = policy({
+      workspace: { root: cwd },
+      pathApprovals: {
+        scopedApprovals: [{
+          version: 1,
+          id: `path-approval-${tool}`,
+          createdAt: '2026-06-10T00:00:00.000Z',
+          scope: 'file',
+          raw: approvedFile,
+          normalizedAbsolute: approvedFile,
+          resolvedRealpath: approvedFile,
+          tools: [tool],
+          source: 'project',
+        }],
+      },
+    });
+    const request = await pathRequest(approvedFile, cwd, tool === 'read' ? 'read' : tool === 'grep' ? 'search' : 'list');
+    request.tool = tool;
+
+    expect(evaluatePermission(config, request)).toMatchObject({
+      decision: 'allow',
+      finalDecision: 'allow',
+      reasonCode: 'project_path_approval_allowed',
+      details: { matchedLayer: 'project', matchedRule: `path-approval-${tool}` },
+    });
+  });
+
+  it('reuses recursive folder approvals for descendants and future children only for supported tools', async () => {
+    const cwd = await tempWorkspace('permission-guard-policy-path-folder-');
+    const outsideRoot = await mkdtemp(join(tmpdir(), 'permission-guard-policy-path-folder-outside-'));
+    const approvedFolder = join(outsideRoot, 'docs');
+    await mkdir(join(approvedFolder, 'archive', '2026'), { recursive: true });
+    await writeFile(join(approvedFolder, 'archive', '2026', 'item.txt'), 'ok', 'utf8');
+    const config = policy({
+      workspace: { root: cwd },
+      pathApprovals: {
+        scopedApprovals: [{
+          version: 1,
+          id: 'path-folder-approval',
+          createdAt: '2026-06-10T00:00:00.000Z',
+          scope: 'folder',
+          raw: approvedFolder,
+          normalizedAbsolute: approvedFolder,
+          resolvedRealpath: approvedFolder,
+          tools: ['read', 'ls', 'find', 'grep'],
+          source: 'project',
+        }],
+      },
+    });
+
+    const readRequest = await pathRequest(join(approvedFolder, 'archive', '2026', 'item.txt'), cwd, 'read');
+    const futureRequest = await pathRequest(join(approvedFolder, 'future.txt'), cwd, 'read');
+    const prefixSibling = await pathRequest(join(outsideRoot, 'docs-private', 'secret.txt'), cwd, 'read');
+    const unsupported = { ...readRequest, tool: 'write' as const, action: 'write' as const, rawInputSummary: 'write outside' };
+
+    expect(evaluatePermission(config, readRequest)).toMatchObject({ decision: 'allow', reasonCode: 'project_path_approval_allowed' });
+    expect(evaluatePermission(config, futureRequest)).toMatchObject({ decision: 'allow', reasonCode: 'project_path_approval_allowed' });
+    expect(evaluatePermission(config, prefixSibling)).toMatchObject({ decision: 'ask', finalDecision: 'requires_approval' });
+    expect(evaluatePermission(config, unsupported)).toMatchObject({ decision: 'ask', finalDecision: 'requires_approval' });
+  });
+
+  it('preserves project isolation, secret deny precedence, and symlink escape denial for path approvals', async () => {
+    const cwd = await tempWorkspace('permission-guard-policy-path-safety-');
+    const otherProject = await tempWorkspace('permission-guard-policy-path-other-project-');
+    const outsideRoot = await mkdtemp(join(tmpdir(), 'permission-guard-policy-path-safety-outside-'));
+    const approvedFolder = join(outsideRoot, 'docs');
+    const realFolder = join(outsideRoot, 'real-folder');
+    await mkdir(approvedFolder, { recursive: true });
+    await mkdir(realFolder, { recursive: true });
+    await writeFile(join(approvedFolder, '.env'), 'SECRET=1', 'utf8');
+    await writeFile(join(realFolder, 'safe.txt'), 'ok', 'utf8');
+    await symlink(realFolder, join(approvedFolder, 'escape'));
+
+    const config = policy({
+      workspace: { root: cwd },
+      pathApprovals: {
+        scopedApprovals: [{
+          version: 1,
+          id: 'path-folder-safety',
+          createdAt: '2026-06-10T00:00:00.000Z',
+          scope: 'folder',
+          raw: approvedFolder,
+          normalizedAbsolute: approvedFolder,
+          resolvedRealpath: approvedFolder,
+          tools: ['read', 'ls', 'find', 'grep'],
+          source: 'project',
+        }],
+      },
+    });
+
+    const sameProjectSecret = await pathRequest(join(approvedFolder, '.env'), cwd, 'read');
+    const otherProjectRequest = await pathRequest(join(approvedFolder, 'safe.txt'), otherProject, 'read');
+    const symlinkEscaped = await pathRequest(join(approvedFolder, 'escape', 'safe.txt'), cwd, 'read');
+
+    expect(evaluatePermission(config, sameProjectSecret)).toMatchObject({ decision: 'deny', reasonCode: 'secret_path_denied' });
+    expect(evaluatePermission(policy({ workspace: { root: otherProject } }), otherProjectRequest)).toMatchObject({ decision: 'ask', finalDecision: 'requires_approval' });
+    expect(evaluatePermission(config, symlinkEscaped)).toMatchObject({ decision: 'ask', finalDecision: 'requires_approval' });
   });
 
   it('denies ask decisions without UI by default and allows only when configured', async () => {

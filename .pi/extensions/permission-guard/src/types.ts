@@ -2,9 +2,12 @@ export type PolicyDecision = 'allow' | 'ask' | 'deny';
 export type ToolMode = 'allow' | 'deny' | 'policy';
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
 export type Action = 'read' | 'list' | 'search' | 'write' | 'create' | 'edit' | 'bash';
-export type ApprovalChoice = 'Allow once' | 'Allow for session' | 'Allow for project' | 'Deny';
+export type ApprovalChoice = 'Allow once' | 'Allow for session' | 'Allow for project' | 'Allow this file for project' | 'Allow this folder for project' | 'Deny';
 export type PermissionSource = 'tool_call' | 'user_bash';
 export type RequestOrigin = 'main' | 'subagent' | 'unknown';
+export type ProjectPathApprovalScope = 'file' | 'folder';
+export type ProjectPathApprovalTool = 'read' | 'ls' | 'find' | 'grep';
+export type ProjectPathApprovalSource = 'project' | 'subagent';
 
 export interface BashExecutionContext {
   cwd: string;
@@ -67,6 +70,24 @@ export interface ScopedBashApproval {
   allowedRoots: BashApprovalRootScope[];
   reasonCode?: string;
   source?: 'session' | 'project' | 'subagent';
+}
+
+export interface ProjectPathApproval {
+  version: 1;
+  id: string;
+  createdAt: string;
+  scope: ProjectPathApprovalScope;
+  raw: string;
+  normalizedAbsolute: string;
+  resolvedRealpath?: string;
+  tools: ProjectPathApprovalTool[];
+  reasonCode?: string;
+  source?: ProjectPathApprovalSource;
+}
+
+export interface ProjectPathApprovalOptions {
+  file?: ProjectPathApproval;
+  folder?: ProjectPathApproval;
 }
 
 export interface BashPathEffect {
@@ -140,6 +161,9 @@ export interface PermissionPolicyConfig {
     envSecretExposure: 'deny' | 'ask';
     maxCommandPreviewChars: number;
   };
+  pathApprovals: {
+    scopedApprovals: ProjectPathApproval[];
+  };
   nonInteractive: {
     onAsk: 'deny' | 'allow';
     allowSessionApprovals: boolean;
@@ -178,6 +202,7 @@ export interface PermissionRequest {
     insideWorkspace: boolean;
     symlinkEscapesWorkspace: boolean;
     workspaceRelative?: string;
+    kind?: 'file' | 'directory' | 'other' | 'missing';
   };
   command?: { raw: string; summary: string; tokens?: string[] };
   executionContext?: BashExecutionContext;
@@ -232,7 +257,7 @@ export interface PermissionRequiredPayload {
   prompt: {
     title: string;
     message: string;
-    choices: ['Allow once', 'Allow for session', 'Allow for project', 'Deny'];
+    choices: ApprovalChoice[];
     safeTarget?: string;
     safeCommandSummary?: string;
     workspaceRoot?: string;
@@ -250,6 +275,7 @@ export interface PermissionRequiredPayload {
   projectScope?: {
     safeCommandPattern?: string;
     bashApproval?: ScopedBashApproval;
+    pathApprovalOptions?: ProjectPathApprovalOptions;
   };
 }
 

@@ -239,6 +239,54 @@ describe('permission guard config loading', () => {
     expect(result.warnings.join('\n')).toContain('bash.scopedApprovals');
   });
 
+  it('treats missing pathApprovals as an empty backward-compatible collection', async () => {
+    const { cwd, homeDir } = await tempWorkspace('permission-guard-path-approvals-missing-');
+    await writeJson(join(cwd, '.pi', 'permissions.json'), {
+      bash: { safeCommands: ['git status'] },
+    });
+
+    const result = await loadPermissionConfig({ cwd, env: {}, homeDir });
+
+    expect(result.config.pathApprovals.scopedApprovals).toEqual([]);
+    expect(result.config.bash.safeCommands).toEqual(['git status']);
+  });
+
+  it('loads valid pathApprovals.scopedApprovals and ignores malformed entries safely', async () => {
+    const { cwd, homeDir } = await tempWorkspace('permission-guard-path-approvals-valid-');
+    await writeJson(join(cwd, '.pi', 'permissions.json'), {
+      pathApprovals: {
+        scopedApprovals: [
+          {
+            version: 1,
+            id: 'path_approval_1',
+            createdAt: '2026-06-10T00:00:00.000Z',
+            scope: 'folder',
+            raw: '/tmp/docs',
+            normalizedAbsolute: '/tmp/docs',
+            resolvedRealpath: '/tmp/docs',
+            tools: ['read', 'ls', 'find', 'grep'],
+            source: 'project',
+          },
+          {
+            version: 1,
+            broken: true,
+          },
+        ],
+      },
+      bash: {
+        safeCommands: ['git status'],
+      },
+    });
+
+    const result = await loadPermissionConfig({ cwd, env: {}, homeDir });
+
+    expect(result.config.pathApprovals.scopedApprovals).toEqual([
+      expect.objectContaining({ id: 'path_approval_1', scope: 'folder', tools: ['read', 'ls', 'find', 'grep'] }),
+    ]);
+    expect(result.config.bash.safeCommands).toEqual(['git status']);
+    expect(result.warnings.join('\n')).toContain('pathApprovals.scopedApprovals');
+  });
+
   it('resolves relative workspace.root against ctx.cwd for global-install-ready config', async () => {
     const { cwd, homeDir } = await tempWorkspace('permission-guard-relative-root-');
     await writeJson(join(cwd, '.pi', 'permissions.json'), { workspace: { root: 'packages/app' } });

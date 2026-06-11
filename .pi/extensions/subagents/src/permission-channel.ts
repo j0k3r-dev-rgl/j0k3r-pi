@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-export type PermissionApprovalChoice = 'Allow once' | 'Allow for session' | 'Allow for project' | 'Deny';
+export type PermissionApprovalChoice = 'Allow once' | 'Allow for session' | 'Allow for project' | 'Allow this file for project' | 'Allow this folder for project' | 'Deny';
 
 export interface PermissionRequiredPayload {
   type: 'permission_required';
@@ -31,6 +31,32 @@ export interface PermissionRequiredPayload {
   };
   projectScope?: {
     safeCommandPattern?: string;
+    pathApprovalOptions?: {
+      file?: {
+        version: 1;
+        id: string;
+        createdAt: string;
+        scope: 'file' | 'folder';
+        raw: string;
+        normalizedAbsolute: string;
+        resolvedRealpath?: string;
+        tools: Array<'read' | 'ls' | 'find' | 'grep'>;
+        reasonCode?: string;
+        source?: 'project' | 'subagent';
+      };
+      folder?: {
+        version: 1;
+        id: string;
+        createdAt: string;
+        scope: 'file' | 'folder';
+        raw: string;
+        normalizedAbsolute: string;
+        resolvedRealpath?: string;
+        tools: Array<'read' | 'ls' | 'find' | 'grep'>;
+        reasonCode?: string;
+        source?: 'project' | 'subagent';
+      };
+    };
   };
 }
 

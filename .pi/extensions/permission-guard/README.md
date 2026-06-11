@@ -11,8 +11,9 @@
 - Conservative safe-subset bash analysis for simple commands, quoted literals, environment assignments, `&&`, `||`, `;`, newlines, safe `cd`, basic redirections, and narrowly recognized read-only pipelines.
 - Structured bash path-effect extraction and classification through the same workspace/path policy used for file tools.
 - Configurable workspace read-only bash policy through `bash.workspaceReadOnly`.
-- Interactive approval choices: `Allow once`, `Allow for session`, `Allow for project`, `Deny`.
+- Interactive approval choices: `Allow once`, `Allow for session`, bash-only `Allow for project`, `Allow this file for project`, `Allow this folder for project`, `Deny`.
 - Session approval cache for repeated matching requests.
+- Project-scoped external path approvals for `read`, `ls`, `find`, and `grep` through `pathApprovals.scopedApprovals`.
 - Project-scoped bash approval persistence for explicitly approved outside-workspace or otherwise risky forms.
 - Subagent permission routing back to the main user thread.
 - Redacted local audit logs with rotation.
@@ -114,6 +115,9 @@ Unknown keys are ignored with warnings. Secret-like config keys such as `apiKey`
     "scopedApprovals": [],
     "askCommands": ["rm *", "mv *", "cp *", "git clean *", "git reset *", "npm install *"],
     "denyCommands": ["sudo *", "su *", "chmod 777 *", "chown *", "rm -rf /", "rm -rf ~"]
+  },
+  "pathApprovals": {
+    "scopedApprovals": []
   },
   "audit": {
     "enabled": true
@@ -296,7 +300,9 @@ Interactive approval choices are English and intentionally stable:
 
 - `Allow once`
 - `Allow for session`
-- `Allow for project`
+- `Allow for project` for bash approvals
+- `Allow this file for project`
+- `Allow this folder for project`
 - `Deny`
 
 `Allow once` applies only to the current request.
@@ -308,13 +314,19 @@ Interactive approval choices are English and intentionally stable:
 - workspace-only bash approvals are written to `bash.safeCommands` as reusable per-segment command strings or conservative regex patterns;
 - outside-workspace or root-scoped bash approvals are written to `bash.scopedApprovals`.
 
+For supported external path tools (`read`, `ls`, `find`, `grep`), prompts with safe explicit path approval options omit the generic `Allow for project` choice. The explicit project choices persist project-scoped external path approvals in `pathApprovals.scopedApprovals`:
+
+- `Allow this file for project` stores one exact normalized file path;
+- `Allow this folder for project` stores one normalized folder root and applies recursively to existing and future descendants in the current project;
+- path approvals do not apply to unsupported tools such as `write`, `edit`, `bash`, or custom tools.
+
 Scoped approval reuse stays limited to the approved command/effect signature and roots; out-of-scope paths ask again.
 
 `Deny` blocks the current request.
 
 ## Subagent approvals
 
-Subagent approvals route to the main thread. If a subagent-originated request needs approval, the subagent cannot approve itself. The guard surfaces a `permission_required` payload for the orchestrator/user thread so the main user can decide.
+Subagent approvals route to the main thread. If a subagent-originated request needs approval, the subagent cannot approve itself. The guard surfaces a `permission_required` payload for the orchestrator/user thread so the main user can decide. For supported external path tools, the payload carries explicit file/folder project approval options so the main thread can persist the same `pathApprovals.scopedApprovals` entry that a direct request would save.
 
 Background subagent tasks cannot complete interactive approval by themselves; rerun in task mode when approval is needed.
 
@@ -361,10 +373,15 @@ When `bypassAll` is `true`, every supported permission check is allowed immediat
 
 For enforcement tests and manual validation, make sure any local permission config used for validation sets `bypassAll: false`. A temporary `bypassAll: true` setting will hide real policy behavior.
 
+Persisted `pathApprovals.scopedApprovals` entries reveal local filesystem paths in project config. Remove an entry manually from `.pi/permissions.json` to revoke it. To roll back the feature completely, remove the `pathApprovals.scopedApprovals` collection and revert the extension/subagent changes.
+
 Suggested manual checks:
 
 - run an in-workspace compound such as `cd .pi/extensions/permission-guard && npm test`;
 - try an outside-workspace path like `cat /tmp/outside.txt` and confirm approval is required;
+- choose `Allow this file for project` and confirm only that exact file is reused later in the same project;
+- choose `Allow this folder for project` and confirm `read`, `ls`, `find`, and `grep` reuse the approval for descendants and future child paths, but not for prefix siblings such as `/tmp/outside-private`;
+- verify secret or symlink-escape paths under an approved folder still do not bypass stricter policy;
 - approve a bash request for session or project, then confirm reuse works only inside the approved roots;
 - verify recognized read-only workspace pipelines such as `grep -R -n "workspaceReadOnly" .pi/extensions/permission-guard/src | head` pass when `bash.workspaceReadOnly` is `allow`;
 - verify unsafe or outside-workspace pipes such as `cat .pi/extensions/permission-guard/package.json | sh` or `find ~/sias/app -maxdepth 1 -mindepth 1 -print | sort` still ask;

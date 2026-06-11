@@ -2,7 +2,12 @@ import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
-import { addProjectBashApproval, buildScopedBashApproval } from '../src/project-approval.js';
+import {
+  addProjectBashApproval,
+  addProjectPathApproval,
+  buildProjectPathApproval,
+  buildScopedBashApproval,
+} from '../src/project-approval.js';
 import { builtInPermissionPolicy } from '../src/defaults.js';
 import { evaluatePermission } from '../src/policy.js';
 import type { PermissionPolicyConfig, PermissionRequest, ScopedBashApproval } from '../src/types.js';
@@ -186,5 +191,80 @@ describe('project scoped approvals', () => {
       expect.objectContaining({ normalizedAbsolute: cwd }),
       expect.objectContaining({ normalizedAbsolute: '/home/test/sias/app' }),
     ]));
+  });
+
+  it('builds exact file and containing-folder project path approvals from read requests', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'permission-guard-project-path-build-'));
+    const outsideRoot = await mkdtemp(join(tmpdir(), 'permission-guard-project-path-build-outside-'));
+    const filePath = join(outsideRoot, 'docs', 'approved.txt');
+    await mkdir(join(outsideRoot, 'docs'), { recursive: true });
+    await writeFile(filePath, 'ok', 'utf8');
+    const config = policy(cwd);
+    const request: PermissionRequest = {
+      id: 'path-request',
+      source: 'tool_call',
+      origin: 'main',
+      tool: 'read',
+      action: 'read',
+      rawInputSummary: `read ${filePath}`,
+      target: await import('../src/path-policy.js').then(({ classifyPathTarget }) => classifyPathTarget(filePath, { cwd, config })),
+      mode: 'tui',
+      hasUI: true,
+      policyIdentity: 'test-policy',
+      timestamp: '2026-06-10T00:00:00.000Z',
+    };
+
+    expect(buildProjectPathApproval(request, 'file')).toEqual(expect.objectContaining({
+      scope: 'file',
+      normalizedAbsolute: filePath,
+      tools: ['read', 'ls', 'find', 'grep'],
+    }));
+    expect(buildProjectPathApproval(request, 'folder')).toEqual(expect.objectContaining({
+      scope: 'folder',
+      normalizedAbsolute: join(outsideRoot, 'docs'),
+      tools: ['read', 'ls', 'find', 'grep'],
+    }));
+  });
+
+  it('writes path approvals to project permissions, deduplicates exact matches, merges tool lists, and preserves bash approvals', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'permission-guard-project-path-save-'));
+    await mkdir(join(cwd, '.pi'), { recursive: true });
+    await writeFile(join(cwd, '.pi', 'permissions.json'), JSON.stringify({
+      bash: { safeCommands: ['git status'] },
+      pathApprovals: {
+        scopedApprovals: [{
+          version: 1,
+          id: 'path-approval-existing',
+          createdAt: '2026-06-10T00:00:00.000Z',
+          scope: 'file',
+          raw: '/tmp/approved.txt',
+          normalizedAbsolute: '/tmp/approved.txt',
+          resolvedRealpath: '/tmp/approved.txt',
+          tools: ['read'],
+          source: 'project',
+        }],
+      },
+    }, null, 2), 'utf8');
+
+    await addProjectPathApproval(cwd, {
+      version: 1,
+      id: 'path-approval-new',
+      createdAt: '2026-06-10T00:00:00.000Z',
+      scope: 'file',
+      raw: '/tmp/approved.txt',
+      normalizedAbsolute: '/tmp/approved.txt',
+      resolvedRealpath: '/tmp/approved.txt',
+      tools: ['ls', 'find', 'grep'],
+      source: 'project',
+    });
+
+    const saved = JSON.parse(await readFile(join(cwd, '.pi', 'permissions.json'), 'utf8'));
+    expect(saved.bash.safeCommands).toEqual(['git status']);
+    expect(saved.pathApprovals.scopedApprovals).toHaveLength(1);
+    expect(saved.pathApprovals.scopedApprovals[0]).toEqual(expect.objectContaining({
+      scope: 'file',
+      normalizedAbsolute: '/tmp/approved.txt',
+      tools: ['read', 'ls', 'find', 'grep'],
+    }));
   });
 });

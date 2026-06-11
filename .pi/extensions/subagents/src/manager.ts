@@ -56,7 +56,7 @@ function sessionIdFromContext(ctx: any): string | undefined {
 }
 
 const MAIN_THREAD_APPROVAL_REGISTRY_KEY = Symbol.for('pi.permissionGuard.mainThreadApprovals');
-const APPROVAL_CHOICES = ['Allow once', 'Allow for session', 'Allow for project', 'Deny'] as const;
+const APPROVAL_CHOICES = ['Allow once', 'Allow for session', 'Allow for project', 'Allow this file for project', 'Allow this folder for project', 'Deny'] as const;
 type ApprovalChoice = typeof APPROVAL_CHOICES[number];
 
 function sanitizeUnknown<T>(value: T): T {
@@ -91,7 +91,8 @@ function approvalPromptMessage(payload: PermissionRequiredPayload): string {
 async function promptMainThreadForPermission(ctx: any, payload: PermissionRequiredPayload): Promise<ApprovalChoice> {
   const select = ctx?.ui?.select;
   if (typeof select !== 'function') throw new Error('Subagent permission requires main-thread approval, but no interactive UI is available.');
-  const choice = await select(approvalPromptMessage(payload), [...APPROVAL_CHOICES]);
+  const offeredChoices = payload.prompt?.choices?.length ? payload.prompt.choices : [...APPROVAL_CHOICES];
+  const choice = await select(approvalPromptMessage(payload), [...offeredChoices]);
   return APPROVAL_CHOICES.includes(choice) ? choice : 'Deny';
 }
 
@@ -139,10 +140,52 @@ async function addProjectSafeCommandPattern(cwd: string, pattern: string): Promi
   await writeFile(configPath, `${JSON.stringify(root, null, 2)}\n`, 'utf8');
 }
 
-async function registerProjectApproval(cwd: string, payload: PermissionRequiredPayload): Promise<void> {
-  const pattern = payload.projectScope?.safeCommandPattern;
-  if (!pattern) throw new Error('Subagent permission approval cannot be saved for the project because no safe project command pattern was provided.');
-  await addProjectSafeCommandPattern(cwd, pattern);
+type ProjectPathApprovalPayload = NonNullable<NonNullable<NonNullable<PermissionRequiredPayload['projectScope']>['pathApprovalOptions']>['file']>;
+
+async function addProjectPathApproval(cwd: string, approval: ProjectPathApprovalPayload): Promise<void> {
+  const configPath = join(resolve(cwd), '.pi', 'permissions.json');
+  let root: Record<string, unknown> = {};
+  try {
+    const raw = await readFile(configPath, 'utf8');
+    const parsed = JSON.parse(raw) as unknown;
+    if (isPlainObject(parsed)) root = parsed;
+  } catch (error: unknown) {
+    if (!(typeof error === 'object' && error && 'code' in error && error.code === 'ENOENT')) throw error;
+  }
+
+  const pathApprovals = isPlainObject(root.pathApprovals) ? root.pathApprovals : {};
+  const scopedApprovals = Array.isArray(pathApprovals.scopedApprovals) ? [...pathApprovals.scopedApprovals] : [];
+  const existingIndex = scopedApprovals.findIndex((entry) => isPlainObject(entry)
+    && entry.scope === approval.scope
+    && entry.normalizedAbsolute === approval.normalizedAbsolute
+    && (entry.resolvedRealpath ?? undefined) === (approval.resolvedRealpath ?? undefined));
+
+  if (existingIndex >= 0 && isPlainObject(scopedApprovals[existingIndex])) {
+    const existing = scopedApprovals[existingIndex] as Record<string, unknown>;
+    const existingTools = Array.isArray(existing.tools) ? existing.tools.filter((tool): tool is string => typeof tool === 'string') : [];
+    scopedApprovals[existingIndex] = { ...existing, tools: [...new Set([...existingTools, ...approval.tools])] };
+  } else {
+    scopedApprovals.push(approval);
+  }
+
+  root.pathApprovals = { ...pathApprovals, scopedApprovals };
+  await mkdir(dirname(configPath), { recursive: true });
+  await writeFile(configPath, `${JSON.stringify(root, null, 2)}\n`, 'utf8');
+}
+
+async function registerProjectApproval(cwd: string, payload: PermissionRequiredPayload, choice: ApprovalChoice): Promise<void> {
+  const pathOptions = payload.projectScope?.pathApprovalOptions;
+  if (choice === 'Allow this file for project') {
+    if (!pathOptions?.file) throw new Error('Subagent file project approval is unavailable for this request.');
+    await addProjectPathApproval(cwd, pathOptions.file);
+  } else if (choice === 'Allow this folder for project') {
+    if (!pathOptions?.folder) throw new Error('Subagent folder project approval is unavailable for this request.');
+    await addProjectPathApproval(cwd, pathOptions.folder);
+  } else {
+    const pattern = payload.projectScope?.safeCommandPattern;
+    if (!pattern) throw new Error('Subagent permission approval cannot be saved for the project because no safe project command pattern was provided.');
+    await addProjectSafeCommandPattern(cwd, pattern);
+  }
   if (payload.sessionScope) registerMainThreadApproval(payload, 'Allow once');
 }
 
@@ -394,8 +437,11 @@ export class SubagentManager {
           const choice = await promptMainThreadForPermission(ctx, permissionRequired);
           subagentAuditLog(cwd, 'permission_bridge_user_choice', { taskId: id, agent: definition.name, choice, requestId: permissionRequired.requestId, reasonCode: permissionRequired.reasonCode });
           if (choice === 'Deny') throw new Error(`Subagent permission denied by main user: ${permissionRequired.reasonCode ?? permissionRequired.reason ?? 'permission_required'}`);
-          if (choice === 'Allow for project') await registerProjectApproval(cwd, permissionRequired);
-          else registerMainThreadApproval(permissionRequired, choice);
+          if (choice === 'Allow for project' || choice === 'Allow this file for project' || choice === 'Allow this folder for project') {
+            await registerProjectApproval(cwd, permissionRequired, choice);
+          } else {
+            registerMainThreadApproval(permissionRequired, choice);
+          }
           task.last_activity = `${choice} approved by main user; retrying subagent`;
           delete task.permission_request;
           task.last_activity_at = nowIso();

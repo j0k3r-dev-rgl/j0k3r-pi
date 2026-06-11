@@ -1,5 +1,5 @@
-import { constants, existsSync, realpathSync } from 'node:fs';
-import { access, realpath as fsRealpath } from 'node:fs/promises';
+import { constants, existsSync, lstatSync, realpathSync } from 'node:fs';
+import { access, lstat, realpath as fsRealpath } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { PermissionPolicyConfig, PermissionRequest } from './types.js';
 
@@ -27,9 +27,13 @@ function toPosixPath(path: string): string {
   return path.split(sep).join('/');
 }
 
-function isSameOrInside(target: string, root: string): boolean {
-  const rel = relative(root, target);
+export function isPathContainedByRoot(target: string, root: string): boolean {
+  const rel = relative(resolve(root), resolve(target));
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+function isSameOrInside(target: string, root: string): boolean {
+  return isPathContainedByRoot(target, root);
 }
 
 export function resolveWorkspaceRoot({ cwd, config }: ResolveWorkspaceRootOptions): string {
@@ -71,6 +75,28 @@ function findNearestExistingParentSync(path: string): string | undefined {
     const parent = dirname(current);
     if (parent === current) return undefined;
     current = parent;
+  }
+}
+
+async function classifyTargetKind(normalizedAbsolute: string): Promise<ClassifiedPathTarget['kind']> {
+  try {
+    const stats = await lstat(normalizedAbsolute);
+    if (stats.isFile()) return 'file';
+    if (stats.isDirectory()) return 'directory';
+    return 'other';
+  } catch {
+    return 'missing';
+  }
+}
+
+function classifyTargetKindSync(normalizedAbsolute: string): ClassifiedPathTarget['kind'] {
+  try {
+    const stats = lstatSync(normalizedAbsolute);
+    if (stats.isFile()) return 'file';
+    if (stats.isDirectory()) return 'directory';
+    return 'other';
+  } catch {
+    return 'missing';
   }
 }
 
@@ -122,6 +148,17 @@ function resolveEffectiveRealpathSync(normalizedAbsolute: string): {
   };
 }
 
+export function isRequestPathCoveredByApproval(
+  approval: { normalizedAbsolute: string; resolvedRealpath?: string },
+  request: Pick<ClassifiedPathTarget, 'normalizedAbsolute' | 'resolvedRealpath'>,
+): boolean {
+  if (!isPathContainedByRoot(request.normalizedAbsolute, approval.normalizedAbsolute)) return false;
+  if (approval.resolvedRealpath && request.resolvedRealpath) {
+    return isPathContainedByRoot(request.resolvedRealpath, approval.resolvedRealpath);
+  }
+  return true;
+}
+
 export async function classifyPathTarget(rawPath: string, options: ClassifyPathTargetOptions): Promise<ClassifiedPathTarget> {
   const workspaceRoot = resolveWorkspaceRoot(options);
   const normalizedAbsolute = isAbsolute(rawPath) ? resolve(rawPath) : resolve(workspaceRoot, rawPath);
@@ -129,6 +166,7 @@ export async function classifyPathTarget(rawPath: string, options: ClassifyPathT
   const followSymlinks = options.config.workspace.followSymlinks ?? 'realpath';
 
   const targetResolution = await resolveEffectiveRealpath(normalizedAbsolute);
+  const kind = await classifyTargetKind(normalizedAbsolute);
   const workspaceRootRealpath = (await realpathIfPossible(workspaceRoot)) ?? workspaceRoot;
   const resolvedRealpath = targetResolution.resolvedRealpath;
   const effectiveTarget = followSymlinks === 'realpath' && resolvedRealpath ? resolvedRealpath : normalizedAbsolute;
@@ -147,6 +185,7 @@ export async function classifyPathTarget(rawPath: string, options: ClassifyPathT
     insideWorkspace,
     symlinkEscapesWorkspace,
     workspaceRelative,
+    kind,
   };
 }
 
@@ -157,6 +196,7 @@ export function classifyResolvedPathTargetSync(rawPath: string, options: Classif
   const followSymlinks = options.config.workspace.followSymlinks ?? 'realpath';
 
   const targetResolution = resolveEffectiveRealpathSync(normalizedAbsolute);
+  const kind = classifyTargetKindSync(normalizedAbsolute);
   const workspaceRootRealpath = realpathIfPossibleSync(workspaceRoot) ?? workspaceRoot;
   const resolvedRealpath = targetResolution.resolvedRealpath;
   const effectiveTarget = followSymlinks === 'realpath' && resolvedRealpath ? resolvedRealpath : normalizedAbsolute;
@@ -175,6 +215,7 @@ export function classifyResolvedPathTargetSync(rawPath: string, options: Classif
     insideWorkspace,
     symlinkEscapesWorkspace,
     workspaceRelative,
+    kind,
   };
 }
 

@@ -59,6 +59,9 @@ export const builtInPermissionPolicy: PermissionPolicyConfig = {
     envSecretExposure: 'deny',
     maxCommandPreviewChars: 240,
   },
+  pathApprovals: {
+    scopedApprovals: [],
+  },
   nonInteractive: {
     onAsk: 'deny',
     allowSessionApprovals: false,

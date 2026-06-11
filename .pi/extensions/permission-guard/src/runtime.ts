@@ -1,5 +1,5 @@
 import { loadPermissionConfig, type PermissionConfigLoadResult } from './config.js';
-import { addProjectBashApproval } from './project-approval.js';
+import { addProjectBashApproval, addProjectPathApproval } from './project-approval.js';
 import { evaluatePermission } from './policy.js';
 import { resolveApproval, type ApprovalPrompt } from './approval.js';
 import { recordAuditDecision, recordPermissionRequiredAudit } from './audit.js';
@@ -184,8 +184,15 @@ async function resolveRuntimeDecision(
         }
       : undefined,
     projectApproval: async (approval) => {
-      if (typeof approval !== 'string') {
+      if (typeof approval === 'string') {
+        return;
+      }
+      if (approval && typeof approval === 'object' && 'commandSignature' in approval && 'effectSignature' in approval) {
         await addProjectBashApproval(ctx.cwd ?? process.cwd(), approval as any);
+        return;
+      }
+      if (approval && typeof approval === 'object' && 'scope' in approval && 'normalizedAbsolute' in approval) {
+        await addProjectPathApproval(ctx.cwd ?? process.cwd(), approval as any);
       }
     },
   });

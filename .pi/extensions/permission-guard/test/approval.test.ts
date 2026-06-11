@@ -61,7 +61,7 @@ function askDecision(config: PermissionPolicyConfig, request: PermissionRequest)
 }
 
 describe('interactive approval and session cache', () => {
-  it('uses the exact English prompt choices', async () => {
+  it('uses explicit project file and folder choices for safe external file requests', async () => {
     const cwd = await tempWorkspace('permission-guard-approval-choices-');
     await writeFile(join(cwd, '..', 'outside.txt'), 'outside', 'utf8');
     const config = policy({ workspace: { root: cwd } });
@@ -71,8 +71,10 @@ describe('interactive approval and session cache', () => {
 
     await resolveApproval(config, request, decision, { prompt, sessionCache: createSessionApprovalCache({ sessionId: 'session-a' }) });
 
-    expect(APPROVAL_CHOICES).toEqual(['Allow once', 'Allow for session', 'Allow for project', 'Deny']);
-    expect(prompt).toHaveBeenCalledWith(expect.objectContaining({ choices: ['Allow once', 'Allow for session', 'Allow for project', 'Deny'] }));
+    expect(APPROVAL_CHOICES).toEqual(['Allow once', 'Allow for session', 'Allow for project', 'Allow this file for project', 'Allow this folder for project', 'Deny']);
+    expect(prompt).toHaveBeenCalledWith(expect.objectContaining({
+      choices: ['Allow once', 'Allow for session', 'Allow this file for project', 'Allow this folder for project', 'Deny'],
+    }));
   });
 
   it('allows once without mutating the session cache', async () => {
@@ -128,6 +130,34 @@ describe('interactive approval and session cache', () => {
       allowedRoots: expect.arrayContaining([expect.objectContaining({ kind: 'directory', normalizedAbsolute: '/workspace/.pi/extensions/permission-guard' })]),
     }));
     expect(cache.snapshot().entries).toEqual([]);
+  });
+
+  it('stores explicit path project approvals with the correct payload and omits unsafe targets', async () => {
+    const cwd = await tempWorkspace('permission-guard-approval-path-project-');
+    const config = policy({ workspace: { root: cwd } });
+    const fileRequest = await outsideReadRequest(cwd);
+    const fileDecision = askDecision(config, fileRequest);
+    const projectApproval = vi.fn(async (_approval: unknown) => undefined);
+
+    await resolveApproval(config, fileRequest, fileDecision, {
+      prompt: async () => 'Allow this file for project' as const,
+      sessionCache: createSessionApprovalCache({ sessionId: 'session-path-project' }),
+      projectApproval,
+    });
+
+    expect(projectApproval).toHaveBeenCalledWith(expect.objectContaining({
+      scope: 'file',
+      normalizedAbsolute: fileRequest.target!.normalizedAbsolute,
+      tools: ['read', 'ls', 'find', 'grep'],
+    }));
+
+    const missingDirectoryRequest = await outsideReadRequest(cwd, '../missing-dir/');
+    missingDirectoryRequest.tool = 'find';
+    missingDirectoryRequest.action = 'list';
+    const missingDecision = askDecision(config, missingDirectoryRequest);
+    const payload = buildPermissionRequiredPayload(missingDirectoryRequest, missingDecision);
+    expect(payload.prompt.choices).not.toContain('Allow this file for project');
+    expect(payload.prompt.choices).not.toContain('Allow this folder for project');
   });
 
   it('stores allow-for-session using a scoped cache entry that can be reused by the pure policy engine', async () => {
@@ -215,7 +245,7 @@ describe('interactive approval and session cache', () => {
       origin: 'subagent',
       requester: request.requester,
       prompt: expect.objectContaining({
-        choices: ['Allow once', 'Allow for session', 'Allow for project', 'Deny'],
+        choices: ['Allow once', 'Allow for session', 'Allow this file for project', 'Allow this folder for project', 'Deny'],
         safeTarget: request.target!.normalizedAbsolute,
         limitations: expect.arrayContaining([expect.stringContaining('not a hard sandbox')]),
       }),

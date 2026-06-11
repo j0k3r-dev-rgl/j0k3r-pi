@@ -1,7 +1,7 @@
 import { isAbsolute, relative } from 'node:path';
 import { classifyBashCommand } from './bash-policy.js';
-import { matchesWorkspaceGlob } from './path-policy.js';
-import type { ScopedBashApproval } from './types.js';
+import { isPathContainedByRoot, isRequestPathCoveredByApproval, matchesWorkspaceGlob } from './path-policy.js';
+import type { ProjectPathApproval, ScopedBashApproval } from './types.js';
 import { evaluateSecretDeny } from './secrets.js';
 import type { Action, PermissionDecisionResult, PermissionPolicyConfig, PermissionRequest, PolicyDecision, RiskLevel, ToolMode } from './types.js';
 
@@ -188,6 +188,23 @@ function rootContains(approvedRoot: string, requestedRoot: string): boolean {
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
 }
 
+function pathApprovalSupportsTool(approval: ProjectPathApproval, tool: PermissionRequest['tool']): boolean {
+  return (tool === 'read' || tool === 'ls' || tool === 'find' || tool === 'grep') && approval.tools.includes(tool);
+}
+
+function pathApprovalCoversRequest(approval: ProjectPathApproval, request: PermissionRequest): boolean {
+  const target = request.target;
+  if (!target) return false;
+  if (!pathApprovalSupportsTool(approval, request.tool)) return false;
+  if (approval.scope === 'file') {
+    if (target.normalizedAbsolute !== approval.normalizedAbsolute) return false;
+    if (approval.resolvedRealpath && target.resolvedRealpath) return target.resolvedRealpath === approval.resolvedRealpath;
+    return true;
+  }
+  if (!isPathContainedByRoot(target.normalizedAbsolute, approval.normalizedAbsolute)) return false;
+  return isRequestPathCoveredByApproval(approval, target);
+}
+
 function approvalInScope(approval: ScopedBashApproval | undefined, result: PermissionDecisionResult): boolean {
   if (!approval || !result.details.shellAnalysis || !result.details.approvalScope) return false;
   if (approval.commandSignature !== result.details.shellAnalysis.commandSignature) return false;
@@ -264,6 +281,25 @@ function applyNonInteractiveFallback(
   };
 }
 
+function applyProjectPathApproval(
+  config: PermissionPolicyConfig,
+  request: PermissionRequest,
+  result: PermissionDecisionResult,
+): PermissionDecisionResult | undefined {
+  if (result.decision !== 'ask' || !request.target) return undefined;
+  const approval = config.pathApprovals.scopedApprovals.find((entry) => pathApprovalCoversRequest(entry, request));
+  if (!approval) return undefined;
+  return {
+    ...result,
+    decision: 'allow',
+    finalDecision: 'allow',
+    reason: 'A scoped project path approval allows this request.',
+    reasonCode: 'project_path_approval_allowed',
+    details: { ...result.details, matchedLayer: 'project', matchedRule: approval.id },
+    audit: config.audit.enabled && config.audit.logAllowed,
+  };
+}
+
 export function evaluatePermission(
   config: PermissionPolicyConfig,
   request: PermissionRequest,
@@ -317,6 +353,11 @@ export function evaluatePermission(
             riskLevel: 'high',
             matchedLayer: 'tool',
           });
+
+  const projectPathApproval = request.action !== 'bash'
+    ? applyProjectPathApproval(config, request, baseResult)
+    : undefined;
+  if (projectPathApproval) return projectPathApproval;
 
   const projectApproval = request.action === 'bash'
     ? config.bash.scopedApprovals.find((entry) => approvalInScope(entry, baseResult))

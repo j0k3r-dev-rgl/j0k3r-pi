@@ -3,7 +3,7 @@ import { access, readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { builtInPermissionPolicy } from './defaults.js';
-import type { PermissionPolicyConfig, PolicyDecision, ToolMode } from './types.js';
+import type { PermissionPolicyConfig, PolicyDecision, ProjectPathApprovalTool, ToolMode } from './types.js';
 
 export interface LoadPermissionConfigOptions {
   cwd?: string;
@@ -73,6 +73,25 @@ function isScopedApproval(value: unknown): value is PermissionPolicyConfig['bash
     && value.allowedRoots.every(isScopedApprovalRoot)
     && (value.reasonCode === undefined || typeof value.reasonCode === 'string')
     && (value.source === undefined || value.source === 'session' || value.source === 'project' || value.source === 'subagent');
+}
+
+function isProjectPathApprovalTool(value: unknown): value is ProjectPathApprovalTool {
+  return value === 'read' || value === 'ls' || value === 'find' || value === 'grep';
+}
+
+function isProjectPathApproval(value: unknown): value is PermissionPolicyConfig['pathApprovals']['scopedApprovals'][number] {
+  return isPlainObject(value)
+    && value.version === 1
+    && typeof value.id === 'string'
+    && typeof value.createdAt === 'string'
+    && (value.scope === 'file' || value.scope === 'folder')
+    && typeof value.raw === 'string'
+    && typeof value.normalizedAbsolute === 'string'
+    && (value.resolvedRealpath === undefined || typeof value.resolvedRealpath === 'string')
+    && Array.isArray(value.tools)
+    && value.tools.every(isProjectPathApprovalTool)
+    && (value.reasonCode === undefined || typeof value.reasonCode === 'string')
+    && (value.source === undefined || value.source === 'project' || value.source === 'subagent');
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -234,6 +253,14 @@ function validateLeaf(value: unknown, defaultValue: unknown, keyPath: string, wa
         return valid;
       }
       warnings.push(`invalid scoped approval array at ${keyPath}; using built-in safe default`);
+      return defaultValue;
+    case 'pathApprovals.scopedApprovals':
+      if (Array.isArray(value)) {
+        const valid = value.filter(isProjectPathApproval);
+        if (valid.length !== value.length) warnings.push('invalid path approval entries at pathApprovals.scopedApprovals; ignoring malformed entries');
+        return valid;
+      }
+      warnings.push(`invalid path approval array at ${keyPath}; using built-in safe default`);
       return defaultValue;
     case 'nonInteractive.onAsk':
       if (value === 'deny' || value === 'allow') return value;

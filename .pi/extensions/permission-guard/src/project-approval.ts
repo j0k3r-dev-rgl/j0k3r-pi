@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import type { PermissionDecisionResult, PermissionRequest, ScopedBashApproval } from './types.js';
+import type { PermissionDecisionResult, PermissionRequest, ProjectPathApproval, ScopedBashApproval } from './types.js';
+
+const pathApprovalTools = ['read', 'ls', 'find', 'grep'] as const;
 
 function normalizeCommand(command: string): string {
   return command.trim().replace(/\s+/g, ' ');
@@ -113,6 +115,37 @@ function workspaceSafeCommandPatterns(command: string): string[] {
   return patterns;
 }
 
+export function buildProjectPathApproval(
+  request: PermissionRequest,
+  scope: 'file' | 'folder',
+): ProjectPathApproval | undefined {
+  const target = request.target;
+  if (!target || target.insideWorkspace) return undefined;
+  if (request.tool !== 'read' && request.tool !== 'ls' && request.tool !== 'find' && request.tool !== 'grep') return undefined;
+  if (scope === 'file' && target.kind !== 'file') return undefined;
+  if (scope === 'folder' && target.kind !== 'file' && target.kind !== 'directory') return undefined;
+
+  const normalizedAbsolute = scope === 'folder' && target.kind === 'file'
+    ? dirname(target.normalizedAbsolute)
+    : target.normalizedAbsolute;
+  const resolvedRealpath = scope === 'folder' && target.kind === 'file'
+    ? (target.resolvedRealpath ? dirname(target.resolvedRealpath) : undefined)
+    : target.resolvedRealpath;
+
+  return {
+    version: 1,
+    id: `path_approval_${randomUUID()}`,
+    createdAt: new Date().toISOString(),
+    scope,
+    raw: normalizedAbsolute,
+    normalizedAbsolute,
+    resolvedRealpath,
+    tools: [...pathApprovalTools],
+    reasonCode: undefined,
+    source: request.origin === 'subagent' ? 'subagent' : 'project',
+  };
+}
+
 export async function addProjectBashApproval(cwd: string, approval: ScopedBashApproval): Promise<string> {
   const configPath = join(resolve(cwd), '.pi', 'permissions.json');
   let root: Record<string, unknown> = {};
@@ -153,6 +186,39 @@ export async function addProjectBashApproval(cwd: string, approval: ScopedBashAp
 
     root.bash = { ...bash, scopedApprovals };
   }
+  await mkdir(dirname(configPath), { recursive: true });
+  await writeFile(configPath, `${JSON.stringify(root, null, 2)}\n`, 'utf8');
+  return configPath;
+}
+
+export async function addProjectPathApproval(cwd: string, approval: ProjectPathApproval): Promise<string> {
+  const configPath = join(resolve(cwd), '.pi', 'permissions.json');
+  let root: Record<string, unknown> = {};
+  try {
+    const raw = await readFile(configPath, 'utf8');
+    const parsed = JSON.parse(raw) as unknown;
+    if (isPlainObject(parsed)) root = parsed;
+  } catch (error: unknown) {
+    if (!(typeof error === 'object' && error && 'code' in error && error.code === 'ENOENT')) throw error;
+  }
+
+  const pathApprovals = isPlainObject(root.pathApprovals) ? root.pathApprovals : {};
+  const scopedApprovals = Array.isArray(pathApprovals.scopedApprovals) ? [...pathApprovals.scopedApprovals] : [];
+  const existingIndex = scopedApprovals.findIndex((entry) => isPlainObject(entry)
+    && entry.scope === approval.scope
+    && entry.normalizedAbsolute === approval.normalizedAbsolute
+    && (entry.resolvedRealpath ?? undefined) === (approval.resolvedRealpath ?? undefined));
+
+  if (existingIndex >= 0 && isPlainObject(scopedApprovals[existingIndex])) {
+    const existing = scopedApprovals[existingIndex] as Record<string, unknown>;
+    const existingTools = Array.isArray(existing.tools) ? existing.tools.filter((tool): tool is string => typeof tool === 'string') : [];
+    const mergedTools = [...new Set([...existingTools, ...approval.tools])];
+    scopedApprovals[existingIndex] = { ...existing, tools: mergedTools };
+  } else {
+    scopedApprovals.push(approval);
+  }
+
+  root.pathApprovals = { ...pathApprovals, scopedApprovals };
   await mkdir(dirname(configPath), { recursive: true });
   await writeFile(configPath, `${JSON.stringify(root, null, 2)}\n`, 'utf8');
   return configPath;

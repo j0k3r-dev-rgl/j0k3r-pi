@@ -39,7 +39,7 @@ async function writeProjectPolicy(cwd: string, policy: Record<string, unknown>) 
 
 function createCtx(cwd: string, choices: ApprovalChoice[] = [], overrides: Record<string, unknown> = {}) {
   const select = vi.fn(async (_message: string, options: ApprovalChoice[]) => {
-    expect(options).toEqual(['Allow once', 'Allow for session', 'Allow for project', 'Deny']);
+    expect(options).toEqual(expect.arrayContaining(['Allow once', 'Allow for session', 'Deny']));
     return choices.shift() ?? 'Deny';
   });
 
@@ -108,7 +108,7 @@ describe('permission guard runtime wiring', () => {
     const handler = pi.handlers.tool_call![0] as ToolCallHandler;
     let resolveChoice!: (choice: ApprovalChoice) => void;
     const select = vi.fn(async (_message: string, options: ApprovalChoice[]) => {
-      expect(options).toEqual(['Allow once', 'Allow for session', 'Allow for project', 'Deny']);
+      expect(options).toEqual(expect.arrayContaining(['Allow once', 'Allow for session', 'Deny']));
       return await new Promise<ApprovalChoice>((resolve) => {
         resolveChoice = resolve;
       });
@@ -228,7 +228,7 @@ describe('permission guard runtime wiring', () => {
       origin: 'subagent',
       requester: { subagentId: 'sg-1', subagentName: 'sdd-apply', taskId: '2.10' },
       prompt: expect.objectContaining({
-        choices: ['Allow once', 'Allow for session', 'Allow for project', 'Deny'],
+        choices: ['Allow once', 'Allow for session', 'Allow this file for project', 'Allow this folder for project', 'Deny'],
         safeTarget: expect.stringContaining('outside.txt'),
       }),
     }));
@@ -265,7 +265,7 @@ describe('permission guard runtime wiring', () => {
       origin: 'subagent',
       requester: { subagentId: 'sg-no-ui', subagentName: 'sdd-verify', taskId: '3.6' },
       prompt: expect.objectContaining({
-        choices: ['Allow once', 'Allow for session', 'Allow for project', 'Deny'],
+        choices: ['Allow once', 'Allow for session', 'Allow this file for project', 'Allow this folder for project', 'Deny'],
         safeTarget: expect.stringContaining('outside.txt'),
       }),
     }));
@@ -322,6 +322,28 @@ describe('permission guard runtime wiring', () => {
     }
   });
 
+  it('persists direct Allow this file for project approvals and reuses them without another prompt', async () => {
+    const cwd = await tempWorkspace('permission-guard-runtime-path-file-project-');
+    const outsideRoot = await mkdtemp(join(tmpdir(), 'permission-guard-runtime-path-file-project-outside-'));
+    const approvedFile = join(outsideRoot, 'approved.txt');
+    await writeFile(approvedFile, 'approved', 'utf8');
+    await writeProjectPolicy(cwd, { bypassAll: false });
+    const pi = createMockPi();
+    registerPermissionGuardRuntime(pi);
+    const handler = pi.handlers.tool_call![0] as ToolCallHandler;
+    const ctx = createCtx(cwd, ['Allow this file for project']);
+    const event = { toolName: 'read', toolCallId: 'tc-path-file-project', input: { path: approvedFile } };
+
+    await expect(handler(event, ctx)).resolves.toBeUndefined();
+    await expect(handler(event, ctx)).resolves.toBeUndefined();
+
+    const saved = JSON.parse(await readFile(join(cwd, '.pi', 'permissions.json'), 'utf8'));
+    expect(saved.pathApprovals.scopedApprovals).toEqual(expect.arrayContaining([
+      expect.objectContaining({ scope: 'file', normalizedAbsolute: approvedFile, tools: ['read', 'ls', 'find', 'grep'] }),
+    ]));
+    expect(ctx.ui.select).toHaveBeenCalledTimes(1);
+  });
+
   it('persists workspace-only Allow for project bash approvals as safeCommands', async () => {
     const cwd = await tempWorkspace('permission-guard-runtime-project-approval-');
     const pi = createMockPi();
@@ -345,6 +367,35 @@ describe('permission guard runtime wiring', () => {
       input: { command: 'npm --prefix .pi/extensions/subagents test -- --run' },
     }, ctx)).resolves.toBeUndefined();
     expect(ctx.ui.select).toHaveBeenCalledTimes(1);
+  });
+
+  it('publishes path approval options for supported external subagent path requests', async () => {
+    const cwd = await tempWorkspace('permission-guard-runtime-subagent-path-options-');
+    const outsideRoot = await mkdtemp(join(tmpdir(), 'permission-guard-runtime-subagent-path-options-outside-'));
+    const approvedFile = join(outsideRoot, 'approved.txt');
+    await writeFile(approvedFile, 'approved', 'utf8');
+    const pi = createMockPi();
+    registerPermissionGuardRuntime(pi);
+    const handler = pi.handlers.tool_call![0] as ToolCallHandler;
+    const ctx = createCtx(cwd, [], {
+      mode: 'print',
+      hasUI: false,
+      origin: 'subagent',
+      requester: { subagentName: 'sdd-apply' },
+    });
+
+    const result = await handler({ toolName: 'read', toolCallId: 'tc-subagent-path-options', input: { path: approvedFile } }, ctx);
+
+    expect((result as any).details?.permission_request).toEqual(expect.objectContaining({
+      type: 'permission_required',
+      tool: 'read',
+      projectScope: expect.objectContaining({
+        pathApprovalOptions: expect.objectContaining({
+          file: expect.objectContaining({ scope: 'file', normalizedAbsolute: approvedFile }),
+          folder: expect.objectContaining({ scope: 'folder', normalizedAbsolute: outsideRoot }),
+        }),
+      }),
+    }));
   });
 
   it('does not handle unsupported tool_call tools', async () => {
