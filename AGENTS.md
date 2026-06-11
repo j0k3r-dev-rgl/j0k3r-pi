@@ -27,7 +27,28 @@ Rules:
 
 ## Workflow selection
 
-Choose the lightest workflow that safely fits the request. For simple questions, tiny inspections, and small localized fixes, stay inline or use simple TDD. For substantial PRD/SDD/OpenSpec work, load the `sdd-workflow` skill and follow it as the operational source of truth for routing tables, phase details, artifact formats, subagent checklists, continue/apply rules, and return envelopes.
+Choose the lightest workflow that safely fits the request, but do not use “lightweight” as an excuse to bypass planning gates for policy-sensitive, cross-cutting, or ambiguous work. For simple questions, tiny inspections, and small localized fixes, stay inline or use simple TDD. For substantial PRD/SDD/OpenSpec work, load the `sdd-workflow` skill and follow it as the operational source of truth for routing tables, phase details, artifact formats, subagent checklists, continue/apply rules, and return envelopes.
+
+### Policy-sensitive workflow gate
+
+Treat changes to agent behavior as higher risk than ordinary docs/config edits.
+
+Policy-sensitive paths include:
+- `AGENTS.md`;
+- `.pi/skills/**`;
+- `.pi/subagents/**`;
+- `.pi/permissions.json`;
+- `.pi/memory.json`;
+- `.pi/context7.json`;
+- `.pi/subagents.json`;
+- workflow, memory, permission, skill-registry, or subagent extension code.
+
+Rules:
+- If the user asks to investigate or diagnose policy-sensitive behavior, stay read-only and report options first.
+- If implementation is approved for a policy-sensitive change, state the selected workflow before editing and explain why it is inline/simple TDD, discovery, or SDD.
+- Use formal SDD planning by default when the change is multi-file, cross-cutting, changes future agent behavior, introduces or changes a contract/API, or needs durable handoff artifacts.
+- Use discovery before SDD when the scope, impact, or right workflow is unclear.
+- Inline/docs-only edits are allowed only for small, explicit, localized policy wording fixes with low future-behavior risk.
 
 ### Workflow routing quick table
 
@@ -40,6 +61,7 @@ Use this table before acting when the request may involve reading files, changin
 | User asks to investigate, analyze, review, compare, diagnose, or “look at” behavior | Read-only investigation; use `discovery` only if isolated research is broad enough to benefit from delegation | Report findings/options and wait for the user to choose next action. |
 | Small localized implementation with clear expected behavior and existing cheap validation | Simple TDD | If this follows an investigation, confirm the selected implementation path first. Add/update failing test before code when non-trivial. |
 | One-extension or one-module change with tests, limited architecture risk, and no durable PRD/spec value | Simple TDD, not full SDD by default | State expected behavior and validation plan; ask before implementing if the user has not explicitly approved implementation. |
+| Policy-sensitive change touching agent instructions, skills, subagents, permissions, memory/config, workflow extensions, or future agent behavior | Discovery or formal SDD by default; inline only for small explicit wording/config fixes | State workflow choice before editing. Use SDD for multi-file/cross-cutting/future-behavior changes; use discovery first when scope is unclear. |
 | Multi-file or multi-extension change, new API/contract, cross-cutting behavior, unclear requirements, or durable handoff value | Formal SDD planning | Load `sdd-workflow`; resolve git gate, execution mode, artifact store, and planning approval before artifacts/subagents. |
 | User explicitly asks for PRD/spec/design/tasks/OpenSpec/SDD | Formal SDD | Do not create artifacts or launch SDD subagents until git gate and mode gate are resolved. |
 | Existing SDD task artifact and user asks to implement approved tasks | SDD apply-only | Confirm implementation approval and task slice/range before `sdd-apply`. |
@@ -51,6 +73,7 @@ Important interpretation rules:
 - “Investigate/analyze/review” is not implementation approval.
 - “Hagamos eso”, “apply the patch”, or “implement it” after options is implementation approval only for the discussed option; confirm if multiple materially different options remain.
 - Do not escalate a localized, well-understood change to full SDD just because it is non-trivial; use Simple TDD when durable artifacts would add little value.
+- Do not downshift policy-sensitive, cross-cutting, or future-agent-behavior changes to inline/simple TDD just because they look like docs/config edits.
 - Do not skip TDD/validation for non-trivial code changes just because the workflow is not full SDD.
 
 ### Discovery gate

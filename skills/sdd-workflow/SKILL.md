@@ -107,7 +107,9 @@ Suggested prompt:
 
 ## Flow selection
 
-Choose the lightest workflow that safely fits the request.
+Choose the lightest workflow that safely fits the request, but treat policy-sensitive agent behavior changes as higher risk than ordinary docs/config edits.
+
+Policy-sensitive paths include `AGENTS.md`, `.pi/skills/**`, `.pi/subagents/**`, `.pi/permissions.json`, `.pi/memory.json`, `.pi/context7.json`, `.pi/subagents.json`, and workflow/memory/permission/skill-registry/subagent extension code.
 
 | Situation | Preconditions | Flow | Subagents |
 |---|---|---|---|
@@ -116,7 +118,8 @@ Choose the lightest workflow that safely fits the request.
 | Investigation/review/diagnosis | user asks to investigate, compare, inspect code/docs/apis, or understand risk before implementation | Read-only investigation; use Discovery when delegated research adds value | `discovery` only when useful |
 | Small localized code fix | clear behavior, cheap validation | Simple TDD | none by default |
 | One-extension or one-module change | existing tests, limited architecture risk, no durable artifact value | Simple TDD | none by default |
-| Documentation-only cleanup | no behavior change, no durable spec value | Inline edit with focused validation | none by default |
+| Documentation-only cleanup | no behavior change, no durable spec value, not policy-sensitive | Inline edit with focused validation | none by default |
+| Policy-sensitive agent behavior change | touches agent instructions, skills, subagents, permissions, memory/config, workflow extension behavior, or future agent behavior | Discovery or formal SDD by default; inline only for small explicit wording/config fixes | `discovery` when impact is unclear; SDD phase agents when formal planning is approved |
 | New named PRD/SDD planning | user wants PRD/spec/design/tasks, mode resolved, planning approved | SDD planning sequence | `sdd-explore` → `sdd-proposal` → `sdd-spec` → `sdd-design` → `sdd-task` |
 | Multi-file/cross-cutting feature from scratch | unclear requirements, new API/contract, architecture risk, or handoff value | Full SDD feature sequence | planning sequence → approved `sdd-apply` → `sdd-verify` → optional `sdd-archive` |
 | Formal SDD exploration only | mode resolved and user approved named SDD exploration | SDD explore-only | `sdd-explore` |
@@ -132,6 +135,8 @@ Routing guardrails:
 - Investigation/discovery is read-only by default and must end with options plus a user decision.
 - Do not convert investigation into implementation unless the user explicitly approves the selected path.
 - For localized extension/module changes with tests, use Simple TDD rather than full SDD unless there is new API/contract or cross-cutting architecture risk.
+- Do not downshift policy-sensitive, cross-cutting, or future-agent-behavior changes to inline/simple TDD just because they look like docs/config edits.
+- Before editing policy-sensitive files, state the selected workflow and why it is safe; use SDD by default for multi-file or future-behavior changes, and discovery when impact is unclear.
 - For broad or ambiguous work, use Discovery before SDD when the user has not yet approved formal SDD.
 - For full SDD, implementation approval is separate from planning approval; do not use `sdd-apply` until tasks exist and apply is approved.
 
