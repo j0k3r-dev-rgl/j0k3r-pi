@@ -42,3 +42,5 @@ pnpm-debug.log*
 
 # local sdd/openspec artifacts
 openspec/
+.pi/skill-registry.json
+.pi/skill-registry.md
