@@ -1,5 +1,4 @@
 import type { AgentTodo, AgentTodoToolResult } from './types.js';
-import { renderAgentTodoWidgetLines } from './widget.js';
 
 function textComponent(text: string) {
   return {
@@ -10,9 +9,15 @@ function textComponent(text: string) {
   };
 }
 
-function progress(todo: AgentTodo): string {
+function progress(todo: AgentTodo): { label: string; completed: number; total: number; open: number } {
   const completed = todo.steps.filter((step) => step.status === 'completed').length;
-  return `${completed}/${todo.steps.length}`;
+  const total = todo.steps.length;
+  return { label: `${completed}/${total}`, completed, total, open: total - completed };
+}
+
+function compactTodoSummary(todo: AgentTodo): string {
+  const stats = progress(todo);
+  return `Agent Todo: ${todo.title} · ${stats.label} complete · ${stats.open} open`;
 }
 
 export function renderAgentTodoCall(args: any, theme: any) {
@@ -29,17 +34,17 @@ export function renderAgentTodoResult(result: AgentTodoToolResult, _options: { i
   if (details.ok === false) {
     const base = theme?.fg?.('error', `Error: ${details.error?.message ?? 'agent todo failed'}`) ?? `Error: ${details.error?.message ?? 'agent todo failed'}`;
     const active = details.state.active_todo;
-    return textComponent(active ? `${base}\n${renderAgentTodoWidgetLines(active).join('\n')}` : base);
+    return textComponent(active ? `${base}\n${compactTodoSummary(active)}` : base);
   }
 
   const active = details.state.active_todo;
   if (active) {
-    return textComponent(renderAgentTodoWidgetLines(active).join('\n'));
+    return textComponent(compactTodoSummary(active));
   }
 
   const current = details.state.current_todo;
   if (current?.status === 'completed') {
-    return textComponent(`${theme?.fg?.('success', 'completed') ?? 'completed'} ${current.title} · ${progress(current)}`);
+    return textComponent(`${theme?.fg?.('success', 'completed') ?? 'completed'} ${current.title} · ${progress(current).label}`);
   }
   if (current?.status === 'cleared') {
     return textComponent(`${theme?.fg?.('dim', 'cleared') ?? 'cleared'} ${current.title}`);

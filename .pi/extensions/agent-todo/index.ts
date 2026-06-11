@@ -13,6 +13,7 @@ export default function agentTodoExtension(pi: any): void {
       idGenerator: (kind: 'todo' | 'step', index: number) => string;
     };
     provider?: any;
+    widgetCollapsed: boolean;
   } = {
     projection: { active_todo: null, current_todo: null },
     deps: {
@@ -21,6 +22,7 @@ export default function agentTodoExtension(pi: any): void {
         ? `${index + 1}`
         : `todo-${randomUUID()}`,
     },
+    widgetCollapsed: false,
   };
   runtime.provider = createAgentTodoProvider(() => runtime.projection);
 
@@ -30,7 +32,7 @@ export default function agentTodoExtension(pi: any): void {
   const rebuild = (ctx: any) => {
     runtime.projection = reconstructAgentTodoProjection(ctx?.sessionManager?.getBranch?.() ?? []);
     publishAgentTodoProvider(runtime.provider, { pi, ctx });
-    syncAgentTodoWidget(ctx, runtime.projection);
+    syncAgentTodoWidget(ctx, runtime.projection, { collapsed: runtime.widgetCollapsed, shortcut: 'alt+t' });
   };
 
   pi.on?.('session_start', async (_event: unknown, ctx: any) => {
@@ -39,6 +41,15 @@ export default function agentTodoExtension(pi: any): void {
 
   pi.on?.('session_tree', async (_event: unknown, ctx: any) => {
     rebuild(ctx);
+  });
+
+  pi.registerShortcut?.('alt+t', {
+    description: 'Toggle compact Agent Todo widget above the editor',
+    handler: async (ctx: any) => {
+      runtime.widgetCollapsed = !runtime.widgetCollapsed;
+      syncAgentTodoWidget(ctx, runtime.projection, { collapsed: runtime.widgetCollapsed, shortcut: 'alt+t' });
+      ctx?.ui?.notify?.(`Agent Todo widget ${runtime.widgetCollapsed ? 'collapsed' : 'expanded'}.`, 'info');
+    },
   });
 
   pi.on?.('session_shutdown', async (_event: unknown, ctx: any) => {

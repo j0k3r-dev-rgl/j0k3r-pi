@@ -22,6 +22,7 @@ describe('registerAgentTodoTool', () => {
     expect(tools).toHaveLength(1);
     expect(tools[0].name).toBe('agent_todo');
     expect(tools[0].parameters.properties.action.type).toBe('string');
+    expect(tools[0].parameters.properties.range.type).toBe('string');
 
     const setWidget = vi.fn();
     const ctx = { ui: { setWidget } };
@@ -30,8 +31,14 @@ describe('registerAgentTodoTool', () => {
     expect(created.details.agent_todo.state.active_todo.title).toBe('Ship feature');
     expect(setWidget).toHaveBeenCalledWith('agent-todo', expect.any(Array));
 
-    const failed = await tools[0].execute('2', { action: 'create', title: 'Second task' }, undefined, undefined, ctx);
-    expect(failed.isError).toBe(true);
-    expect(failed.details.agent_todo.error.code).toBe('active_todo_exists');
+    const completed = await tools[0].execute('2', { action: 'complete_all' }, undefined, undefined, ctx);
+    expect(completed.isError).toBeUndefined();
+    expect(completed.details.agent_todo.state.active_todo).toBeNull();
+    expect(completed.details.agent_todo.state.current_todo.status).toBe('completed');
+    expect(setWidget).toHaveBeenLastCalledWith('agent-todo', undefined);
+
+    const failed = await tools[0].execute('3', { action: 'create', title: 'Second task' }, undefined, undefined, ctx);
+    expect(failed.isError).toBeUndefined();
+    expect(failed.details.agent_todo.state.active_todo.title).toBe('Second task');
   });
 });

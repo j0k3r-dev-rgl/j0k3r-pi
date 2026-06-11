@@ -25,6 +25,10 @@ export function applyAgentTodoAction(
       return success(currentState, supportedAction, currentState, describeShowResult(currentState), false);
     case 'complete_step':
       return completeStep(currentState, input, deps);
+    case 'complete_all':
+      return completeAll(currentState, deps);
+    case 'complete_range':
+      return completeRange(currentState, input, deps);
     case 'reopen_step':
       return reopenStep(currentState, input, deps);
     case 'clear':
@@ -93,6 +97,56 @@ function completeStep(state: AgentTodoProjection, input: AgentTodoToolInput, dep
   return success(nextState, 'complete_step', nextState, `Completed step for ${todo.title}.`, true);
 }
 
+function completeAll(state: AgentTodoProjection, deps: AgentTodoReducerDeps): AgentTodoReducerResult {
+  if (!state.active_todo) return failure(state, 'complete_all', 'no_active_todo', 'No active todo exists.');
+
+  const todo = cloneAgentTodo(state.active_todo)!;
+  let changed = 0;
+  for (const step of todo.steps) {
+    if (step.status !== 'completed') {
+      step.status = 'completed';
+      changed += 1;
+    }
+  }
+  todo.updated_at = deps.now();
+  todo.status = 'completed';
+  todo.completed_at = todo.updated_at;
+  const nextState = { active_todo: null, current_todo: todo };
+  const text = changed > 0
+    ? `Completed all remaining steps for ${todo.title}.`
+    : `All steps were already complete for ${todo.title}.`;
+  return success(nextState, 'complete_all', nextState, text, changed > 0);
+}
+
+function completeRange(state: AgentTodoProjection, input: AgentTodoToolInput, deps: AgentTodoReducerDeps): AgentTodoReducerResult {
+  if (!state.active_todo) return failure(state, 'complete_range', 'no_active_todo', 'No active todo exists.');
+
+  const todo = cloneAgentTodo(state.active_todo)!;
+  const range = resolveStepRange(todo.steps, input);
+  if (!range.ok) return failure(state, 'complete_range', 'invalid_input', range.message);
+
+  let changed = 0;
+  for (let index = range.start; index <= range.end; index += 1) {
+    const step = todo.steps[index]!;
+    if (step.status !== 'completed') {
+      step.status = 'completed';
+      changed += 1;
+    }
+  }
+
+  todo.updated_at = deps.now();
+  const allCompleted = todo.steps.every((candidate) => candidate.status === 'completed');
+  if (allCompleted) {
+    todo.status = 'completed';
+    todo.completed_at = todo.updated_at;
+    const nextState = { active_todo: null, current_todo: todo };
+    return success(nextState, 'complete_range', nextState, `Completed steps ${range.start + 1}-${range.end + 1} and finished ${todo.title}.`, true);
+  }
+
+  const nextState = { active_todo: cloneAgentTodo(todo), current_todo: cloneAgentTodo(todo) };
+  return success(nextState, 'complete_range', nextState, `Completed steps ${range.start + 1}-${range.end + 1} for ${todo.title}.`, changed > 0);
+}
+
 function reopenStep(state: AgentTodoProjection, input: AgentTodoToolInput, deps: AgentTodoReducerDeps): AgentTodoReducerResult {
   const stepId = normalizeRequiredText(input.step_id);
   if (!stepId) return failure(state, 'reopen_step', 'invalid_input', 'step_id is required for reopen_step.');
@@ -126,6 +180,35 @@ function clearTodo(state: AgentTodoProjection, deps: AgentTodoReducerDeps): Agen
   delete todo.completed_at;
   const nextState = { active_todo: null, current_todo: todo };
   return success(nextState, 'clear', nextState, `Cleared agent todo: ${todo.title}.`, true);
+}
+
+function resolveStepRange(steps: AgentTodoStep[], input: AgentTodoToolInput): { ok: true; start: number; end: number } | { ok: false; message: string } {
+  if (typeof input.range === 'string' && input.range.trim()) {
+    const match = input.range.trim().match(/^(\d+)\s*-\s*(\d+)$/);
+    if (!match) return { ok: false, message: 'range must use the form "start-end", for example "2-4".' };
+    const start = Number(match[1]) - 1;
+    const end = Number(match[2]) - 1;
+    return validateStepRange(steps, start, end);
+  }
+
+  const startStepId = normalizeRequiredText(input.start_step_id ?? input.step_id);
+  const endStepId = normalizeRequiredText(input.end_step_id ?? input.step_id);
+  if (!startStepId || !endStepId) {
+    return { ok: false, message: 'complete_range requires range or start_step_id and end_step_id.' };
+  }
+
+  const start = steps.findIndex((candidate) => candidate.id === startStepId);
+  const end = steps.findIndex((candidate) => candidate.id === endStepId);
+  if (start === -1 || end === -1) return { ok: false, message: `Step range not found: ${startStepId}-${endStepId}` };
+  return validateStepRange(steps, start, end);
+}
+
+function validateStepRange(steps: AgentTodoStep[], start: number, end: number): { ok: true; start: number; end: number } | { ok: false; message: string } {
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < 0 || start >= steps.length || end >= steps.length) {
+    return { ok: false, message: `range must be within 1-${steps.length}.` };
+  }
+  if (start > end) return { ok: false, message: 'range start must be before or equal to range end.' };
+  return { ok: true, start, end };
 }
 
 function normalizeRequiredText(value: unknown): string | undefined {

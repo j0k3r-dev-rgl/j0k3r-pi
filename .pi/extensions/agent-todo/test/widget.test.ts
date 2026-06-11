@@ -27,19 +27,36 @@ describe('widget helpers', () => {
     expect(lines).toContain('[ ] 2. Implement');
   });
 
+  it('renders a collapsed dim summary without changing the underlying active todo data', () => {
+    const lines = renderAgentTodoWidgetLines(activeProjection.active_todo!, { collapsed: true, shortcut: 'alt+t' }).join('\n');
+
+    expect(lines).toContain('Agent Todo: Ship feature');
+    expect(lines).toContain('1/2 complete');
+    expect(lines).toContain('alt+t to expand');
+    expect(lines).not.toContain('Write tests');
+    expect(lines).toContain('\u001b[2m');
+  });
+
   it('syncs the above-input widget for active and inactive projections', () => {
     const setWidget = vi.fn();
     const ctx = { ui: { setWidget } };
 
-    syncAgentTodoWidget(ctx, activeProjection);
+    syncAgentTodoWidget(ctx, activeProjection, { collapsed: false, shortcut: 'alt+t' });
     expect(setWidget).toHaveBeenCalledWith('agent-todo', [
       'Agent Todo: Ship feature',
       'Progress: 1/2 steps completed',
       '[x] 1. Write tests',
       '[ ] 2. Implement',
+      '\u001b[2malt+t to collapse\u001b[22m',
     ]);
 
-    syncAgentTodoWidget(ctx, { active_todo: null, current_todo: null });
+    syncAgentTodoWidget(ctx, activeProjection, { collapsed: true, shortcut: 'alt+t' });
+    expect(setWidget).toHaveBeenLastCalledWith('agent-todo', expect.arrayContaining([
+      expect.stringContaining('1/2 complete'),
+      '\u001b[2malt+t to expand\u001b[22m',
+    ]));
+
+    syncAgentTodoWidget(ctx, { active_todo: null, current_todo: null }, { collapsed: true, shortcut: 'alt+t' });
     expect(setWidget).toHaveBeenLastCalledWith('agent-todo', undefined);
   });
 });

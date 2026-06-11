@@ -4,7 +4,7 @@ import { AGENT_TODO_ERROR_CODES, AGENT_TODO_VERSION, type AgentTodoToolInput } f
 import { applyAgentTodoAction } from '../src/reducer.js';
 
 function deps() {
-  const ids = ['todo-1', 'step-1', 'step-2', 'todo-2', 'step-3'];
+  const ids = ['todo-1', 'step-1', 'step-2', 'step-3', 'step-4', 'todo-2', 'step-5'];
   let index = 0;
   return {
     now: () => '2026-06-10T00:00:00.000Z',
@@ -100,6 +100,43 @@ describe('applyAgentTodoAction', () => {
     expect(result.content[0]?.text).toContain('[ ] 2. Implement');
     expect(result.nextState).toEqual(initial.nextState);
     expect(result.details.agent_todo.state.active_todo?.title).toBe('Ship feature');
+  });
+
+  it('completes all open steps at once and closes the active todo', () => {
+    const initial = create({ action: 'create', title: 'Ship feature', steps: ['Write tests', 'Implement', 'Validate'] });
+    const partiallyDone = applyAgentTodoAction(initial.nextState, { action: 'complete_step', step_id: 'step-1' }, deps());
+
+    const allDone = applyAgentTodoAction(partiallyDone.nextState, { action: 'complete_all' }, deps());
+
+    expect(allDone.isError).toBeUndefined();
+    expect(allDone.nextState.active_todo).toBeNull();
+    expect(allDone.nextState.current_todo?.status).toBe('completed');
+    expect(allDone.nextState.current_todo?.steps.map((step) => step.status)).toEqual(['completed', 'completed', 'completed']);
+    expect(allDone.content[0]?.text).toContain('Completed all remaining steps');
+  });
+
+  it('completes an inclusive range by numeric position or step ids', () => {
+    const initial = create({ action: 'create', title: 'Ship feature', steps: ['One', 'Two', 'Three', 'Four'] });
+
+    const byPosition = applyAgentTodoAction(initial.nextState, { action: 'complete_range', range: '2-3' }, deps());
+    expect(byPosition.isError).toBeUndefined();
+    expect(byPosition.nextState.active_todo?.steps.map((step) => step.status)).toEqual(['open', 'completed', 'completed', 'open']);
+
+    const byId = applyAgentTodoAction(byPosition.nextState, { action: 'complete_range', start_step_id: 'step-1', end_step_id: 'step-4' }, deps());
+    expect(byId.nextState.active_todo).toBeNull();
+    expect(byId.nextState.current_todo?.status).toBe('completed');
+    expect(byId.nextState.current_todo?.steps.map((step) => step.status)).toEqual(['completed', 'completed', 'completed', 'completed']);
+  });
+
+  it('rejects invalid ranges without mutating state', () => {
+    const initial = create({ action: 'create', title: 'Ship feature', steps: ['One', 'Two', 'Three'] });
+    const snapshot = JSON.parse(JSON.stringify(initial.nextState));
+
+    const invalid = applyAgentTodoAction(initial.nextState, { action: 'complete_range', range: '3-2' }, deps());
+
+    expect(invalid.isError).toBe(true);
+    expect(invalid.details.agent_todo.error?.code).toBe('invalid_input');
+    expect(invalid.nextState).toEqual(snapshot);
   });
 
   it('completes and reopens steps, auto-completing the todo when the last step closes', () => {

@@ -4,6 +4,8 @@ export const AGENT_TODO_ACTIONS = [
   'create',
   'show',
   'complete_step',
+  'complete_all',
+  'complete_range',
   'reopen_step',
   'clear',
 ] as const;
@@ -53,6 +55,9 @@ export type AgentTodoToolInput = {
   body?: string;
   steps?: string[];
   step_id?: string;
+  start_step_id?: string;
+  end_step_id?: string;
+  range?: string;
 };
 
 export type AgentTodoError = {
