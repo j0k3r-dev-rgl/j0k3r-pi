@@ -34,7 +34,7 @@ export function searchMemory(db: Db, input: SearchInput, context: ResolvedContex
   const limit = input.limit ?? 10;
   const results: any[] = [];
   const where = ['m.status = \'active\'', `m.scope IN (${scopes.map(() => '?').join(',')})`, 'm.importance >= ?'];
-  const args: unknown[] = [...scopes, input.min_importance ?? 1];
+  const args: unknown[] = [...scopes, input.min_importance ?? 0];
   if (projectMode === 'current' && context.scope === 'project') { where.push('(m.scope != \'project\' OR m.project_id = ?)'); args.push(context.project_id); }
   if (projectMode === 'selected') { where.push('(m.scope != \'project\' OR m.project_name = ?)'); args.push(input.project_name ?? ''); }
   if (input.kinds?.length) { where.push(`m.kind IN (${input.kinds.map(() => '?').join(',')})`); args.push(...input.kinds); }

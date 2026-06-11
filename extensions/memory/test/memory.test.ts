@@ -19,6 +19,7 @@ import { consolidateMemories } from '../src/consolidation.js';
 import { exportMemory, importMemory } from '../src/export-import.js';
 import { getSyncStatus } from '../src/sync-status.js';
 import { migrateProjectCanonicals } from '../src/project-migration.js';
+import { renderMemoryToolResult } from '../src/render.js';
 
 let tmp: string;
 beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-memory-test-')); });
@@ -46,6 +47,76 @@ describe('extension setup', () => {
     expect(commands).toContain('memory-migrate-project');
     expect(events).toContain('before_agent_start');
   });
+  it('memory search and list tool results render compact by default and expand details on demand', () => {
+    const result = {
+      content: [{ type: 'text', text: 'Found 1 memory result(s).\n- mem_1 · memory · project/app · decision · compact title — compact snippet' }],
+      details: {
+        results: [{
+          id: 'mem_1',
+          type: 'memory',
+          scope: 'project',
+          project_name: 'app',
+          kind: 'decision',
+          title: 'compact title',
+          snippet: 'expanded snippet with enough detail to show only when expanded',
+          importance: 0.8,
+          confidence: 0.95,
+          updated_at: '2026-01-01T00:00:00.000Z',
+        }],
+      },
+    };
+    const theme = { fg: (_name: string, text: string) => text, bold: (text: string) => text };
+
+    const compact = renderMemoryToolResult(result, { expanded: false, isPartial: false }, theme).render(120).join('\n');
+    const expanded = renderMemoryToolResult(result, { expanded: true, isPartial: false }, theme).render(120).join('\n');
+
+    expect(compact).toContain('memory · 1 result');
+    expect(compact).not.toContain('mem_1');
+    expect(compact).toContain('ctrl+o expand');
+    expect(compact).not.toContain('importance: 0.8');
+    expect(expanded).toContain('memory · 1 result');
+    expect(expanded).not.toContain('id: mem_1');
+    expect(expanded).toContain('importance: 0.8');
+    expect(expanded).toContain('expanded snippet');
+    expect(expanded).toContain('ctrl+o collapse');
+  });
+
+  it('memory tools register compact expandable result renderers', () => {
+    const tools = new Map<string, any>();
+    const old = process.env.PI_MEMORY_DB_PATH;
+    process.env.PI_MEMORY_DB_PATH = path.join(tmp, 'renderers.sqlite');
+    extension({ registerTool: (tool: any) => tools.set(tool.name, tool), registerCommand: () => {}, on: () => {} });
+    if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
+
+    for (const name of ['memory_search', 'memory_list', 'memory_get', 'memory_recall', 'memory_project_profile']) {
+      expect(tools.get(name)?.renderResult).toBeTypeOf('function');
+    }
+  });
+
+  it('memory search and list tool text include compact result ids', async () => {
+    const dbPath = path.join(tmp, 'tool-ids.sqlite');
+    const projectDir = path.join(tmp, 'tool-project');
+    fs.mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Tool Ids App' }));
+    const d = openMemoryDb(dbPath);
+    migrate(d);
+    const context = resolveMemoryContext(projectDir, os.homedir(), {});
+    const memory = addMemory(d, { scope: 'project', kind: 'decision', title: 'search ids decision', content: 'memory search ids should be visible', importance: 0.8 }, context).memory;
+    const old = process.env.PI_MEMORY_DB_PATH;
+    process.env.PI_MEMORY_DB_PATH = dbPath;
+    const tools = new Map<string, any>();
+    extension({ registerTool: (tool: any) => tools.set(tool.name, tool), registerCommand: () => {}, on: () => {} });
+    if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
+
+    const search = await tools.get('memory_search').execute('search-call', { query: 'search ids', limit: 5 }, undefined, undefined, { cwd: projectDir });
+    const list = await tools.get('memory_list').execute('list-call', { scope: 'project', limit: 5 }, undefined, undefined, { cwd: projectDir });
+
+    expect(search.content[0].text).toContain(memory.id);
+    expect(search.content[0].text).toContain('decision');
+    expect(list.content[0].text).toContain(memory.id);
+    expect(list.content[0].text).toContain('search ids decision');
+  });
+
   it('lifecycle shutdown writes summary metadata and auto-updates project profile', async () => {
     const dbPath = path.join(tmp, 'lifecycle.sqlite');
     const projectDir = path.join(tmp, 'project');
@@ -161,6 +232,17 @@ describe('store/search/sessions', () => {
     expect(r.results.some((x: any) => x.scope === 'general')).toBe(true);
     expect(r.results.some((x: any) => x.id === a.id)).toBe(false);
     expect(JSON.stringify(r.results)).not.toContain('Run tests with npm test');
+  });
+
+  it('finds normal durable memories below importance 1 unless min_importance is explicit', () => {
+    const d = db(), c = project();
+    const added = addMemory(d, { scope: 'project', kind: 'progress', title: 'subagents optimization checkpoint', content: 'subagents render optimization completed', importance: 0.8 }, c).memory;
+
+    const defaultSearch = searchMemory(d, { query: 'subagents', limit: 10 }, c);
+    expect(defaultSearch.results.map((x: any) => x.id)).toContain(added.id);
+
+    const strictSearch = searchMemory(d, { query: 'subagents', limit: 10, min_importance: 1 }, c);
+    expect(strictSearch.results.map((x: any) => x.id)).not.toContain(added.id);
   });
   it('stores sessions and prompts for audit without normal prompt search', () => {
     const d = db(), c = project();
