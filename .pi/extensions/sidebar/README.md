@@ -9,8 +9,10 @@ Project-local Pi extension that shows a persistent HUD-style sidebar overlay wit
 
 ```text
 /sidebar
+ctrl+.
 ```
 
+- The overlay title shows `ctrl+. toggle` so the activation/deactivation shortcut is visible.
 - The overlay is non-capturing and anchored at the top-right, following the `pi-hud` style.
 
 ## Sections

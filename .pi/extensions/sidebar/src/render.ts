@@ -14,6 +14,10 @@ export type SidebarTheme = {
   bold?: (text: string) => string;
 };
 
+export type SidebarRenderOptions = {
+  toggleShortcut?: string;
+};
+
 const TOP_LEFT = '╭';
 const TOP_RIGHT = '╮';
 const MID_LEFT = '├';
@@ -68,11 +72,12 @@ function formatElapsed(seconds?: number): string {
   return minutes > 0 ? `${minutes}m${remainder}s` : `${remainder}s`;
 }
 
-function renderTitle(chat: ChatHeaderModel, width: number, theme?: SidebarTheme): string[] {
+function renderTitle(chat: ChatHeaderModel, width: number, theme?: SidebarTheme, options: SidebarRenderOptions = {}): string[] {
   const title = chat.title.trim() || 'Current Chat';
+  const shortcutHint = options.toggleShortcut ? ` · ${options.toggleShortcut} toggle` : '';
   return [
     topBorder(width, theme),
-    panelLine(width, style(theme, 'accent', strong(theme, 'Pi Sidebar')), theme, 'accent'),
+    panelLine(width, style(theme, 'accent', strong(theme, `Pi Sidebar${shortcutHint}`)), theme, 'accent'),
     borderLine(width, MID_LEFT, MID_RIGHT, theme),
     panelLine(width, style(theme, 'dim', title), theme),
   ];
@@ -151,9 +156,9 @@ function renderGitRow(file: GitFileRow, width: number, theme?: SidebarTheme): st
   return panelLine(width, text, theme, token);
 }
 
-export function renderSidebar(model: SidebarModel, width: number, theme?: SidebarTheme): string[] {
+export function renderSidebar(model: SidebarModel, width: number, theme?: SidebarTheme, options: SidebarRenderOptions = {}): string[] {
   const safeWidth = Math.max(1, width);
-  const lines: string[] = [...renderTitle(model.chat, safeWidth, theme)];
+  const lines: string[] = [...renderTitle(model.chat, safeWidth, theme, options)];
 
   const subagentSection = renderSectionState('Subagents', model.subagents, safeWidth, theme);
   lines.push(...subagentSection);

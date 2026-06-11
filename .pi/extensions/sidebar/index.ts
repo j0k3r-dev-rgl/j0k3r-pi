@@ -1,6 +1,8 @@
 import { DEFAULT_MIN_TERMINAL_WIDTH, DEFAULT_OVERLAY_WIDTH } from './src/config.js';
 import { SidebarController } from './src/controller.js';
 
+const SIDEBAR_TOGGLE_SHORTCUT = 'ctrl+.';
+
 function currentSessionId(ctx: any): string | undefined {
   const direct = ctx?.sessionManager?.getSessionId?.() ?? ctx?.sessionId;
   if (typeof direct === 'string' && direct.length > 0) return direct;
@@ -61,6 +63,7 @@ export default function sidebarExtension(pi: any): void {
     const nextController = new SidebarController({
       context: sidebarContext(ctx, pi),
       requestRender: () => sidebarTui?.requestRender?.(),
+      renderOptions: { toggleShortcut: SIDEBAR_TOGGLE_SHORTCUT },
     });
     controller = nextController;
 
@@ -138,6 +141,13 @@ export default function sidebarExtension(pi: any): void {
   pi.registerCommand('sidebar', {
     description: 'Toggle the persistent sidebar HUD',
     handler: async (_args: string, ctx: any) => {
+      toggleSidebar(ctx);
+    },
+  });
+
+  pi.registerShortcut?.(SIDEBAR_TOGGLE_SHORTCUT, {
+    description: 'Toggle the persistent sidebar HUD',
+    handler: async (ctx: any) => {
       toggleSidebar(ctx);
     },
   });

@@ -14,7 +14,7 @@ import type {
   SidebarTodoModel,
   SubagentActivityModel,
 } from './model.js';
-import { renderSidebar, type SidebarTheme } from './render.js';
+import { renderSidebar, type SidebarRenderOptions, type SidebarTheme } from './render.js';
 import { createChatAdapter, type ChatAdapter } from './adapters/chat.js';
 import { createGitAdapter } from './adapters/git.js';
 import { createSubagentsAdapter } from './adapters/subagents.js';
@@ -32,6 +32,7 @@ type SidebarControllerOptions = {
   todoAdapter?: SectionAdapter<SidebarTodoModel>;
   policy?: Partial<RefreshPolicy>;
   requestRender?: () => void;
+  renderOptions?: SidebarRenderOptions;
   setIntervalFn?: typeof setInterval;
   clearIntervalFn?: typeof clearInterval;
 };
@@ -43,6 +44,7 @@ export class SidebarController {
   private readonly subagentsAdapter: SectionAdapter<SubagentActivityModel>;
   private readonly todoAdapter: SectionAdapter<SidebarTodoModel>;
   private readonly requestRenderFn: () => void;
+  private readonly renderOptions: SidebarRenderOptions;
   private readonly setIntervalFn: typeof setInterval;
   private readonly clearIntervalFn: typeof clearInterval;
   private readonly policy: RefreshPolicy;
@@ -65,6 +67,7 @@ export class SidebarController {
     this.subagentsAdapter = options.subagentsAdapter ?? createSubagentsAdapter();
     this.todoAdapter = options.todoAdapter ?? createTodoAdapter();
     this.requestRenderFn = options.requestRender ?? (() => undefined);
+    this.renderOptions = options.renderOptions ?? {};
     this.setIntervalFn = options.setIntervalFn ?? setInterval;
     this.clearIntervalFn = options.clearIntervalFn ?? clearInterval;
     this.policy = {
@@ -131,7 +134,7 @@ export class SidebarController {
   }
 
   render(width: number, theme?: SidebarTheme): string[] {
-    return renderSidebar(this.model, width, theme);
+    return renderSidebar(this.model, width, theme, this.renderOptions);
   }
 
   invalidate(): void {

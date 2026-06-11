@@ -18,18 +18,22 @@ function createHarness() {
     customOptions?.onHandle?.(handle);
     return new Promise<void>(() => undefined);
   });
+  const shortcuts: Array<{ key: string; def: any }> = [];
   const pi = {
     registerCommand: vi.fn((name: string, def: any) => { registered[name] = def; }),
+    registerShortcut: vi.fn((key: string, def: any) => { shortcuts.push({ key, def }); }),
     on: vi.fn((event: string, handler: (event: unknown, ctx: any) => unknown) => {
       handlers[event] = [...(handlers[event] ?? []), handler];
     }),
   };
+  const shortcutByKey = (key: string) => shortcuts.find((shortcut) => shortcut.key === key)?.def;
   const ctx = { hasUI: true, cwd: '/workspace/from-ctx', ui: { custom }, sessionManager: { getSessionId: () => 'session-123' } };
   sidebarExtension(pi);
-  return { pi, registered, handlers, ctx, custom, hide, requestRender, handle, setHidden, components, options };
+  return { pi, registered, handlers, ctx, custom, hide, requestRender, handle, setHidden, components, options, shortcuts, shortcutByKey };
 }
 
 describe('sidebarExtension', () => {
+
   it('registers the /sidebar command and fails closed without ui support', async () => {
     const { pi, registered } = createHarness();
     expect(pi.registerCommand).toHaveBeenCalledWith('sidebar', expect.objectContaining({ description: expect.any(String), handler: expect.any(Function) }));
@@ -71,6 +75,18 @@ describe('sidebarExtension', () => {
 
     expect(custom).toHaveBeenCalledTimes(1);
     expect(setHidden).toHaveBeenCalledTimes(1);
+    expect(setHidden).toHaveBeenCalledWith(true);
+  });
+
+  it('registers ctrl+. as a sidebar toggle shortcut', async () => {
+    const { shortcutByKey, ctx, custom, setHidden } = createHarness();
+    const shortcut = shortcutByKey('ctrl+.');
+
+    expect(shortcut).toEqual(expect.objectContaining({ description: expect.any(String), handler: expect.any(Function) }));
+    await shortcut.handler(ctx);
+    await shortcut.handler(ctx);
+
+    expect(custom).toHaveBeenCalledTimes(1);
     expect(setHidden).toHaveBeenCalledWith(true);
   });
 

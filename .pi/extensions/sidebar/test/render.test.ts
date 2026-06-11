@@ -65,6 +65,13 @@ describe('renderSidebar', () => {
     expect(lines[3]).toContain('A very long conversa…');
   });
 
+  it('renders the sidebar toggle shortcut in the title', () => {
+    const lines = renderSidebar(baseModel(), 36, undefined, { toggleShortcut: 'ctrl+.' });
+
+    expect(lines[1]).toContain('Pi Sidebar');
+    expect(lines[1]).toContain('ctrl+. toggle');
+  });
+
   it('renders a pi-hud-like boxed panel instead of a left-rail list', () => {
     const lines = renderSidebar(baseModel(), 36);
 
