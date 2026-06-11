@@ -5,8 +5,8 @@ Project-local Pi extension that gives the agent a single active task checklist f
 ## What it provides
 
 - LLM-callable `agent_todo` tool for creating, showing, completing, reopening, and clearing the active todo.
-- A compact above-chat widget that shows the active todo and progress.
-- `ctrl+space` shortcut to collapse/expand only the above-chat todo widget.
+- A compact above-chat widget that shows the active todo and progress, collapsed by default.
+- `ctrl+space` shortcut to expand/collapse only the above-chat todo widget.
 - Optional provider data for other extensions, such as the Sidebar extension.
 - Branch-aware reconstruction from prior `agent_todo` tool results on session start/tree navigation.
 - Low-noise tool rendering: mutation results show compact summaries instead of the full checklist every time.
@@ -51,13 +51,14 @@ Project-local Pi extension that gives the agent a single active task checklist f
 
 The extension renders the active todo above the chat/editor with `ctx.ui.setWidget('agent-todo', ...)`.
 
-- Expanded view: title, progress, and step list.
-- Collapsed view: dim compact summary, for example:
+- Collapsed view is the default: dim compact summary, for example:
 
 ```text
 Agent Todo: implement feature · 2/5 complete · 3 open
 ctrl+space to expand
 ```
+
+- Expanded view: title, progress, step list, and `ctrl+space to collapse` hint.
 
 Shortcut:
 

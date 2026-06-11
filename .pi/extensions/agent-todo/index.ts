@@ -22,7 +22,7 @@ export default function agentTodoExtension(pi: any): void {
         ? `${index + 1}`
         : `todo-${randomUUID()}`,
     },
-    widgetCollapsed: false,
+    widgetCollapsed: true,
   };
   runtime.provider = createAgentTodoProvider(() => runtime.projection);
 
