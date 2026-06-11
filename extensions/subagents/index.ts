@@ -144,7 +144,7 @@ export default function subagentsExtension(pi: any): void {
     );
   }
 
-  pi.registerShortcut?.('ctrl+x', {
+  pi.registerShortcut?.('ctrl+,', {
     description: 'Show subagent history panel',
     handler: showSubagentsPanel,
   });

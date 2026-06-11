@@ -26,7 +26,7 @@ Behavior:
 - Displays the status line:
 
 ```text
-N run · M done · K err
+N run · M done · K err · C cnl
 ```
 
 - If one or more subagents are running or queued, it shows only those active subagents.
@@ -36,11 +36,13 @@ N run · M done · K err
 ```text
 ✓ discovery · ◷ 1m0s
 ✗ verify · ◷ 15s
+⊘ planner · ◷ 12s
 ```
 
 - The sidebar does not require the Subagents extension to be installed. Subagent data is optional and fail-closed:
   - compatible provider data is used when available;
-  - compatible history data may be read when available;
+  - compatible global history data may be read from `$XDG_DATA_HOME/pi/subagents/subagents-history.sqlite` or `~/.local/share/pi/subagents/subagents-history.sqlite` when available;
+  - `PI_SUBAGENTS_HISTORY_DB_PATH` and `PI_SUBAGENTS_HISTORY_HOME` overrides match the Subagents extension;
   - missing provider/history support renders an unavailable/idle state without crashing.
 
 ### Agent Todo

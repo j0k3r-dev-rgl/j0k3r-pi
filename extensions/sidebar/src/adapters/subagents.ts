@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 
@@ -255,8 +256,19 @@ function unavailable(): SectionState<SubagentActivityModel> {
   return { kind: 'unavailable', message: 'subagents unavailable' };
 }
 
-function defaultHistoryPathExists(cwd: string): boolean {
-  return fs.existsSync(path.join(cwd, '.pi', 'subagents-history.sqlite'));
+function resolveSubagentsHistoryHome(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.PI_SUBAGENTS_HISTORY_HOME) return path.resolve(env.PI_SUBAGENTS_HISTORY_HOME);
+  const xdg = env.XDG_DATA_HOME;
+  return xdg ? path.join(xdg, 'pi', 'subagents') : path.join(os.homedir(), '.local', 'share', 'pi', 'subagents');
+}
+
+function resolveSubagentHistoryDbPath(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.PI_SUBAGENTS_HISTORY_DB_PATH) return path.resolve(env.PI_SUBAGENTS_HISTORY_DB_PATH);
+  return path.join(resolveSubagentsHistoryHome(env), 'subagents-history.sqlite');
+}
+
+function defaultHistoryPathExists(_cwd: string): boolean {
+  return fs.existsSync(resolveSubagentHistoryDbPath());
 }
 
 async function readHistoryTasks(cwd: string, sessionId?: string): Promise<unknown> {
@@ -269,7 +281,7 @@ async function readHistoryTasks(cwd: string, sessionId?: string): Promise<unknow
   const DatabaseSync = databaseModule.DatabaseSync;
   if (typeof DatabaseSync !== 'function') throw new Error('node:sqlite unavailable');
 
-  const file = path.join(cwd, '.pi', 'subagents-history.sqlite');
+  const file = resolveSubagentHistoryDbPath();
   const db = new DatabaseSync(file, { readOnly: true });
   try {
     const sql = sessionId

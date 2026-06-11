@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { createRequire } from 'node:module';
 
 import type { SectionState, SubagentActivityModel } from '../src/model.js';
 import { createSubagentsAdapter } from '../src/adapters/subagents.js';
+
+const require = createRequire(import.meta.url);
 
 type RawTask = {
   id: string;
@@ -131,6 +137,64 @@ describe('createSubagentsAdapter', () => {
     expect(data.activities[1]?.summary).toBe('Running task');
     expect(data.activities[2]?.elapsedSeconds).toBe(180);
     expect(data.activities[3]?.summary).toBe('tool failed');
+  });
+
+  it('loads recent subagent tasks from the global history db path when no provider is available', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-sidebar-subagents-history-'));
+    const oldDbPath = process.env.PI_SUBAGENTS_HISTORY_DB_PATH;
+    const dbPath = path.join(tmp, 'subagents-history.sqlite');
+    process.env.PI_SUBAGENTS_HISTORY_DB_PATH = dbPath;
+    try {
+      const { DatabaseSync } = require('node:sqlite') as any;
+      const db = new DatabaseSync(dbPath);
+      try {
+        db.exec(`
+          CREATE TABLE subagent_tasks (
+            id TEXT PRIMARY KEY,
+            cwd TEXT NOT NULL,
+            agent TEXT NOT NULL,
+            status TEXT NOT NULL,
+            task TEXT,
+            output_preview TEXT,
+            error TEXT,
+            session_id TEXT,
+            created_at TEXT,
+            started_at TEXT,
+            ended_at TEXT,
+            last_activity_at TEXT
+          )
+        `);
+        db.prepare(`INSERT INTO subagent_tasks (id, cwd, agent, status, task, session_id, created_at, started_at, last_activity_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+          'history-global-task',
+          '/workspace/pi',
+          'discovery',
+          'running',
+          'global history work',
+          'session-123',
+          '2026-06-10T00:08:00.000Z',
+          '2026-06-10T00:08:10.000Z',
+          '2026-06-10T00:09:00.000Z',
+        );
+      } finally {
+        db.close();
+      }
+
+      const state = await createSubagentsAdapter().load({
+        cwd: '/workspace/pi',
+        sessionId: 'session-123',
+        ctx: {},
+        pi: {},
+        now: () => new Date('2026-06-10T00:10:00.000Z'),
+      });
+
+      const data = expectReady(state);
+      expect(data.source).toBe('history');
+      expect(data.activities.map((activity) => activity.id)).toEqual(['history-global-task']);
+    } finally {
+      if (oldDbPath === undefined) delete process.env.PI_SUBAGENTS_HISTORY_DB_PATH;
+      else process.env.PI_SUBAGENTS_HISTORY_DB_PATH = oldDbPath;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it('prefers session-filtered reads when session id is available and falls back to cwd-scoped reads when it is not', async () => {

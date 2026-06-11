@@ -902,13 +902,18 @@ describe('subagents extension', () => {
   });
 
   it('registers agent-facing tools only', () => {
-    const tools: string[] = [], commands: string[] = [];
-    extension({ registerTool: (tool: any) => tools.push(tool.name), registerCommand: (name: string) => commands.push(name) });
+    const tools: string[] = [], commands: string[] = [], shortcuts: string[] = [];
+    extension({
+      registerTool: (tool: any) => tools.push(tool.name),
+      registerCommand: (name: string) => commands.push(name),
+      registerShortcut: (key: string) => shortcuts.push(key),
+    });
     expect(tools).toContain('subagent_run');
     expect(tools).toContain('subagent_list_agents');
     expect(tools).toContain('subagent_status');
     expect(tools).toContain('subagent_result');
     expect(commands).toEqual(['subagents', 'subagent-models']);
+    expect(shortcuts).toEqual(['ctrl+,']);
   });
 
   it('enables mouse tracking while the subagents history panel is open and disables it on close', async () => {
@@ -2109,6 +2114,36 @@ describe('subagents extension', () => {
     expect(rendered).toContain('agent: analyst');
     expect(rendered).toContain('model: mock/model');
     expect(rendered).toContain('effort: high');
+  });
+
+  it('renders a dim ctrl+, and command hint in the subagent_run title', () => {
+    const manager = new SubagentManager(mockRunner());
+    let runTool: any;
+    const dim = vi.fn((_name: string, text: string) => text);
+    registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
+
+    const rendered = runTool.renderCall({ agent: 'analyst', mode: 'task' }, { fg: dim, bold: (text: string) => text }).render(200).join('\n');
+
+    expect(rendered).toContain('subagent analyst (task)');
+    expect(rendered).toContain('(ctrl+, or /subagents for details)');
+    expect(dim).toHaveBeenCalledWith('dim', '(ctrl+, or /subagents for details)');
+  });
+
+  it('keeps ansi-styled subagent_run title hints visible when visual width fits', () => {
+    const manager = new SubagentManager(mockRunner());
+    let runTool: any;
+    const theme = {
+      fg: (_name: string, text: string) => `\u001b[36m${text}\u001b[39m`,
+      bold: (text: string) => `\u001b[1m${text}\u001b[22m`,
+    };
+    registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
+
+    const rendered = runTool.renderCall({ agent: 'discovery', mode: 'task' }, theme).render(80).join('\n');
+    const plain = stripAnsi(rendered);
+
+    expect(plain).toContain('subagent discovery (task)');
+    expect(plain).toContain('(ctrl+, or /subagents for details)');
+    expect(plain).not.toContain('�');
   });
 
   it('keeps subagent_run command results compact when tasks include large thread snapshots', async () => {

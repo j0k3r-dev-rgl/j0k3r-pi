@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { SidebarModel } from '../src/model.js';
 import { renderSidebar } from '../src/render.js';
@@ -173,14 +173,37 @@ describe('renderSidebar', () => {
       activities: [
         { id: 'recent-done', agent: 'discovery', status: 'completed', summary: 'Waited about 60 seconds and finished successfully.', lastActivityAt: '2026-06-10T00:03:00.000Z', elapsedSeconds: 60 },
         { id: 'recent-failed', agent: 'verify', status: 'failed', summary: 'validation failed', lastActivityAt: '2026-06-10T00:02:00.000Z', elapsedSeconds: 15 },
+        { id: 'recent-cancelled', agent: 'planner', status: 'cancelled', summary: 'user cancelled', lastActivityAt: '2026-06-10T00:01:00.000Z', elapsedSeconds: 12 },
       ],
     };
 
     const lines = renderSidebar(model, 42).join('\n');
-    expect(lines).toContain('0 run · 1 done · 1 err');
+    expect(lines).toContain('0 run · 1 done · 1 err · 1 cnl');
     expect(lines).not.toContain('[·]');
     expect(lines).toContain('✓ discovery · ◷ 1m0s');
     expect(lines).toContain('✗ verify · ◷ 15s');
+    expect(lines).toContain('⊘ planner · ◷ 12s');
+  });
+
+  it('renders cancelled subagent counts and rows with a distinct muted color token', () => {
+    const model = baseModel();
+    if (model.subagents.kind !== 'ready') throw new Error('expected ready subagents fixture');
+    model.subagents.data = {
+      windowMinutes: 20,
+      source: 'provider',
+      activities: [
+        { id: 'cancelled', agent: 'planner', status: 'cancelled', summary: 'user cancelled', lastActivityAt: '2026-06-10T00:01:00.000Z', elapsedSeconds: 12 },
+      ],
+    };
+
+    const fg = vi.fn((_token: string, text: string) => text);
+    const lines = renderSidebar(model, 42, { fg }).join('\n');
+
+    expect(lines).toContain('0 run · 0 done · 0 err · 1 cnl');
+    expect(lines).toContain('⊘ planner · ◷ 12s');
+    expect(fg).toHaveBeenCalledWith('muted', '1 cnl');
+    expect(fg).toHaveBeenCalledWith('muted', '⊘ planner · ◷ 12s');
+    expect(fg).not.toHaveBeenCalledWith('warning', '1 cnl');
   });
 
   it('omits and truncates deterministically at narrow widths', () => {

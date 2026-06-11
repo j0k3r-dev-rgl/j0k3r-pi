@@ -9,7 +9,7 @@ Project-local Pi extension for delegating work to markdown-defined subagents. It
 - Status/result/list/cancel tools for delegated tasks.
 - Isolated in-memory agent sessions for each subagent run.
 - Project-scoped task history in a global SQLite data/cache location.
-- TUI history panel via `/subagents` or `ctrl+x`.
+- TUI history panel via `/subagents` or `ctrl+,`.
 - TUI execution rendering can expand/collapse tool and rendered component output with `ctrl+o`.
 - Model profile UI via `/subagent-models`.
 - Per-agent/default model and thinking-effort configuration.
@@ -236,7 +236,7 @@ Behavior:
 |---|---|
 | `/subagents` | Open the TUI subagent history panel. |
 | `/subagent-models` | Configure global subagent and SDD phase model profiles. |
-| `ctrl+x` | Open the TUI subagent history panel. |
+| `ctrl+,` | Open the TUI subagent history panel. |
 
 `/subagent-models` writes global profile changes to:
 

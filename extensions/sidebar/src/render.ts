@@ -116,9 +116,10 @@ function renderSubagentStatusLine(activities: SubagentActivity[], width: number,
   const running = activities.filter(isActiveSubagent).length;
   const completed = activities.filter((activity) => activity.status === 'completed').length;
   const failed = activities.filter((activity) => activity.status === 'failed').length;
+  const cancelled = activities.filter((activity) => activity.status === 'cancelled').length;
   return panelLine(
     width,
-    `${style(theme, 'warning', `${running} run`)} · ${style(theme, 'success', `${completed} done`)} · ${style(theme, 'error', `${failed} err`)}`,
+    `${style(theme, 'warning', `${running} run`)} · ${style(theme, 'success', `${completed} done`)} · ${style(theme, 'error', `${failed} err`)} · ${style(theme, 'muted', `${cancelled} cnl`)}`,
     theme,
   );
 }
@@ -136,8 +137,8 @@ function renderSubagentActiveItem(activity: SubagentActivity, width: number, the
 function renderSubagentTerminalItem(activity: SubagentActivity, width: number, theme?: SidebarTheme): string {
   const elapsed = formatElapsed(activity.elapsedSeconds);
   const elapsedText = elapsed ? ` · ◷ ${elapsed}` : '';
-  const marker = activity.status === 'failed' ? '✗' : activity.status === 'cancelled' ? '–' : '✓';
-  const token = activity.status === 'failed' ? 'error' : activity.status === 'cancelled' ? 'warning' : 'dim';
+  const marker = activity.status === 'failed' ? '✗' : activity.status === 'cancelled' ? '⊘' : '✓';
+  const token = activity.status === 'failed' ? 'error' : activity.status === 'cancelled' ? 'muted' : 'dim';
   return panelLine(width, style(theme, token, `${marker} ${activity.agent}${elapsedText}`), theme, token);
 }
 
