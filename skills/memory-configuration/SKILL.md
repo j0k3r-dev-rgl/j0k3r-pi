@@ -66,6 +66,8 @@ Use this skill when a user asks to configure Pi Memory Extension for a project, 
 - Keep `backups.path` relative to the current working directory; do not use absolute paths.
 - Do not use `..` path escapes in `backups.path`.
 - Prefer project-scoped mirror backups so exports contain only the current memory context/project.
+- Keep memory export/import operational guidance in this skill and memory-extension docs, not in `AGENTS.md`.
+- Run `memory_export` or `memory_import` only when the user asks for backup/restore/export/import work, or when explicitly validating memory backup configuration.
 - Never store secrets, tokens, passwords, private keys, or cloud tokens in `.pi/memory.json`.
 - Use `backups.include_prompts=true` only when the project intentionally wants prompt audit records in backups.
 - After changing `.pi/memory.json` or extension code, tell the user to `/reload` or restart Pi before relying on the new behavior.
@@ -123,7 +125,7 @@ Field rules:
 5. Validate the JSON syntax after edits.
 6. Tell the user to `/reload` or restart Pi.
 7. Use `memory_context` to confirm the expected project identity when practical.
-8. Run or ask the user to run `memory_export` from the project cwd.
+8. If the user requested backup validation, run or ask the user to run `memory_export` from the project cwd; otherwise do not export/import automatically.
 9. Inspect backup meta when validating:
    - `format` should be `pi-memory-backup`;
    - `version` should be `2`;

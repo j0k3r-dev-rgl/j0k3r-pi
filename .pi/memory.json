@@ -1,7 +1,19 @@
 {
-  "project_name": "j0k3r-pi",
-  "import": {
-    "mode": "merge",
-    "on_conflict": "keep_local"
-  }
+	"project_name": "j0k3r-pi",
+	"aliases": [],
+	"default_scope": "project",
+	"session_end": {
+		"semantic": false
+	},
+	"import": {
+		"mode": "merge",
+		"on_conflict": "keep_local"
+	},
+	"backups": {
+		"path": ".pi/mempry-backups/memory-backup.jsonl",
+		"include_prompts": true
+	},
+	"cloud": {
+		"enabled": false
+	}
 }

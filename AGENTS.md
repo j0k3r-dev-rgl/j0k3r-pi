@@ -114,6 +114,18 @@ Rules:
 - Manual validation and user acceptance are separate from automated tests. Passing tests is not approval to commit.
 - When the user does ask for a commit, summarize the pending changes and run `git status --short` first unless already done immediately beforehand.
 
+### Pre-commit memory checkpoint
+
+When the user explicitly asks for a commit, perform a memory checkpoint before running `git commit`.
+
+Rules:
+- This checkpoint is required for meaningful code, docs, workflow, configuration, SDD, or extension changes.
+- Save durable project memories for confirmed decisions, completed progress, validated commands, open todos, unresolved risks, or reusable learnings when present.
+- Create one compact `progress` memory titled `precommit checkpoint: <short summary>` for the commit scope unless an equivalent progress memory was already saved in the same turn.
+- Include changed scope, important files or modules, validations run and results, open todos, and accepted risks.
+- Do not store secrets, raw logs, or low-value temporary details.
+- The checkpoint is not permission to commit; commit permission still requires an explicit user request in the current conversation.
+
 ## Strict TDD
 
 Strict TDD is non-negotiable for code changes.
@@ -140,14 +152,16 @@ If no test framework exists, do not silently skip TDD. Explain the limitation an
 
 ## Memory behavior
 
-Use memory as a persistent brain, not as a checklist.
+Use memory as the agent's persistent brain, not as a transcript dump or a mechanical checklist.
 
 - First rely on startup context, loaded skills, and the current conversation.
 - For substantial tasks in this project, inspect the current project profile early with `memory_project_profile get` unless startup context already includes an up-to-date profile.
 - Search or recall memory only when persistent context is missing, stale, ambiguous, or decision-critical.
 - Do not repeat memory recall just because the task moved from planning to editing or testing if the relevant context is already present.
-- Store durable knowledge only when it is reusable, current, non-sensitive, and valuable for future sessions.
-- After substantial work, perform a brief decision checkpoint: save confirmed durable progress, workflow decisions, validated commands, unresolved risks, or project-profile updates when useful. Do not save transient investigation noise.
+- Store durable knowledge when it is reusable, current, non-sensitive, and valuable for future sessions.
+- Save confirmed decisions, workflow rules, architectural decisions, validated commands, meaningful progress, open todos, unresolved risks, and reusable learnings as durable memories when they affect future work.
+- After every meaningful discussion or substantial task, perform a decision checkpoint before the final response: identify durable decisions, progress, validations, todos, risks, and learnings; save the useful non-sensitive items with `memory_add`, update the project profile when appropriate, and explicitly say what was saved or why nothing was saved.
+- Prefer a small number of atomic memories over large noisy summaries; for normal work, save 1-3 durable memories unless the user asks for a richer record.
 - In full SDD, phase subagents may create/update only the active SDD flow memory (`type: sdd_feature_project_state`) and only as a compact index/state/handoff.
 - Long-form SDD artifacts belong in OpenSpec files when artifact_store is `openspec` or `hybrid`.
 - Non-SDD durable project memories, global preferences, architectural decisions outside the active SDD flow, and cleanup/consolidation remain orchestrator responsibilities unless explicitly delegated.
