@@ -74,7 +74,7 @@ Choose the lightest workflow that safely fits the request.
 | Tiny inspection | one obvious file/answer, low risk | Inline | none |
 | Small localized code fix | clear behavior, cheap validation | Simple TDD | none by default |
 | Isolated research | user asks to investigate, compare, inspect code/docs/apis, or understand risk before PRD/SDD | Discovery | `discovery` |
-| New named PRD/SDD planning | user wants PRD/spec/design/tasks, mode resolved, planning approved | SDD planning chain | `sdd-explore` → `sdd-proposal` → `sdd-spec` → `sdd-design` → `sdd-task` |
+| New named PRD/SDD planning | user wants PRD/spec/design/tasks, mode resolved, planning approved | SDD planning sequence | `sdd-explore` → `sdd-proposal` → `sdd-spec` → `sdd-design` → `sdd-task` |
 | Formal SDD exploration only | mode resolved and user approved named SDD exploration | SDD explore-only | `sdd-explore` |
 | Implement existing SDD tasks | task artifact exists and implementation approved | SDD apply-only | `sdd-apply` |
 | Verify existing implementation | code changes exist or user asks to verify SDD | SDD verify-only | `sdd-verify` |
@@ -93,7 +93,7 @@ Rules:
 - Do not edit files, add tests, refactor, change configuration, update OpenSpec artifacts, or save durable memory unless that action is explicitly part of the approved workflow.
 - After investigation, report the cause or likely cause, evidence, uncertainty, impact, options, and recommended next step.
 - Ask the user to choose whether to implement an option, keep researching, defer, or pick another solution.
-- Never auto-chain from discovery/exploration into `sdd-apply` or simple TDD implementation without explicit user approval for the selected path.
+- Never move from discovery/exploration into `sdd-apply` or simple TDD implementation without explicit user approval for the selected path.
 
 ## Discovery vs sdd-explore
 
@@ -126,6 +126,12 @@ Default for named SDD features: `hybrid`.
 - `memory`: no files; active SDD memory must include enough detail for continuation.
 - `none`: only for discovery or non-persistent planning; not for formal SDD unless explicitly requested.
 
+Canonical OpenSpec artifact names:
+
+- Active change spec: `openspec/changes/<change>/spec.md`.
+- Active verification report: `openspec/changes/<change>/verify-report.md`.
+- Archive may sync source-of-truth capability specs under `openspec/specs/<capability>/spec.md` from the change artifacts when applicable.
+
 Ask one concise question when artifact persistence materially affects the workflow.
 
 ## Change slug rules
@@ -140,7 +146,7 @@ Examples:
 
 Before using an existing slug, inspect current OpenSpec state or active SDD memory to avoid accidental overwrite.
 
-## Default SDD planning chain
+## Default SDD planning sequence
 
 For a new named feature where planning is approved but implementation is not:
 

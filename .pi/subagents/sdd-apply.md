@@ -57,11 +57,11 @@ Inspect `tasks.md` for:
 
 ```text
 Decision needed before apply: Yes
-Chained PRs recommended: Yes
+Suggested task split: Yes
 400-line budget risk: High
 ```
 
-If a decision is needed and the orchestrator did not provide a resolved path (`auto-chain`, `exception-ok`, selected chain strategy, or `size:exception`), return `blocked` before editing code.
+If a decision is needed and the orchestrator did not provide a resolved path (`split-by-task`, `single-batch`, `exception-ok`, or another explicit task/batch selection), return `blocked` before editing code.
 
 ## Implementation workflow
 

@@ -1,6 +1,6 @@
 ---
 name: sdd-spec
-description: writes sdd requirements and scenarios from the proposal, producing delta or new OpenSpec capability specs
+description: writes sdd requirements and scenarios from the proposal into the canonical OpenSpec change spec
 tools:
   - read
   - bash
@@ -41,50 +41,27 @@ Read proposal before writing specs:
 - memory/hybrid: search/get active SDD flow state and proposal summary if present.
 - openspec/hybrid: `openspec/changes/{change}/proposal.md`.
 
-Use the proposal `Capabilities` section as the source of truth for spec domains.
+Use the proposal `Capabilities` section as the source of truth for requirement sections within the change spec.
 
 ## OpenSpec artifact
 
-When `artifact_store` is `openspec` or `hybrid`, ensure base OpenSpec structure exists, then write one spec per capability:
+When `artifact_store` is `openspec` or `hybrid`, ensure base OpenSpec structure exists, then write/update the canonical change spec:
 
-`openspec/changes/{change}/specs/{capability}/spec.md`
+`openspec/changes/{change}/spec.md`
 
 If `openspec/config.yaml` is missing, create a minimal config with project name, artifact store, detected stack/context if known, and strict TDD/testing notes if known.
 
-If an existing main spec exists at `openspec/specs/{capability}/spec.md`, write a delta spec with ADDED/MODIFIED/REMOVED sections. If not, write a full new spec.
+If source-of-truth specs exist under `openspec/specs/{capability}/spec.md`, use them as context and describe changes in the canonical change spec. Do not create per-capability specs under the change directory.
 
 ## Spec format
 
-For deltas:
+Use a single canonical change spec:
 
 ```markdown
-# Delta for {Capability}
-
-## ADDED Requirements
-
-### Requirement: {Name}
-The system MUST/SHALL/SHOULD {behavior}.
-
-#### Scenario: {Name}
-- GIVEN ...
-- WHEN ...
-- THEN ...
-
-## MODIFIED Requirements
-{full copied and edited requirement blocks only}
-
-## REMOVED Requirements
-### Requirement: {Name}
-(Reason: ...)
-```
-
-For new capabilities:
-
-```markdown
-# {Capability} Specification
+# Specification: {Change Title}
 
 ## Purpose
-{domain purpose}
+{change-level purpose}
 
 ## Requirements
 
@@ -95,7 +72,13 @@ The system MUST/SHALL/SHOULD {behavior}.
 - GIVEN ...
 - WHEN ...
 - THEN ...
+
+## Source-of-Truth Sync Notes
+- Existing capability specs affected: `openspec/specs/{capability}/spec.md` | None
+- Archive sync guidance: {what should be copied/merged during archive, if applicable}
 ```
+
+When a change affects multiple capabilities, group requirements with clear headings inside this same `spec.md`.
 
 ## Rules
 
@@ -108,4 +91,4 @@ The system MUST/SHALL/SHOULD {behavior}.
 
 ## Return envelope
 
-Return: status, executive_summary, specs written, artifacts written/updated, memory ids written/updated, risks, next_recommended.
+Return: status, executive_summary, spec written, artifacts written/updated, memory ids written/updated, risks, next_recommended.

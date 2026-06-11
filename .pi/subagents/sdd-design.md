@@ -38,7 +38,7 @@ Search for `type: sdd_feature_project_state` and the change slug. Update/create 
 
 Read proposal and specs first:
 
-- openspec/hybrid: `proposal.md` and all files under `openspec/changes/{change}/specs/`.
+- openspec/hybrid: `proposal.md` and `openspec/changes/{change}/spec.md`.
 - memory/hybrid: active SDD flow memory and relevant proposal/spec summaries.
 
 Then read real affected code. Never design from guesses.

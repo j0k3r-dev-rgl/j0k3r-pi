@@ -27,7 +27,11 @@ Rules:
 
 ## Workflow selection
 
-Choose the lightest workflow that safely fits the request.
+Choose the lightest workflow that safely fits the request. For simple questions, tiny inspections, and small localized fixes, stay inline or use simple TDD. For substantial PRD/SDD/OpenSpec work, load the `sdd-workflow` skill and follow it as the operational source of truth for routing tables, phase details, artifact formats, subagent checklists, continue/apply rules, and return envelopes.
+
+### Discovery gate
+
+Use the `discovery` subagent for isolated research before committing to SDD. Discovery is the explicit non-SDD subagent exception: it may inspect code, project docs, Pi docs/examples, and Context7 documentation, but it must not create OpenSpec artifacts, modify source code, or update active SDD flow memory.
 
 ### Git hygiene before PRD/SDD
 
@@ -41,140 +45,27 @@ Rules:
 - This gate does not apply to tiny inline answers or low-risk inspections that do not create artifacts or change code.
 - A clean-worktree gate is not permission to create commits later; commit permission is governed by the Git commit policy below.
 
-### Pre-SDD mode gate and discovery
+### SDD mode and artifact gates
 
-Before starting any new PRD/SDD/OpenSpec flow, ask the user which execution mode to use unless they already stated it:
+Before starting any new PRD/SDD/OpenSpec flow, ask the user which execution mode to use unless they already stated it: `interactive`, `normal`, or `defaults`. Do not launch SDD subagents or create/update PRD/OpenSpec artifacts for a new flow until this mode is resolved.
 
-- `interactive`: confirm before each SDD phase and before writing/updating artifacts;
-- `normal`: proceed phase-by-phase with concise checkpoints at major transitions;
-- `defaults`: use project defaults and ask only when blocked or when a decision materially affects scope, persistence, or implementation approval.
+For named SDD features, prefer `hybrid` artifact storage unless the user requests otherwise. Canonical OpenSpec artifact names are:
+- active change spec: `openspec/changes/<change>/spec.md`;
+- verification report: `openspec/changes/<change>/verify-report.md`.
 
-Do not launch SDD subagents or create/update PRD/OpenSpec artifacts for a new flow until this mode is resolved.
+### SDD operational details
 
-Use the `discovery` subagent for isolated research before committing to SDD. Discovery may inspect code, project docs, Pi docs/examples, and Context7 documentation, but it must not create OpenSpec artifacts, modify source code, or update active SDD flow memory. Use discovery when the user asks to investigate, compare, inspect, or understand an idea/risk/API before deciding whether to create a PRD/SDD.
+Load `.pi/skills/sdd-workflow/SKILL.md` before starting or continuing substantial PRD/SDD/OpenSpec work, before launching any `sdd-*` subagent, or when SDD flow selection is unclear. The skill owns:
+- the full workflow router;
+- discovery vs `sdd-explore` routing;
+- artifact store policy details;
+- phase responsibilities and sequencing;
+- apply/continue/archive rules;
+- subagent orchestration checklist;
+- expected SDD return envelopes;
+- SDD memory rules and end-of-work checkpoints.
 
-Distinguish discovery from `sdd-explore`:
-
-- `discovery` = pre-SDD or standalone research with a recommendation about next workflow;
-- `sdd-explore` = formal first phase of an approved/named SDD change.
-
-### 1. Inline workflow
-
-Use for tiny, obvious, low-risk changes or simple answers.
-
-Examples:
-- answer a conceptual question;
-- fix a typo;
-- adjust a small localized line;
-- inspect one obvious file.
-
-Rules:
-- The orchestrator may handle it directly.
-- Do not invoke the full SDD flow.
-- Still validate when validation is cheap and relevant.
-
-### 2. Simple TDD workflow
-
-Use for small or medium corrections where tests/validation matter but a full SDD artifact trail would be wasteful. Use this only when the user explicitly asks for a fix/change or approves an implementation option after investigation.
-
-Required steps:
-1. State the understood issue and acceptance criteria briefly.
-2. Identify the smallest failing test or validation that should prove the issue.
-3. Write or update the failing test first whenever a test harness exists.
-4. Implement the minimum fix.
-5. Run focused validation.
-6. Summarize what changed and any remaining risk.
-
-Do not invoke the SDD subagent pipeline for simple fixes unless the user explicitly asks for SDD/OpenSpec.
-
-### 3. Full SDD feature workflow
-
-Load the `sdd-workflow` skill before starting or continuing substantial PRD/SDD/OpenSpec work, before launching any `sdd-*` subagent, or when SDD flow selection is unclear.
-
-Use the SDD subagent pipeline for named features/changes, architectural changes, multi-file work, risky refactors, unclear requirements, or work that benefits from durable artifacts and handoff between phases.
-
-Do NOT use full SDD for:
-- simple questions;
-- small one-file fixes;
-- typo/message changes;
-- direct user requests that are clearly inline;
-- quick inspections with no artifact value.
-
-Triggers that SHOULD use full SDD:
-- the user says SDD, OpenSpec, feature project, spec, design, proposal, tasks, apply, verify, or archive;
-- a new feature needs requirements/design/tasks before implementation;
-- the work crosses several files/modules or has architecture risk;
-- the orchestrator would otherwise need to pass large context repeatedly between agents;
-- the user wants persistent SDD artifacts.
-
-Pi documentation delegation rule:
-- For large or architectural Pi changes that require reading substantial Pi documentation/examples, the orchestrator must not load long docs directly unless answering a narrow inline question.
-- Before SDD mode is approved/resolved, route isolated Pi research to `discovery` and instruct it which Pi docs/examples to read and summarize.
-- After SDD mode is approved/resolved for a named change, route formal SDD investigation to `sdd-explore`.
-- The orchestrator should consume the discovery/exploration artifact or report, then decide the next step. This prevents unnecessary context bloat while still satisfying Pi documentation requirements.
-- If the user asks to be guided on a new Pi feature, permission system, extension, SDK integration, sandboxing, or policy mechanism, ask whether they want discovery first or a PRD/SDD flow unless they explicitly ask for only a brief conceptual answer.
-
-Default full SDD sequence:
-1. `sdd-explore`
-2. `sdd-proposal`
-3. `sdd-spec`
-4. `sdd-design`
-5. `sdd-task`
-6. `sdd-apply` for approved task slices only
-7. `sdd-verify`
-8. `sdd-archive` only after verification passes and the user wants closure
-
-Artifact store policy:
-- For full named SDD features, default to `hybrid`: OpenSpec files for long-form artifacts plus Pi Memory for compact active flow state.
-- If the user asks for memory-only/no files, use `memory`; then the single active SDD flow memory must include enough phase artifact detail for downstream phases because no OpenSpec files exist.
-- If the user asks for files/OpenSpec/team-shareable artifacts, use `openspec` or `hybrid`.
-- In `openspec`, files are the source of truth and memory may hold only a minimal pointer/index.
-- In `hybrid`, files are the source of truth and memory holds compact phase summaries/handoff for recovery.
-- If persistence is unclear and the choice matters, ask one concise question before starting the SDD pipeline.
-
-The orchestrator coordinates the flow. SDD subagents execute phases; they do not orchestrate or delegate.
-
-Before launching an SDD phase, resolve the change slug, artifact_store, current phase/state, required prior artifacts, implementation approval, and validation expectations. For `openspec` or `hybrid`, ensure `openspec/changes/<feature>/` exists before asking a phase to write files; if `openspec/config.yaml` is missing, the first SDD phase may create a minimal config with project context.
-
-### Autonomous workflow router
-
-The orchestrator must choose the flow automatically. Do not require slash commands. Classify the request by intent, risk, existing artifacts, and user wording.
-
-Use this routing table:
-
-| Situation | Preconditions | Flow | Subagents |
-|---|---|---|---|
-| Direct answer or tiny inspection | No code change or very low risk | Inline | none |
-| Small localized code fix | Clear scope, cheap validation, no durable artifact value | Simple TDD | none by default |
-| Explore an idea before committing | User asks to investigate/compare/understand a feature, code area, docs, API, or risk before PRD/SDD | Discovery | `discovery` |
-| Formal SDD exploration | SDD mode is resolved and the user approved a named SDD change | SDD explore-only | `sdd-explore` |
-| Plan a named feature/change | Feature needs requirements/design/tasks, SDD mode is resolved, but implementation is not yet approved | SDD planning chain | `sdd-explore` → `sdd-proposal` → `sdd-spec` → `sdd-design` → `sdd-task` |
-| Implement a planned SDD change | Existing proposal/spec/design/tasks exist and user asks to implement or continue apply | SDD apply-only or apply batch | `sdd-apply` |
-| Validate an implementation | Existing SDD artifacts and code changes exist, or user asks to verify | SDD verify-only | `sdd-verify` |
-| Continue an active SDD flow | Active SDD memory/OpenSpec state exists or user says continue | SDD continue router | inspect state, then run the next missing phase |
-| Close a verified SDD change | Verification passed and user wants closure/archive/source-of-truth sync | SDD archive-only | `sdd-archive` |
-| Large/risky feature from scratch | Named feature, multi-module/risky/unclear requirements, or explicit SDD/OpenSpec intent | Full SDD feature chain | planning chain → approved `sdd-apply` → `sdd-verify` → optional `sdd-archive` |
-
-Apply-only rules:
-- Do not use `sdd-apply` just because the user says "implement". Use simple TDD for small/local changes without SDD artifacts.
-- Use `sdd-apply` only when an SDD task artifact exists, or the current active SDD flow is already at apply phase.
-- If apply is requested but required artifacts are missing, route to the missing planning phase first or ask one concise clarification.
-- If workload forecast says a decision is needed, ask before applying.
-
-Continue rules:
-1. Recover active SDD state from current conversation first.
-2. If insufficient, inspect the active SDD flow memory (`type: sdd_feature_project_state`) or OpenSpec files.
-3. Select the next missing or incomplete phase:
-   - no exploration/proposal and request is unclear → `sdd-explore`;
-   - no proposal → `sdd-proposal`;
-   - no spec → `sdd-spec`;
-   - no design → `sdd-design`;
-   - no tasks → `sdd-task`;
-   - tasks incomplete and apply approved → `sdd-apply`;
-   - implementation complete but not verified → `sdd-verify`;
-   - verification passed and closure requested → `sdd-archive`.
-
-When uncertain between simple TDD and full SDD, prefer the lighter workflow unless the risk/artifact value is clear. Ask at most one concise question if the choice affects persistence, scope, or implementation approval.
+Implementation approval remains separate from planning approval. Do not use `sdd-apply` unless an SDD task artifact exists or the active SDD flow is already at apply phase and the user approved implementation.
 
 ## Git commit and push policy
 
@@ -182,7 +73,7 @@ The assistant must never create commits, tags, branches, rebases, or pushes unle
 
 Rules:
 - Do not assume that finishing code, passing automated tests, completing an SDD phase, finishing a slice/batch, or updating artifacts means the work is ready to commit.
-- Do not create checkpoint commits automatically, even during `auto-chain`, SDD apply slices, or multi-batch work.
+- Do not create checkpoint commits automatically during SDD apply slices, multi-batch work, or any other workflow step.
 - Do not push automatically after committing unless the user explicitly asks to push.
 - If a workflow would benefit from a commit, recommend it and ask first; wait for an explicit affirmative instruction before running Git write operations.
 - Manual validation and user acceptance are separate from automated tests. Passing tests is not approval to commit.
@@ -206,23 +97,11 @@ If no test framework exists, do not silently skip TDD. Explain the limitation an
 
 - The main agent is the orchestrator.
 - Only the orchestrator delegates work to subagents.
-- Project subagents are SDD-focused; do not delegate generic analysis/review unless it maps to an SDD phase.
-- Subagents must not delegate to other subagents.
-- Subagents do not communicate with each other directly.
-- The orchestrator sends focused phase tasks, receives structured reports, consolidates results, and decides the next step.
-- Prefer sequential SDD phases when later work depends on earlier artifacts. Run phases in parallel only when they are truly independent and artifact dependencies are clear.
+- Project subagents are SDD-focused, with `discovery` as the explicit read-only pre-SDD exception.
+- Subagents must not delegate to other subagents or communicate with each other directly.
 - `sdd-apply` is the only SDD phase expected to modify application/source code.
 - `sdd-verify` should report issues and not fix them unless the orchestrator explicitly starts a new apply task.
-
-Expected SDD subagent return envelope:
-
-- status: `success`, `partial`, or `blocked`;
-- executive_summary;
-- artifacts written/updated;
-- memory ids written/updated;
-- risks/issues;
-- validations, when relevant;
-- next_recommended.
+- Detailed SDD phase inputs, sequencing, orchestration checklist, and return envelopes live in the `sdd-workflow` skill.
 
 ## Memory behavior
 

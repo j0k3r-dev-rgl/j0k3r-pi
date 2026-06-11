@@ -1,6 +1,6 @@
 ---
 name: sdd-archive
-description: archives a completed sdd change by syncing OpenSpec delta specs, moving the change folder, and recording closure state
+description: archives a completed sdd change by syncing OpenSpec source-of-truth specs when applicable, moving the change folder, and recording closure state
 tools:
   - read
   - bash
@@ -46,10 +46,11 @@ For OpenSpec/hybrid use files under `openspec/changes/{change}/`. For memory/hyb
 For `openspec` or `hybrid`:
 
 1. Confirm `verify-report.md` has no CRITICAL issues and verdict is acceptable.
-2. Sync delta specs from `openspec/changes/{change}/specs/` into `openspec/specs/`.
-3. Preserve unrelated requirements when merging.
-4. Move `openspec/changes/{change}/` to `openspec/changes/archive/YYYY-MM-DD-{change}/`.
-5. Verify archive contains proposal, specs, design, tasks, apply-progress if present, and verify-report.
+2. Read the canonical change spec at `openspec/changes/{change}/spec.md`.
+3. If the change updates durable capabilities, sync the relevant requirements into `openspec/specs/{capability}/spec.md`; otherwise record `N/A` for source-of-truth sync.
+4. Preserve unrelated requirements when merging.
+5. Move `openspec/changes/{change}/` to `openspec/changes/archive/YYYY-MM-DD-{change}/`.
+6. Verify archive contains proposal, spec, design, tasks, apply-progress if present, and verify-report.
 
 For `memory` mode:
 
@@ -70,14 +71,14 @@ For `memory` mode:
 
 ### Archive Contents
 - proposal.md ✅
-- specs/ ✅
+- spec.md ✅
 - design.md ✅
 - tasks.md ✅
 - apply-progress.md ✅/N/A
 - verify-report.md ✅
 
 ### Source of Truth Updated
-- `openspec/specs/{domain}/spec.md`
+- `openspec/specs/{capability}/spec.md` | N/A
 
 ### SDD Cycle Complete
 {closure notes}

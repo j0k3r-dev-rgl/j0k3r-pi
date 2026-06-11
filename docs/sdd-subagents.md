@@ -25,12 +25,12 @@ There are no slash commands required for SDD. The orchestrator decides the flow 
 | Direct answer or tiny inspection | No code change or very low risk | Inline | none |
 | Small localized code fix | Clear scope, cheap validation, no durable artifact value | Simple TDD | none by default |
 | Explore an idea before committing | User asks to investigate/compare/understand a feature or risk before approving SDD | Discovery | `discovery` |
-| Plan a named feature/change | Feature needs requirements/design/tasks, but implementation is not yet approved | SDD planning chain | `sdd-explore` → `sdd-proposal` → `sdd-spec` → `sdd-design` → `sdd-task` |
+| Plan a named feature/change | Feature needs requirements/design/tasks, but implementation is not yet approved | SDD planning sequence | `sdd-explore` → `sdd-proposal` → `sdd-spec` → `sdd-design` → `sdd-task` |
 | Implement a planned SDD change | Existing proposal/spec/design/tasks exist and user asks to implement or continue apply | SDD apply-only or apply batch | `sdd-apply` |
 | Validate an implementation | Existing SDD artifacts and code changes exist, or user asks to verify | SDD verify-only | `sdd-verify` |
 | Continue an active SDD flow | Active SDD memory/OpenSpec state exists or user says continue | SDD continue router | inspect state, then run the next missing phase |
 | Close a verified SDD change | Verification passed and user wants closure/archive/source-of-truth sync | SDD archive-only | `sdd-archive` |
-| Large/risky feature from scratch | Named feature, multi-module/risky/unclear requirements, or explicit SDD/OpenSpec intent | Full SDD feature chain | planning chain → approved `sdd-apply` → `sdd-verify` → optional `sdd-archive` |
+| Large/risky feature from scratch | Named feature, multi-module/risky/unclear requirements, or explicit SDD/OpenSpec intent | Full SDD feature sequence | planning sequence → approved `sdd-apply` → `sdd-verify` → optional `sdd-archive` |
 
 ### Investigation and SDD entry guard
 
@@ -50,7 +50,7 @@ When continuing, recover state from the current conversation first. If insuffici
 
 - `sdd-explore`: investigates current state, affected areas, approaches, risks, and recommendation.
 - `sdd-proposal`: writes proposal with intent, scope, capabilities, approach, risks, rollback, and success criteria.
-- `sdd-spec`: writes requirement/spec artifacts from proposal capabilities.
+- `sdd-spec`: writes the canonical requirement/spec artifact from proposal capabilities.
 - `sdd-design`: writes technical design, architecture decisions, file changes, contracts, and test strategy.
 - `sdd-task`: writes implementation task plan and review workload forecast.
 - `sdd-apply`: implements assigned tasks and updates cumulative apply progress.
@@ -76,7 +76,7 @@ status: in_progress | blocked | complete
 artifacts:
   exploration: openspec/changes/<feature>/exploration.md
   proposal: openspec/changes/<feature>/proposal.md
-  specs: openspec/changes/<feature>/specs/
+  spec: openspec/changes/<feature>/spec.md
   design: openspec/changes/<feature>/design.md
   tasks: openspec/changes/<feature>/tasks.md
   apply_progress: openspec/changes/<feature>/apply-progress.md
@@ -97,7 +97,7 @@ Rules:
 
 ## OpenSpec model
 
-OpenSpec files hold the full, human-readable, team-shareable SDD artifacts:
+OpenSpec files hold the full, human-readable, team-shareable SDD artifacts. Active changes use a single canonical `spec.md`:
 
 ```txt
 openspec/
@@ -105,10 +105,9 @@ openspec/
   specs/
   changes/
     <feature-slug>/
-      state.yaml
       exploration.md
       proposal.md
-      specs/<capability>/spec.md
+      spec.md
       design.md
       tasks.md
       apply-progress.md
