@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { writeSubagentsDebugLog } from './debug.js';
 
 import type {
   SubagentAssistantItem,
@@ -208,12 +209,7 @@ function loadPiComponents(): Record<string, any> | undefined {
 }
 
 function debugLog(context: Pick<SubagentThreadRenderContext, 'cwd'> | undefined, scope: string, data: unknown): void {
-  try {
-    const cwd = context?.cwd ?? process.cwd();
-    const file = path.join(cwd, '.pi', 'subagents-debug.log');
-    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-    fs.appendFileSync(file, `${new Date().toISOString()} ${scope} ${JSON.stringify(data, (_key, value) => value instanceof Error ? { name: value.name, message: value.message, stack: value.stack } : value).slice(0, 4000)}\n`);
-  } catch {}
+  writeSubagentsDebugLog(context?.cwd, scope, data);
 }
 
 function renderComponent(component: unknown, width: number): string[] | undefined {

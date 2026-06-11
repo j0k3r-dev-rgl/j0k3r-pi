@@ -573,6 +573,8 @@ describe('subagent runner thread snapshots', () => {
     };
 
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-subagent-runner-json-'));
+    const oldDebug = process.env.PI_SUBAGENTS_DEBUG;
+    process.env.PI_SUBAGENTS_DEBUG = '1';
     try {
       const { activities } = await runWithSession(session, cwd);
       const afterToolStart = activities.find((activity) => activity.message === 'memory_search');
@@ -590,6 +592,8 @@ describe('subagent runner thread snapshots', () => {
       expect(log).toContain('memory_search');
       expect(log).toContain('query');
     } finally {
+      if (oldDebug === undefined) delete process.env.PI_SUBAGENTS_DEBUG;
+      else process.env.PI_SUBAGENTS_DEBUG = oldDebug;
       fs.rmSync(cwd, { recursive: true, force: true });
     }
   });

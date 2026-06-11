@@ -1,24 +1,19 @@
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, mkdirSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { getSubagent, loadSubagents, readSubagentsConfig } from './config.js';
+import { loadSubagents, readSubagentsConfig } from './config.js';
+import { writeSubagentsDebugLog } from './debug.js';
 import { sdkSubagentRunner } from './runner.js';
 import { SubagentHistoryStore } from './history.js';
 import { sanitizePermissionTransportText } from './permission-channel.js';
 import { resolveEffectiveSubagentProfile } from './profile-resolver.js';
 import type { PermissionRequiredPayload } from './permission-channel.js';
-import type { ModelRef, SubagentRunInput, SubagentRunner, SubagentTask } from './types.js';
+import type { ModelRef, SubagentDefinition, SubagentRunInput, SubagentsConfig, SubagentRunner, SubagentTask } from './types.js';
 
 function nowIso(): string { return new Date().toISOString(); }
 function taskId(agent: string): string { return `subtask_${agent}_${Date.now()}_${randomUUID().replace(/-/g, '').slice(0, 8)}`; }
 function subagentAuditLog(cwd: string | undefined, event: string, data: Record<string, unknown>): void {
-  try {
-    const root = cwd ?? process.cwd();
-    const file = join(root, '.pi', 'subagents-debug.log');
-    mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-    appendFileSync(file, `${new Date().toISOString()} ${event} ${JSON.stringify(data, (_key, value) => value instanceof Error ? { name: value.name, message: value.message } : value).slice(0, 4000)}\n`);
-  } catch {}
+  writeSubagentsDebugLog(cwd, event, data);
 }
 
 function permissionLogFields(payload: PermissionRequiredPayload | undefined): Record<string, unknown> {
@@ -208,11 +203,20 @@ function createLimiter(max: number) {
   };
 }
 
+const ACTIVITY_RECORD_FLUSH_MS = 250;
+const ACTIVITY_UPDATE_FLUSH_MS = 150;
+const SESSION_TASK_CACHE_MS = 1500;
+
+type PendingRecord = { cwd: string; task: SubagentTask; activity: string; timer: NodeJS.Timeout };
+
 export class SubagentManager {
   private tasks = new Map<string, SubagentTask>();
   private taskCwds = new Map<string, string>();
   private controllers = new Map<string, AbortController>();
   private limiters = new Map<string, ReturnType<typeof createLimiter>>();
+  private pendingRecords = new Map<string, PendingRecord>();
+  private pendingUpdates = new Map<string, NodeJS.Timeout>();
+  private sessionTaskCache = new Map<string, { expiresAt: number; tasks: SubagentTask[] }>();
 
   constructor(
     private runner: SubagentRunner = sdkSubagentRunner,
@@ -238,7 +242,7 @@ export class SubagentManager {
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
     if (!cwd || !sessionId) return active;
     const activeIds = new Set(active.map((task) => task.id));
-    const persisted = this.history.listSessionTasks(cwd, sessionId).filter((task) => !activeIds.has(task.id));
+    const persisted = this.cachedPersistedSessionTasks(cwd, sessionId).filter((task) => !activeIds.has(task.id));
     return [...active, ...persisted].sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
 
@@ -277,10 +281,15 @@ export class SubagentManager {
     if (!agents.length) throw new Error('subagent_run requires agent or agents.');
     const mode = input.mode ?? 'task';
     const config = readSubagentsConfig(cwd);
+    const definitions = new Map(loadSubagents(cwd).map((definition) => [definition.name, definition]));
     const limiter = this.limiter(cwd, config.max_concurrency);
     let ids: string[] = [];
     const notifyUpdate = () => onTaskUpdate?.(ids.map((id) => this.tasks.get(id)!).filter(Boolean));
-    ids = agents.map((agent) => this.startOne(agent, input.task, input.context, mode, ctx, parentSignal, notifyUpdate, limiter));
+    ids = agents.map((agent) => {
+      const definition = definitions.get(agent.toLowerCase());
+      if (!definition) throw new Error(`Subagent not found: ${agent}`);
+      return this.startOne(definition, input.task, input.context, mode, ctx, config, parentSignal, notifyUpdate, limiter);
+    });
     notifyUpdate();
     if (mode === 'background') return { mode, task_ids: ids };
     await Promise.all(ids.map((id) => this.wait(id)));
@@ -298,25 +307,23 @@ export class SubagentManager {
     task.last_activity_at = nowIso();
     task.ended_at = task.last_activity_at;
     const cwd = this.taskCwds.get(id);
-    if (cwd) this.record(cwd, task, task.last_activity);
+    if (cwd) this.record(cwd, task, task.last_activity, true);
     return task;
   }
 
   private startOne(
-    agentName: string,
+    definition: SubagentDefinition,
     taskText: string,
     context: string | undefined,
     mode: 'task' | 'background',
     ctx: any,
+    config: SubagentsConfig,
     parentSignal?: AbortSignal,
     onTaskUpdate?: () => void,
     limiter = createLimiter(1),
   ): string {
     const cwd = ctx?.cwd ?? process.cwd();
     const session_id = sessionIdFromContext(ctx);
-    const definition = getSubagent(cwd, agentName);
-    if (!definition) throw new Error(`Subagent not found: ${agentName}`);
-    const config = readSubagentsConfig(cwd);
     const effectiveProfile = resolveEffectiveSubagentProfile({ agentName: definition.name, definition, config, ctx });
     const id = taskId(definition.name);
     const controller = new AbortController();
@@ -342,8 +349,8 @@ export class SubagentManager {
     const abortFromParent = () => this.cancel(id, 'cancelled by parent abort');
     if (parentSignal?.aborted) abortFromParent();
     else parentSignal?.addEventListener('abort', abortFromParent, { once: true });
-    this.record(cwd, task, 'queued');
-    onTaskUpdate?.();
+    this.record(cwd, task, 'queued', true);
+    this.notifyTaskUpdate(id, onTaskUpdate, true);
 
     const run = async () => {
       let timeout: NodeJS.Timeout | undefined;
@@ -357,8 +364,8 @@ export class SubagentManager {
         task.started_at = nowIso();
         task.last_activity_at = task.started_at;
         task.last_activity = 'started';
-        this.record(cwd, task, 'started');
-        onTaskUpdate?.();
+        this.record(cwd, task, 'started', true);
+        this.notifyTaskUpdate(id, onTaskUpdate, true);
         let approvalsHandled = 0;
         let result: Awaited<ReturnType<SubagentRunner>> | undefined;
         while (true) {
@@ -381,8 +388,11 @@ export class SubagentManager {
               if (activity.effort) task.effort = activity.effort;
               if (activity.thread_snapshot) task.thread_snapshot = sanitizeUnknown(activity.thread_snapshot);
               if (activity.permission_request) task.permission_request = activity.permission_request;
-              this.record(cwd, task, activity.message);
-              onTaskUpdate?.();
+              const importantActivity = activity.message === 'permission required'
+                || Boolean(activity.permission_request)
+                || (Boolean(activity.thread_snapshot) && !activity.message.startsWith('streaming '));
+              this.record(cwd, task, activity.message, importantActivity);
+              this.notifyTaskUpdate(id, onTaskUpdate, importantActivity);
             },
           });
           runnerPromise.catch(() => {});
@@ -430,8 +440,8 @@ export class SubagentManager {
           task.fallback_used = result.fallback_used;
           if (result.thread_snapshot) task.thread_snapshot = sanitizeUnknown(result.thread_snapshot);
           task.permission_request = permissionRequired;
-          this.record(cwd, task, task.last_activity);
-          onTaskUpdate?.();
+          this.record(cwd, task, task.last_activity, true);
+          this.notifyTaskUpdate(id, onTaskUpdate, true);
 
           subagentAuditLog(cwd, 'permission_bridge_prompt_main_thread', { taskId: id, agent: definition.name, ...permissionLogFields(permissionRequired) });
           const choice = await promptMainThreadForPermission(ctx, permissionRequired);
@@ -445,8 +455,8 @@ export class SubagentManager {
           task.last_activity = `${choice} approved by main user; retrying subagent`;
           delete task.permission_request;
           task.last_activity_at = nowIso();
-          this.record(cwd, task, task.last_activity);
-          onTaskUpdate?.();
+          this.record(cwd, task, task.last_activity, true);
+          this.notifyTaskUpdate(id, onTaskUpdate, true);
         }
 
         if (!result) throw new Error('Subagent finished without a result.');
@@ -463,8 +473,8 @@ export class SubagentManager {
         if (result.thread_snapshot) task.thread_snapshot = sanitizeUnknown(result.thread_snapshot);
         delete task.permission_request;
         task.ended_at = task.last_activity_at;
-        this.record(cwd, task, 'completed');
-        onTaskUpdate?.();
+        this.record(cwd, task, 'completed', true);
+        this.notifyTaskUpdate(id, onTaskUpdate, true);
         if (mode === 'background') {
           ctx?.ui?.notify?.(`Subagent ${definition.name} completed: ${id}`, 'info');
           this.onTerminalBackgroundTask?.(task);
@@ -476,8 +486,8 @@ export class SubagentManager {
         task.last_activity = `failed: ${task.error}`;
         task.last_activity_at = nowIso();
         task.ended_at = task.last_activity_at;
-        this.record(cwd, task, task.last_activity);
-        onTaskUpdate?.();
+        this.record(cwd, task, task.last_activity, true);
+        this.notifyTaskUpdate(id, onTaskUpdate, true);
         ctx?.ui?.notify?.(`Subagent ${definition.name} failed: ${task.error}`, 'warning');
         if (mode === 'background') this.onTerminalBackgroundTask?.(task);
       } finally {
@@ -491,13 +501,71 @@ export class SubagentManager {
     return id;
   }
 
-  private record(cwd: string, task: SubagentTask, activity: string): void {
+  private cachedPersistedSessionTasks(cwd: string, sessionId: string): SubagentTask[] {
+    const key = `${cwd}\0${sessionId}`;
+    const cached = this.sessionTaskCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.tasks;
+    const tasks = this.history.listSessionTasks(cwd, sessionId);
+    this.sessionTaskCache.set(key, { expiresAt: Date.now() + SESSION_TASK_CACHE_MS, tasks });
+    return tasks;
+  }
+
+  private invalidateSessionTaskCache(cwd: string, task: SubagentTask): void {
+    if (task.session_id) this.sessionTaskCache.delete(`${cwd}\0${task.session_id}`);
+  }
+
+  private record(cwd: string, task: SubagentTask, activity: string, immediate = false): void {
+    if (immediate) {
+      this.flushRecord(task.id);
+      this.recordNow(cwd, task, activity);
+      return;
+    }
+    const pending = this.pendingRecords.get(task.id);
+    if (pending) {
+      pending.cwd = cwd;
+      pending.task = task;
+      pending.activity = activity;
+      return;
+    }
+    const timer = setTimeout(() => this.flushRecord(task.id), ACTIVITY_RECORD_FLUSH_MS);
+    timer.unref?.();
+    this.pendingRecords.set(task.id, { cwd, task, activity, timer });
+  }
+
+  private flushRecord(taskId: string): void {
+    const pending = this.pendingRecords.get(taskId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pendingRecords.delete(taskId);
+    this.recordNow(pending.cwd, pending.task, pending.activity);
+  }
+
+  private recordNow(cwd: string, task: SubagentTask, activity: string): void {
     try {
+      this.invalidateSessionTaskCache(cwd, task);
       this.history.upsertTask(cwd, task);
       this.history.addEvent(cwd, task, activity);
     } catch {
       // History should never break delegation.
     }
+  }
+
+  private notifyTaskUpdate(taskId: string, onTaskUpdate: (() => void) | undefined, immediate = false): void {
+    if (!onTaskUpdate) return;
+    if (immediate) {
+      const pending = this.pendingUpdates.get(taskId);
+      if (pending) clearTimeout(pending);
+      this.pendingUpdates.delete(taskId);
+      onTaskUpdate();
+      return;
+    }
+    if (this.pendingUpdates.has(taskId)) return;
+    const timer = setTimeout(() => {
+      this.pendingUpdates.delete(taskId);
+      onTaskUpdate();
+    }, ACTIVITY_UPDATE_FLUSH_MS);
+    timer.unref?.();
+    this.pendingUpdates.set(taskId, timer);
   }
 
   private async wait(id: string): Promise<void> {

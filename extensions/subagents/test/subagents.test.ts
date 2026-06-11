@@ -9,6 +9,7 @@ import { resolveEffectiveSubagentProfile } from '../src/profile-resolver.js';
 import { buildPrompt, ThreadSnapshotBuilder } from '../src/runner.js';
 import { applyDirtyProfileEdit, buildModelProfileRows, buildNoChangesModelProfilesMessage, buildNonTuiModelProfilesMessage, commitStagedModelProfiles, createSubagentModelProfilesModal, globalSubagentsConfigPath, groupAvailableModelsByProvider, runSubagentModelsCommand, stageModelProfileEdit } from '../src/model-profiles-ui.js';
 import { resolveSubagentHistoryDbPath, resolveSubagentsHistoryHome, SubagentHistoryStore } from '../src/history.js';
+import { isSubagentsDebugEnabled, writeSubagentsDebugLog } from '../src/debug.js';
 import { SubagentManager } from '../src/manager.js';
 import { registerSubagentTools } from '../src/tools.js';
 import { SubagentsHistoryPanel } from '../src/ui.js';
@@ -1638,6 +1639,25 @@ describe('subagents extension', () => {
     }
   });
 
+  it('keeps subagent debug logging disabled unless PI_SUBAGENTS_DEBUG is enabled', () => {
+    const logFile = path.join(tmp, '.pi', 'subagents-debug.log');
+    const oldDebug = process.env.PI_SUBAGENTS_DEBUG;
+    try {
+      delete process.env.PI_SUBAGENTS_DEBUG;
+      expect(isSubagentsDebugEnabled()).toBe(false);
+      writeSubagentsDebugLog(tmp, 'disabled_event', { ok: true });
+      expect(fs.existsSync(logFile)).toBe(false);
+
+      process.env.PI_SUBAGENTS_DEBUG = '1';
+      expect(isSubagentsDebugEnabled()).toBe(true);
+      writeSubagentsDebugLog(tmp, 'enabled_event', { ok: true });
+      expect(fs.readFileSync(logFile, 'utf8')).toContain('enabled_event');
+    } finally {
+      if (oldDebug === undefined) delete process.env.PI_SUBAGENTS_DEBUG;
+      else process.env.PI_SUBAGENTS_DEBUG = oldDebug;
+    }
+  });
+
   it('runs one subagent as task and exposes the active effort', async () => {
     writeAgent('analyst');
     const manager = new SubagentManager(mockRunner());
@@ -1684,6 +1704,22 @@ describe('subagents extension', () => {
     const result = await manager.run({ agents: ['analyst', 'reviewer'], task: 'review plan', mode: 'task' }, { cwd: tmp });
     expect(result.task_ids.length).toBe(2);
     expect(result.results?.map((r) => r.agent).sort()).toEqual(['analyst', 'reviewer']);
+  });
+
+  it('loads subagent markdown definitions only once per multi-agent run', async () => {
+    writeAgent('a');
+    writeAgent('b');
+    writeAgent('c');
+    const readSpy = vi.spyOn(fs, 'readFileSync');
+    const manager = new SubagentManager(mockRunner());
+
+    await manager.run({ agents: ['a', 'b', 'c'], task: 'single discovery pass', mode: 'task' }, { cwd: tmp });
+
+    const markdownReads = readSpy.mock.calls
+      .map((call) => String(call[0]))
+      .filter((file) => file.startsWith(path.join(tmp, '.pi', 'subagents')) && file.endsWith('.md'));
+    expect(markdownReads).toHaveLength(3);
+    readSpy.mockRestore();
   });
 
   it('enforces configured max concurrency within one run and across concurrent runs', async () => {
@@ -1751,6 +1787,39 @@ describe('subagents extension', () => {
     await new Promise((resolve) => setTimeout(resolve, 120));
     expect(manager.getTask(result.task_ids[0])?.status).toBe('completed');
     expect(manager.getTask(result.task_ids[2])?.status).toBe('completed');
+  });
+
+  it('throttles noisy activity persistence and update notifications while always flushing terminal state', async () => {
+    vi.useFakeTimers();
+    writeAgent('analyst');
+    const persisted: Array<{ task: SubagentTask; activity: string }> = [];
+    const events: Array<{ task: SubagentTask; activity: string }> = [];
+    const history = {
+      upsertTask(_cwd: string, task: SubagentTask) { persisted.push({ task: { ...task }, activity: task.last_activity ?? '' }); },
+      addEvent(_cwd: string, task: SubagentTask, activity: string) { events.push({ task: { ...task }, activity }); },
+      listTasks() { return []; },
+      listSessionTasks() { return []; },
+      getTask() { return undefined; },
+    };
+    const runner: SubagentRunner = async ({ onActivity }) => {
+      for (let index = 0; index < 20; index += 1) onActivity?.({ message: 'streaming response', output: `chunk ${index}` });
+      return { result: 'final review', model: 'mock/model', fallback_used: false };
+    };
+    const updates: SubagentTask[][] = [];
+    const manager = new SubagentManager(runner, history as any);
+
+    const resultPromise = manager.run({ agent: 'analyst', task: 'inspect', mode: 'task' }, { cwd: tmp }, undefined, (tasks) => updates.push(tasks.map((task) => ({ ...task }))));
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+    vi.useRealTimers();
+
+    expect(result.results?.[0].status).toBe('completed');
+    expect(events.map((entry) => entry.activity)).toContain('queued');
+    expect(events.map((entry) => entry.activity)).toContain('started');
+    expect(events.map((entry) => entry.activity)).toContain('completed');
+    expect(events.length).toBeLessThan(10);
+    expect(updates.length).toBeLessThan(10);
+    expect(persisted.at(-1)?.task).toMatchObject({ status: 'completed', result: 'final review', output_preview: 'final review' });
   });
 
   it('tracks latest activity and partial output while running', async () => {

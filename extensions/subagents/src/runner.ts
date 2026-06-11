@@ -1,5 +1,4 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import { writeSubagentsDebugLog } from './debug.js';
 import { resolveEffectiveSubagentProfile } from './profile-resolver.js';
 import { consumeLatestPermissionRequest, resolvePermissionRequest, sanitizePermissionTransportText } from './permission-channel.js';
 import { boundThreadSnapshot } from './thread-view.js';
@@ -94,12 +93,7 @@ function shortJson(value: unknown, limit = 900): string {
 const SNAPSHOT_TEXT_LIMIT = 4000;
 
 function debugLog(cwd: string | undefined, scope: string, data: unknown): void {
-  try {
-    const root = cwd ?? process.cwd();
-    const file = path.join(root, '.pi', 'subagents-debug.log');
-    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-    fs.appendFileSync(file, `${new Date().toISOString()} ${scope} ${JSON.stringify(data, (_key, value) => value instanceof Error ? { name: value.name, message: value.message, stack: value.stack } : value).slice(0, 4000)}\n`);
-  } catch {}
+  writeSubagentsDebugLog(cwd, scope, data);
 }
 
 function truncateSnapshotText(text: string | undefined, limit = SNAPSHOT_TEXT_LIMIT): string | undefined {
@@ -603,9 +597,16 @@ function collectAssistantText(messages: any[]): string {
   return parts.join('\n').trim();
 }
 
-async function createSession(model: any, cwd: string, tools: string[], effort?: ThinkingEffort) {
+let piSdkModulePromise: Promise<any> | undefined;
+
+async function loadPiSdkModule(): Promise<any> {
   const moduleName = '@earendil-works/pi-coding-agent';
-  const { createAgentSession, SessionManager } = await import(moduleName) as any;
+  piSdkModulePromise ??= import(moduleName) as Promise<any>;
+  return piSdkModulePromise;
+}
+
+async function createSession(model: any, cwd: string, tools: string[], effort?: ThinkingEffort) {
+  const { createAgentSession, SessionManager } = await loadPiSdkModule();
   return createAgentSession({ cwd, model, thinkingLevel: effort, tools, sessionManager: SessionManager.inMemory() });
 }
 
