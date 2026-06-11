@@ -44,3 +44,4 @@ pnpm-debug.log*
 openspec/
 .pi/skill-registry.json
 .pi/skill-registry.md
+bin
