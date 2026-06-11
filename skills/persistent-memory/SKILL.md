@@ -131,6 +131,13 @@ Commands:
 - Include the command, cwd, result/exit code when known, and last verified date.
 - Do not save guessed commands as verified commands.
 
+Pre-commit checkpoints:
+
+- When a user explicitly requests a commit, the required pre-commit `progress` memory must be useful beyond the Git diff.
+- Summarize what was accomplished, the user-visible behavior or policy outcome, why the change matters, and any important decisions or tradeoffs.
+- Include changed scope, key files/modules, validations and results, open todos, accepted risks, and relevant reload/manual confirmation as evidence.
+- Do not create a low-value checkpoint that only lists modified files, timestamps, or generic statements like "updated files".
+
 Do not save:
 
 - secrets or credentials;

@@ -145,7 +145,9 @@ Rules:
 - This checkpoint is required for meaningful code, docs, workflow, configuration, SDD, or extension changes.
 - Save durable project memories for confirmed decisions, completed progress, validated commands, open todos, unresolved risks, or reusable learnings when present.
 - Create one compact `progress` memory titled `precommit checkpoint: <short summary>` for the commit scope unless an equivalent progress memory was already saved in the same turn.
-- Include changed scope, important files or modules, validations run and results, open todos, and accepted risks.
+- Make the checkpoint substantively useful for future agents: summarize what was accomplished, the user-visible behavior or policy outcome, why the change matters, and any important decisions or tradeoffs.
+- Include changed scope, important files or modules, validations run and results, open todos, and accepted risks as supporting evidence, not as a bare file/date list.
+- Do not save a low-value checkpoint that only says which files changed or when the commit happened; if there is no durable summary beyond the diff, say so and keep it minimal.
 - Do not store secrets, raw logs, or low-value temporary details.
 - The checkpoint is not permission to commit; commit permission still requires an explicit user request in the current conversation.
 
