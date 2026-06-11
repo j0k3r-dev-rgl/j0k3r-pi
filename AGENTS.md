@@ -90,7 +90,7 @@ For named SDD features, prefer `hybrid` artifact storage unless the user request
 
 ### SDD operational details
 
-Load `.pi/skills/sdd-workflow/SKILL.md` before starting or continuing substantial PRD/SDD/OpenSpec work, before launching any `sdd-*` subagent, or when SDD flow selection is unclear. The skill owns:
+Load `.pi/skills/sdd-workflow/SKILL.md` before starting or continuing substantial PRD/SDD/OpenSpec work, before launching any `sdd-*` subagent, or when SDD flow selection is unclear. Before formal SDD planning/delegation, generate or refresh the skill registry; the skill-registry command must keep generated registry artifacts ignored when a `.gitignore` exists. The skill owns:
 - the full workflow router;
 - discovery vs `sdd-explore` routing;
 - artifact store policy details;
@@ -143,9 +143,11 @@ If no test framework exists, do not silently skip TDD. Explain the limitation an
 Use memory as a persistent brain, not as a checklist.
 
 - First rely on startup context, loaded skills, and the current conversation.
+- For substantial tasks in this project, inspect the current project profile early with `memory_project_profile get` unless startup context already includes an up-to-date profile.
 - Search or recall memory only when persistent context is missing, stale, ambiguous, or decision-critical.
 - Do not repeat memory recall just because the task moved from planning to editing or testing if the relevant context is already present.
 - Store durable knowledge only when it is reusable, current, non-sensitive, and valuable for future sessions.
+- After substantial work, perform a brief decision checkpoint: save confirmed durable progress, workflow decisions, validated commands, unresolved risks, or project-profile updates when useful. Do not save transient investigation noise.
 - In full SDD, phase subagents may create/update only the active SDD flow memory (`type: sdd_feature_project_state`) and only as a compact index/state/handoff.
 - Long-form SDD artifacts belong in OpenSpec files when artifact_store is `openspec` or `hybrid`.
 - Non-SDD durable project memories, global preferences, architectural decisions outside the active SDD flow, and cleanup/consolidation remain orchestrator responsibilities unless explicitly delegated.

@@ -76,7 +76,7 @@ Before creating PRD/OpenSpec artifacts or launching any SDD subagent:
    - if the user is clearly continuing/refining/verifying the same pending SDD/change scope, continue and mention the related dirty state;
    - if starting a new unrelated SDD/change or the relationship is unclear, ask whether to commit, stash, discard, or explicitly continue with a mixed worktree.
 3. Run the skill registry preflight:
-   - use the `skill_registry_generate` tool with `write=true` when available;
+   - use the `skill_registry_generate` tool with `write=true` when available; generated `.pi/skill-registry.json` and `.pi/skill-registry.md` must be added to an existing `.gitignore` when missing, and no `.gitignore` should be created when absent;
    - in interactive contexts, `/skill-registry generate` is the human command entrypoint;
    - if neither is available, stop and report that the skill-registry extension must be loaded/reloaded instead of using ad hoc fallback scripts;
    - read `.pi/skill-registry.json` after generation;
