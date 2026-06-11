@@ -72,7 +72,9 @@ Do not load this skill for:
 Before creating PRD/OpenSpec artifacts or launching any SDD subagent:
 
 1. Run `git status --short`.
-2. If the worktree has uncommitted changes, ask the user how they want to resolve it: they may commit, stash, discard, or explicitly approve continuing dirty.
+2. If the worktree has uncommitted changes, apply the dirty worktree overlap rule:
+   - if the user is clearly continuing/refining/verifying the same pending SDD/change scope, continue and mention the related dirty state;
+   - if starting a new unrelated SDD/change or the relationship is unclear, ask whether to commit, stash, discard, or explicitly continue with a mixed worktree.
 3. Run the skill registry preflight:
    - use the `skill_registry_generate` tool with `write=true` when available;
    - in interactive contexts, `/skill-registry generate` is the human command entrypoint;
@@ -110,10 +112,13 @@ Choose the lightest workflow that safely fits the request.
 | Situation | Preconditions | Flow | Subagents |
 |---|---|---|---|
 | Direct answer | no code change, no durable artifact value | Inline | none |
-| Tiny inspection | one obvious file/answer, low risk | Inline | none |
+| Tiny inspection | one obvious file/answer, low risk | Inline read-only | none |
+| Investigation/review/diagnosis | user asks to investigate, compare, inspect code/docs/apis, or understand risk before implementation | Read-only investigation; use Discovery when delegated research adds value | `discovery` only when useful |
 | Small localized code fix | clear behavior, cheap validation | Simple TDD | none by default |
-| Isolated research | user asks to investigate, compare, inspect code/docs/apis, or understand risk before PRD/SDD | Discovery | `discovery` |
+| One-extension or one-module change | existing tests, limited architecture risk, no durable artifact value | Simple TDD | none by default |
+| Documentation-only cleanup | no behavior change, no durable spec value | Inline edit with focused validation | none by default |
 | New named PRD/SDD planning | user wants PRD/spec/design/tasks, mode resolved, planning approved | SDD planning sequence | `sdd-explore` → `sdd-proposal` → `sdd-spec` → `sdd-design` → `sdd-task` |
+| Multi-file/cross-cutting feature from scratch | unclear requirements, new API/contract, architecture risk, or handoff value | Full SDD feature sequence | planning sequence → approved `sdd-apply` → `sdd-verify` → optional `sdd-archive` |
 | Formal SDD exploration only | mode resolved and user approved named SDD exploration | SDD explore-only | `sdd-explore` |
 | Implement existing SDD tasks | task artifact exists and implementation approved | SDD apply-only | `sdd-apply` |
 | Verify existing implementation | code changes exist or user asks to verify SDD | SDD verify-only | `sdd-verify` |
@@ -121,6 +126,14 @@ Choose the lightest workflow that safely fits the request.
 | Close verified SDD | verification passed and user wants closure | Archive-only | `sdd-archive` |
 
 When uncertain between simple TDD and SDD, prefer the lighter workflow unless the risk or artifact value is clear. Ask one concise clarification if scope, persistence, or approval is unclear.
+
+Routing guardrails:
+
+- Investigation/discovery is read-only by default and must end with options plus a user decision.
+- Do not convert investigation into implementation unless the user explicitly approves the selected path.
+- For localized extension/module changes with tests, use Simple TDD rather than full SDD unless there is new API/contract or cross-cutting architecture risk.
+- For broad or ambiguous work, use Discovery before SDD when the user has not yet approved formal SDD.
+- For full SDD, implementation approval is separate from planning approval; do not use `sdd-apply` until tasks exist and apply is approved.
 
 ## Investigation and decision gate
 

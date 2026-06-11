@@ -29,9 +29,44 @@ Rules:
 
 Choose the lightest workflow that safely fits the request. For simple questions, tiny inspections, and small localized fixes, stay inline or use simple TDD. For substantial PRD/SDD/OpenSpec work, load the `sdd-workflow` skill and follow it as the operational source of truth for routing tables, phase details, artifact formats, subagent checklists, continue/apply rules, and return envelopes.
 
+### Workflow routing quick table
+
+Use this table before acting when the request may involve reading files, changing code/docs/config, adding tests, or delegating:
+
+| User intent / work shape | Default workflow | Approval rule |
+|---|---|---|
+| Simple question, explanation, or opinion with no need to inspect files | Inline answer | Answer directly; do not use tools unless the user asks for investigation. |
+| Tiny inspection of one obvious file/path, no change requested | Inline read-only | Inspect minimally and report; do not edit. |
+| User asks to investigate, analyze, review, compare, diagnose, or “look at” behavior | Read-only investigation; use `discovery` only if isolated research is broad enough to benefit from delegation | Report findings/options and wait for the user to choose next action. |
+| Small localized implementation with clear expected behavior and existing cheap validation | Simple TDD | If this follows an investigation, confirm the selected implementation path first. Add/update failing test before code when non-trivial. |
+| One-extension or one-module change with tests, limited architecture risk, and no durable PRD/spec value | Simple TDD, not full SDD by default | State expected behavior and validation plan; ask before implementing if the user has not explicitly approved implementation. |
+| Multi-file or multi-extension change, new API/contract, cross-cutting behavior, unclear requirements, or durable handoff value | Formal SDD planning | Load `sdd-workflow`; resolve git gate, execution mode, artifact store, and planning approval before artifacts/subagents. |
+| User explicitly asks for PRD/spec/design/tasks/OpenSpec/SDD | Formal SDD | Do not create artifacts or launch SDD subagents until git gate and mode gate are resolved. |
+| Existing SDD task artifact and user asks to implement approved tasks | SDD apply-only | Confirm implementation approval and task slice/range before `sdd-apply`. |
+| User asks to verify/check completed SDD work | SDD verify-only | Verification reports issues only; do not fix without new apply approval. |
+| Documentation-only cleanup with no behavior change | Inline edit or Simple TDD-style validation | Keep changes minimal; validate with formatting/tests only when relevant. |
+
+Important interpretation rules:
+
+- “Investigate/analyze/review” is not implementation approval.
+- “Hagamos eso”, “apply the patch”, or “implement it” after options is implementation approval only for the discussed option; confirm if multiple materially different options remain.
+- Do not escalate a localized, well-understood change to full SDD just because it is non-trivial; use Simple TDD when durable artifacts would add little value.
+- Do not skip TDD/validation for non-trivial code changes just because the workflow is not full SDD.
+
 ### Discovery gate
 
 Use the `discovery` subagent for isolated research before committing to SDD. Discovery is the explicit non-SDD subagent exception: it may inspect code, project docs, Pi docs/examples, and Context7 documentation, but it must not create OpenSpec artifacts, modify source code, or update active SDD flow memory.
+
+### Dirty worktree overlap rule
+
+Before editing files, check `git status --short` when there may already be uncommitted changes or when the current task could overlap with pending work.
+
+If the worktree is dirty:
+- If the requested work clearly continues or modifies the same pending files/scope, continue without asking; briefly mention that you are working on the existing related changes.
+- If the requested work would touch unrelated files, a different feature, or a different scope than the dirty changes, stop and ask whether the user wants to commit, stash, discard, or explicitly continue with a mixed worktree.
+- If it is unclear whether the dirty changes are related, ask one concise clarification before editing.
+
+Do not use a dirty worktree as a blocker when the user is clearly continuing, refining, validating, documenting, or committing the same pending changes.
 
 ### Git hygiene before PRD/SDD
 
