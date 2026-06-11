@@ -11,12 +11,14 @@ import type {
   SectionState,
   SidebarAdapterContext,
   SidebarModel,
+  SidebarTodoModel,
   SubagentActivityModel,
 } from './model.js';
 import { renderSidebar, type SidebarTheme } from './render.js';
 import { createChatAdapter, type ChatAdapter } from './adapters/chat.js';
 import { createGitAdapter } from './adapters/git.js';
 import { createSubagentsAdapter } from './adapters/subagents.js';
+import { createTodoAdapter } from './adapters/todo.js';
 
 type SectionAdapter<T> = {
   load(context: SidebarAdapterContext): Promise<SectionState<T>>;
@@ -27,6 +29,7 @@ type SidebarControllerOptions = {
   chatAdapter?: ChatAdapter;
   gitAdapter?: SectionAdapter<GitStatusModel>;
   subagentsAdapter?: SectionAdapter<SubagentActivityModel>;
+  todoAdapter?: SectionAdapter<SidebarTodoModel>;
   policy?: Partial<RefreshPolicy>;
   requestRender?: () => void;
   setIntervalFn?: typeof setInterval;
@@ -38,6 +41,7 @@ export class SidebarController {
   private readonly chatAdapter: ChatAdapter;
   private readonly gitAdapter: SectionAdapter<GitStatusModel>;
   private readonly subagentsAdapter: SectionAdapter<SubagentActivityModel>;
+  private readonly todoAdapter: SectionAdapter<SidebarTodoModel>;
   private readonly requestRenderFn: () => void;
   private readonly setIntervalFn: typeof setInterval;
   private readonly clearIntervalFn: typeof clearInterval;
@@ -52,12 +56,14 @@ export class SidebarController {
   private subagentsTimer?: ReturnType<typeof setInterval>;
   private gitInFlight = false;
   private subagentsInFlight = false;
+  private todoInFlight = false;
 
   constructor(options: SidebarControllerOptions) {
     this.context = options.context;
     this.chatAdapter = options.chatAdapter ?? createChatAdapter();
     this.gitAdapter = options.gitAdapter ?? createGitAdapter({ timeoutMs: options.policy?.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS });
     this.subagentsAdapter = options.subagentsAdapter ?? createSubagentsAdapter();
+    this.todoAdapter = options.todoAdapter ?? createTodoAdapter();
     this.requestRenderFn = options.requestRender ?? (() => undefined);
     this.setIntervalFn = options.setIntervalFn ?? setInterval;
     this.clearIntervalFn = options.clearIntervalFn ?? clearInterval;
@@ -81,9 +87,11 @@ export class SidebarController {
     void this.refreshChat();
     void this.refreshGit();
     void this.refreshSubagents();
+    void this.refreshTodo();
 
     this.renderTimer = this.setIntervalFn(() => {
       void this.refreshChat();
+      void this.refreshTodo();
     }, this.policy.renderTickMs);
     this.gitTimer = this.setIntervalFn(() => {
       void this.refreshGit();
@@ -189,6 +197,28 @@ export class SidebarController {
       };
     } finally {
       this.subagentsInFlight = false;
+      this.requestRender();
+    }
+  }
+
+  private async refreshTodo(): Promise<void> {
+    if (this.hidden || this.closed || this.todoInFlight) return;
+    this.todoInFlight = true;
+    try {
+      const next = await this.todoAdapter.load(this.context);
+      this.model = {
+        ...this.model,
+        todo: next.kind === 'ready' ? next : undefined,
+        refreshedAt: this.nowIso(),
+      };
+    } catch {
+      this.model = {
+        ...this.model,
+        todo: undefined,
+        refreshedAt: this.nowIso(),
+      };
+    } finally {
+      this.todoInFlight = false;
       this.requestRender();
     }
   }

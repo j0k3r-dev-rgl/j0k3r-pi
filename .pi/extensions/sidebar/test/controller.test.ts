@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ChatHeaderModel, GitStatusModel, SectionState, SidebarAdapterContext, SubagentActivityModel } from '../src/model.js';
+import type { ChatHeaderModel, GitStatusModel, SectionState, SidebarAdapterContext, SidebarTodoModel, SubagentActivityModel } from '../src/model.js';
 import { SidebarController } from '../src/controller.js';
 
 type Deferred<T> = {
@@ -22,6 +22,21 @@ function ready<T>(data: T): SectionState<T> {
 
 function context(): SidebarAdapterContext {
   return { cwd: '/workspace/pi', ctx: {}, pi: {}, now: () => new Date('2026-06-10T00:00:00.000Z') };
+}
+
+function todoData(): SidebarTodoModel {
+  return {
+    id: 'todo-1',
+    title: 'Ship feature',
+    completedSteps: 1,
+    totalSteps: 2,
+    progressLabel: '1/2',
+    steps: [
+      { id: '1', text: 'Write tests', status: 'completed' },
+      { id: '2', text: 'Implement', status: 'open' },
+    ],
+    updatedAt: '2026-06-10T00:00:00.000Z',
+  };
 }
 
 function gitData(label: string): GitStatusModel {
@@ -107,8 +122,13 @@ describe('SidebarController', () => {
     expect('previous' in state && state.previous?.repositoryLabel).toBe('repo');
   });
 
-  it('reduces refresh work while hidden and stops when closed', async () => {
+  it('clears stale todo state on empty or failing adapter results without blocking other refreshes', async () => {
     vi.useFakeTimers();
+    const todoAdapter = {
+      load: vi.fn()
+        .mockResolvedValueOnce(ready(todoData()))
+        .mockResolvedValueOnce({ kind: 'empty', message: 'todo unavailable' }),
+    };
     const gitAdapter = { load: vi.fn(async () => ready(gitData('repo'))) };
     const subagentsAdapter = { load: vi.fn(async () => ready(subagentData('a'))) };
     const controller = new SidebarController({
@@ -116,6 +136,32 @@ describe('SidebarController', () => {
       chatAdapter: { load: async () => ({ title: 'Chat', source: 'runtime' as const }) },
       gitAdapter,
       subagentsAdapter,
+      todoAdapter,
+      requestRender: vi.fn(),
+    });
+
+    controller.start();
+    await Promise.resolve();
+    expect(controller.getModel().todo?.kind).toBe('ready');
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(todoAdapter.load).toHaveBeenCalledTimes(2);
+    expect(controller.getModel().todo).toBeUndefined();
+    expect(gitAdapter.load).toHaveBeenCalled();
+    expect(subagentsAdapter.load).toHaveBeenCalled();
+  });
+
+  it('reduces refresh work while hidden and stops when closed', async () => {
+    vi.useFakeTimers();
+    const gitAdapter = { load: vi.fn(async () => ready(gitData('repo'))) };
+    const subagentsAdapter = { load: vi.fn(async () => ready(subagentData('a'))) };
+    const todoAdapter = { load: vi.fn(async () => ready(todoData())) };
+    const controller = new SidebarController({
+      context: context(),
+      chatAdapter: { load: async () => ({ title: 'Chat', source: 'runtime' as const }) },
+      gitAdapter,
+      subagentsAdapter,
+      todoAdapter,
       requestRender: vi.fn(),
     });
 
@@ -125,13 +171,16 @@ describe('SidebarController', () => {
     await vi.advanceTimersByTimeAsync(6000);
     expect(gitAdapter.load).toHaveBeenCalledTimes(1);
     expect(subagentsAdapter.load).toHaveBeenCalledTimes(1);
+    expect(todoAdapter.load).toHaveBeenCalledTimes(1);
 
     controller.setHidden(false);
     await vi.advanceTimersByTimeAsync(4500);
     expect(gitAdapter.load).toHaveBeenCalledTimes(3);
+    expect(todoAdapter.load).toHaveBeenCalledTimes(6);
 
     controller.close();
     await vi.advanceTimersByTimeAsync(6000);
     expect(gitAdapter.load).toHaveBeenCalledTimes(3);
+    expect(todoAdapter.load).toHaveBeenCalledTimes(6);
   });
 });

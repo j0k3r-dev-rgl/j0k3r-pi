@@ -3,6 +3,7 @@ import type {
   GitFileRow,
   SectionState,
   SidebarModel,
+  SidebarTodoModel,
   SubagentActivity,
 } from './model.js';
 import { DEFAULT_MAX_GIT_FILES } from './config.js';
@@ -55,10 +56,6 @@ function topBorder(width: number, theme?: SidebarTheme): string {
   return borderLine(width, TOP_LEFT, TOP_RIGHT, theme);
 }
 
-function separator(width: number, theme?: SidebarTheme): string {
-  return borderLine(width, MID_LEFT, MID_RIGHT, theme);
-}
-
 function bottomBorder(width: number, theme?: SidebarTheme): string {
   return borderLine(width, BOTTOM_LEFT, BOTTOM_RIGHT, theme);
 }
@@ -76,7 +73,7 @@ function renderTitle(chat: ChatHeaderModel, width: number, theme?: SidebarTheme)
   return [
     topBorder(width, theme),
     panelLine(width, style(theme, 'accent', strong(theme, 'Pi Sidebar')), theme, 'accent'),
-    separator(width, theme),
+    borderLine(width, MID_LEFT, MID_RIGHT, theme),
     panelLine(width, style(theme, 'dim', title), theme),
   ];
 }
@@ -95,6 +92,15 @@ function renderSectionState<T>(label: string, state: SectionState<T>, width: num
       lines.push(panelLine(width, 'loading', theme));
       return lines;
   }
+}
+
+function renderTodo(model: SidebarTodoModel, width: number, theme?: SidebarTheme): string[] {
+  return [
+    ...renderSectionState('Todo', { kind: 'ready', data: model, refreshedAt: model.updatedAt }, width, theme),
+    panelLine(width, model.title, theme, 'accent'),
+    panelLine(width, `${model.progressLabel} steps completed`, theme),
+    ...model.steps.map((step, index) => panelLine(width, `${step.status === 'completed' ? '[x]' : '[ ]'} ${index + 1}. ${step.text}`, theme)),
+  ];
 }
 
 function isActiveSubagent(activity: SubagentActivity): boolean {
@@ -169,6 +175,10 @@ export function renderSidebar(model: SidebarModel, width: number, theme?: Sideba
     } else {
       lines.push(panelLine(safeWidth, 'subagents idle', theme));
     }
+  }
+
+  if (model.todo?.kind === 'ready') {
+    lines.push(...renderTodo(model.todo.data, safeWidth, theme));
   }
 
   const gitSection = renderSectionState('Git', model.git, safeWidth, theme);

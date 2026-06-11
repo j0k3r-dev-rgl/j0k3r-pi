@@ -41,6 +41,17 @@ N run · M done · K err
   - compatible history data may be read when available;
   - missing provider/history support renders an unavailable/idle state without crashing.
 
+### Agent Todo
+
+Shows the current active agent todo when the optional Agent Todo extension exposes a compatible provider.
+
+Behavior:
+
+- Uses only the optional provider/adapter contract.
+- Fails closed when the provider is absent, inactive, throws, returns `null`, or returns invalid/unsupported data.
+- Does not parse session history or `agent_todo` tool results independently.
+- Omits the Todo section entirely when no valid active todo is available.
+
 ### GitLens
 
 Shows the current repository and branch plus a compact list of changed files.

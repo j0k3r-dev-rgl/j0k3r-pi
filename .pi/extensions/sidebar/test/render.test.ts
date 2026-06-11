@@ -89,6 +89,33 @@ describe('renderSidebar', () => {
     expect(lines).toContain('no changes');
   });
 
+  it('renders a compact todo section only when active todo data is ready', () => {
+    const model = baseModel();
+    model.todo = ready({
+      id: 'todo-1',
+      title: 'Ship feature',
+      completedSteps: 1,
+      totalSteps: 2,
+      progressLabel: '1/2',
+      steps: [
+        { id: '1', text: 'Write tests', status: 'completed' },
+        { id: '2', text: 'Implement', status: 'open' },
+      ],
+      updatedAt: '2026-06-10T00:00:00.000Z',
+    });
+
+    const lines = renderSidebar(model, 32).join('\n');
+    expect(lines).toContain('Todo');
+    expect(lines).toContain('Ship feature');
+    expect(lines).toContain('1/2');
+    expect(lines).toContain('[x] 1. Write tests');
+    expect(lines).toContain('[ ] 2. Implement');
+
+    delete model.todo;
+    const withoutTodo = renderSidebar(model, 32).join('\n');
+    expect(withoutTodo).not.toContain('Todo');
+  });
+
   it('renders git rows with names on the left and added/deleted counts at the right edge', () => {
     const lines = renderSidebar(baseModel(), 32);
     const gitRow = lines.find((line) => line.includes('VeryLong'));

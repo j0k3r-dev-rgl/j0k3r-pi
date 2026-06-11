@@ -42,9 +42,25 @@ export type GitStatusModel = {
   files: GitFileRow[];
 };
 
+export type SidebarTodoModel = {
+  id: string;
+  title: string;
+  body?: string;
+  completedSteps: number;
+  totalSteps: number;
+  progressLabel: string;
+  steps: Array<{
+    id: string;
+    text: string;
+    status: 'open' | 'completed';
+  }>;
+  updatedAt: string;
+};
+
 export type SidebarModel = {
   chat: ChatHeaderModel;
   subagents: SectionState<SubagentActivityModel>;
+  todo?: SectionState<SidebarTodoModel>;
   git: SectionState<GitStatusModel>;
   refreshedAt: string;
 };
