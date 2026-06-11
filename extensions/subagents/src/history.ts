@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { boundThreadSnapshot } from './thread-view.js';
@@ -14,8 +15,15 @@ type Db = {
   };
 };
 
-function dbPath(cwd: string): string {
-  return path.join(cwd, '.pi', 'subagents-history.sqlite');
+export function resolveSubagentsHistoryHome(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.PI_SUBAGENTS_HISTORY_HOME) return path.resolve(env.PI_SUBAGENTS_HISTORY_HOME);
+  const xdg = env.XDG_DATA_HOME;
+  return xdg ? path.join(xdg, 'pi', 'subagents') : path.join(os.homedir(), '.local', 'share', 'pi', 'subagents');
+}
+
+export function resolveSubagentHistoryDbPath(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.PI_SUBAGENTS_HISTORY_DB_PATH) return path.resolve(env.PI_SUBAGENTS_HISTORY_DB_PATH);
+  return path.join(resolveSubagentsHistoryHome(env), 'subagents-history.sqlite');
 }
 
 function value(text: string | undefined): string | null { return text ?? null; }
@@ -34,8 +42,8 @@ function parseSnapshotJson(text: unknown): SubagentThreadSnapshot | undefined {
 export class SubagentHistoryStore {
   private dbs = new Map<string, Db>();
 
-  private db(cwd: string): Db {
-    const file = dbPath(cwd);
+  private db(_cwd: string): Db {
+    const file = resolveSubagentHistoryDbPath();
     const existing = this.dbs.get(file);
     if (existing) return existing;
     fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });

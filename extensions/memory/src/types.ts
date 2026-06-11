@@ -18,8 +18,21 @@ export interface ProjectCloudConfig {
   token_env: string;
 }
 
+export type MemoryImportMode = 'merge' | 'dry_run';
+export type MemoryImportConflictPolicy = 'keep_local' | 'keep_imported' | 'mark_conflict';
+
 export interface ProjectSessionEndConfig {
   semantic: boolean;
+}
+
+export interface ProjectImportConfig {
+  mode?: MemoryImportMode;
+  on_conflict?: MemoryImportConflictPolicy;
+}
+
+export interface ProjectBackupsConfig {
+  path?: string;
+  include_prompts: boolean;
 }
 
 export interface ProjectMemoryConfig {
@@ -27,6 +40,8 @@ export interface ProjectMemoryConfig {
   aliases?: string[];
   default_scope?: MemoryScope;
   session_end: ProjectSessionEndConfig;
+  import: ProjectImportConfig;
+  backups: ProjectBackupsConfig;
   cloud: ProjectCloudConfig;
   warnings: string[];
   path?: string;

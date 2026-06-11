@@ -38,6 +38,32 @@ Minimal config:
 }
 ```
 
+Recommended project config for automatic project-scoped mirror backups and safe restores:
+
+```json
+{
+  "project_name": "j0k3r-pi",
+  "aliases": [],
+  "default_scope": "project",
+  "session_end": {
+    "semantic": false
+  },
+  "import": {
+    "mode": "merge",
+    "on_conflict": "keep_local"
+  },
+  "backups": {
+    "path": ".pi/memory-backups/memory-backup.jsonl",
+    "include_prompts": true
+  },
+  "cloud": {
+    "enabled": false
+  }
+}
+```
+
+Use `backups.include_prompts=true` only when the project intentionally wants prompt audit records in backups.
+
 Full supported shape:
 
 ```json
@@ -47,6 +73,14 @@ Full supported shape:
   "default_scope": "project",
   "session_end": {
     "semantic": false
+  },
+  "import": {
+    "mode": "merge",
+    "on_conflict": "keep_local"
+  },
+  "backups": {
+    "path": ".pi/mempry-backups/memory-backup.jsonl",
+    "include_prompts": false
   },
   "cloud": {
     "enabled": false,
@@ -67,6 +101,10 @@ Full supported shape:
 | `aliases` | `[]` | Previous project names used by migration helpers. |
 | `default_scope` | parsed only | Reserved config field for `general`, `project`, or `global`; currently parsed for compatibility but not used by context resolution. |
 | `session_end.semantic` | `false` | Enables model-backed shutdown summary/profile update. Off by default for fast exit. |
+| `import.mode` | `dry_run` | Default `memory_import` mode when the tool call omits `mode`. Valid values: `dry_run`, `merge`. Invalid config values are ignored with a warning. |
+| `import.on_conflict` | `mark_conflict` | Default `memory_import` conflict policy when omitted. Valid values: `keep_local`, `keep_imported`, `mark_conflict`. Invalid config values are ignored with a warning. |
+| `backups.path` | `.pi/mempry-backups/memory-backup.jsonl` | Relative path, resolved from the current working directory, for automatic import/export mirror backups. Absolute paths and paths escaping the workdir are rejected with a warning. |
+| `backups.include_prompts` | `false` | When `true`, automatic `memory_export` includes `memory_session_prompts` for the current project. Prompts are audit data, so this is opt-in. |
 | `cloud.enabled` | `false` | Marks project rows as cloud-sync pending and enables cloud readiness checks. |
 | `cloud.organization_id` | `null` | Required only when cloud is enabled. |
 | `cloud.actor_id` | `null` | Required only when cloud is enabled. |
@@ -75,6 +113,17 @@ Full supported shape:
 | `cloud.token_env` | `PI_MEMORY_CLOUD_TOKEN` | Environment variable name for cloud token. |
 
 Never store cloud tokens directly in `.pi/memory.json`.
+
+### Setup checklist for a new project
+
+1. Create `.pi/memory.json` with the recommended config above and set `project_name` to the canonical project name.
+2. Keep `backups.path` relative to the project working directory. Absolute paths and `..` escapes are rejected/ignored.
+3. Run `/reload` or restart Pi after changing `.pi/memory.json` or extension code.
+4. Use `memory_context` to verify the resolved project identity.
+5. Run `memory_export` from the project cwd. The agent does not need to pass a path.
+6. Inspect the backup meta if needed: `format` should be `pi-memory-backup`, `version` should be `2`, `mirror` should be `true`, and `includes_prompts` should match `backups.include_prompts`.
+
+A dedicated agent skill for this is available as `memory-configuration`.
 
 ## Storage
 
@@ -177,22 +226,47 @@ Shutdown behavior:
 
 ## Export and import
 
-Export JSONL:
+`memory_export` and `memory_import` use an automatic mirror backup path. The agent does not need to pass a `path` parameter.
+
+Default backup file:
+
+```txt
+<workdir>/.pi/mempry-backups/memory-backup.jsonl
+```
+
+Project override:
 
 ```json
 {
-  "path": "./memory-backup.jsonl",
-  "include_archived": true,
-  "include_prompts": false
+  "backups": {
+    "path": "relative/path/to/memory-backup.jsonl",
+    "include_prompts": true
+  }
 }
 ```
 
 Notes:
 
+- `backups.path` must be relative to the current working directory. Absolute paths and `..` escapes are ignored with warnings.
+- `memory_export` writes a mirror JSONL backup with a `meta` record, `manifest`, and hashed row records.
+- Export is scoped to the current memory context/project: project backups contain only that project's memories, sessions, prompts when included, and related entities/links.
+- Export is mirror-style: the file is rewritten from current scoped DB state, so scoped rows removed locally are removed from the backup too.
 - `memory_export` defaults to JSONL.
 - SQLite export is reserved for future implementation.
-- Prompt rows are excluded unless `include_prompts=true`.
-- Import defaults to `dry_run` and validates schema version.
+- Prompt rows are excluded unless `backups.include_prompts=true` or the tool call explicitly passes `include_prompts=true`.
+- Import defaults to `dry_run` and validates backup format/schema version.
+- Projects can override omitted import defaults in `.pi/memory.json`, for example:
+
+  ```json
+  {
+    "import": {
+      "mode": "merge",
+      "on_conflict": "keep_local"
+    }
+  }
+  ```
+
+- Explicit `memory_import` mode/conflict parameters always override `.pi/memory.json` defaults.
 - `merge` mode can keep local records, keep imported records, or mark conflicts.
 
 ## Security and privacy

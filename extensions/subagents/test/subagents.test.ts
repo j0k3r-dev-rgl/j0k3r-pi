@@ -8,7 +8,7 @@ import { loadSubagents, parseFrontmatter, readSubagentsConfig, resetGlobalSubage
 import { resolveEffectiveSubagentProfile } from '../src/profile-resolver.js';
 import { buildPrompt, ThreadSnapshotBuilder } from '../src/runner.js';
 import { applyDirtyProfileEdit, buildModelProfileRows, buildNoChangesModelProfilesMessage, buildNonTuiModelProfilesMessage, commitStagedModelProfiles, createSubagentModelProfilesModal, globalSubagentsConfigPath, groupAvailableModelsByProvider, runSubagentModelsCommand, stageModelProfileEdit } from '../src/model-profiles-ui.js';
-import { SubagentHistoryStore } from '../src/history.js';
+import { resolveSubagentHistoryDbPath, resolveSubagentsHistoryHome, SubagentHistoryStore } from '../src/history.js';
 import { SubagentManager } from '../src/manager.js';
 import { registerSubagentTools } from '../src/tools.js';
 import { SubagentsHistoryPanel } from '../src/ui.js';
@@ -18,8 +18,23 @@ import type { EffectiveSubagentProfile, SubagentModelProfiles, SubagentRunner, S
 const require = createRequire(import.meta.url);
 
 let tmp: string;
-beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-subagents-test-')); fs.mkdirSync(path.join(tmp, '.pi', 'subagents'), { recursive: true }); });
-afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
+let oldAgentDir: string | undefined;
+let oldHistoryDbPath: string | undefined;
+beforeEach(() => {
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-subagents-test-'));
+  oldAgentDir = process.env.PI_CODING_AGENT_DIR;
+  oldHistoryDbPath = process.env.PI_SUBAGENTS_HISTORY_DB_PATH;
+  process.env.PI_CODING_AGENT_DIR = path.join(tmp, 'isolated-agent');
+  process.env.PI_SUBAGENTS_HISTORY_DB_PATH = path.join(tmp, 'global-agent', 'subagents-history.sqlite');
+  fs.mkdirSync(path.join(tmp, '.pi', 'subagents'), { recursive: true });
+});
+afterEach(() => {
+  if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+  else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
+  if (oldHistoryDbPath === undefined) delete process.env.PI_SUBAGENTS_HISTORY_DB_PATH;
+  else process.env.PI_SUBAGENTS_HISTORY_DB_PATH = oldHistoryDbPath;
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
 
 function writeAgent(name: string, body = '# Agent\nhello') {
   fs.writeFileSync(path.join(tmp, '.pi', 'subagents', `${name}.md`), `---\nname: ${name}\ndescription: ${name} agent\ntools:\n  - read\n  - memory_search\n---\n${body}`);
@@ -1598,7 +1613,8 @@ describe('subagents extension', () => {
 
   it('loads project subagents with no delegation tools and memory writes only for sdd agents', () => {
     const repoRoot = path.resolve(process.cwd(), '..', '..', '..');
-    const agents = loadSubagents(repoRoot);
+    const agentDir = path.resolve(process.cwd(), '..', '..');
+    const agents = withAgentDir(agentDir, () => loadSubagents(repoRoot));
     expect(agents.map((agent) => agent.name).sort()).toEqual([
       'discovery',
       'sdd-apply',
@@ -1790,6 +1806,31 @@ describe('subagents extension', () => {
     expect(listed.map((task) => task.id)).not.toContain('subtask_session_other');
   });
 
+  it('resolves sqlite history under global data storage like memory, not the project .pi directory', () => {
+    expect(resolveSubagentsHistoryHome({ XDG_DATA_HOME: '/xdg' } as any)).toBe(path.join('/xdg', 'pi', 'subagents'));
+    expect(resolveSubagentHistoryDbPath({ XDG_DATA_HOME: '/xdg' } as any)).toBe(path.join('/xdg', 'pi', 'subagents', 'subagents-history.sqlite'));
+    expect(resolveSubagentHistoryDbPath({ PI_SUBAGENTS_HISTORY_DB_PATH: '/custom/history.sqlite' } as any)).toBe('/custom/history.sqlite');
+    expect(resolveSubagentsHistoryHome({ PI_SUBAGENTS_HISTORY_HOME: '/custom/home' } as any)).toBe('/custom/home');
+
+    const store = new SubagentHistoryStore();
+    const task: SubagentTask = {
+      id: 'subtask_global_history_1',
+      agent: 'analyst',
+      mode: 'task',
+      status: 'completed',
+      task: 'global history location',
+      created_at: new Date().toISOString(),
+      result: 'stored globally',
+    } as any;
+
+    store.upsertTask(tmp, task);
+
+    expect(resolveSubagentHistoryDbPath()).toBe(path.join(tmp, 'global-agent', 'subagents-history.sqlite'));
+    expect(fs.existsSync(path.join(tmp, 'global-agent', 'subagents-history.sqlite'))).toBe(true);
+    expect(fs.existsSync(path.join(tmp, '.pi', 'subagents-history.sqlite'))).toBe(false);
+    expect(store.getTask(tmp, task.id)?.result).toBe('stored globally');
+  });
+
   it('retrieves completed tasks from sqlite history when not in memory', async () => {
     writeAgent('analyst');
     const manager = new SubagentManager(mockRunner());
@@ -1848,8 +1889,8 @@ describe('subagents extension', () => {
     expect((bounded?.items[0] as any).text.length).toBeLessThanOrEqual(4000);
 
     const { DatabaseSync } = require('node:sqlite') as any;
-    const db = new DatabaseSync(path.join(tmp, '.pi', 'subagents-history.sqlite'));
-    // Old `.pi/subagents-history.sqlite` data may be deleted/reset; v1 deliberately does not migrate flat transcripts into snapshots.
+    const db = new DatabaseSync(resolveSubagentHistoryDbPath());
+    // Old history data may be deleted/reset; v1 deliberately does not migrate flat transcripts into snapshots.
     db.prepare('UPDATE subagent_tasks SET thread_snapshot_json = ? WHERE id = ?').run('{not valid json', task.id);
     const corruptLoaded = store.getTask(tmp, task.id);
     expect(corruptLoaded?.thread_snapshot).toBeUndefined();

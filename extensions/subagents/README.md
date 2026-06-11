@@ -8,7 +8,7 @@ Project-local Pi extension for delegating work to markdown-defined subagents. It
 - `subagent_run` for task-mode or background delegation to one or many agents.
 - Status/result/list/cancel tools for delegated tasks.
 - Isolated in-memory agent sessions for each subagent run.
-- Per-project task history in SQLite.
+- Project-scoped task history in a global SQLite data/cache location.
 - TUI history panel via `/subagents` or `ctrl+x`.
 - TUI execution rendering can expand/collapse tool and rendered component output with `ctrl+o`.
 - Model profile UI via `/subagent-models`.
@@ -248,10 +248,23 @@ In non-TUI environments, edit `model_profiles` manually in that JSON file.
 
 ## Task history
 
-Task history is stored per project cwd:
+Task history is stored in a global data/cache location, while each row remains scoped by project `cwd`:
 
 ```txt
-.pi/subagents-history.sqlite
+$XDG_DATA_HOME/pi/subagents/subagents-history.sqlite
+```
+
+Fallback:
+
+```txt
+~/.local/share/pi/subagents/subagents-history.sqlite
+```
+
+Environment overrides:
+
+```bash
+PI_SUBAGENTS_HISTORY_DB_PATH=/absolute/path/to/subagents-history.sqlite
+PI_SUBAGENTS_HISTORY_HOME=/absolute/path/to/subagents-history-home
 ```
 
 The history DB stores:

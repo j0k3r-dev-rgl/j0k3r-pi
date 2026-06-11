@@ -1,0 +1,28 @@
+{
+	"bypassAll": true,
+	"outsideWorkspace": {
+		"read": "ask",
+		"list": "ask",
+		"search": "ask",
+		"write": "ask",
+		"create": "ask",
+		"rememberApprovals": "session"
+	},
+	"secrets": {
+		"mode": "deny"
+	},
+	"bash": {
+		"outsideWorkspaceFilesystem": "ask",
+		"network": "ask",
+		"workspaceReadOnly": "allow",
+		"safeCommands": [],
+		"scopedApprovals": []
+	},
+	"audit": {
+		"enabled": true,
+		"logAllowed": false,
+		"logDenied": true,
+		"logApprovals": true,
+		"redactPaths": true
+	}
+}

@@ -1,5 +1,6 @@
 import { Type } from 'typebox';
 import type { Db } from './db.js';
+import { resolveBackupPath } from './config.js';
 import { resolveMemoryContext } from './context.js';
 import { addMemory, archiveMemory, getMemory, listMemories, updateMemory } from './memory-store.js';
 import { searchMemory } from './search.js';
@@ -10,7 +11,7 @@ import { consolidateMemories } from './consolidation.js';
 import { ensureProjectProfile, getCurrentProjectProfile, updateProjectProfile } from './project-profile.js';
 import { getSyncStatus } from './sync-status.js';
 import { migrateProjectCanonicals } from './project-migration.js';
-import type { ToolResult } from './types.js';
+import type { MemoryImportConflictPolicy, MemoryImportMode, ToolResult } from './types.js';
 
 function ok(text: string, details: Record<string, unknown> = {}): ToolResult { return { content: [{ type: 'text', text }], details }; }
 function fail(error: unknown): ToolResult { const msg = error instanceof Error ? error.message : String(error); return { content: [{ type: 'text', text: msg }], details: { error: msg }, isError: true }; }
@@ -18,10 +19,29 @@ const Scope = Type.Union([Type.Literal('general'), Type.Literal('project'), Type
 const Kind = Type.Union(['preference','decision','architecture','architectural_decision','command','constraint','workflow','note','learning','session_summary','prompt','bug','todo','progress','api','dependency','project_profile'].map((x) => Type.Literal(x)) as any);
 const Origin = Type.Union([Type.Literal('explicit_user'), Type.Literal('inferred_by_agent'), Type.Literal('confirmed_by_user'), Type.Literal('observed_from_code'), Type.Literal('session_summary')]);
 const ProjectMode = Type.Union([Type.Literal('current'), Type.Literal('all'), Type.Literal('selected')]);
+const ImportMode = Type.Union([Type.Literal('merge'), Type.Literal('dry_run')]);
+const ImportConflictPolicy = Type.Union([Type.Literal('keep_local'), Type.Literal('keep_imported'), Type.Literal('mark_conflict')]);
 const RecallContext = Type.Union(['startup','before_task','task','before_edit','edit','before_test','test','before_commit','commit','review','session_end','end'].map((x) => Type.Literal(x)) as any);
 function normalizeRecallContext(value: string): string {
   return ({ task: 'before_task', edit: 'before_edit', test: 'before_test', commit: 'before_commit', end: 'session_end' } as Record<string, string>)[value] ?? value;
 }
+function resolveImportDefaults(params: any, context: { cwd: string; config?: { import?: { mode?: MemoryImportMode; on_conflict?: MemoryImportConflictPolicy }, backups?: { path?: string } }, warnings?: string[] }) {
+  return {
+    mode: params?.mode ?? context.config?.import?.mode ?? 'dry_run',
+    on_conflict: params?.on_conflict ?? context.config?.import?.on_conflict ?? 'mark_conflict',
+    path: resolveBackupPath(context.cwd, context.config?.backups?.path),
+  } as { path: string; mode: MemoryImportMode; on_conflict: MemoryImportConflictPolicy };
+}
+
+function resolveExportDefaults(params: any, context: ReturnType<typeof resolveMemoryContext>) {
+  return {
+    ...params,
+    path: resolveBackupPath(context.cwd, context.config?.backups?.path),
+    include_prompts: params?.include_prompts === true || context.config?.backups?.include_prompts === true,
+    context,
+  } as { path: string; format?: 'jsonl' | 'sqlite'; include_archived?: boolean; include_prompts?: boolean; context: ReturnType<typeof resolveMemoryContext> };
+}
+
 function recallQuery(context: string, query?: string): string {
   if (query) return query;
   const queries: Record<string, string> = {
@@ -60,8 +80,8 @@ export function registerMemoryTools(pi: any, db: Db): void {
   pi.registerTool({ name: 'memory_consolidate', label: 'Memory Consolidate', description: 'Find or consolidate duplicate active memories.', promptSnippet: 'Consolidate repeated memories safely; dry_run defaults to true.', parameters: Type.Object({ kind: Type.Optional(Type.String()), scope: Type.Optional(Scope), dry_run: Type.Optional(Type.Boolean()), limit: Type.Optional(Type.Number()), similarity: Type.Optional(Type.Boolean()), similarity_threshold: Type.Optional(Type.Number()) }), async execute(_id: string, params: any, _signal: any, _onUpdate: any, ctx: any) { try { const context = resolveMemoryContext(ctx?.cwd ?? process.cwd()); const result = consolidateMemories(db, params ?? {}, context); return ok(`Consolidation ${result.dry_run ? 'dry run' : 'applied'}: ${result.candidates.length} candidate group(s).`, result); } catch (e) { return fail(e); } } });
   pi.registerTool({ name: 'memory_sync_status', label: 'Memory Sync Status', description: 'Show local sync-aware status counts.', promptSnippet: 'Check pending/local/conflict memory sync status.', parameters: Type.Object({}), async execute(_id: string, _params: any, _signal: any, _onUpdate: any, ctx: any) { try { const context = resolveMemoryContext(ctx?.cwd ?? process.cwd()); const status = getSyncStatus(db, context); return ok(`Memory sync status: pending=${status.has_pending}, conflicts=${status.has_conflicts}.`, status); } catch (e) { return fail(e); } } });
   pi.registerTool({ name: 'memory_migrate_project', label: 'Memory Migrate Project', description: 'Dry-run or apply migration of project memories/sessions to the current canonical project identity.', promptSnippet: 'Migrate memories saved under folder/git aliases into the current memory.json/git canonical project.', parameters: Type.Object({ dry_run: Type.Optional(Type.Boolean()), aliases: Type.Optional(Type.Array(Type.Object({ project_id: Type.Optional(Type.String()), project_name: Type.Optional(Type.String()), source: Type.Optional(Type.String()) }))) }), async execute(_id: string, params: any, _signal: any, _onUpdate: any, ctx: any) { try { const context = resolveMemoryContext(ctx?.cwd ?? process.cwd()); const result = migrateProjectCanonicals(db, context, { aliases: params?.aliases, dry_run: params?.dry_run ?? true }); return ok(`${result.dry_run ? 'Project migration dry-run' : 'Project migration applied'}: ${result.memories_to_update} memories, ${result.sessions_to_update} sessions.`, result); } catch (e) { return fail(e); } } });
-  pi.registerTool({ name: 'memory_export', label: 'Memory Export', description: 'Export local memory to portable JSONL backup.', parameters: Type.Object({ path: Type.Optional(Type.String()), format: Type.Optional(Type.Union([Type.Literal('jsonl'), Type.Literal('sqlite')])), include_archived: Type.Optional(Type.Boolean()), include_prompts: Type.Optional(Type.Boolean()) }), async execute(_id: string, params: any) { try { const result = exportMemory(db, params ?? {}); return ok(`Memory exported: ${result.path}`, result); } catch (e) { return fail(e); } } });
-  pi.registerTool({ name: 'memory_import', label: 'Memory Import', description: 'Import local memory from portable JSONL backup.', parameters: Type.Object({ path: Type.String(), mode: Type.Optional(Type.Union([Type.Literal('merge'), Type.Literal('dry_run')])), on_conflict: Type.Optional(Type.Union([Type.Literal('keep_local'), Type.Literal('keep_imported'), Type.Literal('mark_conflict')])) }), async execute(_id: string, params: any) { try { const result = importMemory(db, params); return ok(`Memory import ${result.mode}: ${result.inserted} inserted, ${result.conflicts} conflicts.`, result); } catch (e) { return fail(e); } } });
+  pi.registerTool({ name: 'memory_export', label: 'Memory Export', description: 'Export local memory to the configured mirror JSONL backup.', parameters: Type.Object({ format: Type.Optional(Type.Union([Type.Literal('jsonl'), Type.Literal('sqlite')])), include_archived: Type.Optional(Type.Boolean()), include_prompts: Type.Optional(Type.Boolean()) }), async execute(_id: string, params: any, _signal: any, _onUpdate: any, ctx: any) { try { const context = resolveMemoryContext(ctx?.cwd ?? process.cwd()); const input = resolveExportDefaults(params, context); const result = exportMemory(db, input); return ok(`Memory mirror backup exported: ${result.path}`, { ...result, warnings: context.warnings }); } catch (e) { return fail(e); } } });
+  pi.registerTool({ name: 'memory_import', label: 'Memory Import', description: 'Import local memory from the configured mirror JSONL backup.', parameters: Type.Object({ mode: Type.Optional(ImportMode), on_conflict: Type.Optional(ImportConflictPolicy) }), async execute(_id: string, params: any, _signal: any, _onUpdate: any, ctx: any) { try { const context = resolveMemoryContext(ctx?.cwd ?? process.cwd()); const input = resolveImportDefaults(params, context); const result = importMemory(db, input); return ok(`Memory import ${result.mode}: ${result.inserted} inserted, ${result.conflicts} conflicts.`, { ...result, warnings: context.warnings }); } catch (e) { return fail(e); } } });
 }
 
 function compactMemory(m: any) { return { id: m.id, type: 'memory', scope: m.scope, project_name: m.project_name, kind: m.kind, title: m.title, snippet: (m.summary || m.content || '').slice(0, 240), importance: m.importance, confidence: m.confidence, status: m.status, sync_status: m.sync_status, updated_at: m.updated_at }; }

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import extension from '../index.js';
-import { resolveDbPath, readProjectMemoryConfig } from '../src/config.js';
+import { resolveBackupPath, resolveDbPath, readProjectMemoryConfig } from '../src/config.js';
 import { openMemoryDb } from '../src/db.js';
 import { migrate } from '../src/migrations.js';
 import { resolveMemoryContext, parseGitRemote } from '../src/context.js';
@@ -92,6 +92,31 @@ describe('config', () => {
     const cfg = readProjectMemoryConfig(tmp, {});
     expect(cfg.cloud.url_env).toBe('PI_MEMORY_CLOUD_URL');
     expect(cfg.warnings.join('\n')).toContain('PI_MEMORY_CLOUD_URL');
+  });
+  it('reads backup path config as a normalized relative path and rejects unsafe paths', () => {
+    fs.mkdirSync(path.join(tmp, '.pi'));
+    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'X', backups: { path: 'custom//memory.jsonl', include_prompts: true } }));
+    const cfg = readProjectMemoryConfig(tmp, {});
+    expect(cfg.backups.path).toBe('custom/memory.jsonl');
+    expect(cfg.backups.include_prompts).toBe(true);
+    expect(resolveBackupPath(tmp, cfg.backups.path)).toBe(path.join(tmp, 'custom', 'memory.jsonl'));
+
+    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'X', backups: { path: '/tmp/memory.jsonl' } }));
+    const invalid = readProjectMemoryConfig(tmp, {});
+    expect(invalid.backups.path).toBeUndefined();
+    expect(invalid.warnings.join('\n')).toContain('absolute paths are not allowed');
+  });
+  it('reads import defaults and ignores invalid import config defensively', () => {
+    fs.mkdirSync(path.join(tmp, '.pi'));
+    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'X', import: { mode: 'merge', on_conflict: 'keep_local' } }));
+    const cfg = readProjectMemoryConfig(tmp, {});
+    expect(cfg.import).toEqual({ mode: 'merge', on_conflict: 'keep_local' });
+
+    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'X', import: { mode: 'apply', on_conflict: 'explode' } }));
+    const invalid = readProjectMemoryConfig(tmp, {});
+    expect(invalid.import).toEqual({ mode: undefined, on_conflict: undefined });
+    expect(invalid.warnings.join('\n')).toContain('invalid import.mode');
+    expect(invalid.warnings.join('\n')).toContain('invalid import.on_conflict');
   });
 });
 

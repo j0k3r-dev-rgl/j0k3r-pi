@@ -1,14 +1,17 @@
 # dependencies
 node_modules/
 .pi/extensions/*/node_modules/
-
+npm
+sessions
 # build and test outputs
 dist/
 build/
 coverage/
 .vitest/
 *.tsbuildinfo
-
+auth.json
+settings.json
+trust.json
 # logs and temporary files
 *.log
 npm-debug.log*
