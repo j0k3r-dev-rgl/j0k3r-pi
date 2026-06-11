@@ -10,6 +10,7 @@ Project-local Pi extension for delegating work to markdown-defined subagents. It
 - Isolated in-memory agent sessions for each subagent run.
 - Per-project task history in SQLite.
 - TUI history panel via `/subagents` or `ctrl+x`.
+- TUI execution rendering can expand/collapse tool and rendered component output with `ctrl+o`.
 - Model profile UI via `/subagent-models`.
 - Per-agent/default model and thinking-effort configuration.
 - Tool allowlist filtering that prevents subagents from delegating to other subagents.

@@ -21,6 +21,13 @@ function matchesKey(data: string, key: string): boolean {
   return keys[key]?.includes(data) ?? data === key;
 }
 
+export function createSubagentsPanelKeyMatcher(keybindings?: { matches?: (data: string, keybinding: string) => boolean }) {
+  return (data: string, key: string): boolean => {
+    if (key === 'ctrl+o' && keybindings?.matches?.(data, 'app.tools.expand')) return true;
+    return matchesKey(data, key);
+  };
+}
+
 function visibleWidth(text: string): number {
   return [...text.replace(/\u001b\][^\u001b\u0007]*(?:\u001b\\|\u0007)|\u001b\[[0-?]*[ -/]*[@-~]/g, '')].length;
 }
@@ -109,7 +116,7 @@ export default function subagentsExtension(pi: any): void {
           () => manager.listSessionTasks(cwd, sessionId).slice(0, 100),
           theme,
           close,
-          matchesKey,
+          createSubagentsPanelKeyMatcher(_keybindings),
           visibleWidth,
           truncateToWidth,
           {
