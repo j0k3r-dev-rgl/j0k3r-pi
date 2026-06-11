@@ -1,4 +1,5 @@
 import { mkdtemp, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -131,8 +132,8 @@ describe('skill registry core', () => {
     const first = await writeSkillRegistry({ cwd, registry });
     const second = await writeSkillRegistry({ cwd, registry });
 
-    expect(first).toEqual({ json_changed: true, markdown_changed: true });
-    expect(second).toEqual({ json_changed: false, markdown_changed: false });
+    expect(first).toEqual({ json_changed: true, markdown_changed: true, gitignore_changed: false });
+    expect(second).toEqual({ json_changed: false, markdown_changed: false, gitignore_changed: false });
 
     const json = JSON.parse(await readFile(path.join(cwd, '.pi/skill-registry.json'), 'utf8'));
     const markdown = await readFile(path.join(cwd, '.pi/skill-registry.md'), 'utf8');
@@ -141,5 +142,36 @@ describe('skill registry core', () => {
     expect(json.skills[0].name).toBe('project-testing');
     expect(markdown).toContain('# Skill Registry');
     expect(jsonStat.size).toBeGreaterThan(0);
+  });
+
+  it('adds generated registry files to an existing gitignore without duplicating entries', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'skill-registry-'));
+    const cwd = path.join(root, 'project');
+    const homeDir = path.join(root, 'home');
+    await mkdir(cwd, { recursive: true });
+    await writeFile(path.join(cwd, '.gitignore'), 'node_modules/\n', 'utf8');
+    const registry = await generateSkillRegistry({ cwd, homeDir });
+
+    const first = await writeSkillRegistry({ cwd, registry });
+    const second = await writeSkillRegistry({ cwd, registry });
+    const gitignore = await readFile(path.join(cwd, '.gitignore'), 'utf8');
+
+    expect(first.gitignore_changed).toBe(true);
+    expect(second.gitignore_changed).toBe(false);
+    expect(gitignore.match(/^\.pi\/skill-registry\.json$/gm)).toHaveLength(1);
+    expect(gitignore.match(/^\.pi\/skill-registry\.md$/gm)).toHaveLength(1);
+  });
+
+  it('does not create gitignore when the project has none', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'skill-registry-'));
+    const cwd = path.join(root, 'project');
+    const homeDir = path.join(root, 'home');
+    await mkdir(cwd, { recursive: true });
+    const registry = await generateSkillRegistry({ cwd, homeDir });
+
+    const result = await writeSkillRegistry({ cwd, registry });
+
+    expect(result.gitignore_changed).toBe(false);
+    expect(existsSync(path.join(cwd, '.gitignore'))).toBe(false);
   });
 });

@@ -10,9 +10,9 @@ function fail(error: unknown) {
   return { content: [{ type: 'text', text: message }], details: { error: message }, isError: true };
 }
 
-function summaryText(registry: Awaited<ReturnType<typeof generateSkillRegistry>>, writeResult?: { json_changed: boolean; markdown_changed: boolean }) {
+function summaryText(registry: Awaited<ReturnType<typeof generateSkillRegistry>>, writeResult?: { json_changed: boolean; markdown_changed: boolean; gitignore_changed?: boolean }) {
   const lines = [`skill registry: ${registry.skill_count} skill(s), ${registry.warnings.length} warning(s)`];
-  if (writeResult) lines.push(`json ${writeResult.json_changed ? 'updated' : 'unchanged'}, markdown ${writeResult.markdown_changed ? 'updated' : 'unchanged'}`);
+  if (writeResult) lines.push(`json ${writeResult.json_changed ? 'updated' : 'unchanged'}, markdown ${writeResult.markdown_changed ? 'updated' : 'unchanged'}, gitignore ${writeResult.gitignore_changed ? 'updated' : 'unchanged'}`);
   if (registry.warnings.length) lines.push('', 'warnings:', ...registry.warnings.slice(0, 20).map((warning) => `- ${warning}`));
   return lines.join('\n');
 }

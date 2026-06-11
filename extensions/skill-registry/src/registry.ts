@@ -288,10 +288,37 @@ async function writeIfChanged(filePath: string, content: string): Promise<boolea
   return true;
 }
 
-export async function writeSkillRegistry(input: { cwd?: string; registry: SkillRegistry }): Promise<{ json_changed: boolean; markdown_changed: boolean }> {
+const GENERATED_REGISTRY_GITIGNORE_ENTRIES = ['.pi/skill-registry.json', '.pi/skill-registry.md'] as const;
+
+function gitignoreAlreadyCovers(entry: string, lines: string[]): boolean {
+  return lines.some((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) return false;
+    return trimmed === entry || trimmed === `/${entry}` || trimmed === '.pi/' || trimmed === '.pi/*' || trimmed === '/.pi/' || trimmed === '/.pi/*';
+  });
+}
+
+async function updateGitignoreForGeneratedRegistry(cwd: string): Promise<boolean> {
+  const file = path.join(cwd, '.gitignore');
+  let current: string;
+  try {
+    current = await readFile(file, 'utf8');
+  } catch {
+    return false;
+  }
+  const lines = current.split(/\r?\n/);
+  const missing = GENERATED_REGISTRY_GITIGNORE_ENTRIES.filter((entry) => !gitignoreAlreadyCovers(entry, lines));
+  if (!missing.length) return false;
+  const prefix = current.length && !current.endsWith('\n') ? '\n' : '';
+  await writeFile(file, `${current}${prefix}${missing.join('\n')}\n`, 'utf8');
+  return true;
+}
+
+export async function writeSkillRegistry(input: { cwd?: string; registry: SkillRegistry }): Promise<{ json_changed: boolean; markdown_changed: boolean; gitignore_changed: boolean }> {
   const cwd = path.resolve(input.cwd ?? process.cwd());
   const outDir = path.join(cwd, '.pi');
   const json_changed = await writeIfChanged(path.join(outDir, 'skill-registry.json'), `${JSON.stringify(input.registry, null, 2)}\n`);
   const markdown_changed = await writeIfChanged(path.join(outDir, 'skill-registry.md'), renderSkillRegistryMarkdown(input.registry));
-  return { json_changed, markdown_changed };
+  const gitignore_changed = await updateGitignoreForGeneratedRegistry(cwd);
+  return { json_changed, markdown_changed, gitignore_changed };
 }

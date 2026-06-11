@@ -12,10 +12,10 @@ function compactSkillList(registry: SkillRegistry, limit = 30): string {
   return lines.join('\n') || 'No skills found.';
 }
 
-function resultSummary(registry: SkillRegistry, writeResult?: { json_changed: boolean; markdown_changed: boolean }): string {
+function resultSummary(registry: SkillRegistry, writeResult?: { json_changed: boolean; markdown_changed: boolean; gitignore_changed?: boolean }): string {
   return [
     `skill registry: ${registry.skill_count} skill(s), ${registry.warnings.length} warning(s)`,
-    writeResult ? `json ${writeResult.json_changed ? 'updated' : 'unchanged'}, markdown ${writeResult.markdown_changed ? 'updated' : 'unchanged'}` : undefined,
+    writeResult ? `json ${writeResult.json_changed ? 'updated' : 'unchanged'}, markdown ${writeResult.markdown_changed ? 'updated' : 'unchanged'}, gitignore ${writeResult.gitignore_changed ? 'updated' : 'unchanged'}` : undefined,
     registry.warnings.length ? `warnings:\n${registry.warnings.slice(0, 20).map((warning) => `- ${warning}`).join('\n')}` : undefined,
   ].filter(Boolean).join('\n');
 }
