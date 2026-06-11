@@ -14,7 +14,11 @@ Do not use full SDD for simple questions, tiny one-file fixes, typos, quick insp
 
 For full named SDD features, the default artifact store is `hybrid`: OpenSpec files for long-form artifacts plus Pi Memory for compact active flow state. Use `memory`, `openspec`, or `none` when the user asks for that mode or the task clearly requires it.
 
-Before launching an SDD phase, the orchestrator resolves: change slug, artifact_store, current phase/state, required prior artifacts, implementation approval, and validation expectations. For `openspec` or `hybrid`, ensure `openspec/changes/<feature>/` exists before asking a phase to write files; if `openspec/config.yaml` is missing, the first SDD phase may create a minimal config with project context.
+Before launching an SDD phase, the orchestrator resolves: change slug, artifact_store, current phase/state, required prior artifacts, relevant skill registry entries, implementation approval, and validation expectations. For `openspec` or `hybrid`, ensure `openspec/changes/<feature>/` exists before asking a phase to write files; if `openspec/config.yaml` is missing, the first SDD phase may create a minimal config with project context.
+
+Before creating PRD/OpenSpec artifacts or launching SDD subagents, run the skill registry preflight. Use the `skill_registry_generate` tool with `write=true` when the skill-registry extension is active. In interactive contexts, `/skill-registry generate` is the human command entrypoint. If neither is available, stop and report that the skill-registry extension must be loaded or reloaded.
+
+Then read `.pi/skill-registry.json`, select relevant skills by intent, touched paths, keywords, phase, priority, and related skills, read the selected `SKILL.md` files, and pass the selected skill names/paths/applicability notes into delegated subagent context. The registry is generated from skill files and is an index for routing, not the source of truth; each `SKILL.md` remains authoritative.
 
 ## Autonomous workflow router
 

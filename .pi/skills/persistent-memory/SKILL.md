@@ -5,6 +5,34 @@ description: Operate the Pi Memory Extension as the agent persistent brain. Use 
 
 # Persistent Memory
 
+## Registry Contract
+
+```json
+{
+  "category": "workflow",
+  "domains": ["memory", "project-context", "session-summary", "persistent-brain"],
+  "triggers": {
+    "paths": [
+      ".pi/memory.json",
+      ".pi/extensions/memory/**",
+      ".pi/skills/persistent-memory/SKILL.md"
+    ],
+    "keywords": [
+      "memory",
+      "remember",
+      "recall",
+      "project profile",
+      "session summary",
+      "persistent context",
+      "durable decision"
+    ]
+  },
+  "sdd_phases": ["explore", "proposal", "spec", "design", "task", "apply", "verify", "archive"],
+  "related_skills": ["sdd-workflow"],
+  "priority": 80
+}
+```
+
 Use this skill to operate the Pi Memory Extension deliberately: recall context when useful, save only durable knowledge, keep the project brain clean, and avoid storing sensitive or low-value details.
 
 ## Core rules

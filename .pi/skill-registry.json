@@ -1,0 +1,205 @@
+{
+  "schema_version": 1,
+  "generated_by": "skill-registry-extension",
+  "roots": [
+    {
+      "scope": "project",
+      "path": ".pi/skills"
+    },
+    {
+      "scope": "project",
+      "path": ".agents/skills"
+    },
+    {
+      "scope": "global",
+      "path": "~/.pi/agent/skills"
+    },
+    {
+      "scope": "global",
+      "path": "~/.agents/skills"
+    }
+  ],
+  "skill_count": 2,
+  "warnings": [],
+  "skills": [
+    {
+      "name": "sdd-workflow",
+      "description": "Operate the project's PRD/SDD/OpenSpec workflow, including flow selection, mode gates, discovery vs SDD routing, artifact stores, phase transitions, subagent orchestration, and approval checkpoints.",
+      "scope": "project",
+      "path": ".pi/skills/sdd-workflow/SKILL.md",
+      "title": "SDD Workflow",
+      "metadata": {},
+      "registry_contract": {
+        "category": "workflow",
+        "domains": [
+          "sdd",
+          "openspec",
+          "planning",
+          "subagents"
+        ],
+        "triggers": {
+          "paths": [
+            "openspec/**",
+            ".pi/subagents/sdd-*.md",
+            ".pi/skills/sdd-workflow/SKILL.md"
+          ],
+          "keywords": [
+            "sdd",
+            "prd",
+            "openspec",
+            "proposal",
+            "spec",
+            "design",
+            "tasks",
+            "apply",
+            "verify",
+            "archive"
+          ]
+        },
+        "sdd_phases": [
+          "explore",
+          "proposal",
+          "spec",
+          "design",
+          "task",
+          "apply",
+          "verify",
+          "archive"
+        ],
+        "related_skills": [
+          "persistent-memory"
+        ],
+        "priority": 100
+      },
+      "routing": {
+        "category": "workflow",
+        "domains": [
+          "sdd",
+          "openspec",
+          "planning",
+          "subagents"
+        ],
+        "triggers": {
+          "paths": [
+            "openspec/**",
+            ".pi/subagents/sdd-*.md",
+            ".pi/skills/sdd-workflow/SKILL.md"
+          ],
+          "keywords": [
+            "sdd",
+            "prd",
+            "openspec",
+            "proposal",
+            "spec",
+            "design",
+            "tasks",
+            "apply",
+            "verify",
+            "archive"
+          ]
+        },
+        "sdd_phases": [
+          "explore",
+          "proposal",
+          "spec",
+          "design",
+          "task",
+          "apply",
+          "verify",
+          "archive"
+        ],
+        "related_skills": [
+          "persistent-memory"
+        ],
+        "priority": 100
+      }
+    },
+    {
+      "name": "persistent-memory",
+      "description": "Operate the Pi Memory Extension as the agent persistent brain. Use when persistent context or memory policy is needed, while avoiding redundant recalls when startup context, loaded skill content, or conversation context is already sufficient.",
+      "scope": "project",
+      "path": ".pi/skills/persistent-memory/SKILL.md",
+      "title": "Persistent Memory",
+      "metadata": {},
+      "registry_contract": {
+        "category": "workflow",
+        "domains": [
+          "memory",
+          "project-context",
+          "session-summary",
+          "persistent-brain"
+        ],
+        "triggers": {
+          "paths": [
+            ".pi/memory.json",
+            ".pi/extensions/memory/**",
+            ".pi/skills/persistent-memory/SKILL.md"
+          ],
+          "keywords": [
+            "memory",
+            "remember",
+            "recall",
+            "project profile",
+            "session summary",
+            "persistent context",
+            "durable decision"
+          ]
+        },
+        "sdd_phases": [
+          "explore",
+          "proposal",
+          "spec",
+          "design",
+          "task",
+          "apply",
+          "verify",
+          "archive"
+        ],
+        "related_skills": [
+          "sdd-workflow"
+        ],
+        "priority": 80
+      },
+      "routing": {
+        "category": "workflow",
+        "domains": [
+          "memory",
+          "project-context",
+          "session-summary",
+          "persistent-brain"
+        ],
+        "triggers": {
+          "paths": [
+            ".pi/memory.json",
+            ".pi/extensions/memory/**",
+            ".pi/skills/persistent-memory/SKILL.md"
+          ],
+          "keywords": [
+            "memory",
+            "remember",
+            "recall",
+            "project profile",
+            "session summary",
+            "persistent context",
+            "durable decision"
+          ]
+        },
+        "sdd_phases": [
+          "explore",
+          "proposal",
+          "spec",
+          "design",
+          "task",
+          "apply",
+          "verify",
+          "archive"
+        ],
+        "related_skills": [
+          "sdd-workflow"
+        ],
+        "priority": 80
+      }
+    }
+  ],
+  "content_hash": "2cfe937d8fd1fccde0f101d22949e0338c20d4e1ceb288ea408e16e2ec3f5d2f"
+}

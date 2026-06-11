@@ -5,6 +5,37 @@ description: Operate the project's PRD/SDD/OpenSpec workflow, including flow sel
 
 # SDD Workflow
 
+## Registry Contract
+
+```json
+{
+  "category": "workflow",
+  "domains": ["sdd", "openspec", "planning", "subagents"],
+  "triggers": {
+    "paths": [
+      "openspec/**",
+      ".pi/subagents/sdd-*.md",
+      ".pi/skills/sdd-workflow/SKILL.md"
+    ],
+    "keywords": [
+      "sdd",
+      "prd",
+      "openspec",
+      "proposal",
+      "spec",
+      "design",
+      "tasks",
+      "apply",
+      "verify",
+      "archive"
+    ]
+  },
+  "sdd_phases": ["explore", "proposal", "spec", "design", "task", "apply", "verify", "archive"],
+  "related_skills": ["persistent-memory"],
+  "priority": 100
+}
+```
+
 Use this skill when starting, continuing, validating, or closing PRD/SDD/OpenSpec work, or when deciding whether a request should use inline, simple TDD, discovery, or the formal SDD pipeline.
 
 ## Core principles
@@ -42,9 +73,17 @@ Before creating PRD/OpenSpec artifacts or launching any SDD subagent:
 
 1. Run `git status --short`.
 2. If the worktree has uncommitted changes, ask the user how they want to resolve it: they may commit, stash, discard, or explicitly approve continuing dirty.
-3. Resolve the SDD execution mode.
-4. Resolve the change slug and artifact store if needed.
-5. Confirm implementation approval separately from planning approval.
+3. Run the skill registry preflight:
+   - use the `skill_registry_generate` tool with `write=true` when available;
+   - in interactive contexts, `/skill-registry generate` is the human command entrypoint;
+   - if neither is available, stop and report that the skill-registry extension must be loaded/reloaded instead of using ad hoc fallback scripts;
+   - read `.pi/skill-registry.json` after generation;
+   - select relevant skills by request intent, touched paths, keywords, SDD phase, priority, and related skills;
+   - read each selected `SKILL.md` before relying on it;
+   - pass selected skill names, paths, and applicability notes into any delegated SDD subagent context.
+4. Resolve the SDD execution mode.
+5. Resolve the change slug and artifact store if needed.
+6. Confirm implementation approval separately from planning approval.
 
 The git gate does not apply to tiny inline answers or low-risk inspections that do not create artifacts or change code.
 
@@ -313,6 +352,7 @@ Before launching a subagent, prepare a focused task with:
 - execution mode implications;
 - current known state;
 - required prior artifact paths/summaries;
+- relevant skills loaded from the skill registry, including skill name, `SKILL.md` path, why it applies, and any related skills deliberately loaded or discarded;
 - allowed and forbidden actions;
 - expected return envelope;
 - validation expectations, when relevant.
