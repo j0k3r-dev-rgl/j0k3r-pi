@@ -27,7 +27,7 @@ describe('agentTodoExtension', () => {
 
     expect(tools.map((tool) => tool.name)).toEqual(['agent_todo']);
     expect(commands).toEqual([]);
-    expect(shortcuts.map((shortcut) => shortcut.key)).toEqual(['alt+t']);
+    expect(shortcuts.map((shortcut) => shortcut.key)).toEqual(['ctrl+space']);
     expect(handlers.has('session_start')).toBe(true);
     expect(handlers.has('session_tree')).toBe(true);
     expect(handlers.has('session_shutdown')).toBe(true);
@@ -121,7 +121,7 @@ describe('agentTodoExtension', () => {
 
     await shortcuts[0].def.handler(ctx);
     expect(setWidget).toHaveBeenLastCalledWith('agent-todo', expect.not.arrayContaining(['[ ] 1. Write tests']));
-    expect(setWidget.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining(['\u001b[2malt+t to expand\u001b[22m']));
+    expect(setWidget.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining(['\u001b[2mctrl+space to expand\u001b[22m']));
   });
 
   it('creates runtime numeric step ids while keeping todo ids unique', async () => {

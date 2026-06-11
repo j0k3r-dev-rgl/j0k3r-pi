@@ -28,11 +28,11 @@ describe('widget helpers', () => {
   });
 
   it('renders a collapsed dim summary without changing the underlying active todo data', () => {
-    const lines = renderAgentTodoWidgetLines(activeProjection.active_todo!, { collapsed: true, shortcut: 'alt+t' }).join('\n');
+    const lines = renderAgentTodoWidgetLines(activeProjection.active_todo!, { collapsed: true, shortcut: 'ctrl+space' }).join('\n');
 
     expect(lines).toContain('Agent Todo: Ship feature');
     expect(lines).toContain('1/2 complete');
-    expect(lines).toContain('alt+t to expand');
+    expect(lines).toContain('ctrl+space to expand');
     expect(lines).not.toContain('Write tests');
     expect(lines).toContain('\u001b[2m');
   });
@@ -41,22 +41,22 @@ describe('widget helpers', () => {
     const setWidget = vi.fn();
     const ctx = { ui: { setWidget } };
 
-    syncAgentTodoWidget(ctx, activeProjection, { collapsed: false, shortcut: 'alt+t' });
+    syncAgentTodoWidget(ctx, activeProjection, { collapsed: false, shortcut: 'ctrl+space' });
     expect(setWidget).toHaveBeenCalledWith('agent-todo', [
       'Agent Todo: Ship feature',
       'Progress: 1/2 steps completed',
       '[x] 1. Write tests',
       '[ ] 2. Implement',
-      '\u001b[2malt+t to collapse\u001b[22m',
+      '\u001b[2mctrl+space to collapse\u001b[22m',
     ]);
 
-    syncAgentTodoWidget(ctx, activeProjection, { collapsed: true, shortcut: 'alt+t' });
+    syncAgentTodoWidget(ctx, activeProjection, { collapsed: true, shortcut: 'ctrl+space' });
     expect(setWidget).toHaveBeenLastCalledWith('agent-todo', expect.arrayContaining([
       expect.stringContaining('1/2 complete'),
-      '\u001b[2malt+t to expand\u001b[22m',
+      '\u001b[2mctrl+space to expand\u001b[22m',
     ]));
 
-    syncAgentTodoWidget(ctx, { active_todo: null, current_todo: null }, { collapsed: true, shortcut: 'alt+t' });
+    syncAgentTodoWidget(ctx, { active_todo: null, current_todo: null }, { collapsed: true, shortcut: 'ctrl+space' });
     expect(setWidget).toHaveBeenLastCalledWith('agent-todo', undefined);
   });
 });
