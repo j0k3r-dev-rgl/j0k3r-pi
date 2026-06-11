@@ -131,6 +131,23 @@ Field rules:
    - `includes_prompts` should match `backups.include_prompts`.
 10. If comparing manually, verify exported `memories.project_name` contains only the current project.
 
+## Import troubleshooting notes
+
+- If `memory_import` reports `0 inserted, 0 conflicts` in `dry_run` mode, do not assume the backup is empty. Current import accounting only increments `inserted` during `merge`; dry runs may still have importable rows visible in the detailed `seen` count.
+- When `.pi/memory.json` omits `import.mode`, `memory_import` defaults to `dry_run`. To make no-argument imports apply automatically after reload, configure:
+
+  ```json
+  {
+    "import": {
+      "mode": "merge",
+      "on_conflict": "keep_local"
+    }
+  }
+  ```
+
+- When diagnosing a surprising dry run, inspect the backup row counts and compare backup row ids with the active SQLite DB before changing code or config.
+- After adding or changing import defaults in `.pi/memory.json`, tell the user to `/reload` or restart Pi before relying on omitted tool parameters. Explicit `memory_import` parameters still work immediately.
+
 ## Output Contract
 
 Return:

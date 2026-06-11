@@ -1,3 +1,7 @@
 {
-  "project_name": "j0k3r-pi"
+  "project_name": "j0k3r-pi",
+  "import": {
+    "mode": "merge",
+    "on_conflict": "keep_local"
+  }
 }
