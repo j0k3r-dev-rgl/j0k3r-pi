@@ -1,6 +1,7 @@
 type Component = { invalidate(): void; render(width: number): string[] };
 
 type MemoryRenderOptions = { expanded?: boolean; isPartial?: boolean };
+type MemoryMessage = { customType?: string; content?: string | Array<{ type?: string; text?: string }> };
 
 function clip(text: string | undefined, limit: number): string {
   const normalized = String(text ?? '').replace(/\s+/g, ' ').trim();
@@ -12,6 +13,10 @@ function lineWidth(text: string): number { return [...text.replace(/\u001b\[[0-9
 
 function truncate(text: string, width: number): string {
   return lineWidth(text) <= width ? text : `${text.slice(0, Math.max(0, width - 1))}…`;
+}
+
+function padToWidth(text: string, width: number): string {
+  return `${text}${' '.repeat(Math.max(0, width - lineWidth(text)))}`;
 }
 
 function textComponent(linesForWidth: (width: number) => string[]): Component {
@@ -80,6 +85,65 @@ function inferLabel(result: any): string {
   if (text.startsWith('recalled ')) return 'memory_recall';
   if (text.startsWith('project profile')) return 'memory_project_profile';
   return 'memory';
+}
+
+function messageText(message: MemoryMessage): string {
+  if (typeof message?.content === 'string') return message.content;
+  if (Array.isArray(message?.content)) return message.content.filter((part) => part?.type === 'text').map((part) => part.text ?? '').join('\n');
+  return '';
+}
+
+function matchLine(text: string, pattern: RegExp): string {
+  return text.match(pattern)?.[1]?.trim() ?? '';
+}
+
+function startupItems(text: string): string[] {
+  const marker = 'Startup brain context (recent memories and session summaries):';
+  const start = text.indexOf(marker);
+  if (start < 0) return [];
+  return text.slice(start + marker.length).split('\n').map((line) => line.trim()).filter((line) => line.startsWith('- ') && !line.startsWith('- No recent '));
+}
+
+function toolShellComponent(linesForWidth: (width: number) => string[], theme: any): Component {
+  const bg = (text: string) => theme?.bg?.('toolSuccessBg', text) ?? text;
+  return {
+    invalidate() {},
+    render(width: number) {
+      const outer = Math.max(40, width);
+      const inner = Math.max(1, outer - 2);
+      const contentLines = linesForWidth(inner);
+      return ['', ...contentLines, ''].map((line) => bg(` ${padToWidth(truncate(line, inner), inner)} `));
+    },
+  };
+}
+
+export function renderMemoryContextMessage(message: MemoryMessage, options: MemoryRenderOptions = {}, theme: any = {}): Component {
+  const text = messageText(message);
+  const expanded = options.expanded === true;
+  const accent = (value: string) => theme?.fg?.('accent', value) ?? value;
+  const dim = (value: string) => theme?.fg?.('dim', value) ?? value;
+  const title = (value: string) => theme?.fg?.('toolTitle', theme?.bold?.(value) ?? value) ?? value;
+
+  return toolShellComponent((_width) => {
+    const project = matchLine(text, /^Current memory project: (.+)\.$/m) || matchLine(text, /^Current memory scope: (.+)\.$/m) || 'unknown scope';
+    const session = matchLine(text, /^Memory session:\s*(.+)$/m);
+    const items = startupItems(text);
+    const noun = items.length === 1 ? 'startup item' : 'startup items';
+    const header = `${title('memory_context')} · ${accent(project)} · ${items.length} ${noun}`;
+
+    if (expanded) {
+      return [header, dim('ctrl+o collapse'), '', ...text.split('\n')];
+    }
+
+    const lines = [
+      header,
+      dim('persistent brain · search/recall only when needed · save durable non-sensitive memory'),
+    ];
+    if (session) lines.push(dim(`session ${clip(session, 36)} · ctrl+o expand`));
+    else lines.push(dim('ctrl+o expand'));
+    for (const item of items.slice(0, 3)) lines.push(`• ${clip(item.replace(/^-\s*/, ''), 110)}`);
+    return lines;
+  }, theme);
 }
 
 export function renderMemoryToolResult(result: any, options: MemoryRenderOptions = {}, theme: any = {}): Component {

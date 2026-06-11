@@ -19,7 +19,7 @@ import { consolidateMemories } from '../src/consolidation.js';
 import { exportMemory, importMemory } from '../src/export-import.js';
 import { getSyncStatus } from '../src/sync-status.js';
 import { migrateProjectCanonicals } from '../src/project-migration.js';
-import { renderMemoryToolResult } from '../src/render.js';
+import { renderMemoryContextMessage, renderMemoryToolResult } from '../src/render.js';
 
 let tmp: string;
 beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-memory-test-')); });
@@ -29,11 +29,11 @@ function db() { const d = openMemoryDb(':memory:'); migrate(d); return d; }
 function project(dir = tmp) { fs.mkdirSync(path.join(dir, '.pi'), { recursive: true }); fs.writeFileSync(path.join(dir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'My App' })); return resolveMemoryContext(dir, os.homedir(), {}); }
 
 describe('extension setup', () => {
-  it('exports a pi extension function and registers tools/commands', () => {
-    const tools: string[] = [], commands: string[] = [], events: string[] = [];
+  it('exports a pi extension function and registers tools/commands/renderers', () => {
+    const tools: string[] = [], commands: string[] = [], events: string[] = [], renderers: string[] = [];
     const old = process.env.PI_MEMORY_DB_PATH;
     process.env.PI_MEMORY_DB_PATH = path.join(tmp, 'memory.sqlite');
-    extension({ registerTool: (t: any) => tools.push(t.name), registerCommand: (n: string) => commands.push(n), on: (n: string) => events.push(n) });
+    extension({ registerTool: (t: any) => tools.push(t.name), registerCommand: (n: string) => commands.push(n), registerMessageRenderer: (n: string) => renderers.push(n), on: (n: string) => events.push(n) });
     if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
     expect(tools).toContain('memory_context');
     expect(tools).toContain('memory_add');
@@ -46,6 +46,68 @@ describe('extension setup', () => {
     expect(commands).toContain('memory-sync-status');
     expect(commands).toContain('memory-migrate-project');
     expect(events).toContain('before_agent_start');
+    expect(renderers).toContain('memory-context');
+  });
+  it('memory context messages render compact by default and expand full agent instructions on demand', () => {
+    const content = [
+      'Pi Memory Extension is active. Treat it as the agent persistent brain.',
+      'Current memory project: j0k3r-pi (project:j0k3r-pi).',
+      'Behavior rules:',
+      '- Use memory intelligently, not mechanically: first rely on startup brain context, loaded skill content, and current conversation.',
+      '- Store durable reusable knowledge with memory_add: user preferences, confirmed project decisions, workflow/policy decisions, commands, constraints, architecture, bugs, todos, learnings, progress, and project_profile updates.',
+      '',
+      'Memory session: session_1234567890abcdef',
+      '',
+      'Startup brain context (recent memories and session summaries):',
+      '- memory · project/j0k3r-pi · project_profile · j0k3r-pi project profile',
+      '- memory · project/j0k3r-pi · workflow · policy-sensitive changes require explicit workflow routing',
+    ].join('\n');
+    const theme = { fg: (_name: string, text: string) => text, bg: (name: string, text: string) => `[${name}]${text}`, bold: (text: string) => text };
+
+    const compactLines = renderMemoryContextMessage({ customType: 'memory-context', content }, { expanded: false }, theme).render(120);
+    const expandedLines = renderMemoryContextMessage({ customType: 'memory-context', content }, { expanded: true }, theme).render(120);
+    const compact = compactLines.join('\n');
+    const expanded = expandedLines.join('\n');
+
+    expect(compact).toContain('[toolSuccessBg]');
+    expect(compactLines[0]).not.toContain('memory_context');
+    expect(compactLines[1]).toContain('memory_context');
+    expect(compactLines.at(-1)).not.toContain('memory');
+    expect(compact).toContain('memory_context');
+    expect(compact).toContain('j0k3r-pi');
+    expect(compact).toContain('2 startup items');
+    expect(compact).toContain('ctrl+o expand');
+    expect(compact).not.toContain('Behavior rules:');
+    expect(compact).not.toContain('Store durable reusable knowledge');
+    expect(expanded).toContain('Behavior rules:');
+    expect(expanded).toContain('Store durable reusable knowledge');
+    expect(expanded).toContain('ctrl+o collapse');
+  });
+
+  it('startup memory context instructs the agent consistently with agent and persistent-memory policy', async () => {
+    const dbPath = path.join(tmp, 'policy-context.sqlite');
+    const projectDir = path.join(tmp, 'policy-project');
+    fs.mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Policy Project' }));
+    const old = process.env.PI_MEMORY_DB_PATH;
+    process.env.PI_MEMORY_DB_PATH = dbPath;
+    const handlers = new Map<string, Function>();
+    extension({ registerTool: () => {}, registerCommand: () => {}, registerMessageRenderer: () => {}, on: (name: string, handler: Function) => handlers.set(name, handler) });
+    if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
+
+    const ctx = { cwd: projectDir, ui: { setStatus: () => {}, notify: () => {} }, sessionManager: { getSessionFile: () => path.join(tmp, 'pi-session.json') } };
+    await handlers.get('session_start')?.({}, ctx);
+    const injected = await handlers.get('before_agent_start')?.({ prompt: 'Review memory policy' }, ctx);
+    const content = String(injected?.message?.content ?? '');
+
+    expect(content).toContain('Treat it as the agent persistent brain');
+    expect(content).toContain('first rely on startup brain context, loaded skill content, and current conversation');
+    expect(content).toContain('memory_search or memory_recall only when persistent context is missing, stale, ambiguous, or needed for a decision');
+    expect(content).toContain('inspect the current project profile early with memory_project_profile get unless startup context already includes an up-to-date profile');
+    expect(content).toContain('Store durable reusable knowledge with memory_add');
+    expect(content).toContain('Ask before saving global or general user preferences, large project_profile rewrites, contradictions, or policy changes that affect future agents');
+    expect(content).toContain('memory_search returns compact candidates; use memory_get only when full content is needed');
+    expect(content).toContain('Use memory_archive instead of deleting obsolete memories');
   });
   it('memory search and list tool results render compact by default and expand details on demand', () => {
     const result = {
