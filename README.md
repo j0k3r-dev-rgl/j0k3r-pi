@@ -2,12 +2,15 @@
 
 Project-local Pi configuration, extensions, skills, subagents, and workflow documentation for a controlled coding-agent setup.
 
-This repository is organized around four project extensions plus a Spec-Driven Development workflow:
+This repository is organized around seven project extensions plus a Spec-Driven Development workflow:
 
 - Context7 documentation lookup.
 - Persistent memory.
 - Permission guard.
 - Markdown-defined subagents.
+- Skill registry generation.
+- Sidebar/HUD project context.
+- Agent todo tracking.
 - PRD/SDD/OpenSpec workflow with explicit user approval gates.
 
 ## Repository layout
@@ -19,9 +22,12 @@ This repository is organized around four project extensions plus a Spec-Driven D
 ├── openspec/                         # active and archived OpenSpec changes/specs
 └── .pi/
     ├── extensions/                   # project-local Pi extensions
+    │   ├── agent-todo/
     │   ├── context7/
     │   ├── memory/
     │   ├── permission-guard/
+    │   ├── sidebar/
+    │   ├── skill-registry/
     │   └── subagents/
     ├── skills/                       # project skills loaded by Pi on demand
     └── subagents/                    # markdown-defined subagent roles
@@ -35,17 +41,23 @@ Each extension has its own README with setup, configuration, commands/tools, and
 
 | Extension | Purpose | README |
 |---|---|---|
+| `agent-todo` | Single active checklist/todo for the current agent conversation. | `.pi/extensions/agent-todo/README.md` |
 | `context7` | Native Context7 SDK integration for current external docs. | `.pi/extensions/context7/README.md` |
 | `memory` | Local-first SQLite persistent memory, session summaries, project profile, export/import. | `.pi/extensions/memory/README.md` |
 | `permission-guard` | JSON-configurable in-process guard for built-in tools and user bash commands. | `.pi/extensions/permission-guard/README.md` |
+| `sidebar` | Persistent sidebar/HUD with live project, git, todo, and subagent context. | `.pi/extensions/sidebar/README.md` |
+| `skill-registry` | Generates project/global skill registry artifacts for routing and discovery. | `.pi/extensions/skill-registry/README.md` |
 | `subagents` | Markdown-defined delegated agents, SDD phase agents, task history, model profiles. | `.pi/extensions/subagents/README.md` |
 
 ### Extension validation commands
 
 ```bash
+cd .pi/extensions/agent-todo && npm test && npm run typecheck
 cd .pi/extensions/context7 && npm test && npm run typecheck
 cd .pi/extensions/memory && npm test && npm run typecheck
 cd .pi/extensions/permission-guard && npm test && npm run typecheck
+cd .pi/extensions/sidebar && npm test && npm run typecheck
+cd .pi/extensions/skill-registry && npm test && npm run typecheck
 cd .pi/extensions/subagents && npm test && npm run typecheck
 ```
 
@@ -58,6 +70,8 @@ Common project-local config files:
 | `.pi/context7.json` | Context7 extension | Optional cache/defaults for Context7. Secrets must stay in `CONTEXT7_API_KEY`. |
 | `.pi/memory.json` | Memory extension | Canonical project name, cloud metadata, and `session_end.semantic`. |
 | `.pi/permissions.json` | Permission guard | Project-specific permission policy and safe bash commands. |
+| `.pi/skill-registry.json` | Skill registry extension | Generated machine-readable skill registry. |
+| `.pi/skill-registry.md` | Skill registry extension | Generated human-readable skill registry. |
 | `.pi/subagents.json` | Subagents extension | Project overrides for defaults and model profiles. |
 | `.pi/subagents/*.md` | Subagents extension | Markdown-defined agents and SDD phases. |
 
