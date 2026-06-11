@@ -180,6 +180,7 @@ function findRunningPiPackageRoot(): string | undefined {
 
 export function resetPiComponentCacheForTests(): void {
   piComponents = undefined;
+  builtInToolDefinitionCache.clear();
 }
 
 function loadPiComponents(): Record<string, any> | undefined {
@@ -286,7 +287,11 @@ function renderUserItem(item: SubagentUserItem, context: SubagentThreadRenderCon
   return [`${item.label ?? 'user'}: ${item.text}`];
 }
 
+const builtInToolDefinitionCache = new Map<string, unknown>();
+
 function builtInToolDefinition(name: string, cwd: string): unknown {
+  const key = `${cwd}\0${name}`;
+  if (builtInToolDefinitionCache.has(key)) return builtInToolDefinitionCache.get(key);
   const pi = loadPiComponents();
   const factoryByName: Record<string, string> = {
     read: 'createReadToolDefinition',
@@ -301,11 +306,19 @@ function builtInToolDefinition(name: string, cwd: string): unknown {
   if (!factoryName) return undefined;
   const createSpecificToolDefinition = pi?.[factoryName];
   if (typeof createSpecificToolDefinition === 'function') {
-    try { return createSpecificToolDefinition(cwd); } catch {}
+    try {
+      const definition = createSpecificToolDefinition(cwd);
+      builtInToolDefinitionCache.set(key, definition);
+      return definition;
+    } catch {}
   }
   const createToolDefinition = pi?.createToolDefinition;
   if (typeof createToolDefinition !== 'function') return undefined;
-  try { return createToolDefinition(name, cwd); } catch { return undefined; }
+  try {
+    const definition = createToolDefinition(name, cwd);
+    builtInToolDefinitionCache.set(key, definition);
+    return definition;
+  } catch { return undefined; }
 }
 
 function argString(value: unknown): string {

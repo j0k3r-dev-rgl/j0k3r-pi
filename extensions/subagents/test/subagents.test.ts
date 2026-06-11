@@ -231,7 +231,9 @@ describe('subagents extension', () => {
     fs.mkdirSync(shimDir);
     fs.symlinkSync(path.join(packageRoot, 'dist', 'cli.js'), path.join(shimDir, 'pi'));
     fs.writeFileSync(path.join(packageRoot, 'index.cjs'), `
-      exports.createReadToolDefinition = (cwd) => ({ name: 'read', cwd });
+      let readDefinitionCalls = 0;
+      exports.createReadToolDefinition = (cwd) => { readDefinitionCalls += 1; return { name: 'read', cwd, readDefinitionCalls }; };
+      exports.__readDefinitionCalls = () => readDefinitionCalls;
       exports.ToolExecutionComponent = class {
         constructor(name, id, args, options, definition, tui, cwd) { this.name = name; this.args = args; this.definition = definition; this.cwd = cwd; }
         markExecutionStarted() {}
@@ -258,6 +260,20 @@ describe('subagents extension', () => {
 
       expect(lines.join('\n')).toContain(`pi-tool:200:read:${tmp}:AGENTS.md:file result`);
       expect(lines.join('\n')).not.toContain('read completed ·');
+
+      const second = renderThreadBody({
+        version: 1,
+        source: 'events',
+        items: [{ type: 'tool', name: 'read', status: 'completed', arguments: { path: 'README.md' }, result: { content: [{ type: 'text', text: 'second result' }], isError: false } }],
+      } as any, {
+        cwd: tmp,
+        tui: { requestRender() {} },
+        renderWidth: 200,
+        visibleWidth: (text: string) => text.length,
+        truncateToWidth: (text: string, width: number) => text.length > width ? text.slice(0, width) : text,
+      } as any);
+      expect(second.join('\n')).toContain('README.md:second result');
+      expect(require(packageRoot).__readDefinitionCalls()).toBe(1);
     } finally {
       process.argv[1] = oldArgv1;
       resetPiComponentCacheForTests();
@@ -425,6 +441,63 @@ describe('subagents extension', () => {
 
     expect(Math.max(...widths)).toBeLessThanOrEqual(100);
     expect(text).toContain('…');
+  });
+
+  it('hydrates the selected history task snapshot lazily and memoizes rendered structured body', () => {
+    resetPiComponentCacheForTests();
+    const packageRoot = path.join(tmp, 'fake-pi-panel-memo-package');
+    fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({ name: '@earendil-works/pi-coding-agent', main: 'index.cjs' }));
+    fs.writeFileSync(path.join(packageRoot, 'dist', 'cli.js'), '#!/usr/bin/env node\n');
+    const shimDir = path.join(tmp, 'bin-panel-memo');
+    fs.mkdirSync(shimDir);
+    fs.symlinkSync(path.join(packageRoot, 'dist', 'cli.js'), path.join(shimDir, 'pi'));
+    fs.writeFileSync(path.join(packageRoot, 'index.cjs'), `
+      let assistantRenders = 0;
+      exports.__assistantRenders = () => assistantRenders;
+      exports.getMarkdownTheme = () => ({});
+      exports.AssistantMessageComponent = class {
+        constructor(message) { this.message = message; }
+        render(width) { assistantRenders += 1; return ['assistant-render:' + width + ':' + this.message.content[0].text]; }
+      };
+    `);
+    const oldArgv1 = process.argv[1];
+    process.argv[1] = path.join(shimDir, 'pi');
+    try {
+      const summaryTask: SubagentTask = {
+        id: 'subtask_lazy_panel',
+        agent: 'analyst',
+        mode: 'task',
+        status: 'completed',
+        task: 'lazy panel',
+        created_at: new Date().toISOString(),
+        last_activity_at: '2026-01-01T00:00:00.000Z',
+      } as any;
+      const fullTask: SubagentTask = {
+        ...summaryTask,
+        thread_snapshot: { version: 1, updated_at: 'snapshot-v1', source: 'events', items: [{ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'hydrated snapshot body' }] } }] },
+      } as any;
+      let detailLoads = 0;
+      const panel = new SubagentsHistoryPanel(
+        [summaryTask],
+        { fg: (_name: string, text: string) => text },
+        () => undefined,
+        () => false,
+        (text) => text.length,
+        (text, width) => text.length > width ? text.slice(0, width) : text,
+        { cwd: tmp },
+        20,
+        (id) => { detailLoads += 1; return id === fullTask.id ? fullTask : undefined; },
+      );
+
+      expect(panel.render(120).join('\n')).toContain('assistant-render:120:hydrated snapshot body');
+      expect(panel.render(120).join('\n')).toContain('assistant-render:120:hydrated snapshot body');
+      expect(detailLoads).toBe(1);
+      expect(require(packageRoot).__assistantRenders()).toBe(1);
+    } finally {
+      process.argv[1] = oldArgv1;
+      resetPiComponentCacheForTests();
+    }
   });
 
   it('keeps legacy history panel fallback when thread_snapshot is missing or invalid', () => {
@@ -1936,6 +2009,28 @@ describe('subagents extension', () => {
     const freshManager = new SubagentManager(mockRunner());
     const persisted = freshManager.getTask(result.task_ids[0], tmp);
     expect(persisted?.thread_snapshot).toEqual(finalSnapshot);
+  });
+
+  it('can list session history without parsing thread snapshots and hydrate them on demand', () => {
+    const store = new SubagentHistoryStore();
+    const task: SubagentTask = {
+      id: 'subtask_lazy_history_1',
+      agent: 'analyst',
+      mode: 'task',
+      status: 'completed',
+      task: 'lazy history snapshot',
+      created_at: new Date().toISOString(),
+      session_id: 'session-lazy',
+      thread_snapshot: statusSnapshot('lazy snapshot body'),
+    } as any;
+    store.upsertTask(tmp, task);
+
+    const listed = store.listSessionTasks(tmp, 'session-lazy', 100, { includeSnapshots: false });
+    expect(listed).toHaveLength(1);
+    expect(listed[0].thread_snapshot).toBeUndefined();
+
+    const hydrated = store.getTask(tmp, task.id);
+    expect(hydrated?.thread_snapshot).toEqual(statusSnapshot('lazy snapshot body'));
   });
 
   it('persists only bounded valid thread snapshots and ignores corrupt history snapshot JSON', () => {

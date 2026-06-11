@@ -62,6 +62,8 @@ export class SubagentsHistoryPanel {
   private followTail = true;
   private lastMaxScroll = 0;
   private toolOutputExpanded = false;
+  private hydratedTasks = new Map<string, { signature: string; task: SubagentTask }>();
+  private bodyCache = new Map<string, string[]>();
 
   constructor(
     private tasksProvider: SubagentTask[] | (() => SubagentTask[]),
@@ -72,6 +74,7 @@ export class SubagentsHistoryPanel {
     private truncateToWidth: (text: string, width: number) => string,
     private renderContext: Partial<SubagentThreadRenderContext> = {},
     private maxLinesProvider: number | (() => number) = 42,
+    private taskResolver?: (id: string) => SubagentTask | undefined,
   ) {}
 
   invalidate(): void {}
@@ -162,7 +165,7 @@ export class SubagentsHistoryPanel {
       return lines;
     }
 
-    const task = tasks[this.selected]!;
+    const task = this.resolveTaskForBody(tasks[this.selected]!);
     const usage = formatUsage(task.usage);
     lines.push(line(`${accent(`${this.selected + 1}/${tasks.length}`)}  ${dim('agent:')} ${accent(task.agent)}  ${dim('status:')} ${status(task)}  ${dim('effort:')} ${accent(task.effort ?? 'default/current')}`));
     lines.push(line(`${dim('model:')} ${task.model ?? 'default/current'}  ${dim('id:')} ${task.id}  ${dim('duration:')} ${fmtDuration(task)}`));
@@ -240,7 +243,30 @@ export class SubagentsHistoryPanel {
     return this.truncateToWidth(raw, width);
   }
 
+  private taskSignature(task: SubagentTask): string {
+    const snapshot = task.thread_snapshot;
+    return [task.id, task.status, task.last_activity_at ?? '', task.ended_at ?? '', snapshot?.updated_at ?? '', snapshot?.items?.length ?? 0].join('|');
+  }
+
+  private resolveTaskForBody(task: SubagentTask): SubagentTask {
+    if (task.thread_snapshot || !this.taskResolver) return task;
+    const signature = this.taskSignature(task);
+    const cached = this.hydratedTasks.get(task.id);
+    if (cached?.signature === signature) return cached.task;
+    const hydrated = this.taskResolver(task.id) ?? task;
+    this.hydratedTasks.set(task.id, { signature, task: hydrated });
+    return hydrated;
+  }
+
+  private bodyCacheKey(task: SubagentTask, width: number): string {
+    return [this.taskSignature(task), width, this.toolOutputExpanded ? 'expanded' : 'collapsed'].join('|');
+  }
+
   private bodyLinesFor(task: SubagentTask, width: number): string[] {
+    const cacheKey = this.bodyCacheKey(task, width);
+    const cached = this.bodyCache.get(cacheKey);
+    if (cached) return cached;
+    let lines: string[];
     if (isValidThreadSnapshot(task.thread_snapshot)) {
       const rendered = renderThreadBody(task.thread_snapshot, {
         ...this.renderContext,
@@ -251,9 +277,16 @@ export class SubagentsHistoryPanel {
         renderWidth: width,
         toolOutputExpanded: this.toolOutputExpanded,
       });
-      return rendered.length ? rendered : [''];
+      lines = rendered.length ? rendered : [''];
+    } else {
+      lines = [this.executionFlowFor(task)];
     }
-    return [this.executionFlowFor(task)];
+    this.bodyCache.set(cacheKey, lines);
+    if (this.bodyCache.size > 50) {
+      const oldest = this.bodyCache.keys().next().value;
+      if (oldest !== undefined) this.bodyCache.delete(oldest);
+    }
+    return lines;
   }
 
   private executionFlowFor(task: SubagentTask): string {

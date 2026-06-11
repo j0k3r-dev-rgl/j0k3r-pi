@@ -5,6 +5,63 @@ import path from 'node:path';
 import type { SubagentDefinition, SubagentsConfig } from '../src/types.js';
 
 describe('subagent runner permission-required bridge', () => {
+  it('uses a lean resource loader for subagent sessions when configured', async () => {
+    vi.resetModules();
+    const session = {
+      subscribe: vi.fn(() => vi.fn()),
+      prompt: vi.fn(async () => undefined),
+      messages: [{ role: 'assistant', content: 'lean done' }],
+      dispose: vi.fn(async () => undefined),
+    };
+    const createAgentSession = vi.fn(() => ({ session }));
+    const inMemory = vi.fn(() => ({ kind: 'memory-session' }));
+    const loaderInstances: any[] = [];
+    class DefaultResourceLoader {
+      options: any;
+      reload = vi.fn(async () => undefined);
+      constructor(options: any) { this.options = options; loaderInstances.push(this); }
+    }
+    vi.doMock('@earendil-works/pi-coding-agent', () => ({
+      DefaultResourceLoader,
+      getAgentDir: () => '/agent-dir',
+      SessionManager: { inMemory },
+      createAgentSession,
+    }));
+
+    const { sdkSubagentRunner } = await import('../src/runner.js');
+    const definition: SubagentDefinition = {
+      name: 'analyst',
+      description: 'analysis',
+      filePath: '/tmp/analyst.md',
+      instructions: 'return a concise result',
+      tools: ['read'],
+    };
+    const config: SubagentsConfig = {
+      timeout_ms: 10_000,
+      stall_timeout_ms: 10_000,
+      max_concurrency: 1,
+      default_tools: ['read'],
+      model_profiles: {},
+      session_resources: 'lean',
+    };
+
+    const result = await sdkSubagentRunner({
+      definition,
+      task: 'lean startup',
+      cwd: '/workspace',
+      ctx: { model: { provider: 'test', id: 'model' } },
+      config,
+      signal: new AbortController().signal,
+    });
+
+    expect(result.result).toBe('lean done');
+    expect(loaderInstances).toHaveLength(1);
+    expect(loaderInstances[0].reload).toHaveBeenCalledTimes(1);
+    expect(loaderInstances[0].options).toMatchObject({ cwd: '/workspace', agentDir: '/agent-dir', noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true });
+    expect(inMemory).toHaveBeenCalledWith('/workspace');
+    expect(createAgentSession).toHaveBeenCalledWith(expect.objectContaining({ resourceLoader: loaderInstances[0], cwd: '/workspace', tools: ['read'] }));
+  });
+
   it('preserves structured permission requests from nested tool failures while keeping result surfaces marker-free', async () => {
     vi.resetModules();
     const payload = {

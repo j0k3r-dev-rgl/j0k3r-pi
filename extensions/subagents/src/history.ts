@@ -39,6 +39,8 @@ function parseSnapshotJson(text: unknown): SubagentThreadSnapshot | undefined {
     return undefined;
   }
 }
+type HistoryReadOptions = { includeSnapshots?: boolean };
+
 export class SubagentHistoryStore {
   private dbs = new Map<string, Db>();
 
@@ -177,27 +179,27 @@ export class SubagentHistoryStore {
     `).run(task.id, cwd, task.last_activity_at ?? new Date().toISOString(), task.status, activity, value(task.output_preview));
   }
 
-  getTask(cwd: string, id: string): SubagentTask | undefined {
+  getTask(cwd: string, id: string, options: HistoryReadOptions = {}): SubagentTask | undefined {
     const rows = this.db(cwd).prepare(`
       SELECT * FROM subagent_tasks WHERE cwd = ? AND id = ? LIMIT 1
     `).all(cwd, id);
-    return rows.length ? rowToTask(rows[0]) : undefined;
+    return rows.length ? rowToTask(rows[0], options) : undefined;
   }
 
-  listTasks(cwd: string, limit = 100): SubagentTask[] {
+  listTasks(cwd: string, limit = 100, options: HistoryReadOptions = {}): SubagentTask[] {
     return this.db(cwd).prepare(`
       SELECT * FROM subagent_tasks WHERE cwd = ? ORDER BY created_at DESC LIMIT ?
-    `).all(cwd, limit).map(rowToTask);
+    `).all(cwd, limit).map((row) => rowToTask(row, options));
   }
 
-  listSessionTasks(cwd: string, sessionId: string, limit = 100): SubagentTask[] {
+  listSessionTasks(cwd: string, sessionId: string, limit = 100, options: HistoryReadOptions = {}): SubagentTask[] {
     return this.db(cwd).prepare(`
       SELECT * FROM subagent_tasks WHERE cwd = ? AND session_id = ? ORDER BY created_at DESC LIMIT ?
-    `).all(cwd, sessionId, limit).map(rowToTask);
+    `).all(cwd, sessionId, limit).map((row) => rowToTask(row, options));
   }
 }
 
-function rowToTask(row: any): SubagentTask {
+function rowToTask(row: any, options: HistoryReadOptions = {}): SubagentTask {
   return {
     id: row.id,
     agent: row.agent,
@@ -230,6 +232,6 @@ function rowToTask(row: any): SubagentTask {
     fallback_used: row.fallback_used === null || row.fallback_used === undefined ? undefined : Boolean(row.fallback_used),
     error: row.error ?? undefined,
     result: row.result ?? undefined,
-    thread_snapshot: parseSnapshotJson(row.thread_snapshot_json),
+    thread_snapshot: options.includeSnapshots === false ? undefined : parseSnapshotJson(row.thread_snapshot_json),
   };
 }

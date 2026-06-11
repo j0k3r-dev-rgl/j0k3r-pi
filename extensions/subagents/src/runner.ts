@@ -605,9 +605,37 @@ async function loadPiSdkModule(): Promise<any> {
   return piSdkModulePromise;
 }
 
-async function createSession(model: any, cwd: string, tools: string[], effort?: ThinkingEffort) {
-  const { createAgentSession, SessionManager } = await loadPiSdkModule();
-  return createAgentSession({ cwd, model, thinkingLevel: effort, tools, sessionManager: SessionManager.inMemory() });
+async function createSession(model: any, cwd: string, tools: string[], effort: ThinkingEffort | undefined, config: SubagentsConfig, ctx: any) {
+  const piSdk = await loadPiSdkModule();
+  const { createAgentSession, SessionManager } = piSdk;
+  const options: Record<string, unknown> = {
+    cwd,
+    model,
+    thinkingLevel: effort,
+    tools,
+    sessionManager: SessionManager.inMemory(cwd),
+  };
+  if (ctx?.authStorage) options.authStorage = ctx.authStorage;
+  if (ctx?.modelRegistry) options.modelRegistry = ctx.modelRegistry;
+  if (ctx?.settingsManager) options.settingsManager = ctx.settingsManager;
+  if (config.session_resources === 'lean') {
+    const DefaultResourceLoader = piSdk.DefaultResourceLoader;
+    const agentDir = typeof piSdk.getAgentDir === 'function' ? piSdk.getAgentDir() : undefined;
+    if (typeof DefaultResourceLoader !== 'function') throw new Error('Subagent lean session resources require DefaultResourceLoader from Pi SDK.');
+    const resourceLoader = new DefaultResourceLoader({
+      cwd,
+      agentDir,
+      settingsManager: ctx?.settingsManager,
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      noContextFiles: true,
+    });
+    await resourceLoader.reload();
+    options.agentDir = agentDir;
+    options.resourceLoader = resourceLoader;
+  }
+  return createAgentSession(options);
 }
 
 function selectedModel(input: { ctx: any; definition: SubagentDefinition; profile: EffectiveSubagentProfile }): any | undefined {
@@ -630,7 +658,7 @@ export const sdkSubagentRunner: SubagentRunner = async ({ definition, task, cont
 
   async function attempt(model: any) {
     onActivity?.({ message: `starting ${definition.name} with model ${modelLabel(model) ?? 'unknown'}${effort ? ` effort ${effort}` : ''}`, prompt, effort });
-    const { session } = await createSession(model, cwd, tools, effort);
+    const { session } = await createSession(model, cwd, tools, effort, config, ctx);
     const unregisterPermissionSession = registerPermissionSubagentSession(session, definition);
     try {
       const { result, usage, thread_snapshot, permission_request } = await promptWithInactivity(session, prompt, config.stall_timeout_ms, signal, onActivity, context, cwd);

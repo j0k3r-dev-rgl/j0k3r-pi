@@ -131,6 +131,7 @@ export default function subagentsExtension(pi: any): void {
             imageWidthCells: ctx?.imageWidthCells,
           },
           () => Math.max(12, process.stdout.rows || 42),
+          (id: string) => manager.getTask(id, cwd),
         );
         refresh = setInterval(() => tui.requestRender?.(), 1000);
         return {

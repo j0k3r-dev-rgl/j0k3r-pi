@@ -505,7 +505,7 @@ export class SubagentManager {
     const key = `${cwd}\0${sessionId}`;
     const cached = this.sessionTaskCache.get(key);
     if (cached && cached.expiresAt > Date.now()) return cached.tasks;
-    const tasks = this.history.listSessionTasks(cwd, sessionId);
+    const tasks = this.history.listSessionTasks(cwd, sessionId, 100, { includeSnapshots: false });
     this.sessionTaskCache.set(key, { expiresAt: Date.now() + SESSION_TASK_CACHE_MS, tasks });
     return tasks;
   }

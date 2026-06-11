@@ -103,6 +103,7 @@ Example:
   "timeout_ms": 600000,
   "stall_timeout_ms": 120000,
   "max_concurrency": 5,
+  "session_resources": "full",
   "default_tools": [
     "read",
     "memory_context",
@@ -133,6 +134,7 @@ Example:
 | `timeout_ms` | `600000` | Total timeout per subagent task. |
 | `stall_timeout_ms` | `120000` | Inactivity timeout for a subagent session. |
 | `max_concurrency` | `5` | Max concurrent subagent tasks per cwd/config pair. |
+| `session_resources` | `full` | SDK resource loading mode. Use `lean` to skip skills, prompt templates, themes, and context files in nested subagent sessions while keeping extensions/tools available. |
 | `default_tools` | see below | Default tool allowlist for agents without frontmatter tools. |
 
 Default tools:

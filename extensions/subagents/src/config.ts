@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { ModelRef, SubagentDefinition, SubagentModelProfile, SubagentModelProfiles, SubagentsConfig, ThinkingEffort } from './types.js';
+import type { ModelRef, SubagentDefinition, SubagentModelProfile, SubagentModelProfiles, SubagentSessionResources, SubagentsConfig, ThinkingEffort } from './types.js';
 
 const DEFAULT_TOOLS = ['read', 'memory_context', 'memory_search', 'memory_recall', 'memory_get'];
 const DEFAULT_MAX_CONCURRENCY = 5;
@@ -104,6 +104,11 @@ export function parseEffort(value: any): ThinkingEffort | undefined {
   return THINKING_EFFORTS.has(effort) ? effort as ThinkingEffort : undefined;
 }
 
+function parseSessionResources(value: any): SubagentSessionResources {
+  const resources = String(value ?? 'full').trim().toLowerCase();
+  return resources === 'lean' ? 'lean' : 'full';
+}
+
 function parseModelProfile(value: unknown): SubagentModelProfile | undefined {
   if (!isPlainObject(value)) return undefined;
   const profile: SubagentModelProfile = {};
@@ -159,6 +164,7 @@ export function readSubagentsConfig(cwd: string): SubagentsConfig {
     stall_timeout_ms: positiveInteger(raw.stall_timeout_ms, DEFAULT_STALL_TIMEOUT_MS),
     max_concurrency: positiveInteger(raw.max_concurrency, DEFAULT_MAX_CONCURRENCY),
     default_tools: sanitizeTools(Array.isArray(raw.default_tools) ? raw.default_tools.map(String) : DEFAULT_TOOLS),
+    session_resources: parseSessionResources(raw.session_resources ?? raw.sessionResources),
   };
 }
 

@@ -37,6 +37,8 @@ export type SubagentDefinition = {
   tools: string[];
 };
 
+export type SubagentSessionResources = 'full' | 'lean';
+
 export type SubagentsConfig = {
   default_model?: ModelRef;
   default_effort?: ThinkingEffort;
@@ -45,6 +47,7 @@ export type SubagentsConfig = {
   stall_timeout_ms: number;
   max_concurrency: number;
   default_tools: string[];
+  session_resources?: SubagentSessionResources;
 };
 
 export type SubagentRunInput = {
