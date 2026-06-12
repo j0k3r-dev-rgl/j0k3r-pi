@@ -96,8 +96,8 @@ Use this skill when the user asks to create, modify, review, standardize, or doc
    - `Output Contract`;
    - `References`.
 5. Validate that the registry contract JSON parses mentally or with a lightweight command when appropriate.
-6. Regenerate the skill registry after creating or updating any `SKILL.md` when the current agent/session should use the new routing immediately.
-7. Read the regenerated `.pi/skill-registry.json` or equivalent tool output to confirm the updated skill appears with expected paths, keywords, priority, and related skills.
+6. Regenerate the skill registry after creating or updating any `SKILL.md` when generated artifacts should reflect the change immediately.
+7. Use `skill_registry_resolve` as the primary confirmation/routing helper for the current session: query by intent, touched `SKILL.md` path, and SDD phase when relevant, then confirm the updated skill appears with expected paths, keywords, priority, related skills, and read-before-acting guidance. Read `.pi/skill-registry.json` directly only for debugging or when resolver/generator tools are unavailable.
 
 ## Output Contract
 

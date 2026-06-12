@@ -124,14 +124,13 @@ Before creating PRD/OpenSpec artifacts or launching any SDD subagent:
    - if the user is clearly continuing/refining/verifying the same pending SDD/change scope, continue and mention the related dirty state;
    - if starting a new unrelated SDD/change or the relationship is unclear, ask whether to commit, stash, discard, or explicitly continue with a mixed worktree.
 3. Run the skill registry preflight:
-   - use the `skill_registry_generate` tool with `write=true` when available; generated `.pi/skill-registry.json` and `.pi/skill-registry.md` must be added to an existing `.gitignore` when missing, and no `.gitignore` should be created when absent;
-   - in interactive contexts, `/skill-registry generate` is the human command entrypoint;
-   - if neither is available, stop and report that the skill-registry extension must be loaded/reloaded instead of using ad hoc fallback scripts;
-   - read `.pi/skill-registry.json` after generation;
-   - treat the registry as the routing index for both project-local skills (`.pi/skills`, `.agents/skills`) and global/user skills (`~/.pi/agent/skills`, `~/.agents/skills`);
-   - select relevant skills by request intent, touched paths, keywords, SDD phase, priority, and related skills;
-   - read each selected `SKILL.md` from the path reported by the registry before relying on it; do not assume a fixed `.pi/skills/...` location;
-   - pass selected skill names, paths, and applicability notes into any delegated SDD subagent context.
+   - use `skill_registry_resolve` as the primary routing helper for selecting candidate skills by request intent, touched paths, SDD phase, priority, and related skills;
+   - call `skill_registry_resolve` with `stale_check=true` before formal SDD planning/delegation when skills may affect routing, so cache status (`fresh`, `stale`, `missing`, `invalid`) is visible without manual `.pi/skill-registry.json` inspection;
+   - if generated registry artifacts must be refreshed or the resolver reports stale/missing/invalid cache, use `skill_registry_generate` with `write=true`; generated `.pi/skill-registry.json` and `.pi/skill-registry.md` must be added to an existing `.gitignore` when missing, and no `.gitignore` should be created when absent;
+   - in interactive contexts, `/skill-registry generate` remains the human command entrypoint for regeneration;
+   - if resolver/generator tools are unavailable, stop and report that the skill-registry extension must be loaded/reloaded instead of using ad hoc fallback scripts;
+   - read each selected `SKILL.md` from the path returned by `skill_registry_resolve` before relying on it; do not assume a fixed `.pi/skills/...` location;
+   - pass selected skill names, paths, match reasons, and applicability notes into any delegated SDD subagent context.
 4. Resolve the SDD execution mode.
 5. Resolve the change slug and artifact store if needed.
 6. Confirm implementation approval separately from planning approval.
@@ -496,7 +495,7 @@ Before launching a subagent, prepare a focused task with:
 - current known state;
 - required prior artifact paths/summaries;
 - OpenSpec config path and relevant change metadata path/content summary, if present;
-- relevant skills loaded from the skill registry, including skill name, `SKILL.md` path, why it applies, and any related skills deliberately loaded or discarded;
+- relevant skills selected via `skill_registry_resolve`, including skill name, `SKILL.md` path, match reasons, and any related skills deliberately loaded or discarded;
 - allowed and forbidden actions;
 - expected return envelope;
 - validation expectations, when relevant.

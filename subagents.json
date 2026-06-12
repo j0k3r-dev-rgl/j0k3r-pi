@@ -12,11 +12,11 @@
   ],
   "model_profiles": {
     "discovery": {
-      "model": "gemini-subscription/gemini-3-flash-preview",
+      "model": "openai-codex/gpt-5.4",
       "effort": "medium"
     },
     "sdd-apply": {
-      "model": "gemini-subscription/gemini-3-flash-preview"
+      "model": "openai-codex/gpt-5.3-codex-spark"
     },
     "sdd-archive": {
       "model": "openai-codex/gpt-5.4-mini"
