@@ -40,14 +40,14 @@ description: Operate the project's PRD/SDD/OpenSpec workflow, including flow sel
 }
 ```
 
-Use this skill when starting, continuing, validating, or closing PRD/SDD/OpenSpec work, or when deciding whether a request should use inline, simple TDD, discovery, or the formal SDD pipeline.
+Use this skill when formal PRD/SDD/OpenSpec work is requested, likely, active, being continued, validated, or closed. For general workflow uncertainty, use `workflow-triage` first; `sdd-workflow` should not compete as the general-purpose router.
 
 ## Core principles
 
 - Keep the user in control.
 - Choose the lightest safe workflow.
 - Do not create SDD/OpenSpec artifacts or launch SDD subagents for a new flow until the SDD mode gate is resolved.
-- Use discovery for isolated research before deciding to start formal SDD.
+- Use `workflow-triage` before discovery or SDD when the route is unclear. Use discovery only when the orchestrator lacks read-only evidence needed to decide whether formal SDD is warranted; discovery informs but does not decide the workflow.
 - Treat investigation/discovery as read-only diagnosis, not permission to solve or implement.
 - Use SDD subagents as phase executors only; the main agent remains the orchestrator.
 - Strict TDD still applies to implementation work.
@@ -59,7 +59,7 @@ Load this skill before:
 
 - creating a PRD, proposal, spec, design, task plan, verification plan, or archive;
 - starting or continuing a named SDD/OpenSpec change;
-- deciding whether to route a substantial request to discovery or SDD;
+- deciding SDD details after `workflow-triage` or the current conversation indicates formal SDD may be warranted;
 - launching any `sdd-*` subagent;
 - applying or verifying an existing SDD task;
 - recovering the state of an active SDD flow.
@@ -120,11 +120,11 @@ Policy-sensitive paths include `AGENTS.md`; project-local skills/subagents such 
 |---|---|---|---|
 | Direct answer | no code change, no durable artifact value | Inline | none |
 | Tiny inspection | one obvious file/answer, low risk | Inline read-only | none |
-| Investigation/review/diagnosis | user asks to investigate, compare, inspect code/docs/apis, or understand risk before implementation | Read-only investigation; use Discovery when delegated research adds value | `discovery` only when useful |
+| Investigation/review/diagnosis | user asks to investigate, compare, inspect code/docs/apis, or understand risk before implementation | Read-only investigation; use `workflow-triage` when routing is unclear; use Discovery only when delegated research adds value | `discovery` only when useful |
 | Small localized code fix | clear behavior, cheap validation | Simple TDD | none by default |
 | One-extension or one-module change | existing tests, limited architecture risk, no durable artifact value | Simple TDD | none by default |
 | Documentation-only cleanup | no behavior change, no durable spec value, not policy-sensitive | Inline edit with focused validation | none by default |
-| Policy-sensitive agent behavior change | touches agent instructions, skills, subagents, permissions, memory/config, workflow extension behavior, or future agent behavior | Discovery or formal SDD by default; inline only for small explicit wording/config fixes | `discovery` when impact is unclear; SDD phase agents when formal planning is approved |
+| Policy-sensitive agent behavior change | touches agent instructions, skills, subagents, permissions, memory/config, workflow extension behavior, or future agent behavior | Use `workflow-triage` first; inline/docs-only for small clear fixes; discovery only when evidence is missing; formal SDD only when risk or artifact value warrants it | `discovery` only for needed evidence; SDD phase agents only after formal planning is approved |
 | New named PRD/SDD planning | user wants PRD/spec/design/tasks, mode resolved, planning approved | SDD planning sequence | `sdd-explore` → `sdd-proposal` → `sdd-spec` → `sdd-design` → `sdd-task` |
 | Multi-file/cross-cutting feature from scratch | unclear requirements, new API/contract, architecture risk, or handoff value | Full SDD feature sequence | planning sequence → approved `sdd-apply` → `sdd-verify` → optional `sdd-archive` |
 | Formal SDD exploration only | mode resolved and user approved named SDD exploration | SDD explore-only | `sdd-explore` |
@@ -137,12 +137,12 @@ When uncertain between simple TDD and SDD, prefer the lighter workflow unless th
 
 Routing guardrails:
 
-- Investigation/discovery is read-only by default and must end with options plus a user decision.
+- Investigation/discovery is read-only by default. It must give the orchestrator enough evidence to present options or questions to the user and wait for the user's decision.
 - Do not convert investigation into implementation unless the user explicitly approves the selected path.
 - For localized extension/module changes with tests, use Simple TDD rather than full SDD unless there is new API/contract or cross-cutting architecture risk.
 - Do not downshift policy-sensitive, cross-cutting, or future-agent-behavior changes to inline/simple TDD just because they look like docs/config edits.
-- Before editing policy-sensitive files, state the selected workflow and why it is safe; use SDD by default for multi-file or future-behavior changes, and discovery when impact is unclear.
-- For broad or ambiguous work, use Discovery before SDD when the user has not yet approved formal SDD.
+- Before editing policy-sensitive files, state the selected workflow and why it is safe; use `workflow-triage` first when impact is unclear, use discovery only for missing evidence, and use SDD only when risk or artifact value warrants it.
+- For broad or ambiguous work, use `workflow-triage` before deciding whether discovery or SDD is needed; do not delegate discovery just because the request is ambiguous.
 - For full SDD, implementation approval is separate from planning approval; do not use `sdd-apply` until tasks exist and apply is approved.
 
 ## Investigation and decision gate
@@ -153,19 +153,19 @@ Rules:
 
 - Investigation/discovery/exploration is not implementation approval.
 - Do not edit files, add tests, refactor, change configuration, update OpenSpec artifacts, or save durable memory unless that action is explicitly part of the approved workflow.
-- After investigation, report the cause or likely cause, evidence, uncertainty, impact, options, and recommended next step.
+- After investigation, report the cause or likely cause, evidence, uncertainty, impact, and viable options. The orchestrator chooses and presents the next step; discovery does not own workflow routing.
 - Ask the user to choose whether to implement an option, keep researching, defer, or pick another solution.
 - Never move from discovery/exploration into `sdd-apply` or simple TDD implementation without explicit user approval for the selected path.
 
 ## Discovery vs sdd-explore
 
-Use `discovery` when research is standalone or pre-SDD:
+Use `discovery` when research is standalone or pre-SDD and the orchestrator needs read-only evidence:
 
 - no OpenSpec artifacts;
 - no SDD memory update;
 - no source code edits;
-- output is a bounded research report, options, and next-workflow recommendation;
-- the orchestrator must present the report to the user and wait for the user's decision before implementation.
+- output is a bounded research report with requested facts, constraints, options, risks, and unknowns;
+- the orchestrator must interpret the report, choose the next workflow, present options/questions to the user, and wait for the user's decision before implementation.
 
 Use `sdd-explore` only after the user approved a named SDD flow and the execution mode is resolved:
 
@@ -399,9 +399,11 @@ Discovery may additionally return:
 - research_question;
 - sources_inspected;
 - findings;
-- options;
-- suggested_next_workflow;
-- open_questions_for_user.
+- options, when the orchestrator asked for option comparison;
+- workflow_relevant_observations, when useful;
+- open_questions_or_missing_info.
+
+Discovery does not choose the workflow; the orchestrator interprets the evidence and decides the route.
 
 ## Memory rules for SDD
 

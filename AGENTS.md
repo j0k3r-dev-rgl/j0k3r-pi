@@ -27,7 +27,7 @@ Rules:
 
 ## Workflow selection
 
-Choose the lightest workflow that safely fits the request, but do not use “lightweight” as an excuse to bypass planning gates for policy-sensitive, cross-cutting, or ambiguous work. For simple questions, tiny inspections, and small localized fixes, stay inline or use simple TDD. For substantial PRD/SDD/OpenSpec work, load the `sdd-workflow` skill and follow it as the operational source of truth for routing tables, phase details, artifact formats, subagent checklists, continue/apply rules, and return envelopes.
+Choose the lightest workflow that safely fits the request, but do not use “lightweight” as an excuse to bypass planning gates for policy-sensitive, cross-cutting, or ambiguous work. For simple questions, tiny inspections, and small localized fixes, stay inline or use simple TDD. When the right workflow is unclear, load the `workflow-triage` skill before delegating; use it to classify the request, ask only necessary clarifying questions, and decide whether inline work, simple TDD, read-only discovery, or formal SDD is warranted. Do not call `discovery` just because the request is ambiguous if the orchestrator already has enough context to answer, ask a question, or make a small safe fix. For substantial PRD/SDD/OpenSpec work, load the `sdd-workflow` skill and follow it as the operational source of truth for routing tables, phase details, artifact formats, subagent checklists, continue/apply rules, and return envelopes.
 
 ### Policy-sensitive workflow gate
 
@@ -47,7 +47,7 @@ Rules:
 - If the user asks to investigate or diagnose policy-sensitive behavior, stay read-only and report options first.
 - If implementation is approved for a policy-sensitive change, state the selected workflow before editing and explain why it is inline/simple TDD, discovery, or SDD.
 - Use formal SDD planning by default when the change is multi-file, cross-cutting, changes future agent behavior, introduces or changes a contract/API, or needs durable handoff artifacts.
-- Use discovery before SDD when the scope, impact, or right workflow is unclear.
+- Use `workflow-triage` before SDD or discovery when the scope, impact, or right workflow is unclear; delegate to `discovery` only when read-only evidence is actually needed and current context is insufficient.
 - Inline/docs-only edits are allowed only for small, explicit, localized policy wording fixes with low future-behavior risk.
 
 ### Workflow routing quick table
@@ -58,10 +58,10 @@ Use this table before acting when the request may involve reading files, changin
 |---|---|---|
 | Simple question, explanation, or opinion with no need to inspect files | Inline answer | Answer directly; do not use tools unless the user asks for investigation. |
 | Tiny inspection of one obvious file/path, no change requested | Inline read-only | Inspect minimally and report; do not edit. |
-| User asks to investigate, analyze, review, compare, diagnose, or “look at” behavior | Read-only investigation; use `discovery` only if isolated research is broad enough to benefit from delegation | Report findings/options and wait for the user to choose next action. |
+| User asks to investigate, analyze, review, compare, diagnose, or “look at” behavior | Read-only investigation; use `workflow-triage` when routing is unclear; use `discovery` only if isolated research is broad enough to benefit from delegation | Report findings/options and wait for the user to choose next action. |
 | Small localized implementation with clear expected behavior and existing cheap validation | Simple TDD | If this follows an investigation, confirm the selected implementation path first. Add/update failing test before code when non-trivial. |
 | One-extension or one-module change with tests, limited architecture risk, and no durable PRD/spec value | Simple TDD, not full SDD by default | State expected behavior and validation plan; ask before implementing if the user has not explicitly approved implementation. |
-| Policy-sensitive change touching agent instructions, skills, subagents, permissions, memory/config, workflow extensions, or future agent behavior | Discovery or formal SDD by default; inline only for small explicit wording/config fixes | State workflow choice before editing. Use SDD for multi-file/cross-cutting/future-behavior changes; use discovery first when scope is unclear. |
+| Policy-sensitive change touching agent instructions, skills, subagents, permissions, memory/config, workflow extensions, or future agent behavior | Use `workflow-triage`; inline/docs-only is allowed for small explicit localized fixes; discovery or formal SDD only when risk/evidence/artifact value warrants it | State workflow choice before editing. Do not escalate to SDD when the change is clearly small and already understood. |
 | Multi-file or multi-extension change, new API/contract, cross-cutting behavior, unclear requirements, or durable handoff value | Formal SDD planning | Load `sdd-workflow`; resolve git gate, execution mode, artifact store, and planning approval before artifacts/subagents. |
 | User explicitly asks for PRD/spec/design/tasks/OpenSpec/SDD | Formal SDD | Do not create artifacts or launch SDD subagents until git gate and mode gate are resolved. |
 | Existing SDD task artifact and user asks to implement approved tasks | SDD apply-only | Confirm implementation approval and task slice/range before `sdd-apply`. |
@@ -72,13 +72,13 @@ Important interpretation rules:
 
 - “Investigate/analyze/review” is not implementation approval.
 - “Hagamos eso”, “apply the patch”, or “implement it” after options is implementation approval only for the discussed option; confirm if multiple materially different options remain.
-- Do not escalate a localized, well-understood change to full SDD just because it is non-trivial; use Simple TDD when durable artifacts would add little value.
+- Do not escalate a localized, well-understood change to full SDD just because it is non-trivial; use Simple TDD or inline docs-only when durable artifacts would add little value.
 - Do not downshift policy-sensitive, cross-cutting, or future-agent-behavior changes to inline/simple TDD just because they look like docs/config edits.
 - Do not skip TDD/validation for non-trivial code changes just because the workflow is not full SDD.
 
 ### Discovery gate
 
-Use the `discovery` subagent for isolated research before committing to SDD. Discovery is the explicit non-SDD subagent exception: it may inspect code, project docs, Pi docs/examples, and Context7 documentation, but it must not create OpenSpec artifacts, modify source code, or update active SDD flow memory.
+Use the `discovery` subagent for isolated read-only research only after the orchestrator determines that evidence is missing before choosing or starting a heavier workflow. Discovery is not mandatory and must not run before `workflow-triage` when routing is unclear. Discovery is the explicit non-SDD subagent exception: it may inspect code, project docs, Pi docs/examples, and Context7 documentation, but it must not create OpenSpec artifacts, modify source code, or update active SDD flow memory. Discovery returns the facts, constraints, options, risks, and unknowns requested by the orchestrator; the orchestrator asks user questions and makes the final workflow decision.
 
 ### Dirty worktree overlap rule
 
@@ -113,7 +113,7 @@ For named SDD features, prefer `hybrid` artifact storage unless the user request
 
 ### SDD operational details
 
-Load the selected `sdd-workflow` skill from the skill registry before starting or continuing substantial PRD/SDD/OpenSpec work, before launching any `sdd-*` subagent, or when SDD flow selection is unclear. The skill may be global/user-scoped, for example `~/.pi/agent/skills/sdd-workflow/SKILL.md`, or project-local, for example `.pi/skills/sdd-workflow/SKILL.md`; use registry routing rather than assuming one fixed path. Before formal SDD planning/delegation, generate or refresh the skill registry; the skill-registry command must keep generated registry artifacts ignored when a `.gitignore` exists. The skill owns:
+Load the selected `workflow-triage` skill from the skill registry when the correct workflow is unclear or the user challenges the chosen workflow. Load the selected `sdd-workflow` skill before starting or continuing substantial PRD/SDD/OpenSpec work, before launching any `sdd-*` subagent, or when a formal SDD path is likely. Skills may be global/user-scoped, for example `~/.pi/agent/skills/sdd-workflow/SKILL.md`, or project-local, for example `.pi/skills/sdd-workflow/SKILL.md`; use registry routing rather than assuming one fixed path. Before formal SDD planning/delegation, generate or refresh the skill registry; the skill-registry command must keep generated registry artifacts ignored when a `.gitignore` exists. The SDD workflow skill owns:
 - the full workflow router;
 - discovery vs `sdd-explore` routing;
 - artifact store policy details;
@@ -169,7 +169,7 @@ If no test framework exists, do not silently skip TDD. Explain the limitation an
 
 - The main agent is the orchestrator.
 - Only the orchestrator delegates work to subagents.
-- Project subagents are SDD-focused, with `discovery` as the explicit read-only pre-SDD exception.
+- Project subagents are SDD-focused, with `discovery` as the explicit read-only research exception used when the orchestrator needs evidence before choosing a workflow.
 - Subagents must not delegate to other subagents or communicate with each other directly.
 - `sdd-apply` is the only SDD phase expected to modify application/source code.
 - `sdd-verify` should report issues and not fix them unless the orchestrator explicitly starts a new apply task.

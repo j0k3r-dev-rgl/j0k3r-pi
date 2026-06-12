@@ -1,13 +1,47 @@
 {
-	"default_model": null,
-	"timeout_ms": 1600000,
-	"stall_timeout_ms": 120000,
-	"max_concurrency": 5,
-	"default_tools": [
-		"read",
-		"memory_context",
-		"memory_search",
-		"memory_recall",
-		"memory_get"
-	]
+  "default_model": null,
+  "timeout_ms": 1600000,
+  "stall_timeout_ms": 120000,
+  "max_concurrency": 5,
+  "default_tools": [
+    "read",
+    "memory_context",
+    "memory_search",
+    "memory_recall",
+    "memory_get"
+  ],
+  "model_profiles": {
+    "discovery": {
+      "model": "openai-codex/gpt-5.4",
+      "effort": "medium"
+    },
+    "sdd-apply": {
+      "model": "openai-codex/gpt-5.3-codex-spark"
+    },
+    "sdd-archive": {
+      "model": "openai-codex/gpt-5.4-mini"
+    },
+    "sdd-design": {
+      "model": "openai-codex/gpt-5.5",
+      "effort": "xhigh"
+    },
+    "sdd-explore": {
+      "model": "openai-codex/gpt-5.4"
+    },
+    "sdd-proposal": {
+      "model": "openai-codex/gpt-5.5",
+      "effort": "xhigh"
+    },
+    "sdd-spec": {
+      "model": "openai-codex/gpt-5.5",
+      "effort": "high"
+    },
+    "sdd-task": {
+      "model": "openai-codex/gpt-5.3-codex-spark"
+    },
+    "sdd-verify": {
+      "model": "openai-codex/gpt-5.5",
+      "effort": "high"
+    }
+  }
 }
