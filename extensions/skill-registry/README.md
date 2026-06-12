@@ -27,6 +27,9 @@ The registry is an index for routing. The source of truth remains each `SKILL.md
 | Tool | Purpose |
 |---|---|
 | `skill_registry_generate` | Generate the registry and optionally write output files. Defaults to write. |
+| `skill_registry_resolve` | Resolve candidate skills from the live registry using intent/path/sdd-phase with optional stale-check semantics and one-hop related expansion. Read-only. |
+
+### `skill_registry_generate`
 
 Parameters:
 
@@ -37,6 +40,89 @@ Parameters:
 ```
 
 Use `write: false` for validation or dry-run routing checks.
+
+### `skill_registry_resolve`
+
+Parameters:
+
+```ts
+{
+  intent?: string;
+  paths?: string[]; // project paths; accepts '\\' or '/' and duplicate slashes are normalized
+  sdd_phase?: 'explore' | 'proposal' | 'spec' | 'design' | 'task' | 'apply' | 'verify' | 'archive';
+  include_related?: boolean; // default: true
+  stale_check?: boolean; // default: true
+  max_results?: number; // 1..50, default: 10
+}
+```
+
+Behavior:
+
+- Resolves against a **live in-memory registry** generated for the call (no writes).
+- If `stale_check` is enabled:
+  - compares live `content_hash` against `.pi/skill-registry.json`,
+  - reports `fresh`, `stale`, `missing`, or `invalid` cache state,
+  - does not write or refresh cache files.
+- Ranking is deterministic: score desc, then priority desc, then name asc.
+- Returns direct matches and one-hop related matches (separated).
+- Output is routing-only guidance:
+  - no `SKILL.md` content is included,
+  - response guidance always recommends reading each returned `SKILL.md` before acting.
+- Interactive TUI rendering is compact by default: the detailed routing result is kept for the agent in tool content/details, but the visible tool row shows only a summary until the user expands tool output with Pi's native tool-expand keybinding (default `ctrl+o`).
+
+Response shape includes:
+
+```ts
+{
+  query: {
+    intent?: string,
+    paths: string[],
+    sdd_phase?: string,
+    include_related: boolean,
+    stale_check: boolean,
+    max_results: number,
+  },
+  registry_status: {
+    source: 'live',
+    cache: 'fresh' | 'stale' | 'missing' | 'invalid' | 'not_checked',
+    live_hash: string,
+    cached_hash?: string,
+    cache_path: string,
+  },
+  matches: Array<{
+    name: string,
+    path: string,
+    scope: 'project' | 'global',
+    priority: number,
+    score: number,
+    reasons: Array<{ signal: string; detail: string; weight: number }>;
+    routing: {
+      category: string | null,
+      domains: string[],
+      triggers: Record<string, unknown>,
+      sdd_phases: string[],
+      related_skills: string[],
+    },
+    read_before_acting: string,
+  }>,
+  related_matches: Array<{
+    name: string,
+    path: string,
+    scope: 'project' | 'global',
+    routing: Record<string, unknown>,
+    read_before_acting: string,
+    related_from: string[],
+    relation_reasons: string[],
+  }>,
+  warnings: string[],
+  guidance: string[],
+}
+```
+
+### Command parity note
+
+The `/skill-registry` command set remains unchanged in this MVP (`generate`, `refresh`, `write`, `status`, `list` only). There is **no** `/skill-registry resolve` command parity yet.
+
 
 ## Command
 
