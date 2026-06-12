@@ -44,7 +44,16 @@ Search for `type: sdd_feature_project_state` and the change slug. Update/create 
 
 ## Change metadata and PRD awareness
 
-Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely and treat it as mandatory change context for status, artifact store, source paths, validation expectations, and handoff notes. Then check whether `openspec/changes/{change}/prd.md` exists. If it exists, read it completely and use it as mandatory context for requirements, acceptance criteria, personas, non-goals, and edge cases. Every PRD requirement that enters scope should map to at least one SHALL requirement or be explicitly marked out of scope with rationale. If metadata or PRD is absent, state that it was not found and continue normally.
+Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely and treat it as mandatory change context for status, artifact store, source paths, validation expectations, and handoff notes. Then check whether `openspec/changes/{change}/prd.md` exists only when the orchestrator supplies or requests PRD context for this phase. If it exists and is in scope, read it completely and use it as approved context for requirements, acceptance criteria, personas, non-goals, and edge cases. Every in-scope PRD requirement should map to at least one SHALL requirement or be explicitly marked out of scope with rationale. If metadata or in-scope PRD is absent, state that it was not found and continue normally.
+
+## Alignment check
+
+- `metadata_alignment`: `aligned` only if requirements and constraints map cleanly into spec scope and validation expectations; otherwise `blocked`.
+- `prd_alignment`: `aligned` if in-scope PRD requirements are represented in SHALL language; `blocked` if missing/contradictory; `not-applicable` when no PRD is active.
+- `spec_alignment`: `not-applicable` in this phase as this is the spec output.
+- `conflicts_detected`: list any contradictions or missing mappings between metadata/PRD and the draft spec.
+
+If any item is `blocked`, return `status: blocked` and include the required decision to unblock the flow.
 
 ## Dependencies
 
@@ -78,8 +87,11 @@ Use a single canonical change spec:
 ## Metadata and PRD Alignment
 - Metadata: `openspec/changes/{change}/metadata.yaml` | None
 - PRD: `openspec/changes/{change}/prd.md` | None
+- metadata_alignment: aligned | blocked
+- prd_alignment: aligned | not-applicable | blocked
+- spec_alignment: not-applicable
 - Metadata/PRD requirements mapped: ...
-- Metadata/PRD gaps/conflicts: None | ...
+- Metadata/PRD gaps/conflicts_detected: None | ...
 
 ## Requirements
 
@@ -109,4 +121,4 @@ When a change affects multiple capabilities, group requirements with clear headi
 
 ## Return envelope
 
-Return: status, executive_summary, spec written, artifacts written/updated, memory ids written/updated, risks, next_recommended.
+Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, spec written, artifacts written/updated, memory ids written/updated, risks, next_recommended.

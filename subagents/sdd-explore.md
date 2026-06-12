@@ -69,7 +69,16 @@ If the file exists, read it first and update it instead of blindly overwriting.
 
 ## Change metadata and PRD awareness
 
-Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely and treat it as mandatory change context for slug, status, artifact store, source paths, validation expectations, and handoff notes. Then check whether `openspec/changes/{change}/prd.md` exists. If it exists, read it completely and treat it as mandatory product/requirements context. Reflect relevant metadata and PRD requirements, assumptions, gaps, and conflicts in the exploration output. If metadata or PRD is absent, state that it was not found and continue normally.
+Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely and treat it as mandatory change context for slug, status, artifact store, source paths, validation expectations, and handoff notes. Then check whether `openspec/changes/{change}/prd.md` exists only when the orchestrator supplies or requests PRD context for this phase. If it exists and is in scope, read it completely and treat it as approved product/requirements context. Reflect relevant metadata and approved PRD requirements, assumptions, gaps, and conflicts in the exploration output. If metadata or in-scope PRD is absent, state that it was not found and continue normally.
+
+## Alignment check
+
+- `metadata_alignment`: `aligned` when source constraints and scope are compatible; `blocked` when scope/validation constraints conflict.
+- `prd_alignment`: `aligned` when no in-scope PRD constraints conflict (or `not-applicable` if PRD was not requested in this flow).
+- `spec_alignment`: `not-applicable` in this phase.
+- `conflicts_detected`: list of each conflict with evidence.
+
+If any item is `blocked`, set phase return `status` to `blocked` and include the required decision needed to proceed.
 
 ## Required work
 
@@ -104,9 +113,15 @@ Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists 
 ### Metadata and PRD Alignment
 - Metadata found: Yes/No
 - PRD found: Yes/No
+- Metadata alignment: aligned | blocked
+- PRD alignment: aligned | not-applicable | blocked
+- spec_alignment: not-applicable
 - Relevant metadata/PRD points: ...
 - Metadata/PRD gaps/conflicts: None | ...
 
+### Conflict Resolution
+- conflicts_detected: []
+- required_decision: None | ...
 ### Risks
 - ...
 
@@ -116,4 +131,4 @@ Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists 
 
 ## Return envelope
 
-Return: status, executive_summary, detailed_report, artifacts written/updated, memory ids written/updated, risks, next_recommended.
+Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, detailed_report, artifacts written/updated, memory ids written/updated, risks, next_recommended.

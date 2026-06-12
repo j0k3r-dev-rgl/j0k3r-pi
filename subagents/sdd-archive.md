@@ -45,11 +45,20 @@ Search for `type: sdd_feature_project_state` and the change slug. Update/create 
 
 ## Change metadata and PRD awareness
 
-Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely and preserve it in the archive. Then check whether `openspec/changes/{change}/prd.md` exists. If it exists, read it completely and preserve it in the archive. Ensure archive closure notes mention metadata/PRD alignment, accepted residual metadata/PRD risks, and whether PRD acceptance criteria were verified. If metadata or PRD is absent, state that it was not found and continue normally.
+Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely and preserve it in the archive. Then check whether `openspec/changes/{change}/prd.md` exists only when it is part of the approved change artifacts. If it exists and is in scope, read it completely and preserve it in the archive. Ensure archive closure notes mention metadata/PRD alignment, accepted residual metadata/PRD risks, and whether PRD acceptance criteria were verified when applicable. If metadata or in-scope PRD is absent, state that it was not found and continue normally.
+
+## Alignment check
+
+- `metadata_alignment`: `aligned` when closure artifacts and archive path respect artifact store/scope constraints; `blocked` on mismatch.
+- `prd_alignment`: `aligned` when accepted PRD outcomes are included in closure evidence; `blocked` when outcomes are missing; `not-applicable` if PRD was not part of flow.
+- `spec_alignment`: `aligned` when archived spec scope and archive sync reflect the approved spec; `blocked` when closure omits required normative requirements.
+- `conflicts_detected`: list unresolved conflicts that were accepted with explicit override.
+
+If any item is `blocked`, return `status: blocked` and request explicit override before completing archive.
 
 ## Dependencies
 
-Read verification report first. Then read change metadata if present, PRD if present, proposal, specs, design, tasks, and apply-progress.
+Read verification report first. Then read change metadata if present, PRD if supplied/in scope, proposal, specs, design, tasks, and apply-progress.
 
 For OpenSpec/hybrid use files under `openspec/changes/{change}/`. For memory/hybrid use memory search/get and never rely on compact previews alone. In `memory` mode, all metadata/PRD/proposal/spec/design/tasks/apply-progress/verify details must come from the active SDD flow memory.
 
@@ -103,4 +112,4 @@ Metadata: Present/Absent. PRD: Present/Absent. Acceptance criteria verified: Yes
 
 ## Return envelope
 
-Return: status, executive_summary, specs synced, archive path/report, artifacts written/updated, memory ids written/updated, risks/issues, next_recommended.
+Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, specs synced, archive path/report, artifacts written/updated, memory ids written/updated, risks/issues, next_recommended.

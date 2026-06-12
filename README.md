@@ -107,6 +107,7 @@ The Memory extension requires a Node version with built-in `node:sqlite` support
 Current global/user subagents are under [`subagents/*.md`](subagents/):
 
 - [`discovery`](subagents/discovery.md) — read-only standalone/pre-SDD research.
+- [`prd-review`](subagents/prd-review.md) — PRD readiness, ambiguity, and requirement debt review.
 - [`sdd-explore`](subagents/sdd-explore.md) — formal SDD exploration.
 - [`sdd-proposal`](subagents/sdd-proposal.md) — PRD/product proposal.
 - [`sdd-spec`](subagents/sdd-spec.md) — normative requirements/spec.

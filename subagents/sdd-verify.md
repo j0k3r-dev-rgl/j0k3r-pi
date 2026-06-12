@@ -46,11 +46,20 @@ Search for `type: sdd_feature_project_state` and the change slug. Update/create 
 
 ## Change metadata and PRD awareness
 
-Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely and verify implementation against metadata constraints and validation expectations. Then check whether `openspec/changes/{change}/prd.md` exists. If it exists, read it completely and verify implementation against the PRD in addition to proposal/spec/design/tasks. Metadata validation expectations, PRD acceptance criteria, non-goals, and unresolved debts must be reflected in the verification report. If metadata or PRD is absent, state that it was not found and continue normally.
+Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely and verify implementation against metadata constraints and validation expectations. Then check whether `openspec/changes/{change}/prd.md` exists only when the orchestrator supplies or requests PRD context for verification. If it exists and is in scope, read it completely and verify implementation against the approved PRD in addition to proposal/spec/design/tasks. Metadata validation expectations and in-scope PRD acceptance criteria/non-goals must be reflected in the verification report. If metadata or in-scope PRD is absent, state that it was not found and continue normally.
+
+## Alignment check
+
+- `metadata_alignment`: `aligned` when implementation evidence satisfies metadata constraints; `blocked` when non-compliant.
+- `prd_alignment`: `aligned` when PRD acceptance criteria are verifiable and met; `blocked` when contradicted or not measurable; `not-applicable` if PRD absent from flow.
+- `spec_alignment`: `aligned` when all requirements and scenarios are evidenced; `blocked` when missing evidence exists.
+- `conflicts_detected`: list blocking conflicts and impacted requirements.
+
+If any item is `blocked`, set status to `blocked` and include `required_decision` for remediation or scope adjustment.
 
 ## Dependencies
 
-Read change metadata if present, PRD if present, then proposal, specs, design, tasks, and apply-progress before judging implementation.
+Read change metadata if present, PRD if supplied/in scope, then proposal, specs, design, tasks, and apply-progress before judging implementation.
 
 For OpenSpec/hybrid use files under `openspec/changes/{change}/`. For memory/hybrid use memory search/get and never rely on compact previews alone. In `memory` mode, all metadata/PRD/proposal/spec/design/tasks/apply-progress details must come from the active SDD flow memory.
 
@@ -96,6 +105,7 @@ When `artifact_store` is `openspec` or `hybrid`, write/update:
 | PRD Requirement / Acceptance Criterion | Evidence | Result |
 |----------------------------------------|----------|--------|
 
+
 ### Spec Compliance Matrix
 | Requirement/Scenario | Evidence | Result |
 |----------------------|----------|--------|
@@ -120,4 +130,4 @@ PASS | PASS WITH WARNINGS | FAIL
 
 ## Return envelope
 
-Return: status, executive_summary, verdict, validations run, artifacts written/updated, memory ids written/updated, risks/issues, next_recommended.
+Return: status, executive_summary, verdict, metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, validations run, artifacts written/updated, memory ids written/updated, risks/issues, next_recommended.

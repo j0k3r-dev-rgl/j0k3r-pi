@@ -45,7 +45,16 @@ Search for `type: sdd_feature_project_state` and the change slug. Update/create 
 
 ## Change metadata and PRD awareness
 
-Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely and ensure tasks preserve status, artifact store, scope notes, source paths, validation expectations, and handoff constraints. Then check whether `openspec/changes/{change}/prd.md` exists. If it exists, read it completely and ensure tasks preserve PRD requirements, acceptance criteria, non-goals, validation expectations, and unresolved PRD debts. Block or flag tasks that would implement around unresolved critical metadata/PRD gaps. If metadata or PRD is absent, state that it was not found and continue normally.
+Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely and ensure tasks preserve status, artifact store, scope notes, source paths, validation expectations, and handoff constraints. Then check whether `openspec/changes/{change}/prd.md` exists only when the orchestrator supplies or requests PRD context for this phase. If it exists and is in scope, read it completely and ensure tasks preserve approved PRD requirements, acceptance criteria, non-goals, and validation expectations. Block or flag tasks that would implement around unresolved critical metadata or approved PRD gaps. If metadata or in-scope PRD is absent, state that it was not found and continue normally.
+
+## Alignment check
+
+- `metadata_alignment`: `aligned` when task plan fully respects metadata constraints and scoped work areas; `blocked` when conflicting.
+- `prd_alignment`: `aligned` when task breakdown maps to approved PRD requirements and acceptance criteria; `blocked` on contradiction; `not-applicable` if PRD is not used.
+- `spec_alignment`: `aligned` when tasks cover every required spec scenario and non-functional constraint; `blocked` when tasks omit required behavior.
+- `conflicts_detected`: list blocking conflicts + references.
+
+If any item is `blocked`, return `status: blocked` and include explicit `required_decision` before proposing apply slices.
 
 ## Dependencies
 
@@ -72,8 +81,11 @@ If it exists, read first and update.
 ## Metadata and PRD Alignment
 - Metadata: `openspec/changes/{change}/metadata.yaml` | None
 - PRD: `openspec/changes/{change}/prd.md` | None
+- metadata_alignment: aligned | blocked
+- prd_alignment: aligned | not-applicable | blocked
+- spec_alignment: aligned | blocked
 - Metadata/PRD-driven task constraints: ...
-- Metadata/PRD gaps/conflicts before apply: None | ...
+- Metadata/PRD/spec gaps/conflicts_detected before apply: None | ...
 
 ## Review Workload Forecast
 
@@ -113,4 +125,4 @@ Suggested task split: Yes|No
 
 ## Return envelope
 
-Return: status, executive_summary, task breakdown, workload forecast, artifacts written/updated, memory ids written/updated, risks, next_recommended.
+Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, task breakdown, workload forecast, artifacts written/updated, memory ids written/updated, risks, next_recommended.

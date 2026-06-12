@@ -45,7 +45,16 @@ Search for `type: sdd_feature_project_state` and the change slug. Update the exi
 
 ## Change metadata and PRD awareness
 
-Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely and treat it as mandatory change context for slug, status, artifact store, source paths, validation expectations, and handoff notes. Then check whether `openspec/changes/{change}/prd.md` exists. If it exists, read it completely and treat it as mandatory product/requirements context for intent, scope, goals, non-goals, user stories, and acceptance criteria. Do not silently override or omit metadata/PRD constraints; flag conflicts, missing decisions, or scope drift. If metadata or PRD is absent, state that it was not found and continue normally.
+Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely and treat it as mandatory change context for slug, status, artifact store, source paths, validation expectations, and handoff notes. Then check whether `openspec/changes/{change}/prd.md` exists only when the orchestrator supplies or requests PRD context for this phase. If it exists and is in scope, read it completely and treat it as approved product/requirements context for intent, scope, goals, non-goals, user stories, and acceptance criteria. Do not silently override or omit metadata/approved-PRD constraints; flag conflicts, missing decisions, or scope drift. If metadata or in-scope PRD is absent, state that it was not found and continue normally.
+
+## Alignment check
+
+- `metadata_alignment`: `aligned` when proposal scope, capabilities, and constraints align with metadata; `blocked` when conflicting.
+- `prd_alignment`: `aligned` when in-scope PRD constraints are represented in proposal; `blocked` when constraints conflict; `not-applicable` if PRD is not part of the active flow.
+- `spec_alignment`: `aligned` when proposal is internally consistent and ready to become the basis for a spec; `blocked` if it intentionally contradicts metadata/approved PRD constraints.
+- `conflicts_detected`: list with source artifact, issue, and why it blocks.
+
+If any item is `blocked`, set `status` to `blocked` and include a concrete `required_decision` for the orchestrator.
 
 ## Dependencies
 
@@ -94,8 +103,11 @@ Create the change directory if needed. If the file exists, read it first and upd
 ## Metadata and PRD Alignment
 - Metadata: `openspec/changes/{change}/metadata.yaml` | None
 - PRD: `openspec/changes/{change}/prd.md` | None
+- metadata_alignment: aligned | blocked
+- prd_alignment: aligned | not-applicable | blocked
+- spec_alignment: aligned | blocked (spec not yet produced)
 - Requirements/context carried forward: ...
-- Metadata/PRD gaps/conflicts: None | ...
+- Metadata/PRD conflicts_detected: None | ...
 
 ## Affected Areas
 | Area | Impact | Description |
@@ -126,4 +138,4 @@ Create the change directory if needed. If the file exists, read it first and upd
 
 ## Return envelope
 
-Return: status, executive_summary, proposal summary, artifacts written/updated, memory ids written/updated, risks, next_recommended.
+Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, proposal summary, artifacts written/updated, memory ids written/updated, risks, next_recommended.

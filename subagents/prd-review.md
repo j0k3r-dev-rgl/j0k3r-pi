@@ -51,10 +51,19 @@ Search for `type: sdd_feature_project_state` and the change slug. Update/create 
 1. Read `openspec/changes/{change}/metadata.yaml` completely if it exists, and use it as change-specific context for source paths, validation expectations, and handoff notes. Do not infer that a PRD exists from metadata unless it references a real PRD artifact supplied by the orchestrator.
 2. Read the PRD completely only when a PRD path exists or PRD text is supplied. If the default PRD path exists, use it even if the orchestrator also summarized the PRD.
 3. Inspect only the supporting context needed to review quality: referenced local files/docs, existing OpenSpec artifacts, project docs, installed package/node_modules sources, Pi docs, Context7/internet notes supplied by the orchestrator, or temporary external repository notes.
-3. Check whether goals, non-goals, users, constraints, acceptance criteria, risks, and validation expectations are explicit and consistent.
-4. Identify ambiguity, contradictions, untestable requirements, missing product decisions, hidden technical assumptions, security/privacy risks, and scope creep.
-5. Decide whether the PRD is ready for downstream SDD planning.
-6. Persist review according to `artifact_store`.
+4. Check whether goals, non-goals, users, constraints, acceptance criteria, risks, and validation expectations are explicit and consistent.
+5. Identify ambiguity, contradictions, untestable requirements, missing product decisions, hidden technical assumptions, security/privacy risks, and scope creep.
+6. Decide whether the PRD is ready for downstream SDD planning.
+7. Persist review according to `artifact_store`.
+
+## Alignment and conflict checks
+
+- `metadata_alignment`: `aligned` when PRD scope and quality criteria do not conflict with metadata constraints; `blocked` if metadata imposes blocking constraints that PRD violates.
+- `prd_alignment`: `not-applicable` for this phase (PRD is the source artifact).
+- `spec_alignment`: `not-applicable` (not yet produced), but unresolved PRD contradictions that would make spec derivation impossible should be listed in `conflicts_detected`.
+- `conflicts_detected`: list each metadata/PRD conflict with decision impact.
+
+If `metadata_alignment` is `blocked`, set phase status to `blocked` and request explicit user resolution before planning proceeds.
 
 ## OpenSpec artifact
 
@@ -113,4 +122,4 @@ Proceed to `sdd-explore` / revise PRD / ask user / blocked.
 
 ## Return envelope
 
-Return: status, executive_summary, ready_for_sdd, critical_debts, warnings, questions, artifacts written/updated, memory ids written/updated, next_recommended.
+Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, ready_for_sdd, critical_debts, warnings, questions, artifacts written/updated, memory ids written/updated, next_recommended.

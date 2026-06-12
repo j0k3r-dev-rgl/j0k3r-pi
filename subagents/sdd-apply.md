@@ -49,14 +49,23 @@ Search for `type: sdd_feature_project_state` and the change slug. Update/create 
 
 ## Change metadata and PRD awareness
 
-Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely before editing code and treat it as mandatory context alongside proposal/spec/design/tasks. Then check whether `openspec/changes/{change}/prd.md` exists. If it exists, read it completely before editing code. Treat metadata and PRD as mandatory context alongside proposal/spec/design/tasks. If assigned tasks conflict with metadata or PRD, omit a PRD acceptance criterion, or require an unresolved product decision, return `blocked` instead of implementing around it. If metadata or PRD is absent, state that it was not found and continue normally.
+Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely before editing code and treat it as mandatory context alongside proposal/spec/design/tasks. Then check whether `openspec/changes/{change}/prd.md` exists only when the orchestrator supplies or requests PRD context for this apply slice. If it exists and is in scope, read it completely before editing code and treat approved PRD requirements as context alongside proposal/spec/design/tasks. If assigned tasks conflict with metadata or approved PRD context, omit an acceptance criterion, or require an unresolved product decision, return `blocked` instead of implementing around it. If metadata or in-scope PRD is absent, state that it was not found and continue normally.
+
+## Alignment check
+
+- `metadata_alignment`: `aligned` only when the selected task slice fully respects metadata scope, mode, validation expectations, and boundaries; else `blocked`.
+- `prd_alignment`: `aligned` when PRD-required behavior is implemented only where approved; `blocked` on contradiction or missing acceptance criteria linkage; `not-applicable` if no PRD context.
+- `spec_alignment`: `aligned` when task implementation stays within `spec.md` and existing design constraints; `blocked` on scope creep.
+- `conflicts_detected`: enumerate every conflict with exact file/task reference.
+
+If any item is `blocked`, return `status: blocked` and include `required_decision` instead of applying.
 
 ## Dependencies
 
 Before writing code, retrieve/read:
 
 - change metadata, if present
-- PRD, if present
+- PRD, if supplied/in scope
 - proposal
 - specs
 - design
@@ -118,8 +127,11 @@ Strict TDD | Standard
 ## Metadata and PRD Alignment
 - Metadata: `openspec/changes/{change}/metadata.yaml` | None
 - PRD: `openspec/changes/{change}/prd.md` | None
+- metadata_alignment: aligned | blocked
+- prd_alignment: aligned | not-applicable | blocked
+- spec_alignment: aligned | blocked
 - Metadata/PRD requirements implemented in this batch: ...
-- Metadata/PRD conflicts/gaps encountered: None | ...
+- Metadata/PRD/spec conflicts_detected encountered: None | ...
 
 ## Deviations from Design
 None | ...
@@ -136,4 +148,4 @@ None | ...
 
 ## Return envelope
 
-Return: status, executive_summary, completed tasks, files changed, validations, artifacts updated, memory ids updated, risks/issues, next_recommended.
+Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, completed tasks, files changed, validations, artifacts updated, memory ids updated, risks/issues, next_recommended.
