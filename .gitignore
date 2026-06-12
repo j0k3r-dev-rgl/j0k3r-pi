@@ -36,6 +36,9 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+telegram-pi-control.env
+.pi/agent/telegram-pi-control.env
+extensions/telegram-pi-control/telegram-pi-control.env
 
 # root lockfile exists without a root package.json; extension lockfiles are tracked
 /package-lock.json
