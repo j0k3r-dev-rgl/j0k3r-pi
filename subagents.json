@@ -16,36 +16,40 @@
       "effort": "medium"
     },
     "prd-review": {
-      "model": "openai-codex/gpt-5.5",
-      "effort": "high"
+      "model": "openai-codex/gpt-5.4",
+      "effort": "medium"
     },
     "sdd-apply": {
-      "model": "openai-codex/gpt-5.3-codex-spark"
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "effort": "medium"
     },
     "sdd-archive": {
-      "model": "openai-codex/gpt-5.4-mini"
+      "model": "openai-codex/gpt-5.4-mini",
+      "effort": "medium"
     },
     "sdd-design": {
       "model": "openai-codex/gpt-5.5",
-      "effort": "xhigh"
+      "effort": "medium"
     },
     "sdd-explore": {
-      "model": "openai-codex/gpt-5.4"
+      "model": "openai-codex/gpt-5.4-mini",
+      "effort": "medium"
     },
     "sdd-proposal": {
       "model": "openai-codex/gpt-5.5",
-      "effort": "xhigh"
+      "effort": "medium"
     },
     "sdd-spec": {
       "model": "openai-codex/gpt-5.5",
-      "effort": "high"
+      "effort": "medium"
     },
     "sdd-task": {
-      "model": "openai-codex/gpt-5.3-codex-spark"
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "effort": "medium"
     },
     "sdd-verify": {
       "model": "openai-codex/gpt-5.5",
-      "effort": "high"
+      "effort": "medium"
     }
   }
 }
