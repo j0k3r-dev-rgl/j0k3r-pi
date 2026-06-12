@@ -70,6 +70,7 @@ Use this skill when a user asks to configure Pi Memory Extension for a project, 
 - Run `memory_export` or `memory_import` only when the user asks for backup/restore/export/import work, or when explicitly validating memory backup configuration.
 - Never store secrets, tokens, passwords, private keys, or cloud tokens in `.pi/memory.json`.
 - Use `backups.include_prompts=true` only when the project intentionally wants prompt audit records in backups.
+- Keep `debug=false` by default; enable it only for temporary lifecycle auditing because it writes local session identity logs.
 - After changing `.pi/memory.json` or extension code, tell the user to `/reload` or restart Pi before relying on the new behavior.
 - Use English for reusable configuration examples and skill content.
 
@@ -80,6 +81,7 @@ Recommended project config:
   "project_name": "my-project",
   "aliases": [],
   "default_scope": "project",
+  "debug": false,
   "session_end": {
     "semantic": false
   },
@@ -105,6 +107,7 @@ Field rules:
 - `import.on_conflict`: `keep_local`, `keep_imported`, or `mark_conflict`; recommended restore policy is `keep_local`.
 - `backups.path`: automatic mirror backup file path; default is `.pi/mempry-backups/memory-backup.jsonl` unless configured.
 - `backups.include_prompts`: defaults to `false`; set `true` to export `memory_session_prompts` for the current project.
+- `debug`: defaults to `false`; set `true` only while auditing memory lifecycle/session identity behavior. It writes local `memory-session-debug.log` entries without prompt text.
 - `session_end.semantic`: keep `false` unless the project explicitly wants model-backed shutdown summaries/profile updates.
 - `cloud`: readiness/metadata only unless a backend exists; use env var names for tokens, never raw token values.
 
@@ -121,7 +124,7 @@ Field rules:
 1. Identify the target project cwd and whether `.pi/memory.json` already exists.
 2. Read the existing `.pi/memory.json` before editing.
 3. Preserve existing valid fields unless the user asks to replace them.
-4. Add or update `project_name`, `aliases`, `default_scope`, `session_end`, `import`, `backups`, and `cloud` using the hard rules above.
+4. Add or update `project_name`, `aliases`, `default_scope`, `debug`, `session_end`, `import`, `backups`, and `cloud` using the hard rules above.
 5. Validate the JSON syntax after edits.
 6. Tell the user to `/reload` or restart Pi.
 7. Use `memory_context` to confirm the expected project identity when practical.

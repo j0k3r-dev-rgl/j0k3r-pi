@@ -73,7 +73,7 @@ export function readProjectMemoryConfig(cwd: string, env: NodeJS.ProcessEnv = pr
   const baseSessionEnd = { semantic: false };
   const baseImport = {};
   const baseBackups = { include_prompts: false };
-  if (!configPath) return { session_end: baseSessionEnd, import: baseImport, backups: baseBackups, cloud: baseCloud, warnings };
+  if (!configPath) return { debug: false, session_end: baseSessionEnd, import: baseImport, backups: baseBackups, cloud: baseCloud, warnings };
 
   try {
     const raw = JSON.parse(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
@@ -93,6 +93,7 @@ export function readProjectMemoryConfig(cwd: string, env: NodeJS.ProcessEnv = pr
       project_name: typeof raw.project_name === 'string' ? raw.project_name : undefined,
       aliases: Array.isArray(raw.aliases) ? raw.aliases.filter((x): x is string => typeof x === 'string') : undefined,
       default_scope: raw.default_scope === 'general' || raw.default_scope === 'project' || raw.default_scope === 'global' ? raw.default_scope : undefined,
+      debug: raw.debug === true,
       session_end: {
         semantic: sessionEndRaw.semantic === true,
       },
@@ -125,6 +126,6 @@ export function readProjectMemoryConfig(cwd: string, env: NodeJS.ProcessEnv = pr
     return cfg;
   } catch (error) {
     warnings.push(`Invalid .pi/memory.json: ${error instanceof Error ? error.message : String(error)}`);
-    return { session_end: baseSessionEnd, import: baseImport, backups: baseBackups, cloud: baseCloud, warnings, path: configPath };
+    return { debug: false, session_end: baseSessionEnd, import: baseImport, backups: baseBackups, cloud: baseCloud, warnings, path: configPath };
   }
 }

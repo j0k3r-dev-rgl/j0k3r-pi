@@ -51,6 +51,7 @@ Recommended project config for automatic project-scoped mirror backups and safe 
   "project_name": "j0k3r-pi",
   "aliases": [],
   "default_scope": "project",
+  "debug": false,
   "session_end": {
     "semantic": false
   },
@@ -77,6 +78,7 @@ Full supported shape:
   "project_name": "j0k3r-pi",
   "aliases": ["pi-agent-workflow"],
   "default_scope": "project",
+  "debug": false,
   "session_end": {
     "semantic": false
   },
@@ -106,6 +108,7 @@ Full supported shape:
 | `project_name` | inferred | Canonical project name. If present, it wins over git/folder inference. |
 | `aliases` | `[]` | Previous project names used by migration helpers. |
 | `default_scope` | parsed only | Reserved config field for `general`, `project`, or `global`; currently parsed for compatibility but not used by context resolution. |
+| `debug` | `false` | Enables local lifecycle debug logging to `memory-session-debug.log` in the current working directory. Logs session IDs/files and lifecycle events, never prompt text. Keep disabled unless auditing session behavior. |
 | `session_end.semantic` | `false` | Enables model-backed shutdown summary/profile update. Off by default for fast exit. |
 | `import.mode` | `dry_run` | Default `memory_import` mode when the tool call omits `mode`. Valid values: `dry_run`, `merge`. Invalid config values are ignored with a warning. |
 | `import.on_conflict` | `mark_conflict` | Default `memory_import` conflict policy when omitted. Valid values: `keep_local`, `keep_imported`, `mark_conflict`. Invalid config values are ignored with a warning. |
@@ -177,6 +180,16 @@ Registered lifecycle events:
 - `session_start`: creates or resumes a memory session and sets footer status.
 - `before_agent_start`: captures the user prompt and injects startup brain context once.
 - `session_shutdown`: closes the memory session unless shutdown reason is `reload`.
+
+Memory sessions are linked to Pi sessions using this conservative priority:
+
+1. `ctx.sessionManager.getSessionId()` stored as `metadata_json.pi_session_id`.
+2. `ctx.sessionManager.getSessionFile()` stored as `metadata_json.pi_session_file`.
+3. A Pi custom session entry persisted with `pi.appendEntry("memory-session", { memory_session_id })`.
+4. One unambiguous recent active auto-started session for the same project and cwd.
+5. Create a new memory session.
+
+When a completed memory session is resumed, it is reactivated with `status='active'` and `ended_at=NULL`.
 
 Shutdown behavior:
 

@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type { Db } from './db.js';
 import { resolveMemoryContext } from './context.js';
 import { listMemories } from './memory-store.js';
@@ -5,6 +7,33 @@ import { addSessionPrompt, finishMemorySession, startMemorySession } from './ses
 import { setCurrentMemorySessionId } from './runtime-state.js';
 import { buildHeuristicSessionSummary, buildSemanticSessionSummary, extractConversationFacts } from './session-summary.js';
 import { autoUpdateProjectProfileFromSession, semanticUpdateProjectProfileFromSession } from './project-profile.js';
+
+const MEMORY_SESSION_ENTRY_TYPE = 'memory-session';
+const RECENT_ACTIVE_FALLBACK_MS = 15 * 60 * 1000;
+
+function memoryDebugLog(ctx: any, event: string, data: Record<string, unknown> = {}): void {
+  try {
+    const cwd = ctx?.cwd ?? process.cwd();
+    const context = resolveMemoryContext(cwd);
+    if (context.config?.debug !== true) return;
+    const sessionManager = ctx?.sessionManager;
+    const line = JSON.stringify({
+      ts: new Date().toISOString(),
+      event,
+      cwd,
+      mode: ctx?.mode ?? null,
+      pi_session_id: sessionManager?.getSessionId?.() ?? null,
+      pi_session_file: sessionManager?.getSessionFile?.() ?? null,
+      pi_session_persisted: sessionManager?.isPersisted?.() ?? null,
+      pi_leaf_id: sessionManager?.getLeafId?.() ?? null,
+      pi_entries_count: sessionManager?.getEntries?.()?.length ?? null,
+      ...data,
+    });
+    fs.appendFileSync(path.join(cwd, 'memory-session-debug.log'), `${line}\n`, 'utf8');
+  } catch {
+    // Debug logging must never affect the memory lifecycle.
+  }
+}
 
 function buildMemoryInstructions(context: any): string {
   const projectLine = context.scope === 'project'
@@ -40,45 +69,140 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
   let startupContextInjected = false;
   let sessionClosed = false;
 
-  function findExistingSessionByPiFile(piSessionFile: string | null, context: any): any | undefined {
-    if (!piSessionFile) return undefined;
+  function memorySessionEntryId(ctx: any): string | null {
+    const entries = ctx?.sessionManager?.getEntries?.() ?? ctx?.sessionManager?.getBranch?.() ?? [];
+    for (const entry of [...entries].reverse()) {
+      if (entry?.type === 'custom' && entry?.customType === MEMORY_SESSION_ENTRY_TYPE && typeof entry?.data?.memory_session_id === 'string') {
+        return entry.data.memory_session_id;
+      }
+    }
+    return null;
+  }
+
+  function findSessionByMemoryId(memorySessionId: string | null, context: any): any | undefined {
+    if (!memorySessionId) return undefined;
+    return db.prepare(`SELECT * FROM memory_sessions
+      WHERE id = ?
+        AND status IN ('active','completed')
+        AND (? != 'project' OR scope != 'project' OR project_id = ?)
+      LIMIT 1`).get(memorySessionId, context.scope, context.project_id) as any | undefined;
+  }
+
+  function parseSessionMetadata(row: any): Record<string, unknown> {
+    try { return JSON.parse(row?.metadata_json || '{}') as Record<string, unknown>; }
+    catch { return {}; }
+  }
+
+  function findRecentActiveSession(context: any): any | undefined {
+    const since = new Date(Date.now() - RECENT_ACTIVE_FALLBACK_MS).toISOString();
     const rows = db.prepare(`SELECT * FROM memory_sessions
-      WHERE (? != 'project' OR scope != 'project' OR project_id = ?)
+      WHERE status = 'active'
+        AND ended_at IS NULL
+        AND started_at >= ?
+        AND (? != 'project' OR scope != 'project' OR project_id = ?)
+      ORDER BY started_at DESC
+      LIMIT 5`).all(since, context.scope, context.project_id) as any[];
+    const candidates = rows.filter((row) => {
+      const meta = parseSessionMetadata(row);
+      return meta.auto_started === true && meta.cwd === context.cwd;
+    });
+    return candidates.length === 1 ? candidates[0] : undefined;
+  }
+
+  function findExistingSessionByPiIdentity(piSessionId: string | null, piSessionFile: string | null, entryMemorySessionId: string | null, context: any): any | undefined {
+    const rows = db.prepare(`SELECT * FROM memory_sessions
+      WHERE status IN ('active','completed')
+        AND (? != 'project' OR scope != 'project' OR project_id = ?)
       ORDER BY started_at DESC
       LIMIT 100`).all(context.scope, context.project_id) as any[];
-    return rows.find((row) => {
-      try {
-        const meta = JSON.parse(row.metadata_json || '{}');
-        return meta.pi_session_file === piSessionFile;
-      } catch {
-        return false;
-      }
-    });
+    const parsed = rows.map((row) => ({ row, meta: parseSessionMetadata(row) }));
+    if (piSessionId) {
+      const byId = parsed.find(({ meta }) => meta.pi_session_id === piSessionId);
+      if (byId) return byId.row;
+    }
+    if (piSessionFile) {
+      const byFile = parsed.find(({ meta }) => meta.pi_session_file === piSessionFile);
+      if (byFile) return byFile.row;
+    }
+    const byEntry = findSessionByMemoryId(entryMemorySessionId, context);
+    if (byEntry) return byEntry;
+    return findRecentActiveSession(context);
+  }
+
+  function persistMemorySessionEntry(ctx: any, context: any, memorySessionId: string, piSessionId: string | null, piSessionFile: string | null): void {
+    const entries = ctx?.sessionManager?.getEntries?.() ?? ctx?.sessionManager?.getBranch?.() ?? [];
+    const alreadyPersisted = entries.some((entry: any) => entry?.type === 'custom' && entry?.customType === MEMORY_SESSION_ENTRY_TYPE && entry?.data?.memory_session_id === memorySessionId);
+    if (alreadyPersisted) return;
+    try {
+      pi.appendEntry?.(MEMORY_SESSION_ENTRY_TYPE, {
+        memory_session_id: memorySessionId,
+        project_id: context.project_id,
+        project_name: context.project_name,
+        pi_session_id: piSessionId,
+        pi_session_file: piSessionFile,
+      });
+    } catch {
+      // Session-entry persistence is a fallback and must not affect memory startup.
+    }
   }
 
   function ensureMemorySession(ctx: any): { id: string; context: any } {
     const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
+    const piSessionId = ctx?.sessionManager?.getSessionId?.() ?? null;
+    const piSessionFile = ctx?.sessionManager?.getSessionFile?.() ?? null;
+    const entryMemorySessionId = memorySessionEntryId(ctx);
     if (!activeMemorySessionId) {
-      const piSessionFile = ctx?.sessionManager?.getSessionFile?.() ?? null;
-      const existing = findExistingSessionByPiFile(piSessionFile, context);
+      memoryDebugLog(ctx, 'ensure_memory_session:no_active', {
+        memory_scope: context.scope,
+        memory_project_id: context.project_id ?? null,
+        memory_project_name: context.project_name ?? null,
+        pi_session_id_seen: piSessionId,
+        pi_session_file_seen: piSessionFile,
+        memory_session_entry_id_seen: entryMemorySessionId,
+      });
+      const existing = findExistingSessionByPiIdentity(piSessionId, piSessionFile, entryMemorySessionId, context);
       if (existing) {
         activeMemorySessionId = existing.id;
         setCurrentMemorySessionId(activeMemorySessionId);
         sessionClosed = false;
-        db.prepare('UPDATE memory_sessions SET ended_at=NULL WHERE id=?').run(existing.id);
+        const metadata = parseSessionMetadata(existing);
+        if (piSessionId) metadata.pi_session_id = piSessionId;
+        if (piSessionFile) metadata.pi_session_file = piSessionFile;
+        metadata.cwd = context.cwd;
+        db.prepare("UPDATE memory_sessions SET ended_at=NULL, status='active', metadata_json=? WHERE id=?").run(JSON.stringify(metadata), existing.id);
         const maxPrompt = db.prepare('SELECT COALESCE(MAX(prompt_index), 0) AS max_index FROM memory_session_prompts WHERE session_id=?').get(existing.id) as any;
         promptIndex = Number(maxPrompt?.max_index ?? 0);
+        persistMemorySessionEntry(ctx, context, activeMemorySessionId!, piSessionId, piSessionFile);
+        memoryDebugLog(ctx, 'ensure_memory_session:reused_by_identity', {
+          memory_session_id: activeMemorySessionId,
+          prompt_index: promptIndex,
+        });
       } else {
         const session = startMemorySession(db, {
           title: `Pi session ${new Date().toISOString()}`,
           metadata_json: {
+            pi_session_id: piSessionId,
             pi_session_file: piSessionFile,
+            cwd: context.cwd,
             auto_started: true,
           },
         }, context) as any;
         activeMemorySessionId = session.id;
         setCurrentMemorySessionId(activeMemorySessionId);
+        persistMemorySessionEntry(ctx, context, activeMemorySessionId!, piSessionId, piSessionFile);
+        memoryDebugLog(ctx, 'ensure_memory_session:created', {
+          memory_session_id: activeMemorySessionId,
+          pi_session_id_stored: piSessionId,
+          pi_session_file_stored: piSessionFile,
+        });
       }
+    } else {
+      persistMemorySessionEntry(ctx, context, activeMemorySessionId, piSessionId, piSessionFile);
+      memoryDebugLog(ctx, 'ensure_memory_session:already_active', {
+        memory_session_id: activeMemorySessionId,
+        prompt_index: promptIndex,
+        session_closed: sessionClosed,
+      });
     }
     setCurrentMemorySessionId(activeMemorySessionId);
     return { id: activeMemorySessionId!, context };
@@ -158,13 +282,31 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
     }
   }
 
-  pi.on?.('session_start', async (_event: any, ctx: any) => {
+  pi.on?.('session_start', async (event: any, ctx: any) => {
+    memoryDebugLog(ctx, 'session_start', {
+      reason: event?.reason ?? null,
+      previous_session_file: event?.previousSessionFile ?? null,
+      active_memory_session_id_before: activeMemorySessionId ?? null,
+      session_closed: sessionClosed,
+    });
     const { context } = ensureMemorySession(ctx);
+    memoryDebugLog(ctx, 'session_start:ensured', {
+      reason: event?.reason ?? null,
+      active_memory_session_id_after: activeMemorySessionId ?? null,
+      memory_scope: context.scope,
+      memory_project_name: context.project_name ?? null,
+    });
     ctx.ui?.setStatus?.('memory', `memory:${context.scope}${context.project_name ? `/${context.project_name}` : ''}`);
   });
 
   pi.on?.('before_agent_start', async (event: any, ctx: any) => {
     const prompt = String(event.prompt ?? '');
+    memoryDebugLog(ctx, 'before_agent_start', {
+      has_prompt: prompt.trim().length > 0,
+      active_memory_session_id_before: activeMemorySessionId ?? null,
+      startup_context_injected: startupContextInjected,
+      session_closed: sessionClosed,
+    });
     const { id: sessionId, context: c } = ensureMemorySession(ctx);
 
     if (prompt.trim()) {
@@ -236,7 +378,23 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
 
   pi.on?.('session_shutdown', async (event: any, ctx: any) => {
     const reason = event?.reason ?? 'shutdown';
-    if (reason === 'reload') return;
+    memoryDebugLog(ctx, 'session_shutdown', {
+      reason,
+      target_session_file: event?.targetSessionFile ?? null,
+      active_memory_session_id_before: activeMemorySessionId ?? null,
+      session_closed: sessionClosed,
+    });
+    if (reason === 'reload') {
+      memoryDebugLog(ctx, 'session_shutdown:reload_skipped_close', {
+        active_memory_session_id: activeMemorySessionId ?? null,
+      });
+      return;
+    }
     await closeActiveMemorySession(ctx, reason);
+    memoryDebugLog(ctx, 'session_shutdown:closed', {
+      reason,
+      active_memory_session_id_after: activeMemorySessionId ?? null,
+      session_closed: sessionClosed,
+    });
   });
 }

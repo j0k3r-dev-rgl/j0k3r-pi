@@ -2,6 +2,7 @@
 	"project_name": "j0k3r-pi",
 	"aliases": [],
 	"default_scope": "project",
+	"debug": false,
 	"session_end": {
 		"semantic": false
 	},

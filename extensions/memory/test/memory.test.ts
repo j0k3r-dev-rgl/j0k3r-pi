@@ -253,6 +253,17 @@ describe('config', () => {
     expect(invalid.warnings.join('\n')).toContain('invalid import.mode');
     expect(invalid.warnings.join('\n')).toContain('invalid import.on_conflict');
   });
+
+  it('reads debug flag with a safe false default', () => {
+    expect(readProjectMemoryConfig(tmp, {}).debug).toBe(false);
+    fs.mkdirSync(path.join(tmp, '.pi'));
+    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'X' }));
+    expect(readProjectMemoryConfig(tmp, {}).debug).toBe(false);
+    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'X', debug: true }));
+    expect(readProjectMemoryConfig(tmp, {}).debug).toBe(true);
+    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'X', debug: 'yes' }));
+    expect(readProjectMemoryConfig(tmp, {}).debug).toBe(false);
+  });
 });
 
 describe('context', () => {

@@ -7,7 +7,7 @@ import { openMemoryDb } from '../src/db.js';
 import { migrate } from '../src/migrations.js';
 import { resolveMemoryContext } from '../src/context.js';
 import { addMemory } from '../src/memory-store.js';
-import { addSessionPrompt, startMemorySession } from '../src/sessions.js';
+import { addSessionPrompt, finishMemorySession, startMemorySession } from '../src/sessions.js';
 import { consolidateMemories } from '../src/consolidation.js';
 import { buildProjectProfileUpdatePreview, buildSemanticProjectProfilePrompt, shouldConfirmProjectProfileUpdate } from '../src/project-profile.js';
 import { exportMemory, importMemory } from '../src/export-import.js';
@@ -104,6 +104,212 @@ describe('advanced lifecycle behavior', () => {
     const row = d.prepare('SELECT ended_at, summary FROM memory_sessions LIMIT 1').get() as any;
     expect(row.ended_at).toBeNull();
     expect(row.summary).toBeNull();
+  });
+
+  it('reactivates a resumed memory session and backfills pi session id on reuse', async () => {
+    const dbPath = path.join(tmp, 'resume-reuse.sqlite');
+    const projectDir = path.join(tmp, 'resume-project');
+    const piSessionFile = path.join(tmp, 'pi-session.jsonl');
+    fs.mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Resume App' }));
+    const d = openMemoryDb(dbPath);
+    migrate(d);
+    const context = resolveMemoryContext(projectDir, os.homedir(), {});
+    const existing: any = startMemorySession(d, {
+      title: 'Pi session previous',
+      metadata_json: { pi_session_file: piSessionFile, auto_started: true },
+    }, context);
+    finishMemorySession(d, { session_id: existing.id, summary: 'previous completed summary' }, context);
+
+    const old = process.env.PI_MEMORY_DB_PATH;
+    process.env.PI_MEMORY_DB_PATH = dbPath;
+    const handlers = new Map<string, Function>();
+    extension({ registerTool: () => {}, registerCommand: () => {}, on: (name: string, handler: Function) => handlers.set(name, handler) });
+    if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
+
+    const ctx = {
+      cwd: projectDir,
+      ui: { setStatus: () => {}, notify: () => {} },
+      sessionManager: {
+        getSessionId: () => 'pi-session-123',
+        getSessionFile: () => piSessionFile,
+        isPersisted: () => true,
+        getLeafId: () => null,
+        getEntries: () => [],
+      },
+    };
+    await handlers.get('session_start')?.({ reason: 'resume' }, ctx);
+
+    const row = d.prepare('SELECT status, ended_at, metadata_json FROM memory_sessions WHERE id=?').get(existing.id) as any;
+    expect(row.status).toBe('active');
+    expect(row.ended_at).toBeNull();
+    expect(JSON.parse(row.metadata_json).pi_session_id).toBe('pi-session-123');
+  });
+
+  it('reuses a memory session by pi session id when pi session file is unavailable', async () => {
+    const dbPath = path.join(tmp, 'resume-by-id.sqlite');
+    const projectDir = path.join(tmp, 'resume-by-id-project');
+    fs.mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Resume By Id App' }));
+    const d = openMemoryDb(dbPath);
+    migrate(d);
+    const context = resolveMemoryContext(projectDir, os.homedir(), {});
+    const existing: any = startMemorySession(d, {
+      title: 'Pi session id only',
+      metadata_json: { pi_session_id: 'stable-pi-session-id', auto_started: true },
+    }, context);
+
+    const old = process.env.PI_MEMORY_DB_PATH;
+    process.env.PI_MEMORY_DB_PATH = dbPath;
+    const handlers = new Map<string, Function>();
+    extension({ registerTool: () => {}, registerCommand: () => {}, on: (name: string, handler: Function) => handlers.set(name, handler) });
+    if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
+
+    const ctx = {
+      cwd: projectDir,
+      ui: { setStatus: () => {}, notify: () => {} },
+      sessionManager: {
+        getSessionId: () => 'stable-pi-session-id',
+        getSessionFile: () => null,
+        isPersisted: () => true,
+        getLeafId: () => null,
+        getEntries: () => [],
+      },
+    };
+    await handlers.get('session_start')?.({ reason: 'reload' }, ctx);
+
+    const rows = d.prepare('SELECT id, status FROM memory_sessions ORDER BY started_at ASC').all() as any[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(existing.id);
+    expect(rows[0].status).toBe('active');
+  });
+
+  it('persists the memory session id into the pi session for future fallback', async () => {
+    const h = await lifecycleHarness();
+    const appended: Array<{ customType: string; data: any }> = [];
+    const ctx = { ...h.ctx, appendEntry: undefined } as any;
+    const pi = {
+      registerTool: () => {},
+      registerCommand: () => {},
+      appendEntry: (customType: string, data: any) => appended.push({ customType, data }),
+      on: (name: string, handler: Function) => h.handlers.set(name, handler),
+    };
+    const old = process.env.PI_MEMORY_DB_PATH;
+    process.env.PI_MEMORY_DB_PATH = h.dbPath;
+    extension(pi);
+    if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
+
+    await h.handlers.get('session_start')?.({ reason: 'startup' }, ctx);
+
+    expect(appended).toHaveLength(1);
+    expect(appended[0].customType).toBe('memory-session');
+    expect(appended[0].data.memory_session_id).toMatch(/^session_/);
+    expect(appended[0].data.project_name).toBe('Lifecycle Advanced');
+  });
+
+  it('reuses a memory session from a pi custom entry when pi id and file are unavailable', async () => {
+    const dbPath = path.join(tmp, 'resume-by-entry.sqlite');
+    const projectDir = path.join(tmp, 'resume-by-entry-project');
+    fs.mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Resume By Entry App' }));
+    const d = openMemoryDb(dbPath);
+    migrate(d);
+    const context = resolveMemoryContext(projectDir, os.homedir(), {});
+    const existing: any = startMemorySession(d, { title: 'Pi custom entry session' }, context);
+
+    const old = process.env.PI_MEMORY_DB_PATH;
+    process.env.PI_MEMORY_DB_PATH = dbPath;
+    const handlers = new Map<string, Function>();
+    extension({ registerTool: () => {}, registerCommand: () => {}, on: (name: string, handler: Function) => handlers.set(name, handler) });
+    if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
+
+    const ctx = {
+      cwd: projectDir,
+      ui: { setStatus: () => {}, notify: () => {} },
+      sessionManager: {
+        getSessionId: () => null,
+        getSessionFile: () => null,
+        getEntries: () => [{ type: 'custom', customType: 'memory-session', data: { memory_session_id: existing.id } }],
+        getLeafId: () => null,
+      },
+    };
+    await handlers.get('session_start')?.({ reason: 'reload' }, ctx);
+
+    const rows = d.prepare('SELECT id, status FROM memory_sessions ORDER BY started_at ASC').all() as any[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(existing.id);
+    expect(rows[0].status).toBe('active');
+  });
+
+  it('conservatively reuses one recent active auto session when pi identity is unavailable', async () => {
+    const dbPath = path.join(tmp, 'recent-active.sqlite');
+    const projectDir = path.join(tmp, 'recent-active-project');
+    fs.mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Recent Active App' }));
+    const d = openMemoryDb(dbPath);
+    migrate(d);
+    const context = resolveMemoryContext(projectDir, os.homedir(), {});
+    const existing: any = startMemorySession(d, { title: 'Recent Active', metadata_json: { auto_started: true, cwd: projectDir } }, context);
+
+    const old = process.env.PI_MEMORY_DB_PATH;
+    process.env.PI_MEMORY_DB_PATH = dbPath;
+    const handlers = new Map<string, Function>();
+    extension({ registerTool: () => {}, registerCommand: () => {}, on: (name: string, handler: Function) => handlers.set(name, handler) });
+    if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
+
+    const ctx = {
+      cwd: projectDir,
+      ui: { setStatus: () => {}, notify: () => {} },
+      sessionManager: { getSessionId: () => null, getSessionFile: () => null, getEntries: () => [], getLeafId: () => null },
+    };
+    await handlers.get('session_start')?.({ reason: 'reload' }, ctx);
+
+    const rows = d.prepare('SELECT id, status FROM memory_sessions ORDER BY started_at ASC').all() as any[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(existing.id);
+  });
+
+  it('does not use the recent active fallback when multiple candidates are ambiguous', async () => {
+    const dbPath = path.join(tmp, 'recent-active-ambiguous.sqlite');
+    const projectDir = path.join(tmp, 'recent-active-ambiguous-project');
+    fs.mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Recent Active Ambiguous App' }));
+    const d = openMemoryDb(dbPath);
+    migrate(d);
+    const context = resolveMemoryContext(projectDir, os.homedir(), {});
+    startMemorySession(d, { title: 'Recent Active 1', metadata_json: { auto_started: true, cwd: projectDir } }, context);
+    startMemorySession(d, { title: 'Recent Active 2', metadata_json: { auto_started: true, cwd: projectDir } }, context);
+
+    const old = process.env.PI_MEMORY_DB_PATH;
+    process.env.PI_MEMORY_DB_PATH = dbPath;
+    const handlers = new Map<string, Function>();
+    extension({ registerTool: () => {}, registerCommand: () => {}, on: (name: string, handler: Function) => handlers.set(name, handler) });
+    if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
+
+    const ctx = {
+      cwd: projectDir,
+      ui: { setStatus: () => {}, notify: () => {} },
+      sessionManager: { getSessionId: () => null, getSessionFile: () => null, getEntries: () => [], getLeafId: () => null },
+    };
+    await handlers.get('session_start')?.({ reason: 'reload' }, ctx);
+
+    const rows = d.prepare('SELECT id FROM memory_sessions').all() as any[];
+    expect(rows).toHaveLength(3);
+  });
+
+  it('writes memory session debug log only when memory.json debug is true', async () => {
+    const disabled = await lifecycleHarness();
+    await disabled.handlers.get('before_agent_start')?.({ prompt: 'no debug log' }, disabled.ctx);
+    expect(fs.existsSync(path.join(disabled.ctx.cwd, 'memory-session-debug.log'))).toBe(false);
+
+    const enabled = await lifecycleHarness({ debug: true });
+    await enabled.handlers.get('before_agent_start')?.({ prompt: 'debug log enabled' }, enabled.ctx);
+    const logPath = path.join(enabled.ctx.cwd, 'memory-session-debug.log');
+    expect(fs.existsSync(logPath)).toBe(true);
+    const text = fs.readFileSync(logPath, 'utf8');
+    expect(text).toContain('before_agent_start');
+    expect(text).toContain('pi_session_file');
+    expect(text).not.toContain('debug log enabled');
   });
 
   it('injects startup context only once across turns', async () => {

@@ -39,6 +39,7 @@ export interface ProjectMemoryConfig {
   project_name?: string;
   aliases?: string[];
   default_scope?: MemoryScope;
+  debug: boolean;
   session_end: ProjectSessionEndConfig;
   import: ProjectImportConfig;
   backups: ProjectBackupsConfig;
