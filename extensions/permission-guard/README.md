@@ -20,7 +20,13 @@
 
 ## Extension location
 
-This is a project-local Pi extension:
+In this agent-dir checkout the extension lives at:
+
+```txt
+extensions/permission-guard/index.ts
+```
+
+When copied into a project-local Pi setup, the equivalent path is:
 
 ```txt
 .pi/extensions/permission-guard/index.ts
@@ -34,7 +40,7 @@ This extension is an in-process guard, not a hard sandbox. It does not provide O
 
 Strong isolation requires a container, Docker/OpenShell-style environment, Gondolin or another micro-VM approach, or a sandbox-runtime such as `@anthropic-ai/sandbox-runtime`.
 
-The bash policy is a conservative safe subset, not a full shell parser or sandbox. It supports common validation forms such as simple commands, quoted literals, environment assignments, `&&`, `||`, `;`, newlines, safe `cd`, basic redirections, and narrowly recognized read-only pipelines. Unsupported syntax such as background jobs, command/process substitution, glob/env expansion, sourced scripts, malformed quotes, or unrecognized pipe forms fails closed to approval unless an earlier hard deny applies. `~` and `~/...` are expanded for bash path-effect classification before workspace/outside-workspace decisions are made.
+The bash policy is a conservative safe subset, not a full shell parser or sandbox. It supports common validation forms such as simple commands, quoted literals, environment assignments, `&&`, `||`, `;`, newlines, safe `cd`, basic redirections, and narrowly recognized read-only pipelines. With the conservative defaults, unsupported syntax such as background jobs, command/process substitution, glob/env expansion, sourced scripts, malformed quotes, or unrecognized pipe forms fails closed to approval unless an earlier hard deny applies; permissive configuration such as `bash.outsideWorkspaceFilesystem="allow"` or non-interactive allow fallback can intentionally broaden behavior. `~` and `~/...` are expanded for bash path-effect classification before workspace/outside-workspace decisions are made.
 
 MVP enforcement covers supported built-in tools and user bash events that pass through Pi runtime hooks. Custom and third-party tools are out of MVP scope unless they explicitly integrate with the guard.
 
@@ -51,7 +57,7 @@ If policy denies a request, the extension blocks it. If policy requires approval
 
 ## Defaults
 
-Built-in defaults are conservative:
+Built-in defaults are conservative. Project or global config can override them, including emergency `bypassAll`; inspect the active config when validating enforcement:
 
 - Permission guard is enabled.
 - `bypassAll` is false.
@@ -186,7 +192,7 @@ Each supported tool can be set to `policy`, `allow`, or `deny`:
 }
 ```
 
-`policy` means normal path/bash policy applies. `allow` or `deny` bypasses normal policy for that tool mode.
+`policy` means normal path/bash policy applies. `allow` or `deny` bypasses normal policy for that tool mode. Be careful with `allow`: it bypasses the normal path policy, including secret-path denial for that tool.
 
 ### `bash`
 
@@ -200,7 +206,7 @@ Each supported tool can be set to `policy`, `allow`, or `deny`:
 | `network` | `allow`/`ask`/`deny` | `ask` | Network command policy. |
 | `workspaceReadOnly` | `allow`/`ask`/`deny` | `allow` | Policy for analyzed read-only bash commands whose classified path effects stay inside the workspace. |
 | `outsideWorkspaceFilesystem` | `allow`/`ask`/`deny` | `ask` | Bash path effects outside the workspace. |
-| `envSecretExposure` | `deny`/`ask` | `deny` | Environment secret exposure. Hard-coded obvious exposure is denied. |
+| `envSecretExposure` | `deny`/`ask` | `deny` | Environment secret exposure. Hard-coded obvious exposure is denied; `ask` is accepted for compatibility but reserved for less obvious future cases. |
 | `maxCommandPreviewChars` | number | `240` | Max command preview length in prompts/audit. |
 
 `bash.safeCommands`, `bash.askCommands`, and `bash.denyCommands` support:
@@ -216,27 +222,27 @@ Configured safe commands are allow candidates only after structured analysis con
 Examples allowed by `"workspaceReadOnly": "allow"` when their paths are inside the workspace:
 
 ```bash
-find .pi/extensions/permission-guard/src -maxdepth 1 -mindepth 1 -print | sort
-grep -R -n "workspaceReadOnly" .pi/extensions/permission-guard/src | head
-rg "workspaceReadOnly" .pi/extensions/permission-guard/src | head -n 5
-find .pi/extensions/permission-guard/src -type f | head
-grep -R -n "workspaceReadOnly" .pi/extensions/permission-guard/src | wc -l
-cat .pi/extensions/permission-guard/package.json
+find extensions/permission-guard/src -maxdepth 1 -mindepth 1 -print | sort
+grep -R -n "workspaceReadOnly" extensions/permission-guard/src | head
+rg "workspaceReadOnly" extensions/permission-guard/src | head -n 5
+find extensions/permission-guard/src -type f | head
+grep -R -n "workspaceReadOnly" extensions/permission-guard/src | wc -l
+cat extensions/permission-guard/package.json
 ```
 
-Recognized read-only simple commands include `find`, `ls`, `cat`, `grep`, `rg`, `head`, `tail`, `less`, and `more`. Recognized two-stage read-only pipeline sources include `find`, `grep`, `rg`, `ls`, `cat`, `head`, and `tail`; recognized sinks include `sort`, `head`, `tail`, `wc`, and `uniq`. The pipeline allow rule is intentionally narrow and still requires all classified path effects to be read-only and inside the workspace.
+Recognized read-only simple commands include `find`, `ls`, `cat`, `grep`, `head`, `tail`, `less`, and `more`. `rg` is recognized as a source in narrowly supported two-stage read-only pipelines, not as a standalone simple workspace-read-only command. Recognized two-stage read-only pipeline sources include `find`, `grep`, `rg`, `ls`, `cat`, `head`, and `tail`; recognized sinks include `sort`, `head`, `tail`, `wc`, and `uniq`. The pipeline allow rule is intentionally narrow and still requires all classified path effects to be read-only and inside the workspace.
 
 Examples that are not allowed by `workspaceReadOnly` and must ask or be denied by other policy:
 
 ```bash
 find ~/sias/app -maxdepth 1 -mindepth 1 -print | sort
-cat .pi/extensions/permission-guard/package.json | sh
-find .pi/extensions/permission-guard/src -type f | xargs rm
+cat extensions/permission-guard/package.json | sh
+find extensions/permission-guard/src -type f | xargs rm
 ```
 
 A structured safe compound such as `cd <workspace-relative-dir> && npm test` can be allowed when every segment is proven safe and every classified path effect remains inside the approved roots.
 
-`Allow for project` persists workspace-only bash command approvals to `bash.safeCommands` using reusable per-segment patterns rather than the full compound command. Safe `cd` segments inside the workspace are skipped because workspace directory changes are already covered by policy. For example, approving `cd .pi/extensions/subagents && npm run typecheck && npm test` can add reusable patterns for `npm run typecheck` and `npm test`, not the full `cd ... && ...` string.
+`Allow for project` persists workspace-only bash command approvals to `bash.safeCommands` using reusable per-segment patterns rather than the full compound command. Safe `cd` segments inside the workspace are skipped because workspace directory changes are already covered by policy. For example, approving `cd extensions/subagents && npm run typecheck && npm test` can add reusable patterns for `npm run typecheck` and `npm test`, not the full `cd ... && ...` string.
 
 `bash.scopedApprovals` entries store a normalized command/effect signature plus allowed workspace or directory roots for approvals that need root scoping, especially outside-workspace commands. They are additive and backward compatible with legacy `bash.safeCommands`, but they do not grant arbitrary command access to a directory. Reuse requires a compatible command/effect shape and roots that contain all classified path effects.
 
@@ -309,7 +315,7 @@ Interactive approval choices are English and intentionally stable:
 
 `Allow for session` creates an in-memory scoped approval for the matching command/effect signature within the approved workspace or directory roots.
 
-`Allow for project` persists a reusable project-level approval in `.pi/permissions.json`:
+`Allow for project` persists a reusable project-level approval in `.pi/permissions.json` under the current working directory. Config loading can discover the nearest `.pi/permissions.json` upward, so be aware of the cwd used when persisting approvals:
 
 - workspace-only bash approvals are written to `bash.safeCommands` as reusable per-segment command strings or conservative regex patterns;
 - outside-workspace or root-scoped bash approvals are written to `bash.scopedApprovals`.
@@ -348,14 +354,14 @@ Fallback:
 
 Audit safety rules:
 
-- subagent permission handoff events use decision `permission_required` and include the normal redacted target/command metadata when available;
+- subagent tool-call permission handoff events use decision `permission_required` and include the normal redacted target/command metadata when available;
 - paths and commands are redacted by default;
 - secret paths are hashed/redacted;
 - environment values are redacted;
 - edit replacement text is not written;
 - tokens, passwords, and private keys must not be written to audit logs;
 - audit files use mode `0600`; directories use mode `0700`;
-- audit rotates when `audit.maxBytes` is exceeded.
+- audit rotation is checked before appending a new event when the existing file is already over `audit.maxBytes`; a single write can exceed the threshold until the next audit event.
 
 ## Emergency bypass
 
@@ -377,14 +383,14 @@ Persisted `pathApprovals.scopedApprovals` entries reveal local filesystem paths 
 
 Suggested manual checks:
 
-- run an in-workspace compound such as `cd .pi/extensions/permission-guard && npm test`;
+- run an in-workspace compound such as `cd extensions/permission-guard && npm test`;
 - try an outside-workspace path like `cat /tmp/outside.txt` and confirm approval is required;
 - choose `Allow this file for project` and confirm only that exact file is reused later in the same project;
 - choose `Allow this folder for project` and confirm `read`, `ls`, `find`, and `grep` reuse the approval for descendants and future child paths, but not for prefix siblings such as `/tmp/outside-private`;
 - verify secret or symlink-escape paths under an approved folder still do not bypass stricter policy;
 - approve a bash request for session or project, then confirm reuse works only inside the approved roots;
-- verify recognized read-only workspace pipelines such as `grep -R -n "workspaceReadOnly" .pi/extensions/permission-guard/src | head` pass when `bash.workspaceReadOnly` is `allow`;
-- verify unsafe or outside-workspace pipes such as `cat .pi/extensions/permission-guard/package.json | sh` or `find ~/sias/app -maxdepth 1 -mindepth 1 -print | sort` still ask;
+- verify recognized read-only workspace pipelines such as `grep -R -n "workspaceReadOnly" extensions/permission-guard/src | head` pass when `bash.workspaceReadOnly` is `allow`;
+- verify unsafe or outside-workspace pipes such as `cat extensions/permission-guard/package.json | sh` or `find ~/sias/app -maxdepth 1 -mindepth 1 -print | sort` still ask;
 - verify subagent-origin permission prompts remain marker-free on user-visible surfaces.
 
 ## Development
@@ -392,26 +398,26 @@ Suggested manual checks:
 Install dependencies once:
 
 ```bash
-cd .pi/extensions/permission-guard
+cd extensions/permission-guard
 npm install
 ```
 
 Run tests:
 
 ```bash
-cd .pi/extensions/permission-guard
+cd extensions/permission-guard
 npm test
 ```
 
 Run typecheck:
 
 ```bash
-cd .pi/extensions/permission-guard
+cd extensions/permission-guard
 npm run typecheck
 ```
 
 ## Related project docs
 
-- `openspec/changes/archive/2026-06-09-pi-permission-system/` — archived SDD artifacts for this extension.
-- `.pi/extensions/subagents/README.md` — subagent permission handoff integration.
+- `extensions/subagents/README.md` — subagent permission handoff integration.
+- `skills/permission-guard-configuration/SKILL.md` — agent-facing permission configuration policy.
 - Pi extension docs: session/tool/user bash events and in-process extension limitations.

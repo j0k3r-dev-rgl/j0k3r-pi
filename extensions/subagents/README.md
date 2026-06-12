@@ -1,6 +1,6 @@
 # Pi Subagents Extension
 
-Project-local Pi extension for delegating work to markdown-defined subagents. It registers tools for the orchestrator, runs subagents in isolated in-memory Pi sessions, tracks task history, provides a TUI history panel, and supports per-subagent model/thinking-effort profiles.
+Pi extension for delegating work to markdown-defined subagents. It registers tools for the orchestrator, runs subagents in isolated in-memory Pi sessions, tracks task history, provides a TUI history panel, and supports per-subagent model/thinking-effort profiles.
 
 ## What it provides
 
@@ -18,7 +18,13 @@ Project-local Pi extension for delegating work to markdown-defined subagents. It
 
 ## Extension location
 
-This is a project-local Pi extension:
+In this agent-dir checkout the extension lives at:
+
+```txt
+extensions/subagents/index.ts
+```
+
+When copied into a project-local Pi setup, the equivalent path is:
 
 ```txt
 .pi/extensions/subagents/index.ts
@@ -77,7 +83,7 @@ Supported frontmatter:
 |---|---|
 | `name` | Subagent name. Defaults to filename stem. Normalized to lowercase. |
 | `description` | Short description shown by `subagent_list_agents`. |
-| `tools` | Tool allowlist for the subagent. Defaults to configured `default_tools`. |
+| `tools` | Tool allowlist for the subagent. When omitted, the definition gets the built-in default tool list. Configured `default_tools` is used by the runner when a definition has an empty tool list. |
 | `model` | Optional model as `provider/model-id`. |
 | `effort`, `thinking_level`, `thinkingLevel` | Optional thinking effort: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`. |
 
@@ -92,7 +98,7 @@ Config files:
 .pi/subagents.json              # project
 ```
 
-Project config overrides global scalar values. Model profiles are merged by agent name, with project profile fields overriding global profile fields.
+Project config overrides global scalar values. Model profiles are merged by normalized lowercase agent name, with project profile fields overriding global profile fields.
 
 Example:
 
@@ -134,8 +140,8 @@ Example:
 | `timeout_ms` | `600000` | Total timeout per subagent task. |
 | `stall_timeout_ms` | `120000` | Inactivity timeout for a subagent session. |
 | `max_concurrency` | `5` | Max concurrent subagent tasks per cwd/config pair. |
-| `session_resources` | `full` | SDK resource loading mode. Use `lean` to skip skills, prompt templates, themes, and context files in nested subagent sessions while keeping extensions/tools available. |
-| `default_tools` | see below | Default tool allowlist for agents without frontmatter tools. |
+| `session_resources` | `full` | SDK resource loading mode. Use `lean` to skip skills, prompt templates, themes, and context files in nested subagent sessions while keeping extensions/tools available. Also accepts camelCase `sessionResources`. |
+| `default_tools` | see below | Fallback tool allowlist used by the runner when an agent definition has an empty tool list. Omitted frontmatter `tools` uses the built-in default list. |
 
 Default tools:
 
@@ -177,7 +183,13 @@ If a configured model cannot be resolved, the runner reports an error. If a sele
 
 ## Debug and permission bridge logs
 
-Subagents write local debug/audit breadcrumbs to:
+Debug logging is disabled by default. Enable it with:
+
+```bash
+PI_SUBAGENTS_DEBUG=1
+```
+
+When enabled, subagents write local debug/audit breadcrumbs to:
 
 ```txt
 .pi/subagents-debug.log
@@ -204,7 +216,7 @@ This debug log is separate from `permission-guard`'s redacted NDJSON audit log.
 | `subagent_run` | Delegate a task to one or more subagents. Supports `task` and `background` mode. |
 | `subagent_status` | Get status for a delegated task. |
 | `subagent_result` | Read the result for a delegated task. |
-| `subagent_list_tasks` | List active and persisted delegated tasks. |
+| `subagent_list_tasks` | List active and persisted delegated tasks for the current cwd. |
 | `subagent_cancel` | Cancel a running delegated task. |
 
 Only the main orchestrator should call these tools. Subagents are explicitly prevented from calling `subagent_*` tools.
@@ -234,7 +246,7 @@ Behavior:
 
 | Entry point | Description |
 |---|---|
-| `/subagents` | Open the TUI subagent history panel. |
+| `/subagents` | Open the session-focused TUI subagent history panel. |
 | `/subagent-models` | Configure global subagent and SDD phase model profiles. |
 | `ctrl+,` | Open the TUI subagent history panel. |
 
@@ -279,7 +291,7 @@ The history DB stores:
 - compact thread snapshots;
 - task events.
 
-The extension also may write debug diagnostics to:
+When `PI_SUBAGENTS_DEBUG=1` is set, the extension also may write debug diagnostics to:
 
 ```txt
 .pi/subagents-debug.log
@@ -291,12 +303,12 @@ History is best-effort: failures to persist task history should not break delega
 
 Subagents run in isolated sessions, but permission-sensitive operations must still be approved by the main user.
 
-If a subagent emits a `permission_required:` marker from the permission guard:
+If a subagent emits a structured permission-required request from Permission Guard:
 
 1. The manager surfaces the request to the main thread.
-2. The user can choose `Allow once`, `Allow for session`, `Allow for project`, or `Deny`.
+2. The user can choose `Allow once`, `Allow for session`, `Allow for project`, `Allow this file for project`, `Allow this folder for project`, or `Deny`, depending on request type.
 3. Session approvals are stored in a main-thread approval registry.
-4. Project approvals can append safe command patterns to `.pi/permissions.json`.
+4. Project approvals can update `.pi/permissions.json`, including `bash.safeCommands`, `bash.scopedApprovals`, and `pathApprovals.scopedApprovals`.
 5. The subagent is retried after approval.
 
 Background subagent tasks cannot request interactive permission approval. Rerun in `task` mode if approval is needed.
@@ -325,34 +337,35 @@ This project currently defines:
 | `sdd-verify` | Verification report without applying fixes. |
 | `sdd-archive` | Archive verified SDD changes and sync specs. |
 
-See `.pi/subagents/*.md` and `docs/sdd-subagents.md` for the workflow policy.
+See `subagents/*.md`, `AGENTS.md`, and `skills/sdd-workflow/SKILL.md` for the workflow policy in this checkout. In project-local installs, subagent definitions live under `.pi/subagents/*.md`.
 
 ## Development
 
 Install dependencies once:
 
 ```bash
-cd .pi/extensions/subagents
+cd extensions/subagents
 npm install
 ```
 
 Run tests:
 
 ```bash
-cd .pi/extensions/subagents
+cd extensions/subagents
 npm test
 ```
 
 Run typecheck:
 
 ```bash
-cd .pi/extensions/subagents
+cd extensions/subagents
 npm run typecheck
 ```
 
 ## Related project docs
 
-- `docs/sdd-subagents.md` — SDD workflow and subagent policy.
 - `AGENTS.md` — orchestrator behavior and approval gates.
-- `.pi/subagents/*.md` — concrete subagent definitions.
-- `.pi/extensions/permission-guard/README.md` — permission policy integration used by subagent approval handoff.
+- `skills/sdd-workflow/SKILL.md` — SDD workflow and subagent phase policy.
+- `skills/subagents-configuration/SKILL.md` — subagent configuration policy.
+- `subagents/*.md` — concrete global/user subagent definitions in this checkout.
+- `extensions/permission-guard/README.md` — permission policy integration used by subagent approval handoff.

@@ -18,7 +18,13 @@ Local-first persistent memory for Pi agents. This extension gives the agent a pr
 
 ## Extension location
 
-This is a project-local Pi extension:
+In this agent-dir checkout the extension lives at:
+
+```txt
+extensions/memory/index.ts
+```
+
+When copied into a project-local Pi setup, the equivalent path is:
 
 ```txt
 .pi/extensions/memory/index.ts
@@ -38,7 +44,7 @@ Minimal config:
 }
 ```
 
-Recommended project config for automatic project-scoped mirror backups and safe restores:
+Recommended project config for automatic project-scoped mirror backups and safe restores. This example intentionally overrides the built-in legacy default backup path (`.pi/mempry-backups/...`) with the clearer `.pi/memory-backups/...` path:
 
 ```json
 {
@@ -174,7 +180,7 @@ Registered lifecycle events:
 
 Shutdown behavior:
 
-- Default: fast heuristic local summary and heuristic project-profile update.
+- Default: fast heuristic local summary. A heuristic project-profile update is attempted only when useful durable signals are present.
 - With `session_end.semantic=true`: tries semantic summary and semantic project-profile update with the active model, then falls back to heuristic behavior on error or missing auth.
 
 ## Tools exposed to the agent
@@ -186,7 +192,7 @@ Shutdown behavior:
 | `memory_search` | Search compact local memories/session summaries. |
 | `memory_get` | Read a complete memory by id. |
 | `memory_list` | List compact memories by filters. |
-| `memory_update` | Update memory content/tags/status. |
+| `memory_update` | Update memory content/tags/status/confidence/importance. |
 | `memory_archive` | Archive a memory without deleting it. |
 | `memory_session_start` | Create/register a memory session. |
 | `memory_session_prompt_add` | Store a relevant session prompt for audit. |
@@ -251,7 +257,7 @@ Notes:
 - `memory_export` writes a mirror JSONL backup with a `meta` record, `manifest`, and hashed row records.
 - Export is scoped to the current memory context/project: project backups contain only that project's memories, sessions, prompts when included, and related entities/links.
 - Export is mirror-style: the file is rewritten from current scoped DB state, so scoped rows removed locally are removed from the backup too.
-- `memory_export` defaults to JSONL.
+- `memory_export` defaults to JSONL and includes archived memories unless `include_archived=false` is passed.
 - SQLite export is reserved for future implementation.
 - Prompt rows are excluded unless `backups.include_prompts=true` or the tool call explicitly passes `include_prompts=true`.
 - Import defaults to `dry_run` and validates backup format/schema version.
@@ -272,6 +278,7 @@ Notes:
 ## Security and privacy
 
 - Do not store secrets, tokens, passwords, private keys, or raw logs.
+- Memory add, prompt capture, and session finish flows reject obvious secret-like content before storage.
 - `.pi/memory.json` must not contain cloud tokens.
 - Session prompts are audit records; include prompts in exports only intentionally.
 - The extension writes the local DB outside the repository by default to avoid accidental commits.
@@ -282,34 +289,37 @@ Notes:
 Install dependencies once:
 
 ```bash
-cd .pi/extensions/memory
+cd extensions/memory
 npm install
 ```
 
 Run tests:
 
 ```bash
-cd .pi/extensions/memory
+cd extensions/memory
 npm test
 ```
 
 Run typecheck:
 
 ```bash
-cd .pi/extensions/memory
+cd extensions/memory
 npm run typecheck
 ```
+
+The extension uses Node's built-in `node:sqlite` module, so run it with a Node version that provides that API.
 
 Current expected validation:
 
 ```txt
 2 test files pass
-41 tests pass
+59 tests pass
 typecheck passes
 ```
 
 ## Related project docs
 
-- `docs/memory-tool-spec.md` — full product/technical spec.
-- `docs/memory-task.md` — implementation status and task history.
-- `.pi/skills/persistent-memory/SKILL.md` — agent operating policy for using memory.
+- `skills/persistent-memory/SKILL.md` — agent operating policy for using memory.
+- `skills/memory-configuration/SKILL.md` — `.pi/memory.json`, backup, import, and restore configuration policy.
+- `extensions/memory/src/config.ts` — config parsing and defaults.
+- `extensions/memory/src/export-import.ts` — mirror backup format and import behavior.

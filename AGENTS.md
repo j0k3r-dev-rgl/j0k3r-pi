@@ -35,12 +35,12 @@ Treat changes to agent behavior as higher risk than ordinary docs/config edits.
 
 Policy-sensitive paths include:
 - `AGENTS.md`;
-- `.pi/skills/**`;
-- `.pi/subagents/**`;
+- project-local skills and subagents such as `.pi/skills/**`, `.agents/skills/**`, and `.pi/subagents/**`;
+- global/user agent skills and subagents such as `~/.pi/agent/skills/**`, `~/.agents/skills/**`, and `~/.pi/agent/subagents/**`;
 - `.pi/permissions.json`;
 - `.pi/memory.json`;
 - `.pi/context7.json`;
-- `.pi/subagents.json`;
+- `.pi/subagents.json` and `~/.pi/agent/subagents.json`;
 - workflow, memory, permission, skill-registry, or subagent extension code.
 
 Rules:
@@ -113,7 +113,7 @@ For named SDD features, prefer `hybrid` artifact storage unless the user request
 
 ### SDD operational details
 
-Load `.pi/skills/sdd-workflow/SKILL.md` before starting or continuing substantial PRD/SDD/OpenSpec work, before launching any `sdd-*` subagent, or when SDD flow selection is unclear. Before formal SDD planning/delegation, generate or refresh the skill registry; the skill-registry command must keep generated registry artifacts ignored when a `.gitignore` exists. The skill owns:
+Load the selected `sdd-workflow` skill from the skill registry before starting or continuing substantial PRD/SDD/OpenSpec work, before launching any `sdd-*` subagent, or when SDD flow selection is unclear. The skill may be global/user-scoped, for example `~/.pi/agent/skills/sdd-workflow/SKILL.md`, or project-local, for example `.pi/skills/sdd-workflow/SKILL.md`; use registry routing rather than assuming one fixed path. Before formal SDD planning/delegation, generate or refresh the skill registry; the skill-registry command must keep generated registry artifacts ignored when a `.gitignore` exists. The skill owns:
 - the full workflow router;
 - discovery vs `sdd-explore` routing;
 - artifact store policy details;

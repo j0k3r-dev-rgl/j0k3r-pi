@@ -20,7 +20,9 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
   "triggers": {
     "paths": [
       ".pi/skills/**/SKILL.md",
-      ".pi/agent/skills/**/SKILL.md",
+      ".agents/skills/**/SKILL.md",
+      "~/.pi/agent/skills/**/SKILL.md",
+      "~/.agents/skills/**/SKILL.md",
       "extensions/skill-registry/templates/skill-template.md"
     ],
     "keywords": [
@@ -53,7 +55,7 @@ Field conventions:
 
 ## Activation Contract
 
-Use this skill when the user asks to create, modify, review, standardize, or document a Pi skill, especially any `SKILL.md` under `.pi/skills/**` or `.pi/agent/skills/**`. Prefer this skill before writing skill files so all new skills follow the canonical template from `extensions/skill-registry/templates/skill-template.md`.
+Use this skill when the user asks to create, modify, review, standardize, or document a Pi skill, especially any `SKILL.md` under project-local skill directories (`.pi/skills/**`, `.agents/skills/**`) or global/user skill directories (`~/.pi/agent/skills/**`, `~/.agents/skills/**`). Prefer this skill before writing skill files so all new skills follow the canonical template from `extensions/skill-registry/templates/skill-template.md`.
 
 ## Hard Rules
 
@@ -106,5 +108,5 @@ Return:
 ## References
 
 - `extensions/skill-registry/templates/skill-template.md` — canonical skill file format and registry contract conventions.
-- `.pi/agent/skills/persistent-memory/SKILL.md` — memory policy skill example.
-- `.pi/agent/skills/sdd-workflow/SKILL.md` — workflow/gating skill example.
+- `~/.pi/agent/skills/persistent-memory/SKILL.md` or project-local equivalent selected by the skill registry — memory policy skill example.
+- `~/.pi/agent/skills/sdd-workflow/SKILL.md` or project-local equivalent selected by the skill registry — workflow/gating skill example.

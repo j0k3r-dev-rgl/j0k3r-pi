@@ -21,8 +21,8 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
     "paths": [
       ".pi/subagents/**/*.md",
       ".pi/subagents.json",
-      ".pi/agent/subagents/**/*.md",
-      ".pi/agent/subagents.json",
+      "~/.pi/agent/subagents/**/*.md",
+      "~/.pi/agent/subagents.json",
       "extensions/subagents/**"
     ],
     "keywords": [
@@ -145,5 +145,5 @@ Return:
 - `extensions/subagents/src/config.ts` — subagent/config loading and tool filtering.
 - `extensions/subagents/src/history.ts` — global history storage behavior.
 - `extensions/subagents/src/runner.ts` — prompt building and execution behavior.
-- `.pi/agent/skills/sdd-workflow/SKILL.md` — SDD phase responsibilities and subagent orchestration rules.
-- `.pi/agent/skills/permission-guard-configuration/SKILL.md` — permission handoff and approval policy.
+- `~/.pi/agent/skills/sdd-workflow/SKILL.md` or project-local equivalent selected by the skill registry — SDD phase responsibilities and subagent orchestration rules.
+- `~/.pi/agent/skills/permission-guard-configuration/SKILL.md` or project-local equivalent selected by the skill registry — permission handoff and approval policy.

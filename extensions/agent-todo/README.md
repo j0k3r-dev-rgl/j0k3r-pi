@@ -1,6 +1,6 @@
 # Pi Agent Todo Extension
 
-Project-local Pi extension that gives the agent a single active task checklist for the current conversation branch.
+Pi extension that gives the agent a single active task checklist for the current conversation branch. In this agent-dir checkout it lives at `extensions/agent-todo`; when copied into a project-local Pi setup the equivalent path is `.pi/extensions/agent-todo`.
 
 ## What it provides
 
@@ -19,15 +19,23 @@ Project-local Pi extension that gives the agent a single active task checklist f
 
 ### Supported actions
 
+Every call requires an `action` field.
+
 | Action | Required fields | Description |
 |---|---|---|
 | `create` | `title`; optional `body`, `steps` | Create the active todo. If `steps` is omitted, the title becomes the single step. |
-| `show` | none | Return the current active todo state. |
+| `show` | none beyond `action` | Return the current active todo state. |
 | `complete_step` | `step_id` | Mark one step complete. |
-| `complete_all` | none | Mark all remaining steps complete and close the todo. Prefer this when all steps are done. |
+| `complete_all` | none beyond `action` | Mark all remaining steps complete and close the todo. Prefer this when all steps are done. |
 | `complete_range` | `range` or `start_step_id` + `end_step_id` | Mark an inclusive range complete, for example `2-4`. |
 | `reopen_step` | `step_id` | Reopen a completed/current todo step and reactivate the todo. |
-| `clear` | none | Clear the current todo. |
+| `clear` | none beyond `action` | Clear the current todo. |
+
+Validation notes:
+
+- `title` is required and must be non-empty for `create`.
+- Optional `body`, when provided, must be non-empty.
+- `steps`, when provided, must contain non-empty strings and is capped at 20 steps.
 
 ### Examples
 
@@ -70,13 +78,27 @@ The shortcut only toggles the above-chat widget. It does not collapse or modify 
 
 ## Provider contract
 
-The extension publishes a compatible provider under:
-
-```text
-agent-todo.activeTodo
-```
+The provider name is `agent-todo.activeTodo`. At runtime the compatible provider is exposed through `pi.agentTodo`, `ctx.agentTodo`, and `globalThis.__PI_AGENT_TODO_PROVIDER__` rather than through a generic provider registry.
 
 Consumers can read the active todo without parsing tool output. The Sidebar extension uses this to render its Todo section and should fail closed if no provider/active todo exists.
+
+Provider payload shape:
+
+```ts
+{
+  version: 1;
+  source: "agent-todo";
+  active_todo: {
+    id: string;
+    title: string;
+    body?: string;
+    steps: Array<{ id: string; text: string; status: string }>;
+    updated_at: string;
+  } | null;
+}
+```
+
+When there is no active todo, `active_todo` is `null`.
 
 ## Runtime behavior
 
@@ -84,7 +106,8 @@ Consumers can read the active todo without parsing tool output. The Sidebar exte
 - Completing the final open step closes the active todo.
 - `complete_all` closes the active todo in one action.
 - `complete_range` accepts an inclusive numeric range (`2-4`) or start/end step ids.
-- On session start or tree navigation, state is reconstructed from the current branch's prior `agent_todo` tool results.
+- `reopen_step` can reopen a step on the current active or completed todo, including an already-open step; after `clear`, there is no todo to reopen.
+- On session start or tree navigation, state is reconstructed from the current branch's prior successful version-1 `agent_todo` tool results.
 - On shutdown, the above-chat widget and provider are cleaned up.
 
 ## Development
@@ -92,17 +115,19 @@ Consumers can read the active todo without parsing tool output. The Sidebar exte
 Install dependencies once:
 
 ```bash
-cd .pi/extensions/agent-todo
+cd extensions/agent-todo
 npm install
 ```
 
 Run validation:
 
 ```bash
-cd .pi/extensions/agent-todo
+cd extensions/agent-todo
 npm test
 npm run typecheck
 ```
+
+From outside this checkout, use the absolute agent-dir path, for example `cd ~/.pi/agent/extensions/agent-todo`.
 
 After changing extension code during an interactive Pi session, run:
 

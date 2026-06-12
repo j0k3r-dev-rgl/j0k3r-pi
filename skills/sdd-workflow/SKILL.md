@@ -15,7 +15,11 @@ description: Operate the project's PRD/SDD/OpenSpec workflow, including flow sel
     "paths": [
       "openspec/**",
       ".pi/subagents/sdd-*.md",
-      ".pi/skills/sdd-workflow/SKILL.md"
+      ".pi/skills/sdd-workflow/SKILL.md",
+      ".agents/skills/sdd-workflow/SKILL.md",
+      "~/.pi/agent/subagents/sdd-*.md",
+      "~/.pi/agent/skills/sdd-workflow/SKILL.md",
+      "~/.agents/skills/sdd-workflow/SKILL.md"
     ],
     "keywords": [
       "sdd",
@@ -80,8 +84,9 @@ Before creating PRD/OpenSpec artifacts or launching any SDD subagent:
    - in interactive contexts, `/skill-registry generate` is the human command entrypoint;
    - if neither is available, stop and report that the skill-registry extension must be loaded/reloaded instead of using ad hoc fallback scripts;
    - read `.pi/skill-registry.json` after generation;
+   - treat the registry as the routing index for both project-local skills (`.pi/skills`, `.agents/skills`) and global/user skills (`~/.pi/agent/skills`, `~/.agents/skills`);
    - select relevant skills by request intent, touched paths, keywords, SDD phase, priority, and related skills;
-   - read each selected `SKILL.md` before relying on it;
+   - read each selected `SKILL.md` from the path reported by the registry before relying on it; do not assume a fixed `.pi/skills/...` location;
    - pass selected skill names, paths, and applicability notes into any delegated SDD subagent context.
 4. Resolve the SDD execution mode.
 5. Resolve the change slug and artifact store if needed.
@@ -109,7 +114,7 @@ Suggested prompt:
 
 Choose the lightest workflow that safely fits the request, but treat policy-sensitive agent behavior changes as higher risk than ordinary docs/config edits.
 
-Policy-sensitive paths include `AGENTS.md`, `.pi/skills/**`, `.pi/subagents/**`, `.pi/permissions.json`, `.pi/memory.json`, `.pi/context7.json`, `.pi/subagents.json`, and workflow/memory/permission/skill-registry/subagent extension code.
+Policy-sensitive paths include `AGENTS.md`; project-local skills/subagents such as `.pi/skills/**`, `.agents/skills/**`, and `.pi/subagents/**`; global/user agent skills/subagents such as `~/.pi/agent/skills/**`, `~/.agents/skills/**`, and `~/.pi/agent/subagents/**`; `.pi/permissions.json`; `.pi/memory.json`; `.pi/context7.json`; `.pi/subagents.json` and `~/.pi/agent/subagents.json`; and workflow/memory/permission/skill-registry/subagent extension code.
 
 | Situation | Preconditions | Flow | Subagents |
 |---|---|---|---|

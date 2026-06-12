@@ -15,7 +15,13 @@ Native Pi extension for fetching up-to-date library and framework documentation 
 
 ## Extension location
 
-This is a project-local Pi extension:
+In this agent-dir checkout the extension lives at:
+
+```txt
+extensions/context7/index.ts
+```
+
+When copied into a project-local Pi setup, the equivalent path is:
 
 ```txt
 .pi/extensions/context7/index.ts
@@ -75,7 +81,7 @@ Any config key that looks like `apiKey`, `token`, `secret`, or `password` is ign
 
 Cache is disabled by default.
 
-When enabled, cache files are stored outside the repository:
+When enabled, cache files are stored outside the active workspace/configured repository root passed to the extension:
 
 ```txt
 $XDG_CACHE_HOME/pi/context7
@@ -89,7 +95,7 @@ Fallback:
 
 Safety rules:
 
-- Cache directory must not resolve inside the repository; if it does, cache is disabled.
+- Cache directory must not resolve inside the active workspace/configured repository root; if it does, cache is disabled.
 - Cache keys omit secret-like fields and are SHA-256 hashed.
 - Cache files use mode `0600`; directories use mode `0700`.
 - Cache entries expire according to `cache.ttl_seconds`.
@@ -127,9 +133,9 @@ Parameters:
 
 ```ts
 {
-  libraryName: string;
-  query: string;
-  limit?: number; // 1-10
+  libraryName: string; // required, non-empty
+  query: string;       // required, non-empty
+  limit?: number;      // integer 1-10
 }
 ```
 
@@ -139,7 +145,7 @@ Returns compact candidates with fields such as:
 
 - `id`;
 - `name`;
-- `description`;
+- `description` capped for compactness;
 - `totalSnippets`;
 - `trustScore`;
 - `benchmarkScore`;
@@ -151,10 +157,10 @@ Parameters:
 
 ```ts
 {
-  libraryId: string;
-  query: string;
+  libraryId: string;      // required, non-empty
+  query: string;          // required, non-empty
   type?: "json" | "txt"; // default: json
-  max_chars?: number;     // clamped to 1000-50000
+  max_chars?: number;     // clamped/floored to 1000-50000
 }
 ```
 
@@ -162,8 +168,8 @@ Use when the correct Context7 library ID is already known, for example `/vercel/
 
 Output:
 
-- `json`: formatted snippets with title/source/content;
-- `txt`: raw text, truncated to the effective max char limit.
+- `json`: formatted snippets with title/source/content; snippet content is bounded per snippet, so total JSON output can exceed `max_chars` when multiple snippets are returned.
+- `txt`: text output with a Context7 header, truncated to the effective total max char limit.
 
 ### `context7_resolve_and_get_context`
 
@@ -180,10 +186,10 @@ Parameters:
 
 Behavior:
 
-1. Searches candidates using the configured result limit.
+1. Searches candidates using the configured `defaults.result_limit`; callers cannot pass a per-call `limit` to the resolver.
 2. Scores candidates by name/id match, optional version match, trust score, benchmark score, snippet coverage, and description overlap.
-3. If no candidate is confident enough, returns `ambiguous` with scored candidates.
-4. If unambiguous, fetches documentation for the selected library ID.
+3. Returns `no_results`, `ambiguous`, or `selected`.
+4. If unambiguous, fetches JSON documentation for the selected library ID.
 
 Use this tool for convenience only when ambiguity is acceptable to handle in the result. For high-risk implementation decisions, prefer explicit `context7_search_library` followed by `context7_get_context` after confirming the selected ID.
 
@@ -194,7 +200,7 @@ All tool outputs are designed to be safe for LLM context:
 - exact API key values are redacted;
 - secret-looking text patterns are redacted;
 - private key blocks are redacted;
-- documentation output is truncated by `max_chars`;
+- `txt` documentation output is truncated by `max_chars`; JSON snippet content is bounded per snippet and may exceed `max_chars` in total;
 - search descriptions are capped;
 - errors are formatted with actionable messages;
 - upstream `401`, `403`, `404`, `429`, and `5xx` failures get user-actionable wording.
@@ -232,21 +238,21 @@ When Context7 influences an SDD artifact, record concise source metadata, not fu
 Install dependencies once:
 
 ```bash
-cd .pi/extensions/context7
+cd extensions/context7
 npm install
 ```
 
 Run tests:
 
 ```bash
-cd .pi/extensions/context7
+cd extensions/context7
 npm test
 ```
 
 Run typecheck:
 
 ```bash
-cd .pi/extensions/context7
+cd extensions/context7
 npm run typecheck
 ```
 
@@ -254,11 +260,8 @@ The test suite is designed to run without live Context7 network access or a real
 
 ## Related project docs
 
-- `docs/prd-context7-extension.md` — product requirements and design context.
-- `docs/sdd-subagents.md` — SDD documentation workflow and Context7 source-recording policy.
-- `openspec/specs/context7-status/spec.md` — status tool requirements.
-- `openspec/specs/context7-search-library/spec.md` — library search requirements.
-- `openspec/specs/context7-get-context/spec.md` — documentation fetch requirements.
-- `openspec/specs/context7-resolve-and-get-context/spec.md` — resolver behavior requirements.
-- `openspec/specs/context7-safe-output/spec.md` — redaction/truncation/error-safety requirements.
-- `openspec/specs/context7-optional-cache/spec.md` — cache requirements.
+- `skills/context7-configuration/SKILL.md` — agent-facing Context7 configuration and usage policy.
+- `extensions/context7/src/config.ts` — config parsing and defaults.
+- `extensions/context7/src/tools.ts` — tool schemas and output shaping.
+- `extensions/context7/src/cache.ts` — cache location and safety behavior.
+- `extensions/context7/src/security.ts` — redaction and safe output helpers.
