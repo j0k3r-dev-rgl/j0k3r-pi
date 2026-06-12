@@ -93,6 +93,9 @@ Do not load this skill for:
 - Choose the lightest safe workflow.
 - Do not create SDD/OpenSpec artifacts or launch SDD subagents for a new flow until the SDD mode gate is resolved.
 - PRDs are optional, not mandatory for every SDD. If `openspec/changes/<change>/prd.md` exists, every SDD phase must read it completely, treat it as product/requirements source context, preserve PRD alignment in outputs, and flag conflicts, gaps, or scope drift.
+- `openspec/config.yaml` is project-global and minimal. It may store stable defaults plus the last SDD mode selected by the user, but not active change, feature summaries, PRD status, or implementation-specific context; put change-specific context in `openspec/changes/<change>/metadata.yaml` and phase artifacts.
+- Always ask the user for SDD mode on every new SDD flow. After the user selects `interactive`, `normal`, or `defaults`, update `openspec/config.yaml` `sdd.last_selected_mode`, record the selected mode in change metadata when present, and keep active SDD memory consistent.
+- If `openspec/changes/<change>/metadata.yaml` exists, every SDD phase and subagent must read it before acting, before or alongside PRD/proposal/spec/design/tasks, and preserve/flag metadata alignment.
 - Use `workflow-triage` before discovery or SDD when the route is unclear. Use discovery only when the orchestrator lacks read-only evidence needed to decide whether formal SDD is warranted; discovery informs but does not decide the workflow.
 - Treat investigation/discovery as read-only diagnosis, not permission to solve or implement.
 - Use SDD subagents as phase executors only; the main agent remains the orchestrator.
@@ -142,19 +145,24 @@ This preflight is not permission to run Git write operations. Never create commi
 1. If the route is unclear, load/apply `workflow-triage` first.
 2. Run the required PRD/SDD preflight before creating artifacts or launching SDD/PRD-review subagents.
 3. Resolve execution mode, change slug, artifact store, and approval scope.
-4. Check for `openspec/changes/<change>/prd.md`; if present, make it mandatory context for every downstream phase.
-5. Choose the next phase from the flow selection table or continue router.
+4. Ensure `openspec/config.yaml` exists and is minimal/project-global. If it is missing, create the minimal config with project, artifact store default, SDD mode policy/last selected mode, PRD policy, and change metadata path. If it contains change-specific fields, move them to `openspec/changes/<change>/metadata.yaml`.
+5. Ask for SDD mode on every new SDD flow. After the user selects a mode, update `openspec/config.yaml` `sdd.last_selected_mode`, the change metadata mode when metadata exists, and active SDD memory.
+6. Check for `openspec/changes/<change>/metadata.yaml`; if present, make it mandatory context for every downstream phase.
+7. Check for `openspec/changes/<change>/prd.md`; if present, make it mandatory context for every downstream phase.
+8. Choose the next phase from the flow selection table or continue router.
 6. Prepare focused subagent instructions with selected skills, artifacts, allowed/forbidden actions, and expected return envelope.
 7. Stop before implementation unless an approved task artifact exists and the user explicitly approved apply.
 8. After meaningful work, update active SDD state/memory and report validation, risks, and next recommended step.
 
 ## Execution modes
 
-For every new PRD/SDD/OpenSpec flow, ask which mode to use unless the user already stated it:
+For every new PRD/SDD/OpenSpec flow, ask which mode to use unless the user already stated it in the current conversation:
 
 - `interactive`: ask before each SDD phase and before writing/updating artifacts.
 - `normal`: proceed phase-by-phase with concise checkpoints at major transitions.
 - `defaults`: use project defaults and ask only when blocked or when a decision materially affects scope, persistence, or implementation approval.
+
+`openspec/config.yaml` may store `sdd.last_selected_mode` as a convenience and audit hint, but it does not replace asking the user for a new flow. After the user selects a mode, update `sdd.last_selected_mode`; if a change metadata file exists, update that change's `mode`; and keep active SDD flow memory consistent.
 
 Do not launch SDD subagents or create/update PRD/OpenSpec artifacts for a new flow until the mode is resolved.
 
@@ -244,6 +252,9 @@ Default for named SDD features: `hybrid`.
 
 Canonical OpenSpec artifact names:
 
+- Project-global config: `openspec/config.yaml`.
+- Change metadata: `openspec/changes/<change>/metadata.yaml`.
+- Optional PRD: `openspec/changes/<change>/prd.md`.
 - Active change spec: `openspec/changes/<change>/spec.md`.
 - Active verification report: `openspec/changes/<change>/verify-report.md`.
 - Archive may sync source-of-truth capability specs under `openspec/specs/<capability>/spec.md` from the change artifacts when applicable.
@@ -262,6 +273,20 @@ Examples:
 
 Before using an existing slug, inspect current OpenSpec state or active SDD memory to avoid accidental overwrite.
 
+## OpenSpec config and change metadata
+
+`openspec/config.yaml` is stable, minimal project-global configuration. It should contain only project name, default artifact store, SDD mode policy and last selected mode, PRD policy, and the canonical change metadata path. It must not contain active change-specific fields such as `context.change`, `context.summary`, `active_change`, feature-specific notes, PRD status, implementation plan, validation commands, source paths, or current task details.
+
+Each named SDD change may have `openspec/changes/<change>/metadata.yaml` for change-specific context: slug, title, status, artifact store, mode, summary, relevant source paths, validation expectations, and notes. Do not add placeholder paths or status for artifacts that do not exist. Reference PRD context in metadata only when a real PRD artifact exists or the user explicitly approved PRD creation. If metadata exists, all SDD phases and subagents must read it before acting and report conflicts with downstream artifacts instead of silently ignoring it.
+
+Before starting or continuing a named SDD change:
+
+1. Ensure `openspec/config.yaml` exists, is minimal, and is project-global only.
+2. Always ask the user for the SDD mode for a new flow; after selection, update `openspec/config.yaml` `sdd.last_selected_mode`, the change metadata mode when metadata exists, and active SDD memory.
+3. If `openspec/config.yaml` contains change-specific fields, move them into `openspec/changes/<change>/metadata.yaml` or a phase artifact.
+4. Create or update `openspec/changes/<change>/metadata.yaml` when change-specific context is needed for handoff, validation expectations, or subagent routing.
+5. Treat `metadata.yaml` as context, not as a replacement for proposal/spec/design/tasks. Do not use it to invent absent PRDs or other phase artifacts.
+
 ## Optional PRD flow
 
 Use a PRD-first route when the user asks for a PRD or when complex product, UX, integration, OAuth/auth, security, or architecture work needs requirements definition before formal proposal/spec/design/tasks.
@@ -277,19 +302,21 @@ PRD creation expectations:
 Existing PRD rule:
 
 - If `openspec/changes/<change>/prd.md` exists, it is mandatory context for `sdd-explore`, `sdd-proposal`, `sdd-spec`, `sdd-design`, `sdd-task`, `sdd-apply`, `sdd-verify`, and `sdd-archive`.
-- Each phase output should include a concise `PRD Alignment` section or equivalent notes covering relevant PRD requirements, assumptions, gaps, and conflicts.
+- If `openspec/changes/<change>/metadata.yaml` exists, it is mandatory context for those same phases and for `prd-review`.
+- Each phase output should include concise metadata/PRD alignment notes covering relevant requirements, assumptions, gaps, and conflicts.
 - If an SDD artifact conflicts with the PRD, the phase must report `blocked` or flag the conflict clearly instead of silently overriding the PRD.
 
 ## Default SDD planning sequence
 
 For a new named feature where planning is approved but implementation is not:
 
-1. Optional PRD draft/review when requested, warranted, or already present.
-2. `sdd-explore`
-3. `sdd-proposal`
-4. `sdd-spec`
-5. `sdd-design`
-6. `sdd-task`
+1. Ensure project-global OpenSpec config and change metadata are valid/current.
+2. Optional PRD draft/review when requested, warranted, or already present.
+3. `sdd-explore`
+4. `sdd-proposal`
+5. `sdd-spec`
+6. `sdd-design`
+7. `sdd-task`
 
 Stop before implementation unless the user explicitly approves apply.
 
@@ -468,6 +495,7 @@ Before launching a subagent, prepare a focused task with:
 - execution mode implications;
 - current known state;
 - required prior artifact paths/summaries;
+- OpenSpec config path and relevant change metadata path/content summary, if present;
 - relevant skills loaded from the skill registry, including skill name, `SKILL.md` path, why it applies, and any related skills deliberately loaded or discarded;
 - allowed and forbidden actions;
 - expected return envelope;

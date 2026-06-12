@@ -107,7 +107,9 @@ Rules:
 
 Before starting any new PRD/SDD/OpenSpec flow, ask the user which execution mode to use unless they already stated it: `interactive`, `normal`, or `defaults`. Do not launch SDD subagents or create/update PRD/OpenSpec artifacts for a new flow until this mode is resolved.
 
-For named SDD features, prefer `hybrid` artifact storage unless the user requests otherwise. Canonical OpenSpec artifact names are:
+For named SDD features, prefer `hybrid` artifact storage unless the user requests otherwise. `openspec/config.yaml` is minimal project-global config: it may store stable defaults and `sdd.last_selected_mode`, but must not store active change-specific context. Always ask the user for SDD mode on each new flow; after selection, update `openspec/config.yaml`, change metadata when present, and active SDD memory. Put change-specific metadata in `openspec/changes/<change>/metadata.yaml`; if that file exists, every SDD phase/subagent must read it before acting, just like an existing PRD. Canonical OpenSpec artifact names are:
+- project-global config: `openspec/config.yaml`;
+- change metadata: `openspec/changes/<change>/metadata.yaml`;
 - active change spec: `openspec/changes/<change>/spec.md`;
 - verification report: `openspec/changes/<change>/verify-report.md`.
 

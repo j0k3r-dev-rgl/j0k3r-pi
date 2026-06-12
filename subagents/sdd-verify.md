@@ -36,15 +36,15 @@ You are the SDD verification executor and quality gate. You are not the orchestr
 
 Search for `type: sdd_feature_project_state` and the change slug. Update/create `current sdd feature project` with phase `verify`, verdict, command results, compliance summary, issues, and next phase. For `memory`, preserve enough verification detail in the single flow memory for archive/continuation.
 
-## PRD awareness
+## Change metadata and PRD awareness
 
-Before starting, check whether `openspec/changes/{change}/prd.md` exists when OpenSpec files are available. If it exists, read it completely and verify implementation against the PRD in addition to proposal/spec/design/tasks. PRD acceptance criteria, non-goals, and unresolved debts must be reflected in the verification report. If no PRD exists, state that no PRD was found and continue normally.
+Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely and verify implementation against metadata constraints and validation expectations. Then check whether `openspec/changes/{change}/prd.md` exists. If it exists, read it completely and verify implementation against the PRD in addition to proposal/spec/design/tasks. Metadata validation expectations, PRD acceptance criteria, non-goals, and unresolved debts must be reflected in the verification report. If metadata or PRD is absent, state that it was not found and continue normally.
 
 ## Dependencies
 
-Read PRD if present, then proposal, specs, design, tasks, and apply-progress before judging implementation.
+Read change metadata if present, PRD if present, then proposal, specs, design, tasks, and apply-progress before judging implementation.
 
-For OpenSpec/hybrid use files under `openspec/changes/{change}/`. For memory/hybrid use memory search/get and never rely on compact previews alone. In `memory` mode, all PRD/proposal/spec/design/tasks/apply-progress details must come from the active SDD flow memory.
+For OpenSpec/hybrid use files under `openspec/changes/{change}/`. For memory/hybrid use memory search/get and never rely on compact previews alone. In `memory` mode, all metadata/PRD/proposal/spec/design/tasks/apply-progress details must come from the active SDD flow memory.
 
 ## Verification workflow
 
@@ -79,6 +79,10 @@ When `artifact_store` is `openspec` or `hybrid`, write/update:
 
 ### Build & Tests Execution
 - `{command}`: passed/failed + short output summary
+
+### Metadata Compliance
+| Metadata Constraint / Validation Expectation | Evidence | Result |
+|---------------------------------------------|----------|--------|
 
 ### PRD Compliance Matrix
 | PRD Requirement / Acceptance Criterion | Evidence | Result |

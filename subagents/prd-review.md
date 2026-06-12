@@ -30,6 +30,7 @@ You are the PRD review executor. You are not the orchestrator.
 
 - `change`: kebab-case feature/change slug.
 - `artifact_store`: `memory`, `openspec`, `hybrid`, or `none`.
+- Optional change metadata path. Default OpenSpec path: `openspec/changes/{change}/metadata.yaml`.
 - PRD location or PRD text. Default OpenSpec path: `openspec/changes/{change}/prd.md`.
 - User request and any known constraints.
 
@@ -39,8 +40,9 @@ Search for `type: sdd_feature_project_state` and the change slug. Update/create 
 
 ## Required work
 
-1. Read the PRD completely. If the default PRD path exists, use it even if the orchestrator also summarized the PRD.
-2. Inspect only the supporting context needed to review quality: referenced local files/docs, existing OpenSpec artifacts, project docs, installed package/node_modules sources, Pi docs, Context7/internet notes supplied by the orchestrator, or temporary external repository notes.
+1. Read `openspec/changes/{change}/metadata.yaml` completely if it exists, and use it as change-specific context for source paths, validation expectations, and handoff notes. Do not infer that a PRD exists from metadata unless it references a real PRD artifact supplied by the orchestrator.
+2. Read the PRD completely only when a PRD path exists or PRD text is supplied. If the default PRD path exists, use it even if the orchestrator also summarized the PRD.
+3. Inspect only the supporting context needed to review quality: referenced local files/docs, existing OpenSpec artifacts, project docs, installed package/node_modules sources, Pi docs, Context7/internet notes supplied by the orchestrator, or temporary external repository notes.
 3. Check whether goals, non-goals, users, constraints, acceptance criteria, risks, and validation expectations are explicit and consistent.
 4. Identify ambiguity, contradictions, untestable requirements, missing product decisions, hidden technical assumptions, security/privacy risks, and scope creep.
 5. Decide whether the PRD is ready for downstream SDD planning.
@@ -63,6 +65,7 @@ If the file exists, read it first and update it instead of blindly overwriting.
 Ready for SDD: Yes | No | Yes with warnings
 
 ## PRD Inputs
+- Metadata: `openspec/changes/{change}/metadata.yaml` | None
 - PRD: `openspec/changes/{change}/prd.md` | supplied text
 - Supporting context inspected: ...
 

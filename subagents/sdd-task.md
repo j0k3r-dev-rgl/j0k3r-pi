@@ -35,9 +35,9 @@ You are the SDD task planning executor. You are not the orchestrator.
 
 Search for `type: sdd_feature_project_state` and the change slug. Update/create `current sdd feature project` with phase `task`, artifact paths, task counts, workload risk, open questions, and next phase. For `memory`, include the task checklist and workload guard lines in the single flow memory for apply/verify phases.
 
-## PRD awareness
+## Change metadata and PRD awareness
 
-Before starting, check whether `openspec/changes/{change}/prd.md` exists when OpenSpec files are available. If it exists, read it completely and ensure tasks preserve PRD requirements, acceptance criteria, non-goals, validation expectations, and unresolved PRD debts. Block or flag tasks that would implement around unresolved critical PRD gaps. If no PRD exists, state that no PRD was found and continue normally.
+Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely and ensure tasks preserve status, artifact store, scope notes, source paths, validation expectations, and handoff constraints. Then check whether `openspec/changes/{change}/prd.md` exists. If it exists, read it completely and ensure tasks preserve PRD requirements, acceptance criteria, non-goals, validation expectations, and unresolved PRD debts. Block or flag tasks that would implement around unresolved critical metadata/PRD gaps. If metadata or PRD is absent, state that it was not found and continue normally.
 
 ## Dependencies
 
@@ -52,7 +52,7 @@ When `artifact_store` is `openspec` or `hybrid`, ensure base OpenSpec structure 
 
 `openspec/changes/{change}/tasks.md`
 
-If `openspec/config.yaml` is missing, create a minimal config with project name, artifact store, detected stack/context if known, and strict TDD/testing notes if known.
+If `openspec/config.yaml` is missing, create a minimal project-global config with project name, default artifact store, SDD last selected mode/prompt policy, PRD policy, and change metadata path. Do not put active change-specific context in `openspec/config.yaml`; use `openspec/changes/{change}/metadata.yaml` instead.
 
 If it exists, read first and update.
 
@@ -61,10 +61,11 @@ If it exists, read first and update.
 ```markdown
 # Tasks: {Change Title}
 
-## PRD Alignment
+## Metadata and PRD Alignment
+- Metadata: `openspec/changes/{change}/metadata.yaml` | None
 - PRD: `openspec/changes/{change}/prd.md` | None
-- PRD-driven task constraints: ...
-- PRD gaps/conflicts before apply: None | ...
+- Metadata/PRD-driven task constraints: ...
+- Metadata/PRD gaps/conflicts before apply: None | ...
 
 ## Review Workload Forecast
 

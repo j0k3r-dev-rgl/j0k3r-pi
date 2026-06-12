@@ -34,9 +34,9 @@ You are the SDD specification executor. You are not the orchestrator.
 
 Search for `type: sdd_feature_project_state` and the change slug. Update/create `current sdd feature project` with phase `spec`, spec artifact paths, requirements summary, open questions, and next phase. For `memory`, include enough requirement/scenario detail in the single flow memory for downstream design/task/apply phases.
 
-## PRD awareness
+## Change metadata and PRD awareness
 
-Before starting, check whether `openspec/changes/{change}/prd.md` exists when OpenSpec files are available. If it exists, read it completely and use it as mandatory context for requirements, acceptance criteria, personas, non-goals, and edge cases. Every PRD requirement that enters scope should map to at least one SHALL requirement or be explicitly marked out of scope with rationale. If no PRD exists, state that no PRD was found and continue normally.
+Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely and treat it as mandatory change context for status, artifact store, source paths, validation expectations, and handoff notes. Then check whether `openspec/changes/{change}/prd.md` exists. If it exists, read it completely and use it as mandatory context for requirements, acceptance criteria, personas, non-goals, and edge cases. Every PRD requirement that enters scope should map to at least one SHALL requirement or be explicitly marked out of scope with rationale. If metadata or PRD is absent, state that it was not found and continue normally.
 
 ## Dependencies
 
@@ -45,7 +45,7 @@ Read proposal before writing specs:
 - memory/hybrid: search/get active SDD flow state and proposal summary if present.
 - openspec/hybrid: `openspec/changes/{change}/proposal.md`.
 
-Use the proposal `Capabilities` section as the source of truth for requirement sections within the change spec, constrained by any PRD that exists.
+Use the proposal `Capabilities` section as the source of truth for requirement sections within the change spec, constrained by any metadata or PRD that exists.
 
 ## OpenSpec artifact
 
@@ -53,7 +53,7 @@ When `artifact_store` is `openspec` or `hybrid`, ensure base OpenSpec structure 
 
 `openspec/changes/{change}/spec.md`
 
-If `openspec/config.yaml` is missing, create a minimal config with project name, artifact store, detected stack/context if known, and strict TDD/testing notes if known.
+If `openspec/config.yaml` is missing, create a minimal project-global config with project name, default artifact store, SDD last selected mode/prompt policy, PRD policy, and change metadata path. Do not put active change-specific context in `openspec/config.yaml`; use `openspec/changes/{change}/metadata.yaml` instead.
 
 If source-of-truth specs exist under `openspec/specs/{capability}/spec.md`, use them as context and describe changes in the canonical change spec. Do not create per-capability specs under the change directory.
 
@@ -67,10 +67,11 @@ Use a single canonical change spec:
 ## Purpose
 {change-level purpose}
 
-## PRD Alignment
+## Metadata and PRD Alignment
+- Metadata: `openspec/changes/{change}/metadata.yaml` | None
 - PRD: `openspec/changes/{change}/prd.md` | None
-- PRD requirements mapped: ...
-- PRD gaps/conflicts: None | ...
+- Metadata/PRD requirements mapped: ...
+- Metadata/PRD gaps/conflicts: None | ...
 
 ## Requirements
 

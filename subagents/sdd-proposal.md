@@ -35,9 +35,9 @@ You are the SDD proposal executor. You are not the orchestrator.
 
 Search for `type: sdd_feature_project_state` and the change slug. Update the existing active SDD flow memory, or create `current sdd feature project` if missing. For `openspec` or `hybrid`, keep it compact: current phase, status, artifact paths, summary, open questions, and next phase. For `memory`, include enough proposal detail in the single flow memory for downstream spec/design/task phases.
 
-## PRD awareness
+## Change metadata and PRD awareness
 
-Before starting, check whether `openspec/changes/{change}/prd.md` exists when OpenSpec files are available. If it exists, read it completely and treat it as mandatory product/requirements context for intent, scope, goals, non-goals, user stories, and acceptance criteria. Do not silently override or omit PRD requirements; flag conflicts, missing decisions, or scope drift. If no PRD exists, state that no PRD was found and continue normally.
+Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely and treat it as mandatory change context for slug, status, artifact store, source paths, validation expectations, and handoff notes. Then check whether `openspec/changes/{change}/prd.md` exists. If it exists, read it completely and treat it as mandatory product/requirements context for intent, scope, goals, non-goals, user stories, and acceptance criteria. Do not silently override or omit metadata/PRD constraints; flag conflicts, missing decisions, or scope drift. If metadata or PRD is absent, state that it was not found and continue normally.
 
 ## Dependencies
 
@@ -52,7 +52,7 @@ When `artifact_store` is `openspec` or `hybrid`, ensure base OpenSpec structure 
 
 `openspec/changes/{change}/proposal.md`
 
-If `openspec/config.yaml` is missing, create a minimal config with project name, artifact store, detected stack/context if known, and strict TDD/testing notes if known.
+If `openspec/config.yaml` is missing, create a minimal project-global config with project name, default artifact store, SDD last selected mode/prompt policy, PRD policy, and change metadata path. Do not put active change-specific context in `openspec/config.yaml`; use `openspec/changes/{change}/metadata.yaml` instead.
 
 Create the change directory if needed. If the file exists, read it first and update it.
 
@@ -83,10 +83,11 @@ Create the change directory if needed. If the file exists, read it first and upd
 ## Approach
 {high-level technical approach}
 
-## PRD Alignment
+## Metadata and PRD Alignment
+- Metadata: `openspec/changes/{change}/metadata.yaml` | None
 - PRD: `openspec/changes/{change}/prd.md` | None
-- Requirements carried forward: ...
-- PRD gaps/conflicts: None | ...
+- Requirements/context carried forward: ...
+- Metadata/PRD gaps/conflicts: None | ...
 
 ## Affected Areas
 | Area | Impact | Description |

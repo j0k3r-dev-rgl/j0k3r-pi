@@ -55,13 +55,13 @@ When `artifact_store` is `openspec` or `hybrid`, ensure base OpenSpec structure 
 
 `openspec/changes/{change}/exploration.md`
 
-If `openspec/config.yaml` is missing, create a minimal config with project name, artifact store, detected stack/context if known, and strict TDD/testing notes if known.
+If `openspec/config.yaml` is missing, create a minimal project-global config with project name, default artifact store, SDD last selected mode/prompt policy, PRD policy, and change metadata path. Do not put active change-specific context in `openspec/config.yaml`; use `openspec/changes/{change}/metadata.yaml` instead.
 
 If the file exists, read it first and update it instead of blindly overwriting.
 
-## PRD awareness
+## Change metadata and PRD awareness
 
-Before starting, check whether `openspec/changes/{change}/prd.md` exists when OpenSpec files are available. If it exists, read it completely and treat it as mandatory product/requirements context. Reflect relevant PRD requirements, assumptions, gaps, and conflicts in the exploration output. If no PRD exists, state that no PRD was found and continue normally.
+Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely and treat it as mandatory change context for slug, status, artifact store, source paths, validation expectations, and handoff notes. Then check whether `openspec/changes/{change}/prd.md` exists. If it exists, read it completely and treat it as mandatory product/requirements context. Reflect relevant metadata and PRD requirements, assumptions, gaps, and conflicts in the exploration output. If metadata or PRD is absent, state that it was not found and continue normally.
 
 ## Required work
 
@@ -93,10 +93,11 @@ Before starting, check whether `openspec/changes/{change}/prd.md` exists when Op
 ### Recommendation
 {recommended approach and why}
 
-### PRD Alignment
+### Metadata and PRD Alignment
+- Metadata found: Yes/No
 - PRD found: Yes/No
-- Relevant PRD points: ...
-- PRD gaps/conflicts: None | ...
+- Relevant metadata/PRD points: ...
+- Metadata/PRD gaps/conflicts: None | ...
 
 ### Risks
 - ...
