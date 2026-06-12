@@ -113,8 +113,9 @@ For named SDD features, prefer `hybrid` artifact storage unless the user request
 
 ### SDD operational details
 
-Load the selected `workflow-triage` skill from the skill registry when the correct workflow is unclear or the user challenges the chosen workflow. Load the selected `sdd-workflow` skill before starting or continuing substantial PRD/SDD/OpenSpec work, before launching any `sdd-*` subagent, or when a formal SDD path is likely. Skills may be global/user-scoped, for example `~/.pi/agent/skills/sdd-workflow/SKILL.md`, or project-local, for example `.pi/skills/sdd-workflow/SKILL.md`; use registry routing rather than assuming one fixed path. Before formal SDD planning/delegation, generate or refresh the skill registry; the skill-registry command must keep generated registry artifacts ignored when a `.gitignore` exists. The SDD workflow skill owns:
+Load the selected `workflow-triage` skill from the skill registry when the correct workflow is unclear or the user challenges the chosen workflow. Load the selected `sdd-workflow` skill before starting or continuing substantial PRD/SDD/OpenSpec work, before launching any `sdd-*` or PRD-review subagent, or when a formal SDD path is likely. Skills may be global/user-scoped, for example `~/.pi/agent/skills/sdd-workflow/SKILL.md`, or project-local, for example `.pi/skills/sdd-workflow/SKILL.md`; use registry routing rather than assuming one fixed path. Before formal SDD planning/delegation, generate or refresh the skill registry; the skill-registry command must keep generated registry artifacts ignored when a `.gitignore` exists. When creating, reviewing, or updating any `SKILL.md`, load `skill-authoring`, preserve the `Registry Contract` and `Activation Contract`, and regenerate/read the skill registry when the current session should use the new routing immediately. The SDD workflow skill owns:
 - the full workflow router;
+- optional PRD-first flow and existing-PRD handling;
 - discovery vs `sdd-explore` routing;
 - artifact store policy details;
 - phase responsibilities and sequencing;
@@ -123,7 +124,9 @@ Load the selected `workflow-triage` skill from the skill registry when the corre
 - expected SDD return envelopes;
 - SDD memory rules and end-of-work checkpoints.
 
-Implementation approval remains separate from planning approval. Do not use `sdd-apply` unless an SDD task artifact exists or the active SDD flow is already at apply phase and the user approved implementation.
+PRDs are optional, not mandatory for every SDD. However, if `openspec/changes/<change>/prd.md` exists, every SDD phase and subagent must read it before acting, treat it as product/requirements source context, preserve PRD alignment in its artifact/output, and report conflicts, gaps, or scope drift instead of silently ignoring the PRD. For complex product, integration, OAuth/auth, security, UX, or architecture work, prefer a PRD-first path: investigate enough local files/docs/node_modules/Pi docs/Context7/internet or external repositories to draft a well-defined PRD, ask the user only decision-critical questions, run `prd-review` before downstream SDD, and resolve critical PRD debts before implementation.
+
+Implementation approval remains separate from PRD approval and SDD planning approval. Do not use `sdd-apply` unless an SDD task artifact exists or the active SDD flow is already at apply phase and the user approved implementation.
 
 ## Git commit and push policy
 

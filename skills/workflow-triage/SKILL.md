@@ -23,6 +23,8 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "skills/workflow-triage/SKILL.md",
       "skills/sdd-workflow/SKILL.md",
       "subagents/discovery.md",
+      "subagents/prd-review.md",
+      "subagents/sdd-*.md",
       "~/.pi/agent/skills/workflow-triage/SKILL.md",
       "~/.pi/agent/subagents/discovery.md"
     ],
@@ -37,6 +39,12 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "unclear",
       "investigate",
       "discovery",
+      "prd",
+      "product requirements",
+      "prd-first",
+      "prd-first-sdd",
+      "use-existing-prd-sdd",
+      "prd review",
       "simple tdd",
       "sdd",
       "openspec",
@@ -73,7 +81,8 @@ Good triggers:
 
 - the user proposes a new change, feature, behavior adjustment, or workflow improvement and the implementation path is not fully specified;
 - the user asks to improve, review, investigate, analyze, diagnose, compare, design, plan, or choose an approach;
-- the request could be inline, simple TDD, read-only discovery, or formal SDD and the best route is not obvious;
+- the user asks for PRD-first work, product requirements, PRD review, or continuing SDD from an existing PRD;
+- the request could be inline, simple TDD, read-only discovery, PRD-first SDD, existing-PRD SDD, or formal SDD and the best route is not obvious;
 - the user pushes back that the selected workflow is too heavy or too light;
 - the work touches agent behavior, skills, subagents, permissions, memory/config, workflow extensions, or future-agent behavior;
 - the assistant is about to delegate or create artifacts mainly because of uncertainty.
@@ -90,6 +99,7 @@ Do not load this skill for greetings, obvious direct answers, or already-approve
 - Do not call `discovery` before applying this triage when routing is unclear. First use the orchestrator's current context, startup context, loaded skills, and this checklist to decide whether delegation is needed.
 - Use `discovery` only when delegated read-only research will materially improve the orchestrator's decision. Ask it for specific evidence, not for the final route. Do not delegate when the orchestrator already has enough context or when a small direct fix/answer is clearly safe.
 - Use formal SDD when the change is genuinely cross-cutting, introduces or changes a durable contract/API, has high architecture or policy risk, or needs handoff artifacts.
+- PRDs are optional, not mandatory for every SDD. Prefer a PRD-first SDD route for complex product, UX, integration, OAuth/auth, security, or architecture work where requirements need definition before proposal/spec/design/tasks. If a PRD already exists for the change, choose a PRD-aware route and require downstream SDD phases to use it.
 - Use simple TDD for localized non-trivial code changes with clear expected behavior and cheap validation.
 - Use inline/docs-only edits for small explicit wording/config/doc changes with low future-behavior risk, even when the touched files are policy-sensitive, if the user approved the path and no durable artifact value exists.
 - For user-requested commits, follow the Git commit policy and precommit memory checkpoint rules in `AGENTS.md`; triage is not commit permission.
@@ -155,6 +165,8 @@ Escalate or load related skills:
    - `inline-docs-only` for small approved wording/doc/config changes;
    - `simple-tdd` for localized code changes with clear behavior;
    - `discovery` for bounded read-only research when evidence is missing;
+   - `prd-first-sdd` for complex work that needs product requirements clarified before formal SDD artifacts;
+   - `use-existing-prd-sdd` when `openspec/changes/<change>/prd.md` already exists and should be treated as mandatory context for SDD;
    - `formal-sdd` for substantial/cross-cutting/policy/API changes needing artifacts;
    - `sdd-apply`, `sdd-verify`, or `sdd-archive` for existing approved SDD phases;
    - `blocked-ask-user` when a required decision is missing.

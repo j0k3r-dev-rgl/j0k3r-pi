@@ -1,6 +1,10 @@
 ---
 name: persistent-memory
-description: Operate the Pi Memory Extension as the agent persistent brain. Use when persistent context or memory policy is needed, while avoiding redundant recalls when startup context, loaded skill content, or conversation context is already sufficient.
+description: Operate the Pi Memory Extension as the agent persistent brain. Use when persistent context, project profile, durable decision, session summary, or memory policy is needed, while avoiding redundant recalls when startup context, loaded skill content, or conversation context is already sufficient.
+license: Apache-2.0
+metadata:
+  author: j0k3r
+  version: "1.0"
 ---
 
 # Persistent Memory
@@ -10,7 +14,7 @@ description: Operate the Pi Memory Extension as the agent persistent brain. Use 
 ```json
 {
   "category": "workflow",
-  "domains": ["memory", "project-context", "session-summary", "persistent-brain"],
+  "domains": ["memory", "project-context", "project-profile", "session-summary", "persistent-brain"],
   "triggers": {
     "paths": [
       ".pi/memory.json",
@@ -22,7 +26,9 @@ description: Operate the Pi Memory Extension as the agent persistent brain. Use 
       "remember",
       "recall",
       "project profile",
+      "project_profile",
       "session summary",
+      "memory checkpoint",
       "persistent context",
       "durable decision"
     ]
@@ -33,9 +39,21 @@ description: Operate the Pi Memory Extension as the agent persistent brain. Use 
 }
 ```
 
-Use this skill to operate the Pi Memory Extension deliberately: recall context when useful, save only durable knowledge, keep the project brain clean, and avoid storing sensitive or low-value details.
+Field conventions:
 
-## Core rules
+- `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
+- `domains`: stable domain tags used for routing.
+- `triggers.paths`: glob-like project paths that should activate this skill.
+- `triggers.keywords`: user/request/code keywords that should activate this skill.
+- `sdd_phases`: phases where this skill is usually useful: `explore`, `proposal`, `spec`, `design`, `task`, `apply`, `verify`, `archive`.
+- `related_skills`: skills that should be considered when this skill is active.
+- `priority`: routing priority from 0 to 100. Higher means consider earlier when multiple skills match.
+
+## Activation Contract
+
+Use this skill to operate the Pi Memory Extension deliberately: recall context when useful, save only durable knowledge, keep the project brain clean, and avoid storing sensitive or low-value details. Load it when detailed memory policy is needed and the policy is not already available in the current conversation.
+
+## Hard Rules
 
 - Treat memory as a curated brain, not a transcript dump.
 - Search/recall deliberately when persistent context is missing, stale, ambiguous, or decision-critical; skip memory for obvious tiny tasks and avoid redundant recalls when context is already loaded.
@@ -48,9 +66,7 @@ Use this skill to operate the Pi Memory Extension deliberately: recall context w
 - Current user instruction beats active memory. If the user contradicts memory, follow the user and ask whether to update, archive, or supersede the old memory.
 - Durable memories should be written in lowercase english; audited prompts may stay in their original language.
 
-## When to load this skill
-
-Load this skill when detailed memory policy is needed and the policy is not already available in the current conversation. Good triggers:
+Good activation triggers:
 
 - The task is substantial, ambiguous, multi-step, risky, or affects more than one file and memory policy may matter.
 - You need persistent project context that is not already present in startup brain context or the conversation.
@@ -66,6 +82,26 @@ Do not load this skill for:
 - simple questions unrelated to project memory;
 - obvious typo fixes with no durable context needed;
 - one-off temporary reasoning.
+
+## Decision Gates
+
+Ask or stop when any of these are unresolved and material:
+
+- whether a user preference or policy should be saved globally/general vs project-local;
+- whether a memory would contradict or supersede an existing active memory;
+- whether a large `project_profile` rewrite is acceptable;
+- whether a policy change that affects future agents is confirmed by the user;
+- whether imported/consolidated/migrated memory candidates are safe to apply after dry-run.
+
+## Execution Steps
+
+1. Decide whether startup context, loaded skills, and the current conversation are already sufficient.
+2. Recall/search memory only when persistent context is missing, stale, ambiguous, or decision-critical.
+3. Use `memory_get` only for selected compact candidates that need full content.
+4. Save only durable, non-sensitive, reusable knowledge with the narrowest appropriate scope.
+5. Update project profile only when it improves the living dashboard.
+6. Archive/supersede obsolete memory rather than deleting it.
+7. At meaningful session/task end, perform a decision checkpoint and save only useful durable outcomes.
 
 ## Recall policy
 
@@ -229,6 +265,23 @@ Before closing a substantial session or after the user confirms an important dir
 - a `project_profile` change.
 
 Important decisions/learnings/todos should be saved as separate durable memories when appropriate, but do not save everything automatically. If a memory would change future agent behavior, save it only after the user confirms that policy decision.
+
+## Output Contract
+
+When this skill affects the answer, return concise memory handling notes:
+
+- Skill applied: `persistent-memory`.
+- Whether memory was recalled/searched and why, or why it was skipped.
+- Memories or project profile updated, if any.
+- Durable decisions/todos/risks saved or explicitly not saved.
+- Any contradictions, open confirmation needs, or safe-import/consolidation caveats.
+
+## References
+
+- `AGENTS.md` — primary memory behavior and checkpoint policy.
+- `.pi/memory.json` — project memory configuration.
+- `skills/sdd-workflow/SKILL.md` — SDD memory and active-flow handoff rules.
+- `skills/skill-authoring/SKILL.md` — canonical skill format and registry contract conventions.
 
 ## Response style
 

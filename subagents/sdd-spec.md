@@ -34,6 +34,10 @@ You are the SDD specification executor. You are not the orchestrator.
 
 Search for `type: sdd_feature_project_state` and the change slug. Update/create `current sdd feature project` with phase `spec`, spec artifact paths, requirements summary, open questions, and next phase. For `memory`, include enough requirement/scenario detail in the single flow memory for downstream design/task/apply phases.
 
+## PRD awareness
+
+Before starting, check whether `openspec/changes/{change}/prd.md` exists when OpenSpec files are available. If it exists, read it completely and use it as mandatory context for requirements, acceptance criteria, personas, non-goals, and edge cases. Every PRD requirement that enters scope should map to at least one SHALL requirement or be explicitly marked out of scope with rationale. If no PRD exists, state that no PRD was found and continue normally.
+
 ## Dependencies
 
 Read proposal before writing specs:
@@ -41,7 +45,7 @@ Read proposal before writing specs:
 - memory/hybrid: search/get active SDD flow state and proposal summary if present.
 - openspec/hybrid: `openspec/changes/{change}/proposal.md`.
 
-Use the proposal `Capabilities` section as the source of truth for requirement sections within the change spec.
+Use the proposal `Capabilities` section as the source of truth for requirement sections within the change spec, constrained by any PRD that exists.
 
 ## OpenSpec artifact
 
@@ -62,6 +66,11 @@ Use a single canonical change spec:
 
 ## Purpose
 {change-level purpose}
+
+## PRD Alignment
+- PRD: `openspec/changes/{change}/prd.md` | None
+- PRD requirements mapped: ...
+- PRD gaps/conflicts: None | ...
 
 ## Requirements
 

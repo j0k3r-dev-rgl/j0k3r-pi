@@ -28,6 +28,10 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
     "keywords": [
       "create skill",
       "crear skill",
+      "update skill",
+      "modify skill",
+      "lanzadores",
+      "activation contract",
       "SKILL.md",
       "skill registry",
       "skill-template",
@@ -62,6 +66,7 @@ Use this skill when the user asks to create, modify, review, standardize, or doc
 - Always follow the canonical structure from `extensions/skill-registry/templates/skill-template.md` unless the user explicitly requests a different format.
 - Always include frontmatter with `name`, `description`, `license`, and `metadata` containing `author` and `version`.
 - Always include a valid JSON `Registry Contract` block.
+- Always include an `Activation Contract` section with human-readable launchers: concrete user intents, touched surfaces, risks, and cases where the skill should not load.
 - Keep `description` trigger-focused: mention the surfaces, actions, or risks that should activate the skill.
 - Keep `triggers.paths`, `triggers.keywords`, `domains`, and `related_skills` concrete and useful for routing.
 - Do not put secrets, credentials, private keys, or user-private data in skills.
@@ -91,7 +96,8 @@ Use this skill when the user asks to create, modify, review, standardize, or doc
    - `Output Contract`;
    - `References`.
 5. Validate that the registry contract JSON parses mentally or with a lightweight command when appropriate.
-6. If routing should use the new skill immediately, recommend regenerating the skill registry.
+6. Regenerate the skill registry after creating or updating any `SKILL.md` when the current agent/session should use the new routing immediately.
+7. Read the regenerated `.pi/skill-registry.json` or equivalent tool output to confirm the updated skill appears with expected paths, keywords, priority, and related skills.
 
 ## Output Contract
 

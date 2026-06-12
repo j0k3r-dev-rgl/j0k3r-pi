@@ -1,6 +1,10 @@
 ---
 name: sdd-workflow
-description: Operate the project's PRD/SDD/OpenSpec workflow, including flow selection, mode gates, discovery vs SDD routing, artifact stores, phase transitions, subagent orchestration, and approval checkpoints.
+description: Operate the project's PRD/SDD/OpenSpec workflow, including PRD-first routing, existing-PRD handling, mode gates, discovery vs SDD routing, artifact stores, phase transitions, subagent orchestration, and approval checkpoints.
+license: Apache-2.0
+metadata:
+  author: j0k3r
+  version: "1.0"
 ---
 
 # SDD Workflow
@@ -10,57 +14,69 @@ description: Operate the project's PRD/SDD/OpenSpec workflow, including flow sel
 ```json
 {
   "category": "workflow",
-  "domains": ["sdd", "openspec", "planning", "subagents"],
+  "domains": ["sdd", "prd", "openspec", "planning", "subagents", "workflow-routing"],
   "triggers": {
     "paths": [
       "openspec/**",
+      "openspec/changes/**/prd.md",
+      "subagents/sdd-*.md",
+      "subagents/prd-review.md",
       ".pi/subagents/sdd-*.md",
+      ".pi/subagents/prd-review.md",
       ".pi/skills/sdd-workflow/SKILL.md",
       ".agents/skills/sdd-workflow/SKILL.md",
       "~/.pi/agent/subagents/sdd-*.md",
+      "~/.pi/agent/subagents/prd-review.md",
       "~/.pi/agent/skills/sdd-workflow/SKILL.md",
       "~/.agents/skills/sdd-workflow/SKILL.md"
     ],
     "keywords": [
       "sdd",
       "prd",
+      "prd-first",
+      "prd review",
+      "product requirements",
+      "existing prd",
+      "use-existing-prd",
       "openspec",
       "proposal",
       "spec",
       "design",
       "tasks",
+      "sdd apply",
+      "sdd verify",
+      "sdd archive",
       "apply",
       "verify",
       "archive"
     ]
   },
   "sdd_phases": ["explore", "proposal", "spec", "design", "task", "apply", "verify", "archive"],
-  "related_skills": ["persistent-memory"],
+  "related_skills": ["workflow-triage", "persistent-memory", "skill-authoring", "subagents-configuration"],
   "priority": 100
 }
 ```
 
-Use this skill when formal PRD/SDD/OpenSpec work is requested, likely, active, being continued, validated, or closed. For general workflow uncertainty, use `workflow-triage` first; `sdd-workflow` should not compete as the general-purpose router.
+Field conventions:
 
-## Core principles
+- `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
+- `domains`: stable domain tags used for routing.
+- `triggers.paths`: glob-like project paths that should activate this skill.
+- `triggers.keywords`: user/request/code keywords that should activate this skill.
+- `sdd_phases`: phases where this skill is usually useful: `explore`, `proposal`, `spec`, `design`, `task`, `apply`, `verify`, `archive`.
+- `related_skills`: skills that should be considered when this skill is active.
+- `priority`: routing priority from 0 to 100. Higher means consider earlier when multiple skills match.
 
-- Keep the user in control.
-- Choose the lightest safe workflow.
-- Do not create SDD/OpenSpec artifacts or launch SDD subagents for a new flow until the SDD mode gate is resolved.
-- Use `workflow-triage` before discovery or SDD when the route is unclear. Use discovery only when the orchestrator lacks read-only evidence needed to decide whether formal SDD is warranted; discovery informs but does not decide the workflow.
-- Treat investigation/discovery as read-only diagnosis, not permission to solve or implement.
-- Use SDD subagents as phase executors only; the main agent remains the orchestrator.
-- Strict TDD still applies to implementation work.
-- Prefer `hybrid` artifact storage for named SDD features unless the user requests otherwise.
+## Activation Contract
 
-## When to load this skill
+Use this skill when formal PRD/SDD/OpenSpec work is requested, likely, active, being continued, validated, or closed. Use it for PRD-first planning, existing PRD handling, SDD phase orchestration, OpenSpec artifacts, SDD subagent delegation, apply/verify/archive flows, and recovery of active SDD state. For general workflow uncertainty, use `workflow-triage` first; `sdd-workflow` should not compete as the general-purpose router.
 
 Load this skill before:
 
-- creating a PRD, proposal, spec, design, task plan, verification plan, or archive;
+- creating a PRD, reviewing a PRD, proposal, spec, design, task plan, verification plan, or archive;
 - starting or continuing a named SDD/OpenSpec change;
 - deciding SDD details after `workflow-triage` or the current conversation indicates formal SDD may be warranted;
-- launching any `sdd-*` subagent;
+- launching any `sdd-*` or `prd-review` subagent;
 - applying or verifying an existing SDD task;
 - recovering the state of an active SDD flow.
 
@@ -70,6 +86,31 @@ Do not load this skill for:
 - tiny inline answers;
 - obvious one-line fixes;
 - simple code inspections that do not affect workflow choice.
+
+## Hard Rules
+
+- Keep the user in control.
+- Choose the lightest safe workflow.
+- Do not create SDD/OpenSpec artifacts or launch SDD subagents for a new flow until the SDD mode gate is resolved.
+- PRDs are optional, not mandatory for every SDD. If `openspec/changes/<change>/prd.md` exists, every SDD phase must read it completely, treat it as product/requirements source context, preserve PRD alignment in outputs, and flag conflicts, gaps, or scope drift.
+- Use `workflow-triage` before discovery or SDD when the route is unclear. Use discovery only when the orchestrator lacks read-only evidence needed to decide whether formal SDD is warranted; discovery informs but does not decide the workflow.
+- Treat investigation/discovery as read-only diagnosis, not permission to solve or implement.
+- Use SDD subagents as phase executors only; the main agent remains the orchestrator.
+- Strict TDD still applies to implementation work.
+- Prefer `hybrid` artifact storage for named SDD features unless the user requests otherwise.
+
+## Decision Gates
+
+Ask or stop when any of these are unresolved and material to the SDD route:
+
+- execution mode for a new PRD/SDD/OpenSpec flow (`interactive`, `normal`, or `defaults`);
+- artifact store when it is not obvious or the user requested memory-only/no-artifact behavior;
+- change slug when multiple named changes could be affected;
+- dirty worktree scope when pending changes may be unrelated;
+- whether a PRD should be created first when requirements are unclear;
+- whether existing `prd.md` conflicts with proposed/spec/design/task artifacts;
+- implementation approval, which is separate from PRD approval and SDD planning approval;
+- archive/closure approval after verification.
 
 ## Required preflight for PRD/SDD
 
@@ -95,6 +136,17 @@ Before creating PRD/OpenSpec artifacts or launching any SDD subagent:
 The git gate does not apply to tiny inline answers or low-risk inspections that do not create artifacts or change code.
 
 This preflight is not permission to run Git write operations. Never create commits, checkpoint commits, tags, branches, rebases, or pushes unless the user explicitly asks for that exact Git operation in the current conversation. Completing an SDD phase/slice/batch, passing tests, or updating artifacts is not approval to commit.
+
+## Execution Steps
+
+1. If the route is unclear, load/apply `workflow-triage` first.
+2. Run the required PRD/SDD preflight before creating artifacts or launching SDD/PRD-review subagents.
+3. Resolve execution mode, change slug, artifact store, and approval scope.
+4. Check for `openspec/changes/<change>/prd.md`; if present, make it mandatory context for every downstream phase.
+5. Choose the next phase from the flow selection table or continue router.
+6. Prepare focused subagent instructions with selected skills, artifacts, allowed/forbidden actions, and expected return envelope.
+7. Stop before implementation unless an approved task artifact exists and the user explicitly approved apply.
+8. After meaningful work, update active SDD state/memory and report validation, risks, and next recommended step.
 
 ## Execution modes
 
@@ -125,7 +177,9 @@ Policy-sensitive paths include `AGENTS.md`; project-local skills/subagents such 
 | One-extension or one-module change | existing tests, limited architecture risk, no durable artifact value | Simple TDD | none by default |
 | Documentation-only cleanup | no behavior change, no durable spec value, not policy-sensitive | Inline edit with focused validation | none by default |
 | Policy-sensitive agent behavior change | touches agent instructions, skills, subagents, permissions, memory/config, workflow extension behavior, or future agent behavior | Use `workflow-triage` first; inline/docs-only for small clear fixes; discovery only when evidence is missing; formal SDD only when risk or artifact value warrants it | `discovery` only for needed evidence; SDD phase agents only after formal planning is approved |
-| New named PRD/SDD planning | user wants PRD/spec/design/tasks, mode resolved, planning approved | SDD planning sequence | `sdd-explore` → `sdd-proposal` → `sdd-spec` → `sdd-design` → `sdd-task` |
+| PRD-first SDD planning | complex product/integration/UX/auth/security/architecture work needs requirements definition before SDD | PRD discovery/draft/review, then SDD planning after PRD approval | `discovery` as needed → `prd-review` → SDD phase agents |
+| Existing PRD SDD planning | `openspec/changes/<change>/prd.md` exists | PRD-aware SDD planning sequence; every phase reads the PRD | `prd-review` when not already reviewed → SDD phase agents |
+| New named PRD/SDD planning | user wants PRD/spec/design/tasks, mode resolved, planning approved | SDD planning sequence; PRD optional unless requested or warranted | `sdd-explore` → `sdd-proposal` → `sdd-spec` → `sdd-design` → `sdd-task` |
 | Multi-file/cross-cutting feature from scratch | unclear requirements, new API/contract, architecture risk, or handoff value | Full SDD feature sequence | planning sequence → approved `sdd-apply` → `sdd-verify` → optional `sdd-archive` |
 | Formal SDD exploration only | mode resolved and user approved named SDD exploration | SDD explore-only | `sdd-explore` |
 | Implement existing SDD tasks | task artifact exists and implementation approved | SDD apply-only | `sdd-apply` |
@@ -208,19 +262,58 @@ Examples:
 
 Before using an existing slug, inspect current OpenSpec state or active SDD memory to avoid accidental overwrite.
 
+## Optional PRD flow
+
+Use a PRD-first route when the user asks for a PRD or when complex product, UX, integration, OAuth/auth, security, or architecture work needs requirements definition before formal proposal/spec/design/tasks.
+
+PRD creation expectations:
+
+1. Gather enough evidence to write a strong PRD: user goals, local files, project docs, Pi docs, installed package/node_modules sources, Context7 docs, internet/web references when available, and temporary external repository clones when useful.
+2. Ask the user only decision-critical questions; do not invent hidden requirements.
+3. Write or update `openspec/changes/<change>/prd.md` when artifact storage is `openspec` or `hybrid`; otherwise store the PRD content in active SDD flow memory.
+4. Run `prd-review` before downstream SDD unless the user explicitly waives review.
+5. Resolve CRITICAL PRD debts, contradictions, untestable requirements, or open product decisions before implementation.
+
+Existing PRD rule:
+
+- If `openspec/changes/<change>/prd.md` exists, it is mandatory context for `sdd-explore`, `sdd-proposal`, `sdd-spec`, `sdd-design`, `sdd-task`, `sdd-apply`, `sdd-verify`, and `sdd-archive`.
+- Each phase output should include a concise `PRD Alignment` section or equivalent notes covering relevant PRD requirements, assumptions, gaps, and conflicts.
+- If an SDD artifact conflicts with the PRD, the phase must report `blocked` or flag the conflict clearly instead of silently overriding the PRD.
+
 ## Default SDD planning sequence
 
 For a new named feature where planning is approved but implementation is not:
 
-1. `sdd-explore`
-2. `sdd-proposal`
-3. `sdd-spec`
-4. `sdd-design`
-5. `sdd-task`
+1. Optional PRD draft/review when requested, warranted, or already present.
+2. `sdd-explore`
+3. `sdd-proposal`
+4. `sdd-spec`
+5. `sdd-design`
+6. `sdd-task`
 
 Stop before implementation unless the user explicitly approves apply.
 
 ## Phase responsibilities
+
+### prd-review
+
+Purpose: review an existing or newly drafted PRD before downstream SDD planning or implementation.
+
+Inputs:
+
+- change slug;
+- artifact store;
+- `openspec/changes/<change>/prd.md` or supplied PRD text;
+- relevant user constraints and supporting context.
+
+Outputs:
+
+- `openspec/changes/<change>/prd-review.md` or memory equivalent;
+- readiness verdict (`ready_for_sdd: yes/no/with warnings`);
+- critical debts, warnings, testability gaps, contradictions, and user/orchestrator questions;
+- recommended next step.
+
+Critical PRD debts should block implementation until the orchestrator/user resolves them.
 
 ### sdd-explore
 
@@ -404,6 +497,29 @@ Discovery may additionally return:
 - open_questions_or_missing_info.
 
 Discovery does not choose the workflow; the orchestrator interprets the evidence and decides the route.
+
+## Output Contract
+
+When this skill affects the answer, return a concise SDD workflow decision or phase report:
+
+- Skill applied: `sdd-workflow`.
+- Change slug and artifact store.
+- Execution mode and approval state.
+- PRD status: absent, present/read, review needed, or blocking conflict.
+- Selected phase/next phase and why.
+- Subagents launched or explicitly not needed.
+- Artifacts/memory updated.
+- Validation, risks, blockers, and next recommended step.
+
+## References
+
+- `AGENTS.md` — primary orchestrator policy, SDD gates, dirty worktree rules, TDD, memory, and Git policy.
+- `skills/workflow-triage/SKILL.md` — route selection before formal SDD when workflow is unclear.
+- `skills/skill-authoring/SKILL.md` — canonical skill format and registry contract conventions.
+- `skills/subagents-configuration/SKILL.md` — subagent definition and configuration policy.
+- `subagents/prd-review.md` — PRD review executor.
+- `subagents/sdd-*.md` — SDD phase executors.
+- `openspec/changes/<change>/prd.md` — optional but mandatory context when present.
 
 ## Memory rules for SDD
 

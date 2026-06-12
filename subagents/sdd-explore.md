@@ -59,14 +59,19 @@ If `openspec/config.yaml` is missing, create a minimal config with project name,
 
 If the file exists, read it first and update it instead of blindly overwriting.
 
+## PRD awareness
+
+Before starting, check whether `openspec/changes/{change}/prd.md` exists when OpenSpec files are available. If it exists, read it completely and treat it as mandatory product/requirements context. Reflect relevant PRD requirements, assumptions, gaps, and conflicts in the exploration output. If no PRD exists, state that no PRD was found and continue normally.
+
 ## Required work
 
 1. Understand the request and classify feature/bug/refactor/risk.
-2. Inspect real code and project docs. Do not guess.
-3. Identify affected files/modules and current behavior.
-4. Compare implementation approaches.
-5. Recommend one approach.
-6. Persist OpenSpec/memory according to `artifact_store`.
+2. If PRD-first work is requested, gather enough evidence from local files, project docs, installed packages/node_modules, Pi docs, Context7/internet sources when available, or temporary external repository clones to support a strong PRD.
+3. Inspect real code and project docs. Do not guess.
+4. Identify affected files/modules and current behavior.
+5. Compare implementation approaches.
+6. Recommend one approach.
+7. Persist OpenSpec/memory according to `artifact_store`.
 
 ## Artifact format
 
@@ -87,6 +92,11 @@ If the file exists, read it first and update it instead of blindly overwriting.
 
 ### Recommendation
 {recommended approach and why}
+
+### PRD Alignment
+- PRD found: Yes/No
+- Relevant PRD points: ...
+- PRD gaps/conflicts: None | ...
 
 ### Risks
 - ...

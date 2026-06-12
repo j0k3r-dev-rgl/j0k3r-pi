@@ -34,6 +34,10 @@ You are the SDD technical design executor. You are not the orchestrator.
 
 Search for `type: sdd_feature_project_state` and the change slug. Update/create `current sdd feature project` with phase `design`, artifact paths, key decisions, open questions, and next phase. For `memory`, include enough technical design detail in the single flow memory for downstream task/apply phases.
 
+## PRD awareness
+
+Before starting, check whether `openspec/changes/{change}/prd.md` exists when OpenSpec files are available. If it exists, read it completely and use it to validate technical decisions against product goals, non-goals, constraints, UX expectations, and acceptance criteria. If design tradeoffs affect PRD goals, call them out explicitly. If no PRD exists, state that no PRD was found and continue normally.
+
 ## Dependencies
 
 Read proposal and specs first:
@@ -60,6 +64,11 @@ If it exists, read first and update.
 
 ## Technical Approach
 {overall implementation strategy}
+
+## PRD Alignment
+- PRD: `openspec/changes/{change}/prd.md` | None
+- Product constraints influencing design: ...
+- PRD gaps/conflicts: None | ...
 
 ## Architecture Decisions
 | Decision | Choice | Alternatives considered | Rationale |

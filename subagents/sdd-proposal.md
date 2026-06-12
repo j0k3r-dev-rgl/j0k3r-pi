@@ -35,6 +35,10 @@ You are the SDD proposal executor. You are not the orchestrator.
 
 Search for `type: sdd_feature_project_state` and the change slug. Update the existing active SDD flow memory, or create `current sdd feature project` if missing. For `openspec` or `hybrid`, keep it compact: current phase, status, artifact paths, summary, open questions, and next phase. For `memory`, include enough proposal detail in the single flow memory for downstream spec/design/task phases.
 
+## PRD awareness
+
+Before starting, check whether `openspec/changes/{change}/prd.md` exists when OpenSpec files are available. If it exists, read it completely and treat it as mandatory product/requirements context for intent, scope, goals, non-goals, user stories, and acceptance criteria. Do not silently override or omit PRD requirements; flag conflicts, missing decisions, or scope drift. If no PRD exists, state that no PRD was found and continue normally.
+
 ## Dependencies
 
 Read prior exploration from memory/OpenSpec when available:
@@ -78,6 +82,11 @@ Create the change directory if needed. If the file exists, read it first and upd
 
 ## Approach
 {high-level technical approach}
+
+## PRD Alignment
+- PRD: `openspec/changes/{change}/prd.md` | None
+- Requirements carried forward: ...
+- PRD gaps/conflicts: None | ...
 
 ## Affected Areas
 | Area | Impact | Description |

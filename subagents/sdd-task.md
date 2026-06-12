@@ -35,6 +35,10 @@ You are the SDD task planning executor. You are not the orchestrator.
 
 Search for `type: sdd_feature_project_state` and the change slug. Update/create `current sdd feature project` with phase `task`, artifact paths, task counts, workload risk, open questions, and next phase. For `memory`, include the task checklist and workload guard lines in the single flow memory for apply/verify phases.
 
+## PRD awareness
+
+Before starting, check whether `openspec/changes/{change}/prd.md` exists when OpenSpec files are available. If it exists, read it completely and ensure tasks preserve PRD requirements, acceptance criteria, non-goals, validation expectations, and unresolved PRD debts. Block or flag tasks that would implement around unresolved critical PRD gaps. If no PRD exists, state that no PRD was found and continue normally.
+
 ## Dependencies
 
 Read proposal, specs, and design before writing tasks:
@@ -56,6 +60,11 @@ If it exists, read first and update.
 
 ```markdown
 # Tasks: {Change Title}
+
+## PRD Alignment
+- PRD: `openspec/changes/{change}/prd.md` | None
+- PRD-driven task constraints: ...
+- PRD gaps/conflicts before apply: None | ...
 
 ## Review Workload Forecast
 

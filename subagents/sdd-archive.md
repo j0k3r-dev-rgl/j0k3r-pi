@@ -35,11 +35,15 @@ You are the SDD archive executor. You are not the orchestrator.
 
 Search for `type: sdd_feature_project_state` and the change slug. Update/create `current sdd feature project` with phase `archive`, final status, archive path/report, synced specs, and closure notes. For `memory`, record final closure details in that same flow memory.
 
+## PRD awareness
+
+Before starting, check whether `openspec/changes/{change}/prd.md` exists when OpenSpec files are available. If it exists, read it completely and preserve it in the archive. Ensure archive closure notes mention PRD alignment, any accepted residual PRD risks, and whether PRD acceptance criteria were verified. If no PRD exists, state that no PRD was found and continue normally.
+
 ## Dependencies
 
-Read verification report first. Then read proposal, specs, design, tasks, and apply-progress.
+Read verification report first. Then read PRD if present, proposal, specs, design, tasks, and apply-progress.
 
-For OpenSpec/hybrid use files under `openspec/changes/{change}/`. For memory/hybrid use memory search/get and never rely on compact previews alone. In `memory` mode, all proposal/spec/design/tasks/apply-progress/verify details must come from the active SDD flow memory.
+For OpenSpec/hybrid use files under `openspec/changes/{change}/`. For memory/hybrid use memory search/get and never rely on compact previews alone. In `memory` mode, all PRD/proposal/spec/design/tasks/apply-progress/verify details must come from the active SDD flow memory.
 
 ## Archive workflow
 
@@ -70,6 +74,7 @@ For `memory` mode:
 |--------|--------|---------|
 
 ### Archive Contents
+- prd.md ✅/N/A
 - proposal.md ✅
 - spec.md ✅
 - design.md ✅
@@ -79,6 +84,9 @@ For `memory` mode:
 
 ### Source of Truth Updated
 - `openspec/specs/{capability}/spec.md` | N/A
+
+### PRD Alignment Closure
+PRD: Present/Absent. Acceptance criteria verified: Yes/No/N/A. Residual PRD risks: None | ...
 
 ### SDD Cycle Complete
 {closure notes}
