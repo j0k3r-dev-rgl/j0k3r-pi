@@ -7,6 +7,7 @@
 - Policy checks for supported built-in tool calls.
 - Policy checks for user `!` and `!!` bash commands via `user_bash` events.
 - Workspace and outside-workspace path policy.
+- Optional `bypassWorkspace` mode for provably workspace-contained operations only.
 - Secret path and secret-like command denial by default.
 - Conservative safe-subset bash analysis for simple commands, quoted literals, environment assignments, `&&`, `||`, `;`, newlines, safe `cd`, basic redirections, and narrowly recognized read-only pipelines.
 - Structured bash path-effect extraction and classification through the same workspace/path policy used for file tools.
@@ -61,6 +62,7 @@ Built-in defaults are conservative. Project or global config can override them, 
 
 - Permission guard is enabled.
 - `bypassAll` is false.
+- `bypassWorkspace` is false.
 - Workspace reads/writes/creates/lists/searches are allowed unless matched by ask/deny globs.
 - Workspace `.git/**` and `node_modules/**` default to `ask`.
 - Non-secret outside-workspace reads, lists, searches, writes, and creates default to `ask`.
@@ -139,6 +141,7 @@ Unknown keys are ignored with warnings. Secret-like config keys such as `apiKey`
 |---|---|---:|---|
 | `enabled` | boolean | `true` | Disable/enable policy enforcement. Disabled means supported requests are allowed. |
 | `bypassAll` | boolean | `false` | Emergency all-access bypass. Allows every supported permission check immediately. |
+| `bypassWorkspace` | boolean | `false` | Auto-allows supported operations only when every classified effect is proven inside the active workspace and no stricter deny/secret/destructive/ask rule applies. Outside-workspace, path-context-changing, ambiguous, or unsupported effects still ask/deny. |
 
 ### `workspace`
 
@@ -363,6 +366,28 @@ Audit safety rules:
 - audit files use mode `0600`; directories use mode `0700`;
 - audit rotation is checked before appending a new event when the existing file is already over `audit.maxBytes`; a single write can exceed the threshold until the next audit event.
 
+## Workspace bypass
+
+Workspace-only bypass:
+
+```json
+{
+  "bypassWorkspace": true
+}
+```
+
+When `bypassWorkspace` is `true`, Permission Guard may auto-allow supported file operations and bash commands only when all effects are fully classified and contained inside the active workspace. This is not `bypassAll` and not a sandbox.
+
+Still asks or denies:
+
+- outside-workspace paths;
+- parent/sibling/symlink/traversal escapes;
+- secret or credential paths;
+- explicit deny rules;
+- destructive or privilege-escalating commands;
+- path-context-changing commands such as `cd`, `pushd`, `popd`, `git -C`, and `npm --prefix`;
+- unsupported or ambiguous shell syntax.
+
 ## Emergency bypass
 
 Emergency/all-access bypass:
@@ -377,7 +402,7 @@ When `bypassAll` is `true`, every supported permission check is allowed immediat
 
 ## Enforcement validation
 
-For enforcement tests and manual validation, make sure any local permission config used for validation sets `bypassAll: false`. A temporary `bypassAll: true` setting will hide real policy behavior.
+For enforcement tests and manual validation, make sure any local permission config used for validation sets `bypassAll: false`. A temporary `bypassAll: true` setting will hide real policy behavior. To validate `bypassWorkspace`, set it explicitly to `true` in a temporary project config and verify outside-workspace and path-context-changing commands still ask.
 
 Persisted `pathApprovals.scopedApprovals` entries reveal local filesystem paths in project config. Remove an entry manually from `.pi/permissions.json` to revoke it. To roll back the feature completely, remove the `pathApprovals.scopedApprovals` collection and revert the extension/subagent changes.
 

@@ -157,6 +157,29 @@ function workspaceDecision(config: PermissionPolicyConfig, request: PermissionRe
   });
 }
 
+function workspaceBypassDecision(
+  config: PermissionPolicyConfig,
+  request: PermissionRequest,
+  baseResult: PermissionDecisionResult,
+): PermissionDecisionResult | undefined {
+  if (!request.target) return undefined;
+  if (!config.bypassWorkspace) return undefined;
+  if (!request.target.insideWorkspace || request.target.symlinkEscapesWorkspace) return undefined;
+  if (baseResult.decision !== 'allow' || baseResult.details.matchedLayer !== 'workspace') return undefined;
+
+  return decisionResult({
+    config,
+    request,
+    decision: 'allow',
+    reason: 'Workspace-local request is fully classified and bypassWorkspace is enabled by policy.',
+    reasonCode: 'bypass_workspace_request_allowed',
+    riskLevel: baseResult.riskLevel,
+    matchedLayer: 'workspace',
+    matchedRule: 'bypassWorkspace',
+    target: request.target,
+  });
+}
+
 function outsideDecision(config: PermissionPolicyConfig, request: PermissionRequest, target: Target): PermissionDecisionResult {
   const action = request.action === 'edit' ? 'write' : request.action;
   const decision = action === 'list'
@@ -339,7 +362,7 @@ export function evaluatePermission(
   if (secretResult) return secretResult;
 
   const baseResult = request.action === 'bash'
-    ? classifyBashCommand(config, request, { workspaceRoot: config.workspace.root })
+    ? classifyBashCommand(config, request, { workspaceRoot: config.workspace.root, bypassWorkspace: config.bypassWorkspace })
     : request.target?.insideWorkspace
       ? workspaceDecision(config, request, request.target)
       : request.target
@@ -353,6 +376,11 @@ export function evaluatePermission(
             riskLevel: 'high',
             matchedLayer: 'tool',
           });
+
+  const workspaceBypassResult = request.action !== 'bash'
+    ? workspaceBypassDecision(config, request, baseResult)
+    : undefined;
+  if (workspaceBypassResult) return workspaceBypassResult;
 
   const projectPathApproval = request.action !== 'bash'
     ? applyProjectPathApproval(config, request, baseResult)

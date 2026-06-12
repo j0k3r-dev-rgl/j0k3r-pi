@@ -7,6 +7,7 @@ import {
   TelegramIdentity,
   TelegramUpdate,
   WorkspaceRef,
+  PiRpcEvent,
 } from '../src/types.js';
 
 describe('telegram-pi-control type contracts', () => {
@@ -41,6 +42,37 @@ describe('telegram-pi-control type contracts', () => {
     expect(commandInput.kind).toBe('command');
     expect(textInput.kind).toBe('text');
     expect(commandResult.kind).toBe('ok');
+  });
+
+  it('models permission events for SDK approval flow', () => {
+    const required: PiRpcEvent = {
+      type: 'permission_required',
+      request: {
+        id: 'req-1',
+        requestId: 'req-1',
+        workspaceRoot: '/tmp/workspace',
+        title: 'Permission required',
+        message: 'Approve?',
+        reason: 'approval required',
+        reasonCode: 'permission_required',
+        riskLevel: 'medium',
+        tool: 'bash',
+        action: 'bash',
+        choices: ['Allow once', 'Deny'],
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date().toISOString(),
+      },
+    };
+
+    const resolved: PiRpcEvent = {
+      type: 'permission_resolved',
+      requestId: 'req-1',
+      status: 'approved',
+      choice: 'Allow once',
+    };
+
+    expect(required.type).toBe('permission_required');
+    expect(resolved.type).toBe('permission_resolved');
   });
 
   it('models auth decisions without exposing secret values', () => {

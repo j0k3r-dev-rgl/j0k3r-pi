@@ -174,6 +174,46 @@ describe('pure permission policy engine', () => {
     expect(evaluatePermission(config, outside)).toMatchObject({ decision: 'deny', reasonCode: 'outside_workspace_read_denied' });
   });
 
+  it('auto-allows workspace-confined non-bash requests when workspace policy already allows', async () => {
+    const cwd = await tempWorkspace('permission-guard-policy-bypass-workspace-');
+    await writeFile(join(cwd, 'src', 'index.ts'), 'inside', 'utf8');
+    const request = await pathRequest('src/index.ts', cwd, 'read');
+    const config = policy({ workspace: { root: cwd, allowRead: 'allow' }, bypassWorkspace: true });
+
+    expect(evaluatePermission(config, request)).toMatchObject({
+      decision: 'allow',
+      finalDecision: 'allow',
+      reasonCode: 'bypass_workspace_request_allowed',
+      details: { matchedLayer: 'workspace' },
+    });
+  });
+
+  it('does not bypass workspace-denied non-bash requests', async () => {
+    const cwd = await tempWorkspace('permission-guard-policy-bypass-deny-');
+    const request = await pathRequest('src/index.ts', cwd, 'read');
+    const config = policy({ workspace: { root: cwd, allowRead: 'deny', deny: ['*.ts'] }, bypassWorkspace: true });
+
+    expect(evaluatePermission(config, request)).toMatchObject({
+      decision: 'deny',
+      finalDecision: 'deny',
+      reasonCode: 'workspace_read_denied',
+      details: { matchedLayer: 'workspace' },
+    });
+  });
+
+  it('does not bypass outside-workspace requests when bypassWorkspace is enabled', async () => {
+    const cwd = await tempWorkspace('permission-guard-policy-bypass-outside-');
+    const outsideRequest = await pathRequest('../outside.txt', cwd, 'read');
+    const config = policy({ workspace: { root: cwd }, bypassWorkspace: true, outsideWorkspace: { read: 'allow' } });
+
+    expect(evaluatePermission(config, outsideRequest)).toMatchObject({
+      decision: 'allow',
+      finalDecision: 'allow',
+      reasonCode: 'outside_workspace_read_allowed',
+      details: { matchedLayer: 'outsideWorkspace' },
+    });
+  });
+
   it('converts ask to allow only for matching scoped session approvals', async () => {
     const cwd = await tempWorkspace('permission-guard-policy-session-');
     const request = await pathRequest('../outside.txt', cwd);

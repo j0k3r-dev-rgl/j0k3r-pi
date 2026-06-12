@@ -104,6 +104,51 @@ describe('PiSdkClient', () => {
     expect(await client.getState()).toMatchObject({ sessionFile: '/tmp/existing.jsonl', sessionId: 'session-switched' });
   });
 
+  it('emits permission_required events and resolves answers back to the SDK approval hook', async () => {
+    const session = makeSession();
+    const runtime = makeRuntime(session);
+    const client = new PiSdkClient({ workspaceRoot: '/tmp/ws', runtimeFactory: async () => runtime });
+    const events: any[] = [];
+    client.onEvent((event) => events.push(event));
+
+    await client.start();
+    const bindOptions = (session.bindExtensions as any).mock.calls.at(-1)?.[0];
+    const approvalPromise = bindOptions.uiContext.requestPermissionApproval({
+      requestId: 'req-sdk',
+      reason: 'approval required',
+      reasonCode: 'bash_default_requires_approval',
+      riskLevel: 'medium',
+      tool: 'bash',
+      action: 'bash',
+      prompt: {
+        title: 'Permission required for bash',
+        message: 'Bash command requires approval.',
+        choices: ['Allow once', 'Deny'],
+        workspaceRoot: '/tmp/ws',
+      },
+    });
+
+    expect(events.find((event) => event.type === 'permission_required')).toMatchObject({
+      request: {
+        requestId: 'req-sdk',
+        workspaceRoot: '/tmp/ws',
+        choices: ['Allow once', 'Deny'],
+      },
+    });
+
+    await expect(client.answerPermission('req-sdk', 'Allow once')).resolves.toEqual({
+      ok: true,
+      requestId: 'req-sdk',
+      choice: 'Allow once',
+    });
+    await expect(approvalPromise).resolves.toBe('Allow once');
+    expect(events.find((event) => event.type === 'permission_resolved')).toMatchObject({
+      requestId: 'req-sdk',
+      status: 'approved',
+      choice: 'Allow once',
+    });
+  });
+
   it('creates default SDK sessions with the selected workspace as cwd', async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'telegram-control-sdk-workspace-'));
     const agentDir = await mkdtemp(join(tmpdir(), 'telegram-control-sdk-agent-'));

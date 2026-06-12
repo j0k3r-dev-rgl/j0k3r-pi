@@ -4,6 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type {
   TelegramAdapter,
   TelegramEditOptions,
+  TelegramBotCommand,
   TelegramMessage,
   TelegramMessageRef,
   TelegramSendOptions,
@@ -190,6 +191,10 @@ export class TelegramLongPollingAdapter implements TelegramAdapter {
     });
   }
 
+  async setMyCommands(commands: TelegramBotCommand[]): Promise<void> {
+    await this.request<boolean>('setMyCommands', { commands });
+  }
+
   private async pollOnce(handler: (update: TelegramUpdate) => Promise<void>): Promise<void> {
     const response = await this.request<TelegramUpdate[]>('getUpdates', {
       offset: this.currentOffset,
@@ -208,7 +213,7 @@ export class TelegramLongPollingAdapter implements TelegramAdapter {
   }
 
   private async request<T>(
-    method: 'getUpdates' | 'sendMessage' | 'editMessageText',
+    method: 'getUpdates' | 'sendMessage' | 'editMessageText' | 'setMyCommands',
     payload: Record<string, unknown>,
     includeOffset = false,
   ): Promise<T> {

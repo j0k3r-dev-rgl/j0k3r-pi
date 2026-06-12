@@ -4,7 +4,10 @@ import type {
   PiRpcClient,
   PiRpcEvent,
   TelegramAdapter,
+  TelegramApprovalChoice,
+  TelegramPermissionPrompt,
 } from './types.js';
+import type { TelegramPermissionApprovalStore } from './permission-approval-store.js';
 import { TelegramRateLimitError } from './telegram-adapter.js';
 
 export interface OutputRelayOptions {
@@ -12,7 +15,9 @@ export interface OutputRelayOptions {
   maxTelegramMessageChars?: number;
   flushIntervalMs?: number;
   maxBufferChars?: number;
+  maxPermissionPromptChars?: number;
   rateLimitRetryMultiplier?: number;
+  permissionStore?: TelegramPermissionApprovalStore;
 }
 
 interface StreamState {
@@ -28,20 +33,26 @@ export class TelegramOutputRelay implements OutputRelayContract {
   private readonly maxTelegramMessageChars: number;
   private readonly flushIntervalMs: number;
   private readonly maxBufferChars: number;
+  private readonly maxPermissionPromptChars: number;
   private readonly rateLimitRetryMultiplier: number;
+  private readonly permissionStore?: TelegramPermissionApprovalStore;
 
   private readonly streams = new Map<number, StreamState>();
   private readonly unsubscribers = new Map<number, Array<() => void>>();
+  private readonly activeBindings = new Map<number, ActiveBinding>();
 
   constructor(options: OutputRelayOptions) {
     this.telegram = options.telegram;
     this.maxTelegramMessageChars = options.maxTelegramMessageChars ?? 3900;
     this.flushIntervalMs = options.flushIntervalMs ?? 400;
     this.maxBufferChars = options.maxBufferChars ?? 20_000;
+    this.maxPermissionPromptChars = options.maxPermissionPromptChars ?? 1800;
     this.rateLimitRetryMultiplier = options.rateLimitRetryMultiplier ?? 1;
+    this.permissionStore = options.permissionStore;
   }
 
-  attach(chatId: number, _binding: ActiveBinding, client: PiRpcClient): () => void {
+  attach(chatId: number, binding: ActiveBinding, client: PiRpcClient): () => void {
+    this.activeBindings.set(chatId, binding);
     this.streams.set(chatId, {
       buffer: '',
       truncated: false,
@@ -60,6 +71,7 @@ export class TelegramOutputRelay implements OutputRelayContract {
       }
       this.unsubscribers.delete(chatId);
       this.streams.delete(chatId);
+      this.activeBindings.delete(chatId);
     };
   }
 
@@ -123,8 +135,36 @@ export class TelegramOutputRelay implements OutputRelayContract {
   }
 
   private handleEvent(chatId: number, event: PiRpcEvent): void {
+    const permissionRequired = this.asPermissionRequiredEvent(event);
+    if (permissionRequired) {
+      const binding = this.activeBindings.get(chatId);
+      if (!binding || !this.permissionStore) {
+        return;
+      }
+      this.permissionStore.upsert(chatId, binding, permissionRequired.request);
+      void this.sendPermissionPrompt(chatId, permissionRequired.request);
+      return;
+    }
+
+    const permissionResolved = this.asPermissionResolvedEvent(event);
+    if (permissionResolved) {
+      const binding = this.activeBindings.get(chatId);
+      if (!binding || !this.permissionStore) {
+        return;
+      }
+      this.permissionStore.resolve(
+        chatId,
+        binding,
+        permissionResolved.requestId,
+        permissionResolved.status,
+        permissionResolved.choice,
+        permissionResolved.text,
+      );
+      return;
+    }
+
     if (event.type === 'output') {
-      const text = typeof event.text === 'string' ? event.text : '';
+      const text = typeof event.text === 'string' ? this.sanitizeOutputText(event.text) : '';
       if (!text) {
         return;
       }
@@ -160,7 +200,44 @@ export class TelegramOutputRelay implements OutputRelayContract {
       state.flushTimer = undefined;
     }
 
+    const binding = this.activeBindings.get(chatId);
+    if (binding && this.permissionStore) {
+      this.permissionStore.clearForBinding(chatId, binding);
+    }
+
     void this.complete(chatId, status).catch(() => undefined);
+  }
+
+  private asPermissionRequiredEvent(event: PiRpcEvent): { type: 'permission_required'; request: TelegramPermissionPrompt } | undefined {
+    if (event.type !== 'permission_required') {
+      return undefined;
+    }
+
+    if (!event.request || typeof event.request !== 'object') {
+      return undefined;
+    }
+
+    return event as { type: 'permission_required'; request: TelegramPermissionPrompt };
+  }
+
+  private asPermissionResolvedEvent(event: PiRpcEvent):
+    | ({ type: 'permission_resolved'; requestId: string; status: 'approved' | 'denied' | 'expired' | 'aborted'; choice?: TelegramApprovalChoice; text?: string })
+    | undefined {
+    if (event.type !== 'permission_resolved') {
+      return undefined;
+    }
+
+    if (typeof (event as { requestId?: unknown }).requestId !== 'string') {
+      return undefined;
+    }
+
+    return event as {
+      type: 'permission_resolved';
+      requestId: string;
+      status: 'approved' | 'denied' | 'expired' | 'aborted';
+      choice?: 'Allow once' | 'Allow for session' | 'Allow for project' | 'Allow this file for project' | 'Allow this folder for project' | 'Deny';
+      text?: string;
+    };
   }
 
   private append(chatId: number, text: string): void {
@@ -181,6 +258,37 @@ export class TelegramOutputRelay implements OutputRelayContract {
         void this.flush(chatId);
       }, this.flushIntervalMs);
     }
+  }
+
+  private async sendPermissionPrompt(chatId: number, request: TelegramPermissionPrompt): Promise<void> {
+    const title = request.title ? `${request.title}\n\n` : '';
+    const safeSummary = this.truncateText(request.message, this.maxPermissionPromptChars);
+    const choicesLine = request.choices.join(' | ');
+    const commandLine = `Reply: /approve ${request.requestId} [once|session|project|file|folder] or /deny ${request.requestId}`;
+    const markerLine = `${request.requestId} • expires at ${new Date(request.expiresAt).toLocaleString()}`;
+    const text = `${title}${safeSummary}\n\n${choicesLine}\n${commandLine}\n${markerLine}`.trim();
+
+    await this.telegram.sendMessage(chatId, text);
+  }
+
+  private sanitizeOutputText(raw: string): string {
+    const marker = 'permission_required:';
+    if (!raw.includes(marker)) {
+      return raw;
+    }
+
+    return raw
+      .split('\n')
+      .filter((line) => !line.includes('permission_required:'))
+      .join('\n');
+  }
+
+  private truncateText(text: string, maxLength: number): string {
+    if (text.length <= maxLength) {
+      return text;
+    }
+
+    return `${text.slice(0, maxLength)}...`;
   }
 
   private async sendBounded(chatId: number, text: string): Promise<void> {

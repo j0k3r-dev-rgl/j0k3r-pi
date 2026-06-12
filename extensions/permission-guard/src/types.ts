@@ -123,6 +123,7 @@ export interface ShellAnalysisResult {
 export interface PermissionPolicyConfig {
   enabled: boolean;
   bypassAll: boolean;
+  bypassWorkspace: boolean;
   workspace: {
     root?: string;
     allowRead: PolicyDecision;

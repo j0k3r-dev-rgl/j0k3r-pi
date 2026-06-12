@@ -2,6 +2,10 @@ import type {
   PiRpcClient as PiClientContract,
   PiRpcEvent,
   PiRpcSessionState,
+  TelegramApprovalChoice,
+  TelegramPermissionPrompt,
+  PermissionAnswerResult,
+  PiRpcPermissionResolvedEvent,
 } from './types.js';
 
 export interface PiSdkSessionLike {
@@ -15,6 +19,13 @@ export interface PiSdkSessionLike {
   dispose?: () => void;
   bindExtensions?: (options?: Record<string, unknown>) => Promise<void>;
   subscribe(listener: (event: unknown) => void): () => void;
+}
+
+interface PermissionApprovalEntry {
+  request: TelegramPermissionPrompt;
+  resolve: (choice: TelegramApprovalChoice) => void;
+  reject: (error: Error) => void;
+  timeoutHandle: ReturnType<typeof setTimeout>;
 }
 
 export interface PiSdkRuntimeLike {
@@ -31,6 +42,7 @@ export interface PiSdkClientOptions {
   sessionFile?: string;
   sessionDir?: string;
   agentDir?: string;
+  permissionApprovalTimeoutMs?: number;
   runtimeFactory?: (options: { workspaceRoot: string; sessionFile?: string; sessionDir?: string; agentDir?: string }) => Promise<PiSdkRuntimeLike>;
 }
 
@@ -50,6 +62,8 @@ export class PiSdkClient implements PiClientContract {
   private readonly agentDir?: string;
   private readonly runtimeFactory: (options: { workspaceRoot: string; sessionFile?: string; sessionDir?: string; agentDir?: string }) => Promise<PiSdkRuntimeLike>;
   private readonly listeners = new Set<(event: PiRpcEvent) => void>();
+  private readonly pendingApprovals = new Map<string, PermissionApprovalEntry>();
+  private readonly approvalTimeoutMs: number;
 
   private runtime?: PiSdkRuntimeLike;
   private unsubscribe?: () => void;
@@ -60,6 +74,7 @@ export class PiSdkClient implements PiClientContract {
     this.sessionDir = options.sessionDir;
     this.agentDir = options.agentDir;
     this.runtimeFactory = options.runtimeFactory ?? createDefaultSdkRuntime;
+    this.approvalTimeoutMs = options.permissionApprovalTimeoutMs ?? 5 * 60 * 1000;
   }
 
   async start(): Promise<void> {
@@ -76,6 +91,7 @@ export class PiSdkClient implements PiClientContract {
   async stop(): Promise<void> {
     this.unsubscribe?.();
     this.unsubscribe = undefined;
+    this.abortAllPending('aborted');
     await this.runtime?.dispose();
     this.runtime = undefined;
   }
@@ -120,9 +136,199 @@ export class PiSdkClient implements PiClientContract {
     await this.requireSession().abort();
   }
 
+  async answerPermission(requestId: string, choice: TelegramApprovalChoice): Promise<PermissionAnswerResult> {
+    const pending = this.pendingApprovals.get(requestId);
+    if (!pending) {
+      return { ok: false, reason: 'not_found' };
+    }
+
+    if (!pending.request.choices.includes(choice)) {
+      return { ok: false, reason: 'unsupported_choice' };
+    }
+
+    clearTimeout(pending.timeoutHandle);
+    this.pendingApprovals.delete(requestId);
+    pending.resolve(choice);
+
+    return {
+      ok: true,
+      requestId,
+      choice,
+    };
+  }
+
   onEvent(listener: (event: PiRpcEvent) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  private requestPermissionApproval(payload: unknown): Promise<TelegramApprovalChoice | undefined> {
+    const request = this.toPermissionPrompt(payload);
+    if (!request) {
+      return Promise.resolve('Deny');
+    }
+
+
+    return new Promise<TelegramApprovalChoice>((resolve, reject) => {
+      const timeoutHandle = setTimeout(() => {
+        const pending = this.pendingApprovals.get(request.requestId);
+        if (!pending) {
+          return;
+        }
+        this.pendingApprovals.delete(request.requestId);
+        pending.resolve('Deny');
+        this.emit({
+          type: 'permission_resolved',
+          requestId: request.requestId,
+          status: 'expired',
+        });
+      }, this.approvalTimeoutMs);
+
+      const boundSession = this.requireSession();
+      if (!request.sessionId && boundSession.sessionId) {
+        request.sessionId = boundSession.sessionId;
+      }
+      if (!request.sessionFile && boundSession.sessionFile) {
+        request.sessionFile = boundSession.sessionFile;
+      }
+
+      this.pendingApprovals.set(request.requestId, {
+        request,
+        resolve: (choice: TelegramApprovalChoice) => {
+          resolve(choice);
+          this.emit({
+            type: 'permission_resolved',
+            requestId: request.requestId,
+            status: choice === 'Deny' ? 'denied' : 'approved',
+            choice,
+          });
+        },
+        reject,
+        timeoutHandle,
+      });
+
+      this.emit({
+        type: 'permission_required',
+        request,
+      });
+    });
+  }
+
+  private abortAllPending(status: PiRpcPermissionResolvedEvent['status'] = 'aborted'): void {
+    for (const [requestId, pending] of this.pendingApprovals.entries()) {
+      clearTimeout(pending.timeoutHandle);
+      this.pendingApprovals.delete(requestId);
+      this.emit({
+        type: 'permission_resolved',
+        requestId,
+        status,
+        choice: status === 'approved' ? pending.request.choices[0] : 'Deny',
+      });
+      pending.resolve('Deny');
+    }
+  }
+
+  private toPermissionPrompt(raw: unknown): TelegramPermissionPrompt | undefined {
+    if (!raw || typeof raw !== 'object') {
+      return undefined;
+    }
+
+    const candidate = raw as {
+      requestId?: unknown;
+      reason?: unknown;
+      reasonCode?: unknown;
+      riskLevel?: unknown;
+      tool?: unknown;
+      action?: unknown;
+      prompt?: unknown;
+      projectScope?: unknown;
+      sessionScope?: unknown;
+    };
+    if (typeof candidate.requestId !== 'string' || candidate.requestId.length === 0) {
+      return undefined;
+    }
+
+    const prompt = (candidate.prompt as {
+      title?: unknown;
+      message?: unknown;
+      safeTarget?: unknown;
+      safeCommandSummary?: unknown;
+      choices?: unknown;
+      workspaceRoot?: unknown;
+    }) ?? {};
+
+    if (typeof prompt.title !== 'string' || typeof prompt.message !== 'string') {
+      return undefined;
+    }
+
+    const choices: TelegramApprovalChoice[] = [];
+    const knownChoices = new Set<TelegramApprovalChoice>([
+      'Allow once',
+      'Allow for session',
+      'Allow for project',
+      'Allow this file for project',
+      'Allow this folder for project',
+      'Deny',
+    ]);
+    if (Array.isArray(prompt.choices)) {
+      for (const candidateChoice of prompt.choices) {
+        if (typeof candidateChoice === 'string' && knownChoices.has(candidateChoice as TelegramApprovalChoice)) {
+          choices.push(candidateChoice as TelegramApprovalChoice);
+        }
+      }
+    }
+
+    const request: TelegramPermissionPrompt = {
+      id: candidate.requestId,
+      requestId: candidate.requestId,
+      workspaceRoot: typeof prompt.workspaceRoot === 'string'
+        ? prompt.workspaceRoot
+        : this.runtime?.cwd
+          ?? this.runtime?.services?.cwd
+          ?? this.workspaceRoot,
+      reason: typeof candidate.reason === 'string' ? candidate.reason : 'permission required',
+      reasonCode: typeof candidate.reasonCode === 'string' ? candidate.reasonCode : 'permission_required',
+      riskLevel: candidate.riskLevel === 'critical'
+        ? 'critical'
+        : candidate.riskLevel === 'medium'
+          ? 'medium'
+          : candidate.riskLevel === 'low'
+            ? 'low'
+            : 'high',
+      tool: typeof candidate.tool === 'string' ? candidate.tool : 'unknown',
+      action: typeof candidate.action === 'string' ? candidate.action : 'unknown',
+      title: prompt.title,
+      message: prompt.message,
+      safeTarget: typeof prompt.safeTarget === 'string' ? prompt.safeTarget : undefined,
+      safeCommandSummary: typeof prompt.safeCommandSummary === 'string' ? prompt.safeCommandSummary : undefined,
+      choices: choices.length > 0 ? choices : ['Deny'],
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + this.approvalTimeoutMs).toISOString(),
+    };
+
+    request.sessionId = this.extractSessionId(candidate.sessionScope)
+      || this.extractSessionId(candidate.projectScope)
+      || request.sessionId;
+
+    return request;
+  }
+
+  private extractSessionId(raw: unknown): string | undefined {
+    if (!raw || typeof raw !== 'object') return undefined;
+
+    const candidate = raw as {
+      sessionScope?: unknown;
+      sessionId?: unknown;
+      cacheKey?: unknown;
+      action?: unknown;
+      commandPattern?: unknown;
+    };
+
+    if (typeof candidate.sessionId === 'string' && candidate.sessionId.length > 0) {
+      return candidate.sessionId;
+    }
+
+    return undefined;
   }
 
   private requireRuntime(): PiSdkRuntimeLike {
@@ -137,7 +343,13 @@ export class PiSdkClient implements PiClientContract {
   private async bindCurrentSession(): Promise<void> {
     const session = this.requireSession();
     this.unsubscribe?.();
-    await session.bindExtensions?.({});
+    this.abortAllPending('aborted');
+    await session.bindExtensions?.({
+      mode: 'rpc',
+      uiContext: {
+        requestPermissionApproval: (payload: unknown): Promise<TelegramApprovalChoice | undefined> => this.requestPermissionApproval(payload),
+      },
+    });
     this.unsubscribe = session.subscribe((event) => this.handleSdkEvent(event));
   }
 

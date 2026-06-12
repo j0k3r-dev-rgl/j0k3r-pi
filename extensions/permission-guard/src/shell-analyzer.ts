@@ -194,11 +194,21 @@ function classifyRisk(commandName: string | undefined, unsupported: ShellUnsuppo
 }
 
 function nextCwdFor(segment: ShellSegmentAnalysis, currentCwd: string): string | undefined {
-  if (segment.commandName !== 'cd') return undefined;
-  const target = segment.argv[0];
-  if (!target) return undefined;
-  if (target === '~' || target.startsWith('~/')) return undefined;
-  return resolve(currentCwd, target);
+  if (segment.commandName === 'cd') {
+    const target = segment.argv[0];
+    if (!target) return undefined;
+    if (target === '~' || target.startsWith('~/')) return undefined;
+    return resolve(currentCwd, target);
+  }
+
+  if (segment.commandName === 'pushd') {
+    const target = segment.argv[0];
+    if (!target) return undefined;
+    if (target === '~' || target.startsWith('~/')) return undefined;
+    return resolve(currentCwd, target);
+  }
+
+  return undefined;
 }
 
 function sourceScript(commandName: string | undefined): ShellUnsupportedKind[] {

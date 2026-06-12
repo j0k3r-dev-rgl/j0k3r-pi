@@ -48,6 +48,10 @@ function pathIntentForCommand(commandName: string | undefined): { args: Array<{ 
       return { args: [{ index: 0, intent: 'write' }, { index: 1, intent: 'write' }] };
     case 'cd':
       return { args: [{ index: 0, intent: 'cwd', source: 'cd' }] };
+    case 'pushd':
+      return { args: [{ index: 0, intent: 'cwd', source: 'argument' }] };
+    case 'popd':
+      return { args: [{ index: 0, intent: 'cwd', source: 'argument' }] };
     default:
       return { args: [] };
   }
@@ -148,16 +152,49 @@ export async function extractShellPathEffects(options: ExtractShellPathEffectsOp
       }
     }
 
-    for (const rule of catalog.args) {
-      const raw = rule.index === undefined ? undefined : segment.argv[rule.index];
-      if (!raw) continue;
+    if (commandName === 'popd') {
       pathEffects.push({
         segmentIndex: segment.index,
-        raw,
-        source: rule.source ?? 'argument',
-        intent: rule.intent,
-        classified: await classifyEffect(raw, segment.effectiveCwd, options.config, rule.intent),
+        raw: segment.argv[0] ?? '<directory-stack>',
+        source: 'argument',
+        intent: 'cwd',
+        ambiguous: true,
+        reason: 'directory-stack-context-change',
       });
+    }
+
+    for (const rule of catalog.args) {
+      const raw = rule.index === undefined ? undefined : segment.argv[rule.index];
+      if (!raw) {
+        if (commandName === 'pushd') {
+          pathEffects.push({
+            segmentIndex: segment.index,
+            raw: '<directory-stack>',
+            source: 'argument',
+            intent: 'cwd',
+            ambiguous: true,
+            reason: 'directory-stack-context-change',
+          });
+        }
+        continue;
+      }
+      if (commandName === 'pushd') {
+        pathEffects.push({
+          segmentIndex: segment.index,
+          raw,
+          source: rule.source ?? 'argument',
+          intent: rule.intent,
+          classified: await classifyEffect(raw, segment.effectiveCwd, options.config, rule.intent),
+        });
+      } else {
+        pathEffects.push({
+          segmentIndex: segment.index,
+          raw,
+          source: rule.source ?? 'argument',
+          intent: rule.intent,
+          classified: await classifyEffect(raw, segment.effectiveCwd, options.config, rule.intent),
+        });
+      }
     }
 
     if (catalog.allPathArgs) {
@@ -225,9 +262,32 @@ export function extractShellPathEffectsSync(options: ExtractShellPathEffectsOpti
       }
     }
 
+    if (commandName === 'popd') {
+      pathEffects.push({
+        segmentIndex: segment.index,
+        raw: segment.argv[0] ?? '<directory-stack>',
+        source: 'argument',
+        intent: 'cwd',
+        ambiguous: true,
+        reason: 'directory-stack-context-change',
+      });
+    }
+
     for (const rule of catalog.args) {
       const raw = rule.index === undefined ? undefined : segment.argv[rule.index];
-      if (!raw) continue;
+      if (!raw) {
+        if (commandName === 'pushd') {
+          pathEffects.push({
+            segmentIndex: segment.index,
+            raw: '<directory-stack>',
+            source: 'argument',
+            intent: 'cwd',
+            ambiguous: true,
+            reason: 'directory-stack-context-change',
+          });
+        }
+        continue;
+      }
       pathEffects.push({ segmentIndex: segment.index, raw, source: rule.source ?? 'argument', intent: rule.intent, classified: classifyEffectSync(raw, segment.effectiveCwd, options.config, rule.intent) });
     }
 

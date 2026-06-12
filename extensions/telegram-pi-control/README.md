@@ -12,7 +12,7 @@ Gateway for controlling Pi sessions over Telegram with strict, authorization-fir
 - Maintain per-chat binding and arm-aware command gating via `CommandRouter`.
 - Start/attach Telegram long polling through the CLI entrypoint.
 - Persist Telegram update offsets between restarts.
-- Provide `/close`, clean shutdown, and emergency disable behavior.
+- Provide `/close`, remote permission approval commands, clean shutdown, and emergency disable behavior.
 
 ## Configuration
 
@@ -52,6 +52,8 @@ Example:
 
 ## Commands (MVP behavior)
 
+The gateway registers these commands with Telegram Bot API `setMyCommands` during startup so they appear in the bot command menu.
+
 | Command | Behavior |
 | --- | --- |
 | `/start` | show basic readiness text |
@@ -67,6 +69,9 @@ Example:
 | `/steer <text>` | steering message when armed |
 | `/followup <text>` | follow-up message when armed |
 | `/abort` | abort active run when armed |
+| `/permissions` | list pending Permission Guard approval requests for the active binding |
+| `/approve <id> [once\|session\|project\|file\|folder]` | approve a pending request for the active chat/workspace/session |
+| `/deny <id>` | deny a pending request for the active chat/workspace/session |
 
 ## Shutdown and emergency behavior
 
@@ -112,9 +117,28 @@ mkdir -p "$HOME/.local/state/pi/telegram-pi-control"
 nohup npm run gateway:start > "$HOME/.local/state/pi/telegram-pi-control/gateway.log" 2>&1 &
 ```
 
-Then use Telegram commands: `/workspaces`, `/sessions agent`, `/new agent smoke`, `/open agent <session-id>`, `/arm 300`, plain prompts, `/disarm`, `/close`, and `/abort`.
+Then use Telegram commands: `/workspaces`, `/sessions agent`, `/new agent smoke`, `/open agent <session-id>`, `/arm 300`, plain prompts, `/disarm`, `/close`, `/abort`, `/permissions`, `/approve <id>`, and `/deny <id>`.
 
 When creating or opening a session, the SDK runtime is forced to the selected workspace cwd. Existing session files with stale headers are opened with a cwd override so Telegram control stays in the workspace selected by the operator.
+
+## Permission Guard approval flow
+
+When Permission Guard requires approval inside an SDK-backed Telegram session, the gateway sends a formatted prompt only to the Telegram chat bound to that workspace/session. Raw internal `permission_required:` markers are filtered from normal assistant output.
+
+Respond with:
+
+```text
+/approve <request-id> once
+/approve <request-id> session
+/approve <request-id> project
+/approve <request-id> file
+/approve <request-id> folder
+/deny <request-id>
+```
+
+Only choices offered by Permission Guard for that request are accepted. Requests are scoped to the active chat binding, workspace, and session; stale, expired, wrong-chat, or wrong-binding answers are rejected.
+
+`bypassWorkspace` is configured in Permission Guard, not in the Telegram gateway. It can reduce prompts for provably workspace-contained operations, but it is still an in-process policy guard, not an OS sandbox.
 
 ## Validation steps
 

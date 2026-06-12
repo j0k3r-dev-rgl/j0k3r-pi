@@ -3,6 +3,7 @@ import type { PermissionPolicyConfig } from './types.js';
 export const builtInPermissionPolicy: PermissionPolicyConfig = {
   enabled: true,
   bypassAll: false,
+  bypassWorkspace: false,
   workspace: {
     allowRead: 'allow',
     allowWrite: 'allow',

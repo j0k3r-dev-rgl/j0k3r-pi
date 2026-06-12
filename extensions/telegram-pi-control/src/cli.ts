@@ -10,6 +10,7 @@ import type {
   PiRpcProcessManager,
   PiSessionRef,
   TelegramCommandInput,
+  TelegramBotCommand,
   TelegramControlConfig,
   TelegramIdentity,
   WorkspaceRegistry,
@@ -32,6 +33,7 @@ import { PiSdkClient } from './pi-sdk-client.js';
 import type { PiRpcClient as PiRpcClientContract, AuditEvent } from './types.js';
 import { TelegramLongPollingAdapter } from './telegram-adapter.js';
 import { TelegramOutputRelay } from './output-relay.js';
+import { InMemoryTelegramPermissionApprovalStore } from './permission-approval-store.js';
 import { FileAuditLogger } from './audit.js';
 import type { PiRpcSessionState } from './types.js';
 
@@ -69,8 +71,27 @@ interface TelegramPoller {
   stop(): Promise<void>;
   sendMessage(chatId: number, text: string): Promise<{ chatId: number; messageId: number }>;
   editMessage(ref: { chatId: number; messageId: number }, text: string): Promise<void>;
+  setMyCommands?(commands: TelegramBotCommand[]): Promise<void>;
   offset?: number;
 }
+
+export const TELEGRAM_CONTROL_BOT_COMMANDS: TelegramBotCommand[] = [
+  { command: 'start', description: 'Show Telegram Pi control help' },
+  { command: 'status', description: 'Show active workspace/session status' },
+  { command: 'workspaces', description: 'List trusted workspaces' },
+  { command: 'open', description: 'Open workspace/session: /open <workspace> [session]' },
+  { command: 'sessions', description: 'List sessions: /sessions [workspace]' },
+  { command: 'new', description: 'Create session: /new <workspace> [name]' },
+  { command: 'arm', description: 'Arm prompt forwarding: /arm [seconds]' },
+  { command: 'disarm', description: 'Disable prompt forwarding' },
+  { command: 'close', description: 'Close active session binding' },
+  { command: 'abort', description: 'Abort active Pi run' },
+  { command: 'steer', description: 'Send steer message: /steer <text>' },
+  { command: 'followup', description: 'Send follow-up: /followup <text>' },
+  { command: 'permissions', description: 'List pending permission requests' },
+  { command: 'approve', description: 'Approve permission: /approve <id> [scope]' },
+  { command: 'deny', description: 'Deny permission: /deny <id>' },
+];
 
 type AdapterFactory = (token: string, polling: TelegramControlConfig['telegram']['polling'], options: { initialOffset: number; maxPolls?: number; pollIntervalMs?: number }) => TelegramPoller;
 
@@ -251,6 +272,8 @@ export async function runTelegramControlGateway(options: RunGatewayOptions = {})
       },
     });
 
+  const permissionStore = new InMemoryTelegramPermissionApprovalStore();
+
   const initialOffset = (await readOffsetState(stateOffsetPath)) ?? 0;
   const adapter: TelegramPoller = options.adapter
     ?? options.createAdapter?.(runtimeConfig.botToken, runtimeConfig.config.telegram.polling, {
@@ -271,6 +294,7 @@ export async function runTelegramControlGateway(options: RunGatewayOptions = {})
       telegram: adapter,
       maxTelegramMessageChars: runtimeConfig.config.relay?.maxTelegramMessageChars,
       flushIntervalMs: runtimeConfig.config.relay?.flushIntervalMs,
+      permissionStore,
     });
 
   const relayDisposers = new Map<number, () => void>();
@@ -379,7 +403,16 @@ export async function runTelegramControlGateway(options: RunGatewayOptions = {})
       relayDisposers.delete(binding.chatId);
     }
     relayBindingKeys.delete(binding.chatId);
+    permissionStore.clearForBinding(binding.chatId, binding);
     await processManager.stop(binding);
+  };
+
+  const answerPermission = async (binding: ActiveBinding, requestId: string, choice: import('./types.js').TelegramApprovalChoice) => {
+    const client = await clientForBinding(binding);
+    if (!client.answerPermission) {
+      return { ok: false as const, reason: 'unavailable' as const, requestId };
+    }
+    return client.answerPermission(requestId, choice);
   };
 
   const commandRouter = options.commandRouter
@@ -391,6 +424,8 @@ export async function runTelegramControlGateway(options: RunGatewayOptions = {})
       openSession,
       createSession,
       closeSession,
+      permissionStore,
+      answerPermission,
       sendPrompt,
       sendSteer,
       sendFollowup,
@@ -491,6 +526,10 @@ export async function runTelegramControlGateway(options: RunGatewayOptions = {})
     }
   };
 
+  if (adapter.setMyCommands) {
+    await adapter.setMyCommands(TELEGRAM_CONTROL_BOT_COMMANDS);
+  }
+
   let stopRequested = false;
   let startError: unknown;
   const pollingLoop = adapter.start(handleUpdate).catch((error) => {
@@ -508,6 +547,7 @@ export async function runTelegramControlGateway(options: RunGatewayOptions = {})
 
     stopRequested = true;
     bindings.clearForEmergencyDisable();
+    permissionStore.clearExpired();
     await stopRelayAll();
     await processManager.stopAll().catch(() => undefined);
     await auditLogger.record(recordAuditEvent({

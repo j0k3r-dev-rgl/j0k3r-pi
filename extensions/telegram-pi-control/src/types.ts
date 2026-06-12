@@ -52,6 +52,11 @@ export interface TelegramEditOptions {
   parseMode?: 'HTML' | 'Markdown' | 'MarkdownV2';
 }
 
+export interface TelegramBotCommand {
+  command: string;
+  description: string;
+}
+
 export interface TelegramApiResponse<T> {
   ok: boolean;
   result: T;
@@ -67,6 +72,7 @@ export interface TelegramAdapter {
   stop(): Promise<void>;
   sendMessage(chatId: number, text: string, options?: TelegramSendOptions): Promise<TelegramMessageRef>;
   editMessage(ref: TelegramMessageRef, text: string, options?: TelegramEditOptions): Promise<void>;
+  setMyCommands?(commands: TelegramBotCommand[]): Promise<void>;
 }
 
 export interface TelegramCommand {
@@ -83,7 +89,10 @@ export interface TelegramCommand {
     | 'abort'
     | 'steer'
     | 'followup'
-    | 'prompt';
+    | 'prompt'
+    | 'approve'
+    | 'deny'
+    | 'permissions';
   args: string[];
   identity: TelegramIdentity;
   rawText: string;
@@ -105,6 +114,65 @@ export interface TelegramTextFrame {
 }
 
 export type TelegramCommandInput = TelegramCommandFrame | TelegramTextFrame;
+
+export interface TelegramPermissionPrompt {
+  id: string;
+  requestId: string;
+  workspaceRoot: string;
+  workspaceId?: string;
+  sessionId?: string;
+  sessionFile?: string;
+  rpcKey?: string;
+  title: string;
+  message: string;
+  reason: string;
+  reasonCode: string;
+  riskLevel: 'low' | 'medium' | 'high' | 'critical';
+  tool: string;
+  action: string;
+  safeTarget?: string;
+  safeCommandSummary?: string;
+  choices: TelegramApprovalChoice[];
+  createdAt: string;
+  expiresAt: string;
+}
+
+export type TelegramApprovalChoice =
+  | 'Allow once'
+  | 'Allow for session'
+  | 'Allow for project'
+  | 'Allow this file for project'
+  | 'Allow this folder for project'
+  | 'Deny';
+
+export interface PiRpcPermissionRequiredEvent {
+  type: 'permission_required';
+  request: TelegramPermissionPrompt;
+}
+
+export interface PiRpcPermissionResolvedEvent {
+  type: 'permission_resolved';
+  requestId: string;
+  status: 'approved' | 'denied' | 'expired' | 'aborted';
+  choice?: TelegramApprovalChoice;
+  text?: string;
+}
+
+export type PermissionAnswerResult =
+  | {
+      ok: true;
+      requestId: string;
+      choice: TelegramApprovalChoice;
+    }
+  | {
+      ok: false;
+      reason: 'not_found' | 'expired' | 'already_resolved' | 'unsupported_choice' | 'unavailable';
+      requestId?: string;
+    };
+
+export interface PermissionAnswerablePiClient {
+  answerPermission(requestId: string, choice: TelegramApprovalChoice): Promise<PermissionAnswerResult>;
+}
 
 export interface TelegramCommandOkResult {
   kind: 'ok';
@@ -305,7 +373,21 @@ export interface PiRpcRawEvent {
   [key: string]: unknown;
 }
 
-export type PiRpcEvent = PiRpcOutputEvent | PiRpcStateEvent | PiRpcStatusEvent | PiRpcErrorEvent | PiRpcRawEvent;
+export interface TelegramRpcPendingPermission {
+  request: TelegramPermissionPrompt;
+  status: 'pending' | 'resolved';
+  statusAt?: string;
+  statusText?: string;
+}
+
+export type PiRpcEvent =
+  | PiRpcOutputEvent
+  | PiRpcStateEvent
+  | PiRpcStatusEvent
+  | PiRpcErrorEvent
+  | PiRpcPermissionRequiredEvent
+  | PiRpcPermissionResolvedEvent
+  | PiRpcRawEvent;
 
 export interface PiRpcClient {
   start(): Promise<void>;
@@ -317,6 +399,7 @@ export interface PiRpcClient {
   steer(message: string): Promise<void>;
   followUp(message: string): Promise<void>;
   abort(): Promise<void>;
+  answerPermission?(requestId: string, choice: TelegramApprovalChoice): Promise<PermissionAnswerResult>;
   onEvent(listener: (event: PiRpcEvent) => void): () => void;
 }
 
@@ -348,6 +431,9 @@ export type AuthenticatedTelegramCommandInput =
   | { kind: 'abort'; identity: TelegramIdentity }
   | { kind: 'steer'; identity: TelegramIdentity; message: string }
   | { kind: 'followup'; identity: TelegramIdentity; message: string }
-  | { kind: 'prompt'; identity: TelegramIdentity; message: string };
+  | { kind: 'prompt'; identity: TelegramIdentity; message: string }
+  | { kind: 'approve'; identity: TelegramIdentity; requestId: string; scope?: 'once' | 'session' | 'project' | 'file' | 'folder' }
+  | { kind: 'deny'; identity: TelegramIdentity; requestId: string }
+  | { kind: 'permissions'; identity: TelegramIdentity };
 
 export type CommandResult = TelegramCommandResult;

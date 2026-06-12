@@ -24,6 +24,7 @@ export interface RuntimeContextLike {
   hasUI?: boolean;
   ui?: {
     select?: (message: string, choices: ApprovalChoice[]) => Promise<ApprovalChoice | undefined> | ApprovalChoice | undefined;
+    requestPermissionApproval?: (payload: PermissionRequiredPayload) => Promise<ApprovalChoice | undefined> | ApprovalChoice | undefined;
     notify?: (message: string, level?: 'info' | 'warning' | 'error') => void;
   };
   sessionManager?: {
@@ -182,6 +183,9 @@ async function resolveRuntimeDecision(
           const choice = await ctx.ui!.select!(promptMessage(prompt), prompt.choices);
           return choice ?? 'Deny';
         }
+      : undefined,
+    requestPermissionApproval: hasUIFor(ctx) && ctx.ui?.requestPermissionApproval
+      ? async (payload) => ctx.ui!.requestPermissionApproval!(payload)
       : undefined,
     projectApproval: async (approval) => {
       if (typeof approval === 'string') {

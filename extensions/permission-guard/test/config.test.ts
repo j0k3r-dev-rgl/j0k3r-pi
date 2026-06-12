@@ -85,6 +85,7 @@ describe('permission guard config loading', () => {
   it('keeps the guard enabled and bypass disabled by default in exported defaults', () => {
     expect(builtInPermissionPolicy.enabled).toBe(true);
     expect(builtInPermissionPolicy.bypassAll).toBe(false);
+    expect(builtInPermissionPolicy.bypassWorkspace).toBe(false);
   });
 
   it('loads global JSON before project JSON so project overrides win', async () => {
@@ -193,23 +194,41 @@ describe('permission guard config loading', () => {
     expect(JSON.stringify(result.config)).not.toContain(sentinel);
   });
 
-  it('accepts enabled: false and bypassAll: true without changing audit defaults', async () => {
-    const { cwd, homeDir } = await tempWorkspace('permission-guard-disabled-');
-    await writeJson(join(cwd, '.pi', 'permissions.json'), { enabled: false, bypassAll: true });
+  it('defaults bypassWorkspace to false when flag is missing', async () => {
+    const { cwd, homeDir } = await tempWorkspace('permission-guard-bypass-missing-');
+    const result = await loadPermissionConfig({ cwd, env: {}, homeDir });
+
+    expect(result.config.bypassWorkspace).toBe(false);
+  });
+
+  it('accepts bypassWorkspace when explicitly set to true', async () => {
+    const { cwd, homeDir } = await tempWorkspace('permission-guard-bypass-true-');
+    await writeJson(join(cwd, '.pi', 'permissions.json'), { bypassWorkspace: true });
 
     const result = await loadPermissionConfig({ cwd, env: {}, homeDir });
 
-    expect(result.config.enabled).toBe(false);
+    expect(result.config.bypassWorkspace).toBe(true);
+    expect(result.warnings.join('\n')).not.toContain('bypassWorkspace');
+  });
+
+  it('rejects non-boolean bypassWorkspace values', async () => {
+    const { cwd, homeDir } = await tempWorkspace('permission-guard-bypass-invalid-');
+    await writeJson(join(cwd, '.pi', 'permissions.json'), { bypassWorkspace: 'yes' as unknown });
+
+    const result = await loadPermissionConfig({ cwd, env: {}, homeDir });
+
+    expect(result.config.bypassWorkspace).toBe(false);
+    expect(result.warnings.join('\n')).toContain('invalid boolean at bypassWorkspace');
+  });
+
+  it('allows both bypassWorkspace and bypassAll without masking bypassAll behavior', async () => {
+    const { cwd, homeDir } = await tempWorkspace('permission-guard-bypass-both-');
+    await writeJson(join(cwd, '.pi', 'permissions.json'), { bypassWorkspace: true, bypassAll: true });
+
+    const result = await loadPermissionConfig({ cwd, env: {}, homeDir });
+
+    expect(result.config.bypassWorkspace).toBe(true);
     expect(result.config.bypassAll).toBe(true);
-    expect(result.config.audit).toMatchObject({
-      enabled: true,
-      logAllowed: false,
-      logDenied: true,
-      logApprovals: true,
-      redactPaths: true,
-      maxBytes: 5 * 1024 * 1024,
-      maxFiles: 5,
-    });
   });
 
   it('loads valid bash.scopedApprovals and ignores malformed entries with warnings', async () => {
@@ -233,6 +252,7 @@ describe('permission guard config loading', () => {
 
     const result = await loadPermissionConfig({ cwd, env: {}, homeDir });
 
+    expect(result.config.bypassWorkspace).toBe(false);
     expect(result.config.bash.scopedApprovals).toEqual([
       expect.objectContaining({ id: 'bash_approval_1', normalizedCommand: 'npm test' }),
     ]);

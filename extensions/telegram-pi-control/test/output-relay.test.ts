@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { TelegramRateLimitError } from '../src/telegram-adapter.js';
 import { TelegramOutputRelay } from '../src/output-relay.js';
+import { InMemoryTelegramPermissionApprovalStore } from '../src/permission-approval-store.js';
 import type { TelegramMessageRef } from '../src/types.js';
 import type { PiRpcClient, ActiveBinding } from '../src/types.js';
 
@@ -180,6 +181,46 @@ describe('TelegramOutputRelay', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(adapter.sendCalls.map((call) => call.text)).toEqual(['short output']);
+  });
+
+  it('renders permission prompts and suppresses raw permission markers from output', async () => {
+    const adapter = makeFakeTelegramAdapter();
+    const permissionStore = new InMemoryTelegramPermissionApprovalStore();
+    const relay = new TelegramOutputRelay({
+      telegram: adapter as any,
+      flushIntervalMs: 0,
+      permissionStore,
+    });
+
+    const client = makeFakeClient();
+    relay.attach(106, binding, client);
+
+    const listener = (client.onEvent as any).mock.calls[0][0];
+    listener({
+      type: 'permission_required',
+      request: {
+        id: 'req-2',
+        requestId: 'req-2',
+        workspaceRoot: '/tmp/workspace',
+        title: 'Permission required for bash',
+        message: 'Bash command requires approval.',
+        reason: 'approval required',
+        reasonCode: 'bash_default_requires_approval',
+        riskLevel: 'medium',
+        tool: 'bash',
+        action: 'bash',
+        choices: ['Allow once', 'Deny'],
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+    });
+    client.emitOutput('visible\npermission_required:{"secret":"no"}\nafter');
+    await relay.flush(106);
+
+    expect(adapter.sendCalls[0].text).toContain('/approve req-2');
+    expect(permissionStore.get(106, binding, 'req-2')?.requestId).toBe('req-2');
+    expect(adapter.sendCalls.map((call) => call.text).join('\n')).toContain('visible\nafter');
+    expect(adapter.sendCalls.map((call) => call.text).join('\n')).not.toContain('permission_required:');
   });
 
   it('auto-completes on error events', async () => {

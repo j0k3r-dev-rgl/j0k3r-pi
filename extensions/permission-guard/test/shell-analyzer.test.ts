@@ -72,6 +72,16 @@ describe('shell analyzer', () => {
     expect(result.segments[1]).toMatchObject({ commandName: 'npm', effectiveCwd: '/workspace/packages/app', argv: ['test'] });
   });
 
+  it('tracks effective cwd after pushd and marks popd as non-deterministic', async () => {
+    const result = await analyzeShellCommand({ command: 'pushd packages/app && popd', cwd: '/workspace', config: policy() });
+
+    expect(result.ok).toBe(true);
+    expect(result.segments).toHaveLength(2);
+    expect(result.segments[0]).toMatchObject({ commandName: 'pushd', effectiveCwd: '/workspace', nextCwd: '/workspace/packages/app' });
+    expect(result.segments[1]).toMatchObject({ commandName: 'popd', effectiveCwd: '/workspace/packages/app' });
+    expect(result.unsupported).not.toContain('command_substitution');
+  });
+
   it.each([
     { command: 'git status | cat', unsupported: 'pipe' },
     { command: 'git status &', unsupported: 'background' },

@@ -122,6 +122,32 @@ describe('permission guard runtime wiring', () => {
     await expect(pending).resolves.toEqual(expect.objectContaining({ block: true }));
   });
 
+  it('uses SDK/remote requestPermissionApproval hook for main-thread approvals', async () => {
+    const cwd = await tempWorkspace('permission-guard-runtime-remote-hook-');
+    const pi = createMockPi();
+    registerPermissionGuardRuntime(pi);
+    const handler = pi.handlers.tool_call![0] as ToolCallHandler;
+    const requestPermissionApproval = vi.fn(async (_payload) => 'Allow for session' as const);
+    const ctx = createCtx(cwd, [], {
+      ui: {
+        select: undefined,
+        requestPermissionApproval,
+      },
+    });
+
+    await expect(handler({ toolName: 'read', toolCallId: 'tc-remote', input: { path: '../outside.txt' } }, ctx)).resolves.toBeUndefined();
+
+    expect(requestPermissionApproval).toHaveBeenCalledTimes(1);
+    expect(requestPermissionApproval).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'permission_required',
+      tool: 'read',
+      action: 'read',
+      prompt: expect.objectContaining({
+        choices: expect.arrayContaining(['Allow once', 'Allow for session', 'Allow this file for project', 'Allow this folder for project', 'Deny']),
+      }),
+    }));
+  });
+
   it('reuses Allow for session approvals without prompting again for the same scoped request', async () => {
     const cwd = await tempWorkspace('permission-guard-runtime-session-');
     const state = await mkdtemp(join(tmpdir(), 'permission-guard-runtime-session-state-'));

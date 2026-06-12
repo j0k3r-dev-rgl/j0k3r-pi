@@ -5,7 +5,21 @@ import type { PermissionDecisionResult, PermissionPolicyConfig, PermissionReques
 
 export interface BashPolicyOptions {
   workspaceRoot?: string;
+  bypassWorkspace?: boolean;
 }
+
+const BYPASS_DISALLOWED_REASON_CODES = new Set([
+  'bash_network_denied',
+  'bash_network_requires_approval',
+  'bash_network_allowed',
+  'bash_package_install_requires_approval',
+  'bash_state_change_requires_approval',
+  'bash_configured_ask',
+  'bash_shell_syntax_requires_approval',
+  'bash_default_denied',
+  'bash_unsupported_shell_requires_approval',
+  'bash_workspace_readonly_denied',
+]);
 
 interface BashMatch {
   decision: PolicyDecision;
@@ -243,6 +257,35 @@ function isWorkspaceReadOnlySimpleCommand(analysis: ShellAnalysisResult): boolea
   );
 }
 
+function isWorkspaceBypassCandidate(analysis: ShellAnalysisResult): boolean {
+  if (analysis.pathEffects.length === 0) return false;
+  return analysis.pathEffects.every((effect) =>
+    effect.intent !== 'cwd'
+    && !effect.ambiguous
+    && effect.classified !== undefined
+    && effect.classified.insideWorkspace
+    && effect.classified.symlinkEscapesWorkspace !== true
+  );
+}
+
+function pathContextBypassBlock(analysis: ShellAnalysisResult, options: BashPolicyOptions): BashMatch | undefined {
+  if (!options.bypassWorkspace) return undefined;
+  const hasPathContextEffect = analysis.pathEffects.some((effect) => effect.intent === 'cwd');
+  if (!hasPathContextEffect) return undefined;
+  return {
+    decision: 'ask',
+    reason: 'Bash command changes cwd or path context and requires approval when bypassWorkspace is enabled.',
+    reasonCode: 'bash_path_context_requires_approval',
+    riskLevel: 'medium',
+    matchedRule: 'bypassWorkspace:path-context',
+    analysis,
+  };
+}
+
+function hasDisallowedBypassReason(match: BashMatch): boolean {
+  return match.decision !== 'allow' && BYPASS_DISALLOWED_REASON_CODES.has(match.reasonCode) && match.reasonCode !== 'bash_network_allowed';
+}
+
 function workspaceReadOnlyMatch(config: PermissionPolicyConfig, analysis: ShellAnalysisResult): BashMatch | undefined {
   if (!isWorkspaceReadOnlyPipeline(analysis) && !isWorkspaceReadOnlySimpleCommand(analysis)) return undefined;
   const decision = config.bash.workspaceReadOnly;
@@ -292,8 +335,22 @@ function analysisMatch(config: PermissionPolicyConfig, request: PermissionReques
     config,
   });
 
+  const pathContextBlock = pathContextBypassBlock(analysis, options);
+  if (pathContextBlock) return pathContextBlock;
+
   const workspaceReadOnly = workspaceReadOnlyMatch(config, analysis);
-  if (workspaceReadOnly) return workspaceReadOnly;
+  if (workspaceReadOnly) {
+    const canBypassWorkspace = options.bypassWorkspace && isWorkspaceBypassCandidate(analysis) && !hasDisallowedBypassReason(workspaceReadOnly);
+    if (!canBypassWorkspace) return workspaceReadOnly;
+    return {
+      decision: 'allow',
+      reason: 'Workspace-local filesystem effects are fully classified and bypassWorkspace is enabled.',
+      reasonCode: 'bash_workspace_bypass_allowed',
+      riskLevel: 'low',
+      matchedRule: 'bypassWorkspace',
+      analysis,
+    };
+  }
 
   if (analysis.unsupported.length > 0 || !analysis.effectsComplete) {
     const hasOutsideEffect = analysis.pathEffects.some((effect) => effect.classified && !effect.classified.insideWorkspace);
@@ -310,7 +367,7 @@ function analysisMatch(config: PermissionPolicyConfig, request: PermissionReques
 
   const compoundSafeRule = segmentSafeCompound(analysis, config);
   if (compoundSafeRule) {
-    return {
+    const match: BashMatch = {
       decision: 'allow',
       reason: 'Every command in the compound sequence is allowed by policy after structured analysis.',
       reasonCode: 'bash_safe_compound_command_allowed',
@@ -318,6 +375,15 @@ function analysisMatch(config: PermissionPolicyConfig, request: PermissionReques
       matchedRule: compoundSafeRule,
       analysis,
     };
+    if (options.bypassWorkspace && isWorkspaceBypassCandidate(analysis) && !hasDisallowedBypassReason(match)) return {
+      decision: 'allow',
+      reason: 'Workspace-local filesystem effects are fully classified and bypassWorkspace is enabled.',
+      reasonCode: 'bash_workspace_bypass_allowed',
+      riskLevel: 'low',
+      matchedRule: 'bypassWorkspace',
+      analysis,
+    };
+    return match;
   }
 
   const compoundRisk = compoundRiskMatch(analysis, config);
@@ -330,8 +396,10 @@ function analysisMatch(config: PermissionPolicyConfig, request: PermissionReques
 
   const safeMatch = safeCommandCandidate(command, config);
   const simpleAllow = analysis.unsupported.length === 0 && analysis.pathEffects.every((effect) => effect.classified?.insideWorkspace ?? !effect.ambiguous);
-  if (safeMatch && simpleAllow && analysis.operators.length === 0) {
-    return {
+  const fallbackToSafeMatch = safeMatch && simpleAllow && analysis.operators.length === 0;
+
+  if (fallbackToSafeMatch) {
+    const match: BashMatch = {
       decision: 'allow',
       reason: 'Bash command matches a configured safe command after structured analysis.',
       reasonCode: 'bash_safe_command_allowed',
@@ -339,6 +407,15 @@ function analysisMatch(config: PermissionPolicyConfig, request: PermissionReques
       matchedRule: safeMatch,
       analysis,
     };
+    if (options.bypassWorkspace && isWorkspaceBypassCandidate(analysis) && !hasDisallowedBypassReason(match)) return {
+      decision: 'allow',
+      reason: 'Workspace-local filesystem effects are fully classified and bypassWorkspace is enabled.',
+      reasonCode: 'bash_workspace_bypass_allowed',
+      riskLevel: 'low',
+      matchedRule: 'bypassWorkspace',
+      analysis,
+    };
+    return match;
   }
 
   if (/^(?:npm\s+(?:install|i)|pnpm\s+add|yarn\s+add|pip(?:3)?\s+install|cargo\s+install|gem\s+install|go\s+install)(?:\s|$)/i.test(analysis.normalizedCommand)) {
@@ -365,7 +442,7 @@ function analysisMatch(config: PermissionPolicyConfig, request: PermissionReques
 
   const network = /^(?:curl|wget|ssh|scp|rsync)(?:\s|$)/i.test(analysis.normalizedCommand) || /^git\s+(?:clone|fetch|pull)(?:\s|$)/i.test(analysis.normalizedCommand);
   if (network) {
-    return {
+    const match: BashMatch = {
       decision: config.bash.network,
       reason: 'Network-related bash commands require approval by policy.',
       reasonCode: config.bash.network === 'deny' ? 'bash_network_denied' : config.bash.network === 'allow' ? 'bash_network_allowed' : 'bash_network_requires_approval',
@@ -373,16 +450,55 @@ function analysisMatch(config: PermissionPolicyConfig, request: PermissionReques
       matchedRule: 'network-command',
       analysis,
     };
+    if (options.bypassWorkspace && isWorkspaceBypassCandidate(analysis) && !hasDisallowedBypassReason(match)) return {
+      decision: 'allow',
+      reason: 'Workspace-local filesystem effects are fully classified and bypassWorkspace is enabled.',
+      reasonCode: 'bash_workspace_bypass_allowed',
+      riskLevel: 'low',
+      matchedRule: 'bypassWorkspace',
+      analysis,
+    };
+    return match;
   }
 
   const configuredAsk = matchesCommandPattern(command, config.bash.askCommands);
   if (configuredAsk) {
-    return {
+    const match: BashMatch = {
       decision: 'ask',
       reason: 'Bash command requires approval by configured policy.',
       reasonCode: 'bash_configured_ask',
       riskLevel: 'medium',
       matchedRule: configuredAsk,
+      analysis,
+    };
+    if (options.bypassWorkspace && isWorkspaceBypassCandidate(analysis) && !hasDisallowedBypassReason(match)) return {
+      decision: 'allow',
+      reason: 'Workspace-local filesystem effects are fully classified and bypassWorkspace is enabled.',
+      reasonCode: 'bash_workspace_bypass_allowed',
+      riskLevel: 'low',
+      matchedRule: 'bypassWorkspace',
+      analysis,
+    };
+    return match;
+  }
+
+  const fallback = {
+    decision: config.bash.default === 'deny' ? 'deny' : 'ask',
+    reason: analysis.operators.length > 0
+      ? 'Compound shell syntax requires approval unless every segment is proven safe.'
+      : 'Bash command does not match a more specific allow or deny rule.',
+    reasonCode: config.bash.default === 'deny' ? 'bash_default_denied' : analysis.operators.length > 0 ? 'bash_shell_syntax_requires_approval' : 'bash_default_requires_approval',
+    riskLevel: config.bash.default === 'deny' ? 'high' : 'medium',
+    matchedRule: 'bash.default',
+    analysis,
+  } as BashMatch;
+  if (options.bypassWorkspace && isWorkspaceBypassCandidate(analysis) && !hasDisallowedBypassReason(fallback) && simpleAllow) {
+    return {
+      decision: 'allow',
+      reason: 'Workspace-local filesystem effects are fully classified and bypassWorkspace is enabled.',
+      reasonCode: 'bash_workspace_bypass_allowed',
+      riskLevel: 'low',
+      matchedRule: 'bypassWorkspace',
       analysis,
     };
   }
@@ -398,16 +514,7 @@ function analysisMatch(config: PermissionPolicyConfig, request: PermissionReques
     };
   }
 
-  return {
-    decision: config.bash.default === 'deny' ? 'deny' : 'ask',
-    reason: analysis.operators.length > 0
-      ? 'Compound shell syntax requires approval unless every segment is proven safe.'
-      : 'Bash command does not match a more specific allow or deny rule.',
-    reasonCode: config.bash.default === 'deny' ? 'bash_default_denied' : analysis.operators.length > 0 ? 'bash_shell_syntax_requires_approval' : 'bash_default_requires_approval',
-    riskLevel: config.bash.default === 'deny' ? 'high' : 'medium',
-    matchedRule: 'bash.default',
-    analysis,
-  };
+  return fallback;
 }
 
 function approvalRootsFor(request: PermissionRequest, analysis: ShellAnalysisResult | undefined): NonNullable<PermissionDecisionResult['details']['approvalScope']>['allowedRoots'] | undefined {
@@ -486,7 +593,12 @@ export function classifyBashCommand(
   request: PermissionRequest,
   options: BashPolicyOptions = {},
 ): PermissionDecisionResult {
-  const match = denyMatch(config, request, options) ?? analysisMatch(config, request, options);
+  const mergedOptions: BashPolicyOptions = {
+    ...options,
+    workspaceRoot: options.workspaceRoot ?? config.workspace.root,
+    bypassWorkspace: options.bypassWorkspace ?? config.bypassWorkspace,
+  };
+  const match = denyMatch(config, request, mergedOptions) ?? analysisMatch(config, request, mergedOptions);
   return resultForMatch(config, request, match);
 }
 

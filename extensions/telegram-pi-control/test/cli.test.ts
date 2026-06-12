@@ -4,13 +4,14 @@ import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 
 import { runTelegramControlGateway } from '../src/cli.js';
-import type { BindingManager, OutputRelay, PiRpcProcessManager, PiRpcClient as PiRpcClientContract, TelegramUpdate } from '../src/types.js';
+import type { BindingManager, OutputRelay, PiRpcProcessManager, PiRpcClient as PiRpcClientContract, TelegramBotCommand, TelegramUpdate } from '../src/types.js';
 
 class FakeTelegramAdapter {
   public offset: number;
   public readonly startCalls: number[] = [];
   public readonly stopCalls: number[] = [];
   public readonly messages: Array<{ chatId: number; text: string }> = [];
+  public readonly commandRegistrations: TelegramBotCommand[][] = [];
 
   constructor(
     private readonly updates: TelegramUpdate[],
@@ -39,6 +40,10 @@ class FakeTelegramAdapter {
   async editMessage(): Promise<void> {
     // output relay can be mocked in tests that do not exercise edits
     return;
+  }
+
+  async setMyCommands(commands: TelegramBotCommand[]): Promise<void> {
+    this.commandRegistrations.push(commands);
   }
 }
 
@@ -157,6 +162,44 @@ describe('runTelegramControlGateway', () => {
     await gateway.stop();
 
     expect(adapter.stopCalls.length).toBe(1);
+  });
+
+  it('registers the Telegram bot command menu on startup', async () => {
+    const cwd = await buildConfigTempDir();
+    await mkdir(join(cwd, '.pi'), { recursive: true });
+    await writeFile(join(cwd, '.pi', 'telegram-pi-control.json'), JSON.stringify({
+      telegram: {
+        allowedUserIds: [DEFAULT_ALLOWED_USER],
+      },
+      workspaces: [{
+        id: 'ws',
+        root: cwd,
+        label: 'root',
+      }],
+    }));
+
+    const adapter = new FakeTelegramAdapter([], 0);
+
+    const gateway = await runTelegramControlGateway({
+      cwd,
+      env: {
+        PI_TELEGRAM_CONTROL_BOT_TOKEN: 'token',
+      },
+      adapter,
+      outputRelay: NOOP_OUTPUT_RELAY,
+      stateOffsetPath: join(cwd, 'state.json'),
+      installSignalHandlers: false,
+    });
+
+    await gateway.waitUntilStopped();
+
+    expect(adapter.commandRegistrations).toHaveLength(1);
+    expect(adapter.commandRegistrations[0]).toEqual(expect.arrayContaining([
+      { command: 'workspaces', description: expect.stringContaining('workspaces') },
+      { command: 'approve', description: expect.stringContaining('permission') },
+      { command: 'deny', description: expect.stringContaining('permission') },
+    ]));
+    expect(adapter.commandRegistrations[0].every((entry) => !entry.command.startsWith('/'))).toBe(true);
   });
 
   it('loads and persists update offsets', async () => {

@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { CommandRouter } from '../src/commands.js';
 import { ExactWorkspaceRegistry } from '../src/workspace-registry.js';
 import { InMemoryBindingManager } from '../src/bindings.js';
+import { InMemoryTelegramPermissionApprovalStore } from '../src/permission-approval-store.js';
 import { TelegramCommandInput, TelegramCommand, TelegramControlConfig, AuditEvent } from '../src/types.js';
 
 function identity() {
@@ -118,7 +119,7 @@ describe('CommandRouter', () => {
 
     expect(result.kind).toBe('ok');
     expect(result.text).toContain(`A (a) — ${wA}`);
-    expect(result.text).not.toContain('B');
+    expect(result.text).not.toContain('B (b)');
   });
 
   it('opens trusted workspace and binds active workspace/session', async () => {
@@ -284,6 +285,77 @@ describe('CommandRouter', () => {
 
     const after = await router.handle(commandInput('/status'));
     expect(after.text).toContain('No active workspace/session binding');
+  });
+
+  it('lists, approves, and denies scoped permission requests for the active binding', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'telegram-control-command-permissions-'));
+    const wA = join(root, 'a');
+    await mkdir(wA, { recursive: true });
+
+    const config: TelegramControlConfig = {
+      telegram: { allowedUserIds: [42] },
+      workspaces: [{ id: 'a', label: 'A', root: wA }],
+    };
+
+    const registry = new ExactWorkspaceRegistry(config, { cwd: root });
+    const bindings = new InMemoryBindingManager();
+    const permissionStore = new InMemoryTelegramPermissionApprovalStore();
+    const answerPermission = vi.fn(async (_binding, requestId: string, choice: any) => ({ ok: true as const, requestId, choice }));
+
+    const router = new CommandRouter({
+      workspaceRegistry: registry,
+      trustValidator: {
+        async validate() {
+          return { trusted: true, matchedPath: wA, decision: true, reason: 'nearest_true' };
+        },
+      },
+      bindings,
+      sessionIndex: { listWorkspaceSessions: vi.fn().mockResolvedValue([]) },
+      openSession: vi.fn(async () => ({ sessionId: 'opened' })),
+      createSession: vi.fn(async () => ({ sessionId: 'created' })),
+      closeSession: vi.fn(async () => undefined),
+      permissionStore,
+      answerPermission,
+      sendPrompt: vi.fn(),
+      sendSteer: vi.fn(),
+      sendFollowup: vi.fn(),
+      sendAbort: vi.fn(),
+    });
+
+    await router.handle(commandInput('/open a'));
+    const binding = bindings.get(123)!;
+    permissionStore.upsert(123, binding, {
+      id: 'req-1',
+      requestId: 'req-1',
+      workspaceRoot: wA,
+      workspaceId: 'a',
+      sessionId: 'opened',
+      rpcKey: binding.rpcKey,
+      title: 'Permission required for bash',
+      message: 'Bash command requires approval.',
+      reason: 'approval required',
+      reasonCode: 'bash_default_requires_approval',
+      riskLevel: 'medium',
+      tool: 'bash',
+      action: 'bash',
+      choices: ['Allow once', 'Allow for session', 'Deny'],
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+
+    const listed = await router.handle(commandInput('/permissions'));
+    expect(listed.kind).toBe('ok');
+    expect(listed.text).toContain('req-1');
+
+    const approved = await router.handle(commandInput('/approve req-1 session'));
+    expect(approved.kind).toBe('ok');
+    expect(approved.text).toContain('approved');
+    expect(answerPermission).toHaveBeenCalledWith(binding, 'req-1', 'Allow for session');
+    expect(permissionStore.list(123, binding)).toEqual([]);
+
+    const stale = await router.handle(commandInput('/deny req-1'));
+    expect(stale.kind).toBe('error');
+    expect(stale.text).toContain('No matching pending permission request');
   });
 
   it('arms and disarms binding with bounded duration', async () => {

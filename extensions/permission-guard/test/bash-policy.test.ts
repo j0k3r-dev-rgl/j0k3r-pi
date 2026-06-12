@@ -43,6 +43,63 @@ describe('bash permission policy', () => {
     });
   });
 
+  it('auto-allows workspace-local classified filesystem commands when bypassWorkspace is enabled', () => {
+    const config = policy({}, '/workspace');
+
+    expect(classifyBashCommand({ ...config, bypassWorkspace: true }, bashRequest('mkdir .pi/extensions/permission-guard/cache'))).toMatchObject({
+      decision: 'allow',
+      finalDecision: 'allow',
+      details: { matchedLayer: 'bash' },
+    });
+    expect(classifyBashCommand({ ...config, bypassWorkspace: true }, bashRequest('cat .pi/extensions/permission-guard/src/index.ts'))).toMatchObject({
+      decision: 'allow',
+      finalDecision: 'allow',
+      details: { matchedLayer: 'bash' },
+    });
+  });
+
+  it('does not bypass destructive bash operations when bypassWorkspace is enabled', () => {
+    const config = policy({}, '/workspace');
+
+    expect(classifyBashCommand({ ...config, bypassWorkspace: true }, bashRequest('rm src/file.ts'))).toMatchObject({
+      decision: 'ask',
+      finalDecision: 'requires_approval',
+      reasonCode: 'bash_state_change_requires_approval',
+    });
+  });
+
+  it('forces path-context and cwd/path-root changes to ask when bypassWorkspace is enabled', () => {
+    const config = policy({}, '/workspace');
+
+    expect(classifyBashCommand({ ...config, bypassWorkspace: true }, bashRequest('cd .pi/extensions/permission-guard && cat src/index.ts'))).toMatchObject({
+      decision: 'ask',
+      finalDecision: 'requires_approval',
+    });
+    expect(classifyBashCommand({ ...config, bypassWorkspace: true }, bashRequest('pushd .pi/extensions/permission-guard'))).toMatchObject({
+      decision: 'ask',
+      finalDecision: 'requires_approval',
+    });
+    expect(classifyBashCommand({ ...config, bypassWorkspace: true }, bashRequest('popd'))).toMatchObject({
+      decision: 'ask',
+      finalDecision: 'requires_approval',
+    });
+    expect(classifyBashCommand({ ...config, bypassWorkspace: true }, bashRequest('npm --prefix .pi/extensions/permission-guard test'))).toMatchObject({
+      decision: 'ask',
+      finalDecision: 'requires_approval',
+    });
+    expect(classifyBashCommand({ ...config, bypassWorkspace: true }, bashRequest('git -C .pi/extensions/permission-guard status'))).toMatchObject({
+      decision: 'ask',
+      finalDecision: 'requires_approval',
+    });
+  });
+
+  it('does not bypass commands that remain unsafe or explicitly require approval', () => {
+    const config = policy({}, '/workspace');
+
+    expect(classifyBashCommand({ ...config, bypassWorkspace: true }, bashRequest('npm install left-pad')).finalDecision).toBe('requires_approval');
+    expect(classifyBashCommand({ ...config, bypassWorkspace: true }, bashRequest('curl https://example.com')).finalDecision).toBe('requires_approval');
+  });
+
   it.each(['sudo npm test', 'su root', 'su -c whoami'])('denies privilege escalation command %s', (command) => {
     expect(classifyBashCommand(policy(), bashRequest(command))).toMatchObject({
       decision: 'deny',
@@ -314,6 +371,19 @@ describe('bash permission policy', () => {
         finalDecision: 'requires_approval',
       });
     }
+  });
+
+  it('requires approval for path-context changes when bypassWorkspace is enabled even if legacy safe compound would allow', () => {
+    const config = {
+      ...policy({ safeCommands: ['npm test', 'npm run typecheck'] }, '/workspace'),
+      bypassWorkspace: true,
+    };
+
+    expect(classifyBashCommand(config, bashRequest('cd packages/app && npm test && npm run typecheck'))).toMatchObject({
+      decision: 'ask',
+      finalDecision: 'requires_approval',
+      reasonCode: 'bash_path_context_requires_approval',
+    });
   });
 
   it('does not allow cd chaining when the cd target escapes the workspace', () => {

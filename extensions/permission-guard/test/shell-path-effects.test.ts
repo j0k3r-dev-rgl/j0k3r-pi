@@ -54,6 +54,23 @@ describe('shell path effects', () => {
     ]));
   });
 
+  it('extracts path-context effects for pushd and popd commands', async () => {
+    const cwd = await tempWorkspace('permission-guard-shell-effects-stack-');
+    const config = policy(cwd);
+
+    const pushdAnalysis = await analyzeShellCommand({ command: 'pushd packages/app', cwd, config });
+    const pushdResult = await extractShellPathEffects({ analysis: pushdAnalysis, context: { cwd, workspaceRoot: cwd, policyIdentity: 'test-policy' }, config });
+    expect(pushdResult.pathEffects).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'argument', intent: 'cwd', raw: 'packages/app', classified: expect.objectContaining({ insideWorkspace: true, workspaceRelative: 'packages/app' }) }),
+    ]));
+
+    const popdAnalysis = await analyzeShellCommand({ command: 'popd', cwd, config });
+    const popdResult = await extractShellPathEffects({ analysis: popdAnalysis, context: { cwd, workspaceRoot: cwd, policyIdentity: 'test-policy' }, config });
+    expect(popdResult.pathEffects).toEqual(expect.arrayContaining([
+      expect.objectContaining({ intent: 'cwd', ambiguous: true, reason: 'directory-stack-context-change' }),
+    ]));
+  });
+
   it('detects symlink escapes and outside-workspace effects', async () => {
     const cwd = await tempWorkspace('permission-guard-shell-effects-symlink-');
     const outside = await mkdtemp(join(tmpdir(), 'permission-guard-shell-effects-outside-'));

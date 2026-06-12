@@ -29,9 +29,10 @@ export interface ApprovalPrompt {
 }
 
 export interface ResolveApprovalOptions {
-  prompt?: (prompt: ApprovalPrompt) => Promise<ApprovalChoice> | ApprovalChoice;
+  prompt?: (prompt: ApprovalPrompt) => Promise<ApprovalChoice | undefined> | ApprovalChoice | undefined;
   sessionCache?: SessionApprovalCache;
   projectApproval?: (approval: unknown) => Promise<void> | void;
+  requestPermissionApproval?: (payload: PermissionRequiredPayload) => Promise<ApprovalChoice | undefined> | ApprovalChoice | undefined;
 }
 
 export interface ApprovalResolution {
@@ -173,11 +174,22 @@ export async function resolveApproval(
     return { result: nonInteractiveFallback(config, decision) };
   }
 
-  if (!options.prompt) {
+  const approvalPayload = buildPermissionRequiredPayload(request, decision);
+  const resolveChoice = async (): Promise<ApprovalChoice | undefined> => {
+    if (options.requestPermissionApproval) {
+      const choice = await options.requestPermissionApproval(approvalPayload);
+      if (choice) return choice;
+    }
+
+    if (!options.prompt) return undefined;
+    return options.prompt(approvalPrompt(request, decision));
+  };
+
+  const choice = await resolveChoice();
+  if (!choice) {
     return { result: nonInteractiveFallback(config, decision) };
   }
 
-  const choice = await options.prompt(approvalPrompt(request, decision));
   if (choice === 'Deny') return { result: withApprovalResult(decision, false, 'approval_denied') };
   if (choice === 'Allow once') return { result: withApprovalResult(decision, true, 'approval_allow_once') };
   if (choice === 'Allow for project') {

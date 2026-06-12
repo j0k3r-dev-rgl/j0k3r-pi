@@ -1,5 +1,6 @@
 import { AuthenticatedTelegramCommandInput, CommandResult, PiSessionRef, TelegramCommandInput, WorkspaceRef, AuditEvent, TelegramCommandDeniedResult } from './types.js';
-import type { BindingManager, PiTrustValidator, WorkspaceRegistry } from './types.js';
+import type { BindingManager, PiTrustValidator, TelegramApprovalChoice, WorkspaceRegistry } from './types.js';
+import type { TelegramPermissionApprovalStore } from './permission-approval-store.js';
 
 export interface CommandRouterSessionIndex {
   listWorkspaceSessions(workspaceRoot: string): Promise<PiSessionRef[]>;
@@ -13,6 +14,8 @@ export interface CommandRouterDependencies {
   openSession: (workspace: WorkspaceRef, requestedSession?: PiSessionRef) => Promise<PiSessionRef>;
   createSession: (workspace: WorkspaceRef, sessionName?: string) => Promise<PiSessionRef>;
   closeSession?: (binding: import('./types.js').ActiveBinding) => Promise<void>;
+  permissionStore?: TelegramPermissionApprovalStore;
+  answerPermission?: (binding: import('./types.js').ActiveBinding, requestId: string, choice: TelegramApprovalChoice) => Promise<import('./types.js').PermissionAnswerResult>;
   sendPrompt: (binding: import('./types.js').ActiveBinding, message: string) => Promise<void>;
   sendSteer: (binding: import('./types.js').ActiveBinding, message: string) => Promise<void>;
   sendFollowup: (binding: import('./types.js').ActiveBinding, message: string) => Promise<void>;
@@ -88,6 +91,31 @@ function previewText(value: string, maxChars = 0): string | undefined {
   return `${value.slice(0, Math.max(0, maxChars))}...`;
 }
 
+function approvalChoiceFor(scope?: 'once' | 'session' | 'project' | 'file' | 'folder'): TelegramApprovalChoice {
+  switch (scope) {
+    case 'session':
+      return 'Allow for session';
+    case 'project':
+      return 'Allow for project';
+    case 'file':
+      return 'Allow this file for project';
+    case 'folder':
+      return 'Allow this folder for project';
+    case 'once':
+    default:
+      return 'Allow once';
+  }
+}
+
+function normalizeApprovalScope(value?: string): 'once' | 'session' | 'project' | 'file' | 'folder' | undefined {
+  if (!value) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'once' || normalized === 'session' || normalized === 'project' || normalized === 'file' || normalized === 'folder') {
+    return normalized;
+  }
+  return undefined;
+}
+
 export function parseCommandInput(input: TelegramCommandInput): AuthenticatedTelegramCommandInput {
   if (input.kind === 'text') {
     const text = input.rawText ?? input.text;
@@ -157,6 +185,21 @@ export function parseCommandInput(input: TelegramCommandInput): AuthenticatedTel
           identity: input.identity,
           message: args.join(' '),
         };
+      case 'approve':
+        return {
+          kind: 'approve',
+          identity: input.identity,
+          requestId: args[0] ?? '',
+          scope: normalizeApprovalScope(args[1]),
+        };
+      case 'deny':
+        return {
+          kind: 'deny',
+          identity: input.identity,
+          requestId: args[0] ?? '',
+        };
+      case 'permissions':
+        return { kind: 'permissions', identity: input.identity };
       default:
         return { kind: 'prompt', identity: input.identity, message: trimmed };
     }
@@ -202,6 +245,12 @@ export function parseCommandInput(input: TelegramCommandInput): AuthenticatedTel
       return { kind: 'steer', identity: input.identity, message: args.join(' ') };
     case 'followup':
       return { kind: 'followup', identity: input.identity, message: args.join(' ') };
+    case 'approve':
+      return { kind: 'approve', identity: input.identity, requestId: args[0] ?? '', scope: normalizeApprovalScope(args[1]) };
+    case 'deny':
+      return { kind: 'deny', identity: input.identity, requestId: args[0] ?? '' };
+    case 'permissions':
+      return { kind: 'permissions', identity: input.identity };
     default:
       return {
         kind: 'prompt',
@@ -718,6 +767,109 @@ export class CommandRouter {
           kind: 'ok',
           text: 'Session closed.',
         };
+      }
+
+      case 'permissions': {
+        const binding = this.dependencies.bindings.get(identity.chatId);
+        if (!binding) {
+          return makeDenied('No active binding. Open a workspace first.');
+        }
+        const pending = this.dependencies.permissionStore?.list(identity.chatId, binding) ?? [];
+        if (pending.length === 0) {
+          return { kind: 'ok', text: 'No pending permission requests.' };
+        }
+        const lines = pending.map((request) => `${request.requestId}: ${request.title} — ${request.reasonCode} — expires ${request.expiresAt}`);
+        return { kind: 'ok', text: `Pending permissions:\n${lines.join('\n')}` };
+      }
+
+      case 'approve': {
+        const binding = this.dependencies.bindings.get(identity.chatId);
+        if (!binding) return makeDenied('No active binding. Open a workspace first.');
+        if (!input.requestId) return makeDenied('Usage: /approve <request-id> [once|session|project|file|folder].');
+
+        const pending = this.dependencies.permissionStore?.get(identity.chatId, binding, input.requestId);
+        if (!pending) {
+          await this.recordAudit({
+            event: 'permission_approval',
+            decision: 'deny',
+            reason: 'pending permission request not found',
+            action: 'approve',
+            actor: buildActor(identity),
+            workspace: sanitizeWorkspace(binding.workspace),
+            sessionId: binding.sessionId,
+            sessionFile: binding.sessionFile,
+            command: '/approve',
+            metadata: { requestId: input.requestId },
+          });
+          return { kind: 'error', text: 'No matching pending permission request.' };
+        }
+
+        const choice = approvalChoiceFor(input.scope);
+        if (!pending.choices.includes(choice)) {
+          return { kind: 'error', text: `Approval choice is not available for this request. Available: ${pending.choices.join(', ')}` };
+        }
+        const result = await this.dependencies.answerPermission?.(binding, input.requestId, choice)
+          ?? { ok: false as const, reason: 'unavailable' as const, requestId: input.requestId };
+        if (!result.ok) {
+          return { kind: 'error', text: `Unable to approve permission request (${result.reason}).` };
+        }
+        this.dependencies.permissionStore?.resolve(identity.chatId, binding, input.requestId, 'approved', choice);
+        await this.recordAudit({
+          event: 'permission_approval',
+          decision: 'allow',
+          reason: 'permission approved from telegram',
+          action: 'approve',
+          actor: buildActor(identity),
+          workspace: sanitizeWorkspace(binding.workspace),
+          sessionId: binding.sessionId,
+          sessionFile: binding.sessionFile,
+          command: '/approve',
+          metadata: { requestId: input.requestId, choice },
+        });
+        return { kind: 'ok', text: `Permission ${input.requestId} approved (${choice}).` };
+      }
+
+      case 'deny': {
+        const binding = this.dependencies.bindings.get(identity.chatId);
+        if (!binding) return makeDenied('No active binding. Open a workspace first.');
+        if (!input.requestId) return makeDenied('Usage: /deny <request-id>.');
+
+        const pending = this.dependencies.permissionStore?.get(identity.chatId, binding, input.requestId);
+        if (!pending) {
+          await this.recordAudit({
+            event: 'permission_approval',
+            decision: 'deny',
+            reason: 'pending permission request not found',
+            action: 'deny',
+            actor: buildActor(identity),
+            workspace: sanitizeWorkspace(binding.workspace),
+            sessionId: binding.sessionId,
+            sessionFile: binding.sessionFile,
+            command: '/deny',
+            metadata: { requestId: input.requestId },
+          });
+          return { kind: 'error', text: 'No matching pending permission request.' };
+        }
+
+        const result = await this.dependencies.answerPermission?.(binding, input.requestId, 'Deny')
+          ?? { ok: false as const, reason: 'unavailable' as const, requestId: input.requestId };
+        if (!result.ok) {
+          return { kind: 'error', text: `Unable to deny permission request (${result.reason}).` };
+        }
+        this.dependencies.permissionStore?.resolve(identity.chatId, binding, input.requestId, 'denied', 'Deny');
+        await this.recordAudit({
+          event: 'permission_approval',
+          decision: 'deny',
+          reason: 'permission denied from telegram',
+          action: 'deny',
+          actor: buildActor(identity),
+          workspace: sanitizeWorkspace(binding.workspace),
+          sessionId: binding.sessionId,
+          sessionFile: binding.sessionFile,
+          command: '/deny',
+          metadata: { requestId: input.requestId },
+        });
+        return { kind: 'ok', text: `Permission ${input.requestId} denied.` };
       }
 
       case 'abort': {

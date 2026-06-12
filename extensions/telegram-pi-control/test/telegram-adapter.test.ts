@@ -146,6 +146,40 @@ describe('telegram adapter transport', () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it('registers bot commands with Telegram setMyCommands', async () => {
+    const calls: FetchCall[] = [];
+    const fetcher = vi.fn(async (url: string, options?: { method?: string; body?: string }) => {
+      calls.push({
+        method: options?.method ?? 'GET',
+        endpoint: url,
+        body: options?.body,
+      });
+      return {
+        status: 200,
+        ok: true,
+        headers: { get: () => null },
+        json: async () => ({ ok: true, result: true }),
+      };
+    });
+
+    const adapter = new TelegramLongPollingAdapter({ token: 'test-token', fetcher, pollIntervalMs: 0, maxPolls: 1 });
+
+    await adapter.setMyCommands([
+      { command: 'workspaces', description: 'List workspaces' },
+      { command: 'approve', description: 'Approve permission' },
+    ]);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].endpoint).toContain('/setMyCommands');
+    expect(calls[0].method).toBe('POST');
+    expect(JSON.parse(calls[0].body ?? '{}')).toEqual({
+      commands: [
+        { command: 'workspaces', description: 'List workspaces' },
+        { command: 'approve', description: 'Approve permission' },
+      ],
+    });
+  });
+
   it('throws structured rate-limit errors from polling', async () => {
     const fetcher = vi.fn(async () => ({
       status: 429,

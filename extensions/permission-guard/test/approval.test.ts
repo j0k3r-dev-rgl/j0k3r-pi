@@ -77,6 +77,44 @@ describe('interactive approval and session cache', () => {
     }));
   });
 
+  it('supports main-thread requestPermissionApproval hooks for approval flow', async () => {
+    const cwd = await tempWorkspace('permission-guard-approval-remote-hook-');
+    const config = policy({ workspace: { root: cwd } });
+    const request = await outsideReadRequest(cwd);
+    const decision = askDecision(config, request);
+    const hook = vi.fn(async () => 'Allow for session' as const);
+    const cache = createSessionApprovalCache({ sessionId: 'session-remote' });
+
+    const resolved = await resolveApproval(config, request, decision, {
+      requestPermissionApproval: hook,
+      sessionCache: cache,
+    });
+
+    expect(hook).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'permission_required',
+      requestId: request.id,
+      prompt: expect.objectContaining({
+        choices: ['Allow once', 'Allow for session', 'Allow this file for project', 'Allow this folder for project', 'Deny'],
+      }),
+    }));
+    expect(resolved.result).toMatchObject({ decision: 'allow', finalDecision: 'allow', reasonCode: 'approval_allow_session' });
+    expect(resolved.result.cacheKey).toBeDefined();
+    expect(cache.snapshot().entries).toHaveLength(1);
+  });
+
+  it('falls back to non-interactive policy when requestPermissionApproval hook is missing', async () => {
+    const cwd = await tempWorkspace('permission-guard-approval-remote-missing-');
+    const config = policy({ workspace: { root: cwd }, nonInteractive: { onAsk: 'deny' } });
+    const request = await outsideReadRequest(cwd);
+    const decision = askDecision(config, request);
+
+    const resolved = await resolveApproval(config, request, decision, {
+      sessionCache: createSessionApprovalCache({ sessionId: 'session-missing' }),
+    });
+
+    expect(resolved.result).toMatchObject({ decision: 'deny', finalDecision: 'deny', reasonCode: 'non_interactive_ask_denied' });
+  });
+
   it('allows once without mutating the session cache', async () => {
     const cwd = await tempWorkspace('permission-guard-approval-once-');
     const config = policy({ workspace: { root: cwd } });
