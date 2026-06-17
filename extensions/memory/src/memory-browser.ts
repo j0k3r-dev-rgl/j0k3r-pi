@@ -86,10 +86,10 @@ export function filterBrowserItems<T extends { label: string; description: strin
   });
 }
 
-function loadMemories(db: Db, context: any): BrowserItem[] {
+export function loadMemories(db: Db, context: any): BrowserItem[] {
   const rows = db.prepare(`SELECT id, scope, project_name, kind, title, summary, content, tags, importance, confidence, status, sync_status, created_at, updated_at
     FROM memories
-    WHERE scope IN ('global', 'general') OR (scope='project' AND project_id = ?)
+    WHERE scope='project' AND project_id = ?
     ORDER BY updated_at DESC
     LIMIT 200`).all(context.project_id ?? '__no_project__') as any[];
   return rows.map((m) => ({
@@ -121,7 +121,7 @@ export function loadSessions(db: Db, context: any): BrowserItem[] {
   const rows = db.prepare(`SELECT s.id, s.scope, s.project_name, s.title, s.started_at, s.ended_at, s.summary, s.learned, s.status, s.metadata_json,
       (SELECT COUNT(*) FROM memory_session_prompts p WHERE p.session_id = s.id) AS prompt_count
     FROM memory_sessions s
-    WHERE s.scope IN ('global', 'general') OR (s.scope='project' AND s.project_id = ?)
+    WHERE s.scope='project' AND s.project_id = ?
     ORDER BY s.started_at DESC
     LIMIT 200`).all(context.project_id ?? '__no_project__') as any[];
   const promptsForSession = db.prepare(`SELECT id, role, prompt, prompt_index, created_at
@@ -192,7 +192,7 @@ export function loadPrompts(db: Db, context: any): BrowserItem[] {
       s.scope, s.project_name, s.title AS session_title, s.started_at, s.ended_at, s.metadata_json AS session_metadata_json
     FROM memory_session_prompts p
     JOIN memory_sessions s ON s.id = p.session_id
-    WHERE s.scope IN ('global', 'general') OR (s.scope='project' AND s.project_id = ?)
+    WHERE s.scope='project' AND s.project_id = ?
     ORDER BY p.created_at DESC, p.prompt_index DESC
     LIMIT 200`).all(context.project_id ?? '__no_project__') as any[];
   return rows.map((p) => {

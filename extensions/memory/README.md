@@ -236,7 +236,7 @@ Shutdown behavior:
 
 ## Memory browser
 
-`/memory-browser` opens an interactive browser with nvim-style navigation. It lists memories, sessions, and captured prompts. Session details include the prompts linked to that session for audit/debugging. Subagent sessions/prompts are linked to their parent user session and hidden by default; user session details show linked subagent sessions, and `origin=subagent` or `origin=all` can inspect them directly. It supports filter commands such as:
+`/memory-browser` opens an interactive browser with nvim-style navigation. It lists only the current project's memories, sessions, and captured prompts. Session details include the prompts linked to that session for audit/debugging. Subagent sessions/prompts are linked to their parent user session and hidden by default; user session details show linked subagent sessions, and `origin=subagent` or `origin=all` can inspect them directly within the current project. It supports filter commands such as:
 
 ```txt
 :query=npm kind=command scope=project status=active project=app

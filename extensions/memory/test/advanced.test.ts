@@ -12,7 +12,7 @@ import { consolidateMemories } from '../src/consolidation.js';
 import { buildProjectProfileUpdatePreview, buildSemanticProjectProfilePrompt, shouldConfirmProjectProfileUpdate } from '../src/project-profile.js';
 import { exportMemory, importMemory } from '../src/export-import.js';
 import { searchMemory } from '../src/search.js';
-import { applyBrowserFilterCommand, filterBrowserItems, loadPrompts, loadSessions } from '../src/memory-browser.js';
+import { applyBrowserFilterCommand, filterBrowserItems, loadMemories, loadPrompts, loadSessions } from '../src/memory-browser.js';
 
 let tmp: string;
 beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-memory-advanced-')); });
@@ -523,10 +523,52 @@ describe('semantic profile, consolidation links, and entities', () => {
     expect(filtered.map((i) => i.id)).toEqual(['1']);
   });
 
-  it('loads prompt items for the memory browser scoped to the current project', () => {
+  it('loads memory browser items only for the current project', () => {
+    const d = db(), c = project();
+    addMemory(d, { scope: 'project', kind: 'note', title: 'current project memory', content: 'current project only' }, c);
+    addMemory(d, { scope: 'general', kind: 'note', title: 'general memory', content: 'general should be hidden' }, c);
+    addMemory(d, { scope: 'global', kind: 'note', title: 'global memory', content: 'global should be hidden' }, c);
+
+    const otherDir = path.join(tmp, 'other-memory-project');
+    fs.mkdirSync(path.join(otherDir, '.pi'), { recursive: true });
+    fs.writeFileSync(path.join(otherDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Other Memory App' }));
+    const other = resolveMemoryContext(otherDir, os.homedir(), {});
+    addMemory(d, { scope: 'project', kind: 'note', title: 'other project memory', content: 'other project should be hidden' }, other);
+
+    const memories = loadMemories(d, c);
+    expect(memories.map((item) => item.label)).toEqual(['note · current project memory']);
+    expect(JSON.stringify(memories)).not.toContain('general should be hidden');
+    expect(JSON.stringify(memories)).not.toContain('global should be hidden');
+    expect(JSON.stringify(memories)).not.toContain('other project should be hidden');
+  });
+
+  it('loads session items only for the current project', () => {
+    const d = db(), c = project();
+    const currentSession: any = startMemorySession(d, { title: 'Current Project Session' }, c);
+    startMemorySession(d, { title: 'General Session', scope: 'general' }, c);
+    startMemorySession(d, { title: 'Global Session', scope: 'global' }, c);
+
+    const otherDir = path.join(tmp, 'other-session-project');
+    fs.mkdirSync(path.join(otherDir, '.pi'), { recursive: true });
+    fs.writeFileSync(path.join(otherDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Other Session App' }));
+    const other = resolveMemoryContext(otherDir, os.homedir(), {});
+    startMemorySession(d, { title: 'Other Project Session' }, other);
+
+    const sessions = loadSessions(d, c);
+    expect(sessions.map((item) => item.id)).toEqual([currentSession.id]);
+    expect(JSON.stringify(sessions)).not.toContain('General Session');
+    expect(JSON.stringify(sessions)).not.toContain('Global Session');
+    expect(JSON.stringify(sessions)).not.toContain('Other Project Session');
+  });
+
+  it('loads prompt items for the memory browser scoped only to the current project', () => {
     const d = db(), c = project();
     const currentSession: any = startMemorySession(d, { title: 'Current Prompt Session' }, c);
     addSessionPrompt(d, { session_id: currentSession.id, role: 'user', prompt: 'show browser prompts', prompt_index: 1 }, c);
+    const generalSession: any = startMemorySession(d, { title: 'General Prompt Session', scope: 'general' }, c);
+    addSessionPrompt(d, { session_id: generalSession.id, role: 'user', prompt: 'general prompt should be hidden', prompt_index: 1 }, c);
+    const globalSession: any = startMemorySession(d, { title: 'Global Prompt Session', scope: 'global' }, c);
+    addSessionPrompt(d, { session_id: globalSession.id, role: 'user', prompt: 'global prompt should be hidden', prompt_index: 1 }, c);
 
     const otherDir = path.join(tmp, 'other-project');
     fs.mkdirSync(path.join(otherDir, '.pi'), { recursive: true });
@@ -544,6 +586,8 @@ describe('semantic profile, consolidation links, and entities', () => {
     expect(prompts[0]?.detail).toContain(`session: ${currentSession.id}`);
     expect(prompts[0]?.detail).toContain('role: user');
     expect(prompts[0]?.detail).toContain('show browser prompts');
+    expect(JSON.stringify(prompts)).not.toContain('general prompt should be hidden');
+    expect(JSON.stringify(prompts)).not.toContain('global prompt should be hidden');
     expect(JSON.stringify(prompts)).not.toContain('other project prompt');
   });
 
