@@ -102,6 +102,7 @@ Do not load this skill for:
 - Use SDD subagents as phase executors only; the main agent remains the orchestrator and must load/apply the workflow skills itself before delegation.
 - Strict TDD still applies to implementation work.
 - Prefer `hybrid` artifact storage for named SDD features unless the user requests otherwise.
+- Minimal delegated apply is allowed as an explicit lightweight exception to full SDD when the user approves implementation from an existing tracker/checklist, the work is mechanical and bounded, no new product/design contract is being invented, and the orchestrator provides a complete task packet. It may delegate to `sdd-apply` without creating OpenSpec proposal/spec/design/tasks.
 
 ## Decision Gates
 
@@ -201,6 +202,7 @@ Policy-sensitive paths include `AGENTS.md`; project-local skills/subagents such 
 | Tiny inspection | one obvious file/answer, low risk | Inline read-only | none |
 | Investigation/review/diagnosis | user asks to investigate, compare, inspect code/docs/apis, or understand risk before implementation | Read-only investigation; use `workflow-triage` when routing is unclear; use Discovery only when delegated research adds value | `discovery` only when useful |
 | Small localized code fix | clear behavior, cheap validation | Simple TDD | none by default |
+| Tracker-backed mechanical migration across many files | user-approved tracker/checklist exists; behavior/design already settled; acceptance checks and validation commands are clear; no new API/product decision | Minimal delegated apply | `sdd-apply` may be used with `minimal_apply: true` and a focused task packet |
 | One-extension or one-module change | existing tests, limited architecture risk, no durable artifact value | Simple TDD | none by default |
 | Documentation-only cleanup | no behavior change, no durable spec value, not policy-sensitive | Inline edit with focused validation | none by default |
 | Policy-sensitive agent behavior change | touches agent instructions, skills, subagents, permissions, memory/config, workflow extension behavior, or future agent behavior | Use `workflow-triage` first; inline/docs-only for small clear fixes; discovery only when evidence is missing; formal SDD only when risk or artifact value warrants it | `discovery` only for needed evidence; SDD phase agents only after formal planning is approved |
@@ -210,6 +212,7 @@ Policy-sensitive paths include `AGENTS.md`; project-local skills/subagents such 
 | Multi-file/cross-cutting feature from scratch | unclear requirements, new API/contract, architecture risk, or handoff value | Full SDD feature sequence | planning sequence → approved `sdd-apply` → `sdd-verify` → optional `sdd-archive` |
 | Formal SDD exploration only | mode resolved and user approved named SDD exploration | SDD explore-only | `sdd-explore` |
 | Implement existing SDD tasks | task artifact exists and implementation approved | SDD apply-only | `sdd-apply` |
+| Implement approved tracker slice without full SDD | tracker/checklist and task packet are approved; scope is mechanical and bounded; full SDD artifact value is low | Minimal delegated apply | `sdd-apply` with `minimal_apply: true` |
 | Verify existing implementation | code changes exist or user asks to verify SDD | SDD verify-only | `sdd-verify` |
 | Continue active SDD | active memory/OpenSpec state exists or user says continue | Continue router | inspect state, then next missing phase |
 | Close verified SDD | verification passed and user wants closure | Archive-only | `sdd-archive` |
@@ -326,6 +329,39 @@ Existing PRD rule:
 - If `openspec/changes/<change>/metadata.yaml` exists, it is mandatory context for SDD phases and for `prd-review`; the orchestrator must use it when drafting or revising the PRD.
 - Each phase output should include concise metadata and artifact alignment notes covering relevant requirements, assumptions, gaps, and conflicts.
 - If an SDD artifact conflicts with an approved PRD requirement supplied by the orchestrator, the phase must report `blocked` or flag the conflict clearly instead of silently overriding it.
+
+## Minimal delegated apply
+
+Use this flow for approved, tracker-backed implementation that is too broad for comfortable inline work but too mechanical for full PRD/spec/design/tasks.
+
+Preconditions:
+
+- The user explicitly approved implementation of a named slice or batch.
+- A tracker/checklist exists in the repo or conversation and is cited by path or included in the prompt.
+- Expected behavior is already designed or obvious from existing patterns.
+- The task is a mechanical migration, cleanup, annotation rollout, or repetitive refactor with bounded files/surfaces.
+- Acceptance criteria and validation commands are explicit.
+- No new product behavior, external contract, persistence model, security policy, or architecture decision is being invented.
+
+Task packet required from the orchestrator:
+
+- `minimal_apply: true`.
+- Change/slice name.
+- Tracker/checklist path or embedded checklist.
+- Allowed files/surfaces and forbidden files/surfaces.
+- Exact task slice/range.
+- Acceptance criteria.
+- Strict TDD expectations or reason tests are not needed for docs-only/mechanical edits.
+- Validation commands.
+- Selected skills and applicability notes.
+- Expected return envelope.
+
+Rules:
+
+- Do not create OpenSpec artifacts solely for minimal delegated apply.
+- Use `artifact_store: none` unless the task packet explicitly asks for a lightweight progress file.
+- If the subagent discovers an unresolved design/product/security/API decision, it must stop and return `blocked`.
+- The orchestrator remains responsible for final review, memory checkpoint, and any commit.
 
 ## Default SDD planning sequence
 
@@ -519,10 +555,11 @@ Before launching a subagent, prepare a focused task with:
 - phase name and goal;
 - change slug;
 - artifact store;
+- whether this is formal SDD apply or `minimal_apply: true`;
 - execution mode implications;
 - current known state;
 - required prior artifact paths/summaries;
-- OpenSpec config path and relevant change metadata path/content summary, if present;
+- OpenSpec config path and relevant change metadata path/content summary, if present; for minimal delegated apply, the tracker/checklist path or embedded task packet instead;
 - relevant skills selected via `skill_registry_resolve`, including skill name, `SKILL.md` path, match reasons, and any related skills deliberately loaded or discarded;
 - allowed and forbidden actions;
 - expected return envelope;
@@ -565,6 +602,7 @@ Discovery does not choose the workflow; the orchestrator interprets the evidence
 When this skill affects the answer, return a concise SDD workflow decision or phase report:
 
 - Skill applied: `sdd-workflow`.
+- Flow type: formal SDD, SDD apply-only, verify-only, archive-only, or minimal delegated apply.
 - Change slug and artifact store.
 - Execution mode and approval state.
 - PRD status: absent, present/read, review absent/read, review needed, or blocking conflict.

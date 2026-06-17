@@ -46,6 +46,9 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "use-existing-prd-sdd",
       "prd review",
       "simple tdd",
+      "minimal delegated apply",
+      "delegated batch apply",
+      "tracker-based apply",
       "sdd",
       "openspec",
       "which workflow",
@@ -101,6 +104,7 @@ Do not load this skill for greetings, obvious direct answers, or already-approve
 - Use formal SDD when the change is genuinely cross-cutting, introduces or changes a durable contract/API, has high architecture or policy risk, or needs handoff artifacts.
 - PRDs are optional, not mandatory for every SDD. Prefer a PRD-first route only when the user asks for a PRD or when complex product, UX, integration, OAuth/auth, security, or architecture work genuinely needs requirements definition before proposal/spec/design/tasks. The main orchestrator drafts or revises the PRD directly with the user because it has the full conversation and decision context; do not create or delegate extra PRD draft/analyzer subagents just to transform context. Use `prd-review` only to validate PRD ambiguity, debt, testability, contradictions, missing questions, and readiness before the PRD is approved or waived. Once the PRD is approved or waived, downstream SDD proceeds normally from `metadata.yaml` and SDD artifacts.
 - Use simple TDD for localized non-trivial code changes with clear expected behavior and cheap validation.
+- Use minimal delegated apply for broad but mechanically scoped migrations when a user-approved tracker/checklist exists, behavior/design is already settled, validation is clear, and delegation would reduce orchestration load without requiring a full PRD/spec/design SDD.
 - Use inline/docs-only edits for small explicit wording/config/doc changes with low future-behavior risk, even when the touched files are policy-sensitive, if the user approved the path and no durable artifact value exists.
 - For user-requested commits, follow the Git commit policy and precommit memory checkpoint rules in `AGENTS.md`; triage is not commit permission.
 
@@ -167,6 +171,7 @@ Escalate or load related skills:
    - `inline-readonly` for tiny inspection;
    - `inline-docs-only` for small approved wording/doc/config changes;
    - `simple-tdd` for localized code changes with clear behavior;
+   - `minimal-delegated-apply` for tracker-backed mechanical multi-file migrations with approved scope, clear acceptance checks, and no new design decisions;
    - `discovery` for bounded read-only research when evidence is missing;
    - `prd-first-sdd` for complex work that needs product requirements clarified before formal SDD artifacts; the orchestrator writes/revises the PRD with the user and may use `prd-review` before approving or waiving it;
    - `use-existing-prd-sdd` when `openspec/changes/<change>/prd.md` already exists; the orchestrator decides whether it is approved, needs `prd-review`, or is waived, then downstream SDD proceeds normally from `metadata.yaml` and SDD artifacts;
@@ -188,6 +193,7 @@ When this skill affects the answer, return a concise workflow decision:
 - Whether discovery is needed; if not, explicitly note that current context is sufficient. If yes, provide the exact evidence/research question.
 - Clarifying question or approval needed from the user, if any.
 - Related skills considered or loaded.
+- For `minimal-delegated-apply`, name the approved tracker/task packet, allowed scope, forbidden scope, validation commands, and why full SDD is unnecessary.
 - Validation/memory/commit implications when relevant.
 
 ## References
