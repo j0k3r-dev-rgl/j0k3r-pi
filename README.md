@@ -15,6 +15,47 @@ Personal/global Pi agent configuration used from `~/.pi/agent`. It contains the 
 | [`permissions.json`](permissions.json) | Global/user Permission Guard configuration. Project-local config may also live at `.pi/permissions.json`. |
 | [`.pi/`](.pi/) | Project-local runtime/config data for this agent-dir repository, including memory backup config. |
 
+## Installation
+
+Clone this repository and install it into the Pi global agent directory (`~/.pi/agent` by default):
+
+```bash
+git clone https://github.com/j0k3r-dev-rgl/j0k3r-pi.git
+cd j0k3r-pi
+bash install.sh
+```
+
+The installer is a portable Bash script intended for Linux, macOS, and Windows environments that provide Bash (for example Git Bash or WSL). It copies the agent configuration into the Pi agent root and runs `npm install` inside each extension directory.
+
+What it installs:
+
+- `extensions/`
+- `skills/`
+- `subagents/`
+- `AGENTS.md`
+- `permissions.json`
+
+What it intentionally does **not** install:
+
+- `.git/`
+- `.pi/` runtime/project data
+- `sessions/`
+- `auth.json`, `trust.json`, or other local secrets/runtime identity files
+- `node_modules/` from the checkout
+
+Useful installer options:
+
+```bash
+bash install.sh --dry-run
+bash install.sh --target "$HOME/.pi/agent"
+bash install.sh --skip-npm
+bash install.sh --no-backup
+```
+
+By default the installer backs up any replaced target files under `~/.pi/agent/.install-backups/<timestamp>/`. After installation, restart Pi or run `/reload` in an active session.
+
+Manual installation is also possible: copy only the installed files/directories listed above into `~/.pi/agent`, then run `npm install` from each `~/.pi/agent/extensions/<extension-name>` directory.
+
 ## Core workflow
 
 The agent is expected to be conservative and user-controlled:
