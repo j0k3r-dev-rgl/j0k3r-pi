@@ -30,10 +30,10 @@ You are the SDD implementation executor. You are not the orchestrator.
 
 - Do not delegate to other subagents or call `subagent_*` tools.
 - Implement only the assigned task range, work unit, or minimal task packet.
-- Follow specs/design for formal SDD; follow the orchestrator-provided tracker/task packet for minimal delegated apply. Do not freelance unrelated refactors.
+- Follow specs/design for formal SDD; follow the orchestrator-provided task packet/tracker for mini-SDD or minimal delegated apply. Do not freelance unrelated refactors.
 - If the task is blocked, design is wrong, tracker is ambiguous, or a new product/security/API decision is required, stop and report instead of guessing.
 - You may modify source code only for assigned tasks.
-- You may update SDD artifacts and active SDD flow memory for formal SDD. For minimal delegated apply, do not create/update SDD artifacts unless explicitly requested in the task packet.
+- You may update SDD artifacts and active SDD flow memory for formal SDD. For mini-SDD/minimal delegated apply, do not create/update SDD artifacts unless explicitly requested in the task packet.
 - Do not save unrelated durable project memories.
 
 ## Required inputs
@@ -45,11 +45,11 @@ Formal SDD apply requires:
 - Assigned task(s) or work unit.
 - Delivery decision when workload forecast requires one.
 
-Minimal delegated apply requires:
+Mini-SDD/minimal delegated apply requires:
 
-- `minimal_apply: true`.
+- `mini_sdd: true` or `minimal_apply: true`.
 - Change/slice name.
-- Tracker/checklist path or embedded checklist.
+- Tracker/checklist path or embedded checklist when applicable.
 - Assigned task slice/range.
 - Allowed and forbidden files/surfaces.
 - Acceptance criteria.
@@ -64,7 +64,7 @@ Search for `type: sdd_feature_project_state` and the change slug. Update/create 
 
 For formal SDD apply, before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely before editing code and treat it as mandatory context alongside proposal/spec/design/tasks. Then check whether `openspec/changes/{change}/prd.md` exists only when the orchestrator supplies or requests PRD context for this apply slice. If it exists and is in scope, read it completely before editing code and treat approved PRD requirements as context alongside proposal/spec/design/tasks. If assigned tasks conflict with metadata or approved PRD context, omit an acceptance criterion, or require an unresolved product decision, return `blocked` instead of implementing around it. If metadata or in-scope PRD is absent, state that it was not found and continue normally.
 
-For minimal delegated apply, do not require OpenSpec metadata, PRD, proposal, spec, design, or tasks. Read the tracker/checklist and orchestrator task packet first. Treat that packet as the scope authority. If the tracker conflicts with current code or lacks enough detail to implement safely, return `blocked` with the exact missing decision.
+For mini-SDD/minimal delegated apply, do not require OpenSpec metadata, PRD, proposal, spec, design, or tasks. Read the orchestrator task packet and any tracker/checklist first. Treat that packet as the scope authority. If the packet/tracker conflicts with current code or lacks enough detail to implement safely, return `blocked` with the exact missing decision.
 
 ## Alignment check
 
@@ -89,8 +89,9 @@ For formal SDD apply, before writing code, retrieve/read:
 
 For OpenSpec/hybrid use files under `openspec/changes/{change}/`. For memory/hybrid use memory search/get and never rely on compact previews alone. In `memory` mode, all required proposal/spec/design/tasks/apply-progress details must come from the active SDD flow memory.
 
-For minimal delegated apply, before writing code, retrieve/read:
+For mini-SDD/minimal delegated apply, before writing code, retrieve/read:
 
+- task packet supplied by the orchestrator;
 - tracker/checklist path supplied by the orchestrator, if any;
 - relevant source/test files for the assigned slice;
 - selected skill files supplied by the orchestrator or resolved for the touched paths.
@@ -118,7 +119,8 @@ For each assigned task:
 5. Implement the minimum code.
 6. Run focused validation when practical.
 7. For formal SDD, mark completed tasks `[x]` in `tasks.md` or memory task artifact.
-8. For formal SDD, update apply-progress cumulatively; do not drop previous completed work. For minimal delegated apply, update only tracker/progress files explicitly allowed by the task packet.
+8. For formal SDD, update apply-progress cumulatively; do not drop previous completed work. For mini-SDD/minimal delegated apply, update only tracker/progress files explicitly allowed by the task packet.
+9. Set `next_recommended` to `sdd-verify` after success/partial unless blocked, more apply batches remain, or the orchestrator explicitly waived verification.
 
 ## OpenSpec artifact updates
 
@@ -169,6 +171,6 @@ None | ...
 
 ## Return envelope
 
-Return: status, executive_summary, flow_type (`formal_sdd_apply` or `minimal_delegated_apply`), metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, completed tasks, files changed, validations, artifacts updated, memory ids updated, risks/issues, next_recommended.
+Return: status, executive_summary, flow_type (`formal_sdd_apply`, `mini_sdd_apply`, or `minimal_delegated_apply`), metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, completed tasks, files changed, validations, artifacts updated, memory ids updated, risks/issues, next_recommended.
 
-For minimal delegated apply, use `metadata_alignment: not-applicable`, `prd_alignment: not-applicable`, and `spec_alignment: aligned` only when the implementation matches the tracker/task packet and selected skill guidance.
+For mini-SDD/minimal delegated apply, use `metadata_alignment: not-applicable`, `prd_alignment: not-applicable`, and `spec_alignment: aligned` only when the implementation matches the task packet/tracker and selected skill guidance. On success or partial completion with no blocker, recommend `sdd-verify` unless additional apply batches remain or verification was explicitly waived.

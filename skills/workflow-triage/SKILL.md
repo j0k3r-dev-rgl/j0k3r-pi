@@ -47,6 +47,8 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "prd review",
       "simple tdd",
       "minimal delegated apply",
+      "mini-sdd",
+      "mini sdd",
       "delegated batch apply",
       "tracker-based apply",
       "sdd",
@@ -104,8 +106,10 @@ Do not load this skill for greetings, obvious direct answers, or already-approve
 - Use formal SDD when the change is genuinely cross-cutting, introduces or changes a durable contract/API, has high architecture or policy risk, or needs handoff artifacts.
 - PRDs are optional, not mandatory for every SDD. Prefer a PRD-first route only when the user asks for a PRD or when complex product, UX, integration, OAuth/auth, security, or architecture work genuinely needs requirements definition before proposal/spec/design/tasks. The main orchestrator drafts or revises the PRD directly with the user because it has the full conversation and decision context; do not create or delegate extra PRD draft/analyzer subagents just to transform context. Use `prd-review` only to validate PRD ambiguity, debt, testability, contradictions, missing questions, and readiness before the PRD is approved or waived. Once the PRD is approved or waived, downstream SDD proceeds normally from `metadata.yaml` and SDD artifacts.
 - Use simple TDD for localized non-trivial code changes with clear expected behavior and cheap validation.
-- Use minimal delegated apply for broad but mechanically scoped migrations when a user-approved tracker/checklist exists, behavior/design is already settled, validation is clear, and delegation would reduce orchestration load without requiring a full PRD/spec/design SDD.
-- Use inline/docs-only edits for small explicit wording/config/doc changes with low future-behavior risk, even when the touched files are policy-sensitive, if the user approved the path and no durable artifact value exists.
+- Use simple TDD with an explicit review gate when the main agent can implement safely but the change is policy-sensitive, multi-file, or risk-bearing enough that a final diff/tests/risk review is required.
+- Use mini-SDD for medium-sized, taskable, multi-file work when behavior is clear enough to write a compact task packet, full PRD/spec/design would add little value, and independent apply/verify execution would reduce mistakes. Mini-SDD means the orchestrator writes the task packet, `sdd-apply` implements, and `sdd-verify` validates by default.
+- Use minimal delegated apply for broad but mechanically scoped migrations when a user-approved tracker/checklist exists, behavior/design is already settled, validation is clear, and delegation would reduce orchestration load without requiring a full PRD/spec/design SDD. Minimal delegated apply is a specialized mini-SDD shape.
+- Use inline/docs-only edits only for small explicit wording/config/doc changes with low future-behavior risk, even when the touched files are policy-sensitive, if the user approved the path and no durable artifact value exists.
 - For user-requested commits, follow the Git commit policy and precommit memory checkpoint rules in `AGENTS.md`; triage is not commit permission.
 
 ## Intake Model
@@ -118,7 +122,9 @@ When the user proposes a change or feature, the orchestrator should use this seq
 4. If PRD-level requirements are needed, keep PRD drafting with the main orchestrator and the user; use `prd-review` only as a validation gate before PRD approval/waiver.
 5. If the missing information is factual and can be researched read-only, delegate a focused `discovery` task.
 6. Once enough information is available, choose the lightest safe workflow.
-6. State the selected workflow and why before editing policy-sensitive files or starting implementation.
+7. Decide explicitly who should implement: main agent for inline/simple TDD, or `sdd-apply` for mini-SDD/minimal delegated apply/formal SDD apply.
+8. Decide explicitly whether post-change validation is orchestrator review only, `sdd-verify`, or formal archive/closure.
+9. State the selected workflow and why before editing policy-sensitive files or starting implementation.
 
 Do not pick SDD, simple TDD, or inline implementation before the decision-critical questions are answered.
 
@@ -137,7 +143,7 @@ Ask one concise question when any of these are missing and materially affect the
 
 Escalate or load related skills:
 
-- Load `sdd-workflow` only when formal SDD/OpenSpec work is likely or requested, or when continuing/applying/verifying/archive SDD state.
+- Load `sdd-workflow` when formal SDD/OpenSpec work is likely or requested, when mini-SDD/minimal delegated apply will use `sdd-apply`/`sdd-verify`, or when continuing/applying/verifying/archive SDD state.
 - Use `discovery` when evidence is missing and the research is bounded/read-only.
 - Consider `skill-authoring` when creating or changing skills.
 - Consider `subagents-configuration` when changing subagent definitions/config.
@@ -171,6 +177,8 @@ Escalate or load related skills:
    - `inline-readonly` for tiny inspection;
    - `inline-docs-only` for small approved wording/doc/config changes;
    - `simple-tdd` for localized code changes with clear behavior;
+   - `simple-tdd-with-review` for localized but risk-bearing or policy-sensitive changes implemented by the main agent with a mandatory post-change review gate;
+   - `mini-sdd` for medium taskable multi-file work where the orchestrator creates a compact task packet, `sdd-apply` implements, and `sdd-verify` validates;
    - `minimal-delegated-apply` for tracker-backed mechanical multi-file migrations with approved scope, clear acceptance checks, and no new design decisions;
    - `discovery` for bounded read-only research when evidence is missing;
    - `prd-first-sdd` for complex work that needs product requirements clarified before formal SDD artifacts; the orchestrator writes/revises the PRD with the user and may use `prd-review` before approving or waiving it;
@@ -193,7 +201,8 @@ When this skill affects the answer, return a concise workflow decision:
 - Whether discovery is needed; if not, explicitly note that current context is sufficient. If yes, provide the exact evidence/research question.
 - Clarifying question or approval needed from the user, if any.
 - Related skills considered or loaded.
-- For `minimal-delegated-apply`, name the approved tracker/task packet, allowed scope, forbidden scope, validation commands, and why full SDD is unnecessary.
+- For `simple-tdd-with-review`, name the review checklist and validation commands.
+- For `mini-sdd` or `minimal-delegated-apply`, name the approved task packet/tracker, allowed scope, forbidden scope, validation commands, why full SDD is unnecessary, and whether `sdd-verify` is required or explicitly waived.
 - Validation/memory/commit implications when relevant.
 
 ## References

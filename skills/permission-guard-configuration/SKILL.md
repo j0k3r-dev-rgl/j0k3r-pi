@@ -20,6 +20,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
   "triggers": {
     "paths": [
       ".pi/permissions.json",
+      "permissions.json",
       "extensions/permission-guard/**",
       ".pi/subagents-debug.log"
     ],

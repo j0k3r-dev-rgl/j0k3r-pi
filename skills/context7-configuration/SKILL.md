@@ -20,7 +20,9 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
   "triggers": {
     "paths": [
       ".pi/context7.json",
-      "extensions/context7/**"
+      "context7.json",
+      "extensions/context7/**",
+      "skills/context7-configuration/SKILL.md"
     ],
     "keywords": [
       "context7",

@@ -21,6 +21,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
     "paths": [
       ".pi/skills/**/SKILL.md",
       ".agents/skills/**/SKILL.md",
+      "skills/**/SKILL.md",
       "~/.pi/agent/skills/**/SKILL.md",
       "~/.agents/skills/**/SKILL.md",
       "extensions/skill-registry/templates/skill-template.md"

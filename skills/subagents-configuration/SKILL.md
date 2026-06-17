@@ -21,6 +21,8 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
     "paths": [
       ".pi/subagents/**/*.md",
       ".pi/subagents.json",
+      "subagents/**/*.md",
+      "subagents.json",
       "~/.pi/agent/subagents/**/*.md",
       "~/.pi/agent/subagents.json",
       "extensions/subagents/**"

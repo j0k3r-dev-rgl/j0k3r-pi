@@ -19,7 +19,9 @@ metadata:
     "paths": [
       ".pi/memory.json",
       ".pi/extensions/memory/**",
-      ".pi/skills/persistent-memory/SKILL.md"
+      "extensions/memory/**",
+      ".pi/skills/persistent-memory/SKILL.md",
+      "skills/persistent-memory/SKILL.md"
     ],
     "keywords": [
       "memory",

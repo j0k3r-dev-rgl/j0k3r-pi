@@ -46,6 +46,8 @@ metadata:
       "tasks",
       "sdd apply",
       "sdd verify",
+      "mini-sdd",
+      "mini sdd",
       "sdd archive",
       "apply",
       "verify",
@@ -102,7 +104,8 @@ Do not load this skill for:
 - Use SDD subagents as phase executors only; the main agent remains the orchestrator and must load/apply the workflow skills itself before delegation.
 - Strict TDD still applies to implementation work.
 - Prefer `hybrid` artifact storage for named SDD features unless the user requests otherwise.
-- Minimal delegated apply is allowed as an explicit lightweight exception to full SDD when the user approves implementation from an existing tracker/checklist, the work is mechanical and bounded, no new product/design contract is being invented, and the orchestrator provides a complete task packet. It may delegate to `sdd-apply` without creating OpenSpec proposal/spec/design/tasks.
+- Mini-SDD is the default lightweight delegated workflow for medium, taskable changes that are too large/risky for comfortable main-agent simple TDD but do not need full PRD/proposal/spec/design/tasks. The orchestrator creates a compact task packet, delegates implementation to `sdd-apply`, and runs `sdd-verify` by default.
+- Minimal delegated apply is a specialized mini-SDD exception to full SDD when the user approves implementation from an existing tracker/checklist, the work is mechanical and bounded, no new product/design contract is being invented, and the orchestrator provides a complete task packet. It may delegate to `sdd-apply` without creating OpenSpec proposal/spec/design/tasks.
 
 ## Decision Gates
 
@@ -202,7 +205,8 @@ Policy-sensitive paths include `AGENTS.md`; project-local skills/subagents such 
 | Tiny inspection | one obvious file/answer, low risk | Inline read-only | none |
 | Investigation/review/diagnosis | user asks to investigate, compare, inspect code/docs/apis, or understand risk before implementation | Read-only investigation; use `workflow-triage` when routing is unclear; use Discovery only when delegated research adds value | `discovery` only when useful |
 | Small localized code fix | clear behavior, cheap validation | Simple TDD | none by default |
-| Tracker-backed mechanical migration across many files | user-approved tracker/checklist exists; behavior/design already settled; acceptance checks and validation commands are clear; no new API/product decision | Minimal delegated apply | `sdd-apply` may be used with `minimal_apply: true` and a focused task packet |
+| Medium taskable multi-file change | behavior is clear; no PRD/full SDD artifact value; independent implementation/verification would reduce mistakes | Mini-SDD | orchestrator task packet → `sdd-apply` → `sdd-verify` by default |
+| Tracker-backed mechanical migration across many files | user-approved tracker/checklist exists; behavior/design already settled; acceptance checks and validation commands are clear; no new API/product decision | Minimal delegated apply | `sdd-apply` may be used with `minimal_apply: true` and a focused task packet, then `sdd-verify` by default |
 | One-extension or one-module change | existing tests, limited architecture risk, no durable artifact value | Simple TDD | none by default |
 | Documentation-only cleanup | no behavior change, no durable spec value, not policy-sensitive | Inline edit with focused validation | none by default |
 | Policy-sensitive agent behavior change | touches agent instructions, skills, subagents, permissions, memory/config, workflow extension behavior, or future agent behavior | Use `workflow-triage` first; inline/docs-only for small clear fixes; discovery only when evidence is missing; formal SDD only when risk or artifact value warrants it | `discovery` only for needed evidence; SDD phase agents only after formal planning is approved |
@@ -330,24 +334,23 @@ Existing PRD rule:
 - Each phase output should include concise metadata and artifact alignment notes covering relevant requirements, assumptions, gaps, and conflicts.
 - If an SDD artifact conflicts with an approved PRD requirement supplied by the orchestrator, the phase must report `blocked` or flag the conflict clearly instead of silently overriding it.
 
-## Minimal delegated apply
+## Mini-SDD and minimal delegated apply
 
-Use this flow for approved, tracker-backed implementation that is too broad for comfortable inline work but too mechanical for full PRD/spec/design/tasks.
+Use mini-SDD for approved, taskable implementation that is too broad or risk-bearing for comfortable inline/simple TDD but too clear and bounded for full PRD/proposal/spec/design/tasks. Minimal delegated apply is the tracker-backed/mechanical variant of mini-SDD.
 
 Preconditions:
 
 - The user explicitly approved implementation of a named slice or batch.
-- A tracker/checklist exists in the repo or conversation and is cited by path or included in the prompt.
-- Expected behavior is already designed or obvious from existing patterns.
-- The task is a mechanical migration, cleanup, annotation rollout, or repetitive refactor with bounded files/surfaces.
+- Expected behavior is already designed, obvious from existing patterns, or captured in the task packet.
 - Acceptance criteria and validation commands are explicit.
 - No new product behavior, external contract, persistence model, security policy, or architecture decision is being invented.
+- For minimal delegated apply specifically, a tracker/checklist exists in the repo or conversation and is cited by path or included in the prompt; the task is a mechanical migration, cleanup, annotation rollout, or repetitive refactor with bounded files/surfaces.
 
 Task packet required from the orchestrator:
 
-- `minimal_apply: true`.
+- `mini_sdd: true` or `minimal_apply: true`.
 - Change/slice name.
-- Tracker/checklist path or embedded checklist.
+- Tracker/checklist path or embedded checklist when applicable.
 - Allowed files/surfaces and forbidden files/surfaces.
 - Exact task slice/range.
 - Acceptance criteria.
@@ -358,9 +361,10 @@ Task packet required from the orchestrator:
 
 Rules:
 
-- Do not create OpenSpec artifacts solely for minimal delegated apply.
+- Do not create OpenSpec artifacts solely for mini-SDD/minimal delegated apply.
 - Use `artifact_store: none` unless the task packet explicitly asks for a lightweight progress file.
 - If the subagent discovers an unresolved design/product/security/API decision, it must stop and return `blocked`.
+- After `sdd-apply` returns success/partial for mini-SDD or minimal delegated apply, the default next phase is `sdd-verify`; the orchestrator may skip it only when the user explicitly waives verification or the task packet is docs-only and the orchestrator performs an explicit review checklist.
 - The orchestrator remains responsible for final review, memory checkpoint, and any commit.
 
 ## Default SDD planning sequence
@@ -493,25 +497,27 @@ Rules:
 
 ### sdd-verify
 
-Purpose: verify implementation against artifacts.
+Purpose: verify implementation against formal SDD artifacts or, for mini-SDD/minimal delegated apply, against the orchestrator task packet, acceptance criteria, apply output, changed files, and validation evidence.
 
 Rules:
 
 - report issues; do not fix unless orchestrator starts a new apply task;
 - run relevant tests/validation;
-- compare implementation to metadata, approved PRD context when supplied, spec, design, and tasks;
+- for formal SDD, compare implementation to metadata, approved PRD context when supplied, spec, design, and tasks;
+- for mini-SDD/minimal delegated apply, compare implementation to the task packet, allowed/forbidden scope, acceptance criteria, selected skill guidance, and `sdd-apply` return envelope;
 - identify residual risks.
 
 ### sdd-archive
 
-Purpose: close verified SDD work.
+Purpose: close verified formal SDD work.
 
 Rules:
 
 - only after verification passes and user wants closure;
 - sync source-of-truth artifacts;
 - update compact memory/project state if appropriate;
-- summarize decisions, validations, and remaining follow-ups.
+- summarize decisions, validations, and remaining follow-ups;
+- mini-SDD/minimal delegated apply normally ends after `sdd-verify`; archive is optional and only needed when artifacts/progress were persisted or the user requests formal closure.
 
 ## Continue router
 
@@ -529,8 +535,8 @@ Then choose next missing phase:
 - no design → `sdd-design`;
 - no tasks → `sdd-task`;
 - tasks incomplete and implementation approved → `sdd-apply`;
-- implementation complete but not verified → `sdd-verify`;
-- verification passed and closure requested → `sdd-archive`.
+- implementation complete but not verified → `sdd-verify` (mandatory by default for formal SDD, mini-SDD, and minimal delegated apply);
+- verification passed and closure requested for formal SDD, or optional closure requested for persisted mini-SDD artifacts → `sdd-archive`.
 
 ## Approval checkpoints
 
@@ -555,7 +561,7 @@ Before launching a subagent, prepare a focused task with:
 - phase name and goal;
 - change slug;
 - artifact store;
-- whether this is formal SDD apply or `minimal_apply: true`;
+- whether this is formal SDD apply, `mini_sdd: true`, or `minimal_apply: true`;
 - execution mode implications;
 - current known state;
 - required prior artifact paths/summaries;
@@ -602,7 +608,7 @@ Discovery does not choose the workflow; the orchestrator interprets the evidence
 When this skill affects the answer, return a concise SDD workflow decision or phase report:
 
 - Skill applied: `sdd-workflow`.
-- Flow type: formal SDD, SDD apply-only, verify-only, archive-only, or minimal delegated apply.
+- Flow type: formal SDD, PRD-first, mini-SDD, SDD apply-only, verify-only, archive-only, or minimal delegated apply.
 - Change slug and artifact store.
 - Execution mode and approval state.
 - PRD status: absent, present/read, review absent/read, review needed, or blocking conflict.
