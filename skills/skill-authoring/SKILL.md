@@ -70,9 +70,23 @@ Use this skill when the user asks to create, modify, review, standardize, or doc
 - Always include an `Activation Contract` section with human-readable launchers: concrete user intents, touched surfaces, risks, and cases where the skill should not load.
 - Keep `description` trigger-focused: mention the surfaces, actions, or risks that should activate the skill.
 - Keep `triggers.paths`, `triggers.keywords`, `domains`, and `related_skills` concrete and useful for routing.
+- Trigger paths must cover the real surfaces agents edit: project-local paths, global/user paths, and repo-relative paths when the active workspace is the global agent directory (for example `skills/**/SKILL.md` under `~/.pi/agent`).
+- Trigger keywords should include canonical English terms plus common aliases users actually use when they ask for the skill, without adding broad words that steal unrelated routing.
 - Do not put secrets, credentials, private keys, or user-private data in skills.
 - Do not invent durable project rules. If a rule is uncertain, put it under `Decision Gates` or ask the user.
 - Use English for reusable skill content even when conversing with the user in another language.
+
+## Launcher Quality Checklist
+
+Before considering a skill update complete, check the launchers:
+
+- Path-only routing: representative touched paths should resolve to the intended skill even with a weak intent such as `edit file`.
+- Intent-only routing: representative user phrases should resolve to the intended skill even when no path is supplied.
+- Weak-intent + path routing: vague requests plus target paths should still route correctly.
+- Scope coverage: include project-local paths (`.pi/...`, `.agents/...`), global/user paths (`~/.pi/agent/...`, `~/.agents/...`), and repo-relative paths (`skills/...`, `subagents/...`, root config files) when applicable to the current workspace.
+- Specificity: avoid overly broad path globs or keywords that make the skill outrank more specific skills for unrelated work.
+- Priority: choose a priority that lets domain-specific skills outrank generic helpers, while workflow/router skills can still win when routing is the task.
+- Related skills: include only skills that a future agent should realistically consider one hop away.
 
 ## Decision Gates
 
@@ -98,7 +112,11 @@ Use this skill when the user asks to create, modify, review, standardize, or doc
    - `References`.
 5. Validate that the registry contract JSON parses mentally or with a lightweight command when appropriate.
 6. Regenerate the skill registry after creating or updating any `SKILL.md` when generated artifacts should reflect the change immediately.
-7. Use `skill_registry_resolve` as the primary confirmation/routing helper for the current session: query by intent, touched `SKILL.md` path, and SDD phase when relevant, then confirm the updated skill appears with expected paths, keywords, priority, related skills, and read-before-acting guidance. Read `.pi/skill-registry.json` directly only for debugging or when resolver/generator tools are unavailable.
+7. Run at least 2-3 representative `skill_registry_resolve` checks for changed launchers:
+   - one path-only or weak-intent + path query;
+   - one intent-only query;
+   - one realistic mixed intent + path query for the most important surface.
+8. Confirm the updated skill appears with expected paths, keywords, priority, related skills, and read-before-acting guidance. Read `.pi/skill-registry.json` directly only for debugging or when resolver/generator tools are unavailable.
 
 ## Output Contract
 
@@ -109,7 +127,7 @@ Return:
 - Scope chosen: global agent skill or project-local skill.
 - Template sections included.
 - Related skills considered or explicitly discarded.
-- Validation executed, or the concrete reason it was not run.
+- Validation executed, including registry JSON parse, registry generation, and representative `skill_registry_resolve` checks, or the concrete reason any were not run.
 - Any open decisions about scope, routing, or registry regeneration.
 
 ## References
