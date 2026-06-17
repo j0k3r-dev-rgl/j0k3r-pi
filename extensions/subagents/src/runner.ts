@@ -407,7 +407,8 @@ const SUBAGENT_SESSION_REGISTRY_KEY = Symbol.for('pi.permissionGuard.subagentSes
 
 type SubagentPermissionSessionMetadata = {
   origin: 'subagent';
-  requester: { subagentName: string; description?: string };
+  requester: { subagentName: string; description?: string; taskId?: string };
+  parent?: { piSessionId?: string };
 };
 
 function subagentPermissionRegistry(): Map<string, SubagentPermissionSessionMetadata> {
@@ -419,14 +420,15 @@ function subagentPermissionRegistry(): Map<string, SubagentPermissionSessionMeta
   return registry;
 }
 
-function registerPermissionSubagentSession(session: any, definition: SubagentDefinition): () => void {
+function registerPermissionSubagentSession(session: any, definition: SubagentDefinition, taskId?: string, parentPiSessionId?: string): () => void {
   const sessionId = session?.sessionManager?.getSessionId?.() ?? session?.sessionId;
   if (typeof sessionId !== 'string' || sessionId.length === 0) return () => undefined;
   const registry = subagentPermissionRegistry();
   const previous = registry.get(sessionId);
   registry.set(sessionId, {
     origin: 'subagent',
-    requester: { subagentName: definition.name, description: definition.description },
+    requester: { subagentName: definition.name, description: definition.description, taskId },
+    parent: parentPiSessionId ? { piSessionId: parentPiSessionId } : undefined,
   });
   return () => {
     if (previous) registry.set(sessionId, previous);
@@ -647,7 +649,7 @@ function selectedModel(input: { ctx: any; definition: SubagentDefinition; profil
   return resolved;
 }
 
-export const sdkSubagentRunner: SubagentRunner = async ({ definition, task, context, cwd, ctx, config, signal, effectiveProfile, onActivity }) => {
+export const sdkSubagentRunner: SubagentRunner = async ({ definition, task, taskId, parentPiSessionId, context, cwd, ctx, config, signal, effectiveProfile, onActivity }) => {
   const profile = effectiveProfile ?? resolveEffectiveSubagentProfile({ agentName: definition.name, definition, config, ctx });
   const preferred = selectedModel({ ctx, definition, profile });
   const current = ctx?.model;
@@ -659,7 +661,7 @@ export const sdkSubagentRunner: SubagentRunner = async ({ definition, task, cont
   async function attempt(model: any) {
     onActivity?.({ message: `starting ${definition.name} with model ${modelLabel(model) ?? 'unknown'}${effort ? ` effort ${effort}` : ''}`, prompt, effort });
     const { session } = await createSession(model, cwd, tools, effort, config, ctx);
-    const unregisterPermissionSession = registerPermissionSubagentSession(session, definition);
+    const unregisterPermissionSession = registerPermissionSubagentSession(session, definition, taskId, parentPiSessionId ?? ctx?.sessionManager?.getSessionId?.());
     try {
       const { result, usage, thread_snapshot, permission_request } = await promptWithInactivity(session, prompt, config.stall_timeout_ms, signal, onActivity, context, cwd);
       return { result, usage, thread_snapshot, permission_request };

@@ -28,6 +28,10 @@ metadata:
       "project profile",
       "project_profile",
       "session summary",
+      "memory session",
+      "memory session finish",
+      "closed session",
+      "session reopen",
       "memory checkpoint",
       "persistent context",
       "durable decision"
@@ -65,6 +69,7 @@ Use this skill to operate the Pi Memory Extension deliberately: recall context w
 - Archive or supersede obsolete memory; do not delete normal memories.
 - Current user instruction beats active memory. If the user contradicts memory, follow the user and ask whether to update, archive, or supersede the old memory.
 - Durable memories should be written in lowercase english; audited prompts may stay in their original language.
+- Treat closed memory sessions as immutable until lifecycle reopen: do not assume `memory_add`, prompt capture, recall, or ordinary memory tooling reopens a completed session. A completed memory session should capture new prompts only after Pi emits `session_start`/resume and the Memory Extension reuses the same Pi session identity.
 
 Good activation triggers:
 
@@ -241,6 +246,17 @@ Use migration when project memories may be split across aliases from folder, git
 3. Apply only if canonical identity is correct: `/memory-migrate-project --apply`.
 
 Use the same dry-run-first rule for imports with possible conflicts: inspect the dry-run/conflict report before merge/apply.
+
+## Memory session lifecycle policy
+
+Memory sessions may be active or completed. A completed session is intentionally closed:
+
+- Do not store additional prompts into a completed session.
+- Do not reopen a completed session just because `memory_add`, `memory_recall`, or another memory tool is used.
+- Reopening is a lifecycle action: the Memory Extension reopens a completed session only when Pi emits `session_start`/resume and the same Pi session identity is reused.
+- When a completed session is reopened, preserve the previous summary/learned fields until the next finish. Agents may read the previous summary and combine it with new activity before the session is finished again.
+- `memory_session_finish` may be run again for the same session and should be understood as rewriting the latest closing summary/learned state, not appending a second independent close record.
+- If a prompt or memory operation appears to target a closed session before lifecycle reopen, do not force it into that session; let lifecycle reopen happen first or start a new explicit session if the user asks.
 
 ## Session-end policy
 

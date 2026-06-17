@@ -372,6 +372,8 @@ export class SubagentManager {
           const runnerPromise = this.runner({
             definition,
             task: taskText,
+            taskId: id,
+            parentPiSessionId: session_id,
             context,
             cwd,
             ctx,

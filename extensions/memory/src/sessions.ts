@@ -21,10 +21,21 @@ export function startMemorySession(db: Db, input: { title?: string; scope?: Memo
   return db.prepare('SELECT * FROM memory_sessions WHERE id=?').get(id);
 }
 
+export function reopenMemorySessionIfClosed(db: Db, sessionId: string | undefined, context: ResolvedContext): boolean {
+  if (!sessionId) return false;
+  const session = db.prepare('SELECT id, status, ended_at, scope FROM memory_sessions WHERE id=?').get(sessionId) as any;
+  if (!session) return false;
+  if (session.status === 'active' && session.ended_at == null) return false;
+  const sync = session.scope === 'project' && context.config?.cloud.enabled ? 'pending' : 'local';
+  db.prepare("UPDATE memory_sessions SET ended_at=NULL, status='active', sync_status=? WHERE id=?").run(sync, sessionId);
+  return true;
+}
+
 export function addSessionPrompt(db: Db, input: { session_id: string; role: string; prompt: string; prompt_index: number; metadata_json?: Record<string, unknown> }, context: ResolvedContext) {
   assertSafeText(input.prompt);
   const session = db.prepare('SELECT * FROM memory_sessions WHERE id=?').get(input.session_id) as any;
   if (!session) throw new Error(`Session not found: ${input.session_id}`);
+  if (session.status !== 'active' || session.ended_at != null) throw new Error(`Session is closed: ${input.session_id}`);
   const id = generateGenericId('prompt');
   const sync = session.scope === 'project' && context.config?.cloud.enabled ? 'pending' : 'local';
   const meta = { ...(input.metadata_json ?? {}), cloud_distribution: 'audit_only' };

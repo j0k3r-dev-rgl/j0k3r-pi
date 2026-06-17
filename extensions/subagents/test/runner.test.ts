@@ -520,15 +520,17 @@ describe('subagent runner permission-required bridge', () => {
       await sdkSubagentRunner({
         definition,
         task: 'read /etc/hosts',
+        taskId: 'task_sdd-verify_123',
         cwd: '/workspace',
-        ctx: { model: { provider: 'test', id: 'model' } },
+        ctx: { model: { provider: 'test', id: 'model' }, sessionManager: { getSessionId: () => 'parent-pi-session' } },
         config,
         signal: new AbortController().signal,
       });
 
       expect(metadataDuringPrompt).toEqual({
         origin: 'subagent',
-        requester: { subagentName: 'sdd-verify', description: 'verification executor' },
+        requester: { subagentName: 'sdd-verify', description: 'verification executor', taskId: 'task_sdd-verify_123' },
+        parent: { piSessionId: 'parent-pi-session' },
       });
       expect((holder[registryKey] as Map<string, unknown> | undefined)?.has('nested-session-1')).toBe(false);
     } finally {

@@ -189,7 +189,7 @@ Memory sessions are linked to Pi sessions using this conservative priority:
 4. One unambiguous recent active auto-started session for the same project and cwd.
 5. Create a new memory session.
 
-When a completed memory session is resumed, it is reactivated with `status='active'` and `ended_at=NULL`.
+When a completed memory session is resumed through `session_start` with the same Pi identity, it is reactivated with `status='active'` and `ended_at=NULL`. A closed session does not capture additional prompts until that reopen happens, and its previous summary is preserved until the next finish rewrites it.
 
 Shutdown behavior:
 
@@ -236,10 +236,12 @@ Shutdown behavior:
 
 ## Memory browser
 
-`/memory-browser` opens an interactive browser with nvim-style navigation. It lists memories and sessions and supports filter commands such as:
+`/memory-browser` opens an interactive browser with nvim-style navigation. It lists memories, sessions, and captured prompts. Session details include the prompts linked to that session for audit/debugging. Subagent sessions/prompts are linked to their parent user session and hidden by default; user session details show linked subagent sessions, and `origin=subagent` or `origin=all` can inspect them directly. It supports filter commands such as:
 
 ```txt
 :query=npm kind=command scope=project status=active project=app
+:origin=subagent
+:origin=all
 :clear
 ```
 

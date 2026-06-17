@@ -12,7 +12,7 @@ import { consolidateMemories } from '../src/consolidation.js';
 import { buildProjectProfileUpdatePreview, buildSemanticProjectProfilePrompt, shouldConfirmProjectProfileUpdate } from '../src/project-profile.js';
 import { exportMemory, importMemory } from '../src/export-import.js';
 import { searchMemory } from '../src/search.js';
-import { applyBrowserFilterCommand, filterBrowserItems } from '../src/memory-browser.js';
+import { applyBrowserFilterCommand, filterBrowserItems, loadPrompts, loadSessions } from '../src/memory-browser.js';
 
 let tmp: string;
 beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-memory-advanced-')); });
@@ -320,6 +320,93 @@ describe('advanced lifecycle behavior', () => {
     expect(second).toBeUndefined();
   });
 
+  it('does not store prompts into a closed memory session until session_start reopens it', async () => {
+    const h = await lifecycleHarness();
+    await h.handlers.get('before_agent_start')?.({ prompt: 'first turn before close' }, h.ctx);
+    await h.handlers.get('session_shutdown')?.({ reason: 'quit' }, h.ctx);
+
+    const d = openMemoryDb(h.dbPath);
+    const closed = d.prepare('SELECT id, status, ended_at, summary FROM memory_sessions LIMIT 1').get() as any;
+    expect(closed.status).toBe('completed');
+    expect(closed.ended_at).not.toBeNull();
+    expect(closed.summary).toContain('captured 1 prompt(s)');
+
+    await h.handlers.get('before_agent_start')?.({ prompt: 'ignored turn while closed' }, h.ctx);
+    const stillClosed = d.prepare('SELECT status, ended_at, summary FROM memory_sessions WHERE id=?').get(closed.id) as any;
+    expect(stillClosed.status).toBe('completed');
+    expect(stillClosed.ended_at).not.toBeNull();
+    const promptCountBeforeReopen = d.prepare('SELECT COUNT(*) AS count FROM memory_session_prompts WHERE session_id=?').get(closed.id) as any;
+    expect(promptCountBeforeReopen.count).toBe(1);
+
+    await h.handlers.get('session_start')?.({ reason: 'resume' }, h.ctx);
+    const reopened = d.prepare('SELECT status, ended_at, summary FROM memory_sessions WHERE id=?').get(closed.id) as any;
+    expect(reopened.status).toBe('active');
+    expect(reopened.ended_at).toBeNull();
+    expect(reopened.summary).toBe(closed.summary);
+
+    await h.handlers.get('before_agent_start')?.({ prompt: 'stored turn after reopen' }, h.ctx);
+    const promptCountAfterReopen = d.prepare('SELECT COUNT(*) AS count FROM memory_session_prompts WHERE session_id=?').get(closed.id) as any;
+    expect(promptCountAfterReopen.count).toBe(2);
+
+    await h.handlers.get('session_shutdown')?.({ reason: 'quit-again' }, h.ctx);
+    const refinished = d.prepare('SELECT status, summary FROM memory_sessions WHERE id=?').get(closed.id) as any;
+    expect(refinished.status).toBe('completed');
+    expect(refinished.summary).toContain('captured 2 prompt(s)');
+  });
+
+  it('does not reopen the current closed memory session just because a durable memory is saved', async () => {
+    const dbPath = path.join(tmp, 'memory-add-closed.sqlite');
+    const projectDir = path.join(tmp, 'memory-add-closed-project');
+    fs.mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Memory Add Closed App' }));
+    const old = process.env.PI_MEMORY_DB_PATH;
+    process.env.PI_MEMORY_DB_PATH = dbPath;
+    const handlers = new Map<string, Function>();
+    const tools = new Map<string, any>();
+    extension({ registerTool: (tool: any) => tools.set(tool.name, tool), registerCommand: () => {}, on: (name: string, handler: Function) => handlers.set(name, handler) });
+    if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
+    const ctx = { cwd: projectDir, ui: { setStatus: () => {}, notify: () => {} }, sessionManager: { getSessionFile: () => path.join(tmp, 'memory-add-closed.jsonl'), getBranch: () => [] } };
+
+    await handlers.get('session_start')?.({}, ctx);
+    await handlers.get('before_agent_start')?.({ prompt: 'first turn before memory add' }, ctx);
+    await handlers.get('session_shutdown')?.({ reason: 'quit' }, ctx);
+    const d = openMemoryDb(dbPath);
+    const closed = d.prepare('SELECT id, status, ended_at FROM memory_sessions LIMIT 1').get() as any;
+    expect(closed.status).toBe('completed');
+
+    await tools.get('memory_add').execute('tool-call', { kind: 'note', content: 'memory saved after session was closed' }, undefined, undefined, ctx);
+    const stillClosed = d.prepare('SELECT status, ended_at FROM memory_sessions WHERE id=?').get(closed.id) as any;
+    expect(stillClosed.status).toBe('completed');
+    expect(stillClosed.ended_at).not.toBeNull();
+  });
+
+  it('marks memory sessions started inside subagent runtime as subagent origin', async () => {
+    const h = await lifecycleHarness();
+    const registryKey = Symbol.for('pi.permissionGuard.subagentSessions');
+    const registry = new Map<string, any>();
+    (globalThis as any)[registryKey] = registry;
+    const d = openMemoryDb(h.dbPath);
+    const parentContext = resolveMemoryContext(h.ctx.cwd, os.homedir(), {});
+    const parent: any = startMemorySession(d, { title: 'Parent User Session', metadata_json: { pi_session_id: 'parent-pi-session' } }, parentContext);
+    h.ctx.sessionManager.getSessionId = () => 'nested-subagent-session';
+    registry.set('nested-subagent-session', {
+      origin: 'subagent',
+      requester: { subagentName: 'discovery', description: 'read-only research', taskId: 'task_discovery_123' },
+      parent: { piSessionId: 'parent-pi-session' },
+    });
+
+    await h.handlers.get('before_agent_start')?.({ prompt: 'subagent delegated prompt' }, h.ctx);
+    const row = d.prepare('SELECT metadata_json FROM memory_sessions WHERE id != ? LIMIT 1').get(parent.id) as any;
+    const meta = JSON.parse(row.metadata_json);
+    expect(meta.origin).toBe('subagent');
+    expect(meta.subagent_name).toBe('discovery');
+    expect(meta.subagent_description).toBe('read-only research');
+    expect(meta.subagent_task_id).toBe('task_discovery_123');
+    expect(meta.parent_pi_session_id).toBe('parent-pi-session');
+    expect(meta.parent_memory_session_id).toBe(parent.id);
+    registry.delete('nested-subagent-session');
+  });
+
   it('startup context prefers previous completed session summaries over the current empty session', async () => {
     const dbPath = path.join(tmp, 'startup.sqlite');
     const projectDir = path.join(tmp, 'startup-project');
@@ -422,8 +509,8 @@ describe('advanced lifecycle behavior', () => {
 
 describe('semantic profile, consolidation links, and entities', () => {
   it('parses and applies browser filter commands', () => {
-    const filters = applyBrowserFilterCommand({}, 'query=npm kind=command scope=project status=active project=app');
-    expect(filters).toEqual({ query: 'npm', kind: 'command', scope: 'project', status: 'active', project: 'app' });
+    const filters = applyBrowserFilterCommand({}, 'query=npm kind=command scope=project status=active project=app origin=all');
+    expect(filters).toEqual({ query: 'npm', kind: 'command', scope: 'project', status: 'active', project: 'app', origin: 'all' });
     expect(applyBrowserFilterCommand(filters, 'clear')).toEqual({});
   });
 
@@ -434,6 +521,69 @@ describe('semantic profile, consolidation links, and entities', () => {
     ];
     const filtered = filterBrowserItems(items, { query: 'npm', kind: 'command', scope: 'project', status: 'active', project: 'app' });
     expect(filtered.map((i) => i.id)).toEqual(['1']);
+  });
+
+  it('loads prompt items for the memory browser scoped to the current project', () => {
+    const d = db(), c = project();
+    const currentSession: any = startMemorySession(d, { title: 'Current Prompt Session' }, c);
+    addSessionPrompt(d, { session_id: currentSession.id, role: 'user', prompt: 'show browser prompts', prompt_index: 1 }, c);
+
+    const otherDir = path.join(tmp, 'other-project');
+    fs.mkdirSync(path.join(otherDir, '.pi'), { recursive: true });
+    fs.writeFileSync(path.join(otherDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Other App' }));
+    const other = resolveMemoryContext(otherDir, os.homedir(), {});
+    const otherSession: any = startMemorySession(d, { title: 'Other Prompt Session' }, other);
+    addSessionPrompt(d, { session_id: otherSession.id, role: 'user', prompt: 'other project prompt', prompt_index: 1 }, other);
+
+    const prompts = loadPrompts(d, c);
+    expect(prompts.map((item) => item.type)).toEqual(['prompts']);
+    expect(prompts[0]).toMatchObject({
+      label: 'user #1 · show browser prompts',
+      description: 'project/Advanced App · user · Current Prompt Session',
+    });
+    expect(prompts[0]?.detail).toContain(`session: ${currentSession.id}`);
+    expect(prompts[0]?.detail).toContain('role: user');
+    expect(prompts[0]?.detail).toContain('show browser prompts');
+    expect(JSON.stringify(prompts)).not.toContain('other project prompt');
+  });
+
+  it('includes linked prompts in session browser details', () => {
+    const d = db(), c = project();
+    const session: any = startMemorySession(d, { title: 'Linked Prompt Session' }, c);
+    addSessionPrompt(d, { session_id: session.id, role: 'user', prompt: 'first linked prompt', prompt_index: 1 }, c);
+    addSessionPrompt(d, { session_id: session.id, role: 'assistant', prompt: 'second linked response', prompt_index: 2 }, c);
+
+    const sessions = loadSessions(d, c);
+    const item = sessions.find((candidate) => candidate.id === session.id);
+    expect(item?.detail).toContain('linked prompts:');
+    expect(item?.detail).toContain('[1] user');
+    expect(item?.detail).toContain('first linked prompt');
+    expect(item?.detail).toContain('[2] assistant');
+    expect(item?.detail).toContain('second linked response');
+  });
+
+  it('hides subagent sessions and prompts by default while allowing origin filters', () => {
+    const d = db(), c = project();
+    const userSession: any = startMemorySession(d, { title: 'User Session', metadata_json: { pi_session_id: 'parent-pi-session' } }, c);
+    addSessionPrompt(d, { session_id: userSession.id, role: 'user', prompt: 'user prompt', prompt_index: 1 }, c);
+    const subagentSession: any = startMemorySession(d, { title: 'Subagent Session', metadata_json: { origin: 'subagent', subagent_name: 'discovery', subagent_task_id: 'task_discovery_123', parent_pi_session_id: 'parent-pi-session', parent_memory_session_id: userSession.id } }, c);
+    addSessionPrompt(d, { session_id: subagentSession.id, role: 'user', prompt: 'subagent prompt', prompt_index: 1 }, c);
+
+    const sessions = loadSessions(d, c);
+    expect(filterBrowserItems(sessions, {}).map((item) => item.id)).toEqual([userSession.id]);
+    expect(filterBrowserItems(sessions, { origin: 'subagent' }).map((item) => item.id)).toEqual([subagentSession.id]);
+    expect(filterBrowserItems(sessions, { origin: 'all' }).map((item) => item.id).sort()).toEqual([subagentSession.id, userSession.id].sort());
+    const userDetail = sessions.find((item) => item.id === userSession.id)?.detail;
+    expect(userDetail).toContain('linked subagent sessions:');
+    expect(userDetail).toContain('discovery · task_discovery_123');
+    expect(userDetail).toContain(subagentSession.id);
+    const subagentDetail = sessions.find((item) => item.id === subagentSession.id)?.detail;
+    expect(subagentDetail).toContain(`parent memory session: ${userSession.id}`);
+
+    const prompts = loadPrompts(d, c);
+    expect(filterBrowserItems(prompts, {}).map((item) => item.id)).toHaveLength(1);
+    expect(filterBrowserItems(prompts, {})[0]?.detail).toContain('user prompt');
+    expect(filterBrowserItems(prompts, { origin: 'subagent' })[0]?.detail).toContain('subagent prompt');
   });
 
   it('builds a semantic project profile prompt with conservative instructions', () => {

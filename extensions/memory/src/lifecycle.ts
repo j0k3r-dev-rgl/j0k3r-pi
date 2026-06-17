@@ -3,13 +3,14 @@ import path from 'node:path';
 import type { Db } from './db.js';
 import { resolveMemoryContext } from './context.js';
 import { listMemories } from './memory-store.js';
-import { addSessionPrompt, finishMemorySession, startMemorySession } from './sessions.js';
+import { addSessionPrompt, finishMemorySession, reopenMemorySessionIfClosed, startMemorySession } from './sessions.js';
 import { setCurrentMemorySessionId } from './runtime-state.js';
 import { buildHeuristicSessionSummary, buildSemanticSessionSummary, extractConversationFacts } from './session-summary.js';
 import { autoUpdateProjectProfileFromSession, semanticUpdateProjectProfileFromSession } from './project-profile.js';
 
 const MEMORY_SESSION_ENTRY_TYPE = 'memory-session';
 const RECENT_ACTIVE_FALLBACK_MS = 15 * 60 * 1000;
+const SUBAGENT_SESSION_REGISTRY_KEY = Symbol.for('pi.permissionGuard.subagentSessions');
 
 function memoryDebugLog(ctx: any, event: string, data: Record<string, unknown> = {}): void {
   try {
@@ -93,6 +94,38 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
     catch { return {}; }
   }
 
+  function subagentRuntimeMetadata(ctx: any): Record<string, unknown> | undefined {
+    const piSessionId = ctx?.sessionManager?.getSessionId?.() ?? null;
+    if (!piSessionId) return undefined;
+    const registry = (globalThis as Record<symbol, unknown>)[SUBAGENT_SESSION_REGISTRY_KEY];
+    if (!(registry instanceof Map)) return undefined;
+    const metadata = registry.get(piSessionId) as any;
+    if (metadata?.origin !== 'subagent') return undefined;
+    const parentPiSessionId = metadata.parent?.piSessionId ?? null;
+    const result: Record<string, unknown> = {
+      origin: 'subagent',
+      subagent_name: metadata.requester?.subagentName ?? metadata.requester?.subagentId ?? null,
+      subagent_description: metadata.requester?.description ?? null,
+      subagent_task_id: metadata.requester?.taskId ?? null,
+      parent_pi_session_id: parentPiSessionId,
+    };
+    if (parentPiSessionId) {
+      const parent = db.prepare(`SELECT id FROM memory_sessions
+        WHERE metadata_json LIKE ?
+        ORDER BY started_at DESC
+        LIMIT 1`).get(`%${parentPiSessionId}%`) as any;
+      if (parent?.id) result.parent_memory_session_id = parent.id;
+    }
+    return result;
+  }
+
+  function mergeSessionMetadata(sessionId: string, updates: Record<string, unknown>): void {
+    if (!Object.keys(updates).length) return;
+    const row = db.prepare('SELECT metadata_json FROM memory_sessions WHERE id=?').get(sessionId) as any;
+    const metadata = { ...(row?.metadata_json ? parseSessionMetadata(row) : {}), ...updates };
+    db.prepare('UPDATE memory_sessions SET metadata_json=? WHERE id=?').run(JSON.stringify(metadata), sessionId);
+  }
+
   function findRecentActiveSession(context: any): any | undefined {
     const since = new Date(Date.now() - RECENT_ACTIVE_FALLBACK_MS).toISOString();
     const rows = db.prepare(`SELECT * FROM memory_sessions
@@ -146,7 +179,7 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
     }
   }
 
-  function ensureMemorySession(ctx: any): { id: string; context: any } {
+  function ensureMemorySession(ctx: any, options: { reopenClosed?: boolean } = {}): { id: string; context: any; closed: boolean } {
     const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
     const piSessionId = ctx?.sessionManager?.getSessionId?.() ?? null;
     const piSessionFile = ctx?.sessionManager?.getSessionFile?.() ?? null;
@@ -164,12 +197,15 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
       if (existing) {
         activeMemorySessionId = existing.id;
         setCurrentMemorySessionId(activeMemorySessionId);
-        sessionClosed = false;
+        const shouldReopen = options.reopenClosed === true || (existing.status === 'active' && existing.ended_at == null);
+        sessionClosed = !shouldReopen;
         const metadata = parseSessionMetadata(existing);
         if (piSessionId) metadata.pi_session_id = piSessionId;
         if (piSessionFile) metadata.pi_session_file = piSessionFile;
         metadata.cwd = context.cwd;
-        db.prepare("UPDATE memory_sessions SET ended_at=NULL, status='active', metadata_json=? WHERE id=?").run(JSON.stringify(metadata), existing.id);
+        Object.assign(metadata, subagentRuntimeMetadata(ctx) ?? {});
+        if (shouldReopen) db.prepare("UPDATE memory_sessions SET ended_at=NULL, status='active', metadata_json=? WHERE id=?").run(JSON.stringify(metadata), existing.id);
+        else db.prepare("UPDATE memory_sessions SET metadata_json=? WHERE id=?").run(JSON.stringify(metadata), existing.id);
         const maxPrompt = db.prepare('SELECT COALESCE(MAX(prompt_index), 0) AS max_index FROM memory_session_prompts WHERE session_id=?').get(existing.id) as any;
         promptIndex = Number(maxPrompt?.max_index ?? 0);
         persistMemorySessionEntry(ctx, context, activeMemorySessionId!, piSessionId, piSessionFile);
@@ -185,6 +221,7 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
             pi_session_file: piSessionFile,
             cwd: context.cwd,
             auto_started: true,
+            ...(subagentRuntimeMetadata(ctx) ?? {}),
           },
         }, context) as any;
         activeMemorySessionId = session.id;
@@ -198,14 +235,18 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
       }
     } else {
       persistMemorySessionEntry(ctx, context, activeMemorySessionId, piSessionId, piSessionFile);
+      const reopened = options.reopenClosed === true ? reopenMemorySessionIfClosed(db, activeMemorySessionId, context) : false;
+      if (reopened) sessionClosed = false;
+      mergeSessionMetadata(activeMemorySessionId, subagentRuntimeMetadata(ctx) ?? {});
       memoryDebugLog(ctx, 'ensure_memory_session:already_active', {
         memory_session_id: activeMemorySessionId,
         prompt_index: promptIndex,
         session_closed: sessionClosed,
+        reopened,
       });
     }
     setCurrentMemorySessionId(activeMemorySessionId);
-    return { id: activeMemorySessionId!, context };
+    return { id: activeMemorySessionId!, context, closed: sessionClosed };
   }
 
   async function closeActiveMemorySession(ctx: any, reason: string): Promise<void> {
@@ -289,7 +330,7 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
       active_memory_session_id_before: activeMemorySessionId ?? null,
       session_closed: sessionClosed,
     });
-    const { context } = ensureMemorySession(ctx);
+    const { context } = ensureMemorySession(ctx, { reopenClosed: true });
     memoryDebugLog(ctx, 'session_start:ensured', {
       reason: event?.reason ?? null,
       active_memory_session_id_after: activeMemorySessionId ?? null,
@@ -307,9 +348,9 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
       startup_context_injected: startupContextInjected,
       session_closed: sessionClosed,
     });
-    const { id: sessionId, context: c } = ensureMemorySession(ctx);
+    const { id: sessionId, context: c, closed } = ensureMemorySession(ctx, { reopenClosed: false });
 
-    if (prompt.trim()) {
+    if (prompt.trim() && !closed) {
       try {
         addSessionPrompt(db, {
           session_id: sessionId,
@@ -369,6 +410,8 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
         },
       };
     }
+
+    if (prompt.trim() && closed) return undefined;
 
     // After startup, do not inject memory automatically on every turn.
     // The agent has the brain instructions and should call memory_search/memory_recall

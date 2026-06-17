@@ -214,6 +214,8 @@ export type SubagentTask = {
 export type SubagentRunner = (input: {
   definition: SubagentDefinition;
   task: string;
+  taskId?: string;
+  parentPiSessionId?: string;
   context?: string;
   cwd: string;
   ctx: any;

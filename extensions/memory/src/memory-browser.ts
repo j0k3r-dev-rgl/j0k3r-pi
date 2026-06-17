@@ -1,8 +1,9 @@
 import type { Db } from './db.js';
 import { snippet, parseJson } from './utils.js';
 
-type BrowserTab = 'memories' | 'sessions';
-export type BrowserFilters = { query?: string; kind?: string; scope?: string; status?: string; project?: string };
+type BrowserTab = 'memories' | 'sessions' | 'prompts';
+export type BrowserFilters = { query?: string; kind?: string; scope?: string; status?: string; project?: string; origin?: 'user' | 'subagent' | 'all' | string };
+
 type BrowserItem = {
   type: BrowserTab;
   id: string;
@@ -10,6 +11,7 @@ type BrowserItem = {
   description: string;
   detail: string;
   updated: string;
+  origin?: 'user' | 'subagent' | string;
 };
 
 function stripAnsi(s: string): string { return s.replace(/\x1b\[[0-9;]*m/g, ''); }
@@ -62,14 +64,18 @@ export function applyBrowserFilterCommand(current: BrowserFilters, command: stri
     const [key, ...rest] = part.split('=');
     const value = rest.join('=').trim();
     if (!value) continue;
-    if (['query', 'kind', 'scope', 'status', 'project'].includes(key)) (next as any)[key] = value.toLowerCase();
+    if (['query', 'kind', 'scope', 'status', 'project', 'origin'].includes(key)) (next as any)[key] = value.toLowerCase();
   }
   return next;
 }
 
-export function filterBrowserItems<T extends { label: string; description: string; detail: string }>(items: T[], filters: BrowserFilters): T[] {
+export function filterBrowserItems<T extends { label: string; description: string; detail: string; origin?: string }>(items: T[], filters: BrowserFilters): T[] {
   const q = filters.query?.trim().toLowerCase();
+  const origin = filters.origin?.trim().toLowerCase();
   return items.filter((item) => {
+    const itemOrigin = (item.origin ?? 'user').toLowerCase();
+    if (!origin && itemOrigin === 'subagent') return false;
+    if (origin && origin !== 'all' && itemOrigin !== origin) return false;
     const haystack = `${item.label}\n${item.description}\n${item.detail}`.toLowerCase();
     if (q && !haystack.includes(q)) return false;
     if (filters.kind && !haystack.includes(`kind: ${filters.kind.toLowerCase()}`) && !item.label.toLowerCase().startsWith(`${filters.kind.toLowerCase()} `)) return false;
@@ -111,48 +117,125 @@ function loadMemories(db: Db, context: any): BrowserItem[] {
   }));
 }
 
-function loadSessions(db: Db, context: any): BrowserItem[] {
+export function loadSessions(db: Db, context: any): BrowserItem[] {
   const rows = db.prepare(`SELECT s.id, s.scope, s.project_name, s.title, s.started_at, s.ended_at, s.summary, s.learned, s.status, s.metadata_json,
       (SELECT COUNT(*) FROM memory_session_prompts p WHERE p.session_id = s.id) AS prompt_count
     FROM memory_sessions s
     WHERE s.scope IN ('global', 'general') OR (s.scope='project' AND s.project_id = ?)
     ORDER BY s.started_at DESC
     LIMIT 200`).all(context.project_id ?? '__no_project__') as any[];
-  return rows.map((s) => ({
-    type: 'sessions' as const,
-    id: s.id,
-    label: `${s.title ?? s.id}`,
-    description: `${s.scope}${s.project_name ? `/${s.project_name}` : ''} · prompts ${s.prompt_count} · ${s.ended_at ? 'closed' : 'open'}`,
-    updated: s.ended_at ?? s.started_at,
-    detail: [
-      `id: ${s.id}`,
-      `scope: ${s.scope}${s.project_name ? `/${s.project_name}` : ''}`,
-      `status: ${s.status}`,
-      `started: ${s.started_at}`,
-      `ended: ${s.ended_at ?? 'open'}`,
-      `prompts: ${s.prompt_count}`,
-      `pi session: ${parseJson<any>(s.metadata_json, {}).pi_session_file ?? 'unknown'}`,
-      '',
-      'summary:',
-      s.summary ?? 'no summary yet',
-      '',
-      'learned:',
-      s.learned ?? 'no learnings yet',
-    ].join('\n'),
-  }));
+  const promptsForSession = db.prepare(`SELECT id, role, prompt, prompt_index, created_at
+    FROM memory_session_prompts
+    WHERE session_id = ?
+    ORDER BY prompt_index ASC, created_at ASC
+    LIMIT 50`);
+  const subagentsForParent = db.prepare(`SELECT id, title, started_at, ended_at, status, metadata_json,
+      (SELECT COUNT(*) FROM memory_session_prompts p WHERE p.session_id = memory_sessions.id) AS prompt_count
+    FROM memory_sessions
+    WHERE metadata_json LIKE ?
+    ORDER BY started_at ASC
+    LIMIT 50`);
+  return rows.map((s) => {
+    const metadata = parseJson<any>(s.metadata_json, {});
+    const origin = metadata.origin === 'subagent' ? 'subagent' : 'user';
+    const linkedPrompts = promptsForSession.all(s.id) as any[];
+    const linkedPromptLines = linkedPrompts.length
+      ? linkedPrompts.flatMap((p) => [
+        `[${p.prompt_index}] ${p.role} · ${p.created_at} · ${p.id}`,
+        snippet(p.prompt, 240),
+      ])
+      : ['none'];
+    const linkedSubagents = origin === 'user' ? (subagentsForParent.all(`%${s.id}%`) as any[]) : [];
+    const linkedSubagentLines = linkedSubagents.length
+      ? linkedSubagents.flatMap((child) => {
+        const childMetadata = parseJson<any>(child.metadata_json, {});
+        const label = `${childMetadata.subagent_name ?? 'subagent'} · ${childMetadata.subagent_task_id ?? 'unknown task'} · prompts ${child.prompt_count} · ${child.ended_at ? 'closed' : 'open'}`;
+        return [label, child.id];
+      })
+      : ['none'];
+    return {
+      type: 'sessions' as const,
+      id: s.id,
+      label: `${s.title ?? s.id}`,
+      description: `${s.scope}${s.project_name ? `/${s.project_name}` : ''} · ${origin} · prompts ${s.prompt_count} · ${s.ended_at ? 'closed' : 'open'}`,
+      updated: s.ended_at ?? s.started_at,
+      origin,
+      detail: [
+        `id: ${s.id}`,
+        `scope: ${s.scope}${s.project_name ? `/${s.project_name}` : ''}`,
+        `origin: ${origin}`,
+        metadata.subagent_name ? `subagent: ${metadata.subagent_name}` : '',
+        `status: ${s.status}`,
+        `started: ${s.started_at}`,
+        `ended: ${s.ended_at ?? 'open'}`,
+        `prompts: ${s.prompt_count}`,
+        `pi session: ${metadata.pi_session_file ?? 'unknown'}`,
+        origin === 'subagent' ? `parent memory session: ${metadata.parent_memory_session_id ?? 'unknown'}` : '',
+        origin === 'subagent' ? `parent pi session: ${metadata.parent_pi_session_id ?? 'unknown'}` : '',
+        '',
+        ...(origin === 'user' ? ['linked subagent sessions:', ...linkedSubagentLines, ''] : []),
+        'linked prompts:',
+        ...linkedPromptLines,
+        '',
+        'summary:',
+        s.summary ?? 'no summary yet',
+        '',
+        'learned:',
+        s.learned ?? 'no learnings yet',
+      ].join('\n'),
+    };
+  });
+}
+
+export function loadPrompts(db: Db, context: any): BrowserItem[] {
+  const rows = db.prepare(`SELECT p.id, p.session_id, p.role, p.prompt, p.prompt_index, p.created_at, p.sync_status, p.metadata_json,
+      s.scope, s.project_name, s.title AS session_title, s.started_at, s.ended_at, s.metadata_json AS session_metadata_json
+    FROM memory_session_prompts p
+    JOIN memory_sessions s ON s.id = p.session_id
+    WHERE s.scope IN ('global', 'general') OR (s.scope='project' AND s.project_id = ?)
+    ORDER BY p.created_at DESC, p.prompt_index DESC
+    LIMIT 200`).all(context.project_id ?? '__no_project__') as any[];
+  return rows.map((p) => {
+    const sessionMetadata = parseJson<any>(p.session_metadata_json, {});
+    const origin = sessionMetadata.origin === 'subagent' ? 'subagent' : 'user';
+    return {
+      type: 'prompts' as const,
+      id: p.id,
+      label: `${p.role} #${p.prompt_index} · ${snippet(p.prompt, 80)}`,
+      description: `${p.scope}${p.project_name ? `/${p.project_name}` : ''} · ${origin} · ${p.session_title ?? p.session_id}`,
+      updated: p.created_at,
+      origin,
+      detail: [
+        `id: ${p.id}`,
+        `session: ${p.session_id}`,
+        `session title: ${p.session_title ?? ''}`,
+        `scope: ${p.scope}${p.project_name ? `/${p.project_name}` : ''}`,
+        `origin: ${origin}`,
+        sessionMetadata.subagent_name ? `subagent: ${sessionMetadata.subagent_name}` : '',
+        `role: ${p.role}`,
+        `prompt index: ${p.prompt_index}`,
+        `created: ${p.created_at}`,
+        `sync: ${p.sync_status}`,
+        `pi session: ${sessionMetadata.pi_session_file ?? 'unknown'}`,
+        '',
+        p.prompt ?? '',
+      ].join('\n'),
+    };
+  });
 }
 
 export async function openMemoryBrowser(db: Db, ctx: any, context: any): Promise<void> {
   const memories = loadMemories(db, context);
   const sessions = loadSessions(db, context);
+  const prompts = loadPrompts(db, context);
   const state = { tab: 'memories' as BrowserTab, selected: 0, offset: 0, detail: false, detailScroll: 0, filters: {} as BrowserFilters, filterMode: false, filterBuffer: '' };
 
-  const items = () => filterBrowserItems(state.tab === 'memories' ? memories : sessions, state.filters);
+  const items = () => filterBrowserItems(state.tab === 'memories' ? memories : state.tab === 'sessions' ? sessions : prompts, state.filters);
   const clamp = () => {
     const max = Math.max(0, items().length - 1);
     state.selected = Math.max(0, Math.min(state.selected, max));
   };
-  const switchTab = () => { state.tab = state.tab === 'memories' ? 'sessions' : 'memories'; state.selected = 0; state.offset = 0; state.detail = false; state.detailScroll = 0; };
+  const switchTab = () => { state.tab = state.tab === 'memories' ? 'sessions' : state.tab === 'sessions' ? 'prompts' : 'memories'; state.selected = 0; state.offset = 0; state.detail = false; state.detailScroll = 0; };
   const scrollInfo = (offset: number, visible: number, total: number) => total <= visible ? 'all' : `${offset + 1}-${Math.min(total, offset + visible)}/${total}`;
 
   await ctx.ui.custom((_tui: any, theme: any, _kb: any, done: (value?: unknown) => void) => {
@@ -170,7 +253,7 @@ export async function openMemoryBrowser(db: Db, ctx: any, context: any): Promise
       if (state.selected < state.offset) state.offset = state.selected;
       if (state.selected >= state.offset + visible) state.offset = state.selected - visible + 1;
       const current = items();
-      const tabLine = `${state.tab === 'memories' ? accent('[memories]') : normal(' memories ')} ${state.tab === 'sessions' ? accent('[sessions]') : normal(' sessions ')}`;
+      const tabLine = `${state.tab === 'memories' ? accent('[memories]') : normal(' memories ')} ${state.tab === 'sessions' ? accent('[sessions]') : normal(' sessions ')} ${state.tab === 'prompts' ? accent('[prompts]') : normal(' prompts ')}`;
       const filterLine = state.filterMode
         ? accent(`filter> ${state.filterBuffer}`)
         : dim(`filters: ${Object.entries(state.filters).map(([k, v]) => `${k}=${v}`).join(' ') || 'none'}`);
