@@ -90,13 +90,14 @@ function assertGitMemoryEnabled(context: { config?: { git?: { enabled?: boolean 
 
 function resolveImportDefaults(
   params: any,
-  context: { cwd: string; config?: { import?: { mode?: MemoryImportMode; on_conflict?: MemoryImportConflictPolicy }; backups?: { path?: string } }, warnings?: string[] },
+  context: { cwd: string; config?: { import?: { mode?: MemoryImportMode; on_conflict?: MemoryImportConflictPolicy }; backups?: { path?: string }; git?: { enabled?: boolean; sync?: { import?: boolean } } }, warnings?: string[] },
 ) {
   return {
     mode: params?.mode ?? context.config?.import?.mode ?? 'dry_run',
     on_conflict: params?.on_conflict ?? context.config?.import?.on_conflict ?? 'mark_conflict',
     path: resolveBackupPath(context.cwd, context.config?.backups?.path),
-  } as { path: string; mode: MemoryImportMode; on_conflict: MemoryImportConflictPolicy };
+    include_git: context.config?.git?.enabled === true && context.config.git.sync?.import === true,
+  } as { path: string; mode: MemoryImportMode; on_conflict: MemoryImportConflictPolicy; include_git: boolean };
 }
 
 function resolveExportDefaults(
@@ -108,12 +109,14 @@ function resolveExportDefaults(
     ...params,
     path: resolveBackupPath(context.cwd, context.config?.backups?.path),
     include_sessions: hasExplicitIncludeSessions ? params?.include_sessions : context.config?.backups?.include_sessions,
+    include_git: context.config?.git.enabled === true && context.config.git.sync.export === true,
     context,
   } as {
     path: string;
     format?: 'jsonl' | 'sqlite';
     include_archived?: boolean;
     include_sessions?: boolean;
+    include_git?: boolean;
     context: ReturnType<typeof resolveMemoryContext>;
   };
 }

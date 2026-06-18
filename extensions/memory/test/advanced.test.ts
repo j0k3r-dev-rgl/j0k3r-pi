@@ -46,6 +46,21 @@ function createMemoryBackup(): string {
   return out;
 }
 
+function createGitMemoryBackup(): string {
+  const source = db(), c = project(path.join(tmp, 'git-backup-source'));
+  addMemory(source, { scope: 'project', kind: 'note', content: 'ordinary memory import still works' }, c);
+  addMemory(source, {
+    scope: 'project',
+    kind: 'commit_record',
+    title: 'import git commit memory',
+    content: 'git commit memory should follow git.sync.import config',
+    metadata_json: { commit: { repo: 'repo', commit_hash: 'def5678', release_impact: 'minor' } },
+  }, c);
+  const out = path.join(tmp, `git-backup-${Date.now()}-${Math.random()}.jsonl`);
+  exportMemory(source, { path: out, context: c, include_git: true });
+  return out;
+}
+
 async function runMemoryExportTool(memoryConfig: Record<string, unknown> = {}, params: Record<string, unknown> = {}) {
   const dbPath = path.join(tmp, `export-target-${Date.now()}-${Math.random()}.sqlite`);
   const projectDir = path.join(tmp, `export-project-${Date.now()}-${Math.random()}`);
@@ -55,6 +70,13 @@ async function runMemoryExportTool(memoryConfig: Record<string, unknown> = {}, p
   migrate(d);
   const context = resolveMemoryContext(projectDir, os.homedir(), {});
   addMemory(d, { scope: 'project', kind: 'note', content: 'automatic mirror backup export memory' }, context);
+  addMemory(d, {
+    scope: 'project',
+    kind: 'commit_record',
+    title: 'export git commit memory',
+    content: 'git commit memory should follow git.sync.export config',
+    metadata_json: { commit: { repo: 'repo', commit_hash: 'abc1234', release_impact: 'patch' } },
+  }, context);
   const session: any = startMemorySession(d, { title: 'export tool session' }, context);
   addSessionPrompt(d, { session_id: session.id, role: 'user', prompt: 'configured backup prompt export', prompt_index: 1 }, context);
   const old = process.env.PI_MEMORY_DB_PATH;
@@ -697,7 +719,7 @@ describe('commit changelog advanced behavior', () => {
     expect(defaultText).not.toContain('project b release note');
 
     const exportPath = path.join(tmp, 'commit-project-a.jsonl');
-    const exportResult = exportMemory(d, { path: exportPath, context: resolveMemoryContext(projectADir, os.homedir(), {}) });
+    const exportResult = exportMemory(d, { path: exportPath, context: resolveMemoryContext(projectADir, os.homedir(), {}), include_git: true });
     expect(exportResult.path).toBe(exportPath);
     const exportText = fs.readFileSync(exportPath, 'utf8');
     expect(exportText).toContain(commitA.details.memory.id);
@@ -707,7 +729,7 @@ describe('commit changelog advanced behavior', () => {
     const importedDbPath = path.join(tmp, 'commit-imported.sqlite');
     const importedDb = openMemoryDb(importedDbPath);
     migrate(importedDb);
-    const importResult = importMemory(importedDb, { path: exportPath, mode: 'merge' });
+    const importResult = importMemory(importedDb, { path: exportPath, mode: 'merge', include_git: true });
     expect(importResult.inserted).toBeGreaterThan(0);
 
     const old = process.env.PI_MEMORY_DB_PATH;
@@ -1034,6 +1056,32 @@ describe('semantic profile, consolidation links, and entities', () => {
     const text = fs.readFileSync(details.path, 'utf8');
     expect(JSON.parse(text.split('\n')[0]).includes_sessions).toBe(false);
     expect(text).not.toContain('configured backup prompt export');
+  });
+
+  it('uses git.sync.export to include or exclude git memory records from configured exports', async () => {
+    const disabled = await runMemoryExportTool({ git: { enabled: true, sync: { export: false } } });
+    const disabledText = fs.readFileSync(disabled.details.path, 'utf8');
+    expect(disabledText).toContain('automatic mirror backup export memory');
+    expect(disabledText).not.toContain('export git commit memory');
+    expect(disabled.details.includes_git).toBe(false);
+
+    const enabled = await runMemoryExportTool({ git: { enabled: true, sync: { export: true } } });
+    const enabledText = fs.readFileSync(enabled.details.path, 'utf8');
+    expect(enabledText).toContain('automatic mirror backup export memory');
+    expect(enabledText).toContain('export git commit memory');
+    expect(enabled.details.includes_git).toBe(true);
+  });
+
+  it('uses git.sync.import to include or skip git memory records from configured imports', async () => {
+    const out = createGitMemoryBackup();
+    const disabled = await runMemoryImportTool({ git: { enabled: true, sync: { import: false } }, import: { mode: 'merge', on_conflict: 'keep_local' } }, { path: out });
+    expect(disabled.inserted).toBeGreaterThan(0);
+    expect(disabled.skipped_git).toBeGreaterThan(0);
+    expect(disabled.seen_by_table.memories).toBeGreaterThan(disabled.inserted_by_table.memories);
+
+    const enabled = await runMemoryImportTool({ git: { enabled: true, sync: { import: true } }, import: { mode: 'merge', on_conflict: 'keep_local' } }, { path: out });
+    expect(enabled.skipped_git).toBe(0);
+    expect(enabled.inserted_by_table.memories).toBeGreaterThanOrEqual(2);
   });
 
   it('mirror export rewrites the backup without keeping removed local rows', () => {

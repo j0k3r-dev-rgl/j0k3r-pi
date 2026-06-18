@@ -89,7 +89,7 @@ Do not use this skill for ordinary Git commits/tags/changelog work when Memory g
 - Use `memory_commit_changelog_link` to connect commit records, changelog entries, PRD/SDD memories, decision memories, or other supporting memories only when the relationship is explicit and useful. Prefer `derived_from` from release/tag or changelog records to source commit records, and `supports` for evidence/validation memories.
 - Use `memory_commit_changelog_search` before creating release notes or changelog updates so existing commit/changelog/release records are reused instead of duplicated.
 - If `.pi/memory.json` does not have `git.enabled=true`, do not use Memory git tools. Explain that git memory tools are disabled and continue the base Git workflow with `git-operations-release` unless the user wants to enable the Memory Extension git module.
-- Treat `git.sync.cloud`, `git.sync.export`, and `git.sync.import` as configuration/intent flags only. They do not authorize cloud calls, exports, imports, commits, tags, or pushes by themselves.
+- Treat `git.sync.cloud`, `git.sync.export`, and `git.sync.import` as configuration flags only. `git.sync.export/import` control whether configured memory export/import includes git memory records; they do not authorize Git commits, tags, pushes, cloud calls, or automatic changelog generation by themselves.
 
 ## Decision Gates
 

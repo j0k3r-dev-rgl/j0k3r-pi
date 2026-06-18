@@ -79,7 +79,7 @@ Use this skill when a user asks to configure Pi Memory Extension for a project, 
 - Run `memory_export` or `memory_import` only when the user asks for backup/restore/export/import work, or when explicitly validating memory backup configuration.
 - Never store secrets, tokens, passwords, private keys, or cloud tokens in `.pi/memory.json`.
 - Keep `git.enabled=false` by default; set it to `true` only when the project intentionally wants git commit/changelog memory tools available.
-- Keep `git.sync.cloud=false`, `git.sync.export=false`, and `git.sync.import=false` by default; these are module-level intent flags and must not imply automatic Git commits, tags, pushes, cloud calls, exports, or imports unless a concrete implementation and explicit user action support them.
+- Keep `git.sync.cloud=false`, `git.sync.export=false`, and `git.sync.import=false` by default. `git.sync.export` controls whether configured memory exports include git memory records; `git.sync.import` controls whether configured memory imports apply git memory records. None of these flags authorize Git commits, tags, pushes, cloud calls, or automatic release/changelog generation.
 - Use `backups.include_sessions=true` only when the project intentionally wants session and linked prompt rows in mirror backups.
 - Legacy `backups.include_prompts` is fallback-only compatibility; prefer `backups.include_sessions` in all new configs.
 - Keep `debug=false` by default; enable it only for temporary lifecycle auditing because it writes local session identity logs.
@@ -134,8 +134,8 @@ Field rules:
 - `cloud`: readiness/metadata only unless a backend exists; use env var names for tokens, never raw token values.
 - `git.enabled`: defaults to `false`; set `true` to enable git-oriented memory surfaces such as commit/changelog memory tools for the project.
 - `git.sync.cloud`: defaults to `false`; when `true`, records project intent to include git memory in future cloud sync flows. It does not perform cloud sync by itself.
-- `git.sync.export`: defaults to `false`; when `true`, records project intent to include git memory in future export/sync workflows. It does not run exports by itself.
-- `git.sync.import`: defaults to `false`; when `true`, records project intent to include git memory in future import/sync workflows. It does not run imports by itself.
+- `git.sync.export`: defaults to `false`; when `true`, configured `memory_export` calls include git memory records (`commit_record`, `changelog_entry`, `release_record`) plus their links/entities. It does not run exports by itself.
+- `git.sync.import`: defaults to `false`; when `true`, configured `memory_import` calls apply git memory records (`commit_record`, `changelog_entry`, `release_record`) plus their links/entities. When false, imports skip those git memory rows while still importing ordinary memories. It does not run imports by itself.
 
 ## Decision Gates
 
@@ -144,7 +144,8 @@ Field rules:
 - If the user asks to import with overwrite behavior, confirm whether `keep_imported` is acceptable before recommending it.
 - If a backup contains another project's memories, verify the extension version/reload state and export context before changing project config.
 - If configuring memory as part of a broader PRD/SDD workflow, also consider `persistent-memory` and `sdd-workflow`.
-- If the user wants commit/changelog tools but `.pi/memory.json` omits `git.enabled`, explain that git memory is off by default and ask whether to enable it.
+- If the user wants commit/changelog/release tools but `.pi/memory.json` omits `git.enabled`, explain that git memory is off by default and ask whether to enable it.
+- If the user expects commit/tag/release memories to travel through backup files, confirm `git.sync.export=true` on the exporting project and `git.sync.import=true` on the importing project.
 
 ## Execution Steps
 
@@ -161,6 +162,7 @@ Field rules:
    - `version` should be `2`;
    - `mirror` should be `true`;
    - `includes_sessions` should match `backups.include_sessions`.
+   - `includes_git` should match `git.enabled && git.sync.export` for configured exports.
 10. If comparing manually, verify exported `memories.project_name` contains only the current project.
 
 ## Import troubleshooting notes

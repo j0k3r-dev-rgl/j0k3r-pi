@@ -8,8 +8,19 @@ import { nowIso, sha256 } from './utils.js';
 const BACKUP_FORMAT = 'pi-memory-backup';
 const BACKUP_VERSION = 2;
 const TABLES = ['memories', 'memory_sessions', 'memory_session_prompts', 'memory_links', 'memory_entities'] as const;
+const GIT_MEMORY_KINDS = new Set(['commit_record', 'changelog_entry', 'release_record']);
 type TableName = typeof TABLES[number];
 type BackupRecord = { type: TableName; id: string; hash: string; row: Record<string, unknown> };
+
+function shouldIncludeGit(input: { include_git?: boolean; context?: ResolvedContext }): boolean {
+  if (typeof input.include_git === 'boolean') return input.include_git;
+  const git = input.context?.config?.git;
+  return git?.enabled === true && git.sync.export === true;
+}
+
+function isGitMemoryRow(row: Record<string, unknown>): boolean {
+  return GIT_MEMORY_KINDS.has(String(row.kind ?? ''));
+}
 
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
@@ -33,12 +44,13 @@ function contextWhere(context: ResolvedContext | undefined, alias: string): { sq
 function exportRows(
   db: Db,
   table: TableName,
-  input: { include_archived?: boolean; include_sessions?: boolean; context?: ResolvedContext },
+  input: { include_archived?: boolean; include_sessions?: boolean; include_git?: boolean; context?: ResolvedContext },
 ): Record<string, unknown>[] {
   const scoped = contextWhere(input.context, table);
   if (table === 'memories') {
     const statusWhere = input.include_archived === false ? ' AND status = \'active\'' : '';
-    return db.prepare(`SELECT * FROM memories WHERE ${scoped.sql}${statusWhere} ORDER BY id`).all(...scoped.args as any[]) as Record<string, unknown>[];
+    const gitWhere = shouldIncludeGit(input) ? '' : ` AND kind NOT IN (${Array.from(GIT_MEMORY_KINDS).map(() => '?').join(',')})`;
+    return db.prepare(`SELECT * FROM memories WHERE ${scoped.sql}${statusWhere}${gitWhere} ORDER BY id`).all(...scoped.args as any[], ...(shouldIncludeGit(input) ? [] : Array.from(GIT_MEMORY_KINDS)) as any[]) as Record<string, unknown>[];
   }
   if (table === 'memory_sessions') {
     if (input.include_sessions !== true) return [];
@@ -53,13 +65,16 @@ function exportRows(
     const fromScoped = contextWhere(input.context, 'from_mem');
     const toScoped = contextWhere(input.context, 'to_mem');
     const args = [...fromScoped.args, ...toScoped.args] as any[];
-    return db.prepare(`SELECT l.* FROM memory_links l JOIN memories from_mem ON from_mem.id = l.from_memory_id JOIN memories to_mem ON to_mem.id = l.to_memory_id WHERE ${fromScoped.sql} AND ${toScoped.sql} ORDER BY l.id`).all(...args) as Record<string, unknown>[];
+    const gitWhere = shouldIncludeGit(input) ? '' : ` AND from_mem.kind NOT IN (${Array.from(GIT_MEMORY_KINDS).map(() => '?').join(',')}) AND to_mem.kind NOT IN (${Array.from(GIT_MEMORY_KINDS).map(() => '?').join(',')})`;
+    const gitArgs = shouldIncludeGit(input) ? [] : [...Array.from(GIT_MEMORY_KINDS), ...Array.from(GIT_MEMORY_KINDS)];
+    return db.prepare(`SELECT l.* FROM memory_links l JOIN memories from_mem ON from_mem.id = l.from_memory_id JOIN memories to_mem ON to_mem.id = l.to_memory_id WHERE ${fromScoped.sql} AND ${toScoped.sql}${gitWhere} ORDER BY l.id`).all(...args, ...gitArgs as any[]) as Record<string, unknown>[];
   }
   const memoryScoped = contextWhere(input.context, 'm');
-  return db.prepare(`SELECT e.* FROM memory_entities e JOIN memories m ON m.id = e.memory_id WHERE ${memoryScoped.sql} ORDER BY e.id`).all(...memoryScoped.args as any[]) as Record<string, unknown>[];
+  const gitWhere = shouldIncludeGit(input) ? '' : ` AND m.kind NOT IN (${Array.from(GIT_MEMORY_KINDS).map(() => '?').join(',')})`;
+  return db.prepare(`SELECT e.* FROM memory_entities e JOIN memories m ON m.id = e.memory_id WHERE ${memoryScoped.sql}${gitWhere} ORDER BY e.id`).all(...memoryScoped.args as any[], ...(shouldIncludeGit(input) ? [] : Array.from(GIT_MEMORY_KINDS)) as any[]) as Record<string, unknown>[];
 }
 
-export function exportMemory(db: Db, input: { path?: string; format?: 'jsonl' | 'sqlite'; include_archived?: boolean; include_sessions?: boolean; context?: ResolvedContext } = {}) {
+export function exportMemory(db: Db, input: { path?: string; format?: 'jsonl' | 'sqlite'; include_archived?: boolean; include_sessions?: boolean; include_git?: boolean; context?: ResolvedContext } = {}) {
   const outPath = input.path ?? path.resolve(process.cwd(), '.pi', 'mempry-backups', 'memory-backup.jsonl');
   if (input.format === 'sqlite') throw new Error('sqlite export is reserved for future implementation; use jsonl.');
   fs.mkdirSync(path.dirname(outPath), { recursive: true, mode: 0o700 });
@@ -78,6 +93,7 @@ export function exportMemory(db: Db, input: { path?: string; format?: 'jsonl' | 
     return acc;
   }, { mirror: true, rows: {} as Record<TableName, Record<string, string>> });
   const includeSessions = input.include_sessions === true;
+  const includeGit = shouldIncludeGit(input);
   const lines = [
     JSON.stringify({
       type: 'meta',
@@ -87,13 +103,14 @@ export function exportMemory(db: Db, input: { path?: string; format?: 'jsonl' | 
       brain_id: getMeta(db, 'brain_id'),
       exported_at: nowIso(),
       includes_sessions: includeSessions,
+      includes_git: includeGit,
       mirror: true,
     }),
     JSON.stringify({ type: 'manifest', ...manifest }),
     ...records.map((record) => JSON.stringify(record)),
   ];
   fs.writeFileSync(outPath, `${lines.join('\n')}\n`, { mode: 0o600 });
-  return { path: outPath, rows: records.length, mirror: true, format: BACKUP_FORMAT, version: BACKUP_VERSION };
+  return { path: outPath, rows: records.length, mirror: true, format: BACKUP_FORMAT, version: BACKUP_VERSION, includes_git: includeGit };
 }
 
 function rebuildFts(db: Db): void {
@@ -102,9 +119,10 @@ function rebuildFts(db: Db): void {
   }
 }
 
-export function importMemory(db: Db, input: { path: string; mode?: MemoryImportMode; on_conflict?: MemoryImportConflictPolicy }) {
+export function importMemory(db: Db, input: { path: string; mode?: MemoryImportMode; on_conflict?: MemoryImportConflictPolicy; include_git?: boolean }) {
   const mode = input.mode ?? 'dry_run';
   const onConflict = input.on_conflict ?? 'mark_conflict';
+  const includeGit = input.include_git === true;
   const lines = fs.readFileSync(input.path, 'utf8').split(/\r?\n/).filter(Boolean);
   const items = lines.map((line, index) => {
     try { return JSON.parse(line) as { type: string; format?: string; version?: number; schema_version?: number; row?: Record<string, unknown> }; }
@@ -116,11 +134,27 @@ export function importMemory(db: Db, input: { path: string; mode?: MemoryImportM
   if (typeof meta.schema_version !== 'number') throw new Error('Invalid memory import: missing schema_version.');
   if (meta.schema_version > SCHEMA_VERSION) throw new Error(`Unsupported schema_version ${meta.schema_version}; current schema_version is ${SCHEMA_VERSION}.`);
 
-  let seen = 0, inserted = 0, conflicts = 0, replaced = 0;
+  const gitMemoryIds = new Set(items
+    .filter((item) => item.type === 'memories' && item.row?.id && isGitMemoryRow(item.row))
+    .map((item) => String(item.row!.id)));
+
+  let seen = 0, inserted = 0, conflicts = 0, replaced = 0, skippedGit = 0;
+  const seenByTable: Record<string, number> = {};
+  const insertedByTable: Record<string, number> = {};
   const conflictDetails: Array<{ table: string; id: unknown; action: string }> = [];
   for (const item of items) {
     if (!TABLES.includes(item.type as any) || !item.row?.id) continue;
     seen++;
+    seenByTable[item.type] = (seenByTable[item.type] ?? 0) + 1;
+    const skipGit = includeGit === false && (
+      (item.type === 'memories' && isGitMemoryRow(item.row))
+      || (item.type === 'memory_links' && (gitMemoryIds.has(String(item.row.from_memory_id ?? '')) || gitMemoryIds.has(String(item.row.to_memory_id ?? ''))))
+      || (item.type === 'memory_entities' && gitMemoryIds.has(String(item.row.memory_id ?? '')))
+    );
+    if (skipGit) {
+      skippedGit++;
+      continue;
+    }
     const table = item.type;
     const id = item.row.id;
     const exists = db.prepare(`SELECT id FROM ${table} WHERE id=?`).get(id as any);
@@ -146,9 +180,10 @@ export function importMemory(db: Db, input: { path: string; mode?: MemoryImportM
       const placeholders = cols.map(() => '?').join(',');
       db.prepare(`INSERT INTO ${table}(${cols.join(',')}) VALUES(${placeholders})`).run(...cols.map((c) => item.row![c]) as any[]);
       inserted++;
+      insertedByTable[table] = (insertedByTable[table] ?? 0) + 1;
     }
   }
   const rebuiltFts = mode === 'merge';
   if (rebuiltFts) rebuildFts(db);
-  return { mode, on_conflict: onConflict, seen, inserted, conflicts, replaced, rebuilt_fts: rebuiltFts, conflict_details: conflictDetails };
+  return { mode, on_conflict: onConflict, seen, inserted, conflicts, replaced, skipped_git: skippedGit, includes_git: includeGit, seen_by_table: seenByTable, inserted_by_table: insertedByTable, rebuilt_fts: rebuiltFts, conflict_details: conflictDetails };
 }
