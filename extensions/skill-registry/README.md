@@ -20,7 +20,21 @@ Agent-dir development version of a future Pi skill registry extension. It genera
 - Adds generated registry files to an existing `.gitignore` when missing; it does not create `.gitignore` if none exists.
 - Exposes an LLM-callable tool and human slash command.
 
+### Enable gate
+
+The extension only registers when `.pi/skill-registry.config.json` exists with `{"enabled": true}` in project scope. Missing or invalid config defaults to disabled.
+
+Example config:
+
+```json
+{
+  "enabled": true
+}
+```
+
 The registry is an index for routing. The source of truth remains each `SKILL.md`.
+
+A dedicated agent skill for configuring this extension is available as `skill-registry-configuration`.
 
 ## Tool
 

@@ -59,21 +59,29 @@ export function findMemoryConfigPath(cwd: string): string | undefined {
   }
 }
 
+function buildBaseConfig(): Omit<ProjectMemoryConfig, 'project_name' | 'aliases' | 'default_scope' | 'warnings' | 'path'> {
+  return {
+    enabled: false,
+    debug: false,
+    session_end: { semantic: false },
+    import: {},
+    backups: { include_sessions: false },
+    cloud: {
+      enabled: false,
+      organization_id: null,
+      actor_id: null,
+      remote_project_id: null,
+      url_env: DEFAULT_CLOUD_URL_ENV,
+      token_env: DEFAULT_CLOUD_TOKEN_ENV,
+    },
+  };
+}
+
 export function readProjectMemoryConfig(cwd: string, env: NodeJS.ProcessEnv = process.env): ProjectMemoryConfig {
   const warnings: string[] = [];
   const configPath = findMemoryConfigPath(cwd);
-  const baseCloud = {
-    enabled: false,
-    organization_id: null,
-    actor_id: null,
-    remote_project_id: null,
-    url_env: DEFAULT_CLOUD_URL_ENV,
-    token_env: DEFAULT_CLOUD_TOKEN_ENV,
-  };
-  const baseSessionEnd = { semantic: false };
-  const baseImport = {};
-  const baseBackups = { include_prompts: false };
-  if (!configPath) return { debug: false, session_end: baseSessionEnd, import: baseImport, backups: baseBackups, cloud: baseCloud, warnings };
+  const base = buildBaseConfig();
+  if (!configPath) return { ...base, warnings };
 
   try {
     const raw = JSON.parse(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
@@ -81,15 +89,52 @@ export function readProjectMemoryConfig(cwd: string, env: NodeJS.ProcessEnv = pr
     const sessionEndRaw = (raw.session_end && typeof raw.session_end === 'object') ? raw.session_end as Record<string, unknown> : {};
     const importRaw = (raw.import && typeof raw.import === 'object') ? raw.import as Record<string, unknown> : {};
     const backupsRaw = (raw.backups && typeof raw.backups === 'object') ? raw.backups as Record<string, unknown> : {};
+
     if (raw.import !== undefined && (typeof raw.import !== 'object' || raw.import === null)) warnings.push('Ignoring invalid import config; expected object.');
     if (raw.backups !== undefined && (typeof raw.backups !== 'object' || raw.backups === null)) warnings.push('Ignoring invalid backups config; expected object.');
+    if (raw.cloud !== undefined && (typeof raw.cloud !== 'object' || raw.cloud === null)) warnings.push('Ignoring invalid cloud config; expected object.');
+
     if ('token' in cloudRaw) warnings.push('Do not store cloud.token in .pi/memory.json; use token_env.');
+
     const importMode = importRaw.mode === 'merge' || importRaw.mode === 'dry_run' ? importRaw.mode : undefined;
     const importOnConflict = importRaw.on_conflict === 'keep_local' || importRaw.on_conflict === 'keep_imported' || importRaw.on_conflict === 'mark_conflict' ? importRaw.on_conflict : undefined;
     if (importRaw.mode !== undefined && importMode === undefined) warnings.push('Ignoring invalid import.mode in .pi/memory.json; expected "merge" or "dry_run".');
     if (importRaw.on_conflict !== undefined && importOnConflict === undefined) warnings.push('Ignoring invalid import.on_conflict in .pi/memory.json; expected "keep_local", "keep_imported", or "mark_conflict".');
+
     const backupPath = normalizeRelativeBackupPath(backupsRaw.path, warnings);
+
+    const includeSessionsRaw = backupsRaw.include_sessions;
+    const hasLegacyIncludePrompts = backupsRaw.include_prompts;
+    const includeSessionsWasSpecified = includeSessionsRaw === true || includeSessionsRaw === false;
+    const legacySessions = typeof hasLegacyIncludePrompts === 'boolean' ? hasLegacyIncludePrompts : undefined;
+
+    if (includeSessionsRaw !== undefined && !includeSessionsWasSpecified) {
+      warnings.push('Ignoring invalid backups.include_sessions in .pi/memory.json; expected boolean.');
+    }
+
+    if ('include_sessions' in backupsRaw && 'include_prompts' in backupsRaw && includeSessionsWasSpecified) {
+      warnings.push('Ignoring backups.include_prompts in .pi/memory.json because backups.include_sessions is authoritative.');
+    }
+
+    const includeSessions = includeSessionsWasSpecified
+      ? includeSessionsRaw as boolean
+      : legacySessions === true
+        ? true
+        : false;
+
+    if (!includeSessionsWasSpecified && typeof legacySessions === 'boolean') {
+      if (legacySessions) warnings.push('backups.include_prompts in .pi/memory.json is deprecated; use backups.include_sessions instead.');
+      else warnings.push('Ignoring false value of legacy backups.include_prompts in .pi/memory.json; use backups.include_sessions for explicit control.');
+    }
+
+    const rawEnabled = raw.enabled;
+    const enabled = rawEnabled === true;
+    if (rawEnabled !== undefined && typeof rawEnabled !== 'boolean') {
+      warnings.push('Ignoring invalid enabled flag in .pi/memory.json; expected true or false.');
+    }
+
     const cfg: ProjectMemoryConfig = {
+      enabled,
       project_name: typeof raw.project_name === 'string' ? raw.project_name : undefined,
       aliases: Array.isArray(raw.aliases) ? raw.aliases.filter((x): x is string => typeof x === 'string') : undefined,
       default_scope: raw.default_scope === 'general' || raw.default_scope === 'project' || raw.default_scope === 'global' ? raw.default_scope : undefined,
@@ -103,7 +148,7 @@ export function readProjectMemoryConfig(cwd: string, env: NodeJS.ProcessEnv = pr
       },
       backups: {
         path: backupPath,
-        include_prompts: backupsRaw.include_prompts === true,
+        include_sessions: includeSessions,
       },
       cloud: {
         enabled: cloudRaw.enabled === true,
@@ -116,6 +161,7 @@ export function readProjectMemoryConfig(cwd: string, env: NodeJS.ProcessEnv = pr
       warnings,
       path: configPath,
     };
+
     if (cfg.cloud.enabled) {
       if (!cfg.cloud.organization_id) warnings.push('cloud.organization_id is required when cloud.enabled=true.');
       if (!cfg.cloud.actor_id) warnings.push('cloud.actor_id is required when cloud.enabled=true.');
@@ -123,9 +169,10 @@ export function readProjectMemoryConfig(cwd: string, env: NodeJS.ProcessEnv = pr
       if (!env[cfg.cloud.url_env]) warnings.push(`Missing cloud URL env var: ${cfg.cloud.url_env}.`);
       if (!env[cfg.cloud.token_env]) warnings.push(`Missing cloud token env var: ${cfg.cloud.token_env}.`);
     }
+
     return cfg;
   } catch (error) {
     warnings.push(`Invalid .pi/memory.json: ${error instanceof Error ? error.message : String(error)}`);
-    return { debug: false, session_end: baseSessionEnd, import: baseImport, backups: baseBackups, cloud: baseCloud, warnings, path: configPath };
+    return { ...buildBaseConfig(), warnings, path: configPath };
   }
 }

@@ -19,7 +19,7 @@ beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-memory-advanc
 afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
 function db() { const d = openMemoryDb(':memory:'); migrate(d); return d; }
-function project(dir = tmp) { fs.mkdirSync(path.join(dir, '.pi'), { recursive: true }); fs.writeFileSync(path.join(dir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Advanced App' })); return resolveMemoryContext(dir, os.homedir(), {}); }
+function project(dir = tmp) { fs.mkdirSync(path.join(dir, '.pi'), { recursive: true }); fs.writeFileSync(path.join(dir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Advanced App', enabled: true })); return resolveMemoryContext(dir, os.homedir(), {}); }
 
 function createMemoryBackup(): string {
   const source = db(), c = project(path.join(tmp, 'backup-source'));
@@ -33,7 +33,7 @@ async function runMemoryExportTool(memoryConfig: Record<string, unknown> = {}, p
   const dbPath = path.join(tmp, `export-target-${Date.now()}-${Math.random()}.sqlite`);
   const projectDir = path.join(tmp, `export-project-${Date.now()}-${Math.random()}`);
   fs.mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
-  fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Export Tool App', ...memoryConfig }));
+  fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Export Tool App', enabled: true, ...memoryConfig }));
   const d = openMemoryDb(dbPath);
   migrate(d);
   const context = resolveMemoryContext(projectDir, os.homedir(), {});
@@ -53,7 +53,7 @@ async function runMemoryImportTool(memoryConfig: Record<string, unknown>, params
   const dbPath = path.join(tmp, `target-${Date.now()}-${Math.random()}.sqlite`);
   const projectDir = path.join(tmp, `import-project-${Date.now()}-${Math.random()}`);
   fs.mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
-  fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Import Tool App', ...memoryConfig }));
+  fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Import Tool App', enabled: true, ...memoryConfig }));
   if (typeof params.path === 'string') {
     const backupPath = path.join(projectDir, '.pi', 'mempry-backups', 'memory-backup.jsonl');
     fs.mkdirSync(path.dirname(backupPath), { recursive: true });
@@ -73,7 +73,7 @@ async function lifecycleHarness(memoryConfig: Record<string, unknown> = {}) {
   const dbPath = path.join(tmp, 'lifecycle.sqlite');
   const projectDir = path.join(tmp, 'project');
   fs.mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
-  fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Lifecycle Advanced', ...memoryConfig }));
+  fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Lifecycle Advanced', enabled: true, ...memoryConfig }));
   const old = process.env.PI_MEMORY_DB_PATH;
   process.env.PI_MEMORY_DB_PATH = dbPath;
   const handlers = new Map<string, Function>();
@@ -708,17 +708,24 @@ describe('semantic profile, consolidation links, and entities', () => {
     expect(fs.existsSync(details.path)).toBe(true);
   });
 
-  it('uses configured backup include_prompts when exporting automatically', async () => {
-    const { details } = await runMemoryExportTool({ backups: { include_prompts: true } }, { include_prompts: false });
+  it('uses explicit include_sessions to override configured include_sessions', async () => {
+    const { details } = await runMemoryExportTool({ backups: { include_sessions: true } }, { include_sessions: false });
     const text = fs.readFileSync(details.path, 'utf8');
-    expect(JSON.parse(text.split('\n')[0]).includes_prompts).toBe(true);
+    expect(JSON.parse(text.split('\n')[0]).includes_sessions).toBe(false);
+    expect(text).not.toContain('configured backup prompt export');
+  });
+
+  it('uses configured include_sessions when the tool param is omitted', async () => {
+    const { details } = await runMemoryExportTool({ backups: { include_sessions: true } });
+    const text = fs.readFileSync(details.path, 'utf8');
+    expect(JSON.parse(text.split('\n')[0]).includes_sessions).toBe(true);
     expect(text).toContain('configured backup prompt export');
   });
 
-  it('keeps prompt export disabled by default', async () => {
+  it('keeps session/prompt export disabled by default', async () => {
     const { details } = await runMemoryExportTool();
     const text = fs.readFileSync(details.path, 'utf8');
-    expect(JSON.parse(text.split('\n')[0]).includes_prompts).toBe(false);
+    expect(JSON.parse(text.split('\n')[0]).includes_sessions).toBe(false);
     expect(text).not.toContain('configured backup prompt export');
   });
 
@@ -751,7 +758,7 @@ describe('semantic profile, consolidation links, and entities', () => {
     addSessionPrompt(d, { session_id: bSession.id, role: 'user', prompt: 'app b prompt', prompt_index: 1 }, cb);
 
     const out = path.join(tmp, 'project-a-backup.jsonl');
-    exportMemory(d, { path: out, context: ca, include_prompts: true });
+    exportMemory(d, { path: out, context: ca, include_sessions: true });
     const rows = fs.readFileSync(out, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
     const exported = rows.filter((row) => row.row).map((row) => row.row);
 

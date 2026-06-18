@@ -79,7 +79,7 @@ Good activation triggers:
 - You need persistent project context that is not already present in startup brain context or the conversation.
 - You need to decide whether something should be saved to memory.
 - You need to update or inspect `project_profile`.
-- You need to migrate, consolidate, import, export, or audit memory.
+- You need to consolidate, import, export, or audit memory.
 - The user asks about remembered context, previous decisions, project state, or todos.
 - You are ending substantial work and need to decide what, if anything, to save.
 
@@ -98,7 +98,7 @@ Ask or stop when any of these are unresolved and material:
 - whether a memory would contradict or supersede an existing active memory;
 - whether a large `project_profile` rewrite is acceptable;
 - whether a policy change that affects future agents is confirmed by the user;
-- whether imported/consolidated/migrated memory candidates are safe to apply after dry-run.
+- whether imported or consolidated memory candidates are safe to apply after dry-run.
 
 ## Execution Steps
 
@@ -239,13 +239,15 @@ Use similarity mode cautiously:
 {"similarity": true, "dry_run": true}
 ```
 
-## Migration policy
+## Legacy identity caveat
 
-Use migration when project memories may be split across aliases from folder, git remote, git root, or `.pi/memory.json`.
+Current memory import/export preserves the project identity stored in exported rows. The extension no longer provides a dedicated project-canonical migration tool.
 
-1. Run dry-run first: `memory_migrate_project(dry_run=true)` or `/memory-migrate-project`.
-2. Verify the canonical project name and project id.
-3. Apply only if canonical identity is correct: `/memory-migrate-project --apply`.
+If imported backups contain rows from an old alias or unwanted project identity:
+
+1. Run import dry-run first and inspect the row counts/conflicts.
+2. Prefer re-exporting from the intended canonical project or resetting/clearing local memory before merge when the project intentionally starts fresh.
+3. Do not assume import rewrites `project_id` or `project_name` automatically.
 
 Use the same dry-run-first rule for imports with possible conflicts: inspect the dry-run/conflict report before merge/apply.
 

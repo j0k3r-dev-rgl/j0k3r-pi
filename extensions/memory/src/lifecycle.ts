@@ -55,7 +55,7 @@ function buildMemoryInstructions(context: any): string {
     '- Write memory titles, summaries, contents, and tags in english lowercase to improve retrieval consistency.',
     '- Good memories are durable, actionable, atomic, recoverable, current, and non-sensitive.',
     '- Memory content should include the idea type, context, concrete details, implications for future agents, and source when useful.',
-    '- Load the `persistent-memory` skill when you need detailed memory operating policy and it is not already loaded in the conversation: substantial tasks, deciding what to save, project_profile updates, consolidation, migration, import/export, or session-end summaries.',
+    '- Load the `persistent-memory` skill when you need detailed memory operating policy and it is not already loaded in the conversation: substantial tasks, deciding what to save, project_profile updates, consolidation, import/export, or session-end summaries.',
     '- At the end of substantial work, summarize what changed, decisions made, progress, validations, open todos, and reusable learnings.',
     '- For user-requested commits, precommit checkpoint memories must summarize what was accomplished, why it matters, decisions/tradeoffs, validations, open todos, and risks; do not save only changed files or timestamps.',
     '- Do not store secrets, tokens, passwords, private keys, or low-value temporary details.',

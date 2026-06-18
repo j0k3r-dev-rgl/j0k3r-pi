@@ -41,8 +41,26 @@ async function createSkill(filePath: string, name: string, description: string) 
   await writeFile(filePath, body, 'utf8');
 }
 
+async function withTempCwd<T>(runner: (cwd: string) => Promise<T>, enabled = true): Promise<T> {
+  const root = await mkdtemp(path.join(tmpdir(), 'skill-registry-extension-test-'));
+  const cwd = path.join(root, 'project');
+  await mkdir(cwd, { recursive: true });
+  await mkdir(path.join(cwd, '.pi'), { recursive: true });
+  if (enabled) {
+    await writeFile(path.join(cwd, '.pi/skill-registry.config.json'), JSON.stringify({ enabled: true }), 'utf8');
+  }
+  const originalCwd = process.cwd();
+  process.chdir(cwd);
+  try {
+    return await runner(cwd);
+  } finally {
+    process.chdir(originalCwd);
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 describe('skill registry extension', () => {
-  it('registers command and llm-callable tools', () => {
+  it('registers command and llm-callable tools when enabled', () => {
     const tools: any[] = [];
     const commands: Record<string, any> = {};
     const pi = {
@@ -50,13 +68,15 @@ describe('skill registry extension', () => {
       registerCommand: vi.fn((name: string, command: any) => { commands[name] = command; }),
     };
 
-    skillRegistryExtension(pi);
+    return withTempCwd(async () => {
+      skillRegistryExtension(pi);
 
-    expect(pi.registerTool).toHaveBeenCalledWith(expect.objectContaining({ name: 'skill_registry_generate' }));
-    expect(pi.registerTool).toHaveBeenCalledWith(expect.objectContaining({ name: 'skill_registry_resolve' }));
-    expect(pi.registerCommand).toHaveBeenCalledWith('skill-registry', expect.objectContaining({ description: expect.any(String), handler: expect.any(Function) }));
-    expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(['skill_registry_generate', 'skill_registry_resolve']));
-    expect(commands['skill-registry']).toBeTruthy();
+      expect(pi.registerTool).toHaveBeenCalledWith(expect.objectContaining({ name: 'skill_registry_generate' }));
+      expect(pi.registerTool).toHaveBeenCalledWith(expect.objectContaining({ name: 'skill_registry_resolve' }));
+      expect(pi.registerCommand).toHaveBeenCalledWith('skill-registry', expect.objectContaining({ description: expect.any(String), handler: expect.any(Function) }));
+      expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(['skill_registry_generate', 'skill_registry_resolve']));
+      expect(commands['skill-registry']).toBeTruthy();
+    });
   });
 
   it('registers resolver tool with read-before-acting guidance', async () => {
@@ -67,10 +87,8 @@ describe('skill registry extension', () => {
       registerCommand: vi.fn((name: string, command: any) => { commands[name] = command; }),
     };
 
-    const root = await mkdtemp(path.join(tmpdir(), 'skill-registry-extension-test-'));
-    try {
-      const cwd = path.join(root, 'project');
-      const homeDir = path.join(root, 'home');
+    await withTempCwd(async (cwd) => {
+      const homeDir = path.join(path.dirname(cwd), 'home');
       await createSkill(path.join(cwd, '.pi/skills/basic/SKILL.md'), 'resolver-test', 'routing test skill');
 
       skillRegistryExtension(pi);
@@ -93,9 +111,7 @@ describe('skill registry extension', () => {
       expect(result?.details?.matches?.[0]?.read_before_acting).toContain('Read .pi/skills/basic/SKILL.md before acting');
       expect(result?.details?.guidance?.join(' ')).toContain('Read');
       expect(commands['skill-registry']).toBeTruthy();
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
+    });
   });
 
   it('renders resolver results compactly until native tool expansion is enabled', async () => {
@@ -105,10 +121,8 @@ describe('skill registry extension', () => {
       registerCommand: vi.fn(),
     };
 
-    const root = await mkdtemp(path.join(tmpdir(), 'skill-registry-extension-test-'));
-    try {
-      const cwd = path.join(root, 'project');
-      const homeDir = path.join(root, 'home');
+    await withTempCwd(async (cwd) => {
+      const homeDir = path.join(path.dirname(cwd), 'home');
       await createSkill(path.join(cwd, '.pi/skills/basic/SKILL.md'), 'resolver-test', 'routing test skill');
 
       skillRegistryExtension(pi);
@@ -132,8 +146,21 @@ describe('skill registry extension', () => {
       expect(expanded).toContain('.pi/skills/basic/SKILL.md');
       expect(expanded).toContain('reasons:');
       expect(expanded).toContain('Read .pi/skills/basic/SKILL.md before acting');
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
+    });
+  });
+
+  it('is disabled by default when config is missing', () => {
+    const tools: any[] = [];
+    const commands: Record<string, any> = {};
+    const pi = {
+      registerTool: vi.fn((tool: any) => tools.push(tool)),
+      registerCommand: vi.fn((name: string, command: any) => { commands[name] = command; }),
+    };
+
+    return withTempCwd(async () => {
+      skillRegistryExtension(pi);
+      expect(tools).toHaveLength(0);
+      expect(commands).toEqual({});
+    }, false);
   });
 });

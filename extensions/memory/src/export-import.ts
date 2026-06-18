@@ -30,17 +30,22 @@ function contextWhere(context: ResolvedContext | undefined, alias: string): { sq
   return { sql: `${alias}.scope = ?`, args: [context.scope] };
 }
 
-function exportRows(db: Db, table: TableName, input: { include_archived?: boolean; include_prompts?: boolean; context?: ResolvedContext }): Record<string, unknown>[] {
+function exportRows(
+  db: Db,
+  table: TableName,
+  input: { include_archived?: boolean; include_sessions?: boolean; context?: ResolvedContext },
+): Record<string, unknown>[] {
   const scoped = contextWhere(input.context, table);
   if (table === 'memories') {
     const statusWhere = input.include_archived === false ? ' AND status = \'active\'' : '';
     return db.prepare(`SELECT * FROM memories WHERE ${scoped.sql}${statusWhere} ORDER BY id`).all(...scoped.args as any[]) as Record<string, unknown>[];
   }
   if (table === 'memory_sessions') {
+    if (input.include_sessions !== true) return [];
     return db.prepare(`SELECT * FROM memory_sessions WHERE ${scoped.sql} ORDER BY id`).all(...scoped.args as any[]) as Record<string, unknown>[];
   }
   if (table === 'memory_session_prompts') {
-    if (input.include_prompts !== true) return [];
+    if (input.include_sessions !== true) return [];
     const sessionScoped = contextWhere(input.context, 's');
     return db.prepare(`SELECT p.* FROM memory_session_prompts p JOIN memory_sessions s ON s.id = p.session_id WHERE ${sessionScoped.sql} ORDER BY p.id`).all(...sessionScoped.args as any[]) as Record<string, unknown>[];
   }
@@ -54,7 +59,7 @@ function exportRows(db: Db, table: TableName, input: { include_archived?: boolea
   return db.prepare(`SELECT e.* FROM memory_entities e JOIN memories m ON m.id = e.memory_id WHERE ${memoryScoped.sql} ORDER BY e.id`).all(...memoryScoped.args as any[]) as Record<string, unknown>[];
 }
 
-export function exportMemory(db: Db, input: { path?: string; format?: 'jsonl' | 'sqlite'; include_archived?: boolean; include_prompts?: boolean; context?: ResolvedContext } = {}) {
+export function exportMemory(db: Db, input: { path?: string; format?: 'jsonl' | 'sqlite'; include_archived?: boolean; include_sessions?: boolean; context?: ResolvedContext } = {}) {
   const outPath = input.path ?? path.resolve(process.cwd(), '.pi', 'mempry-backups', 'memory-backup.jsonl');
   if (input.format === 'sqlite') throw new Error('sqlite export is reserved for future implementation; use jsonl.');
   fs.mkdirSync(path.dirname(outPath), { recursive: true, mode: 0o700 });
@@ -72,8 +77,18 @@ export function exportMemory(db: Db, input: { path?: string; format?: 'jsonl' | 
     (acc.rows[record.type] ??= {})[record.id] = record.hash;
     return acc;
   }, { mirror: true, rows: {} as Record<TableName, Record<string, string>> });
+  const includeSessions = input.include_sessions === true;
   const lines = [
-    JSON.stringify({ type: 'meta', format: BACKUP_FORMAT, version: BACKUP_VERSION, schema_version: SCHEMA_VERSION, brain_id: getMeta(db, 'brain_id'), exported_at: nowIso(), includes_prompts: input.include_prompts === true, mirror: true }),
+    JSON.stringify({
+      type: 'meta',
+      format: BACKUP_FORMAT,
+      version: BACKUP_VERSION,
+      schema_version: SCHEMA_VERSION,
+      brain_id: getMeta(db, 'brain_id'),
+      exported_at: nowIso(),
+      includes_sessions: includeSessions,
+      mirror: true,
+    }),
     JSON.stringify({ type: 'manifest', ...manifest }),
     ...records.map((record) => JSON.stringify(record)),
   ];
@@ -112,7 +127,10 @@ export function importMemory(db: Db, input: { path: string; mode?: MemoryImportM
     if (exists) {
       conflicts++;
       let action = 'kept_local';
-      if (mode === 'merge' && onConflict === 'mark_conflict' && 'sync_status' in item.row) { db.prepare(`UPDATE ${table} SET sync_status='conflict' WHERE id=?`).run(id as any); action = 'marked_conflict'; }
+      if (mode === 'merge' && onConflict === 'mark_conflict' && 'sync_status' in item.row) {
+        db.prepare(`UPDATE ${table} SET sync_status='conflict' WHERE id=?`).run(id as any);
+        action = 'marked_conflict';
+      }
       if (mode === 'merge' && onConflict === 'keep_imported') {
         action = 'replaced_with_imported';
         const cols = Object.keys(item.row);

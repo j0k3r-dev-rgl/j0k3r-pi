@@ -32,10 +32,11 @@ export interface ProjectImportConfig {
 
 export interface ProjectBackupsConfig {
   path?: string;
-  include_prompts: boolean;
+  include_sessions: boolean;
 }
 
 export interface ProjectMemoryConfig {
+  enabled: boolean;
   project_name?: string;
   aliases?: string[];
   default_scope?: MemoryScope;

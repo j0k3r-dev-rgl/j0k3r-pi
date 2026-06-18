@@ -40,6 +40,7 @@ Minimal config:
 
 ```json
 {
+  "enabled": true,
   "project_name": "j0k3r-pi"
 }
 ```
@@ -59,9 +60,10 @@ Recommended project config for automatic project-scoped mirror backups and safe 
     "mode": "merge",
     "on_conflict": "keep_local"
   },
+  "enabled": true,
   "backups": {
     "path": ".pi/memory-backups/memory-backup.jsonl",
-    "include_prompts": true
+    "include_sessions": true
   },
   "cloud": {
     "enabled": false
@@ -69,7 +71,7 @@ Recommended project config for automatic project-scoped mirror backups and safe 
 }
 ```
 
-Use `backups.include_prompts=true` only when the project intentionally wants prompt audit records in backups.
+Use `backups.include_sessions=true` only when the project intentionally wants session and session-prompt export/import. Prompt rows are always stored locally for audit as part of sessions.
 
 Full supported shape:
 
@@ -88,7 +90,7 @@ Full supported shape:
   },
   "backups": {
     "path": ".pi/mempry-backups/memory-backup.jsonl",
-    "include_prompts": false
+    "include_sessions": false
   },
   "cloud": {
     "enabled": false,
@@ -106,14 +108,15 @@ Full supported shape:
 | Field | Default | Description |
 |---|---:|---|
 | `project_name` | inferred | Canonical project name. If present, it wins over git/folder inference. |
-| `aliases` | `[]` | Previous project names used by migration helpers. |
+| `aliases` | `[]` | Optional legacy project-name aliases kept for compatibility. |
 | `default_scope` | parsed only | Reserved config field for `general`, `project`, or `global`; currently parsed for compatibility but not used by context resolution. |
 | `debug` | `false` | Enables local lifecycle debug logging to `memory-session-debug.log` in the current working directory. Logs session IDs/files and lifecycle events, never prompt text. Keep disabled unless auditing session behavior. |
 | `session_end.semantic` | `false` | Enables model-backed shutdown summary/profile update. Off by default for fast exit. |
 | `import.mode` | `dry_run` | Default `memory_import` mode when the tool call omits `mode`. Valid values: `dry_run`, `merge`. Invalid config values are ignored with a warning. |
 | `import.on_conflict` | `mark_conflict` | Default `memory_import` conflict policy when omitted. Valid values: `keep_local`, `keep_imported`, `mark_conflict`. Invalid config values are ignored with a warning. |
 | `backups.path` | `.pi/mempry-backups/memory-backup.jsonl` | Relative path, resolved from the current working directory, for automatic import/export mirror backups. Absolute paths and paths escaping the workdir are rejected with a warning. |
-| `backups.include_prompts` | `false` | When `true`, automatic `memory_export` includes `memory_session_prompts` for the current project. Prompts are audit data, so this is opt-in. |
+| `backups.include_sessions` | `false` | When `true`, automatic `memory_export` includes `memory_sessions` and linked `memory_session_prompts` for the current project. Session prompts are audit data, so this is opt-in. |
+| `enabled` | `false` | Enable memory extension registration for this project when true. |
 | `cloud.enabled` | `false` | Marks project rows as cloud-sync pending and enables cloud readiness checks. |
 | `cloud.organization_id` | `null` | Required only when cloud is enabled. |
 | `cloud.actor_id` | `null` | Required only when cloud is enabled. |
@@ -130,7 +133,7 @@ Never store cloud tokens directly in `.pi/memory.json`.
 3. Run `/reload` or restart Pi after changing `.pi/memory.json` or extension code.
 4. Use `memory_context` to verify the resolved project identity.
 5. Run `memory_export` from the project cwd. The agent does not need to pass a path.
-6. Inspect the backup meta if needed: `format` should be `pi-memory-backup`, `version` should be `2`, `mirror` should be `true`, and `includes_prompts` should match `backups.include_prompts`.
+6. Inspect the backup meta if needed: `format` should be `pi-memory-backup`, `version` should be `2`, `mirror` should be `true`, and `includes_sessions` should match `backups.include_sessions`.
 
 A dedicated agent skill for this is available as `memory-configuration`.
 
@@ -215,7 +218,6 @@ Shutdown behavior:
 | `memory_project_profile` | Get/ensure/update the current project profile. |
 | `memory_consolidate` | Find or apply duplicate-memory consolidation. Dry-run defaults to true. |
 | `memory_sync_status` | Show local sync-aware status counts. |
-| `memory_migrate_project` | Dry-run/apply migration to the current canonical project identity. |
 | `memory_export` | Export memory to JSONL. |
 | `memory_import` | Import memory from JSONL. Dry-run by default. |
 
@@ -231,7 +233,6 @@ Shutdown behavior:
 | `/memory-sync-status` | Show counts by sync status. |
 | `/memory-consolidate [kind]` | Dry-run duplicate detection. |
 | `/memory-project-profile` | Ensure and show current project profile. |
-| `/memory-migrate-project [--apply]` | Dry-run/apply project canonical migration. |
 | `/memory-browser` | Open the interactive memory browser. |
 
 ## Memory browser
@@ -261,7 +262,7 @@ Project override:
 {
   "backups": {
     "path": "relative/path/to/memory-backup.jsonl",
-    "include_prompts": true
+    "include_sessions": true
   }
 }
 ```
@@ -270,11 +271,12 @@ Notes:
 
 - `backups.path` must be relative to the current working directory. Absolute paths and `..` escapes are ignored with warnings.
 - `memory_export` writes a mirror JSONL backup with a `meta` record, `manifest`, and hashed row records.
-- Export is scoped to the current memory context/project: project backups contain only that project's memories, sessions, prompts when included, and related entities/links.
+- Export is scoped to the current memory context/project: project backups contain only that project's memories, sessions, prompts (when sessions are included), and related entities/links.
 - Export is mirror-style: the file is rewritten from current scoped DB state, so scoped rows removed locally are removed from the backup too.
 - `memory_export` defaults to JSONL and includes archived memories unless `include_archived=false` is passed.
 - SQLite export is reserved for future implementation.
-- Prompt rows are excluded unless `backups.include_prompts=true` or the tool call explicitly passes `include_prompts=true`.
+- Session prompt rows are included only when `backups.include_sessions=true` or the tool call explicitly passes `include_sessions=true`.
+- Legacy support: if only `backups.include_prompts` exists, it is used as fallback with a deprecation warning.
 - Import defaults to `dry_run` and validates backup format/schema version.
 - Projects can override omitted import defaults in `.pi/memory.json`, for example:
 
@@ -295,7 +297,7 @@ Notes:
 - Do not store secrets, tokens, passwords, private keys, or raw logs.
 - Memory add, prompt capture, and session finish flows reject obvious secret-like content before storage.
 - `.pi/memory.json` must not contain cloud tokens.
-- Session prompts are audit records; include prompts in exports only intentionally.
+- Session prompts are audit records; include session exports only intentionally.
 - The extension writes the local DB outside the repository by default to avoid accidental commits.
 - Cloud sync is not implemented yet; cloud config currently affects status/readiness and initial sync metadata.
 

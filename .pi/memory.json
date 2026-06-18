@@ -1,20 +1,21 @@
 {
-	"project_name": "j0k3r-pi",
-	"aliases": [],
-	"default_scope": "project",
-	"debug": false,
-	"session_end": {
-		"semantic": false
-	},
-	"import": {
-		"mode": "merge",
-		"on_conflict": "keep_local"
-	},
-	"backups": {
-		"path": ".pi/memory-backups/memory-backup.jsonl",
-		"include_prompts": true
-	},
-	"cloud": {
-		"enabled": false
-	}
+  "enabled": true,
+  "project_name": "j0k3r-pi",
+  "aliases": [],
+  "default_scope": "project",
+  "debug": false,
+  "session_end": {
+    "semantic": false
+  },
+  "import": {
+    "mode": "merge",
+    "on_conflict": "keep_local"
+  },
+  "backups": {
+    "path": ".pi/memory-backups/memory-backup.jsonl",
+    "include_sessions": true
+  },
+  "cloud": {
+    "enabled": false
+  }
 }

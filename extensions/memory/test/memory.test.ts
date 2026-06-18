@@ -18,7 +18,6 @@ import { autoUpdateProjectProfileFromSession, ensureProjectProfile, updateProjec
 import { consolidateMemories } from '../src/consolidation.js';
 import { exportMemory, importMemory } from '../src/export-import.js';
 import { getSyncStatus } from '../src/sync-status.js';
-import { migrateProjectCanonicals } from '../src/project-migration.js';
 import { renderMemoryContextMessage, renderMemoryToolResult } from '../src/render.js';
 
 let tmp: string;
@@ -26,27 +25,33 @@ beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-memory-test-'
 afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
 function db() { const d = openMemoryDb(':memory:'); migrate(d); return d; }
-function project(dir = tmp) { fs.mkdirSync(path.join(dir, '.pi'), { recursive: true }); fs.writeFileSync(path.join(dir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'My App' })); return resolveMemoryContext(dir, os.homedir(), {}); }
+function project(dir = tmp) { fs.mkdirSync(path.join(dir, '.pi'), { recursive: true }); fs.writeFileSync(path.join(dir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'My App', enabled: true })); return resolveMemoryContext(dir, os.homedir(), {}); }
 
 describe('extension setup', () => {
   it('exports a pi extension function and registers tools/commands/renderers', () => {
     const tools: string[] = [], commands: string[] = [], events: string[] = [], renderers: string[] = [];
+    fs.mkdirSync(path.join(tmp, '.pi'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Test App', enabled: true }));
+    const oldCwd = process.cwd();
     const old = process.env.PI_MEMORY_DB_PATH;
     process.env.PI_MEMORY_DB_PATH = path.join(tmp, 'memory.sqlite');
-    extension({ registerTool: (t: any) => tools.push(t.name), registerCommand: (n: string) => commands.push(n), registerMessageRenderer: (n: string) => renderers.push(n), on: (n: string) => events.push(n) });
-    if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
-    expect(tools).toContain('memory_context');
-    expect(tools).toContain('memory_add');
-    expect(tools).toContain('memory_export');
-    expect(tools).toContain('memory_project_profile');
-    expect(tools).toContain('memory_consolidate');
-    expect(tools).toContain('memory_sync_status');
-    expect(tools).toContain('memory_migrate_project');
-    expect(commands).toContain('memory-status');
-    expect(commands).toContain('memory-sync-status');
-    expect(commands).toContain('memory-migrate-project');
-    expect(events).toContain('before_agent_start');
-    expect(renderers).toContain('memory-context');
+    process.chdir(tmp);
+    try {
+      extension({ registerTool: (t: any) => tools.push(t.name), registerCommand: (n: string) => commands.push(n), registerMessageRenderer: (n: string) => renderers.push(n), on: (n: string) => events.push(n) });
+      expect(tools).toContain('memory_context');
+      expect(tools).toContain('memory_add');
+      expect(tools).toContain('memory_export');
+      expect(tools).toContain('memory_project_profile');
+      expect(tools).toContain('memory_consolidate');
+      expect(tools).toContain('memory_sync_status');
+      expect(commands).toContain('memory-status');
+      expect(commands).toContain('memory-sync-status');
+      expect(events).toContain('before_agent_start');
+      expect(renderers).toContain('memory-context');
+    } finally {
+      process.chdir(oldCwd);
+      if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
+    }
   });
   it('memory context messages render compact by default and expand full agent instructions on demand', () => {
     const content = [
@@ -84,11 +89,29 @@ describe('extension setup', () => {
     expect(expanded).toContain('ctrl+o collapse');
   });
 
+  it('does not register when disabled from config', () => {
+    const tools: string[] = [], commands: string[] = [];
+    const oldCwd = process.cwd();
+    const old = process.env.PI_MEMORY_DB_PATH;
+    try {
+      fs.mkdirSync(path.join(tmp, '.pi'), { recursive: true });
+      fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Disabled App', enabled: false }));
+      process.chdir(tmp);
+      process.env.PI_MEMORY_DB_PATH = path.join(tmp, 'disabled-memory.sqlite');
+      extension({ registerTool: (t: any) => tools.push(t.name), registerCommand: (n: string) => commands.push(n), registerMessageRenderer: () => {}, on: () => {} });
+      expect(tools).toEqual([]);
+      expect(commands).toEqual([]);
+    } finally {
+      process.chdir(oldCwd);
+      if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
+    }
+  });
+
   it('startup memory context instructs the agent consistently with agent and persistent-memory policy', async () => {
     const dbPath = path.join(tmp, 'policy-context.sqlite');
     const projectDir = path.join(tmp, 'policy-project');
     fs.mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
-    fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Policy Project' }));
+    fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Policy Project', enabled: true }));
     const old = process.env.PI_MEMORY_DB_PATH;
     process.env.PI_MEMORY_DB_PATH = dbPath;
     const handlers = new Map<string, Function>();
@@ -230,10 +253,10 @@ describe('config', () => {
   });
   it('reads backup path config as a normalized relative path and rejects unsafe paths', () => {
     fs.mkdirSync(path.join(tmp, '.pi'));
-    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'X', backups: { path: 'custom//memory.jsonl', include_prompts: true } }));
+    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'X', backups: { path: 'custom//memory.jsonl', include_sessions: true } }));
     const cfg = readProjectMemoryConfig(tmp, {});
     expect(cfg.backups.path).toBe('custom/memory.jsonl');
-    expect(cfg.backups.include_prompts).toBe(true);
+    expect(cfg.backups.include_sessions).toBe(true);
     expect(resolveBackupPath(tmp, cfg.backups.path)).toBe(path.join(tmp, 'custom', 'memory.jsonl'));
 
     fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'X', backups: { path: '/tmp/memory.jsonl' } }));
@@ -241,6 +264,32 @@ describe('config', () => {
     expect(invalid.backups.path).toBeUndefined();
     expect(invalid.warnings.join('\n')).toContain('absolute paths are not allowed');
   });
+  it('supports legacy include_prompts as fallback for include_sessions with deprecation warning', () => {
+    fs.mkdirSync(path.join(tmp, '.pi'));
+    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'X', backups: { include_prompts: true } }));
+    const cfg = readProjectMemoryConfig(tmp, {});
+    expect(cfg.backups.include_sessions).toBe(true);
+    expect(cfg.warnings.join('\n')).toContain('deprecated');
+
+    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'X', backups: { include_sessions: false, include_prompts: true } }));
+    const cfgAuthoritative = readProjectMemoryConfig(tmp, {});
+    expect(cfgAuthoritative.backups.include_sessions).toBe(false);
+    expect(cfgAuthoritative.warnings.join('\n')).toContain('authoritative');
+  });
+  it('reads enabled flag defaults and validates non-boolean values', () => {
+    fs.mkdirSync(path.join(tmp, '.pi'));
+    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'X' }));
+    expect(readProjectMemoryConfig(tmp, {}).enabled).toBe(false);
+
+    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'X', enabled: true }));
+    expect(readProjectMemoryConfig(tmp, {}).enabled).toBe(true);
+
+    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'X', enabled: 'yes' }));
+    const invalid = readProjectMemoryConfig(tmp, {});
+    expect(invalid.enabled).toBe(false);
+    expect(invalid.warnings.join('\n')).toContain('Ignoring invalid enabled flag');
+  });
+
   it('reads import defaults and ignores invalid import config defensively', () => {
     fs.mkdirSync(path.join(tmp, '.pi'));
     fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'X', import: { mode: 'merge', on_conflict: 'keep_local' } }));
@@ -449,58 +498,25 @@ describe('profile/consolidation/export/sync', () => {
     expect(result.candidates.length).toBe(1);
     expect(result.applied.length).toBe(0);
   });
-  it('exports prompts only when explicitly requested and imports dry run', () => {
+  it('exports sessions (and session prompts) only when explicitly requested and imports dry run', () => {
     const d = db(), c = project();
     const s: any = startMemorySession(d, { title: 'Export' }, c);
     addSessionPrompt(d, { session_id: s.id, role: 'user', prompt: 'audit prompt text', prompt_index: 1 }, c);
-    const noPrompts = path.join(tmp, 'no-prompts.jsonl');
-    exportMemory(d, { path: noPrompts });
-    expect(fs.readFileSync(noPrompts, 'utf8')).not.toContain('audit prompt text');
-    const withPrompts = path.join(tmp, 'with-prompts.jsonl');
-    exportMemory(d, { path: withPrompts, include_prompts: true });
-    expect(fs.readFileSync(withPrompts, 'utf8')).toContain('audit prompt text');
-    expect(importMemory(db(), { path: withPrompts, mode: 'dry_run' }).seen).toBeGreaterThan(0);
+    const noSessions = path.join(tmp, 'no-sessions.jsonl');
+    exportMemory(d, { path: noSessions });
+    expect(fs.readFileSync(noSessions, 'utf8')).not.toContain('audit prompt text');
+    const withSessions = path.join(tmp, 'with-sessions.jsonl');
+    exportMemory(d, { path: withSessions, include_sessions: true });
+    const payload = fs.readFileSync(withSessions, 'utf8');
+    expect(payload).toContain('audit prompt text');
+    expect(payload).toContain('"includes_sessions":true');
+    expect(importMemory(db(), { path: withSessions, mode: 'dry_run' }).seen).toBeGreaterThan(0);
   });
   it('reports sync status counts', () => {
     const d = db(), c = project();
     addMemory(d, { scope: 'project', kind: 'note', content: 'local sync status item' }, c);
     const status = getSyncStatus(d, c);
     expect(status.memories.local).toBeGreaterThan(0);
-  });
-  it('dry-runs and applies project canonical migration across memory aliases', () => {
-    const d = db();
-    const canonical = project();
-    const folderAlias = { ...canonical, project_id: 'project:j0k3r-pi', project_name: 'j0k3r-pi', source: 'folder' } as any;
-    const gitAlias = { ...canonical, project_id: 'git:github.com/j0k3r/j0k3r-pi', project_name: 'j0k3r-pi', source: 'git_remote' } as any;
-    const keepOther = { ...canonical, project_id: 'project:other-app', project_name: 'other-app', source: 'folder' } as any;
-    const m1 = addMemory(d, { scope: 'project', kind: 'note', content: 'folder alias memory' }, folderAlias).memory;
-    const m2 = addMemory(d, { scope: 'project', kind: 'note', content: 'git alias memory' }, gitAlias).memory;
-    const m3 = addMemory(d, { scope: 'project', kind: 'note', content: 'other project memory' }, keepOther).memory;
-    const s: any = startMemorySession(d, { title: 'Alias Session' }, folderAlias);
-    const dry = migrateProjectCanonicals(d, canonical, { aliases: [{ project_id: folderAlias.project_id, project_name: folderAlias.project_name }, { project_id: gitAlias.project_id, project_name: gitAlias.project_name }], dry_run: true });
-    expect(dry.memories_to_update).toBe(2);
-    expect(dry.sessions_to_update).toBe(1);
-    expect(getMemoryRaw(d, m1.id)?.project_id).toBe(folderAlias.project_id);
-    const applied = migrateProjectCanonicals(d, canonical, { aliases: [{ project_id: folderAlias.project_id, project_name: folderAlias.project_name }, { project_id: gitAlias.project_id, project_name: gitAlias.project_name }], dry_run: false });
-    expect(applied.updated_memories).toBe(2);
-    expect(getMemoryRaw(d, m1.id)?.project_id).toBe(canonical.project_id);
-    expect(getMemoryRaw(d, m2.id)?.project_name).toBe(canonical.project_name);
-    expect(getMemoryRaw(d, m3.id)?.project_id).toBe(keepOther.project_id);
-    const migratedSession = d.prepare('SELECT project_id, project_name FROM memory_sessions WHERE id=?').get(s.id) as any;
-    expect(migratedSession.project_id).toBe(canonical.project_id);
-  });
-
-  it('does not over-migrate projects that only share an alias project_name', () => {
-    const d = db();
-    const canonical = project();
-    const alias = { ...canonical, project_id: 'project:alias-a', project_name: 'shared-name', source: 'folder' } as any;
-    const sameNameOtherId = { ...canonical, project_id: 'project:other-id', project_name: 'shared-name', source: 'folder' } as any;
-    const aliased = addMemory(d, { scope: 'project', kind: 'note', content: 'aliased memory' }, alias).memory;
-    const other = addMemory(d, { scope: 'project', kind: 'note', content: 'other memory' }, sameNameOtherId).memory;
-    const applied = migrateProjectCanonicals(d, canonical, { aliases: [{ project_id: alias.project_id, project_name: alias.project_name }], dry_run: false });
-    expect(applied.updated_memories).toBe(1);
-    expect(getMemoryRaw(d, aliased.id)?.project_id).toBe(canonical.project_id);
-    expect(getMemoryRaw(d, other.id)?.project_id).toBe(sameNameOtherId.project_id);
   });
 });
 
