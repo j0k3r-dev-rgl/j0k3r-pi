@@ -104,6 +104,9 @@ Do not load this skill for greetings, tiny inline answers, obvious one-line fixe
 - Prefer `hybrid` artifact storage for named SDD features unless the user requests otherwise.
 - PRDs are optional, not mandatory for every SDD.
 - If `openspec/changes/<change>/metadata.yaml` exists, every SDD phase and subagent must read it before acting and report alignment or conflicts.
+- Skill Registry selection is mandatory before SDD subagent launch: the orchestrator chooses the phase subagent, resolves relevant skills for that phase and touched paths, reads selected `SKILL.md` files when needed for routing confidence, and injects exact skill paths plus applicability notes into the subagent prompt.
+- Treat security as cross-phase SDD context, not a verify-only concern. Each phase must preserve or refine security/privacy/auth/trust-boundary implications relevant to its responsibility and report `security_alignment` in its return envelope.
+- For OpenSpec/hybrid flows, `implementation-map.md` is the primary context-compression handoff. Subagents should read it before broad code searches, update it when they learn concrete files/symbols/validations, and avoid rediscovering already mapped context unless evidence is stale or incomplete.
 - For mini-SDD and minimal delegated apply, do not invent missing design or product decisions; stop and return `blocked` when they appear.
 
 ## Decision Gates
@@ -261,8 +264,10 @@ When this skill affects the answer, return a concise SDD workflow decision or ph
 - Companion modules loaded.
 - PRD status: absent, present/read, review absent/read, review needed, waived, or blocking conflict.
 - Selected phase or next phase and why.
+- Selected skills injected into subagents, or why no skill matched.
 - Subagents launched or explicitly not needed.
 - Artifacts or memory updated.
+- Security alignment and implementation-map continuity notes when relevant.
 - Validation, risks, blockers, and next recommended step.
 
 ## References

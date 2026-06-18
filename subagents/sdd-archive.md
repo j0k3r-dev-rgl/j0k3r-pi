@@ -52,6 +52,7 @@ Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists 
 - `metadata_alignment`: `aligned` when closure artifacts and archive path respect artifact store/scope constraints; `blocked` on mismatch.
 - `prd_alignment`: `aligned` when accepted PRD outcomes are included in closure evidence; `blocked` when outcomes are missing; `not-applicable` if PRD was not part of flow.
 - `spec_alignment`: `aligned` when archived spec scope and archive sync reflect the approved spec; `blocked` when closure omits required normative requirements.
+- `security_alignment`: `aligned` when closure preserves verified security/privacy/auth/data outcomes and accepted residual security risks; `blocked` when unresolved security evidence is missing or critical risks remain.
 - `conflicts_detected`: list unresolved conflicts that were accepted with explicit override.
 
 If any item is `blocked`, return `status: blocked` and request explicit override before completing archive.
@@ -104,8 +105,8 @@ For `memory` mode:
 ### Source of Truth Updated
 - `openspec/specs/{capability}/spec.md` | N/A
 
-### Metadata, Implementation Map, and PRD Alignment Closure
-Metadata: Present/Absent. Implementation map: Present/Absent. PRD: Present/Absent. Acceptance criteria verified: Yes/No/N/A. Residual metadata/implementation-map/PRD risks: None | ...
+### Metadata, Implementation Map, PRD, and Security Alignment Closure
+Metadata: Present/Absent. Implementation map: Present/Absent. PRD: Present/Absent. Acceptance criteria verified: Yes/No/N/A. Security requirements verified: Yes/No/N/A. Residual metadata/implementation-map/PRD/security risks: None | ...
 
 ### SDD Cycle Complete
 {closure notes}
@@ -113,4 +114,4 @@ Metadata: Present/Absent. Implementation map: Present/Absent. PRD: Present/Absen
 
 ## Return envelope
 
-Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, implementation_map_preserved, specs synced, archive path/report, artifacts written/updated, memory ids written/updated, risks/issues, next_recommended.
+Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, security_alignment, conflicts_detected, required_decision, skills loaded with source (`orchestrator-injected`, `fallback-registry`, `none`), implementation_map_preserved, security closure summary, specs synced, archive path/report, context efficiency notes, artifacts written/updated, memory ids written/updated, risks/issues, next_recommended.

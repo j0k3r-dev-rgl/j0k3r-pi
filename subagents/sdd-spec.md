@@ -52,7 +52,8 @@ Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists 
 - `metadata_alignment`: `aligned` only if requirements and constraints map cleanly into spec scope and validation expectations; otherwise `blocked`.
 - `prd_alignment`: `aligned` if in-scope PRD requirements are represented in SHALL language; `blocked` if missing/contradictory; `not-applicable` when no PRD is active.
 - `spec_alignment`: `not-applicable` in this phase as this is the spec output.
-- `conflicts_detected`: list any contradictions or missing mappings between metadata/PRD and the draft spec.
+- `security_alignment`: `aligned` when security/privacy/auth/data exposure implications are represented as requirements or explicitly marked `not-applicable`; `blocked` when the proposal/PRD/metadata implies security impact but the spec lacks testable security requirements.
+- `conflicts_detected`: list any contradictions or missing mappings between metadata/PRD/security constraints and the draft spec.
 
 If any item is `blocked`, return `status: blocked` and include the required decision to unblock the flow.
 
@@ -64,7 +65,7 @@ Read proposal and implementation map before writing specs:
 - openspec/hybrid: `openspec/changes/{change}/proposal.md`.
 - openspec/hybrid: `openspec/changes/{change}/implementation-map.md` if present; use it to understand explored files and constraints, and flag stale or contradictory map entries instead of silently ignoring them.
 
-Use the proposal `Capabilities` section as the source of truth for requirement sections within the change spec, constrained by any metadata or PRD that exists.
+Use the proposal `Capabilities` section as the source of truth for requirement sections within the change spec, constrained by any metadata or PRD that exists. Also use `implementation-map.md` to avoid re-discovering already mapped files/symbols and to attach requirement-to-source trace notes when useful.
 
 ## OpenSpec artifact
 
@@ -109,6 +110,23 @@ The system MUST/SHALL/SHOULD {behavior}.
 - WHEN ...
 - THEN ...
 
+## Security / Privacy Requirements
+
+### Requirement: {Security Requirement Name}
+The system MUST/SHALL/SHOULD {authn/authz/data/secrets/input/dependency/privacy behavior}.
+
+#### Abuse / Failure Scenario: {Name}
+- GIVEN ...
+- WHEN ...
+- THEN ...
+
+If security is not applicable, write `Security requirements: not applicable` with a one-line rationale.
+
+## Acceptance Criteria and Testability Matrix
+| Requirement or Scenario | Expected Evidence | Validation Layer | Notes |
+|---|---|---|---|
+| ... | unit/integration/e2e/typecheck/build/manual with rationale | ... | ... |
+
 ## Source-of-Truth Sync Notes
 - Existing capability specs affected: `openspec/specs/{capability}/spec.md` | None
 - Archive sync guidance: {what should be copied/merged during archive, if applicable}
@@ -121,10 +139,12 @@ When a change affects multiple capabilities, group requirements with clear headi
 - Specs describe WHAT, not HOW.
 - Use RFC 2119 keywords.
 - Every requirement needs at least one testable scenario.
-- Include happy paths and edge cases.
+- Include happy paths, edge cases, and abuse/failure scenarios when behavior has security, privacy, data, input, dependency, or permission impact.
+- Include a security/privacy section for every spec; use explicit `not applicable` only with rationale.
+- Include an acceptance/testability matrix so `sdd-task`, `sdd-apply`, and `sdd-verify` know what evidence is required.
 - MODIFIED requirements must be full blocks, not partial patches.
 - Persist OpenSpec/memory according to `artifact_store`.
 
 ## Return envelope
 
-Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, spec written, implementation_map_updates, artifacts written/updated, memory ids written/updated, risks, next_recommended.
+Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, security_alignment, conflicts_detected, required_decision, skills loaded with source (`orchestrator-injected`, `fallback-registry`, `none`), spec written, security requirements summary, testability matrix summary, implementation_map_updates, context efficiency notes, artifacts written/updated, memory ids written/updated, risks, next_recommended.

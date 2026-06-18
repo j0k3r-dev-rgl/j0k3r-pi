@@ -53,6 +53,7 @@ Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists 
 - `metadata_alignment`: `aligned` when proposal scope, capabilities, and constraints align with metadata; `blocked` when conflicting.
 - `prd_alignment`: `aligned` when in-scope PRD constraints are represented in proposal; `blocked` when constraints conflict; `not-applicable` if PRD is not part of the active flow.
 - `spec_alignment`: `aligned` when proposal is internally consistent and ready to become the basis for a spec; `blocked` if it intentionally contradicts metadata/approved PRD constraints.
+- `security_alignment`: `aligned` when proposal scope carries forward security/privacy/auth/data implications or explicitly marks them not applicable; `blocked` when security implications are implied but omitted.
 - `conflicts_detected`: list with source artifact, issue, and why it blocks.
 
 If any item is `blocked`, set `status` to `blocked` and include a concrete `required_decision` for the orchestrator.
@@ -120,6 +121,11 @@ Create the change directory if needed. If the file exists, read it first and upd
 |------|--------|-------------|
 | `path` | New/Modified/Removed | ... |
 
+## Security / Privacy Impact
+- Impact: applicable | not applicable
+- Trust boundaries, sensitive data, permissions, secrets, external calls, input validation, or dependencies affected: ...
+- Required security follow-up for spec/design/tasks: ...
+
 ## Risks
 | Risk | Likelihood | Mitigation |
 |------|------------|------------|
@@ -144,4 +150,4 @@ Create the change directory if needed. If the file exists, read it first and upd
 
 ## Return envelope
 
-Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, proposal summary, implementation_map_updates, artifacts written/updated, memory ids written/updated, risks, next_recommended.
+Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, security_alignment, conflicts_detected, required_decision, skills loaded with source (`orchestrator-injected`, `fallback-registry`, `none`), proposal summary, security/privacy impact summary, implementation_map_updates, context efficiency notes, artifacts written/updated, memory ids written/updated, risks, next_recommended.

@@ -52,6 +52,7 @@ Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists 
 - `metadata_alignment`: `aligned` when technical design constraints and file choices match metadata scope/validation expectations; `blocked` when they do not.
 - `prd_alignment`: `aligned` when design decisions are consistent with in-scope approved PRD requirements; `blocked` on conflict; `not-applicable` when PRD is out of scope.
 - `spec_alignment`: `aligned` when architecture/design decisions faithfully implement current `spec.md`; `blocked` on mismatch.
+- `security_alignment`: `aligned` when design includes appropriate controls for spec security/privacy/auth/data requirements or explicitly explains why none apply; `blocked` when controls are missing or contradict requirements.
 - `conflicts_detected`: list each conflict with location and remediation requirement.
 
 If any item is `blocked`, set phase `status` to `blocked` and return `required_decision`.
@@ -101,7 +102,12 @@ If it exists, read first and update.
 |---|---|---|---|
 
 ## Data Flow
-{ASCII diagram or concise description}
+{ASCII diagram or concise description, including trust boundaries when relevant}
+
+## Security Controls and Failure Handling
+| Concern | Design Control | Validation Expectation |
+|---|---|---|
+| Authn/authz/data/secrets/input/dependencies/privacy | ... | ... |
 
 ## File Changes
 | File | Action | Description |
@@ -141,4 +147,4 @@ If it exists, read first and update.
 
 ## Return envelope
 
-Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, key decisions, files affected, implementation_map_updates, artifacts written/updated, memory ids written/updated, risks, next_recommended.
+Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, security_alignment, conflicts_detected, required_decision, skills loaded with source (`orchestrator-injected`, `fallback-registry`, `none`), key decisions, security controls summary, files affected, implementation_map_updates, context efficiency notes, artifacts written/updated, memory ids written/updated, risks, next_recommended.

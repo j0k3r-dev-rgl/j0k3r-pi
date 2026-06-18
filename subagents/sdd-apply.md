@@ -72,6 +72,7 @@ For mini-SDD/minimal delegated apply, do not require OpenSpec metadata, PRD, pro
 - `metadata_alignment`: `aligned` only when the selected task slice fully respects metadata scope, mode, validation expectations, and boundaries; else `blocked`.
 - `prd_alignment`: `aligned` when PRD-required behavior is implemented only where approved; `blocked` on contradiction or missing acceptance criteria linkage; `not-applicable` if no PRD context.
 - `spec_alignment`: `aligned` when task implementation stays within `spec.md` and existing design constraints; `blocked` on scope creep.
+- `security_alignment`: `aligned` when implemented tasks preserve security/privacy/auth/data requirements and do not introduce unplanned exposure; `blocked` when a required security control is missing or a new security decision is needed.
 - `conflicts_detected`: enumerate every conflict with exact file/task reference.
 
 If any item is `blocked`, return `status: blocked` and include `required_decision` instead of applying.
@@ -114,15 +115,16 @@ If a decision is needed and the orchestrator did not provide a resolved path (`s
 
 For each assigned task:
 
-1. Read relevant spec scenarios.
-2. Read design decisions and file changes.
-3. Read existing code patterns.
-4. If a test framework exists and strict TDD applies, write/update a failing test first.
-5. Implement the minimum code.
-6. Run focused validation when practical.
-7. For formal SDD, mark completed tasks `[x]` in `tasks.md` or memory task artifact.
-8. For formal SDD, update apply-progress cumulatively; do not drop previous completed work. For mini-SDD/minimal delegated apply, update only tracker/progress files explicitly allowed by the task packet.
-9. Set `next_recommended` to `sdd-verify` after success/partial unless blocked, more apply batches remain, or the orchestrator explicitly waived verification.
+1. Read relevant spec scenarios, security requirements, and acceptance/testability matrix.
+2. Read design decisions, security controls, and file changes.
+3. Read `implementation-map.md` before broad source searches and only re-read mapped files when needed for fresh evidence or implementation details.
+4. Read existing code patterns.
+5. If a test framework exists and strict TDD applies, write/update a failing test first.
+6. Implement the minimum code.
+7. Run focused validation when practical.
+8. For formal SDD, mark completed tasks `[x]` in `tasks.md` or memory task artifact.
+9. For formal SDD, update apply-progress cumulatively; do not drop previous completed work. For mini-SDD/minimal delegated apply, update only tracker/progress files explicitly allowed by the task packet.
+10. Set `next_recommended` to `sdd-verify` after success/partial unless blocked, more apply batches remain, or the orchestrator explicitly waived verification.
 
 ## OpenSpec artifact updates
 
@@ -157,14 +159,15 @@ Deviations from implementation map: None | ...
 ## Validations
 - command/result
 
-## Metadata and PRD Alignment
+## Metadata, PRD, Spec, and Security Alignment
 - Metadata: `openspec/changes/{change}/metadata.yaml` | None
 - PRD: `openspec/changes/{change}/prd.md` | None
 - metadata_alignment: aligned | blocked
 - prd_alignment: aligned | not-applicable | blocked
 - spec_alignment: aligned | blocked
-- Metadata/PRD requirements implemented in this batch: ...
-- Metadata/PRD/spec conflicts_detected encountered: None | ...
+- security_alignment: aligned | not-applicable | blocked
+- Metadata/PRD/spec/security requirements implemented in this batch: ...
+- Metadata/PRD/spec/security conflicts_detected encountered: None | ...
 
 ## Deviations from Design
 None | ...
@@ -181,6 +184,6 @@ None | ...
 
 ## Return envelope
 
-Return: status, executive_summary, flow_type (`formal_sdd_apply`, `mini_sdd_apply`, or `minimal_delegated_apply`), metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, completed tasks, files changed, implementation_map_updates, validations, artifacts updated, memory ids updated, risks/issues, next_recommended.
+Return: status, executive_summary, flow_type (`formal_sdd_apply`, `mini_sdd_apply`, or `minimal_delegated_apply`), metadata_alignment, prd_alignment, spec_alignment, security_alignment, conflicts_detected, required_decision, skills loaded with source (`orchestrator-injected`, `fallback-registry`, `none`), completed tasks, security controls implemented, files changed, implementation_map_updates, context efficiency notes, validations, artifacts updated, memory ids updated, risks/issues, next_recommended.
 
-For mini-SDD/minimal delegated apply, use `metadata_alignment: not-applicable`, `prd_alignment: not-applicable`, and `spec_alignment: aligned` only when the implementation matches the task packet/tracker and selected skill guidance. On success or partial completion with no blocker, recommend `sdd-verify` unless additional apply batches remain or verification was explicitly waived.
+For mini-SDD/minimal delegated apply, use `metadata_alignment: not-applicable`, `prd_alignment: not-applicable`, and `spec_alignment: aligned` only when the implementation matches the task packet/tracker and selected skill guidance. Set `security_alignment: not-applicable` only when the task packet and touched files have no security-relevant surface; otherwise preserve/verify applicable security constraints. On success or partial completion with no blocker, recommend `sdd-verify` unless additional apply batches remain or verification was explicitly waived.

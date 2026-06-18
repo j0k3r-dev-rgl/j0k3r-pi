@@ -92,8 +92,9 @@ If any item is `blocked`, set phase return `status` to `blocked` and include the
 3. Inspect real code and project docs. Do not guess.
 4. Identify affected files/modules and current behavior.
 5. Compare implementation approaches.
-6. Recommend one approach.
-7. Persist OpenSpec/memory according to `artifact_store`.
+6. Identify security/privacy/auth/trust-boundary implications or state why they are not applicable.
+7. Recommend one approach.
+8. Persist OpenSpec/memory according to `artifact_store`.
 
 ## Implementation map format
 
@@ -169,8 +170,9 @@ Operational handoff for downstream SDD agents. This file is not normative; metad
 - Metadata alignment: aligned | blocked
 - PRD alignment: aligned | not-applicable | blocked
 - spec_alignment: not-applicable
-- Relevant metadata/PRD points: ...
-- Metadata/PRD gaps/conflicts: None | ...
+- security_alignment: aligned | not-applicable | blocked
+- Relevant metadata/PRD/security points: ...
+- Metadata/PRD/security gaps/conflicts: None | ...
 
 ### Conflict Resolution
 - conflicts_detected: []
@@ -184,4 +186,4 @@ Operational handoff for downstream SDD agents. This file is not normative; metad
 
 ## Return envelope
 
-Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, detailed_report, implementation_map_summary, artifacts written/updated, memory ids written/updated, risks, next_recommended.
+Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, security_alignment, conflicts_detected, required_decision, skills loaded with source (`orchestrator-injected`, `fallback-registry`, `none`), detailed_report, implementation_map_summary, security_surface_summary, context efficiency notes, artifacts written/updated, memory ids written/updated, risks, next_recommended.

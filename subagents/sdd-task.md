@@ -53,6 +53,7 @@ Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists 
 - `metadata_alignment`: `aligned` when task plan fully respects metadata constraints and scoped work areas; `blocked` when conflicting.
 - `prd_alignment`: `aligned` when task breakdown maps to approved PRD requirements and acceptance criteria; `blocked` on contradiction; `not-applicable` if PRD is not used.
 - `spec_alignment`: `aligned` when tasks cover every required spec scenario and non-functional constraint; `blocked` when tasks omit required behavior.
+- `security_alignment`: `aligned` when tasks include implementation and validation work for each security/privacy/auth/data requirement, or explicitly mark security as not applicable with rationale; `blocked` when security requirements are not taskable.
 - `conflicts_detected`: list blocking conflicts + references.
 
 If any item is `blocked`, return `status: blocked` and include explicit `required_decision` before proposing apply slices.
@@ -115,6 +116,11 @@ Suggested task split: Yes|No
 | Task/Phase | Map path/symbol/validation reference | Coverage notes |
 |------------|--------------------------------------|----------------|
 
+## Security Task Coverage
+| Security Requirement | Implementation Task | Validation Task | Result |
+|---|---|---|---|
+| ... | ... | ... | covered/not-applicable/blocked |
+
 ## Phase 1: Foundation
 - [ ] 1.1 {specific task with file path and map reference when applicable}
 
@@ -132,8 +138,9 @@ Suggested task split: Yes|No
 - Order by dependency.
 - Include test-first tasks when project strict TDD applies.
 - Always include the three exact workload guard lines.
+- Add explicit security implementation and validation tasks when the spec/design contains security requirements; otherwise include a clear not-applicable rationale.
 - Persist OpenSpec/memory according to `artifact_store`.
 
 ## Return envelope
 
-Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, task breakdown, workload forecast, implementation_map_updates, artifacts written/updated, memory ids written/updated, risks, next_recommended.
+Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, security_alignment, conflicts_detected, required_decision, skills loaded with source (`orchestrator-injected`, `fallback-registry`, `none`), task breakdown, security task coverage, workload forecast, implementation_map_updates, context efficiency notes, artifacts written/updated, memory ids written/updated, risks, next_recommended.
