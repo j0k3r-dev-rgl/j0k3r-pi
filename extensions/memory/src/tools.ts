@@ -11,7 +11,7 @@ import { consolidateMemories } from './consolidation.js';
 import { ensureProjectProfile, getCurrentProjectProfile, updateProjectProfile } from './project-profile.js';
 import { getSyncStatus } from './sync-status.js';
 import { renderMemoryToolResult } from './render.js';
-import { addChangelogEntry, addCommitChangelogLink, addCommitRecord, searchCommitChangelog } from './commit-changelog.js';
+import { addChangelogEntry, addCommitChangelogLink, addCommitRecord, addReleaseRecord, searchCommitChangelog, searchReleaseCandidates } from './commit-changelog.js';
 import { MEMORY_KINDS } from './types.js';
 import type { MemoryImportConflictPolicy, MemoryImportMode, ToolResult } from './types.js';
 
@@ -298,12 +298,84 @@ export function registerMemoryTools(pi: any, db: Db): void {
   });
 
   pi.registerTool({
+    name: 'memory_release_candidates_search',
+    label: 'Memory Release Candidates Search',
+    description: 'Search release-impacting commit records that are not yet linked to a release/tag record.',
+    parameters: Type.Object({
+      scope: Type.Optional(Scope),
+      project_mode: Type.Optional(ProjectMode),
+      project_name: Type.Optional(Type.String()),
+      repo: Type.Optional(Type.String()),
+      branch: Type.Optional(Type.String()),
+      change_type: Type.Optional(Type.Union([
+        Type.Literal('fix'),
+        Type.Literal('feature'),
+        Type.Literal('chore'),
+        Type.Literal('docs'),
+        Type.Literal('refactor'),
+        Type.Literal('test'),
+        Type.Literal('sync'),
+        Type.Literal('other'),
+      ])),
+      release_impact: Type.Optional(Type.Union([
+        Type.Literal('major'),
+        Type.Literal('minor'),
+        Type.Literal('patch'),
+      ])),
+      since: Type.Optional(Type.String()),
+      until: Type.Optional(Type.String()),
+      limit: Type.Optional(Type.Number()),
+    }),
+    async execute(_id: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
+      try {
+        const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
+        assertGitMemoryEnabled(context);
+        const results = searchReleaseCandidates(db, params ?? {}, context);
+        return ok(resultListText(`Found ${results.results.length} release candidate commit(s).`, results.results), results);
+      } catch (e) {
+        return fail(e);
+      }
+    },
+    renderResult: renderMemoryToolResult,
+  });
+
+  pi.registerTool({
+    name: 'memory_release_record_add',
+    label: 'Memory Release Record Add',
+    description: 'Create a release/tag memory record and explicitly link selected commit records without generating changelog content.',
+    parameters: Type.Object({
+      scope: Type.Optional(Scope),
+      version: Type.String(),
+      release_tag: Type.String(),
+      release_date: Type.Optional(Type.String()),
+      commit_ids: Type.Array(Type.String()),
+      title: Type.Optional(Type.String()),
+      summary: Type.Optional(Type.String()),
+      content: Type.Optional(Type.String()),
+      tags: Type.Optional(Type.Array(Type.String())),
+      confidence: Type.Optional(Type.Number()),
+      importance: Type.Optional(Type.Number()),
+      metadata_json: Type.Optional(Type.Record(Type.String(), Type.Any())),
+    }),
+    async execute(_id: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
+      try {
+        const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
+        assertGitMemoryEnabled(context);
+        const result = addReleaseRecord(db, params, context);
+        return ok(`Release record saved: ${result.memory.title ?? result.memory.id}${result.warning ? ` (${result.warning})` : ''}`, result);
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  });
+
+  pi.registerTool({
     name: 'memory_commit_changelog_search',
     label: 'Memory Commit Changelog Search',
     description: 'Search commit records, changelog entries, and optional provenance links.',
     parameters: Type.Object({
       query: Type.Optional(Type.String()),
-      record_types: Type.Optional(Type.Array(Type.Union([Type.Literal('commit_record'), Type.Literal('changelog_entry')]))),
+      record_types: Type.Optional(Type.Array(Type.Union([Type.Literal('commit_record'), Type.Literal('changelog_entry'), Type.Literal('release_record')]))),
       scope: Type.Optional(Scope),
       project_mode: Type.Optional(ProjectMode),
       project_name: Type.Optional(Type.String()),

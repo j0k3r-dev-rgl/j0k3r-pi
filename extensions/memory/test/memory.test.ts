@@ -565,14 +565,18 @@ describe('commit changelog tool contracts', () => {
     expect(tools.has('memory_changelog_entry_add')).toBe(true);
     expect(tools.has('memory_commit_changelog_link')).toBe(true);
     expect(tools.has('memory_commit_changelog_search')).toBe(true);
+    expect(tools.has('memory_release_candidates_search')).toBe(true);
+    expect(tools.has('memory_release_record_add')).toBe(true);
 
     const addSchema = JSON.stringify(tools.get('memory_add')?.parameters ?? {});
     expect(addSchema).toContain('commit_record');
     expect(addSchema).toContain('changelog_entry');
+    expect(addSchema).toContain('release_record');
 
     const searchSchema = JSON.stringify(tools.get('memory_search')?.parameters ?? {});
     expect(searchSchema).toContain('commit_record');
     expect(searchSchema).toContain('changelog_entry');
+    expect(searchSchema).toContain('release_record');
 
     const commitSchema = JSON.stringify(tools.get('memory_commit_record_add')?.parameters ?? {});
     expect(commitSchema).toContain('repo');
@@ -601,6 +605,7 @@ describe('commit changelog tool contracts', () => {
 
     const commitSearchSchema = JSON.stringify(tools.get('memory_commit_changelog_search')?.parameters ?? {});
     expect(commitSearchSchema).toContain('record_types');
+    expect(commitSearchSchema).toContain('release_record');
     expect(commitSearchSchema).toContain('repo');
     expect(commitSearchSchema).toContain('commit_hash');
     expect(commitSearchSchema).toContain('branch');
@@ -609,18 +614,32 @@ describe('commit changelog tool contracts', () => {
     expect(commitSearchSchema).toContain('section');
     expect(commitSearchSchema).toContain('include_links');
     expect(commitSearchSchema).toContain('include_related');
+
+    const releaseCandidatesSchema = JSON.stringify(tools.get('memory_release_candidates_search')?.parameters ?? {});
+    expect(releaseCandidatesSchema).toContain('repo');
+    expect(releaseCandidatesSchema).toContain('since');
+    expect(releaseCandidatesSchema).toContain('until');
+    expect(releaseCandidatesSchema).toContain('release_impact');
+
+    const releaseRecordSchema = JSON.stringify(tools.get('memory_release_record_add')?.parameters ?? {});
+    expect(releaseRecordSchema).toContain('version');
+    expect(releaseRecordSchema).toContain('release_tag');
+    expect(releaseRecordSchema).toContain('commit_ids');
+    expect(releaseRecordSchema).not.toContain('generate');
   });
 
   it('rejects commit/changelog module tools when git memory config is disabled by default', async () => {
     const { projectDir, tools } = registerMemoryToolHarness('Git Disabled App');
     fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Git Disabled App', enabled: true }));
-    const result = await tools.get('memory_commit_record_add').execute('tool-call', {
-      repo: 'j0k3r/pi',
-      commit_hash: 'abcdef1234567890',
-      subject: 'add git memory gate',
-    }, undefined, undefined, { cwd: projectDir });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('git.enabled=true');
+    for (const toolName of ['memory_commit_record_add', 'memory_release_candidates_search']) {
+      const result = await tools.get(toolName).execute('tool-call', toolName === 'memory_commit_record_add' ? {
+        repo: 'j0k3r/pi',
+        commit_hash: 'abcdef1234567890',
+        subject: 'add git memory gate',
+      } : {}, undefined, undefined, { cwd: projectDir });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('git.enabled=true');
+    }
   });
 
   it('stores minimal commit/changelog records and rejects missing related/source memories', async () => {
@@ -655,12 +674,17 @@ describe('commit changelog tool contracts', () => {
     expect(changelog.details.memory.kind).toBe('changelog_entry');
 
     const links = d.prepare('SELECT from_memory_id, to_memory_id, relation_type FROM memory_links ORDER BY relation_type, from_memory_id, to_memory_id').all() as Array<{ from_memory_id: string; to_memory_id: string; relation_type: string }>;
-    expect(links).toHaveLength(3);
+    expect(links).toHaveLength(2);
     expect(links).toEqual(expect.arrayContaining([
-      { from_memory_id: changelog.details.memory.id, to_memory_id: commit.details.memory.id, relation_type: 'derived_from' },
       { from_memory_id: commit.details.memory.id, to_memory_id: supportId, relation_type: 'related_to' },
       { from_memory_id: changelog.details.memory.id, to_memory_id: supportId, relation_type: 'related_to' },
     ]));
+    expect(links).not.toContainEqual({ from_memory_id: changelog.details.memory.id, to_memory_id: commit.details.memory.id, relation_type: 'derived_from' });
+
+    const changelogMeta = d.prepare('SELECT metadata_json FROM memories WHERE id=?').get(changelog.details.memory.id) as { metadata_json: string };
+    expect(JSON.parse(changelogMeta.metadata_json)).toMatchObject({
+      changelog: { source_commit_ids: [commit.details.memory.id] },
+    });
 
     const invalidRelated = await commitAdd.execute('tool-call', {
       repo: 'github.com/j0k3r/j0k3r-pi',
@@ -749,6 +773,71 @@ describe('commit changelog tool contracts', () => {
       { kind: 'changelog_entry', count: 1 },
       { kind: 'commit_record', count: 1 },
     ]);
+  });
+
+  it('finds unreleased commit candidates and records explicit release/tag links without generating changelogs', async () => {
+    const { d, projectDir, tools } = registerMemoryToolHarness('Release Tag App');
+    const commitAdd = tools.get('memory_commit_record_add');
+    const candidatesSearch = tools.get('memory_release_candidates_search');
+    const releaseAdd = tools.get('memory_release_record_add');
+
+    const feature = await commitAdd.execute('tool-call', {
+      repo: 'github.com/j0k3r/j0k3r-pi',
+      commit_hash: 'aaa1111',
+      subject: 'add release memory candidates',
+      change_type: 'feature',
+      release_impact: 'minor',
+      authored_at: '2026-06-18T10:00:00Z',
+    }, undefined, undefined, { cwd: projectDir });
+    const fix = await commitAdd.execute('tool-call', {
+      repo: 'github.com/j0k3r/j0k3r-pi',
+      commit_hash: 'bbb2222',
+      subject: 'fix release candidate filtering',
+      change_type: 'fix',
+      release_impact: 'patch',
+      authored_at: '2026-06-18T11:00:00Z',
+    }, undefined, undefined, { cwd: projectDir });
+    await commitAdd.execute('tool-call', {
+      repo: 'github.com/j0k3r/j0k3r-pi',
+      commit_hash: 'ccc3333',
+      subject: 'sync memory backup metadata',
+      change_type: 'sync',
+    }, undefined, undefined, { cwd: projectDir });
+
+    const before = await candidatesSearch.execute('tool-call', {
+      repo: 'github.com/j0k3r/j0k3r-pi',
+      limit: 10,
+    }, undefined, undefined, { cwd: projectDir });
+    expect(before.isError).not.toBe(true);
+    expect(before.details.results.map((item: any) => item.id)).toEqual([fix.details.memory.id, feature.details.memory.id]);
+
+    const release = await releaseAdd.execute('tool-call', {
+      version: '1.5.0',
+      release_tag: 'v1.5.0',
+      release_date: '2026-06-18',
+      commit_ids: [feature.details.memory.id, fix.details.memory.id],
+      summary: 'Release memory records for explicit tag provenance.',
+      content: 'The agent writes the changelog separately using the selected commit context.',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(release.isError).not.toBe(true);
+    expect(release.details.memory.kind).toBe('release_record');
+    expect(release.details.memory.metadata_summary).toMatchObject({ version: '1.5.0', release_tag: 'v1.5.0' });
+
+    const releaseMeta = d.prepare('SELECT metadata_json FROM memories WHERE id=?').get(release.details.memory.id) as { metadata_json: string };
+    expect(JSON.parse(releaseMeta.metadata_json)).toMatchObject({
+      release: { version: '1.5.0', release_tag: 'v1.5.0', commit_ids: [feature.details.memory.id, fix.details.memory.id] },
+    });
+    const links = d.prepare("SELECT from_memory_id, to_memory_id, relation_type FROM memory_links WHERE from_memory_id=? ORDER BY to_memory_id").all(release.details.memory.id) as Array<{ from_memory_id: string; to_memory_id: string; relation_type: string }>;
+    expect(links).toEqual([
+      { from_memory_id: release.details.memory.id, to_memory_id: feature.details.memory.id, relation_type: 'derived_from' },
+      { from_memory_id: release.details.memory.id, to_memory_id: fix.details.memory.id, relation_type: 'derived_from' },
+    ].sort((a, b) => a.to_memory_id.localeCompare(b.to_memory_id)));
+
+    const changelogRows = d.prepare("SELECT COUNT(*) AS count FROM memories WHERE kind='changelog_entry'").get() as { count: number };
+    expect(changelogRows.count).toBe(0);
+
+    const after = await candidatesSearch.execute('tool-call', { repo: 'github.com/j0k3r/j0k3r-pi', limit: 10 }, undefined, undefined, { cwd: projectDir });
+    expect(after.details.results).toHaveLength(0);
   });
 
   it('stores normalized commit release classification metadata, defaults sync release impact, and keeps legacy commit records valid', async () => {

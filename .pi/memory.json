@@ -19,11 +19,11 @@
     "enabled": false
   },
   "git": {
-    "enabled": false,
+    "enabled": true,
     "sync": {
-      "cloud": false,
-      "export": false,
-      "import": false
+      "cloud": true,
+      "export": true,
+      "import": true
     }
   }
 }

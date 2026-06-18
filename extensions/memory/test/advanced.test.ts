@@ -558,6 +558,9 @@ describe('commit changelog advanced behavior', () => {
       related_memory_ids: [support.details.memory.id],
     }, undefined, undefined, { cwd: projectDir });
 
+    const automaticSourceLinks = d.prepare("SELECT * FROM memory_links WHERE from_memory_id=? AND to_memory_id=? AND relation_type='derived_from'").all(changelog.details.memory.id, commit.details.memory.id) as any[];
+    expect(automaticSourceLinks).toHaveLength(0);
+
     for (const relationType of ['derived_from', 'supports', 'related_to', 'supersedes']) {
       const result = await linkTool.execute('tool-call', {
         from_memory_id: changelog.details.memory.id,
@@ -597,7 +600,7 @@ describe('commit changelog advanced behavior', () => {
     });
     const changelogMetaRow = d.prepare("SELECT metadata_json FROM memories WHERE id=?").get(changelog.details.memory.id) as { metadata_json: string };
     expect(JSON.parse(changelogMetaRow.metadata_json)).toMatchObject({
-      changelog: { version: '1.4.0', release_tag: 'v1.4.0', section: 'added', bullets: ['memory commit changelog test coverage'] },
+      changelog: { version: '1.4.0', release_tag: 'v1.4.0', section: 'added', bullets: ['memory commit changelog test coverage'], source_commit_ids: [commit.details.memory.id] },
       extra: { channel: 'stable' },
     });
 
@@ -642,10 +645,12 @@ describe('commit changelog advanced behavior', () => {
     const commitAdd = tools.get('memory_commit_record_add');
     const changelogAdd = tools.get('memory_changelog_entry_add');
     const searchTool = tools.get('memory_commit_changelog_search');
+    const linkTool = tools.get('memory_commit_changelog_link');
 
     expect(commitAdd).toBeTruthy();
     expect(changelogAdd).toBeTruthy();
     expect(searchTool).toBeTruthy();
+    expect(linkTool).toBeTruthy();
 
     const commitA = await commitAdd.execute('tool-call', {
       repo: 'github.com/j0k3r/j0k3r-pi',
@@ -659,6 +664,11 @@ describe('commit changelog advanced behavior', () => {
       section: 'added',
       bullets: ['project a release note'],
       source_commit_ids: [commitA.details.memory.id],
+    }, undefined, undefined, { cwd: projectADir });
+    await linkTool.execute('tool-call', {
+      from_memory_id: changelogA.details.memory.id,
+      to_memory_id: commitA.details.memory.id,
+      relation_type: 'derived_from',
     }, undefined, undefined, { cwd: projectADir });
     await commitAdd.execute('tool-call', {
       repo: 'github.com/j0k3r/j0k3r-pi',

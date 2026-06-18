@@ -3,7 +3,7 @@ export type MemoryStatus = 'active' | 'archived' | 'superseded';
 export type SyncStatus = 'local' | 'pending' | 'synced' | 'conflict';
 
 export const MEMORY_KINDS = [
-  'preference','decision','architecture','architectural_decision','command','constraint','workflow','note','learning','session_summary','prompt','bug','todo','progress','api','dependency','project_profile','commit_record','changelog_entry'
+  'preference','decision','architecture','architectural_decision','command','constraint','workflow','note','learning','session_summary','prompt','bug','todo','progress','api','dependency','project_profile','commit_record','changelog_entry','release_record'
 ] as const;
 export type MemoryKind = typeof MEMORY_KINDS[number];
 

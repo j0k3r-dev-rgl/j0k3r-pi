@@ -5,7 +5,7 @@ import { generateGenericId } from './ids.js';
 import { jsonString, nowIso, parseJson, snippet } from './utils.js';
 
 export type CommitChangelogRelation = 'derived_from' | 'supports' | 'related_to' | 'supersedes';
-export type CommitChangelogRecordType = 'commit_record' | 'changelog_entry';
+export type CommitChangelogRecordType = 'commit_record' | 'changelog_entry' | 'release_record';
 
 export type CommitChangeType = 'fix' | 'feature' | 'chore' | 'docs' | 'refactor' | 'test' | 'sync' | 'other';
 export type CommitReleaseImpact = 'major' | 'minor' | 'patch' | 'none';
@@ -57,6 +57,34 @@ export interface LinkInput {
   metadata_json?: Record<string, unknown>;
 }
 
+export interface ReleaseCandidatesInput {
+  scope?: 'general' | 'project' | 'global';
+  project_mode?: 'current' | 'all' | 'selected';
+  project_name?: string;
+  repo?: string;
+  branch?: string;
+  change_type?: CommitChangeType;
+  release_impact?: CommitReleaseImpact;
+  since?: string;
+  until?: string;
+  limit?: number;
+}
+
+export interface ReleaseRecordInput {
+  scope?: 'general' | 'project' | 'global';
+  version: string;
+  release_tag: string;
+  release_date?: string;
+  commit_ids: string[];
+  title?: string;
+  summary?: string;
+  content?: string;
+  tags?: string[];
+  confidence?: number;
+  importance?: number;
+  metadata_json?: Record<string, unknown>;
+}
+
 export interface SearchInput {
   query?: string;
   record_types?: CommitChangelogRecordType[];
@@ -81,7 +109,7 @@ export interface SearchInput {
 
 const COMMIT_HASH_RE = /^[a-f0-9]{7,64}$/i;
 const ALLOWED_RELATIONS: CommitChangelogRelation[] = ['derived_from', 'supports', 'related_to', 'supersedes'];
-const DEFAULT_RECORD_TYPES: CommitChangelogRecordType[] = ['commit_record', 'changelog_entry'];
+const DEFAULT_RECORD_TYPES: CommitChangelogRecordType[] = ['commit_record', 'changelog_entry', 'release_record'];
 const COMMIT_CHANGE_TYPES: CommitChangeType[] = ['fix', 'feature', 'chore', 'docs', 'refactor', 'test', 'sync', 'other'];
 const COMMIT_RELEASE_IMPACTS: CommitReleaseImpact[] = ['major', 'minor', 'patch', 'none'];
 
@@ -142,6 +170,15 @@ function requireSourceCommits(db: Db, ids: string[] | undefined): MemoryRecord[]
   });
 }
 
+function requireReleaseCommits(db: Db, ids: string[] | undefined): MemoryRecord[] {
+  if (!ids?.length) throw new Error('commit_ids must contain at least one commit_record memory id');
+  return ids.map((id) => {
+    const record = requireMemory(db, id, 'release commit memory');
+    if (record.kind !== 'commit_record') throw new Error(`release commit memory must have kind commit_record: ${id}`);
+    return record;
+  });
+}
+
 function reservedMetadata(extra: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
   if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return undefined;
   const cleaned = Object.fromEntries(Object.entries(extra).filter(([key]) => key !== 'commit' && key !== 'changelog' && key !== 'extra'));
@@ -191,6 +228,18 @@ function buildChangelogMetadata(input: ChangelogEntryInput): Record<string, unkn
   };
 }
 
+function buildReleaseMetadata(input: ReleaseRecordInput): Record<string, unknown> {
+  return {
+    release: {
+      version: normalizeText(input.version),
+      release_tag: normalizeText(input.release_tag),
+      release_date: normalizeOptionalText(input.release_date),
+      commit_ids: input.commit_ids ?? [],
+    },
+    ...(reservedMetadata(input.metadata_json) ? { extra: reservedMetadata(input.metadata_json) } : {}),
+  };
+}
+
 function buildCommitPayload(input: CommitRecordInput): { title: string; summary: string; content: string; tags: string[] } {
   const repo = normalizeText(input.repo);
   const hash = normalizeText(input.commit_hash);
@@ -215,6 +264,22 @@ function buildCommitPayload(input: CommitRecordInput): { title: string; summary:
     input.content ? normalizeText(input.content) : '',
   ].filter(Boolean).join('\n');
   const tags = Array.from(new Set([...(normalizeStringList(input.tags)), 'commit_record', repo, hash, ...(branch ? [branch] : []), ...(changeType ? [changeType] : []), ...(releaseImpact ? [releaseImpact] : [])]));
+  return { title, summary, content, tags };
+}
+
+function buildReleasePayload(input: ReleaseRecordInput): { title: string; summary: string; content: string; tags: string[] } {
+  const version = normalizeText(input.version);
+  const releaseTag = normalizeText(input.release_tag);
+  const title = normalizeOptionalText(input.title) ?? `release ${version} ${releaseTag}`;
+  const summary = snippet(normalizeOptionalText(input.summary) ?? `release ${version} tagged ${releaseTag} from ${input.commit_ids.length} commit(s)`, 160);
+  const content = [
+    `version: ${version}`,
+    `release_tag: ${releaseTag}`,
+    input.release_date ? `release_date: ${normalizeText(input.release_date)}` : '',
+    `commit_ids: ${input.commit_ids.join(', ')}`,
+    input.content ? normalizeText(input.content) : '',
+  ].filter(Boolean).join('\n');
+  const tags = Array.from(new Set([...(normalizeStringList(input.tags)), 'release_record', version, releaseTag]));
   return { title, summary, content, tags };
 }
 
@@ -272,7 +337,7 @@ function compactMemory(record: MemoryRecord): Record<string, unknown> {
     title: record.title,
     snippet: snippet(record.summary || record.content || '', 240),
     status: record.status,
-    metadata_summary: metadata.commit ?? metadata.changelog ?? metadata.extra ?? {},
+    metadata_summary: metadata.commit ?? metadata.changelog ?? metadata.release ?? metadata.extra ?? {},
     updated_at: record.updated_at,
   };
 }
@@ -359,7 +424,7 @@ export function addChangelogEntry(db: Db, input: ChangelogEntryInput, context: R
   if (!section) throw new Error('section is required');
   if (!bullets.length) throw new Error('bullets must contain at least one non-empty entry');
 
-  const sourceCommits = requireSourceCommits(db, input.source_commit_ids);
+  requireSourceCommits(db, input.source_commit_ids);
   const related = requireRelatedMemories(db, input.related_memory_ids, 'changelog entry');
   const fields = desiredProjectFields(input.scope, context);
   const duplicate = findActiveDuplicateChangelog(db, {
@@ -385,9 +450,88 @@ export function addChangelogEntry(db: Db, input: ChangelogEntryInput, context: R
     metadata_json: buildChangelogMetadata({ ...input, bullets: payload.bullets }),
   }, context).memory;
 
-  for (const commit of sourceCommits) insertLinkIfMissing(db, created, commit, 'derived_from', { source_tool: 'memory_changelog_entry_add' });
   linkRelatedMemories(db, created, related, 'memory_changelog_entry_add');
   return { memory: compactMemory(created) };
+}
+
+function isCommitLinkedToRelease(db: Db, commitId: string): boolean {
+  const rows = db.prepare("SELECT m.* FROM memory_links l JOIN memories m ON m.id=l.from_memory_id WHERE l.to_memory_id=? AND l.relation_type='derived_from' AND m.status='active'").all(commitId) as unknown as MemoryRecord[];
+  return rows.some((row) => {
+    if (row.kind === 'release_record') return true;
+    if (row.kind !== 'changelog_entry') return false;
+    const meta = parseJson<{ changelog?: Record<string, unknown> }>(row.metadata_json, {});
+    return Boolean(normalizeOptionalText(meta.changelog?.release_tag));
+  });
+}
+
+export function searchReleaseCandidates(db: Db, input: ReleaseCandidatesInput, context: ResolvedContext): { results: Array<Record<string, unknown>> } {
+  const status = 'active';
+  const rows = db.prepare('SELECT * FROM memories WHERE kind=? AND status=? ORDER BY updated_at DESC LIMIT ?').all(
+    'commit_record',
+    status,
+    Math.max(1, Math.min(input.limit ?? 25, 100)),
+  ) as unknown as MemoryRecord[];
+
+  const searchInput: SearchInput = { ...input, record_types: ['commit_record'], status };
+  const results = rows
+    .filter((row) => memoryMatchesProjectMode(row, searchInput, context))
+    .filter((row) => passesStructuredFilters(row, searchInput))
+    .filter((row) => {
+      const meta = parseJson<{ commit?: Record<string, unknown> }>(row.metadata_json, {});
+      return ['major', 'minor', 'patch'].includes(normalizeText(meta.commit?.release_impact));
+    })
+    .filter((row) => !isCommitLinkedToRelease(db, row.id))
+    .sort((a, b) => {
+      const aMeta = parseJson<{ commit?: Record<string, unknown> }>(a.metadata_json, {});
+      const bMeta = parseJson<{ commit?: Record<string, unknown> }>(b.metadata_json, {});
+      const aDate = normalizeOptionalText(aMeta.commit?.authored_at) ?? normalizeText(a.updated_at);
+      const bDate = normalizeOptionalText(bMeta.commit?.authored_at) ?? normalizeText(b.updated_at);
+      return bDate.localeCompare(aDate);
+    })
+    .slice(0, input.limit ?? 25)
+    .map((row) => ({ ...compactMemory(row), links: linksForMemory(db, row.id) }));
+
+  return { results };
+}
+
+export function addReleaseRecord(db: Db, input: ReleaseRecordInput, context: ResolvedContext): { memory: Record<string, unknown>; links: Array<Record<string, unknown>>; warning?: string } {
+  const version = normalizeText(input.version);
+  const releaseTag = normalizeText(input.release_tag);
+  if (!version) throw new Error('version is required');
+  if (!releaseTag) throw new Error('release_tag is required');
+
+  const commits = requireReleaseCommits(db, input.commit_ids);
+  const fields = desiredProjectFields(input.scope, context);
+  for (const commit of commits) {
+    if (commit.scope !== fields.scope || commit.project_id !== fields.project_id || commit.project_name !== fields.project_name) {
+      throw new Error(`release commit memory must be in the same project/scope: ${commit.id}`);
+    }
+  }
+
+  const duplicate = (db.prepare("SELECT * FROM memories WHERE kind=? AND status=? AND scope=?").all('release_record', 'active', fields.scope) as unknown as MemoryRecord[])
+    .find((row) => {
+      const meta = parseJson<{ release?: Record<string, unknown> }>(row.metadata_json, {});
+      return row.project_id === fields.project_id
+        && row.project_name === fields.project_name
+        && normalizeText(meta.release?.version) === version
+        && normalizeText(meta.release?.release_tag) === releaseTag;
+    });
+  if (duplicate) return { memory: compactMemory(duplicate), links: linksForMemory(db, duplicate.id), warning: 'duplicate release record; returned existing record' };
+
+  const payload = buildReleasePayload(input);
+  const created = addMemory(db, {
+    scope: input.scope,
+    kind: 'release_record',
+    title: payload.title,
+    summary: payload.summary,
+    content: payload.content,
+    tags: payload.tags,
+    confidence: input.confidence,
+    importance: input.importance,
+    metadata_json: buildReleaseMetadata(input),
+  }, context).memory;
+  const links = commits.map((commit) => insertLinkIfMissing(db, created, commit, 'derived_from', { source_tool: 'memory_release_record_add', release_tag: releaseTag }).link);
+  return { memory: compactMemory(created), links };
 }
 
 export function addCommitChangelogLink(db: Db, input: LinkInput): { link: Record<string, unknown>; warning?: string } {
