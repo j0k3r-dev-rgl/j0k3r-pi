@@ -105,12 +105,73 @@ Do not load this skill for greetings, obvious direct answers, or already-approve
 - Use `discovery` only when delegated read-only research will materially improve the orchestrator's decision. Ask it for specific evidence, not for the final route. Do not delegate when the orchestrator already has enough context or when a small direct fix/answer is clearly safe.
 - Use formal SDD when the change is genuinely cross-cutting, introduces or changes a durable contract/API, has high architecture or policy risk, or needs handoff artifacts.
 - PRDs are optional, not mandatory for every SDD. Prefer a PRD-first route only when the user asks for a PRD or when complex product, UX, integration, OAuth/auth, security, or architecture work genuinely needs requirements definition before proposal/spec/design/tasks. The main orchestrator drafts or revises the PRD directly with the user because it has the full conversation and decision context; do not create or delegate extra PRD draft/analyzer subagents just to transform context. Use `prd-review` only to validate PRD ambiguity, debt, testability, contradictions, missing questions, acceptance-criteria coverage, implementation-detail leakage, and readiness before the PRD is approved, revised, blocked, or waived. Once a PRD is approved or explicitly in scope, downstream SDD phases must read and preserve it as mandatory product/requirements context; if PRD review is waived, the orchestrator must state that waiver and any accepted risks.
-- Use simple TDD for localized non-trivial code changes with clear expected behavior and cheap validation.
+- Use simple TDD for localized non-trivial code changes with clear expected behavior and cheap validation. **Crucial Rule:** Even for small, localized changes that qualify for an inline fix or Simple TDD, you must NEVER assume. Always ask the user: *"¿Prefieres que arregle esto directamente o hacemos una revisión y propuesta primero?"* (Unless the user explicitly ordered a direct fix).
 - Use simple TDD with an explicit review gate when the main agent can implement safely but the change is policy-sensitive, multi-file, or risk-bearing enough that a final diff/tests/risk review is required.
 - Use mini-SDD for medium-sized, taskable, multi-file work when behavior is clear enough to write a compact task packet, full PRD/spec/design would add little value, and independent apply/verify execution would reduce mistakes. Mini-SDD means the orchestrator writes the task packet, `sdd-apply` implements, and `sdd-verify` validates by default.
 - Use minimal delegated apply for broad but mechanically scoped migrations when a user-approved tracker/checklist exists, behavior/design is already settled, validation is clear, and delegation would reduce orchestration load without requiring a full PRD/spec/design SDD. Minimal delegated apply is a specialized mini-SDD shape.
 - Use inline/docs-only edits only for small explicit wording/config/doc changes with low future-behavior risk, even when the touched files are policy-sensitive, if the user approved the path and no durable artifact value exists.
 - For user-requested commits, follow the Git commit policy in `AGENTS.md`; triage is not commit permission.
+
+## Policy-sensitive workflow gate
+
+Treat changes to agent behavior as higher risk than ordinary docs/config edits.
+
+Policy-sensitive paths include:
+- `AGENTS.md`;
+- project-local skills and subagents such as `.pi/skills/**`, `.agents/skills/**`, and `.pi/subagents/**`;
+- global/user agent skills and subagents such as `~/.pi/agent/skills/**`, `~/.agents/skills/**`, and `~/.pi/agent/subagents/**`;
+- `.pi/permissions.json`;
+- `.pi/memory.json`;
+- `.pi/context7.json`;
+- `.pi/subagents.json` and `~/.pi/agent/subagents.json`;
+- workflow, memory, permission, skill-registry, or subagent extension code.
+
+Rules:
+- If the user asks to investigate or diagnose policy-sensitive behavior, stay read-only and report options first.
+- If implementation is approved for a policy-sensitive change, state the selected workflow before editing and explain why it is inline/simple TDD, discovery, or SDD.
+- Use formal SDD planning by default when the change is multi-file, cross-cutting, changes future agent behavior, introduces or changes a contract/API, or needs durable handoff artifacts.
+- Use `workflow-triage` before SDD or discovery when the scope, impact, or right workflow is unclear; delegate to `discovery` only when read-only evidence is actually needed and current context is insufficient.
+- Inline/docs-only edits are allowed only for small, explicit, localized policy wording fixes with low future-behavior risk.
+
+## Mandatory workflow decision protocol
+
+Before any non-trivial change, the orchestrator must choose and state one route:
+
+1. `inline` / `simple-tdd`: the main agent implements because scope is small, behavior is clear, affected surface is localized, and validation is cheap. (Requires explicit user permission to fix directly).
+2. `simple-tdd-with-review`: the main agent implements because scope is still localized, but a policy-sensitive/risk-bearing final review checklist is mandatory before reporting done.
+3. `mini-sdd`: the main agent writes a compact task packet/checklist, delegates implementation to `sdd-apply`, then runs `sdd-verify` by default. Use this when the work is medium-sized, spans multiple related files, is easy to task, and does not need full PRD/spec/design artifacts.
+4. `prd-first`: the main agent drafts/updates a PRD and normally runs `prd-review` before downstream SDD when product requirements, UX, acceptance criteria, or user-visible behavior are not settled.
+5. `formal-sdd`: use full proposal/spec/design/tasks/apply/verify for cross-cutting, architectural, security-sensitive, API/contract, persistence, or high-handoff-value work.
+
+If the route is `mini-sdd`, `prd-first`, or `formal-sdd`, the orchestrator must not silently implement the work itself. It must create the required task/PRD/SDD context and use the appropriate subagents unless the user explicitly chooses a different route.
+
+## Workflow routing quick table
+
+Use this table before acting when the request may involve reading files, changing code/docs/config, adding tests, or delegating:
+
+| User intent / work shape | Default workflow | Approval rule |
+|---|---|---|
+| Simple question, explanation, or opinion with no need to inspect files | Inline answer | Answer directly; do not use tools unless the user asks for investigation. |
+| Tiny inspection of one obvious file/path, no change requested | Inline read-only | Inspect minimally and report; do not edit. |
+| User asks to investigate, analyze, review, compare, diagnose, or “look at” behavior | Read-only investigation; use `workflow-triage` when routing is unclear; use `discovery` only if isolated research is broad enough to benefit from delegation | Report findings/options and wait for the user to choose next action. |
+| Small localized implementation with clear expected behavior and existing cheap validation | Simple TDD | Always ask: "¿Prefieres que arregle esto directamente o hacemos una revisión/propuesta primero?". Add/update failing test before code when non-trivial. |
+| One-extension or one-module change with tests, limited architecture risk, and no durable PRD/spec value | Simple TDD, not full SDD by default | State expected behavior and validation plan; ask before implementing if the user has not explicitly approved implementation. |
+| Medium multi-file change with clear behavior and taskable scope, but no PRD/full SDD value | Mini-SDD | Orchestrator writes task packet/checklist, delegates implementation to `sdd-apply`, then runs `sdd-verify` unless user explicitly waives verification. |
+| Policy-sensitive change touching agent instructions, skills, subagents, permissions, memory/config, workflow extensions, or future agent behavior | Use `workflow-triage`; inline/docs-only is allowed only for small explicit localized fixes; otherwise prefer simple-tdd-with-review, mini-SDD, or formal SDD according to scope/risk | State workflow choice before editing and perform a post-change review/verify gate. |
+| Multi-file or multi-extension change, new API/contract, cross-cutting behavior, unclear requirements, or durable handoff value | Formal SDD planning | Load `sdd-workflow`; resolve git gate, execution mode, artifact store, and planning approval before artifacts/subagents. |
+| User explicitly asks for PRD/spec/design/tasks/OpenSpec/SDD | Formal SDD | Do not create artifacts or launch SDD subagents until git gate and mode gate are resolved. |
+| Existing SDD task artifact and user asks to implement approved tasks | SDD apply-only | Confirm implementation approval and task slice/range before `sdd-apply`. |
+| User asks to verify/check completed SDD work | SDD verify-only | Verification reports issues only; do not fix without new apply approval. |
+| Documentation-only cleanup with no behavior change | Inline edit or Simple TDD-style validation | Keep changes minimal; validate with formatting/tests only when relevant. |
+
+Important interpretation rules:
+
+- “Investigate/analyze/review” is not implementation approval.
+- “Hagamos eso”, “apply the patch”, or “implement it” after options is implementation approval only for the discussed option; confirm if multiple materially different options remain.
+- Do not escalate a localized, well-understood change to full SDD just because it is non-trivial; use Simple TDD or inline docs-only when durable artifacts would add little value.
+- Do not downshift policy-sensitive, cross-cutting, or future-agent-behavior changes to inline/simple TDD just because they look like docs/config edits.
+- Do not skip TDD/validation for non-trivial code changes just because the workflow is not full SDD.
+- Do not skip the post-change review/verify gate for non-trivial, multi-file, delegated, or policy-sensitive work. If no subagent verification is used, perform an explicit orchestrator review of diff, tests, risks, and next steps before final response.
 
 ## Intake Model
 
