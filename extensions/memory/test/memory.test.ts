@@ -129,8 +129,8 @@ describe('extension setup', () => {
     expect(content).toContain('inspect the current project profile early with memory_project_profile get unless startup context already includes an up-to-date profile');
     expect(content).toContain('Store durable reusable knowledge with memory_add');
     expect(content).toContain('Ask before saving global or general user preferences, large project_profile rewrites, contradictions, or policy changes that affect future agents');
-    expect(content).toContain('precommit checkpoint memories must summarize what was accomplished, why it matters, decisions/tradeoffs, validations, open todos, and risks');
-    expect(content).toContain('do not save only changed files or timestamps');
+    expect(content).not.toContain('precommit checkpoint');
+    expect(content).not.toContain('For user-requested commits');
     expect(content).toContain('memory_search returns compact candidates; use memory_get only when full content is needed');
     expect(content).toContain('Use memory_archive instead of deleting obsolete memories');
   });

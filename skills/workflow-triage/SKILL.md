@@ -110,7 +110,7 @@ Do not load this skill for greetings, obvious direct answers, or already-approve
 - Use mini-SDD for medium-sized, taskable, multi-file work when behavior is clear enough to write a compact task packet, full PRD/spec/design would add little value, and independent apply/verify execution would reduce mistakes. Mini-SDD means the orchestrator writes the task packet, `sdd-apply` implements, and `sdd-verify` validates by default.
 - Use minimal delegated apply for broad but mechanically scoped migrations when a user-approved tracker/checklist exists, behavior/design is already settled, validation is clear, and delegation would reduce orchestration load without requiring a full PRD/spec/design SDD. Minimal delegated apply is a specialized mini-SDD shape.
 - Use inline/docs-only edits only for small explicit wording/config/doc changes with low future-behavior risk, even when the touched files are policy-sensitive, if the user approved the path and no durable artifact value exists.
-- For user-requested commits, follow the Git commit policy and precommit memory checkpoint rules in `AGENTS.md`; triage is not commit permission.
+- For user-requested commits, follow the Git commit policy in `AGENTS.md`; triage is not commit permission.
 
 ## Intake Model
 

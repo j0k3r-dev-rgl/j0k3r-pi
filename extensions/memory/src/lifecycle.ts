@@ -57,7 +57,6 @@ function buildMemoryInstructions(context: any): string {
     '- Memory content should include the idea type, context, concrete details, implications for future agents, and source when useful.',
     '- Load the `persistent-memory` skill when you need detailed memory operating policy and it is not already loaded in the conversation: substantial tasks, deciding what to save, project_profile updates, consolidation, import/export, or session-end summaries.',
     '- At the end of substantial work, summarize what changed, decisions made, progress, validations, open todos, and reusable learnings.',
-    '- For user-requested commits, precommit checkpoint memories must summarize what was accomplished, why it matters, decisions/tradeoffs, validations, open todos, and risks; do not save only changed files or timestamps.',
     '- Do not store secrets, tokens, passwords, private keys, or low-value temporary details.',
     '- memory_search returns compact candidates; use memory_get only when full content is needed.',
     '- Use memory_archive instead of deleting obsolete memories.',

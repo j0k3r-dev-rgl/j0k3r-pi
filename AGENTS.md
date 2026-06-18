@@ -158,21 +158,7 @@ Rules:
 - Do not push automatically after committing unless the user explicitly asks to push.
 - If a workflow would benefit from a commit, recommend it and ask first; wait for an explicit affirmative instruction before running Git write operations.
 - Manual validation and user acceptance are separate from automated tests. Passing tests is not approval to commit.
-- When the user does ask for a commit, summarize the pending changes and run `git status --short` first unless already done immediately beforehand.
-
-### Pre-commit memory checkpoint
-
-When the user explicitly asks for a commit, perform a memory checkpoint before running `git commit`.
-
-Rules:
-- This checkpoint is required for meaningful code, docs, workflow, configuration, SDD, or extension changes.
-- Save durable project memories for confirmed decisions, completed progress, validated commands, open todos, unresolved risks, or reusable learnings when present.
-- Create one compact `progress` memory titled `precommit checkpoint: <short summary>` for the commit scope unless an equivalent progress memory was already saved in the same turn.
-- Make the checkpoint substantively useful for future agents: summarize what was accomplished, the user-visible behavior or policy outcome, why the change matters, and any important decisions or tradeoffs.
-- Include changed scope, important files or modules, validations run and results, open todos, and accepted risks as supporting evidence, not as a bare file/date list.
-- Do not save a low-value checkpoint that only says which files changed or when the commit happened; if there is no durable summary beyond the diff, say so and keep it minimal.
-- Do not store secrets, raw logs, or low-value temporary details.
-- The checkpoint is not permission to commit; commit permission still requires an explicit user request in the current conversation.
+- When the user does ask for a commit, run `git status --short` first unless already done immediately beforehand.
 
 ## Strict TDD
 
