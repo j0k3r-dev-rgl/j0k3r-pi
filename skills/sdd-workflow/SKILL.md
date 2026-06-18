@@ -95,7 +95,7 @@ Do not load this skill for:
 - Keep the user in control.
 - Choose the lightest safe workflow.
 - Do not create SDD/OpenSpec artifacts or launch SDD subagents for a new flow until the SDD mode gate is resolved.
-- PRDs are optional, not mandatory for every SDD. If `openspec/changes/<change>/prd.md` exists, it is PRD context only when the orchestrator selected a PRD-aware route and marks the PRD as approved for the flow; downstream phases continue from `metadata.yaml` and phase artifacts regardless and should use PRD context only when explicitly included by the orchestrator.
+- PRDs are optional, not mandatory for every SDD. If `openspec/changes/<change>/prd.md` exists, it is PRD context only when the orchestrator selected a PRD-aware route and marks the PRD as approved or in scope for the flow. Once approved or in scope, downstream phases must read and preserve PRD context instead of relying only on metadata or phase artifacts.
 - `openspec/config.yaml` is project-global and minimal. It may store stable defaults plus the last SDD mode selected by the user, but not active change, feature summaries, PRD status, or implementation-specific context; put change-specific context in `openspec/changes/<change>/metadata.yaml` and phase artifacts.
 - Always ask the user for SDD mode on every new SDD flow. After the user selects `interactive`, `normal`, or `defaults`, update `openspec/config.yaml` `sdd.last_selected_mode`, record the selected mode in change metadata when present, and keep active SDD memory consistent.
 - If `openspec/changes/<change>/metadata.yaml` exists, every SDD phase and subagent must read it before acting, before or alongside PRD/proposal/spec/design/tasks, and preserve/flag metadata alignment.
@@ -129,13 +129,15 @@ When metadata and context artifacts diverge, the orchestrator must use this prec
 3. **Approved PRD artifacts** (`openspec/changes/<change>/prd.md` + `openspec/changes/<change>/prd-review.md`) when they are in scope.
 4. **`openspec/changes/<change>/spec.md`** as the normative requirement contract.
 5. **`design.md` and `tasks.md`** as implementation constraints derived from spec.
-6. **`verify-report.md` / runtime evidence** as implementation outcome.
+6. **`implementation-map.md`** as non-normative operational handoff for explored files, expected file operations, symbols, validations, risks, and downstream notes.
+7. **`verify-report.md` / runtime evidence** as implementation outcome.
 
 When the same domain is contradictory:
 
 - For **scope and execution constraints** (artifact store, mode, validation expectations, approval scope), `metadata.yaml` wins unless the user explicitly approves an override.
 - For **behavioral/product intent**, prefer PRD when it is approved and explicitly scoped for the flow.
 - For **implementation detail**, prefer `spec.md`; if `design.md`/`tasks.md` contradict spec, treat as blocked and request correction.
+- For **operational handoff detail**, use `implementation-map.md` to reduce repeated investigation, but do not let it override metadata, approved PRD, spec, design, or tasks; stale or contradictory map entries must be updated or reported as conflicts.
 
 Each phase actor must return an explicit conflict assessment in its report. If any conflict is *blocking* and unresolved, the phase status must be `blocked` and include the required user decision before continuing.
 
@@ -283,6 +285,7 @@ Canonical OpenSpec artifact names:
 - Optional PRD: `openspec/changes/<change>/prd.md`.
 - Optional PRD review: `openspec/changes/<change>/prd-review.md`.
 - Active change spec: `openspec/changes/<change>/spec.md`.
+- Implementation map: `openspec/changes/<change>/implementation-map.md`.
 - Active verification report: `openspec/changes/<change>/verify-report.md`.
 - Archive may sync source-of-truth capability specs under `openspec/specs/<capability>/spec.md` from the change artifacts when applicable.
 
@@ -306,6 +309,8 @@ Before using an existing slug, inspect current OpenSpec state or active SDD memo
 
 Each named SDD change may have `openspec/changes/<change>/metadata.yaml` for change-specific context: slug, title, status, artifact store, mode, summary, relevant source paths, validation expectations, and notes. Do not add placeholder paths or status for artifacts that do not exist. Reference PRD context in metadata only when a real PRD artifact exists or the user explicitly approved PRD creation. If metadata exists, all SDD phases and subagents must read it before acting and report conflicts with downstream artifacts instead of silently ignoring it.
 
+Each named formal SDD change should maintain a separate operational handoff artifact at `openspec/changes/<change>/implementation-map.md` when `artifact_store` is `openspec` or `hybrid`. The implementation map is a living map of explored files, relevant symbols, files expected to be modified/created/deleted, validation commands, risks, open questions, and handoff notes. It must not be stored in `metadata.yaml`, and it must not replace proposal/spec/design/tasks. It is operational context: if it conflicts with metadata, approved PRD, spec, design, or tasks, the conflicting phase must report the conflict instead of treating the map as normative.
+
 Before starting or continuing a named SDD change:
 
 1. Ensure `openspec/config.yaml` exists, is minimal, and is project-global only.
@@ -313,6 +318,7 @@ Before starting or continuing a named SDD change:
 3. If `openspec/config.yaml` contains change-specific fields, move them into `openspec/changes/<change>/metadata.yaml` or a phase artifact.
 4. Create or update `openspec/changes/<change>/metadata.yaml` when change-specific context is needed for handoff, validation expectations, or subagent routing.
 5. Treat `metadata.yaml` as context, not as a replacement for proposal/spec/design/tasks. Do not use it to invent absent PRDs or other phase artifacts.
+6. Keep implementation handoff detail out of metadata; use `openspec/changes/<change>/implementation-map.md` for explored files, relevant symbols, expected file operations, validation commands, risks, open questions, and downstream handoff notes.
 
 ## Optional PRD flow
 
@@ -323,16 +329,67 @@ PRD creation expectations:
 1. Gather enough evidence to write a strong PRD: user goals, local files, project docs, Pi docs, installed package/node_modules sources, Context7 docs, internet/web references when available, and temporary external repository clones when useful.
 2. Ask the user only decision-critical questions; do not invent hidden requirements.
 3. Write or update `openspec/changes/<change>/prd.md` when artifact storage is `openspec` or `hybrid`; otherwise store the PRD content in active SDD flow memory.
-4. Run `prd-review` before downstream SDD when PRD readiness is uncertain, unless the user explicitly waives review or has already approved the PRD.
-5. Resolve CRITICAL PRD debts, contradictions, untestable requirements, or open product decisions before approving the PRD or proceeding to implementation.
+4. Use the canonical PRD structure below unless the user explicitly supplies another format.
+5. Run `prd-review` before downstream SDD when PRD readiness is uncertain, unless the user explicitly waives review or has already approved the PRD.
+6. Resolve CRITICAL PRD debts, contradictions, untestable requirements, or open product decisions before approving the PRD or proceeding to implementation.
+
+Canonical PRD format:
+
+```markdown
+# PRD: {Change Title}
+
+## Status
+State: draft | reviewed | approved | blocked | waived
+Owner: orchestrator
+Last updated: YYYY-MM-DD
+Approval: pending | approved by user | review waived by user | blocked
+
+## Problem
+{user/product problem}
+
+## Goals
+- ...
+
+## Non-Goals
+- ...
+
+## Users / Personas
+- ...
+
+## User Stories
+- As a ..., I want ..., so that ...
+
+## Functional Requirements
+- FR-1: ...
+
+## Acceptance Criteria
+- AC-1: ...
+
+## Constraints
+- Product/UX/business/security/privacy constraints only. Put implementation/file/symbol detail in `implementation-map.md`, `design.md`, or `tasks.md`.
+
+## Risks
+- ...
+
+## Success Metrics
+- ...
+
+## Open Questions
+- [ ] ...
+
+## Out of Scope
+- ...
+```
 
 Existing PRD rule:
 
 - If `openspec/changes/<change>/prd.md` exists, the orchestrator decides whether it is already approved, needs `prd-review`, or is waived for the current flow.
-- Once the PRD is approved, downstream SDD phases continue normally. They use `metadata.yaml`, proposal, spec, design, and tasks as their operational context; the orchestrator may also include relevant approved PRD requirements in the phase prompt when needed.
+- Approved or explicitly in-scope PRDs are mandatory downstream context: `sdd-explore`, `sdd-proposal`, `sdd-spec`, `sdd-design`, `sdd-task`, `sdd-apply`, and `sdd-verify` must read the PRD when `artifact_store` is `openspec` or `hybrid`, or use the active SDD memory PRD content in `memory` mode.
+- Once the PRD is approved, downstream SDD phases continue normally. They use `metadata.yaml`, the approved PRD, proposal, spec, design, implementation-map, and tasks as their operational context.
 - If `openspec/changes/<change>/metadata.yaml` exists, it is mandatory context for SDD phases and for `prd-review`; the orchestrator must use it when drafting or revising the PRD.
-- Each phase output should include concise metadata and artifact alignment notes covering relevant requirements, assumptions, gaps, and conflicts.
+- Each phase output should include concise metadata/PRD/artifact alignment notes covering relevant requirements, assumptions, gaps, and conflicts.
 - If an SDD artifact conflicts with an approved PRD requirement supplied by the orchestrator, the phase must report `blocked` or flag the conflict clearly instead of silently overriding it.
+- PRD is product/requirements context, not technical implementation planning: do not use PRD to list exact files, functions, or implementation steps except as non-binding background. Use `implementation-map.md`, `design.md`, and `tasks.md` for those details.
 
 ## Mini-SDD and minimal delegated apply
 
@@ -387,7 +444,7 @@ Stop before implementation unless the user explicitly approves apply.
 
 Purpose: draft or revise a PRD from user goals, evidence, and constraints before PRD review and downstream SDD planning.
 
-The main orchestrator owns PRD drafting because it has the full current conversation, user approvals, decision history, and gathered context. It should write/update `openspec/changes/<change>/prd.md` directly when artifact storage is `openspec` or `hybrid`, or store the PRD in active SDD memory for memory-only flows. Ask the user only decision-critical questions and put unresolved decisions in Open Questions. Do not delegate PRD drafting to a separate subagent just to transform context.
+The main orchestrator owns PRD drafting because it has the full current conversation, user approvals, decision history, and gathered context. It should write/update `openspec/changes/<change>/prd.md` directly when artifact storage is `openspec` or `hybrid`, or store the PRD in active SDD memory for memory-only flows. Ask the user only decision-critical questions and put unresolved decisions in Open Questions. Do not delegate PRD drafting to a separate subagent just to transform context. Keep PRD content product/requirements-focused; put implementation handoff in `implementation-map.md`, technical decisions in `design.md`, and execution steps in `tasks.md`.
 
 ### prd-review
 
@@ -404,6 +461,8 @@ Outputs:
 
 - `openspec/changes/<change>/prd-review.md` or memory equivalent;
 - readiness verdict (`ready_for_sdd: yes/no/with warnings`);
+- recommended PRD status (`approved`, `blocked`, `needs-revision`, or `ready-with-warnings`);
+- acceptance criteria/testability matrix for downstream spec/task/verify phases;
 - critical debts, warnings, testability gaps, contradictions, and user/orchestrator questions;
 - recommended next step.
 
@@ -424,26 +483,23 @@ Inputs:
 Outputs:
 
 - exploration artifact or memory section;
+- initial implementation-map artifact or memory section;
 - recommendation;
 - open questions;
 - readiness for proposal.
 
 ### sdd-proposal
 
-Purpose: product/PRD-level proposal.
+Purpose: SDD proposal that translates user goals and any approved PRD into SDD planning scope and capability-level approach. It should not duplicate the whole PRD when a PRD exists.
 
 Outputs should include:
 
-- problem statement;
-- goals and non-goals;
-- users/personas;
-- MVP scope;
-- user stories;
-- acceptance criteria;
-- UX/product behavior;
-- risks;
-- open questions;
-- rollout/validation notes.
+- concise problem/scope summary with references to PRD sections when applicable;
+- goals/non-goals only when no PRD exists, or deltas from the approved PRD;
+- MVP scope and affected capabilities;
+- high-level approach and rollout/validation notes;
+- risks and open questions;
+- acceptance criteria references or deltas, not a competing PRD copy.
 
 ### sdd-spec
 
@@ -465,6 +521,7 @@ Outputs should include:
 
 - architecture;
 - affected modules/files;
+- implementation-map refinements for expected file operations, relevant symbols, and validation map;
 - data flow;
 - APIs/interfaces;
 - testing strategy;
@@ -480,6 +537,7 @@ Outputs should include:
 - ordered tasks;
 - dependencies;
 - acceptance checks per task;
+- concrete file/symbol references from the implementation map when applicable;
 - TDD/test-first expectations;
 - validation commands;
 - apply slices suitable for approval.
@@ -503,7 +561,7 @@ Rules:
 
 - report issues; do not fix unless orchestrator starts a new apply task;
 - run relevant tests/validation;
-- for formal SDD, compare implementation to metadata, approved PRD context when supplied, spec, design, and tasks;
+- for formal SDD, compare implementation to metadata, approved PRD context when supplied, spec, design, tasks, and implementation-map expectations;
 - for mini-SDD/minimal delegated apply, compare implementation to the task packet, allowed/forbidden scope, acceptance criteria, selected skill guidance, and `sdd-apply` return envelope;
 - identify residual risks.
 
@@ -565,7 +623,7 @@ Before launching a subagent, prepare a focused task with:
 - execution mode implications;
 - current known state;
 - required prior artifact paths/summaries;
-- OpenSpec config path and relevant change metadata path/content summary, if present; for minimal delegated apply, the tracker/checklist path or embedded task packet instead;
+- OpenSpec config path, relevant change metadata path/content summary, and implementation-map path/summary when present; for minimal delegated apply, the tracker/checklist path or embedded task packet instead;
 - relevant skills selected via `skill_registry_resolve`, including skill name, `SKILL.md` path, match reasons, and any related skills deliberately loaded or discarded;
 - allowed and forbidden actions;
 - expected return envelope;
@@ -626,11 +684,13 @@ When this skill affects the answer, return a concise SDD workflow decision or ph
 - `subagents/prd-review.md` — PRD review executor.
 - `subagents/sdd-*.md` — SDD phase executors.
 - `openspec/changes/<change>/prd.md` — optional PRD artifact; mandatory only for flows where the orchestrator explicitly selected PRD-aware context.
+- `openspec/changes/<change>/implementation-map.md` — operational handoff artifact for explored files, relevant symbols, expected file operations, validation map, risks, open questions, and downstream handoff notes; separate from `metadata.yaml` and non-normative compared with spec/design/tasks.
 
 ## Memory rules for SDD
 
 - Subagents may update only the active SDD flow memory and only as compact index/state/handoff.
 - Long-form artifacts belong in OpenSpec when artifact store is `openspec` or `hybrid`.
+- Formal SDD operational handoff belongs in `implementation-map.md`, not in `metadata.yaml`; memory stores only compact pointers/summaries for OpenSpec/hybrid flows.
 - The orchestrator owns durable non-SDD memories, project profile updates, and consolidation.
 - Save only durable, non-sensitive decisions, constraints, commands, learnings, todos, and progress.
 

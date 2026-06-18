@@ -104,7 +104,7 @@ Do not load this skill for greetings, obvious direct answers, or already-approve
 - Do not call `discovery` before applying this triage when routing is unclear. First use the orchestrator's current context, startup context, loaded skills, and this checklist to decide whether delegation is needed.
 - Use `discovery` only when delegated read-only research will materially improve the orchestrator's decision. Ask it for specific evidence, not for the final route. Do not delegate when the orchestrator already has enough context or when a small direct fix/answer is clearly safe.
 - Use formal SDD when the change is genuinely cross-cutting, introduces or changes a durable contract/API, has high architecture or policy risk, or needs handoff artifacts.
-- PRDs are optional, not mandatory for every SDD. Prefer a PRD-first route only when the user asks for a PRD or when complex product, UX, integration, OAuth/auth, security, or architecture work genuinely needs requirements definition before proposal/spec/design/tasks. The main orchestrator drafts or revises the PRD directly with the user because it has the full conversation and decision context; do not create or delegate extra PRD draft/analyzer subagents just to transform context. Use `prd-review` only to validate PRD ambiguity, debt, testability, contradictions, missing questions, and readiness before the PRD is approved or waived. Once the PRD is approved or waived, downstream SDD proceeds normally from `metadata.yaml` and SDD artifacts.
+- PRDs are optional, not mandatory for every SDD. Prefer a PRD-first route only when the user asks for a PRD or when complex product, UX, integration, OAuth/auth, security, or architecture work genuinely needs requirements definition before proposal/spec/design/tasks. The main orchestrator drafts or revises the PRD directly with the user because it has the full conversation and decision context; do not create or delegate extra PRD draft/analyzer subagents just to transform context. Use `prd-review` only to validate PRD ambiguity, debt, testability, contradictions, missing questions, acceptance-criteria coverage, implementation-detail leakage, and readiness before the PRD is approved, revised, blocked, or waived. Once a PRD is approved or explicitly in scope, downstream SDD phases must read and preserve it as mandatory product/requirements context; if PRD review is waived, the orchestrator must state that waiver and any accepted risks.
 - Use simple TDD for localized non-trivial code changes with clear expected behavior and cheap validation.
 - Use simple TDD with an explicit review gate when the main agent can implement safely but the change is policy-sensitive, multi-file, or risk-bearing enough that a final diff/tests/risk review is required.
 - Use mini-SDD for medium-sized, taskable, multi-file work when behavior is clear enough to write a compact task packet, full PRD/spec/design would add little value, and independent apply/verify execution would reduce mistakes. Mini-SDD means the orchestrator writes the task packet, `sdd-apply` implements, and `sdd-verify` validates by default.
@@ -119,7 +119,7 @@ When the user proposes a change or feature, the orchestrator should use this seq
 1. Understand the requested outcome in plain language.
 2. Identify what is known, what is assumed, and what is missing.
 3. Ask only the questions needed to choose a safe workflow or avoid building the wrong thing.
-4. If PRD-level requirements are needed, keep PRD drafting with the main orchestrator and the user; use `prd-review` only as a validation gate before PRD approval/waiver.
+4. If PRD-level requirements are needed, keep PRD drafting with the main orchestrator and the user; use the canonical PRD structure from `sdd-workflow`, keep implementation/file/symbol details out of the PRD, and use `prd-review` only as a validation gate before PRD approval/revision/block/waiver.
 5. If the missing information is factual and can be researched read-only, delegate a focused `discovery` task.
 6. Once enough information is available, choose the lightest safe workflow.
 7. Decide explicitly who should implement: main agent for inline/simple TDD, or `sdd-apply` for mini-SDD/minimal delegated apply/formal SDD apply.
@@ -171,7 +171,7 @@ Escalate or load related skills:
    - external docs/API uncertainty.
 4. Decide whether clarification is required before any tool use, delegation, artifact creation, or edit.
 5. Decide whether the orchestrator already has enough context to proceed directly. If yes, do not delegate to `discovery` just to confirm the obvious.
-6. Decide whether a PRD is needed: if the user explicitly asks for one or requirements are genuinely unclear/complex, draft/revise it as the main orchestrator; otherwise do not add PRD overhead.
+6. Decide whether a PRD is needed: if the user explicitly asks for one or requirements are genuinely unclear/complex, draft/revise it as the main orchestrator using `sdd-workflow` PRD lifecycle/status guidance; otherwise do not add PRD overhead.
 7. Choose the lightest safe workflow:
    - `inline-answer` for simple explanation/opinion;
    - `inline-readonly` for tiny inspection;
@@ -181,8 +181,8 @@ Escalate or load related skills:
    - `mini-sdd` for medium taskable multi-file work where the orchestrator creates a compact task packet, `sdd-apply` implements, and `sdd-verify` validates;
    - `minimal-delegated-apply` for tracker-backed mechanical multi-file migrations with approved scope, clear acceptance checks, and no new design decisions;
    - `discovery` for bounded read-only research when evidence is missing;
-   - `prd-first-sdd` for complex work that needs product requirements clarified before formal SDD artifacts; the orchestrator writes/revises the PRD with the user and may use `prd-review` before approving or waiving it;
-   - `use-existing-prd-sdd` when `openspec/changes/<change>/prd.md` already exists; the orchestrator decides whether it is approved, needs `prd-review`, or is waived, then downstream SDD proceeds normally from `metadata.yaml` and SDD artifacts;
+   - `prd-first-sdd` for complex work that needs product requirements clarified before formal SDD artifacts; the orchestrator writes/revises the PRD with the user using the canonical PRD format and may use `prd-review` before approving, revising, blocking, or waiving it;
+   - `use-existing-prd-sdd` when `openspec/changes/<change>/prd.md` already exists; the orchestrator decides whether it is approved/in scope, needs `prd-review`, needs revision, is blocked, or is waived; when approved/in scope, downstream SDD must read and preserve PRD context alongside metadata, phase artifacts, and `implementation-map.md`;
    - `formal-sdd` for substantial/cross-cutting/policy/API changes needing artifacts;
    - `sdd-apply`, `sdd-verify`, or `sdd-archive` for existing approved SDD phases;
    - `blocked-ask-user` when a required decision is missing.

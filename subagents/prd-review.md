@@ -51,10 +51,11 @@ Search for `type: sdd_feature_project_state` and the change slug. Update/create 
 1. Read `openspec/changes/{change}/metadata.yaml` completely if it exists, and use it as change-specific context for source paths, validation expectations, and handoff notes. Do not infer that a PRD exists from metadata unless it references a real PRD artifact supplied by the orchestrator.
 2. Read the PRD completely only when a PRD path exists or PRD text is supplied. If the default PRD path exists, use it even if the orchestrator also summarized the PRD.
 3. Inspect only the supporting context needed to review quality: referenced local files/docs, existing OpenSpec artifacts, project docs, installed package/node_modules sources, Pi docs, Context7/internet notes supplied by the orchestrator, or temporary external repository notes.
-4. Check whether goals, non-goals, users, constraints, acceptance criteria, risks, and validation expectations are explicit and consistent.
-5. Identify ambiguity, contradictions, untestable requirements, missing product decisions, hidden technical assumptions, security/privacy risks, and scope creep.
-6. Decide whether the PRD is ready for downstream SDD planning.
-7. Persist review according to `artifact_store`.
+4. Check whether status, problem, goals, non-goals, users/personas, user stories, functional requirements, acceptance criteria, constraints, risks, success metrics, and validation expectations are explicit and consistent.
+5. Identify ambiguity, contradictions, untestable requirements, missing product decisions, hidden technical assumptions, security/privacy risks, scope creep, and implementation/file-level detail that belongs in `implementation-map.md`, `design.md`, or `tasks.md` instead of the PRD.
+6. Produce structured matrices for acceptance criteria testability and open decisions so downstream `sdd-spec`, `sdd-task`, and `sdd-verify` can reuse them without reinterpreting the PRD.
+7. Decide whether the PRD is ready for downstream SDD planning and recommend a PRD status: `approved`, `blocked`, `needs-revision`, or `ready-with-warnings`.
+8. Persist review according to `artifact_store`.
 
 ## Alignment and conflict checks
 
@@ -80,10 +81,12 @@ If the file exists, read it first and update it instead of blindly overwriting.
 
 ## Verdict
 Ready for SDD: Yes | No | Yes with warnings
+Recommended PRD status: approved | blocked | needs-revision | ready-with-warnings
 
 ## PRD Inputs
 - Metadata: `openspec/changes/{change}/metadata.yaml` | None
 - PRD: `openspec/changes/{change}/prd.md` | supplied text
+- PRD declared status: draft | reviewed | approved | blocked | waived | missing
 - Supporting context inspected: ...
 
 ## Strengths
@@ -101,11 +104,24 @@ Issues that should be resolved before or during SDD planning:
 Non-blocking improvements:
 - ...
 
-## Testability
-| Requirement / Acceptance Criterion | Testable? | Notes |
-|------------------------------------|-----------|-------|
+## Acceptance Criteria Matrix
+| ID | Criterion | Source section | Testable? | Blocking? | Notes |
+|----|-----------|----------------|-----------|-----------|-------|
 
-## Open Questions for Orchestrator/User
+## Requirement Coverage Matrix
+| Requirement/User Story | Covered by acceptance criteria? | Gaps / Notes |
+|------------------------|----------------------------------|--------------|
+
+## Testability
+| Requirement / Acceptance Criterion | Testable? | Suggested evidence |
+|------------------------------------|-----------|--------------------|
+
+## Open Decisions for Orchestrator/User
+| Decision | Blocking? | Recommended owner | Notes |
+|----------|-----------|-------------------|-------|
+
+## Implementation Detail Leakage
+PRD content that should move to `implementation-map.md`, `design.md`, or `tasks.md`:
 - None | ...
 
 ## Recommended Next Step
@@ -115,11 +131,12 @@ Proceed to `sdd-explore` / revise PRD / ask user / blocked.
 ## Rules
 
 - A PRD is allowed to be imperfect, but critical ambiguity or contradictions must block implementation.
-- Do not invent missing decisions; list them as questions or debts.
+- Do not invent missing decisions; list them as questions, debts, or open decisions.
 - Be concrete and cite PRD sections/headings when possible.
 - Treat security, auth, privacy, and user-visible behavior requirements as high scrutiny.
+- Keep PRD review product/requirements-focused. Flag exact file lists, function plans, implementation steps, and validation command maps as implementation detail leakage unless they are clearly non-binding background.
 - If no PRD is found and none is supplied, return `blocked` with a clear missing-PRD message.
 
 ## Return envelope
 
-Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, ready_for_sdd, critical_debts, warnings, questions, artifacts written/updated, memory ids written/updated, next_recommended.
+Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, ready_for_sdd, recommended_prd_status, acceptance_criteria_matrix, requirement_coverage_matrix, critical_debts, warnings, questions, implementation_detail_leakage, artifacts written/updated, memory ids written/updated, next_recommended.

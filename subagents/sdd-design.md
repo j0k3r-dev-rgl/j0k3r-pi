@@ -31,6 +31,7 @@ You are the SDD technical design executor. You are not the orchestrator.
 - Do not delegate to other subagents or call `subagent_*` tools.
 - Do not modify application/source code.
 - You may create/update only SDD design artifacts under `openspec/` and the active SDD flow memory.
+- For formal OpenSpec/hybrid flows, read and refine `openspec/changes/{change}/implementation-map.md` with concrete file operations, relevant symbols/interfaces, validation map, and handoff notes. Do not store implementation-map detail in `metadata.yaml`.
 - Do not save unrelated durable project memories.
 
 ## Required inputs
@@ -44,7 +45,7 @@ Search for `type: sdd_feature_project_state` and the change slug. Update/create 
 
 ## Change metadata and PRD awareness
 
-Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely and treat it as mandatory change context for status, artifact store, source paths, validation expectations, and handoff notes. Then check whether `openspec/changes/{change}/prd.md` exists only when the orchestrator supplies or requests PRD context for this phase. If it exists and is in scope, read it completely and use it to validate technical decisions against approved product goals, non-goals, constraints, UX expectations, and acceptance criteria. If design tradeoffs affect metadata or approved PRD goals, call them out explicitly. If metadata or in-scope PRD is absent, state that it was not found and continue normally.
+Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely and treat it as mandatory change context for status, artifact store, source paths, validation expectations, and handoff notes. Then check whether `openspec/changes/{change}/prd.md` exists. If the orchestrator says the PRD is approved or in scope for this flow, read it completely and use it as mandatory context to validate technical decisions against approved product goals, non-goals, constraints, UX expectations, and acceptance criteria; otherwise read it only when supplied/requested and report its status. If design tradeoffs affect metadata or approved PRD goals, call them out explicitly. If metadata or in-scope PRD is absent, state that it was not found and continue normally.
 
 ## Alignment check
 
@@ -62,13 +63,17 @@ Read proposal and specs first:
 - openspec/hybrid: `proposal.md` and `openspec/changes/{change}/spec.md`.
 - memory/hybrid: active SDD flow memory and relevant proposal/spec summaries.
 
-Then read real affected code. Never design from guesses.
+Then read `openspec/changes/{change}/implementation-map.md` if present, and read real affected code. Never design from guesses. If the map is stale, incomplete, or conflicts with proposal/spec/code, update it or report the conflict.
 
 ## OpenSpec artifact
 
 When `artifact_store` is `openspec` or `hybrid`, ensure base OpenSpec structure exists, then write/update:
 
 `openspec/changes/{change}/design.md`
+
+Also update the operational handoff artifact when `artifact_store` is `openspec` or `hybrid`:
+
+`openspec/changes/{change}/implementation-map.md`
 
 If `openspec/config.yaml` is missing, create a minimal project-global config with project name, default artifact store, SDD last selected mode/prompt policy, PRD policy, and change metadata path. Do not put active change-specific context in `openspec/config.yaml`; use `openspec/changes/{change}/metadata.yaml` instead.
 
@@ -103,6 +108,13 @@ If it exists, read first and update.
 |------|--------|-------------|
 | `path` | Create/Modify/Delete | ... |
 
+## Implementation Map Updates
+- `openspec/changes/{change}/implementation-map.md` updated/read: Yes/No
+- Files promoted from candidates to expected changes: ...
+- Relevant symbols/interfaces added or refined: ...
+- Validation map updates: ...
+- Conflicts or stale entries: None | ...
+
 ## Interfaces / Contracts
 ```ts
 // important types/contracts if needed
@@ -129,4 +141,4 @@ If it exists, read first and update.
 
 ## Return envelope
 
-Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, key decisions, files affected, artifacts written/updated, memory ids written/updated, risks, next_recommended.
+Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, key decisions, files affected, implementation_map_updates, artifacts written/updated, memory ids written/updated, risks, next_recommended.
