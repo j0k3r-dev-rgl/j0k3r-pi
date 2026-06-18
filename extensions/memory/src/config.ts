@@ -74,6 +74,14 @@ function buildBaseConfig(): Omit<ProjectMemoryConfig, 'project_name' | 'aliases'
       url_env: DEFAULT_CLOUD_URL_ENV,
       token_env: DEFAULT_CLOUD_TOKEN_ENV,
     },
+    git: {
+      enabled: false,
+      sync: {
+        cloud: false,
+        export: false,
+        import: false,
+      },
+    },
   };
 }
 
@@ -89,10 +97,14 @@ export function readProjectMemoryConfig(cwd: string, env: NodeJS.ProcessEnv = pr
     const sessionEndRaw = (raw.session_end && typeof raw.session_end === 'object') ? raw.session_end as Record<string, unknown> : {};
     const importRaw = (raw.import && typeof raw.import === 'object') ? raw.import as Record<string, unknown> : {};
     const backupsRaw = (raw.backups && typeof raw.backups === 'object') ? raw.backups as Record<string, unknown> : {};
+    const gitRaw = (raw.git && typeof raw.git === 'object') ? raw.git as Record<string, unknown> : {};
+    const gitSyncRaw = (gitRaw.sync && typeof gitRaw.sync === 'object') ? gitRaw.sync as Record<string, unknown> : {};
 
     if (raw.import !== undefined && (typeof raw.import !== 'object' || raw.import === null)) warnings.push('Ignoring invalid import config; expected object.');
     if (raw.backups !== undefined && (typeof raw.backups !== 'object' || raw.backups === null)) warnings.push('Ignoring invalid backups config; expected object.');
     if (raw.cloud !== undefined && (typeof raw.cloud !== 'object' || raw.cloud === null)) warnings.push('Ignoring invalid cloud config; expected object.');
+    if (raw.git !== undefined && (typeof raw.git !== 'object' || raw.git === null)) warnings.push('Ignoring invalid git config; expected object.');
+    if (gitRaw.sync !== undefined && (typeof gitRaw.sync !== 'object' || gitRaw.sync === null)) warnings.push('Ignoring invalid git.sync config; expected object.');
 
     if ('token' in cloudRaw) warnings.push('Do not store cloud.token in .pi/memory.json; use token_env.');
 
@@ -133,6 +145,17 @@ export function readProjectMemoryConfig(cwd: string, env: NodeJS.ProcessEnv = pr
       warnings.push('Ignoring invalid enabled flag in .pi/memory.json; expected true or false.');
     }
 
+    const gitEnabled = gitRaw.enabled === true;
+    if (gitRaw.enabled !== undefined && typeof gitRaw.enabled !== 'boolean') {
+      warnings.push('Ignoring invalid git.enabled in .pi/memory.json; expected true or false.');
+    }
+    const gitSyncCloud = gitSyncRaw.cloud === true;
+    const gitSyncExport = gitSyncRaw.export === true;
+    const gitSyncImport = gitSyncRaw.import === true;
+    if (gitSyncRaw.cloud !== undefined && typeof gitSyncRaw.cloud !== 'boolean') warnings.push('Ignoring invalid git.sync.cloud in .pi/memory.json; expected true or false.');
+    if (gitSyncRaw.export !== undefined && typeof gitSyncRaw.export !== 'boolean') warnings.push('Ignoring invalid git.sync.export in .pi/memory.json; expected true or false.');
+    if (gitSyncRaw.import !== undefined && typeof gitSyncRaw.import !== 'boolean') warnings.push('Ignoring invalid git.sync.import in .pi/memory.json; expected true or false.');
+
     const cfg: ProjectMemoryConfig = {
       enabled,
       project_name: typeof raw.project_name === 'string' ? raw.project_name : undefined,
@@ -157,6 +180,14 @@ export function readProjectMemoryConfig(cwd: string, env: NodeJS.ProcessEnv = pr
         remote_project_id: typeof cloudRaw.remote_project_id === 'string' ? cloudRaw.remote_project_id : null,
         url_env: typeof cloudRaw.url_env === 'string' && cloudRaw.url_env.trim() ? cloudRaw.url_env : DEFAULT_CLOUD_URL_ENV,
         token_env: typeof cloudRaw.token_env === 'string' && cloudRaw.token_env.trim() ? cloudRaw.token_env : DEFAULT_CLOUD_TOKEN_ENV,
+      },
+      git: {
+        enabled: gitEnabled,
+        sync: {
+          cloud: gitSyncCloud,
+          export: gitSyncExport,
+          import: gitSyncImport,
+        },
       },
       warnings,
       path: configPath,

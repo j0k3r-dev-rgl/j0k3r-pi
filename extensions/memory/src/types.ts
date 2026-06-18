@@ -3,7 +3,7 @@ export type MemoryStatus = 'active' | 'archived' | 'superseded';
 export type SyncStatus = 'local' | 'pending' | 'synced' | 'conflict';
 
 export const MEMORY_KINDS = [
-  'preference','decision','architecture','architectural_decision','command','constraint','workflow','note','learning','session_summary','prompt','bug','todo','progress','api','dependency','project_profile'
+  'preference','decision','architecture','architectural_decision','command','constraint','workflow','note','learning','session_summary','prompt','bug','todo','progress','api','dependency','project_profile','commit_record','changelog_entry'
 ] as const;
 export type MemoryKind = typeof MEMORY_KINDS[number];
 
@@ -35,6 +35,17 @@ export interface ProjectBackupsConfig {
   include_sessions: boolean;
 }
 
+export interface ProjectGitSyncConfig {
+  cloud: boolean;
+  export: boolean;
+  import: boolean;
+}
+
+export interface ProjectGitConfig {
+  enabled: boolean;
+  sync: ProjectGitSyncConfig;
+}
+
 export interface ProjectMemoryConfig {
   enabled: boolean;
   project_name?: string;
@@ -45,6 +56,7 @@ export interface ProjectMemoryConfig {
   import: ProjectImportConfig;
   backups: ProjectBackupsConfig;
   cloud: ProjectCloudConfig;
+  git: ProjectGitConfig;
   warnings: string[];
   path?: string;
 }

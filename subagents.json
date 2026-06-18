@@ -20,7 +20,7 @@
       "effort": "medium"
     },
     "sdd-apply": {
-      "model": "openai-codex/gpt-5.3-codex-spark",
+      "model": "openai-codex/gpt-5.4",
       "effort": "medium"
     },
     "sdd-archive": {
@@ -44,11 +44,11 @@
       "effort": "medium"
     },
     "sdd-task": {
-      "model": "openai-codex/gpt-5.3-codex-spark",
+      "model": "openai-codex/gpt-5.4",
       "effort": "medium"
     },
     "sdd-verify": {
-      "model": "openai-codex/gpt-5.5",
+      "model": "openai-codex/gpt-5.4",
       "effort": "medium"
     }
   }

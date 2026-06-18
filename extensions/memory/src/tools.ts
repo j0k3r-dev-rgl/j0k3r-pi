@@ -11,6 +11,8 @@ import { consolidateMemories } from './consolidation.js';
 import { ensureProjectProfile, getCurrentProjectProfile, updateProjectProfile } from './project-profile.js';
 import { getSyncStatus } from './sync-status.js';
 import { renderMemoryToolResult } from './render.js';
+import { addChangelogEntry, addCommitChangelogLink, addCommitRecord, searchCommitChangelog } from './commit-changelog.js';
+import { MEMORY_KINDS } from './types.js';
 import type { MemoryImportConflictPolicy, MemoryImportMode, ToolResult } from './types.js';
 
 function ok(text: string, details: Record<string, unknown> = {}): ToolResult {
@@ -40,25 +42,7 @@ function resultListText(prefix: string, rows: any[]): string {
 }
 
 const Scope = Type.Union([Type.Literal('general'), Type.Literal('project'), Type.Literal('global')]);
-const Kind = Type.Union([
-  'preference',
-  'decision',
-  'architecture',
-  'architectural_decision',
-  'command',
-  'constraint',
-  'workflow',
-  'note',
-  'learning',
-  'session_summary',
-  'prompt',
-  'bug',
-  'todo',
-  'progress',
-  'api',
-  'dependency',
-  'project_profile',
-].map((x) => Type.Literal(x)) as any);
+const Kind = Type.Union(MEMORY_KINDS.map((x) => Type.Literal(x)) as any);
 const Origin = Type.Union([
   Type.Literal('explicit_user'),
   Type.Literal('inferred_by_agent'),
@@ -96,6 +80,12 @@ function normalizeRecallContext(value: string): string {
     commit: 'before_commit',
     end: 'session_end',
   }[value] ?? value;
+}
+
+function assertGitMemoryEnabled(context: { config?: { git?: { enabled?: boolean } } }): void {
+  if (context.config?.git?.enabled !== true) {
+    throw new Error('Memory git module is disabled. Set git.enabled=true in .pi/memory.json to use commit/changelog memory tools.');
+  }
 }
 
 function resolveImportDefaults(
@@ -194,6 +184,169 @@ export function registerMemoryTools(pi: any, db: Db): void {
         return fail(e);
       }
     },
+  });
+
+  pi.registerTool({
+    name: 'memory_commit_record_add',
+    label: 'Memory Commit Record Add',
+    description: 'Create a commit record memory with commit metadata and optional provenance links.',
+    parameters: Type.Object({
+      scope: Type.Optional(Scope),
+      repo: Type.String(),
+      commit_hash: Type.String(),
+      subject: Type.String(),
+      branch: Type.Optional(Type.String()),
+      author: Type.Optional(Type.String()),
+      authored_at: Type.Optional(Type.String()),
+      change_type: Type.Optional(Type.Union([
+        Type.Literal('fix'),
+        Type.Literal('feature'),
+        Type.Literal('chore'),
+        Type.Literal('docs'),
+        Type.Literal('refactor'),
+        Type.Literal('test'),
+        Type.Literal('sync'),
+        Type.Literal('other'),
+      ])),
+      release_impact: Type.Optional(Type.Union([
+        Type.Literal('major'),
+        Type.Literal('minor'),
+        Type.Literal('patch'),
+        Type.Literal('none'),
+      ])),
+      summary: Type.Optional(Type.String()),
+      content: Type.Optional(Type.String()),
+      files_changed: Type.Optional(Type.Array(Type.String())),
+      diffstat: Type.Optional(Type.Union([Type.String(), Type.Record(Type.String(), Type.Any())])),
+      source_session_id: Type.Optional(Type.String()),
+      related_memory_ids: Type.Optional(Type.Array(Type.String())),
+      tags: Type.Optional(Type.Array(Type.String())),
+      confidence: Type.Optional(Type.Number()),
+      importance: Type.Optional(Type.Number()),
+      metadata_json: Type.Optional(Type.Record(Type.String(), Type.Any())),
+    }),
+    async execute(_id: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
+      try {
+        const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
+        assertGitMemoryEnabled(context);
+        const result = addCommitRecord(db, params, context);
+        return ok(`Commit record saved: ${result.memory.title ?? result.memory.id}${result.warning ? ` (${result.warning})` : ''}`, result);
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: 'memory_changelog_entry_add',
+    label: 'Memory Changelog Entry Add',
+    description: 'Create a changelog entry memory with release metadata and optional provenance links.',
+    parameters: Type.Object({
+      scope: Type.Optional(Scope),
+      version: Type.String(),
+      section: Type.String(),
+      bullets: Type.Array(Type.String()),
+      release_tag: Type.Optional(Type.String()),
+      release_date: Type.Optional(Type.String()),
+      title: Type.Optional(Type.String()),
+      summary: Type.Optional(Type.String()),
+      content: Type.Optional(Type.String()),
+      source_commit_ids: Type.Optional(Type.Array(Type.String())),
+      related_memory_ids: Type.Optional(Type.Array(Type.String())),
+      tags: Type.Optional(Type.Array(Type.String())),
+      confidence: Type.Optional(Type.Number()),
+      importance: Type.Optional(Type.Number()),
+      metadata_json: Type.Optional(Type.Record(Type.String(), Type.Any())),
+    }),
+    async execute(_id: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
+      try {
+        const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
+        assertGitMemoryEnabled(context);
+        const result = addChangelogEntry(db, params, context);
+        return ok(`Changelog entry saved: ${result.memory.title ?? result.memory.id}${result.warning ? ` (${result.warning})` : ''}`, result);
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: 'memory_commit_changelog_link',
+    label: 'Memory Commit Changelog Link',
+    description: 'Link commit/changelog memories or supporting memories through memory_links.',
+    parameters: Type.Object({
+      from_memory_id: Type.String(),
+      to_memory_id: Type.String(),
+      relation_type: Type.Union([
+        Type.Literal('derived_from'),
+        Type.Literal('supports'),
+        Type.Literal('related_to'),
+        Type.Literal('supersedes'),
+      ]),
+      metadata_json: Type.Optional(Type.Record(Type.String(), Type.Any())),
+    }),
+    async execute(_id: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
+      try {
+        const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
+        assertGitMemoryEnabled(context);
+        const result = addCommitChangelogLink(db, params);
+        return ok(`Link saved: ${result.link.id}${result.warning ? ` (${result.warning})` : ''}`, result);
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: 'memory_commit_changelog_search',
+    label: 'Memory Commit Changelog Search',
+    description: 'Search commit records, changelog entries, and optional provenance links.',
+    parameters: Type.Object({
+      query: Type.Optional(Type.String()),
+      record_types: Type.Optional(Type.Array(Type.Union([Type.Literal('commit_record'), Type.Literal('changelog_entry')]))),
+      scope: Type.Optional(Scope),
+      project_mode: Type.Optional(ProjectMode),
+      project_name: Type.Optional(Type.String()),
+      repo: Type.Optional(Type.String()),
+      commit_hash: Type.Optional(Type.String()),
+      branch: Type.Optional(Type.String()),
+      change_type: Type.Optional(Type.Union([
+        Type.Literal('fix'),
+        Type.Literal('feature'),
+        Type.Literal('chore'),
+        Type.Literal('docs'),
+        Type.Literal('refactor'),
+        Type.Literal('test'),
+        Type.Literal('sync'),
+        Type.Literal('other'),
+      ])),
+      release_impact: Type.Optional(Type.Union([
+        Type.Literal('major'),
+        Type.Literal('minor'),
+        Type.Literal('patch'),
+        Type.Literal('none'),
+      ])),
+      version: Type.Optional(Type.String()),
+      release_tag: Type.Optional(Type.String()),
+      section: Type.Optional(Type.String()),
+      status: Type.Optional(Type.Union([Type.Literal('active'), Type.Literal('archived'), Type.Literal('superseded')])),
+      since: Type.Optional(Type.String()),
+      until: Type.Optional(Type.String()),
+      include_links: Type.Optional(Type.Boolean()),
+      include_related: Type.Optional(Type.Boolean()),
+      limit: Type.Optional(Type.Number()),
+    }),
+    async execute(_id: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
+      try {
+        const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
+        assertGitMemoryEnabled(context);
+        const results = searchCommitChangelog(db, params ?? {}, context);
+        return ok(resultListText(`Found ${results.results.length} commit/changelog result(s).`, results.results), results);
+      } catch (e) {
+        return fail(e);
+      }
+    },
+    renderResult: renderMemoryToolResult,
   });
 
   pi.registerTool({

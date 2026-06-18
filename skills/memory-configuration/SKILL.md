@@ -16,7 +16,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
 ```json
 {
   "category": "workflow",
-  "domains": ["memory", "project-configuration", "backups", "import-export"],
+  "domains": ["memory", "project-configuration", "backups", "import-export", "git-memory"],
   "triggers": {
     "paths": [
       ".pi/memory.json",
@@ -24,7 +24,8 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       ".pi/mempry-backups/**",
       "extensions/memory/README.md",
       "extensions/memory/src/config.ts",
-      "extensions/memory/src/export-import.ts"
+      "extensions/memory/src/export-import.ts",
+      "extensions/memory/src/commit-changelog.ts"
     ],
     "keywords": [
       "memory.json",
@@ -35,7 +36,13 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "backups.include_sessions",
       "enabled",
       "import defaults",
-      "project memory"
+      "project memory",
+      "git memory",
+      "git.enabled",
+      "git.sync.cloud",
+      "git.sync.export",
+      "git.sync.import",
+      "commit changelog memory"
     ]
   },
   "sdd_phases": ["explore", "design", "task", "apply", "verify"],
@@ -59,7 +66,7 @@ Field conventions:
 
 ## Activation Contract
 
-Use this skill when a user asks to configure Pi Memory Extension for a project, create or review `.pi/memory.json`, enable or disable memory for a repo, set backup/import defaults, include sessions in backups, or explain how project memory backup/restore should work. Prefer this skill before editing memory configuration in another project.
+Use this skill when a user asks to configure Pi Memory Extension for a project, create or review `.pi/memory.json`, enable or disable memory for a repo, enable or disable git/commit/changelog memory, set backup/import defaults, include sessions in backups, or explain how project memory backup/restore should work. Prefer this skill before editing memory configuration in another project.
 
 ## Hard Rules
 
@@ -71,6 +78,8 @@ Use this skill when a user asks to configure Pi Memory Extension for a project, 
 - Keep memory export/import operational guidance in this skill and memory-extension docs, not in `AGENTS.md`.
 - Run `memory_export` or `memory_import` only when the user asks for backup/restore/export/import work, or when explicitly validating memory backup configuration.
 - Never store secrets, tokens, passwords, private keys, or cloud tokens in `.pi/memory.json`.
+- Keep `git.enabled=false` by default; set it to `true` only when the project intentionally wants git commit/changelog memory tools available.
+- Keep `git.sync.cloud=false`, `git.sync.export=false`, and `git.sync.import=false` by default; these are module-level intent flags and must not imply automatic Git commits, tags, pushes, cloud calls, exports, or imports unless a concrete implementation and explicit user action support them.
 - Use `backups.include_sessions=true` only when the project intentionally wants session and linked prompt rows in mirror backups.
 - Legacy `backups.include_prompts` is fallback-only compatibility; prefer `backups.include_sessions` in all new configs.
 - Keep `debug=false` by default; enable it only for temporary lifecycle auditing because it writes local session identity logs.
@@ -99,6 +108,14 @@ Recommended project config:
   },
   "cloud": {
     "enabled": false
+  },
+  "git": {
+    "enabled": false,
+    "sync": {
+      "cloud": false,
+      "export": false,
+      "import": false
+    }
   }
 }
 ```
@@ -115,6 +132,10 @@ Field rules:
 - `debug`: defaults to `false`; set `true` only while auditing memory lifecycle/session identity behavior. It writes local `memory-session-debug.log` entries without prompt text.
 - `session_end.semantic`: keep `false` unless the project explicitly wants model-backed shutdown summaries/profile updates.
 - `cloud`: readiness/metadata only unless a backend exists; use env var names for tokens, never raw token values.
+- `git.enabled`: defaults to `false`; set `true` to enable git-oriented memory surfaces such as commit/changelog memory tools for the project.
+- `git.sync.cloud`: defaults to `false`; when `true`, records project intent to include git memory in future cloud sync flows. It does not perform cloud sync by itself.
+- `git.sync.export`: defaults to `false`; when `true`, records project intent to include git memory in future export/sync workflows. It does not run exports by itself.
+- `git.sync.import`: defaults to `false`; when `true`, records project intent to include git memory in future import/sync workflows. It does not run imports by itself.
 
 ## Decision Gates
 
@@ -123,13 +144,14 @@ Field rules:
 - If the user asks to import with overwrite behavior, confirm whether `keep_imported` is acceptable before recommending it.
 - If a backup contains another project's memories, verify the extension version/reload state and export context before changing project config.
 - If configuring memory as part of a broader PRD/SDD workflow, also consider `persistent-memory` and `sdd-workflow`.
+- If the user wants commit/changelog tools but `.pi/memory.json` omits `git.enabled`, explain that git memory is off by default and ask whether to enable it.
 
 ## Execution Steps
 
 1. Identify the target project cwd and whether `.pi/memory.json` already exists.
 2. Read the existing `.pi/memory.json` before editing.
 3. Preserve existing valid fields unless the user asks to replace them.
-4. Add or update `enabled`, `project_name`, `aliases`, `default_scope`, `debug`, `session_end`, `import`, `backups`, and `cloud` using the hard rules above.
+4. Add or update `enabled`, `project_name`, `aliases`, `default_scope`, `debug`, `session_end`, `import`, `backups`, `cloud`, and `git` using the hard rules above.
 5. Validate the JSON syntax after edits.
 6. Tell the user to `/reload` or restart Pi.
 7. Use `memory_context` to confirm the expected project identity when practical.
@@ -165,12 +187,12 @@ Return:
 
 - Skill applied: `memory-configuration`.
 - Target project/path configured or reviewed.
-- Important `.pi/memory.json` fields set or preserved.
+- Important `.pi/memory.json` fields set or preserved, including `git.enabled` and `git.sync.*` when relevant.
 - Whether memory is enabled and why.
 - Whether session export is enabled and why.
 - Backup path and whether it is relative/safe.
 - Reload/export validation performed, or the concrete reason it was not run.
-- Risks, drift, or open decisions.
+- Risks, drift, or open decisions, especially whether git memory should remain disabled by default.
 
 ## References
 

@@ -17,5 +17,13 @@
   },
   "cloud": {
     "enabled": false
+  },
+  "git": {
+    "enabled": false,
+    "sync": {
+      "cloud": false,
+      "export": false,
+      "import": false
+    }
   }
 }

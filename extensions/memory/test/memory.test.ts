@@ -25,7 +25,22 @@ beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-memory-test-'
 afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
 function db() { const d = openMemoryDb(':memory:'); migrate(d); return d; }
-function project(dir = tmp) { fs.mkdirSync(path.join(dir, '.pi'), { recursive: true }); fs.writeFileSync(path.join(dir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'My App', enabled: true })); return resolveMemoryContext(dir, os.homedir(), {}); }
+function project(dir = tmp) { fs.mkdirSync(path.join(dir, '.pi'), { recursive: true }); fs.writeFileSync(path.join(dir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'My App', enabled: true, git: { enabled: true } })); return resolveMemoryContext(dir, os.homedir(), {}); }
+function registerMemoryToolHarness(name = 'Commit Tool App') {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  const dbPath = path.join(tmp, `${slug}.sqlite`);
+  const projectDir = path.join(tmp, `${slug}-project`);
+  fs.mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
+  fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: name, enabled: true, git: { enabled: true } }));
+  const d = openMemoryDb(dbPath);
+  migrate(d);
+  const old = process.env.PI_MEMORY_DB_PATH;
+  process.env.PI_MEMORY_DB_PATH = dbPath;
+  const tools = new Map<string, any>();
+  extension({ registerTool: (tool: any) => tools.set(tool.name, tool), registerCommand: () => {}, registerMessageRenderer: () => {}, on: () => {} });
+  if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
+  return { d, dbPath, projectDir, tools };
+}
 
 describe('extension setup', () => {
   it('exports a pi extension function and registers tools/commands/renderers', () => {
@@ -290,6 +305,28 @@ describe('config', () => {
     expect(invalid.warnings.join('\n')).toContain('Ignoring invalid enabled flag');
   });
 
+  it('reads git module config with disabled sync defaults and validates booleans defensively', () => {
+    expect(readProjectMemoryConfig(tmp, {}).git).toEqual({ enabled: false, sync: { cloud: false, export: false, import: false } });
+
+    fs.mkdirSync(path.join(tmp, '.pi'));
+    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({
+      project_name: 'X',
+      git: { enabled: true, sync: { cloud: true, export: true, import: true } },
+    }));
+    expect(readProjectMemoryConfig(tmp, {}).git).toEqual({ enabled: true, sync: { cloud: true, export: true, import: true } });
+
+    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({
+      project_name: 'X',
+      git: { enabled: 'yes', sync: { cloud: 'yes', export: 1, import: null } },
+    }));
+    const invalid = readProjectMemoryConfig(tmp, {});
+    expect(invalid.git).toEqual({ enabled: false, sync: { cloud: false, export: false, import: false } });
+    expect(invalid.warnings.join('\n')).toContain('invalid git.enabled');
+    expect(invalid.warnings.join('\n')).toContain('invalid git.sync.cloud');
+    expect(invalid.warnings.join('\n')).toContain('invalid git.sync.export');
+    expect(invalid.warnings.join('\n')).toContain('invalid git.sync.import');
+  });
+
   it('reads import defaults and ignores invalid import config defensively', () => {
     fs.mkdirSync(path.join(tmp, '.pi'));
     fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'X', import: { mode: 'merge', on_conflict: 'keep_local' } }));
@@ -517,6 +554,284 @@ describe('profile/consolidation/export/sync', () => {
     addMemory(d, { scope: 'project', kind: 'note', content: 'local sync status item' }, c);
     const status = getSyncStatus(d, c);
     expect(status.memories.local).toBeGreaterThan(0);
+  });
+});
+
+describe('commit changelog tool contracts', () => {
+  it('registers commit/changelog tools and schemas without a public duplicate override', () => {
+    const { tools } = registerMemoryToolHarness();
+
+    expect(tools.has('memory_commit_record_add')).toBe(true);
+    expect(tools.has('memory_changelog_entry_add')).toBe(true);
+    expect(tools.has('memory_commit_changelog_link')).toBe(true);
+    expect(tools.has('memory_commit_changelog_search')).toBe(true);
+
+    const addSchema = JSON.stringify(tools.get('memory_add')?.parameters ?? {});
+    expect(addSchema).toContain('commit_record');
+    expect(addSchema).toContain('changelog_entry');
+
+    const searchSchema = JSON.stringify(tools.get('memory_search')?.parameters ?? {});
+    expect(searchSchema).toContain('commit_record');
+    expect(searchSchema).toContain('changelog_entry');
+
+    const commitSchema = JSON.stringify(tools.get('memory_commit_record_add')?.parameters ?? {});
+    expect(commitSchema).toContain('repo');
+    expect(commitSchema).toContain('commit_hash');
+    expect(commitSchema).toContain('subject');
+    expect(commitSchema).toContain('change_type');
+    expect(commitSchema).toContain('release_impact');
+    expect(commitSchema).toContain('sync');
+    expect(commitSchema).toContain('none');
+    expect(commitSchema).not.toContain('allow_duplicate');
+
+    const changelogSchema = JSON.stringify(tools.get('memory_changelog_entry_add')?.parameters ?? {});
+    expect(changelogSchema).toContain('version');
+    expect(changelogSchema).toContain('section');
+    expect(changelogSchema).toContain('bullets');
+    expect(changelogSchema).not.toContain('allow_duplicate');
+
+    const linkSchema = JSON.stringify(tools.get('memory_commit_changelog_link')?.parameters ?? {});
+    expect(linkSchema).toContain('from_memory_id');
+    expect(linkSchema).toContain('to_memory_id');
+    expect(linkSchema).toContain('relation_type');
+    expect(linkSchema).toContain('derived_from');
+    expect(linkSchema).toContain('supports');
+    expect(linkSchema).toContain('related_to');
+    expect(linkSchema).toContain('supersedes');
+
+    const commitSearchSchema = JSON.stringify(tools.get('memory_commit_changelog_search')?.parameters ?? {});
+    expect(commitSearchSchema).toContain('record_types');
+    expect(commitSearchSchema).toContain('repo');
+    expect(commitSearchSchema).toContain('commit_hash');
+    expect(commitSearchSchema).toContain('branch');
+    expect(commitSearchSchema).toContain('version');
+    expect(commitSearchSchema).toContain('release_tag');
+    expect(commitSearchSchema).toContain('section');
+    expect(commitSearchSchema).toContain('include_links');
+    expect(commitSearchSchema).toContain('include_related');
+  });
+
+  it('rejects commit/changelog module tools when git memory config is disabled by default', async () => {
+    const { projectDir, tools } = registerMemoryToolHarness('Git Disabled App');
+    fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Git Disabled App', enabled: true }));
+    const result = await tools.get('memory_commit_record_add').execute('tool-call', {
+      repo: 'j0k3r/pi',
+      commit_hash: 'abcdef1234567890',
+      subject: 'add git memory gate',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('git.enabled=true');
+  });
+
+  it('stores minimal commit/changelog records and rejects missing related/source memories', async () => {
+    const { d, projectDir, tools } = registerMemoryToolHarness('Commit Behavior App');
+    const memoryAdd = tools.get('memory_add');
+    const commitAdd = tools.get('memory_commit_record_add');
+    const changelogAdd = tools.get('memory_changelog_entry_add');
+
+    expect(commitAdd).toBeTruthy();
+    expect(changelogAdd).toBeTruthy();
+
+    const support = await memoryAdd.execute('tool-call', { kind: 'note', content: 'supporting memory for commit changelog tools' }, undefined, undefined, { cwd: projectDir });
+    const supportId = support.details.memory.id;
+
+    const commit = await commitAdd.execute('tool-call', {
+      repo: 'github.com/j0k3r/j0k3r-pi',
+      commit_hash: 'abc1234',
+      subject: 'add commit memory contract tests',
+      related_memory_ids: [supportId],
+    }, undefined, undefined, { cwd: projectDir });
+    expect(commit.isError).not.toBe(true);
+    expect(commit.details.memory.kind).toBe('commit_record');
+
+    const changelog = await changelogAdd.execute('tool-call', {
+      version: '1.2.3',
+      section: 'added',
+      bullets: ['commit changelog contract coverage'],
+      source_commit_ids: [commit.details.memory.id],
+      related_memory_ids: [supportId],
+    }, undefined, undefined, { cwd: projectDir });
+    expect(changelog.isError).not.toBe(true);
+    expect(changelog.details.memory.kind).toBe('changelog_entry');
+
+    const links = d.prepare('SELECT from_memory_id, to_memory_id, relation_type FROM memory_links ORDER BY relation_type, from_memory_id, to_memory_id').all() as Array<{ from_memory_id: string; to_memory_id: string; relation_type: string }>;
+    expect(links).toHaveLength(3);
+    expect(links).toEqual(expect.arrayContaining([
+      { from_memory_id: changelog.details.memory.id, to_memory_id: commit.details.memory.id, relation_type: 'derived_from' },
+      { from_memory_id: commit.details.memory.id, to_memory_id: supportId, relation_type: 'related_to' },
+      { from_memory_id: changelog.details.memory.id, to_memory_id: supportId, relation_type: 'related_to' },
+    ]));
+
+    const invalidRelated = await commitAdd.execute('tool-call', {
+      repo: 'github.com/j0k3r/j0k3r-pi',
+      commit_hash: 'def5678',
+      subject: 'reject missing related memory ids',
+      related_memory_ids: ['mem_missing_related'],
+    }, undefined, undefined, { cwd: projectDir });
+    expect(invalidRelated.isError).toBe(true);
+
+    const invalidSource = await changelogAdd.execute('tool-call', {
+      version: '1.2.4',
+      section: 'fixed',
+      bullets: ['reject missing source commit ids'],
+      source_commit_ids: ['mem_missing_commit'],
+    }, undefined, undefined, { cwd: projectDir });
+    expect(invalidSource.isError).toBe(true);
+
+    const kinds = d.prepare("SELECT kind FROM memories WHERE project_name=? ORDER BY created_at ASC").all('Commit Behavior App') as Array<{ kind: string }>;
+    expect(kinds.map((row) => row.kind)).toEqual(['note', 'commit_record', 'changelog_entry']);
+  });
+
+  it('rejects invalid commit hashes and empty changelog bullets', async () => {
+    const { d, projectDir, tools } = registerMemoryToolHarness('Commit Validation App');
+    const commitAdd = tools.get('memory_commit_record_add');
+    const changelogAdd = tools.get('memory_changelog_entry_add');
+
+    expect(commitAdd).toBeTruthy();
+    expect(changelogAdd).toBeTruthy();
+
+    const invalidCommit = await commitAdd.execute('tool-call', {
+      repo: 'github.com/j0k3r/j0k3r-pi',
+      commit_hash: 'not-a-hash',
+      subject: 'invalid hash should fail',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(invalidCommit.isError).toBe(true);
+
+    const emptyBullets = await changelogAdd.execute('tool-call', {
+      version: '2.0.0',
+      section: 'changed',
+      bullets: ['   ', ''],
+    }, undefined, undefined, { cwd: projectDir });
+    expect(emptyBullets.isError).toBe(true);
+
+    const count = d.prepare("SELECT COUNT(*) AS count FROM memories WHERE project_name=? AND kind IN ('commit_record', 'changelog_entry')").get('Commit Validation App') as { count: number };
+    expect(count.count).toBe(0);
+  });
+
+  it('deduplicates duplicate commit and changelog adds without an override parameter', async () => {
+    const { d, projectDir, tools } = registerMemoryToolHarness('Commit Dedup App');
+    const commitAdd = tools.get('memory_commit_record_add');
+    const changelogAdd = tools.get('memory_changelog_entry_add');
+
+    expect(commitAdd).toBeTruthy();
+    expect(changelogAdd).toBeTruthy();
+
+    const firstCommit = await commitAdd.execute('tool-call', {
+      repo: 'github.com/j0k3r/j0k3r-pi',
+      commit_hash: 'fedcba9',
+      subject: 'dedupe commit record',
+    }, undefined, undefined, { cwd: projectDir });
+    const secondCommit = await commitAdd.execute('tool-call', {
+      repo: 'github.com/j0k3r/j0k3r-pi',
+      commit_hash: 'fedcba9',
+      subject: 'dedupe commit record',
+    }, undefined, undefined, { cwd: projectDir });
+
+    expect(secondCommit.isError).not.toBe(true);
+    expect(secondCommit.details.memory.id).toBe(firstCommit.details.memory.id);
+
+    const firstEntry = await changelogAdd.execute('tool-call', {
+      version: '3.0.0',
+      section: 'added',
+      bullets: ['dedupe changelog entry'],
+    }, undefined, undefined, { cwd: projectDir });
+    const secondEntry = await changelogAdd.execute('tool-call', {
+      version: '3.0.0',
+      section: 'added',
+      bullets: ['dedupe changelog entry'],
+    }, undefined, undefined, { cwd: projectDir });
+
+    expect(secondEntry.isError).not.toBe(true);
+    expect(secondEntry.details.memory.id).toBe(firstEntry.details.memory.id);
+
+    const counts = d.prepare("SELECT kind, COUNT(*) AS count FROM memories WHERE project_name=? AND kind IN ('commit_record', 'changelog_entry') GROUP BY kind ORDER BY kind").all('Commit Dedup App') as Array<{ kind: string; count: number }>;
+    expect(counts).toEqual([
+      { kind: 'changelog_entry', count: 1 },
+      { kind: 'commit_record', count: 1 },
+    ]);
+  });
+
+  it('stores normalized commit release classification metadata, defaults sync release impact, and keeps legacy commit records valid', async () => {
+    const { d, projectDir, tools } = registerMemoryToolHarness('Commit Classification App');
+    const memoryAdd = tools.get('memory_add');
+    const commitAdd = tools.get('memory_commit_record_add');
+    const searchTool = tools.get('memory_commit_changelog_search');
+
+    expect(commitAdd).toBeTruthy();
+    expect(searchTool).toBeTruthy();
+
+    const classified = await commitAdd.execute('tool-call', {
+      repo: 'github.com/j0k3r/j0k3r-pi',
+      commit_hash: 'c0ffee1',
+      subject: 'ship release classification support',
+      change_type: ' Feature ',
+      release_impact: ' Minor ',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(classified.isError).not.toBe(true);
+
+    const classifiedMeta = d.prepare('SELECT metadata_json FROM memories WHERE id=?').get(classified.details.memory.id) as { metadata_json: string };
+    expect(JSON.parse(classifiedMeta.metadata_json)).toMatchObject({
+      commit: {
+        change_type: 'feature',
+        release_impact: 'minor',
+      },
+    });
+
+    const syncCommit = await commitAdd.execute('tool-call', {
+      repo: 'github.com/j0k3r/j0k3r-pi',
+      commit_hash: 'c0ffee2',
+      subject: 'sync cloud memory metadata',
+      change_type: 'sync',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(syncCommit.isError).not.toBe(true);
+
+    const syncMeta = d.prepare('SELECT metadata_json FROM memories WHERE id=?').get(syncCommit.details.memory.id) as { metadata_json: string };
+    expect(JSON.parse(syncMeta.metadata_json)).toMatchObject({
+      commit: {
+        change_type: 'sync',
+        release_impact: 'none',
+      },
+    });
+
+    const invalidChangeType = await commitAdd.execute('tool-call', {
+      repo: 'github.com/j0k3r/j0k3r-pi',
+      commit_hash: 'c0ffee3',
+      subject: 'reject invalid classification',
+      change_type: 'breaking',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(invalidChangeType.isError).toBe(true);
+
+    const invalidReleaseImpact = await commitAdd.execute('tool-call', {
+      repo: 'github.com/j0k3r/j0k3r-pi',
+      commit_hash: 'c0ffee4',
+      subject: 'reject invalid release impact',
+      release_impact: 'micro',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(invalidReleaseImpact.isError).toBe(true);
+
+    const legacy = await memoryAdd.execute('tool-call', {
+      scope: 'project',
+      kind: 'commit_record',
+      title: 'legacy commit record',
+      content: 'legacy commit content without classification metadata',
+      metadata_json: {
+        commit: {
+          repo: 'github.com/j0k3r/j0k3r-pi',
+          commit_hash: 'c0ffee5',
+          subject: 'legacy commit record',
+        },
+      },
+    }, undefined, undefined, { cwd: projectDir });
+    expect(legacy.isError).not.toBe(true);
+
+    const legacySearch = await searchTool.execute('tool-call', {
+      record_types: ['commit_record'],
+      commit_hash: 'c0ffee5',
+      limit: 10,
+    }, undefined, undefined, { cwd: projectDir });
+    expect(legacySearch.isError).not.toBe(true);
+    expect(legacySearch.details.results).toHaveLength(1);
+    expect(legacySearch.details.results[0].id).toBe(legacy.details.memory.id);
   });
 });
 

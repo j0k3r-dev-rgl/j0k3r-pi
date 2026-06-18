@@ -1,0 +1,475 @@
+import type { Db } from './db.js';
+import type { MemoryRecord, ResolvedContext } from './types.js';
+import { addMemory, getMemoryRaw } from './memory-store.js';
+import { generateGenericId } from './ids.js';
+import { jsonString, nowIso, parseJson, snippet } from './utils.js';
+
+export type CommitChangelogRelation = 'derived_from' | 'supports' | 'related_to' | 'supersedes';
+export type CommitChangelogRecordType = 'commit_record' | 'changelog_entry';
+
+export type CommitChangeType = 'fix' | 'feature' | 'chore' | 'docs' | 'refactor' | 'test' | 'sync' | 'other';
+export type CommitReleaseImpact = 'major' | 'minor' | 'patch' | 'none';
+
+export interface CommitRecordInput {
+  scope?: 'general' | 'project' | 'global';
+  repo: string;
+  commit_hash: string;
+  subject: string;
+  branch?: string;
+  author?: string;
+  authored_at?: string;
+  change_type?: CommitChangeType;
+  release_impact?: CommitReleaseImpact;
+  summary?: string;
+  content?: string;
+  files_changed?: string[];
+  diffstat?: Record<string, unknown> | string;
+  source_session_id?: string;
+  related_memory_ids?: string[];
+  tags?: string[];
+  confidence?: number;
+  importance?: number;
+  metadata_json?: Record<string, unknown>;
+}
+
+export interface ChangelogEntryInput {
+  scope?: 'general' | 'project' | 'global';
+  version: string;
+  section: string;
+  bullets: string[];
+  release_tag?: string;
+  release_date?: string;
+  title?: string;
+  summary?: string;
+  content?: string;
+  source_commit_ids?: string[];
+  related_memory_ids?: string[];
+  tags?: string[];
+  confidence?: number;
+  importance?: number;
+  metadata_json?: Record<string, unknown>;
+}
+
+export interface LinkInput {
+  from_memory_id: string;
+  to_memory_id: string;
+  relation_type: CommitChangelogRelation;
+  metadata_json?: Record<string, unknown>;
+}
+
+export interface SearchInput {
+  query?: string;
+  record_types?: CommitChangelogRecordType[];
+  scope?: 'general' | 'project' | 'global';
+  project_mode?: 'current' | 'all' | 'selected';
+  project_name?: string;
+  repo?: string;
+  commit_hash?: string;
+  branch?: string;
+  change_type?: CommitChangeType;
+  release_impact?: CommitReleaseImpact;
+  version?: string;
+  release_tag?: string;
+  section?: string;
+  status?: 'active' | 'archived' | 'superseded';
+  since?: string;
+  until?: string;
+  include_links?: boolean;
+  include_related?: boolean;
+  limit?: number;
+}
+
+const COMMIT_HASH_RE = /^[a-f0-9]{7,64}$/i;
+const ALLOWED_RELATIONS: CommitChangelogRelation[] = ['derived_from', 'supports', 'related_to', 'supersedes'];
+const DEFAULT_RECORD_TYPES: CommitChangelogRecordType[] = ['commit_record', 'changelog_entry'];
+const COMMIT_CHANGE_TYPES: CommitChangeType[] = ['fix', 'feature', 'chore', 'docs', 'refactor', 'test', 'sync', 'other'];
+const COMMIT_RELEASE_IMPACTS: CommitReleaseImpact[] = ['major', 'minor', 'patch', 'none'];
+
+function normalizeText(value: unknown): string {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function normalizeOptionalText(value: unknown): string | undefined {
+  const normalized = normalizeText(value);
+  return normalized || undefined;
+}
+
+function normalizeStringList(values: unknown): string[] {
+  return Array.isArray(values)
+    ? values.map((value) => normalizeText(value)).filter(Boolean)
+    : [];
+}
+
+function normalizeBulletIdentity(bullets: string[]): string {
+  return bullets.map((bullet) => normalizeText(bullet)).filter(Boolean).join('\n');
+}
+
+function memoryMatchesProjectMode(record: MemoryRecord, input: SearchInput, context: ResolvedContext): boolean {
+  const projectMode = input.project_mode ?? (context.scope === 'project' ? 'current' : 'all');
+  if (input.scope && record.scope !== input.scope) return false;
+  if (projectMode === 'all') return true;
+  if (projectMode === 'selected') return record.scope !== 'project' || record.project_name === input.project_name;
+  if (context.scope === 'project') return record.scope !== 'project' || record.project_id === context.project_id;
+  return true;
+}
+
+function sameProjectBoundary(a: MemoryRecord, b: MemoryRecord): boolean {
+  return a.scope === b.scope && a.project_id === b.project_id && a.project_name === b.project_name;
+}
+
+function desiredProjectFields(scope: CommitRecordInput['scope'] | ChangelogEntryInput['scope'] | undefined, context: ResolvedContext): { scope: 'general' | 'project' | 'global'; project_id: string | null; project_name: string | null } {
+  const desiredScope = scope ?? context.scope;
+  if (desiredScope !== 'project') return { scope: desiredScope, project_id: null, project_name: null };
+  if (context.scope === 'project') return { scope: 'project', project_id: context.project_id, project_name: context.project_name };
+  return { scope: 'general', project_id: null, project_name: null };
+}
+
+function requireMemory(db: Db, id: string, label: string): MemoryRecord {
+  const record = getMemoryRaw(db, id);
+  if (!record) throw new Error(`${label} not found: ${id}`);
+  return record;
+}
+
+function requireRelatedMemories(db: Db, ids: string[] | undefined, ownerLabel: string): MemoryRecord[] {
+  return (ids ?? []).map((id) => requireMemory(db, id, `${ownerLabel} related memory`));
+}
+
+function requireSourceCommits(db: Db, ids: string[] | undefined): MemoryRecord[] {
+  return (ids ?? []).map((id) => {
+    const record = requireMemory(db, id, 'source commit memory');
+    if (record.kind !== 'commit_record') throw new Error(`source commit memory must have kind commit_record: ${id}`);
+    return record;
+  });
+}
+
+function reservedMetadata(extra: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return undefined;
+  const cleaned = Object.fromEntries(Object.entries(extra).filter(([key]) => key !== 'commit' && key !== 'changelog' && key !== 'extra'));
+  return Object.keys(cleaned).length ? cleaned : undefined;
+}
+
+function normalizeEnumValue<T extends string>(value: unknown, allowed: readonly T[], label: string): T | undefined {
+  const normalized = normalizeOptionalText(value);
+  if (!normalized) return undefined;
+  if ((allowed as readonly string[]).includes(normalized)) return normalized as T;
+  throw new Error(`${label} must be one of: ${allowed.join(', ')}`);
+}
+
+function buildCommitMetadata(input: CommitRecordInput): Record<string, unknown> {
+  const changeType = normalizeEnumValue(input.change_type, COMMIT_CHANGE_TYPES, 'change_type');
+  const releaseImpact = normalizeEnumValue(input.release_impact, COMMIT_RELEASE_IMPACTS, 'release_impact')
+    ?? (changeType === 'sync' ? 'none' : undefined);
+  return {
+    commit: {
+      repo: normalizeText(input.repo),
+      commit_hash: normalizeText(input.commit_hash),
+      subject: normalizeText(input.subject),
+      branch: normalizeOptionalText(input.branch),
+      author: normalizeOptionalText(input.author),
+      authored_at: normalizeOptionalText(input.authored_at),
+      change_type: changeType,
+      release_impact: releaseImpact,
+      files_changed: normalizeStringList(input.files_changed),
+      diffstat: input.diffstat,
+      source_session_id: normalizeOptionalText(input.source_session_id),
+    },
+    ...(reservedMetadata(input.metadata_json) ? { extra: reservedMetadata(input.metadata_json) } : {}),
+  };
+}
+
+function buildChangelogMetadata(input: ChangelogEntryInput): Record<string, unknown> {
+  return {
+    changelog: {
+      version: normalizeText(input.version),
+      release_tag: normalizeOptionalText(input.release_tag),
+      release_date: normalizeOptionalText(input.release_date),
+      section: normalizeText(input.section),
+      bullets: normalizeStringList(input.bullets),
+      source_commit_ids: input.source_commit_ids ?? [],
+    },
+    ...(reservedMetadata(input.metadata_json) ? { extra: reservedMetadata(input.metadata_json) } : {}),
+  };
+}
+
+function buildCommitPayload(input: CommitRecordInput): { title: string; summary: string; content: string; tags: string[] } {
+  const repo = normalizeText(input.repo);
+  const hash = normalizeText(input.commit_hash);
+  const subject = normalizeText(input.subject);
+  const branch = normalizeOptionalText(input.branch);
+  const changeType = normalizeEnumValue(input.change_type, COMMIT_CHANGE_TYPES, 'change_type');
+  const releaseImpact = normalizeEnumValue(input.release_impact, COMMIT_RELEASE_IMPACTS, 'release_impact')
+    ?? (changeType === 'sync' ? 'none' : undefined);
+  const files = normalizeStringList(input.files_changed);
+  const title = `${repo} ${hash} ${subject}`.trim();
+  const summary = snippet([subject, branch ? `branch ${branch}` : '', changeType ? `change_type ${changeType}` : '', releaseImpact ? `release_impact ${releaseImpact}` : '', files.length ? `${files.length} files changed` : '', input.summary ? normalizeText(input.summary) : ''].filter(Boolean).join(' · '), 160);
+  const content = [
+    `repo: ${repo}`,
+    `commit: ${hash}`,
+    branch ? `branch: ${branch}` : '',
+    `subject: ${subject}`,
+    changeType ? `change_type: ${changeType}` : '',
+    releaseImpact ? `release_impact: ${releaseImpact}` : '',
+    input.author ? `author: ${normalizeText(input.author)}` : '',
+    input.authored_at ? `authored_at: ${normalizeText(input.authored_at)}` : '',
+    files.length ? `files_changed: ${files.join(', ')}` : '',
+    input.content ? normalizeText(input.content) : '',
+  ].filter(Boolean).join('\n');
+  const tags = Array.from(new Set([...(normalizeStringList(input.tags)), 'commit_record', repo, hash, ...(branch ? [branch] : []), ...(changeType ? [changeType] : []), ...(releaseImpact ? [releaseImpact] : [])]));
+  return { title, summary, content, tags };
+}
+
+function buildChangelogPayload(input: ChangelogEntryInput): { title: string; summary: string; content: string; tags: string[]; bullets: string[] } {
+  const version = normalizeText(input.version);
+  const section = normalizeText(input.section);
+  const bullets = normalizeStringList(input.bullets);
+  const releaseTag = normalizeOptionalText(input.release_tag);
+  const title = normalizeOptionalText(input.title) ?? `release ${version} ${section}`;
+  const summary = snippet(normalizeOptionalText(input.summary) ?? bullets.join(' · '), 160);
+  const content = [
+    `version: ${version}`,
+    releaseTag ? `release_tag: ${releaseTag}` : '',
+    input.release_date ? `release_date: ${normalizeText(input.release_date)}` : '',
+    `section: ${section}`,
+    ...bullets.map((bullet) => `- ${bullet}`),
+    input.content ? normalizeText(input.content) : '',
+  ].filter(Boolean).join('\n');
+  const tags = Array.from(new Set([...(normalizeStringList(input.tags)), 'changelog_entry', version, section, ...(releaseTag ? [releaseTag] : [])]));
+  return { title, summary, content, tags, bullets };
+}
+
+function findActiveDuplicateCommit(db: Db, candidate: { scope: string; project_id: string | null; project_name: string | null; repo: string; commit_hash: string }): MemoryRecord | undefined {
+  const rows = db.prepare('SELECT * FROM memories WHERE kind=? AND status=? AND scope=?').all('commit_record', 'active', candidate.scope) as unknown as MemoryRecord[];
+  return rows.find((row) => {
+    const meta = parseJson<{ commit?: Record<string, unknown> }>(row.metadata_json, {});
+    return row.project_id === candidate.project_id
+      && row.project_name === candidate.project_name
+      && normalizeText(meta.commit?.repo) === candidate.repo
+      && normalizeText(meta.commit?.commit_hash) === candidate.commit_hash;
+  });
+}
+
+function findActiveDuplicateChangelog(db: Db, candidate: { scope: string; project_id: string | null; project_name: string | null; version: string; section: string; bullet_identity: string }): MemoryRecord | undefined {
+  const rows = db.prepare('SELECT * FROM memories WHERE kind=? AND status=? AND scope=?').all('changelog_entry', 'active', candidate.scope) as unknown as MemoryRecord[];
+  return rows.find((row) => {
+    const meta = parseJson<{ changelog?: Record<string, unknown> }>(row.metadata_json, {});
+    const bullets = normalizeStringList(meta.changelog?.bullets);
+    return row.project_id === candidate.project_id
+      && row.project_name === candidate.project_name
+      && normalizeText(meta.changelog?.version) === candidate.version
+      && normalizeText(meta.changelog?.section) === candidate.section
+      && normalizeBulletIdentity(bullets) === candidate.bullet_identity;
+  });
+}
+
+function compactMemory(record: MemoryRecord): Record<string, unknown> {
+  const metadata = parseJson<Record<string, unknown>>(record.metadata_json, {});
+  return {
+    id: record.id,
+    type: 'memory',
+    scope: record.scope,
+    project_name: record.project_name,
+    kind: record.kind,
+    title: record.title,
+    snippet: snippet(record.summary || record.content || '', 240),
+    status: record.status,
+    metadata_summary: metadata.commit ?? metadata.changelog ?? metadata.extra ?? {},
+    updated_at: record.updated_at,
+  };
+}
+
+function compactLink(row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: row.id,
+    from_memory_id: row.from_memory_id,
+    to_memory_id: row.to_memory_id,
+    relation_type: row.relation_type,
+    metadata_json: parseJson<Record<string, unknown>>(typeof row.metadata_json === 'string' ? row.metadata_json : null, {}),
+  };
+}
+
+function insertLinkIfMissing(db: Db, from: MemoryRecord, to: MemoryRecord, relationType: CommitChangelogRelation, metadata: Record<string, unknown> = {}): { link: Record<string, unknown>; warning?: string } {
+  if (!ALLOWED_RELATIONS.includes(relationType)) throw new Error(`unsupported relation_type: ${relationType}`);
+  if (!sameProjectBoundary(from, to)) throw new Error(`cross-project links are not allowed: ${from.id} -> ${to.id}`);
+  const existing = db.prepare('SELECT * FROM memory_links WHERE from_memory_id=? AND to_memory_id=? AND relation_type=?').get(from.id, to.id, relationType) as Record<string, unknown> | undefined;
+  if (existing) return { link: compactLink(existing), warning: 'duplicate link; returned existing link' };
+  const row = {
+    id: generateGenericId('link'),
+    from_memory_id: from.id,
+    to_memory_id: to.id,
+    relation_type: relationType,
+    created_at: nowIso(),
+    metadata_json: jsonString(metadata),
+  };
+  db.prepare('INSERT INTO memory_links(id,from_memory_id,to_memory_id,relation_type,created_at,metadata_json) VALUES(?,?,?,?,?,?)').run(
+    row.id,
+    row.from_memory_id,
+    row.to_memory_id,
+    row.relation_type,
+    row.created_at,
+    row.metadata_json,
+  );
+  return { link: compactLink(row) };
+}
+
+function linkRelatedMemories(db: Db, from: MemoryRecord, related: MemoryRecord[], sourceTool: 'memory_commit_record_add' | 'memory_changelog_entry_add'): void {
+  for (const memory of related) insertLinkIfMissing(db, from, memory, 'related_to', { source_tool: sourceTool });
+}
+
+export function addCommitRecord(db: Db, input: CommitRecordInput, context: ResolvedContext): { memory: Record<string, unknown>; warning?: string } {
+  const repo = normalizeText(input.repo);
+  const commitHash = normalizeText(input.commit_hash);
+  const subject = normalizeText(input.subject);
+  if (!repo) throw new Error('repo is required');
+  if (!subject) throw new Error('subject is required');
+  if (!COMMIT_HASH_RE.test(commitHash)) throw new Error('commit_hash must be a 7-64 character hex string');
+
+  const related = requireRelatedMemories(db, input.related_memory_ids, 'commit record');
+  const fields = desiredProjectFields(input.scope, context);
+  const duplicate = findActiveDuplicateCommit(db, {
+    scope: fields.scope,
+    project_id: fields.project_id,
+    project_name: fields.project_name,
+    repo,
+    commit_hash: commitHash,
+  });
+  if (duplicate) return { memory: compactMemory(duplicate), warning: 'duplicate commit record; returned existing record' };
+
+  const payload = buildCommitPayload(input);
+  const created = addMemory(db, {
+    scope: input.scope,
+    kind: 'commit_record',
+    title: payload.title,
+    summary: payload.summary,
+    content: payload.content,
+    tags: payload.tags,
+    confidence: input.confidence,
+    importance: input.importance,
+    metadata_json: buildCommitMetadata(input),
+  }, context).memory;
+
+  linkRelatedMemories(db, created, related, 'memory_commit_record_add');
+  return { memory: compactMemory(created) };
+}
+
+export function addChangelogEntry(db: Db, input: ChangelogEntryInput, context: ResolvedContext): { memory: Record<string, unknown>; warning?: string } {
+  const version = normalizeText(input.version);
+  const section = normalizeText(input.section);
+  const bullets = normalizeStringList(input.bullets);
+  if (!version) throw new Error('version is required');
+  if (!section) throw new Error('section is required');
+  if (!bullets.length) throw new Error('bullets must contain at least one non-empty entry');
+
+  const sourceCommits = requireSourceCommits(db, input.source_commit_ids);
+  const related = requireRelatedMemories(db, input.related_memory_ids, 'changelog entry');
+  const fields = desiredProjectFields(input.scope, context);
+  const duplicate = findActiveDuplicateChangelog(db, {
+    scope: fields.scope,
+    project_id: fields.project_id,
+    project_name: fields.project_name,
+    version,
+    section,
+    bullet_identity: normalizeBulletIdentity(bullets),
+  });
+  if (duplicate) return { memory: compactMemory(duplicate), warning: 'duplicate changelog entry; returned existing record' };
+
+  const payload = buildChangelogPayload(input);
+  const created = addMemory(db, {
+    scope: input.scope,
+    kind: 'changelog_entry',
+    title: payload.title,
+    summary: payload.summary,
+    content: payload.content,
+    tags: payload.tags,
+    confidence: input.confidence,
+    importance: input.importance,
+    metadata_json: buildChangelogMetadata({ ...input, bullets: payload.bullets }),
+  }, context).memory;
+
+  for (const commit of sourceCommits) insertLinkIfMissing(db, created, commit, 'derived_from', { source_tool: 'memory_changelog_entry_add' });
+  linkRelatedMemories(db, created, related, 'memory_changelog_entry_add');
+  return { memory: compactMemory(created) };
+}
+
+export function addCommitChangelogLink(db: Db, input: LinkInput): { link: Record<string, unknown>; warning?: string } {
+  const from = requireMemory(db, input.from_memory_id, 'from memory');
+  const to = requireMemory(db, input.to_memory_id, 'to memory');
+  return insertLinkIfMissing(db, from, to, input.relation_type, { ...(input.metadata_json ?? {}), source_tool: 'memory_commit_changelog_link' });
+}
+
+function passesTextQuery(record: MemoryRecord, query: string | undefined): boolean {
+  const normalized = normalizeOptionalText(query);
+  if (!normalized) return true;
+  const haystack = [record.title, record.summary, record.content, record.tags, record.kind, record.project_name].map((value) => normalizeText(value)).join('\n');
+  return normalized.split(/\s+/).every((term) => haystack.includes(term));
+}
+
+function passesStructuredFilters(record: MemoryRecord, input: SearchInput): boolean {
+  const metadata = parseJson<{ commit?: Record<string, unknown>; changelog?: Record<string, unknown> }>(record.metadata_json, {});
+  const commit = metadata.commit ?? {};
+  const changelog = metadata.changelog ?? {};
+  if (input.repo && normalizeText(commit.repo) !== normalizeText(input.repo)) return false;
+  if (input.commit_hash && normalizeText(commit.commit_hash) !== normalizeText(input.commit_hash)) return false;
+  if (input.branch && normalizeText(commit.branch) !== normalizeText(input.branch)) return false;
+  if (input.change_type && normalizeText(commit.change_type) !== normalizeText(input.change_type)) return false;
+  if (input.release_impact && normalizeText(commit.release_impact) !== normalizeText(input.release_impact)) return false;
+  if (input.version && normalizeText(changelog.version) !== normalizeText(input.version)) return false;
+  if (input.release_tag && normalizeText(changelog.release_tag) !== normalizeText(input.release_tag)) return false;
+  if (input.section && normalizeText(changelog.section) !== normalizeText(input.section)) return false;
+  if (input.since || input.until) {
+    const candidateDate = normalizeOptionalText(commit.authored_at) ?? normalizeOptionalText(changelog.release_date) ?? normalizeText(record.created_at);
+    if (input.since && candidateDate < normalizeText(input.since)) return false;
+    if (input.until && candidateDate > normalizeText(input.until)) return false;
+  }
+  return true;
+}
+
+function linksForMemory(db: Db, memoryId: string): Array<Record<string, unknown>> {
+  const rows = db.prepare('SELECT * FROM memory_links WHERE from_memory_id=? OR to_memory_id=? ORDER BY created_at ASC').all(memoryId, memoryId) as Array<Record<string, unknown>>;
+  return rows.map(compactLink);
+}
+
+function relatedForMemory(db: Db, memoryId: string): Array<Record<string, unknown>> {
+  const visited = new Set<string>([memoryId]);
+  const queue: Array<{ id: string; depth: number }> = [{ id: memoryId, depth: 0 }];
+  const relatedIds = new Set<string>();
+
+  while (queue.length) {
+    const current = queue.shift()!;
+    if (current.depth >= 2) continue;
+    for (const link of linksForMemory(db, current.id)) {
+      const nextId = link.from_memory_id === current.id ? link.to_memory_id : link.from_memory_id;
+      if (typeof nextId !== 'string' || visited.has(nextId)) continue;
+      visited.add(nextId);
+      relatedIds.add(nextId);
+      queue.push({ id: nextId, depth: current.depth + 1 });
+    }
+  }
+
+  return Array.from(relatedIds)
+    .map((id) => getMemoryRaw(db, id))
+    .filter((row): row is MemoryRecord => Boolean(row))
+    .map((row) => ({ ...compactMemory(row), links: linksForMemory(db, row.id) }));
+}
+
+export function searchCommitChangelog(db: Db, input: SearchInput, context: ResolvedContext): { results: Array<Record<string, unknown>> } {
+  const recordTypes = input.record_types?.length ? input.record_types : DEFAULT_RECORD_TYPES;
+  const status = input.status ?? 'active';
+  const rows = db.prepare(`SELECT * FROM memories WHERE kind IN (${recordTypes.map(() => '?').join(',')}) AND status=? ORDER BY updated_at DESC LIMIT ?`).all(
+    ...recordTypes,
+    status,
+    Math.max(1, Math.min(input.limit ?? 10, 100)),
+  ) as unknown as MemoryRecord[];
+
+  const results = rows
+    .filter((row) => memoryMatchesProjectMode(row, input, context))
+    .filter((row) => passesTextQuery(row, input.query))
+    .filter((row) => passesStructuredFilters(row, input))
+    .slice(0, input.limit ?? 10)
+    .map((row) => ({
+      ...compactMemory(row),
+      ...(input.include_links ? { links: linksForMemory(db, row.id) } : {}),
+      ...(input.include_related ? { related: relatedForMemory(db, row.id) } : {}),
+    }));
+
+  return { results };
+}
