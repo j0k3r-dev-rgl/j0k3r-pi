@@ -22,6 +22,12 @@ export interface CommitRecordInput {
   release_impact?: CommitReleaseImpact;
   summary?: string;
   content?: string;
+  functional_description?: string;
+  changelog_bullets?: string[];
+  areas?: string[];
+  validation?: string[];
+  risks?: string[];
+  decisions?: string[];
   files_changed?: string[];
   diffstat?: Record<string, unknown> | string;
   source_session_id?: string;
@@ -68,6 +74,11 @@ export interface ReleaseCandidatesInput {
   since?: string;
   until?: string;
   limit?: number;
+}
+
+export interface ReleaseNotesPreviewInput extends ReleaseCandidatesInput {
+  version?: string;
+  release_tag?: string;
 }
 
 export interface ReleaseRecordInput {
@@ -181,7 +192,7 @@ function requireReleaseCommits(db: Db, ids: string[] | undefined): MemoryRecord[
 
 function reservedMetadata(extra: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
   if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return undefined;
-  const cleaned = Object.fromEntries(Object.entries(extra).filter(([key]) => key !== 'commit' && key !== 'changelog' && key !== 'extra'));
+  const cleaned = Object.fromEntries(Object.entries(extra).filter(([key]) => !['commit', 'changelog', 'release', 'release_context', 'extra'].includes(key)));
   return Object.keys(cleaned).length ? cleaned : undefined;
 }
 
@@ -192,10 +203,24 @@ function normalizeEnumValue<T extends string>(value: unknown, allowed: readonly 
   throw new Error(`${label} must be one of: ${allowed.join(', ')}`);
 }
 
+function buildReleaseContextMetadata(input: CommitRecordInput): Record<string, unknown> | undefined {
+  const releaseContext = {
+    functional_description: normalizeOptionalText(input.functional_description),
+    changelog_bullets: normalizeStringList(input.changelog_bullets),
+    areas: normalizeStringList(input.areas),
+    validation: normalizeStringList(input.validation),
+    risks: normalizeStringList(input.risks),
+    decisions: normalizeStringList(input.decisions),
+  };
+  const cleaned = Object.fromEntries(Object.entries(releaseContext).filter(([, value]) => Array.isArray(value) ? value.length > 0 : Boolean(value)));
+  return Object.keys(cleaned).length ? cleaned : undefined;
+}
+
 function buildCommitMetadata(input: CommitRecordInput): Record<string, unknown> {
   const changeType = normalizeEnumValue(input.change_type, COMMIT_CHANGE_TYPES, 'change_type');
   const releaseImpact = normalizeEnumValue(input.release_impact, COMMIT_RELEASE_IMPACTS, 'release_impact')
     ?? (changeType === 'sync' ? 'none' : undefined);
+  const releaseContext = buildReleaseContextMetadata(input);
   return {
     commit: {
       repo: normalizeText(input.repo),
@@ -210,6 +235,7 @@ function buildCommitMetadata(input: CommitRecordInput): Record<string, unknown> 
       diffstat: input.diffstat,
       source_session_id: normalizeOptionalText(input.source_session_id),
     },
+    ...(releaseContext ? { release_context: releaseContext } : {}),
     ...(reservedMetadata(input.metadata_json) ? { extra: reservedMetadata(input.metadata_json) } : {}),
   };
 }
@@ -261,9 +287,15 @@ function buildCommitPayload(input: CommitRecordInput): { title: string; summary:
     input.author ? `author: ${normalizeText(input.author)}` : '',
     input.authored_at ? `authored_at: ${normalizeText(input.authored_at)}` : '',
     files.length ? `files_changed: ${files.join(', ')}` : '',
+    input.functional_description ? `functional_description: ${normalizeText(input.functional_description)}` : '',
+    normalizeStringList(input.changelog_bullets).length ? `changelog_bullets: ${normalizeStringList(input.changelog_bullets).join(' | ')}` : '',
+    normalizeStringList(input.areas).length ? `areas: ${normalizeStringList(input.areas).join(', ')}` : '',
+    normalizeStringList(input.validation).length ? `validation: ${normalizeStringList(input.validation).join(' | ')}` : '',
+    normalizeStringList(input.risks).length ? `risks: ${normalizeStringList(input.risks).join(' | ')}` : '',
+    normalizeStringList(input.decisions).length ? `decisions: ${normalizeStringList(input.decisions).join(' | ')}` : '',
     input.content ? normalizeText(input.content) : '',
   ].filter(Boolean).join('\n');
-  const tags = Array.from(new Set([...(normalizeStringList(input.tags)), 'commit_record', repo, hash, ...(branch ? [branch] : []), ...(changeType ? [changeType] : []), ...(releaseImpact ? [releaseImpact] : [])]));
+  const tags = Array.from(new Set([...(normalizeStringList(input.tags)), 'commit_record', repo, hash, ...(branch ? [branch] : []), ...(changeType ? [changeType] : []), ...(releaseImpact ? [releaseImpact] : []), ...normalizeStringList(input.areas)]));
   return { title, summary, content, tags };
 }
 
@@ -492,6 +524,51 @@ export function searchReleaseCandidates(db: Db, input: ReleaseCandidatesInput, c
     .map((row) => ({ ...compactMemory(row), links: linksForMemory(db, row.id) }));
 
   return { results };
+}
+
+function previewSectionForChangeType(changeType: string): 'Added' | 'Changed' | 'Fixed' | 'Internal' {
+  if (changeType === 'feature') return 'Added';
+  if (changeType === 'fix') return 'Fixed';
+  if (['docs', 'test', 'chore', 'refactor', 'sync'].includes(changeType)) return 'Internal';
+  return 'Changed';
+}
+
+function sentenceCase(text: string): string {
+  const trimmed = text.trim();
+  return trimmed ? `${trimmed[0].toUpperCase()}${trimmed.slice(1)}` : trimmed;
+}
+
+export function previewReleaseNotes(db: Db, input: ReleaseNotesPreviewInput, context: ResolvedContext): { text: string; sections: Record<string, string[]>; candidates: Array<Record<string, unknown>>; needs_context: Array<Record<string, unknown>> } {
+  const { version: _version, release_tag: _releaseTag, ...candidateInput } = input;
+  const candidates = searchReleaseCandidates(db, candidateInput, context).results;
+  const sections: Record<string, string[]> = { Added: [], Changed: [], Fixed: [], Removed: [], Internal: [] };
+  const needsContext: Array<Record<string, unknown>> = [];
+
+  for (const candidate of candidates) {
+    const id = String(candidate.id ?? '');
+    const row = getMemoryRaw(db, id);
+    if (!row) continue;
+    const meta = parseJson<{ commit?: Record<string, unknown>; release_context?: Record<string, unknown> }>(row.metadata_json, {});
+    const bullets = normalizeStringList(meta.release_context?.changelog_bullets).map(sentenceCase);
+    if (!bullets.length) {
+      needsContext.push(candidate);
+      continue;
+    }
+    const section = previewSectionForChangeType(normalizeText(meta.commit?.change_type));
+    sections[section].push(...bullets);
+  }
+
+  const heading = input.version ? `## ${input.version}${input.release_tag ? ` (${input.release_tag})` : ''}` : '## Release notes preview';
+  const lines = [heading, ''];
+  for (const section of ['Added', 'Changed', 'Fixed', 'Removed', 'Internal']) {
+    const bullets = sections[section] ?? [];
+    if (!bullets.length) continue;
+    lines.push(`### ${section}`, ...bullets.map((bullet) => `- ${bullet}`), '');
+  }
+  if (needsContext.length) {
+    lines.push('### Needs context', ...needsContext.map((item) => `- ${item.title ?? item.id}`), '');
+  }
+  return { text: lines.join('\n').trimEnd(), sections, candidates, needs_context: needsContext };
 }
 
 export function addReleaseRecord(db: Db, input: ReleaseRecordInput, context: ResolvedContext): { memory: Record<string, unknown>; links: Array<Record<string, unknown>>; warning?: string } {

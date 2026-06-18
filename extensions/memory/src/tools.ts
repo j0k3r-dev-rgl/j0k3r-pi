@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
 import { Type } from 'typebox';
 import type { Db } from './db.js';
 import { resolveBackupPath } from './config.js';
@@ -11,7 +13,7 @@ import { consolidateMemories } from './consolidation.js';
 import { ensureProjectProfile, getCurrentProjectProfile, updateProjectProfile } from './project-profile.js';
 import { getSyncStatus } from './sync-status.js';
 import { renderMemoryToolResult } from './render.js';
-import { addChangelogEntry, addCommitChangelogLink, addCommitRecord, addReleaseRecord, searchCommitChangelog, searchReleaseCandidates } from './commit-changelog.js';
+import { addChangelogEntry, addCommitChangelogLink, addCommitRecord, addReleaseRecord, previewReleaseNotes, searchCommitChangelog, searchReleaseCandidates } from './commit-changelog.js';
 import { MEMORY_KINDS } from './types.js';
 import type { MemoryImportConflictPolicy, MemoryImportMode, ToolResult } from './types.js';
 
@@ -86,6 +88,52 @@ function assertGitMemoryEnabled(context: { config?: { git?: { enabled?: boolean 
   if (context.config?.git?.enabled !== true) {
     throw new Error('Memory git module is disabled. Set git.enabled=true in .pi/memory.json to use commit/changelog memory tools.');
   }
+}
+
+function runGit(cwd: string, args: string[]): string {
+  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+}
+
+function optionalGit(cwd: string, args: string[]): string | undefined {
+  try {
+    return runGit(cwd, args) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function requireRichCurrentCommitContext(params: any): void {
+  if (!String(params?.summary ?? '').trim()) throw new Error('summary is required for memory_record_current_commit');
+  if (!String(params?.functional_description ?? '').trim()) throw new Error('functional_description is required for memory_record_current_commit');
+  if (!Array.isArray(params?.changelog_bullets) || !params.changelog_bullets.some((bullet: unknown) => String(bullet ?? '').trim())) {
+    throw new Error('changelog_bullets must contain at least one entry for memory_record_current_commit');
+  }
+  if (!String(params?.change_type ?? '').trim()) throw new Error('change_type is required for memory_record_current_commit');
+  if (!String(params?.release_impact ?? '').trim()) throw new Error('release_impact is required for memory_record_current_commit');
+}
+
+function currentCommitInput(cwd: string, params: any): any {
+  requireRichCurrentCommitContext(params);
+  const hash = runGit(cwd, ['rev-parse', 'HEAD']);
+  const subject = runGit(cwd, ['show', '-s', '--format=%s', 'HEAD']);
+  const author = runGit(cwd, ['show', '-s', '--format=%an <%ae>', 'HEAD']);
+  const authoredAt = runGit(cwd, ['show', '-s', '--format=%aI', 'HEAD']);
+  const branch = optionalGit(cwd, ['branch', '--show-current']);
+  const remote = optionalGit(cwd, ['config', '--get', 'remote.origin.url']);
+  const root = optionalGit(cwd, ['rev-parse', '--show-toplevel']);
+  const files = runGit(cwd, ['show', '--name-only', '--format=', 'HEAD']).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const diffstat = runGit(cwd, ['show', '--stat', '--oneline', '--format=short', 'HEAD']);
+  return {
+    ...params,
+    repo: remote ?? (root ? path.basename(root) : 'unknown'),
+    commit_hash: hash,
+    subject,
+    branch,
+    author,
+    authored_at: authoredAt,
+    files_changed: files,
+    diffstat,
+  };
 }
 
 function resolveImportDefaults(
@@ -190,6 +238,55 @@ export function registerMemoryTools(pi: any, db: Db): void {
   });
 
   pi.registerTool({
+    name: 'memory_record_current_commit',
+    label: 'Memory Record Current Commit',
+    description: 'Record the current Git HEAD commit in Memory with rich release/changelog provenance context. Does not commit, tag, push, or edit files.',
+    parameters: Type.Object({
+      scope: Type.Optional(Scope),
+      change_type: Type.Optional(Type.Union([
+        Type.Literal('fix'),
+        Type.Literal('feature'),
+        Type.Literal('chore'),
+        Type.Literal('docs'),
+        Type.Literal('refactor'),
+        Type.Literal('test'),
+        Type.Literal('sync'),
+        Type.Literal('other'),
+      ])),
+      release_impact: Type.Optional(Type.Union([
+        Type.Literal('major'),
+        Type.Literal('minor'),
+        Type.Literal('patch'),
+        Type.Literal('none'),
+      ])),
+      summary: Type.Optional(Type.String()),
+      content: Type.Optional(Type.String()),
+      functional_description: Type.Optional(Type.String()),
+      changelog_bullets: Type.Optional(Type.Array(Type.String())),
+      areas: Type.Optional(Type.Array(Type.String())),
+      validation: Type.Optional(Type.Array(Type.String())),
+      risks: Type.Optional(Type.Array(Type.String())),
+      decisions: Type.Optional(Type.Array(Type.String())),
+      related_memory_ids: Type.Optional(Type.Array(Type.String())),
+      tags: Type.Optional(Type.Array(Type.String())),
+      confidence: Type.Optional(Type.Number()),
+      importance: Type.Optional(Type.Number()),
+      metadata_json: Type.Optional(Type.Record(Type.String(), Type.Any())),
+    }),
+    async execute(_id: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
+      try {
+        const cwd = ctx?.cwd ?? process.cwd();
+        const context = resolveMemoryContext(cwd);
+        assertGitMemoryEnabled(context);
+        const result = addCommitRecord(db, currentCommitInput(cwd, params ?? {}), context);
+        return ok(`Current commit record saved: ${result.memory.title ?? result.memory.id}${result.warning ? ` (${result.warning})` : ''}`, result);
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  });
+
+  pi.registerTool({
     name: 'memory_commit_record_add',
     label: 'Memory Commit Record Add',
     description: 'Create a commit record memory with commit metadata and optional provenance links.',
@@ -219,6 +316,12 @@ export function registerMemoryTools(pi: any, db: Db): void {
       ])),
       summary: Type.Optional(Type.String()),
       content: Type.Optional(Type.String()),
+      functional_description: Type.Optional(Type.String()),
+      changelog_bullets: Type.Optional(Type.Array(Type.String())),
+      areas: Type.Optional(Type.Array(Type.String())),
+      validation: Type.Optional(Type.Array(Type.String())),
+      risks: Type.Optional(Type.Array(Type.String())),
+      decisions: Type.Optional(Type.Array(Type.String())),
       files_changed: Type.Optional(Type.Array(Type.String())),
       diffstat: Type.Optional(Type.Union([Type.String(), Type.Record(Type.String(), Type.Any())])),
       source_session_id: Type.Optional(Type.String()),
@@ -340,6 +443,49 @@ export function registerMemoryTools(pi: any, db: Db): void {
       }
     },
     renderResult: renderMemoryToolResult,
+  });
+
+  pi.registerTool({
+    name: 'memory_release_notes_preview',
+    label: 'Memory Release Notes Preview',
+    description: 'Preview release notes from unlinked release candidate commit records. Read-only: does not edit changelog files or create memory records.',
+    parameters: Type.Object({
+      scope: Type.Optional(Scope),
+      project_mode: Type.Optional(ProjectMode),
+      project_name: Type.Optional(Type.String()),
+      repo: Type.Optional(Type.String()),
+      branch: Type.Optional(Type.String()),
+      change_type: Type.Optional(Type.Union([
+        Type.Literal('fix'),
+        Type.Literal('feature'),
+        Type.Literal('chore'),
+        Type.Literal('docs'),
+        Type.Literal('refactor'),
+        Type.Literal('test'),
+        Type.Literal('sync'),
+        Type.Literal('other'),
+      ])),
+      release_impact: Type.Optional(Type.Union([
+        Type.Literal('major'),
+        Type.Literal('minor'),
+        Type.Literal('patch'),
+      ])),
+      version: Type.Optional(Type.String()),
+      release_tag: Type.Optional(Type.String()),
+      since: Type.Optional(Type.String()),
+      until: Type.Optional(Type.String()),
+      limit: Type.Optional(Type.Number()),
+    }),
+    async execute(_id: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
+      try {
+        const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
+        assertGitMemoryEnabled(context);
+        const result = previewReleaseNotes(db, params ?? {}, context);
+        return ok(result.text || 'No release candidate notes found.', result);
+      } catch (e) {
+        return fail(e);
+      }
+    },
   });
 
   pi.registerTool({

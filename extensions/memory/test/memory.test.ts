@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import extension from '../index.js';
 import { resolveBackupPath, resolveDbPath, readProjectMemoryConfig } from '../src/config.js';
 import { openMemoryDb } from '../src/db.js';
@@ -40,6 +41,10 @@ function registerMemoryToolHarness(name = 'Commit Tool App') {
   extension({ registerTool: (tool: any) => tools.set(tool.name, tool), registerCommand: () => {}, registerMessageRenderer: () => {}, on: () => {} });
   if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
   return { d, dbPath, projectDir, tools };
+}
+
+function git(projectDir: string, args: string[]) {
+  return execFileSync('git', args, { cwd: projectDir, encoding: 'utf8' }).trim();
 }
 
 describe('extension setup', () => {
@@ -562,10 +567,12 @@ describe('commit changelog tool contracts', () => {
     const { tools } = registerMemoryToolHarness();
 
     expect(tools.has('memory_commit_record_add')).toBe(true);
+    expect(tools.has('memory_record_current_commit')).toBe(true);
     expect(tools.has('memory_changelog_entry_add')).toBe(true);
     expect(tools.has('memory_commit_changelog_link')).toBe(true);
     expect(tools.has('memory_commit_changelog_search')).toBe(true);
     expect(tools.has('memory_release_candidates_search')).toBe(true);
+    expect(tools.has('memory_release_notes_preview')).toBe(true);
     expect(tools.has('memory_release_record_add')).toBe(true);
 
     const addSchema = JSON.stringify(tools.get('memory_add')?.parameters ?? {});
@@ -584,9 +591,21 @@ describe('commit changelog tool contracts', () => {
     expect(commitSchema).toContain('subject');
     expect(commitSchema).toContain('change_type');
     expect(commitSchema).toContain('release_impact');
+    expect(commitSchema).toContain('functional_description');
+    expect(commitSchema).toContain('changelog_bullets');
+    expect(commitSchema).toContain('areas');
+    expect(commitSchema).toContain('validation');
+    expect(commitSchema).toContain('risks');
+    expect(commitSchema).toContain('decisions');
     expect(commitSchema).toContain('sync');
     expect(commitSchema).toContain('none');
     expect(commitSchema).not.toContain('allow_duplicate');
+
+    const currentCommitSchema = JSON.stringify(tools.get('memory_record_current_commit')?.parameters ?? {});
+    expect(currentCommitSchema).toContain('functional_description');
+    expect(currentCommitSchema).toContain('changelog_bullets');
+    expect(currentCommitSchema).toContain('release_impact');
+    expect(currentCommitSchema).not.toContain('commit_hash');
 
     const changelogSchema = JSON.stringify(tools.get('memory_changelog_entry_add')?.parameters ?? {});
     expect(changelogSchema).toContain('version');
@@ -620,6 +639,12 @@ describe('commit changelog tool contracts', () => {
     expect(releaseCandidatesSchema).toContain('since');
     expect(releaseCandidatesSchema).toContain('until');
     expect(releaseCandidatesSchema).toContain('release_impact');
+
+    const releasePreviewSchema = JSON.stringify(tools.get('memory_release_notes_preview')?.parameters ?? {});
+    expect(releasePreviewSchema).toContain('repo');
+    expect(releasePreviewSchema).toContain('version');
+    expect(releasePreviewSchema).toContain('release_tag');
+    expect(releasePreviewSchema).not.toContain('edit');
 
     const releaseRecordSchema = JSON.stringify(tools.get('memory_release_record_add')?.parameters ?? {});
     expect(releaseRecordSchema).toContain('version');
@@ -773,6 +798,193 @@ describe('commit changelog tool contracts', () => {
       { kind: 'changelog_entry', count: 1 },
       { kind: 'commit_record', count: 1 },
     ]);
+  });
+
+  it('requires rich release context when recording the current git HEAD commit', async () => {
+    const { projectDir, tools } = registerMemoryToolHarness('Current Commit Required App');
+    const currentCommit = tools.get('memory_record_current_commit');
+
+    git(projectDir, ['init']);
+    git(projectDir, ['config', 'user.name', 'Test User']);
+    git(projectDir, ['config', 'user.email', 'test@example.com']);
+    fs.writeFileSync(path.join(projectDir, 'feature.txt'), 'current commit memory\n');
+    git(projectDir, ['add', 'feature.txt']);
+    git(projectDir, ['commit', '-m', 'feat(memory): require rich context']);
+
+    const missingSummary = await currentCommit.execute('tool-call', {
+      functional_description: 'records current commit with required context',
+      changelog_bullets: ['Added required rich commit context.'],
+      change_type: 'feature',
+      release_impact: 'minor',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(missingSummary.isError).toBe(true);
+    expect(missingSummary.content[0].text).toContain('summary is required');
+
+    const missingBullets = await currentCommit.execute('tool-call', {
+      summary: 'Records current commit with required context.',
+      functional_description: 'records current commit with required context',
+      change_type: 'feature',
+      release_impact: 'minor',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(missingBullets.isError).toBe(true);
+    expect(missingBullets.content[0].text).toContain('changelog_bullets must contain at least one entry');
+  });
+
+  it('records the current git HEAD commit with rich context without performing git writes', async () => {
+    const { d, projectDir, tools } = registerMemoryToolHarness('Current Commit App');
+    const currentCommit = tools.get('memory_record_current_commit');
+    expect(currentCommit).toBeTruthy();
+
+    git(projectDir, ['init']);
+    git(projectDir, ['config', 'user.name', 'Test User']);
+    git(projectDir, ['config', 'user.email', 'test@example.com']);
+    git(projectDir, ['remote', 'add', 'origin', 'https://github.com/j0k3r/current-commit-app.git']);
+    fs.writeFileSync(path.join(projectDir, 'feature.txt'), 'current commit memory\n');
+    git(projectDir, ['add', 'feature.txt']);
+    git(projectDir, ['commit', '-m', 'feat(memory): record current commit']);
+    const head = git(projectDir, ['rev-parse', 'HEAD']);
+    const branch = git(projectDir, ['branch', '--show-current']);
+
+    const result = await currentCommit.execute('tool-call', {
+      summary: 'Records the current git HEAD commit with rich release context.',
+      functional_description: 'The Memory Extension can read HEAD metadata and store a rich commit record without performing Git writes.',
+      changelog_bullets: ['Added current commit memory recording from Git HEAD.'],
+      areas: ['memory', 'git'],
+      validation: ['git rev-parse HEAD', 'git show --name-only HEAD'],
+      risks: ['Requires running inside a Git repository.'],
+      decisions: ['Do not perform commit, tag, push, or changelog edits from this tool.'],
+      change_type: 'feature',
+      release_impact: 'minor',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(result.isError).not.toBe(true);
+    expect(result.details.memory.kind).toBe('commit_record');
+
+    const row = d.prepare('SELECT content, metadata_json FROM memories WHERE id=?').get(result.details.memory.id) as { content: string; metadata_json: string };
+    const metadata = JSON.parse(row.metadata_json);
+    expect(metadata.commit).toMatchObject({
+      repo: 'https://github.com/j0k3r/current-commit-app.git',
+      commit_hash: head.toLowerCase(),
+      subject: 'feat(memory): record current commit',
+      branch,
+      author: 'test user <test@example.com>',
+      change_type: 'feature',
+      release_impact: 'minor',
+      files_changed: ['feature.txt'],
+    });
+    expect(metadata.release_context.changelog_bullets).toEqual(['added current commit memory recording from git head.']);
+    expect(row.content).toContain('functional_description: the memory extension can read head metadata');
+    expect(git(projectDir, ['rev-parse', 'HEAD'])).toBe(head);
+  });
+
+  it('stores rich commit release context metadata and makes it searchable', async () => {
+    const { d, projectDir, tools } = registerMemoryToolHarness('Rich Commit App');
+    const commitAdd = tools.get('memory_commit_record_add');
+    const searchTool = tools.get('memory_commit_changelog_search');
+
+    const commit = await commitAdd.execute('tool-call', {
+      repo: 'github.com/j0k3r/j0k3r-pi',
+      commit_hash: 'abc9876',
+      subject: 'add rich commit memory context',
+      summary: 'Added centralized frontend input normalization and memory provenance context.',
+      functional_description: 'InputFilled and TextFilled now normalize text on blur by default while preserving normalize=false as an escape hatch.',
+      changelog_bullets: [
+        'Added centralized frontend text normalization for shared input primitives.',
+        'Recorded richer commit provenance for future release notes.',
+      ],
+      areas: ['frontend', 'memory'],
+      validation: ['cd front && bun run typecheck', 'cd extensions/memory && npm test -- --run'],
+      risks: ['normalize=false remains the compatibility escape hatch'],
+      decisions: ['store release context in commit memory metadata without generating changelog content'],
+      change_type: 'feature',
+      release_impact: 'minor',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(commit.isError).not.toBe(true);
+
+    const metaRow = d.prepare('SELECT content, metadata_json FROM memories WHERE id=?').get(commit.details.memory.id) as { content: string; metadata_json: string };
+    expect(metaRow.content).toContain('functional_description: inputfilled and textfilled now normalize text on blur');
+    expect(metaRow.content).toContain('changelog_bullets: added centralized frontend text normalization for shared input primitives');
+    expect(JSON.parse(metaRow.metadata_json)).toMatchObject({
+      commit: { change_type: 'feature', release_impact: 'minor' },
+      release_context: {
+        functional_description: 'inputfilled and textfilled now normalize text on blur by default while preserving normalize=false as an escape hatch.',
+        changelog_bullets: [
+          'added centralized frontend text normalization for shared input primitives.',
+          'recorded richer commit provenance for future release notes.',
+        ],
+        areas: ['frontend', 'memory'],
+        validation: ['cd front && bun run typecheck', 'cd extensions/memory && npm test -- --run'],
+        risks: ['normalize=false remains the compatibility escape hatch'],
+        decisions: ['store release context in commit memory metadata without generating changelog content'],
+      },
+    });
+
+    const search = await searchTool.execute('tool-call', {
+      query: 'frontend normalization primitives',
+      record_types: ['commit_record'],
+      limit: 5,
+    }, undefined, undefined, { cwd: projectDir });
+    expect(search.isError).not.toBe(true);
+    expect(search.details.results.map((item: any) => item.id)).toContain(commit.details.memory.id);
+  });
+
+  it('previews release notes from candidate commit bullets without writing changelog records', async () => {
+    const { d, projectDir, tools } = registerMemoryToolHarness('Release Preview App');
+    const commitAdd = tools.get('memory_commit_record_add');
+    const previewTool = tools.get('memory_release_notes_preview');
+
+    const feature = await commitAdd.execute('tool-call', {
+      repo: 'github.com/j0k3r/j0k3r-pi',
+      commit_hash: 'ddd4444',
+      subject: 'add release notes preview',
+      summary: 'Adds release notes preview for memory candidates.',
+      functional_description: 'The agent can preview release notes from stored commit bullets without editing changelog files.',
+      changelog_bullets: ['Added release notes preview from Memory commit candidates.'],
+      areas: ['memory', 'release'],
+      validation: ['cd extensions/memory && npm test -- --run'],
+      change_type: 'feature',
+      release_impact: 'minor',
+      authored_at: '2026-06-18T12:00:00Z',
+    }, undefined, undefined, { cwd: projectDir });
+    const fix = await commitAdd.execute('tool-call', {
+      repo: 'github.com/j0k3r/j0k3r-pi',
+      commit_hash: 'eee5555',
+      subject: 'fix preview grouping',
+      summary: 'Fixes preview grouping.',
+      functional_description: 'Fix commits are grouped into Fixed.',
+      changelog_bullets: ['Fixed release notes preview grouping.'],
+      change_type: 'fix',
+      release_impact: 'patch',
+      authored_at: '2026-06-18T13:00:00Z',
+    }, undefined, undefined, { cwd: projectDir });
+    const chore = await commitAdd.execute('tool-call', {
+      repo: 'github.com/j0k3r/j0k3r-pi',
+      commit_hash: 'fff6666',
+      subject: 'chore without bullets',
+      summary: 'Internal cleanup without release bullets.',
+      functional_description: 'This commit intentionally lacks changelog bullets.',
+      change_type: 'chore',
+      release_impact: 'patch',
+      authored_at: '2026-06-18T14:00:00Z',
+    }, undefined, undefined, { cwd: projectDir });
+
+    const preview = await previewTool.execute('tool-call', {
+      repo: 'github.com/j0k3r/j0k3r-pi',
+      version: '1.6.0',
+      release_tag: 'v1.6.0',
+      limit: 10,
+    }, undefined, undefined, { cwd: projectDir });
+    expect(preview.isError).not.toBe(true);
+    expect(preview.details.candidates.map((item: any) => item.id)).toEqual([chore.details.memory.id, fix.details.memory.id, feature.details.memory.id]);
+    expect(preview.details.sections.Added).toContain('Added release notes preview from memory commit candidates.');
+    expect(preview.details.sections.Fixed).toContain('Fixed release notes preview grouping.');
+    expect(preview.details.needs_context.map((item: any) => item.id)).toEqual([chore.details.memory.id]);
+    expect(preview.content[0].text).toContain('## 1.6.0');
+    expect(preview.content[0].text).toContain('### Added');
+    expect(preview.content[0].text).toContain('- Added release notes preview from memory commit candidates.');
+    expect(preview.content[0].text).toContain('### Needs context');
+
+    const generatedRows = d.prepare("SELECT COUNT(*) AS count FROM memories WHERE kind IN ('changelog_entry','release_record')").get() as { count: number };
+    expect(generatedRows.count).toBe(0);
   });
 
   it('finds unreleased commit candidates and records explicit release/tag links without generating changelogs', async () => {

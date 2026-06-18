@@ -32,12 +32,15 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "commit record",
       "changelog memory",
       "memory_commit_record_add",
+      "memory_record_current_commit",
       "memory_changelog_entry_add",
       "memory_commit_changelog_link",
       "memory_commit_changelog_search",
       "memory_release_candidates_search",
       "memory_release_record_add",
+      "memory_release_notes_preview",
       "release candidates",
+      "release notes preview",
       "release record",
       "release impact memory",
       "change_type",
@@ -80,11 +83,13 @@ Do not use this skill for ordinary Git commits/tags/changelog work when Memory g
 - Before any user-requested commit/tag, run `git status --short` and inspect enough diff/log context to record accurate metadata.
 - Do not store raw full diffs, secrets, private keys, tokens, or sensitive logs in memory records.
 - Prefer compact provenance: subject, commit hash, branch, author/date when available, changed file list, diffstat summary, validation summary, and links to related memories or changelog entries.
-- Use `memory_commit_record_add` for durable commit records. Include `change_type` and `release_impact` when known.
+- Use `memory_record_current_commit` after a real user-approved commit when recording the current Git HEAD with rich release/changelog context. It reads Git metadata but must not commit, tag, push, or edit files.
+- Use `memory_commit_record_add` for durable commit records when the commit metadata is supplied explicitly. Include `change_type`, `release_impact`, `functional_description`, `changelog_bullets`, `areas`, `validation`, `risks`, and `decisions` when known.
 - Use `change_type: "sync"` with `release_impact: "none"` for cloud/sync/provenance-only commits that should not appear as release-impacting changes.
 - Use `memory_changelog_entry_add` for changelog source data only when useful. Include `version`, `section`, `bullets`, and `release_tag` when a tag/version exists, but do not treat this as the final changelog writer.
 - `source_commit_ids` on `memory_changelog_entry_add` is metadata only. It must not be treated as a release/tag link and must not create `memory_links` automatically.
 - Use `memory_release_candidates_search` when preparing a tag/release to retrieve release-impacting commit records that are not yet linked to a release/tag record. This tool is read-only and does not generate changelog text.
+- Use `memory_release_notes_preview` to produce a read-only release notes preview from candidate commit `changelog_bullets`. It must not edit files, create changelog entries, or create release records; commits without bullets must be reported as needing context.
 - Use `memory_release_record_add` after a tag/release decision to store the release/tag record and explicitly create `derived_from` links to the selected commits. This tool stores provenance only; it must not generate or edit `CHANGELOG.md`.
 - Use `memory_commit_changelog_link` to connect commit records, changelog entries, PRD/SDD memories, decision memories, or other supporting memories only when the relationship is explicit and useful. Prefer `derived_from` from release/tag or changelog records to source commit records, and `supports` for evidence/validation memories.
 - Use `memory_commit_changelog_search` before creating release notes or changelog updates so existing commit/changelog/release records are reused instead of duplicated.
@@ -110,14 +115,15 @@ Do not use this skill for ordinary Git commits/tags/changelog work when Memory g
 5. Classify the change:
    - `change_type`: `fix`, `feature`, `chore`, `docs`, `refactor`, `test`, `sync`, or `other`.
    - `release_impact`: `major`, `minor`, `patch`, or `none`.
-6. After a user-approved commit exists, record it with `memory_commit_record_add` using the real commit hash and compact metadata.
+6. After a user-approved commit exists, prefer `memory_record_current_commit` to record HEAD with rich context; use `memory_commit_record_add` when recording a non-HEAD commit or when metadata is supplied explicitly.
 7. When preparing a tag/release, call `memory_release_candidates_search` to retrieve release-impacting commit records that are not already linked to a release/tag record.
-8. The agent uses those records to reason about and manually draft/update `CHANGELOG.md` or release notes; tools must not auto-generate or auto-edit changelog content.
-9. After the user approves the tag/release grouping, call `memory_release_record_add` to store the release/tag record and create explicit `derived_from` links to the selected commits.
-10. When changelog source bullets are useful as memory, create or update changelog memory with `memory_changelog_entry_add`; treat any `source_commit_ids` as metadata until a release/tag aggregation is explicitly approved.
-11. Link other supporting records only when the relationship is explicit and useful for future provenance.
-12. Search existing records with `memory_commit_changelog_search` before drafting changelog updates or release summaries.
-13. Report what was recorded, what was intentionally not recorded, validations observed, and any remaining git/manual actions.
+8. Optionally call `memory_release_notes_preview` to preview grouped notes from stored `changelog_bullets`; use the preview as context only.
+9. The agent uses those records to reason about and manually draft/update `CHANGELOG.md` or release notes; tools must not auto-generate or auto-edit changelog content.
+10. After the user approves the tag/release grouping, call `memory_release_record_add` to store the release/tag record and create explicit `derived_from` links to the selected commits.
+11. When changelog source bullets are useful as memory, create or update changelog memory with `memory_changelog_entry_add`; treat any `source_commit_ids` as metadata until a release/tag aggregation is explicitly approved.
+12. Link other supporting records only when the relationship is explicit and useful for future provenance.
+13. Search existing records with `memory_commit_changelog_search` before drafting changelog updates or release summaries.
+14. Report what was recorded, what was intentionally not recorded, validations observed, and any remaining git/manual actions.
 
 ## Output Contract
 

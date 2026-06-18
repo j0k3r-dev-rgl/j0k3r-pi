@@ -102,8 +102,10 @@ Use `git-memory-release` only as an optional companion after verifying `.pi/memo
 7. For tags/releases, confirm tag/version and selected commits before creating the tag.
 8. Optional Memory integration:
    - If `.pi/memory.json` has `git.enabled=true`, load/apply `git-memory-release`.
-   - After a commit, optionally record the commit with `memory_commit_record_add`.
-   - Before a tag/release, optionally query `memory_release_candidates_search`.
+   - After a commit, optionally record the current HEAD with `memory_record_current_commit` using rich context for future release notes.
+   - Use `memory_commit_record_add` only when recording an explicit non-HEAD commit or when all commit metadata is already supplied.
+   - Before a tag/release, optionally query `memory_release_candidates_search` and `memory_release_notes_preview` to gather release context.
+   - The agent still drafts/edits changelog content manually; Memory preview is context only.
    - After an approved tag/release grouping, optionally record it with `memory_release_record_add`.
    - If git memory is disabled, skip these steps and state that Memory provenance was not recorded.
 9. Report actions taken, commit/tag hashes or names, validation, skipped Memory integration, and remaining manual steps.
