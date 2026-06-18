@@ -9,9 +9,10 @@ export function registerAgentTodoTool(pi: any, runtime: any): void {
     name: 'agent_todo',
     label: 'Agent Todo',
     description: 'Manage the single active agent todo.',
-    promptSnippet: 'Use agent_todo to manage the single active todo for the current branch.',
+    promptSnippet: 'Manage a single active todo for substantial multi-step work.',
     promptGuidelines: [
-      'Use agent_todo to create, show, complete_step, complete_all, complete_range, reopen_step, or clear the single active todo.',
+      'Use agent_todo only for long, tedious, multi-phase, or high-coordination tasks where a checklist adds value.',
+      'Do not use agent_todo for direct answers, tiny inspections, small approved edits, or simple commit/push operations.',
       'Use agent_todo complete_all when all remaining todo steps are done instead of completing each step one by one.',
       'Use agent_todo complete_range with range like "2-4" when a contiguous set of steps is done.'
     ],

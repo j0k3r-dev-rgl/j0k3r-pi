@@ -15,7 +15,19 @@ Pi extension that gives the agent a single active task checklist for the current
 
 | Tool | Purpose |
 |---|---|
-| `agent_todo` | Manage the single active agent todo for the current branch. |
+| `agent_todo` | Manage a single active todo for substantial multi-step work. |
+
+### Usage policy
+
+Use `agent_todo` only when a checklist adds coordination value, such as:
+
+- long, tedious, multi-phase, or high-coordination tasks;
+- broad investigations;
+- multi-file changes;
+- PRD/SDD/OpenSpec workflows;
+- refactors, migrations, or tasks with several validations/checkpoints.
+
+Do not use `agent_todo` for direct answers, tiny inspections, small approved edits, simple commit/push operations, or obvious short tasks where a conversational plan is enough.
 
 ### Supported actions
 

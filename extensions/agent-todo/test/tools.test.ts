@@ -21,6 +21,9 @@ describe('registerAgentTodoTool', () => {
 
     expect(tools).toHaveLength(1);
     expect(tools[0].name).toBe('agent_todo');
+    expect(tools[0].promptSnippet).toBe('Manage a single active todo for substantial multi-step work.');
+    expect(tools[0].promptGuidelines).toContain('Use agent_todo only for long, tedious, multi-phase, or high-coordination tasks where a checklist adds value.');
+    expect(tools[0].promptGuidelines).toContain('Do not use agent_todo for direct answers, tiny inspections, small approved edits, or simple commit/push operations.');
     expect(tools[0].parameters.properties.action.type).toBe('string');
     expect(tools[0].parameters.properties.range.type).toBe('string');
 
