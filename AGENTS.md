@@ -27,14 +27,12 @@ Rules:
 
 ## Workflow selection
 
-For any code edit or implementation, and for any non-trivial docs/config change, **the orchestrator must choose and state the workflow first** using the `workflow-triage` skill. 
+For any code edit or implementation, and for any non-trivial docs/config change, **the orchestrator must choose and state the workflow first** by consulting `workflow-triage`.
 
-1. **Do not guess the workflow.** If the route is unclear, load `workflow-triage` to classify the request.
-2. **Never assume requirements.** 
-3. **Ask before inline changes.** Even for small, localized changes that qualify for an inline fix or Simple TDD, the orchestrator must NEVER assume. Always ask the user: *"¿Prefieres que arregle esto directamente o hacemos una revisión y propuesta primero?"* (unless the user explicitly ordered a direct fix).
-4. For substantial work (PRD/SDD/OpenSpec), load and follow `sdd-workflow`.
-
-All detailed routing tables, policy-sensitive paths, and workflow definitions (mini-SDD, simple-tdd, formal-sdd, etc.) are defined in the `workflow-triage` skill.
+Rules:
+- `AGENTS.md` defines global guardrails, not workflow routes.
+- `workflow-triage` owns route selection and follow-on skill loading.
+- When triage selects PRD/SDD/OpenSpec work, load `sdd-workflow` core plus only the companion modules required by that route.
 
 ### Dirty worktree overlap rule
 
@@ -89,15 +87,12 @@ If no test framework exists, do not silently skip TDD. Explain the limitation an
 
 ## Post-change review and verification gate
 
-Before reporting non-trivial work as done, the orchestrator must run the review/verify path selected in the workflow decision:
+Before reporting non-trivial work as done, the orchestrator must run the review/verify path selected by `workflow-triage` and any follow-on workflow skills.
 
-- For `simple-tdd`: review the diff, tests run, risk areas, and any skipped validation before final response.
-- For `simple-tdd-with-review`: perform an explicit checklist covering scope, policy-sensitive effects, tests, docs/config drift, and whether subagent verification is now warranted.
-- For `mini-sdd` and `minimal-delegated-apply`: run `sdd-verify` after `sdd-apply` by default. Skip only if the user explicitly waives verification or the task packet is docs-only and the orchestrator documents an equivalent review checklist.
-- For `formal-sdd`: continue from apply to `sdd-verify`; archive only after verification passes and the user approves closure.
-- Verification reports issues only. Do not fix verification findings without a new apply/remediation approval.
-
-The final response must state which review/verify path ran, validations, known risks, and any waived verification.
+Rules:
+- Do not skip the selected review or verification gate for non-trivial work unless the user explicitly waives it.
+- If verification reports issues, do not fix them without new apply/remediation approval.
+- The final response must state which review/verify path ran, validations, known risks, and any waived verification.
 
 ## Subagent orchestration
 
@@ -105,9 +100,7 @@ The final response must state which review/verify path ran, validations, known r
 - Only the orchestrator delegates work to subagents.
 - Project subagents are SDD-focused, with `discovery` as the explicit read-only research exception used when the orchestrator needs evidence before choosing a workflow.
 - Subagents must not delegate to other subagents or communicate with each other directly.
-- `sdd-apply` is the only SDD phase expected to modify application/source code.
-- `sdd-verify` should report issues and not fix them unless the orchestrator explicitly starts a new apply task.
-- Detailed SDD phase inputs, sequencing, orchestration checklist, and return envelopes live in the `sdd-workflow` skill.
+- Detailed subagent and SDD phase behavior lives in `workflow-triage` plus the selected `sdd-workflow` core/companion modules.
 
 ## Memory behavior
 
@@ -122,7 +115,7 @@ Use memory as the agent's persistent brain, not as a transcript dump or a mechan
 - After every meaningful discussion or substantial task, perform a decision checkpoint before the final response: identify durable decisions, progress, validations, todos, risks, and learnings; save the useful non-sensitive items with `memory_add`, update the project profile when appropriate, and explicitly say what was saved or why nothing was saved.
 - Prefer a small number of atomic memories over large noisy summaries; for normal work, save 1-3 durable memories unless the user asks for a richer record.
 - In full SDD, phase subagents may create/update only the active SDD flow memory (`type: sdd_feature_project_state`) and only as a compact index/state/handoff.
-- Long-form SDD artifacts belong in OpenSpec files when artifact_store is `openspec` or `hybrid`; detailed SDD artifact names and formats are owned by `sdd-workflow`.
+- When the selected SDD route uses `openspec` or `hybrid`, keep long-form SDD artifacts in OpenSpec and keep memory compact.
 - Non-SDD durable project memories, global preferences, architectural decisions outside the active SDD flow, and cleanup/consolidation remain orchestrator responsibilities unless explicitly delegated.
 
 ## Safety and code editing
