@@ -775,9 +775,26 @@ describe('commit changelog tool contracts', () => {
       commit_hash: 'fedcba9',
       subject: 'dedupe commit record',
     }, undefined, undefined, { cwd: projectDir });
+    const thirdCommit = await commitAdd.execute('tool-call', {
+      repo: 'git@github.com:j0k3r/j0k3r-pi.git',
+      commit_hash: 'fedcba9',
+      subject: 'dedupe commit record',
+    }, undefined, undefined, { cwd: projectDir });
+    const fourthCommit = await commitAdd.execute('tool-call', {
+      repo: 'https://github.com/j0k3r/j0k3r-pi.git',
+      commit_hash: 'fedcba9',
+      subject: 'dedupe commit record',
+    }, undefined, undefined, { cwd: projectDir });
 
     expect(secondCommit.isError).not.toBe(true);
     expect(secondCommit.details.memory.id).toBe(firstCommit.details.memory.id);
+    expect(thirdCommit.isError).not.toBe(true);
+    expect(thirdCommit.details.memory.id).toBe(firstCommit.details.memory.id);
+    expect(fourthCommit.isError).not.toBe(true);
+    expect(fourthCommit.details.memory.id).toBe(firstCommit.details.memory.id);
+
+    const commitMeta = d.prepare('SELECT metadata_json FROM memories WHERE id=?').get(firstCommit.details.memory.id) as { metadata_json: string };
+    expect(JSON.parse(commitMeta.metadata_json).commit.repo).toBe('github.com/j0k3r/j0k3r-pi');
 
     const firstEntry = await changelogAdd.execute('tool-call', {
       version: '3.0.0',
@@ -862,7 +879,7 @@ describe('commit changelog tool contracts', () => {
     const row = d.prepare('SELECT content, metadata_json FROM memories WHERE id=?').get(result.details.memory.id) as { content: string; metadata_json: string };
     const metadata = JSON.parse(row.metadata_json);
     expect(metadata.commit).toMatchObject({
-      repo: 'https://github.com/j0k3r/current-commit-app.git',
+      repo: 'github.com/j0k3r/current-commit-app',
       commit_hash: head.toLowerCase(),
       subject: 'feat(memory): record current commit',
       branch,
@@ -985,6 +1002,84 @@ describe('commit changelog tool contracts', () => {
 
     const generatedRows = d.prepare("SELECT COUNT(*) AS count FROM memories WHERE kind IN ('changelog_entry','release_record')").get() as { count: number };
     expect(generatedRows.count).toBe(0);
+  });
+
+  it('deduplicates release candidates and preview entries by normalized repo and commit hash', async () => {
+    const { projectDir, tools } = registerMemoryToolHarness('Release Preview Dedup App');
+    const memoryAdd = tools.get('memory_add');
+    const candidatesSearch = tools.get('memory_release_candidates_search');
+    const previewTool = tools.get('memory_release_notes_preview');
+    const releaseAdd = tools.get('memory_release_record_add');
+
+    const rich = await memoryAdd.execute('tool-call', {
+      scope: 'project',
+      kind: 'commit_record',
+      title: 'ssh duplicate commit',
+      content: 'legacy commit record using ssh remote',
+      metadata_json: {
+        commit: {
+          repo: 'git@github.com:j0k3r-dev-rgl/sias-app.git',
+          commit_hash: 'fb55501',
+          subject: 'add sias feature',
+          change_type: 'feature',
+          release_impact: 'minor',
+          authored_at: '2026-06-18T12:00:00Z',
+        },
+        release_context: {
+          changelog_bullets: ['Added SIAS release provenance.'],
+        },
+      },
+    }, undefined, undefined, { cwd: projectDir });
+    const sparse = await memoryAdd.execute('tool-call', {
+      scope: 'project',
+      kind: 'commit_record',
+      title: 'host duplicate commit',
+      content: 'legacy commit record using host path',
+      metadata_json: {
+        commit: {
+          repo: 'github.com/j0k3r-dev-rgl/sias-app',
+          commit_hash: 'fb55501',
+          subject: 'add sias feature without context',
+          change_type: 'feature',
+          release_impact: 'minor',
+          authored_at: '2026-06-18T13:00:00Z',
+        },
+      },
+    }, undefined, undefined, { cwd: projectDir });
+
+    const candidates = await candidatesSearch.execute('tool-call', {
+      repo: 'https://github.com/j0k3r-dev-rgl/sias-app.git',
+      limit: 10,
+    }, undefined, undefined, { cwd: projectDir });
+    expect(candidates.isError).not.toBe(true);
+    expect(candidates.details.results.map((item: any) => item.id)).toEqual([rich.details.memory.id]);
+    expect(candidates.details.results.map((item: any) => item.id)).not.toContain(sparse.details.memory.id);
+
+    const preview = await previewTool.execute('tool-call', {
+      repo: 'github.com/j0k3r-dev-rgl/sias-app',
+      version: '2.0.0',
+      release_tag: 'v2.0.0',
+      limit: 10,
+    }, undefined, undefined, { cwd: projectDir });
+    expect(preview.isError).not.toBe(true);
+    expect(preview.details.candidates.map((item: any) => item.id)).toEqual([rich.details.memory.id]);
+    expect(preview.details.sections.Added).toEqual(['Added sias release provenance.']);
+    expect(preview.details.needs_context).toEqual([]);
+    expect(preview.content[0].text).not.toContain('Needs context');
+
+    const release = await releaseAdd.execute('tool-call', {
+      version: '2.0.0',
+      release_tag: 'v2.0.0',
+      commit_ids: [rich.details.memory.id],
+    }, undefined, undefined, { cwd: projectDir });
+    expect(release.isError).not.toBe(true);
+
+    const afterRelease = await candidatesSearch.execute('tool-call', {
+      repo: 'git@github.com:j0k3r-dev-rgl/sias-app.git',
+      limit: 10,
+    }, undefined, undefined, { cwd: projectDir });
+    expect(afterRelease.isError).not.toBe(true);
+    expect(afterRelease.details.results).toEqual([]);
   });
 
   it('finds unreleased commit candidates and records explicit release/tag links without generating changelogs', async () => {

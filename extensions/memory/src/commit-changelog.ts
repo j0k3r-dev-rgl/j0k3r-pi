@@ -128,6 +128,21 @@ function normalizeText(value: unknown): string {
   return String(value ?? '').trim().toLowerCase();
 }
 
+function normalizeRepoUrl(value: unknown): string {
+  const raw = normalizeText(value).replace(/\/+$/, '').replace(/\.git$/, '');
+  if (!raw) return '';
+  const ssh = raw.match(/^git@([^:]+):(.+)$/);
+  if (ssh) return `${ssh[1]}/${ssh[2]}`.replace(/\/+$/, '').replace(/\.git$/, '');
+  const scheme = raw.match(/^(?:https?|ssh|git):\/\/([^/]+)\/(.+)$/);
+  if (scheme) {
+    const host = scheme[1];
+    let path = scheme[2];
+    if (path.startsWith('git@')) path = path.slice(4);
+    return `${host}/${path}`.replace(/\/+$/, '').replace(/\.git$/, '');
+  }
+  return raw;
+}
+
 function normalizeOptionalText(value: unknown): string | undefined {
   const normalized = normalizeText(value);
   return normalized || undefined;
@@ -223,7 +238,7 @@ function buildCommitMetadata(input: CommitRecordInput): Record<string, unknown> 
   const releaseContext = buildReleaseContextMetadata(input);
   return {
     commit: {
-      repo: normalizeText(input.repo),
+      repo: normalizeRepoUrl(input.repo),
       commit_hash: normalizeText(input.commit_hash),
       subject: normalizeText(input.subject),
       branch: normalizeOptionalText(input.branch),
@@ -267,7 +282,7 @@ function buildReleaseMetadata(input: ReleaseRecordInput): Record<string, unknown
 }
 
 function buildCommitPayload(input: CommitRecordInput): { title: string; summary: string; content: string; tags: string[] } {
-  const repo = normalizeText(input.repo);
+  const repo = normalizeRepoUrl(input.repo);
   const hash = normalizeText(input.commit_hash);
   const subject = normalizeText(input.subject);
   const branch = normalizeOptionalText(input.branch);
@@ -340,7 +355,7 @@ function findActiveDuplicateCommit(db: Db, candidate: { scope: string; project_i
     const meta = parseJson<{ commit?: Record<string, unknown> }>(row.metadata_json, {});
     return row.project_id === candidate.project_id
       && row.project_name === candidate.project_name
-      && normalizeText(meta.commit?.repo) === candidate.repo
+      && normalizeRepoUrl(meta.commit?.repo) === candidate.repo
       && normalizeText(meta.commit?.commit_hash) === candidate.commit_hash;
   });
 }
@@ -413,7 +428,7 @@ function linkRelatedMemories(db: Db, from: MemoryRecord, related: MemoryRecord[]
 }
 
 export function addCommitRecord(db: Db, input: CommitRecordInput, context: ResolvedContext): { memory: Record<string, unknown>; warning?: string } {
-  const repo = normalizeText(input.repo);
+  const repo = normalizeRepoUrl(input.repo);
   const commitHash = normalizeText(input.commit_hash);
   const subject = normalizeText(input.subject);
   if (!repo) throw new Error('repo is required');
@@ -486,6 +501,51 @@ export function addChangelogEntry(db: Db, input: ChangelogEntryInput, context: R
   return { memory: compactMemory(created) };
 }
 
+function commitDate(record: MemoryRecord): string {
+  const meta = parseJson<{ commit?: Record<string, unknown> }>(record.metadata_json, {});
+  return normalizeOptionalText(meta.commit?.authored_at) ?? normalizeText(record.updated_at);
+}
+
+function commitDedupeKey(record: MemoryRecord): string | undefined {
+  const meta = parseJson<{ commit?: Record<string, unknown> }>(record.metadata_json, {});
+  const repo = normalizeRepoUrl(meta.commit?.repo);
+  const hash = normalizeText(meta.commit?.commit_hash);
+  return repo && hash ? `${repo}\n${hash}` : undefined;
+}
+
+function commitCandidateScore(record: MemoryRecord): number {
+  const meta = parseJson<{ release_context?: Record<string, unknown> }>(record.metadata_json, {});
+  const bullets = normalizeStringList(meta.release_context?.changelog_bullets).length;
+  const contextFields = ['functional_description', 'areas', 'validation', 'risks', 'decisions']
+    .filter((key) => {
+      const value = meta.release_context?.[key];
+      return Array.isArray(value) ? normalizeStringList(value).length > 0 : Boolean(normalizeOptionalText(value));
+    }).length;
+  return (bullets ? 100 : 0) + bullets + contextFields;
+}
+
+function betterCommitCandidate(a: MemoryRecord, b: MemoryRecord): MemoryRecord {
+  const aScore = commitCandidateScore(a);
+  const bScore = commitCandidateScore(b);
+  if (aScore !== bScore) return aScore > bScore ? a : b;
+  return commitDate(a) >= commitDate(b) ? a : b;
+}
+
+function dedupeCommitRows(rows: MemoryRecord[]): MemoryRecord[] {
+  const byKey = new Map<string, MemoryRecord>();
+  const passthrough: MemoryRecord[] = [];
+  for (const row of rows) {
+    const key = commitDedupeKey(row);
+    if (!key) {
+      passthrough.push(row);
+      continue;
+    }
+    const existing = byKey.get(key);
+    byKey.set(key, existing ? betterCommitCandidate(existing, row) : row);
+  }
+  return [...byKey.values(), ...passthrough];
+}
+
 function isCommitLinkedToRelease(db: Db, commitId: string): boolean {
   const rows = db.prepare("SELECT m.* FROM memory_links l JOIN memories m ON m.id=l.from_memory_id WHERE l.to_memory_id=? AND l.relation_type='derived_from' AND m.status='active'").all(commitId) as unknown as MemoryRecord[];
   return rows.some((row) => {
@@ -494,6 +554,18 @@ function isCommitLinkedToRelease(db: Db, commitId: string): boolean {
     const meta = parseJson<{ changelog?: Record<string, unknown> }>(row.metadata_json, {});
     return Boolean(normalizeOptionalText(meta.changelog?.release_tag));
   });
+}
+
+function isCommitIdentityLinkedToRelease(db: Db, record: MemoryRecord): boolean {
+  if (isCommitLinkedToRelease(db, record.id)) return true;
+  const key = commitDedupeKey(record);
+  if (!key) return false;
+  const rows = db.prepare('SELECT * FROM memories WHERE kind=? AND status=? AND scope=?').all('commit_record', 'active', record.scope) as unknown as MemoryRecord[];
+  return rows.some((row) => row.id !== record.id
+    && row.project_id === record.project_id
+    && row.project_name === record.project_name
+    && commitDedupeKey(row) === key
+    && isCommitLinkedToRelease(db, row.id));
 }
 
 export function searchReleaseCandidates(db: Db, input: ReleaseCandidatesInput, context: ResolvedContext): { results: Array<Record<string, unknown>> } {
@@ -505,21 +577,15 @@ export function searchReleaseCandidates(db: Db, input: ReleaseCandidatesInput, c
   ) as unknown as MemoryRecord[];
 
   const searchInput: SearchInput = { ...input, record_types: ['commit_record'], status };
-  const results = rows
+  const results = dedupeCommitRows(rows
     .filter((row) => memoryMatchesProjectMode(row, searchInput, context))
     .filter((row) => passesStructuredFilters(row, searchInput))
     .filter((row) => {
       const meta = parseJson<{ commit?: Record<string, unknown> }>(row.metadata_json, {});
       return ['major', 'minor', 'patch'].includes(normalizeText(meta.commit?.release_impact));
     })
-    .filter((row) => !isCommitLinkedToRelease(db, row.id))
-    .sort((a, b) => {
-      const aMeta = parseJson<{ commit?: Record<string, unknown> }>(a.metadata_json, {});
-      const bMeta = parseJson<{ commit?: Record<string, unknown> }>(b.metadata_json, {});
-      const aDate = normalizeOptionalText(aMeta.commit?.authored_at) ?? normalizeText(a.updated_at);
-      const bDate = normalizeOptionalText(bMeta.commit?.authored_at) ?? normalizeText(b.updated_at);
-      return bDate.localeCompare(aDate);
-    })
+    .filter((row) => !isCommitIdentityLinkedToRelease(db, row)))
+    .sort((a, b) => commitDate(b).localeCompare(commitDate(a)))
     .slice(0, input.limit ?? 25)
     .map((row) => ({ ...compactMemory(row), links: linksForMemory(db, row.id) }));
 
@@ -628,7 +694,7 @@ function passesStructuredFilters(record: MemoryRecord, input: SearchInput): bool
   const metadata = parseJson<{ commit?: Record<string, unknown>; changelog?: Record<string, unknown> }>(record.metadata_json, {});
   const commit = metadata.commit ?? {};
   const changelog = metadata.changelog ?? {};
-  if (input.repo && normalizeText(commit.repo) !== normalizeText(input.repo)) return false;
+  if (input.repo && normalizeRepoUrl(commit.repo) !== normalizeRepoUrl(input.repo)) return false;
   if (input.commit_hash && normalizeText(commit.commit_hash) !== normalizeText(input.commit_hash)) return false;
   if (input.branch && normalizeText(commit.branch) !== normalizeText(input.branch)) return false;
   if (input.change_type && normalizeText(commit.change_type) !== normalizeText(input.change_type)) return false;
