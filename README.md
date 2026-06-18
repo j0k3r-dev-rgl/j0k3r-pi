@@ -74,6 +74,8 @@ See [`AGENTS.md`](AGENTS.md) for the full policy.
 
 [`extensions/skill-registry`](extensions/skill-registry/) generates `.pi/skill-registry.json` and `.pi/skill-registry.md` from both project-local and global/user skills.
 
+The extension is opt-in at project scope: it only registers when `.pi/skill-registry.config.json` exists with `{"enabled": true}`. Missing or invalid config keeps it disabled.
+
 Scanned skill roots:
 
 - `.pi/skills`
@@ -101,13 +103,15 @@ See [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 |---|---|---|
 | Agent Todo | [`extensions/agent-todo/README.md`](extensions/agent-todo/README.md) | Single active task checklist for the current conversation branch, plus widget/provider integration. |
 | Context7 | [`extensions/context7/README.md`](extensions/context7/README.md) | Safe, bounded Context7 library documentation tools without MCP. |
-| Memory | [`extensions/memory/README.md`](extensions/memory/README.md) | Local-first project-aware persistent memory backed by SQLite/FTS5. |
+| Memory | [`extensions/memory/README.md`](extensions/memory/README.md) | Local-first project-aware persistent memory backed by SQLite/FTS5. Opt-in via `.pi/memory.json` with `enabled: true`. |
 | Permission Guard | [`extensions/permission-guard/README.md`](extensions/permission-guard/README.md) | In-process permission policy for supported tools and user bash commands. |
 | Sidebar | [`extensions/sidebar/README.md`](extensions/sidebar/README.md) | HUD-style sidebar with chat, subagents, todo, and git status. |
-| Skill Registry | [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md) | Routing index generator for global and project skills. |
+| Skill Registry | [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md) | Routing index generator for global and project skills. Opt-in via `.pi/skill-registry.config.json` with `enabled: true`. |
 | Subagents | [`extensions/subagents/README.md`](extensions/subagents/README.md) | Markdown-defined subagent delegation, history, TUI panel, model profiles, and permission handoff. |
 
 After changing extension code, markdown subagents, skills, or config during an interactive Pi session, run `/reload` or restart Pi when the relevant README/skill says so.
+
+Note: Memory and Skill Registry now default to disabled until the project explicitly opts in through their respective `.pi/*.json` config files.
 
 ## Validation commands
 
