@@ -178,11 +178,36 @@ export interface YoutubeChannelResult {
 export interface PlaylistRefInput {
   url?: string;
   playlist_id?: string;
+  entriesOffset?: number;
+  entriesLimit?: number;
+  enrichEntries?: boolean;
+  descriptionPreviewChars?: number;
 }
 
 export interface NormalizedPlaylistRef {
   url?: string;
   playlist_id?: string;
+  entriesOffset: number;
+  entriesLimit: number;
+  enrichEntries: boolean;
+  descriptionPreviewChars: number;
+}
+
+export interface YoutubePlaylistEntry {
+  title: string;
+  url?: string | null;
+  video_id?: string | null;
+  duration?: number | null;
+  channel_name?: string | null;
+  channel_id?: string | null;
+  description_preview?: string | null;
+  published_date?: string | null;
+  view_count?: number | null;
+  like_count?: number | null;
+  dislike_count?: number | null;
+  comment_count?: number | null;
+  chapters_count?: number | null;
+  tags?: string[];
 }
 
 export interface YoutubePlaylistDetails {
@@ -190,15 +215,20 @@ export interface YoutubePlaylistDetails {
   playlist_id: string;
   url: string;
   channel_name?: string | null;
+  channel_id?: string | null;
+  uploader?: string | null;
+  uploader_id?: string | null;
   description?: string | null;
+  description_preview?: string | null;
   video_count?: number | null;
-  entries?: Array<{
-    title: string;
-    url?: string | null;
-    video_id?: string | null;
-    duration?: number | null;
-    channel_name?: string | null;
-  }>;
+  view_count?: number | null;
+  modified_date?: string | null;
+  entries_offset: number;
+  entries_limit: number;
+  entries_returned: number;
+  has_more_entries: boolean;
+  next_entries_offset?: number | null;
+  entries?: YoutubePlaylistEntry[];
 }
 
 export interface YtDlpRuntime {

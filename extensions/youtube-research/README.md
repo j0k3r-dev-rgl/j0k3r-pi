@@ -25,7 +25,11 @@ A standalone Pi extension that adds five focused YouTube research tools.
 4. `youtube_channel_search`
    - Search channels by query, channel ID, handle, or URL and return metadata-rich channel entries.
 5. `youtube_playlist_get`
-   - Fetch playlist metadata and compact entries by URL or playlist ID.
+   - Fetch rich playlist metadata by URL or playlist ID, including description, total video count, channel/uploader, playlist views when available, and modified date when available.
+   - Supports pagination with `entriesOffset` and `entriesLimit` so large playlists do not return every video at once; current `yt-dlp` extraction reliably exposes the first 100 playlist entries, so `entriesOffset` is bounded to `0..99`.
+   - Returns pagination signals: `entries_offset`, `entries_limit`, `entries_returned`, `has_more_entries`, and `next_entries_offset`.
+   - Returns compact entries by default (`id`, `title`, `url`, `duration`).
+   - Supports opt-in enriched entries with `enrichEntries` and `descriptionPreviewChars`; enrichment adds per-video description previews, views, likes, comments, published date, chapters count, and compact tags when `yt-dlp` provides them.
 
 ## Input behavior
 - Video/playlist inputs follow **exactly-one** rules for URL vs ID.

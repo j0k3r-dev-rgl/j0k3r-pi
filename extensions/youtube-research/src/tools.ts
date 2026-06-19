@@ -9,6 +9,11 @@ import {
   validatePlaylistRef,
   validateChannelInput,
   normalizeSourceMode,
+  PLAYLIST_ENTRIES_DEFAULT_LIMIT,
+  PLAYLIST_ENTRIES_MAX_LIMIT,
+  PLAYLIST_ENTRIES_MAX_OFFSET,
+  PLAYLIST_DESCRIPTION_PREVIEW_DEFAULT_CHARS,
+  PLAYLIST_DESCRIPTION_PREVIEW_MAX_CHARS,
 } from './validation.js';
 import {
   normalizeSearchResults,
@@ -41,6 +46,8 @@ import {
   YtDlpClient,
   YtDlpRuntime,
   TranscriptSource,
+  YoutubePlaylistDetails,
+  YoutubePlaylistEntry,
 } from './types.js';
 
 const execFileAsync = promisify(execFile);
@@ -224,11 +231,28 @@ function summarizeChannelSearch(params: YoutubeChannelSearchInput, results: Retu
 }
 
 function summarizePlaylist(playlist: ReturnType<typeof normalizePlaylistDetails>): string {
+  const entries = playlist.entries ?? [];
   const lines = [
     `youtube_playlist_get: ${playlist.playlist_title} (${playlist.playlist_id})`,
     `url: ${playlist.url}`,
-    `entries: ${playlist.entries?.length ?? 0}`,
-    playlist.channel_name ? `channel: ${playlist.channel_name}` : undefined,
+    playlist.video_count === null || playlist.video_count === undefined ? undefined : `total videos: ${playlist.video_count}`,
+    `entries: ${playlist.entries_returned} from offset ${playlist.entries_offset}`,
+    playlist.has_more_entries ? `next offset: ${playlist.next_entries_offset}` : undefined,
+    playlist.channel_name ? `channel: ${playlist.channel_name}${playlist.channel_id ? ` (${playlist.channel_id})` : ''}` : undefined,
+    playlist.description_preview ? `description: ${playlist.description_preview}` : undefined,
+    ...entries.slice(0, 10).flatMap((entry, index) => {
+      const meta = [
+        formatDuration(entry.duration) ? `duration: ${formatDuration(entry.duration)}` : undefined,
+        formatViewCount(entry.view_count) ? `views: ${formatViewCount(entry.view_count)}` : undefined,
+        formatViewCount(entry.like_count) ? `likes: ${formatViewCount(entry.like_count)}` : undefined,
+        formatViewCount(entry.comment_count) ? `comments: ${formatViewCount(entry.comment_count)}` : undefined,
+        entry.published_date ? `published: ${entry.published_date}` : undefined,
+      ].filter(Boolean).join(' | ');
+      return [
+        `${playlist.entries_offset + index + 1}. ${entry.title} (${entry.video_id ?? 'unknown'})${meta ? ` — ${meta}` : ''}`,
+        entry.description_preview ? `   description: ${entry.description_preview}` : undefined,
+      ].filter(Boolean);
+    }),
   ].filter(Boolean);
 
   return lines.join('\n');
@@ -439,7 +463,35 @@ function normalizeVideoReference(input: VideoRefInput): NormalizedVideoRef {
   throw new Error('exactly one of url or video_id is required');
 }
 
+function normalizePlaylistOptionLimit(value: unknown, key: string, defaultValue: number, maxValue: number, minValue = 1): number {
+  if (value === undefined || value === null || value === '') {
+    return defaultValue;
+  }
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new Error(`${key} must be an integer`);
+  }
+  if (value < minValue || value > maxValue) {
+    throw new Error(`${key} must be between ${minValue} and ${maxValue}`);
+  }
+  return value;
+}
+
+function playlistOptions(input: PlaylistRefInput): Pick<NormalizedPlaylistRef, 'entriesOffset' | 'entriesLimit' | 'enrichEntries' | 'descriptionPreviewChars'> {
+  return {
+    entriesOffset: normalizePlaylistOptionLimit(input.entriesOffset, 'entriesOffset', 0, PLAYLIST_ENTRIES_MAX_OFFSET, 0),
+    entriesLimit: normalizePlaylistOptionLimit(input.entriesLimit, 'entriesLimit', PLAYLIST_ENTRIES_DEFAULT_LIMIT, PLAYLIST_ENTRIES_MAX_LIMIT),
+    enrichEntries: input.enrichEntries === true,
+    descriptionPreviewChars: normalizePlaylistOptionLimit(
+      input.descriptionPreviewChars,
+      'descriptionPreviewChars',
+      PLAYLIST_DESCRIPTION_PREVIEW_DEFAULT_CHARS,
+      PLAYLIST_DESCRIPTION_PREVIEW_MAX_CHARS,
+    ),
+  };
+}
+
 function normalizePlaylistReference(input: PlaylistRefInput): NormalizedPlaylistRef {
+  const options = playlistOptions(input);
   if (input.url) {
     const url = input.url.trim();
     if (!isPlaylistUrl(url)) {
@@ -451,7 +503,7 @@ function normalizePlaylistReference(input: PlaylistRefInput): NormalizedPlaylist
       throw new Error('invalid playlist url');
     }
 
-    return { playlist_id: playlistId, url };
+    return { playlist_id: playlistId, url, ...options };
   }
 
   if (input.playlist_id) {
@@ -460,7 +512,7 @@ function normalizePlaylistReference(input: PlaylistRefInput): NormalizedPlaylist
       throw new Error('invalid playlist id format');
     }
 
-    return { playlist_id: id, url: `https://www.youtube.com/playlist?list=${id}` };
+    return { playlist_id: id, url: `https://www.youtube.com/playlist?list=${id}`, ...options };
   }
 
   throw new Error('exactly one of url or playlist_id is required');
@@ -599,6 +651,54 @@ async function enrichSearchResults(results: YoutubeSearchResult[], input: Search
   return enriched;
 }
 
+async function enrichPlaylistEntries(playlist: YoutubePlaylistDetails, reference: NormalizedPlaylistRef, client: YtDlpClient): Promise<YoutubePlaylistDetails> {
+  if (!reference.enrichEntries || !playlist.entries?.length) {
+    return playlist;
+  }
+
+  const entries: YoutubePlaylistEntry[] = [];
+  for (const entry of playlist.entries) {
+    if (!entry.video_id && !entry.url) {
+      entries.push(entry);
+      continue;
+    }
+    try {
+      const raw = await client.getVideo({
+        video_id: entry.video_id ?? undefined,
+        videoUrl: entry.url ?? undefined,
+        descriptionPreviewChars: reference.descriptionPreviewChars,
+      }, undefined);
+      if (!raw) {
+        entries.push(entry);
+        continue;
+      }
+      const details = normalizeVideoDetails(raw as RawYtDlpItem);
+      entries.push({
+        ...entry,
+        title: details.title || entry.title,
+        url: details.url || entry.url,
+        video_id: details.video_id || entry.video_id,
+        channel_name: details.channel_name ?? entry.channel_name,
+        channel_id: details.channel_id ?? entry.channel_id,
+        duration: details.duration ?? entry.duration,
+        description_preview: compactSnippet(details.full_description, reference.descriptionPreviewChars),
+        published_date: details.published_date ?? entry.published_date,
+        view_count: details.view_count ?? entry.view_count,
+        like_count: details.like_count,
+        dislike_count: details.dislike_count,
+        comment_count: details.comment_count,
+        chapters_count: details.chapters?.length ?? 0,
+        tags: details.tags?.slice(0, 8),
+      });
+    } catch {
+      // Best-effort enrichment: keep the compact playlist entry when full metadata fails.
+      entries.push(entry);
+    }
+  }
+
+  return { ...playlist, entries };
+}
+
 function cleanTranscriptText(raw: string): string {
   return raw
     .split('\n')
@@ -691,6 +791,10 @@ const channelSearchParameters = Type.Object({
 const playlistParameters = Type.Object({
   url: Type.Optional(Type.String()),
   playlist_id: Type.Optional(Type.String()),
+  entriesOffset: Type.Optional(Type.Number({ minimum: 0, maximum: PLAYLIST_ENTRIES_MAX_OFFSET })),
+  entriesLimit: Type.Optional(Type.Number({ minimum: 1, maximum: PLAYLIST_ENTRIES_MAX_LIMIT })),
+  enrichEntries: Type.Optional(Type.Boolean()),
+  descriptionPreviewChars: Type.Optional(Type.Number({ minimum: 1, maximum: PLAYLIST_DESCRIPTION_PREVIEW_MAX_CHARS })),
 });
 
 async function runSearch(
@@ -925,7 +1029,12 @@ async function runPlaylistGet(
     return buildFailure('not_found', `No playlist found for ${reference.playlist_id ?? reference.url}`, false);
   }
 
-  const playlist = normalizePlaylistDetails(raw as RawYtDlpItem);
+  const compactPlaylist = normalizePlaylistDetails(raw as RawYtDlpItem, {
+    entriesOffset: reference.entriesOffset,
+    entriesLimit: reference.entriesLimit,
+    descriptionPreviewChars: reference.descriptionPreviewChars,
+  });
+  const playlist = await enrichPlaylistEntries(compactPlaylist, reference, client);
   return buildSuccess(summarizePlaylist(playlist), playlist);
 }
 
@@ -992,7 +1101,7 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
   pi.registerTool({
     name: 'youtube_playlist_get',
     label: 'YouTube Playlist',
-    description: 'Fetch YouTube playlist metadata and compact video entries by URL or playlist ID.',
+    description: 'Fetch rich YouTube playlist metadata with offset/limit pagination and optional enriched video entries by URL or playlist ID.',
     parameters: playlistParameters,
     async execute(_id: string, params: PlaylistRefInput) {
       try {

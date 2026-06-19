@@ -116,10 +116,14 @@ export function buildVideoCommand(input: NormalizedVideoRef, binary?: string): s
 }
 
 export function buildPlaylistCommand(input: NormalizedPlaylistRef, binary?: string): string[] {
+  const start = input.entriesOffset + 1;
+  const end = input.entriesOffset + input.entriesLimit;
   return [
     commandBinary(binary),
-    '--dump-json',
+    '--dump-single-json',
     '--flat-playlist',
+    '--playlist-items',
+    `${start}:${end}`,
     youtubePlaylistUrl(input),
   ];
 }

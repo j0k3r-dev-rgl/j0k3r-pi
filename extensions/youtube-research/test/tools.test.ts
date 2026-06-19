@@ -91,7 +91,7 @@ describe('youtube-research tool registration', () => {
     expect(pi.tools.find((tool) => tool.name === 'youtube_video_get')?.description).toMatch(/description preview.*comments/i);
     expect(pi.tools.find((tool) => tool.name === 'youtube_transcript_get')?.description).toMatch(/source modes.*fallback/i);
     expect(pi.tools.find((tool) => tool.name === 'youtube_channel_search')?.description).toMatch(/query.*channel ID.*handle.*URL/i);
-    expect(pi.tools.find((tool) => tool.name === 'youtube_playlist_get')?.description).toMatch(/URL.*playlist ID/i);
+    expect(pi.tools.find((tool) => tool.name === 'youtube_playlist_get')?.description).toMatch(/pagination.*optional enriched video entries/i);
   });
 
   it('returns stable structured success/failure envelopes from all public tools', async () => {
@@ -560,7 +560,7 @@ describe('youtube-research tool registration', () => {
     expect(result.details.data.results[0].url).toContain('/channel/UCbx_d228PdYwgB4Jz202SIQ');
   });
 
-  it('fetches playlist details with compact entry normalization and direct URL/ID support', async () => {
+  it('fetches playlist details with rich metadata, pagination, optional entry enrichment, and direct URL/ID support', async () => {
     const pi = createMockPi();
     const { client } = createMockClient();
 
@@ -568,10 +568,34 @@ describe('youtube-research tool registration', () => {
       id: 'PL123',
       title: 'Playlist One',
       webpage_url: 'https://youtube.com/playlist?list=PL123',
-      description: 'desc',
+      description: 'desc '.repeat(50),
       channel: 'host',
-      entries: [{ title: 'Episode', id: 'vid1', duration: 12, url: 'https://youtube.com/watch?v=vid1' }],
+      channel_id: 'UC123',
+      uploader: 'host uploads',
+      uploader_id: '@host',
+      playlist_count: 12,
+      view_count: 400,
+      modified_date: '20260430',
+      entries: [
+        { title: 'Episode', id: 'vid1', duration: 12, url: 'https://youtube.com/watch?v=vid1' },
+        { title: 'Episode 2', id: 'vid2', duration: 13, url: 'https://youtube.com/watch?v=vid2' },
+      ],
     });
+    (client.getVideo as any).mockImplementation(async (input: { video_id?: string; url?: string }) => ({
+      id: input.video_id ?? 'vid1',
+      title: 'Episode full',
+      webpage_url: input.url ?? 'https://youtube.com/watch?v=vid1',
+      description: 'Full episode description useful for agent selection.'.repeat(3),
+      duration: 12,
+      view_count: 1000,
+      like_count: 50,
+      comment_count: 7,
+      upload_date: '20240102',
+      channel: 'host',
+      channel_id: 'UC123',
+      tags: ['python', 'tutorial'],
+      chapters: [{ title: 'Intro', start_time: 0 }],
+    }));
 
     registerYoutubeResearchTools(pi, {
       checkRuntime: vi.fn().mockResolvedValue({ runtime: { binary: 'yt-dlp' } }),
@@ -580,19 +604,46 @@ describe('youtube-research tool registration', () => {
 
     const playlistTool = pi.tools.find((tool) => tool.name === 'youtube_playlist_get');
 
-    const byId = (await execute(playlistTool!, { playlist_id: 'PL123' })) as {
+    const byId = (await execute(playlistTool!, {
+      playlist_id: 'PL123',
+      entriesOffset: 10,
+      entriesLimit: 2,
+      enrichEntries: true,
+      descriptionPreviewChars: 60,
+    })) as {
       details: { status: string; data: YoutubePlaylistDetails; error?: { code: string } };
+      content: Array<{ text: string }>;
       isError?: boolean;
     };
     expect(byId.details.status).toBe('success');
+    expect(client.getPlaylist).toHaveBeenCalledWith(expect.objectContaining({ playlist_id: 'PL123', entriesOffset: 10, entriesLimit: 2, enrichEntries: true }));
+    expect(client.getVideo).toHaveBeenCalledTimes(2);
     expect(byId.details.data.playlist_id).toBe('PL123');
-    expect(byId.details.data.entries).toHaveLength(1);
+    expect(byId.details.data.video_count).toBe(12);
+    expect(byId.details.data.entries_offset).toBe(10);
+    expect(byId.details.data.entries_limit).toBe(2);
+    expect(byId.details.data.entries_returned).toBe(2);
+    expect(byId.details.data.has_more_entries).toBe(false);
+    expect(byId.details.data.entries?.[0].description_preview).toContain('Full episode description');
+    expect(byId.details.data.entries?.[0].like_count).toBe(50);
+    expect(byId.details.data.entries?.[0].comment_count).toBe(7);
+    expect(byId.details.data.entries?.[0].published_date).toBe('2024-01-02');
+    expect(byId.content[0].text).toContain('total videos: 12');
+    expect(byId.content[0].text).toContain('entries: 2 from offset 10');
 
     const byUrl = (await execute(playlistTool!, { url: 'https://www.youtube.com/playlist?list=PL123' })) as {
       details: { status: 'success'; data: YoutubePlaylistDetails };
     };
     expect(byUrl.details.status).toBe('success');
     expect(byUrl.details.data.playlist_id).toBe('PL123');
+
+    const invalidOffset = (await execute(playlistTool!, { playlist_id: 'PL123', entriesOffset: 100 })) as {
+      details: { status: 'failure'; error: { code: string; message: string } };
+      isError?: boolean;
+    };
+    expect(invalidOffset.isError).toBe(true);
+    expect(invalidOffset.details.error.code).toBe('validation_error');
+    expect(invalidOffset.details.error.message).toContain('entriesOffset must be between 0 and 99');
   });
 
   it('returns normalized youtube_video_get payload from id/url reference', async () => {

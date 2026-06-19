@@ -1,3 +1,4 @@
+import { PLAYLIST_ACCESSIBLE_ENTRY_WINDOW } from './validation.js';
 import type {
   YoutubeSearchResult,
   YoutubeVideoDetails,
@@ -5,6 +6,7 @@ import type {
   YoutubePlaylistDetails,
   YoutubeChannelSearchInput,
   YoutubeVideoComment,
+  YoutubePlaylistEntry,
 } from './types.js';
 
 export interface RawYtDlpItem {
@@ -81,16 +83,21 @@ function classifySearchResultType(raw: RawYtDlpItem): YoutubeSearchResult['resul
   return 'unknown';
 }
 
+function formatYtDlpDate(value: string): string | null {
+  const clean = value.replace(/[^0-9]/g, '');
+  if (clean.length === 8) {
+    const y = clean.slice(0, 4);
+    const m = clean.slice(4, 6);
+    const d = clean.slice(6, 8);
+    return `${y}-${m}-${d}`;
+  }
+  return null;
+}
+
 function pickPublishedDate(raw: RawYtDlpItem): string | null {
   const uploadDate = toStringOrUndefined(raw.upload_date);
   if (uploadDate) {
-    const clean = uploadDate.replace(/[^0-9]/g, '');
-    if (clean.length === 8) {
-      const y = clean.slice(0, 4);
-      const m = clean.slice(4, 6);
-      const d = clean.slice(6, 8);
-      return `${y}-${m}-${d}`;
-    }
+    return formatYtDlpDate(uploadDate);
   }
   const unix = toNumber(raw.timestamp);
   if (typeof unix === 'number') {
@@ -206,28 +213,70 @@ export function normalizeChannelResult(raw: RawYtDlpItem): YoutubeChannelResult 
   };
 }
 
-export function normalizePlaylistDetails(raw: RawYtDlpItem): YoutubePlaylistDetails {
+export function normalizePlaylistEntry(item: RawYtDlpItem, descriptionPreviewChars = 500): YoutubePlaylistEntry {
+  const id = toStringOrUndefined(item.id) ?? toStringOrUndefined(item.video_id) ?? null;
+  const description = toStringOrUndefined(item.description) ?? null;
+  const rawUrl = toStringOrUndefined(item.webpage_url) ?? toStringOrUndefined(item.url);
+  const url = rawUrl && /^https?:\/\//i.test(rawUrl) ? rawUrl : id ? `https://www.youtube.com/watch?v=${id}` : rawUrl ?? null;
+  return {
+    title: toStringOrUndefined(item.title) ?? 'untitled',
+    url,
+    video_id: id,
+    duration: toNumber(item.duration) ?? null,
+    channel_name: toStringOrUndefined(item.channel) ?? toStringOrUndefined(item.uploader) ?? null,
+    channel_id: toStringOrUndefined(item.channel_id) ?? toStringOrUndefined(item.uploader_id) ?? null,
+    description_preview: description ? compactText(description, descriptionPreviewChars) : null,
+    published_date: pickPublishedDate(item),
+    view_count: toNumber(item.view_count) ?? null,
+    like_count: toNumber(item.like_count) ?? null,
+    dislike_count: toNumber(item.dislike_count) ?? null,
+    comment_count: toNumber(item.comment_count) ?? null,
+    chapters_count: Array.isArray(item.chapters) ? item.chapters.length : null,
+    tags: Array.isArray(item.tags) ? item.tags.filter((tag): tag is string => typeof tag === 'string').slice(0, 8) : undefined,
+  };
+}
+
+function compactText(value: string, max: number): string {
+  const clean = value.replace(/\s+/g, ' ').trim();
+  return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
+}
+
+export function normalizePlaylistDetails(
+  raw: RawYtDlpItem,
+  options: { entriesOffset?: number; entriesLimit?: number; descriptionPreviewChars?: number } = {},
+): YoutubePlaylistDetails {
+  const descriptionPreviewChars = options.descriptionPreviewChars ?? 500;
   const entries = Array.isArray((raw as { entries?: unknown }).entries)
-    ? ((raw as { entries?: unknown[] }).entries ?? []).map((entry) => {
-        const item = entry as RawYtDlpItem;
-        const id = toStringOrUndefined(item.id) ?? toStringOrUndefined(item.video_id) ?? null;
-        return {
-          title: toStringOrUndefined(item.title) ?? 'untitled',
-          url: toStringOrUndefined(item.url) ?? (id ? `https://www.youtube.com/watch?v=${id}` : null),
-          video_id: id,
-          duration: toNumber(item.duration) ?? null,
-          channel_name: toStringOrUndefined(item.channel) ?? null,
-        };
-      })
+    ? ((raw as { entries?: unknown[] }).entries ?? []).map((entry) => normalizePlaylistEntry(entry as RawYtDlpItem, descriptionPreviewChars))
     : undefined;
+  const total = toNumber((raw as { playlist_count?: unknown }).playlist_count) ?? entries?.length ?? null;
+  const entriesOffset = options.entriesOffset ?? 0;
+  const entriesLimit = options.entriesLimit ?? entries?.length ?? 0;
+  const entriesReturned = entries?.length ?? 0;
+  const nextOffset = entriesOffset + entriesReturned;
+  const accessibleTotal = total === null ? null : Math.min(total, PLAYLIST_ACCESSIBLE_ENTRY_WINDOW);
+  const hasMoreEntries = accessibleTotal !== null ? nextOffset < accessibleTotal : entriesReturned >= entriesLimit;
+  const modifiedDate = toStringOrUndefined((raw as { modified_date?: unknown }).modified_date);
+  const description = toStringOrUndefined(raw.description) ?? null;
 
   return {
     playlist_title: toStringOrUndefined(raw.title) ?? 'untitled',
     playlist_id: toStringOrUndefined(raw.id) ?? 'unknown',
     url: toStringOrUndefined(raw.webpage_url) ?? 'unknown',
     channel_name: toStringOrUndefined((raw as { channel?: unknown }).channel) ?? null,
-    description: toStringOrUndefined(raw.description) ?? null,
-    video_count: toNumber((raw as { playlist_count?: unknown }).playlist_count) ?? entries?.length ?? null,
+    channel_id: toStringOrUndefined(raw.channel_id) ?? null,
+    uploader: toStringOrUndefined(raw.uploader) ?? null,
+    uploader_id: toStringOrUndefined(raw.uploader_id) ?? null,
+    description,
+    description_preview: description ? compactText(description, descriptionPreviewChars) : null,
+    video_count: total,
+    view_count: toNumber(raw.view_count) ?? null,
+    modified_date: modifiedDate ? formatYtDlpDate(modifiedDate) : null,
+    entries_offset: entriesOffset,
+    entries_limit: entriesLimit,
+    entries_returned: entriesReturned,
+    has_more_entries: hasMoreEntries,
+    next_entries_offset: hasMoreEntries ? nextOffset : null,
     entries,
   };
 }

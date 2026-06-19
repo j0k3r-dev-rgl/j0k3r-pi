@@ -141,10 +141,12 @@ describe('youtube-research yt-dlp command and parse contract', () => {
       'https://www.youtube.com/watch?v=abc123',
     ]);
 
-    expect(buildPlaylistCommand({ playlist_id: 'PL123' })).toEqual([
+    expect(buildPlaylistCommand({ playlist_id: 'PL123', entriesOffset: 10, entriesLimit: 5, enrichEntries: false, descriptionPreviewChars: 500 })).toEqual([
       'yt-dlp',
-      '--dump-json',
+      '--dump-single-json',
       '--flat-playlist',
+      '--playlist-items',
+      '11:15',
       'https://www.youtube.com/playlist?list=PL123',
     ]);
 

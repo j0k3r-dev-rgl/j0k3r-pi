@@ -19,6 +19,12 @@ export const SEARCH_ENRICH_DEFAULT_LIMIT = 3;
 export const SEARCH_ENRICH_MAX_LIMIT = 5;
 export const SEARCH_DESCRIPTION_PREVIEW_DEFAULT_CHARS = 300;
 export const SEARCH_DESCRIPTION_PREVIEW_MAX_CHARS = 2000;
+export const PLAYLIST_ENTRIES_DEFAULT_LIMIT = 10;
+export const PLAYLIST_ENTRIES_MAX_LIMIT = 100;
+export const PLAYLIST_ENTRIES_MAX_OFFSET = 99;
+export const PLAYLIST_ACCESSIBLE_ENTRY_WINDOW = 100;
+export const PLAYLIST_DESCRIPTION_PREVIEW_DEFAULT_CHARS = 500;
+export const PLAYLIST_DESCRIPTION_PREVIEW_MAX_CHARS = 2000;
 export const TRANSCRIPT_SOURCE_MODES: TranscriptSourceMode[] = ['auto', 'manual', 'automatic', 'translated', 'any-caption', 'best-effort'];
 
 export function isIsoDate(value: unknown): value is string {
@@ -144,6 +150,20 @@ function boundedInteger(input: Record<string, unknown>, key: string, defaultValu
   return value;
 }
 
+function boundedNonNegativeInteger(input: Record<string, unknown>, key: string, defaultValue: number, maxValue: number): number {
+  const value = input[key];
+  if (value === undefined || value === null || value === '') {
+    return defaultValue;
+  }
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new Error(`${key} must be an integer`);
+  }
+  if (value < 0 || value > maxValue) {
+    throw new Error(`${key} must be between 0 and ${maxValue}`);
+  }
+  return value;
+}
+
 function hasExactlyOneRef(ref: Partial<Record<string, string>>, keys: string[]): boolean {
   const present = keys.filter((key) => {
     const value = ref[key];
@@ -162,6 +182,11 @@ export function validatePlaylistRef(input: PlaylistRefInput): void {
   if (!hasExactlyOneRef(input as Partial<Record<string, string>>, ['url', 'playlist_id'])) {
     throw new Error('exactly one of url or playlist_id is required');
   }
+  const rawInput = input as unknown as Record<string, unknown>;
+  boundedNonNegativeInteger(rawInput, 'entriesOffset', 0, PLAYLIST_ENTRIES_MAX_OFFSET);
+  boundedInteger(rawInput, 'entriesLimit', PLAYLIST_ENTRIES_DEFAULT_LIMIT, PLAYLIST_ENTRIES_MAX_LIMIT);
+  optionalBoolean(rawInput, 'enrichEntries', false);
+  boundedInteger(rawInput, 'descriptionPreviewChars', PLAYLIST_DESCRIPTION_PREVIEW_DEFAULT_CHARS, PLAYLIST_DESCRIPTION_PREVIEW_MAX_CHARS);
 }
 
 export function validateChannelInput(input: YoutubeChannelSearchInput): void {

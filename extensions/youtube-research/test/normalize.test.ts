@@ -124,24 +124,54 @@ describe('youtube-research normalization layer', () => {
     expect(normalized.url).toBe('https://youtube.com/@dev-channel');
   });
 
-  it('normalizes playlist details with compact entry defaults', () => {
+  it('normalizes playlist details with rich playlist metadata, pagination, and compact entries', () => {
     const raw = {
       title: 'Playlist',
       id: 'PL1',
       webpage_url: 'https://youtube.com/playlist?list=PL1',
       channel: 'host',
-      description: 'list',
-      entries: [{ title: 'ep1', id: 'v1', duration: 10 }],
       channel_id: 'chan123',
-      playlist_count: 1,
+      uploader: 'Host Uploads',
+      uploader_id: '@host',
+      description: 'list '.repeat(100),
+      entries: [{ title: 'ep1', id: 'v1', duration: 10, url: 'https://youtube.com/watch?v=v1' }],
+      playlist_count: 12,
+      view_count: 345,
+      modified_date: '20260430',
     };
 
-    const normalized = normalizePlaylistDetails(raw);
+    const normalized = normalizePlaylistDetails(raw, { entriesOffset: 5, entriesLimit: 1, descriptionPreviewChars: 40 });
     expect(normalized.playlist_id).toBe('PL1');
     expect(normalized.playlist_title).toBe('Playlist');
-    expect(normalized.entries?.[0].video_id).toBe('v1');
-    expect(normalized.video_count).toBe(1);
+    expect(normalized.description_preview).toMatch(/list/);
+    expect(normalized.video_count).toBe(12);
     expect(normalized.channel_name).toBe('host');
+    expect(normalized.channel_id).toBe('chan123');
+    expect(normalized.uploader_id).toBe('@host');
+    expect(normalized.view_count).toBe(345);
+    expect(normalized.modified_date).toBe('2026-04-30');
+    expect(normalized.entries_offset).toBe(5);
+    expect(normalized.entries_limit).toBe(1);
+    expect(normalized.entries_returned).toBe(1);
+    expect(normalized.has_more_entries).toBe(true);
+    expect(normalized.next_entries_offset).toBe(6);
+    expect(normalized.entries?.[0].video_id).toBe('v1');
+    expect(normalized.entries?.[0].url).toBe('https://youtube.com/watch?v=v1');
+  });
+
+  it('does not advertise playlist pagination past the yt-dlp accessible first 100 entries', () => {
+    const raw = {
+      title: 'Large Playlist',
+      id: 'PLlarge',
+      webpage_url: 'https://youtube.com/playlist?list=PLlarge',
+      playlist_count: 158,
+      entries: [{ title: 'entry 100', id: 'v100', duration: 10 }],
+    };
+
+    const normalized = normalizePlaylistDetails(raw, { entriesOffset: 99, entriesLimit: 5 });
+    expect(normalized.entries_returned).toBe(1);
+    expect(normalized.has_more_entries).toBe(false);
+    expect(normalized.next_entries_offset).toBeNull();
   });
 
   it('is stable about missing optional fields', () => {
