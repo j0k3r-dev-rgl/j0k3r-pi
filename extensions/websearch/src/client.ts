@@ -1,4 +1,6 @@
 import type {
+  DevtoClient,
+  HackerNewsClient,
   StackExchangeClient,
   StackOverflowAnswersRequest,
   StackOverflowQuestionRef,
@@ -9,6 +11,9 @@ import type {
   WebsearchRuntime,
 } from './types.js';
 import { ProviderFailure, providerErrorFromResponse, stackExchangePayloadError } from './security.js';
+import { createDevtoClient } from './providers/devto.js';
+import { createGitHubClient } from './providers/github.js';
+import { createHackerNewsClient as createAlgoliaHackerNewsClient } from './providers/hackernews.js';
 
 const STACK_EXCHANGE_API_BASE = 'https://api.stackexchange.com/2.3';
 export const STACK_EXCHANGE_BODY_FILTER = 'withbody';
@@ -74,12 +79,20 @@ class DirectFetchStackExchangeClient implements StackExchangeClient {
   }
 }
 
+
 export function createStackExchangeClient(runtime: WebsearchRuntime): StackExchangeClient {
   return new DirectFetchStackExchangeClient({ key: runtime.env.STACK_EXCHANGE_KEY }, runtime.fetch);
+}
+
+export function createHackerNewsClient(runtime: WebsearchRuntime): HackerNewsClient {
+  return createAlgoliaHackerNewsClient(runtime);
 }
 
 export function createWebsearchClients(runtime: WebsearchRuntime): WebsearchClients {
   return {
     stackExchange: createStackExchangeClient(runtime),
+    github: createGitHubClient(runtime),
+    devto: createDevtoClient(runtime),
+    hackerNews: createHackerNewsClient(runtime),
   };
 }

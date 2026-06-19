@@ -1,13 +1,28 @@
 import type {
+  DevtoArticleSearchRequest,
+  DevtoCommentsRequest,
+  GitHubIssueGetRequest,
+  GitHubIssueRef,
+  GitHubIssueSearchRequest,
+  HackerNewsSearchRequest,
+  HackerNewsStoryRequest,
   StackOverflowAnswersRequest,
   StackOverflowQuestionRef,
   StackOverflowSearchRequest,
 } from './types.js';
 
-const SEARCH_DEFAULT_LIMIT = 5;
-const SEARCH_MAX_LIMIT = 10;
+export const SEARCH_DEFAULT_LIMIT = 5;
+export const SEARCH_MAX_LIMIT = 10;
 const STACK_OVERFLOW_ANSWERS_DEFAULT_LIMIT = 10;
 const STACK_OVERFLOW_ANSWERS_MAX_LIMIT = 30;
+export const GITHUB_COMMENTS_DEFAULT_LIMIT = 5;
+export const GITHUB_COMMENTS_MAX_LIMIT = 20;
+export const DEVTO_TOP_LEVEL_COMMENTS_DEFAULT_LIMIT = 10;
+export const DEVTO_TOTAL_COMMENTS_MAX = 25;
+export const DEVTO_MAX_DEPTH = 2;
+export const HN_COMMENTS_DEFAULT_LIMIT = 10;
+export const HN_COMMENTS_MAX_LIMIT = 25;
+export const HN_MAX_DEPTH = 3;
 
 export class ValidationError extends Error {
   readonly code = 'validation_error' as const;
@@ -25,6 +40,29 @@ function requiredString(input: Input, key: string): string {
     throw new ValidationError(`${key} is required.`);
   }
   return value.trim();
+}
+
+function requiredInteger(input: Input, key: string): number {
+  const value = input[key];
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new ValidationError(`${key} must be an integer.`);
+  }
+  if (value < 1) {
+    throw new ValidationError(`${key} must be at least 1.`);
+  }
+  return value;
+}
+
+function optionalString(input: Input, key: string): string | undefined {
+  const value = input[key];
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+  if (typeof value !== 'string') {
+    throw new ValidationError(`${key} must be a string.`);
+  }
+  const trimmed = value.trim();
+  return trimmed === '' ? undefined : trimmed;
 }
 
 function boundedInteger(input: Input, key: string, defaultValue: number, max: number): number {
@@ -67,6 +105,60 @@ function parseStackOverflowQuestion(raw: string): StackOverflowQuestionRef {
   }
 }
 
+function parseGitHubRepoScope(value: string): { owner: string; repo: string } {
+  const match = /^(?<owner>[A-Za-z0-9_.-]+)\/(?<repo>[A-Za-z0-9_.-]+)$/.exec(value.trim());
+  if (!match?.groups?.owner || !match.groups.repo) {
+    throw new ValidationError('issue must be a GitHub issue url or owner/repo#number reference.');
+  }
+  return { owner: match.groups.owner, repo: match.groups.repo };
+}
+
+export function validateGitHubIssueRef(value: unknown): GitHubIssueRef {
+  const raw = requiredString(asInput(value), 'issue');
+  const refMatch = /^(?<owner>[A-Za-z0-9_.-]+)\/(?<repo>[A-Za-z0-9_.-]+)#(?<issueNumber>\d+)$/.exec(raw);
+  if (refMatch?.groups?.owner && refMatch.groups.repo && refMatch.groups.issueNumber) {
+    return {
+      owner: refMatch.groups.owner,
+      repo: refMatch.groups.repo,
+      issueNumber: Number(refMatch.groups.issueNumber),
+      url: `https://github.com/${refMatch.groups.owner}/${refMatch.groups.repo}/issues/${refMatch.groups.issueNumber}`,
+    };
+  }
+
+  try {
+    const url = new URL(raw);
+    if (!/(^|\.)github\.com$/i.test(url.hostname)) {
+      throw new ValidationError('issue must be a GitHub issue url or owner/repo#number reference.');
+    }
+    const match = /^\/([^/]+)\/([^/]+)\/issues\/(\d+)$/.exec(url.pathname);
+    if (!match) {
+      throw new ValidationError('GitHub issue url must include /owner/repo/issues/number.');
+    }
+    return {
+      owner: match[1]!,
+      repo: match[2]!,
+      issueNumber: Number(match[3]!),
+      url: `https://github.com/${match[1]!}/${match[2]!}/issues/${match[3]!}`,
+    };
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      throw error;
+    }
+    throw new ValidationError('issue must be a GitHub issue url or owner/repo#number reference.');
+  }
+}
+
+function optionalGitHubState(input: Input, key: string): 'open' | 'closed' | undefined {
+  const value = input[key];
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+  if (value !== 'open' && value !== 'closed') {
+    throw new ValidationError(`${key} must be "open" or "closed".`);
+  }
+  return value;
+}
+
 export function validateStackOverflowSearch(value: unknown): StackOverflowSearchRequest {
   const input = asInput(value);
   return {
@@ -84,5 +176,62 @@ export function validateStackOverflowAnswers(value: unknown): StackOverflowAnswe
   return {
     ...parseStackOverflowQuestion(requiredString(input, 'question')),
     limit: boundedInteger(input, 'limit', STACK_OVERFLOW_ANSWERS_DEFAULT_LIMIT, STACK_OVERFLOW_ANSWERS_MAX_LIMIT),
+  };
+}
+
+export function validateGitHubIssueSearch(value: unknown): GitHubIssueSearchRequest {
+  const input = asInput(value);
+  const repoInput = optionalString(input, 'repo');
+  if (repoInput) {
+    parseGitHubRepoScope(repoInput);
+  }
+  return {
+    query: requiredString(input, 'query'),
+    limit: boundedInteger(input, 'limit', SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT),
+    repo: repoInput,
+    state: optionalGitHubState(input, 'state'),
+  };
+}
+
+export function validateGitHubIssueGet(value: unknown): GitHubIssueGetRequest {
+  const input = asInput(value);
+  return {
+    ...validateGitHubIssueRef(input),
+    commentsLimit: boundedInteger(input, 'commentsLimit', GITHUB_COMMENTS_DEFAULT_LIMIT, GITHUB_COMMENTS_MAX_LIMIT),
+  };
+}
+
+export function validateDevtoArticleSearch(value: unknown): DevtoArticleSearchRequest {
+  const input = asInput(value);
+  return {
+    tag: requiredString(input, 'tag'),
+    limit: boundedInteger(input, 'limit', SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT),
+  };
+}
+
+export function validateDevtoCommentsGet(value: unknown): DevtoCommentsRequest {
+  const input = asInput(value);
+  return {
+    articleId: requiredInteger(input, 'article_id'),
+    topLevelLimit: boundedInteger(input, 'topLevelLimit', DEVTO_TOP_LEVEL_COMMENTS_DEFAULT_LIMIT, DEVTO_TOTAL_COMMENTS_MAX),
+    totalLimit: DEVTO_TOTAL_COMMENTS_MAX,
+    maxDepth: DEVTO_MAX_DEPTH,
+  };
+}
+
+export function validateHackerNewsSearch(value: unknown): HackerNewsSearchRequest {
+  const input = asInput(value);
+  return {
+    query: requiredString(input, 'query'),
+    limit: boundedInteger(input, 'limit', SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT),
+  };
+}
+
+export function validateHackerNewsStoryGet(value: unknown): HackerNewsStoryRequest {
+  const input = asInput(value);
+  return {
+    storyId: requiredInteger(input, 'story_id'),
+    commentsLimit: boundedInteger(input, 'commentsLimit', HN_COMMENTS_DEFAULT_LIMIT, HN_COMMENTS_MAX_LIMIT),
+    maxDepth: HN_MAX_DEPTH,
   };
 }

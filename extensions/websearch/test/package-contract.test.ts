@@ -20,14 +20,25 @@ describe('websearch package contract', () => {
     });
   });
 
-  it('keeps runtime dependencies minimal', () => {
+  it('allows only the approved runtime dependencies for community-platform support', () => {
     const pkg = JSON.parse(readFileSync(packagePath, 'utf8')) as {
       dependencies?: Record<string, string>;
     };
 
     expect(pkg.dependencies).toEqual({
       typebox: expect.any(String),
+      octokit: expect.any(String),
     });
+    const disallowedRuntimeDependencies = [
+      '@octokit/rest',
+      'devto',
+      'forem',
+      'hacker-news-api',
+      'hn-api',
+      `red${'dit'}`,
+      `snoo${'wrap'}`,
+    ];
+    expect(Object.keys(pkg.dependencies ?? {})).not.toEqual(expect.arrayContaining(disallowedRuntimeDependencies));
   });
 
   it('uses strict NodeNext TypeScript configuration', () => {

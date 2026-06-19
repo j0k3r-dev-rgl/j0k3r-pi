@@ -3,7 +3,20 @@ export type ToolContent = {
   text: string;
 };
 
-export type Provider = 'stack_overflow';
+export type Provider = 'stack_overflow' | 'github' | 'devto' | 'hacker_news';
+
+export type ErrorCategory =
+  | 'validation'
+  | 'rate_limit'
+  | 'quota_exhausted'
+  | 'auth'
+  | 'not_found'
+  | 'provider_unavailable'
+  | 'network'
+  | 'timeout'
+  | 'cancelled'
+  | 'provider_payload'
+  | 'unexpected';
 
 export type ToolError = {
   code:
@@ -21,6 +34,9 @@ export type ToolError = {
   retry_after_seconds?: number;
   backoff_seconds?: number;
   provider?: Provider;
+  category?: ErrorCategory;
+  status?: number;
+  request_id?: string;
 };
 
 export type ToolResponse<T> =
@@ -99,14 +115,216 @@ export type StackOverflowAnswersResult = {
   answers: NormalizedStackOverflowAnswer[];
 };
 
+export type GitHubIssueRef = {
+  owner: string;
+  repo: string;
+  issueNumber: number;
+  url: string;
+};
+
+export type GitHubIssueSearchRequest = {
+  query: string;
+  limit: number;
+  repo?: string;
+  state?: 'open' | 'closed';
+};
+
+export type GitHubIssueCommentsRequest = GitHubIssueRef & {
+  limit: number;
+};
+
+export type GitHubIssueGetRequest = GitHubIssueRef & {
+  commentsLimit: number;
+};
+
+export type GitHubRawIssueSearchItem = Record<string, unknown>;
+export type GitHubRawIssue = Record<string, unknown>;
+export type GitHubRawIssueComment = Record<string, unknown>;
+
+export type NormalizedGitHubIssue = {
+  platform: 'github';
+  id: string;
+  number: number;
+  repository: string;
+  url: string;
+  title?: string;
+  author?: string;
+  created_at?: string;
+  updated_at?: string;
+  state?: string;
+  score?: number;
+  comments_count?: number;
+  snippet?: string;
+  body?: string;
+  follow_up_ref: string;
+};
+
+export type NormalizedGitHubIssueComment = {
+  id: string;
+  url?: string;
+  author?: string;
+  created_at?: string;
+  updated_at?: string;
+  body?: string;
+};
+
+export type GitHubIssueSearchResult = {
+  query: string;
+  limit: number;
+  repo?: string;
+  state?: 'open' | 'closed';
+  items: NormalizedGitHubIssue[];
+};
+
+export type GitHubIssueDetailResult = NormalizedGitHubIssue & {
+  comments: NormalizedGitHubIssueComment[];
+  comments_limit: number;
+  bounds: {
+    comments_default: number;
+    comments_max: number;
+  };
+};
+
+export type DevtoArticleSearchRequest = {
+  tag: string;
+  limit: number;
+};
+
+export type DevtoCommentsRequest = {
+  articleId: number;
+  topLevelLimit: number;
+  totalLimit: number;
+  maxDepth: number;
+};
+
+export type DevtoRawArticle = Record<string, unknown>;
+export type DevtoRawComment = Record<string, unknown>;
+
+export type NormalizedDevtoArticle = {
+  platform: 'devto';
+  id: string;
+  url?: string;
+  title?: string;
+  author?: string;
+  published_at?: string;
+  tags?: string[];
+  reactions_count?: number;
+  comments_count?: number;
+  snippet?: string;
+  follow_up_article_id: number;
+};
+
+export type DevtoArticleSearchResult = {
+  tag: string;
+  limit: number;
+  items: NormalizedDevtoArticle[];
+};
+
+export type DevtoCommentNode = {
+  id: string;
+  author?: string;
+  created_at?: string;
+  body?: string;
+  children?: DevtoCommentNode[];
+};
+
+export type DevtoCommentsResult = {
+  platform: 'devto';
+  article_id: number;
+  url?: string;
+  top_level_limit: number;
+  total_limit: number;
+  max_depth: number;
+  comments: DevtoCommentNode[];
+  bounds: {
+    returned_top_level_comments: number;
+    returned_total_nodes: number;
+    truncated_by_depth: boolean;
+    truncated_by_total_limit: boolean;
+    truncated_by_top_level_limit: boolean;
+  };
+};
+
+export type HackerNewsSearchRequest = {
+  query: string;
+  limit: number;
+};
+
+export type HackerNewsStoryRequest = {
+  storyId: number;
+  commentsLimit: number;
+  maxDepth: number;
+};
+
+export type HackerNewsRawStory = Record<string, unknown>;
+export type HackerNewsRawItem = Record<string, unknown>;
+
+export type NormalizedHackerNewsStory = {
+  platform: 'hacker_news';
+  id: string;
+  url?: string;
+  title?: string;
+  author?: string;
+  created_at?: string;
+  points?: number;
+  comments_count?: number;
+  snippet?: string;
+  follow_up_story_id: number;
+};
+
+export type HackerNewsSearchResult = {
+  query: string;
+  limit: number;
+  items: NormalizedHackerNewsStory[];
+};
+
+export type HackerNewsCommentNode = {
+  id: string;
+  author?: string;
+  created_at?: string;
+  body?: string;
+  children?: HackerNewsCommentNode[];
+};
+
+export type HackerNewsStoryDetailResult = NormalizedHackerNewsStory & {
+  body?: string;
+  comments_limit: number;
+  max_depth: number;
+  comments: HackerNewsCommentNode[];
+  bounds: {
+    returned_total_comments: number;
+    truncated_by_depth: boolean;
+    truncated_by_total_limit: boolean;
+  };
+};
+
 export interface StackExchangeClient {
   searchQuestions(input: StackOverflowSearchRequest, signal?: AbortSignal): Promise<StackOverflowRawQuestion[]>;
   getQuestion(input: StackOverflowQuestionRef, signal?: AbortSignal): Promise<StackOverflowRawQuestion | null>;
   getAnswers(input: StackOverflowAnswersRequest, signal?: AbortSignal): Promise<StackOverflowRawAnswer[]>;
 }
 
+export interface GitHubClient {
+  searchIssues(input: GitHubIssueSearchRequest, signal?: AbortSignal): Promise<GitHubRawIssueSearchItem[]>;
+  getIssue(input: GitHubIssueRef, signal?: AbortSignal): Promise<GitHubRawIssue | null>;
+  listIssueComments(input: GitHubIssueCommentsRequest, signal?: AbortSignal): Promise<GitHubRawIssueComment[]>;
+}
+
+export interface DevtoClient {
+  searchArticles(input: DevtoArticleSearchRequest, signal?: AbortSignal): Promise<DevtoRawArticle[]>;
+  getComments(input: DevtoCommentsRequest, signal?: AbortSignal): Promise<DevtoRawComment[]>;
+}
+
+export interface HackerNewsClient {
+  searchStories(input: HackerNewsSearchRequest, signal?: AbortSignal): Promise<HackerNewsRawStory[]>;
+  getStory(input: HackerNewsStoryRequest, signal?: AbortSignal): Promise<HackerNewsRawItem | null>;
+}
+
 export interface WebsearchClients {
   stackExchange: StackExchangeClient;
+  github: GitHubClient;
+  devto: DevtoClient;
+  hackerNews: HackerNewsClient;
 }
 
 export interface RegisterWebsearchToolsDeps {
