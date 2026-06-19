@@ -16,6 +16,7 @@ type Tool = {
   description: string;
   parameters: { type: string; [key: string]: unknown };
   execute: (...args: unknown[]) => Promise<unknown> | unknown;
+  renderResult?: (...args: unknown[]) => unknown;
 };
 
 type MockPi = {
@@ -97,6 +98,7 @@ describe('youtube-research tool registration', () => {
       expect(tool.parameters.type).toBe('object');
       expect(typeof tool.description).toBe('string');
       expect(typeof tool.execute).toBe('function');
+      expect(typeof tool.renderResult).toBe('function');
     }
 
     expect(pi.tools.find((tool) => tool.name === 'youtube_search')?.description).toMatch(/enriched video metadata/i);

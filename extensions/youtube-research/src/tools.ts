@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Type } from 'typebox';
 import { checkYtDlpRuntime, YT_DLP_INSTALL_HINT } from './runtime.js';
+import { renderYoutubeToolResult } from './render.js';
 import { YoutubeResearchClient } from './client.js';
 import {
   validateSearchFilters,
@@ -1166,6 +1167,7 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
     label: 'YouTube Search',
     description: 'Search videos, channels, and playlists on YouTube, with optional enriched video metadata for choosing what to inspect next.',
     parameters: searchParameters,
+    renderResult: renderYoutubeToolResult,
     async execute(_id: string, params: YoutubeSearchInput) {
       try {
         return await runSearch(params, checkRuntime, createClient);
@@ -1180,6 +1182,7 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
     label: 'YouTube Video Details',
     description: 'Fetch detailed video metadata, description preview, caption signals, and optional bounded comments for one YouTube video.',
     parameters: videoParameters,
+    renderResult: renderYoutubeToolResult,
     async execute(_id: string, params: VideoRefInput) {
       try {
         return await runVideoGet(params, checkRuntime, createClient);
@@ -1194,6 +1197,7 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
     label: 'YouTube Transcript',
     description: 'Fetch transcript text for one YouTube video with explicit source modes and staged best-effort fallback semantics.',
     parameters: transcriptParameters,
+    renderResult: renderYoutubeToolResult,
     async execute(_id: string, params: YoutubeTranscriptInput) {
       try {
         return await runTranscriptGet(params, checkRuntime, createClient);
@@ -1208,6 +1212,7 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
     label: 'YouTube Channel Search',
     description: 'Search or inspect YouTube channels by query, channel ID, handle, or URL, with optional recent videos and playlists for recurring research sources.',
     parameters: channelSearchParameters,
+    renderResult: renderYoutubeToolResult,
     async execute(_id: string, params: YoutubeChannelSearchInput) {
       try {
         return await runChannelSearch(params, checkRuntime, createClient);
@@ -1222,6 +1227,7 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
     label: 'YouTube Playlist',
     description: 'Fetch rich YouTube playlist metadata with offset/limit pagination and optional enriched video entries by URL or playlist ID.',
     parameters: playlistParameters,
+    renderResult: renderYoutubeToolResult,
     async execute(_id: string, params: PlaylistRefInput) {
       try {
         return await runPlaylistGet(params, checkRuntime, createClient);
