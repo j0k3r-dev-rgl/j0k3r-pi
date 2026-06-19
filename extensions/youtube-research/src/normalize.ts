@@ -4,6 +4,7 @@ import type {
   YoutubeChannelResult,
   YoutubePlaylistDetails,
   YoutubeChannelSearchInput,
+  YoutubeVideoComment,
 } from './types.js';
 
 export interface RawYtDlpItem {
@@ -20,6 +21,30 @@ function toNumber(value: unknown): number | undefined {
 
 function toBoolean(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
+}
+
+function normalizeVideoComments(value: unknown): YoutubeVideoComment[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const comments: YoutubeVideoComment[] = [];
+  for (const entry of value) {
+    const raw = entry as Record<string, unknown>;
+    const id = toStringOrUndefined(raw.id);
+    const text = toStringOrUndefined(raw.text);
+    if (!id || !text) {
+      continue;
+    }
+    comments.push({
+      id,
+      author: toStringOrUndefined(raw.author) ?? null,
+      text,
+      like_count: toNumber(raw.like_count) ?? null,
+      timestamp: toNumber(raw.timestamp) ?? null,
+      parent: toStringOrUndefined(raw.parent) ?? null,
+    });
+  }
+  return comments;
 }
 
 function pickUrl(raw: RawYtDlpItem): string {
@@ -130,11 +155,14 @@ export function normalizeVideoDetails(raw: RawYtDlpItem): YoutubeVideoDetails {
     url: pickUrl(raw),
     video_id: toStringOrUndefined(raw.id) ?? 'unknown',
     channel_name: toStringOrUndefined(raw.uploader) ?? toStringOrUndefined((raw as { channel?: unknown }).channel) ?? null,
-    channel_id: toStringOrUndefined(raw.uploader_id) ?? null,
+    channel_id: toStringOrUndefined(raw.channel_id) ?? toStringOrUndefined(raw.uploader_id) ?? null,
     full_description: toStringOrUndefined(raw.description) ?? null,
     published_date: pickPublishedDate(raw),
     duration: toNumber(raw.duration) ?? null,
     view_count: toNumber(raw.view_count) ?? null,
+    like_count: toNumber(raw.like_count) ?? null,
+    dislike_count: toNumber(raw.dislike_count) ?? null,
+    comment_count: toNumber(raw.comment_count) ?? null,
     tags: Array.isArray(raw.tags) ? raw.tags.filter((tag): tag is string => typeof tag === 'string') : undefined,
     chapters: Array.isArray(raw.chapters)
       ? (raw.chapters as Array<Record<string, unknown>>).map((chapter) => ({
@@ -147,6 +175,7 @@ export function normalizeVideoDetails(raw: RawYtDlpItem): YoutubeVideoDetails {
     caption_available: subtitleLanguages.length > 0 || autoLanguages.length > 0 || toBoolean(raw.always_rewrite) === true,
     caption_languages: subtitleLanguages,
     automatic_caption_languages: autoLanguages,
+    comments: normalizeVideoComments(raw.comments),
   };
 }
 

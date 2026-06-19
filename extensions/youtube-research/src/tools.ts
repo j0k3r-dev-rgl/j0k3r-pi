@@ -136,28 +136,67 @@ function summarizeSearchResults(query: string, effectiveType: NormalizedSearchIn
       entry.published_date ? `published: ${entry.published_date}` : null,
       formatDuration(entry.duration) ? `duration: ${formatDuration(entry.duration)}` : null,
       formatViewCount(entry.view_count) ? `views: ${formatViewCount(entry.view_count)}` : null,
+      formatViewCount(entry.like_count) ? `likes: ${formatViewCount(entry.like_count)}` : null,
+      formatViewCount(entry.comment_count) ? `comments: ${formatViewCount(entry.comment_count)}` : null,
+      entry.chapters_count === undefined || entry.chapters_count === null ? null : `chapters: ${entry.chapters_count}`,
     ].filter(Boolean);
 
-    const snippet = compactSnippet(entry.description_snippet);
+    const snippet = compactSnippet(entry.description_preview ?? entry.description_snippet);
+    const tags = entry.tags && entry.tags.length > 0 ? entry.tags.slice(0, 3).join(', ') : null;
 
     return [
       `${index + 1}. [${entry.result_type}] ${entry.title}`,
       `   id: ${identity}`,
       meta.length ? `   ${meta.join(' | ')}` : null,
       `   url: ${entry.url}`,
-      snippet ? `   snippet: ${snippet}` : null,
+      snippet ? `   ${entry.description_preview ? 'description' : 'snippet'}: ${snippet}` : null,
+      tags ? `   tags: ${tags}` : null,
     ].filter(Boolean) as string[];
   });
 
   return `${header}\n${lines.join('\n')}`;
 }
 
+function summarizeLanguages(label: string, languages: string[] | undefined): string | undefined {
+  if (!languages || languages.length === 0) {
+    return undefined;
+  }
+  const visible = languages.slice(0, CAPTION_SUMMARY_MAX_LANGUAGES).join(', ');
+  const remaining = languages.length - CAPTION_SUMMARY_MAX_LANGUAGES;
+  return `${label} ${visible}${remaining > 0 ? `… (+${remaining} more)` : ''}`;
+}
+
+function summarizeVideoComments(details: YoutubeVideoDetails): string | undefined {
+  if (!details.comments || details.comments.length === 0) {
+    return undefined;
+  }
+  return [
+    'comments',
+    ...details.comments.slice(0, VIDEO_COMMENTS_MAX_LIMIT).map((comment, index) => {
+      const meta = [comment.like_count === null || comment.like_count === undefined ? undefined : `${comment.like_count} likes`].filter(Boolean).join('; ');
+      return `${index + 1}. ${comment.author ?? 'unknown'}${meta ? ` (${meta})` : ''}: ${compactSnippet(comment.text, 240) ?? ''}`;
+    }),
+  ].join('\n');
+}
+
 function summarizeVideo(details: YoutubeVideoDetails): string {
+  const captionSignals = [
+    summarizeLanguages('manual', details.caption_languages),
+    summarizeLanguages('automatic', details.automatic_caption_languages),
+  ].filter(Boolean).join('; ');
+  const metadata = [
+    details.duration === null || details.duration === undefined ? undefined : `duration: ${formatDuration(details.duration)}`,
+    details.view_count === null || details.view_count === undefined ? undefined : `views: ${details.view_count.toLocaleString('en-US')}`,
+    details.published_date ? `published: ${details.published_date}` : undefined,
+  ].filter(Boolean).join(' | ');
   const lines = [
     `youtube_video_get: ${details.title} (${details.video_id})`,
     `url: ${details.url}`,
-    details.channel_name ? `channel: ${details.channel_name}` : undefined,
-    details.published_date ? `published: ${details.published_date}` : undefined,
+    details.channel_name ? `channel: ${details.channel_name}${details.channel_id ? ` (${details.channel_id})` : ''}` : undefined,
+    metadata || undefined,
+    details.description_preview ? `description: ${details.description_preview}` : undefined,
+    captionSignals ? `captions: ${captionSignals}` : undefined,
+    summarizeVideoComments(details),
   ].filter(Boolean);
 
   return lines.join('\n');
@@ -195,6 +234,10 @@ function summarizePlaylist(playlist: ReturnType<typeof normalizePlaylistDetails>
   return lines.join('\n');
 }
 
+function isYtDlpVideoUnavailable(message: string): boolean {
+  return /\bvideo unavailable\b|\bprivate video\b|\bthis video is unavailable\b|\bvideo not found\b/i.test(message);
+}
+
 function toToolError<T = unknown>(error: unknown): PiToolResult<T> {
   if (isErrorLike(error)) {
     return {
@@ -221,6 +264,9 @@ function toToolError<T = unknown>(error: unknown): PiToolResult<T> {
     if (error.message.toLowerCase().includes('validation')) {
       return buildFailure<T>('validation_error', error.message, true);
     }
+    if (isYtDlpVideoUnavailable(error.message)) {
+      return buildFailure<T>('not_found', error.message, false);
+    }
     return buildFailure<T>('yt_dlp_failed', error.message, false);
   }
 
@@ -235,6 +281,12 @@ interface NormalizedExecutionInput {
 }
 
 type SearchFilters = ReturnType<typeof validateSearchFilters>;
+
+const VIDEO_COMMENTS_DEFAULT_LIMIT = 5;
+const VIDEO_COMMENTS_MAX_LIMIT = 20;
+const DESCRIPTION_PREVIEW_DEFAULT_CHARS = 600;
+const DESCRIPTION_PREVIEW_MAX_CHARS = 2000;
+const CAPTION_SUMMARY_MAX_LANGUAGES = 5;
 
 type YtDlpExecutor = (args: string[], options?: { signal?: AbortSignal; cwd?: string }) => Promise<{
   stdout: string;
@@ -342,7 +394,24 @@ function isPlaylistUrl(input: string): boolean {
   return /youtube\.com\/playlist\//i.test(input) || /[?&]list=/.test(input);
 }
 
+function normalizeVideoOptionLimit(value: unknown, key: string, defaultValue: number, maxValue: number): number {
+  if (value === undefined || value === null || value === '') {
+    return defaultValue;
+  }
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new Error(`${key} must be an integer`);
+  }
+  if (value < 1 || value > maxValue) {
+    throw new Error(`${key} must be between 1 and ${maxValue}`);
+  }
+  return value;
+}
+
 function normalizeVideoReference(input: VideoRefInput): NormalizedVideoRef {
+  const includeComments = input.includeComments === true;
+  const commentsLimit = normalizeVideoOptionLimit(input.commentsLimit, 'commentsLimit', includeComments ? VIDEO_COMMENTS_DEFAULT_LIMIT : 0, VIDEO_COMMENTS_MAX_LIMIT);
+  const descriptionPreviewChars = normalizeVideoOptionLimit(input.descriptionPreviewChars, 'descriptionPreviewChars', DESCRIPTION_PREVIEW_DEFAULT_CHARS, DESCRIPTION_PREVIEW_MAX_CHARS);
+
   if (input.url) {
     const url = input.url.trim();
     const videoId = parseYoutubeVideoId(url);
@@ -350,7 +419,7 @@ function normalizeVideoReference(input: VideoRefInput): NormalizedVideoRef {
       throw new Error('invalid video url');
     }
 
-    return { video_id: videoId, videoUrl: url };
+    return { video_id: videoId, videoUrl: url, includeComments, commentsLimit, descriptionPreviewChars };
   }
 
   if (input.video_id) {
@@ -361,6 +430,9 @@ function normalizeVideoReference(input: VideoRefInput): NormalizedVideoRef {
     return {
       video_id: videoId,
       videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
+      includeComments,
+      commentsLimit,
+      descriptionPreviewChars,
     };
   }
 
@@ -479,6 +551,54 @@ function applySearchFilters(results: YoutubeSearchResult[], input: SearchFilters
   return filtered.slice(0, input.limit);
 }
 
+async function enrichSearchResults(results: YoutubeSearchResult[], input: SearchFilters, client: YtDlpClient): Promise<YoutubeSearchResult[]> {
+  if (!input.enrich) {
+    return results;
+  }
+
+  const enriched = [...results];
+  let enrichedCount = 0;
+  for (let index = 0; index < enriched.length && enrichedCount < (input.enrichLimit ?? 3); index += 1) {
+    const entry = enriched[index];
+    if (entry.result_type !== 'video' || !entry.video_id) {
+      continue;
+    }
+    enrichedCount += 1;
+    try {
+      const raw = await client.getVideo({
+        video_id: entry.video_id,
+        videoUrl: entry.url,
+        descriptionPreviewChars: input.descriptionPreviewChars,
+      }, undefined);
+      if (!raw) {
+        continue;
+      }
+      const details = normalizeVideoDetails(raw as RawYtDlpItem);
+      enriched[index] = {
+        ...entry,
+        title: details.title || entry.title,
+        url: details.url || entry.url,
+        channel_id: details.channel_id ?? entry.channel_id,
+        channel_name: details.channel_name ?? entry.channel_name,
+        description_preview: compactSnippet(details.full_description, input.descriptionPreviewChars),
+        description_snippet: compactSnippet(details.full_description, input.descriptionPreviewChars) ?? entry.description_snippet,
+        published_date: details.published_date ?? entry.published_date,
+        duration: details.duration ?? entry.duration,
+        view_count: details.view_count ?? entry.view_count,
+        thumbnail_url: details.thumbnail_url ?? entry.thumbnail_url,
+        like_count: details.like_count,
+        dislike_count: details.dislike_count,
+        comment_count: details.comment_count,
+        chapters_count: details.chapters?.length ?? 0,
+        tags: details.tags?.slice(0, 8),
+      };
+    } catch {
+      // Best-effort enrichment: keep the base search result when full metadata fails.
+    }
+  }
+  return enriched;
+}
+
 function cleanTranscriptText(raw: string): string {
   return raw
     .split('\n')
@@ -540,11 +660,17 @@ const searchParameters = Type.Object({
   sort: Type.Optional(Type.String()),
   language: Type.Optional(Type.String()),
   topic_tags: Type.Optional(Type.Array(Type.String())),
+  enrich: Type.Optional(Type.Boolean()),
+  enrichLimit: Type.Optional(Type.Number({ minimum: 1, maximum: 5 })),
+  descriptionPreviewChars: Type.Optional(Type.Number({ minimum: 1, maximum: DESCRIPTION_PREVIEW_MAX_CHARS })),
 });
 
 const videoParameters = Type.Object({
   url: Type.Optional(Type.String()),
   video_id: Type.Optional(Type.String()),
+  includeComments: Type.Optional(Type.Boolean()),
+  commentsLimit: Type.Optional(Type.Number({ minimum: 1, maximum: VIDEO_COMMENTS_MAX_LIMIT })),
+  descriptionPreviewChars: Type.Optional(Type.Number({ minimum: 1, maximum: DESCRIPTION_PREVIEW_MAX_CHARS })),
 });
 
 const transcriptParameters = Type.Object({
@@ -593,12 +719,13 @@ async function runSearch(
 
   const normalizedResults = normalizeSearchResults(rawResults as RawYtDlpItem[]);
   const filtered = applySearchFilters(normalizedResults, normalized);
+  const results = await enrichSearchResults(filtered, normalized, client);
 
-  return buildSuccess(summarizeSearchResults(normalized.query, normalized.type, filtered), {
-    results: filtered,
+  return buildSuccess(summarizeSearchResults(normalized.query, normalized.type, results), {
+    results,
     query: normalized.query,
     effective_type: normalized.type,
-    total: filtered.length,
+    total: results.length,
   });
 }
 
@@ -625,13 +752,28 @@ async function runVideoGet(
   }
 
   const client = createClient(dependency.runtime);
-  const raw = await client.getVideo(reference);
+  let raw: unknown;
+  try {
+    raw = await client.getVideo(reference, undefined);
+  } catch (error) {
+    if (error instanceof Error && isYtDlpVideoUnavailable(error.message)) {
+      return buildFailure('not_found', error.message, false);
+    }
+    throw error;
+  }
   if (!raw) {
     return buildFailure('not_found', `No video metadata found for ${reference.video_id}`, false);
   }
 
   const details = normalizeVideoDetails(raw as RawYtDlpItem);
-  return buildSuccess(summarizeVideo(details), details);
+  const preview = compactSnippet(details.full_description, reference.descriptionPreviewChars ?? DESCRIPTION_PREVIEW_DEFAULT_CHARS);
+  const comments = reference.includeComments ? (details.comments ?? []).slice(0, reference.commentsLimit ?? VIDEO_COMMENTS_DEFAULT_LIMIT) : undefined;
+  const data: YoutubeVideoDetails = {
+    ...details,
+    description_preview: preview,
+    comments,
+  };
+  return buildSuccess(summarizeVideo(data), data);
 }
 
 async function runTranscriptGet(
@@ -794,7 +936,7 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
   pi.registerTool({
     name: 'youtube_search',
     label: 'YouTube Search',
-    description: 'Search videos, channels, and playlists on YouTube.',
+    description: 'Search videos, channels, and playlists on YouTube, with optional enriched video metadata for choosing what to inspect next.',
     parameters: searchParameters,
     async execute(_id: string, params: YoutubeSearchInput) {
       try {
@@ -808,7 +950,7 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
   pi.registerTool({
     name: 'youtube_video_get',
     label: 'YouTube Video Details',
-    description: 'Fetch detailed metadata for a single video.',
+    description: 'Fetch detailed video metadata, description preview, caption signals, and optional bounded comments for one YouTube video.',
     parameters: videoParameters,
     async execute(_id: string, params: VideoRefInput) {
       try {
@@ -822,7 +964,7 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
   pi.registerTool({
     name: 'youtube_transcript_get',
     label: 'YouTube Transcript',
-    description: 'Fetch transcript text with staged fallback semantics.',
+    description: 'Fetch transcript text for one YouTube video with explicit source modes and staged best-effort fallback semantics.',
     parameters: transcriptParameters,
     async execute(_id: string, params: YoutubeTranscriptInput) {
       try {
@@ -836,7 +978,7 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
   pi.registerTool({
     name: 'youtube_channel_search',
     label: 'YouTube Channel Search',
-    description: 'Search and inspect channels as recurring research sources.',
+    description: 'Search and inspect YouTube channels by query, channel ID, handle, or URL as recurring research sources.',
     parameters: channelSearchParameters,
     async execute(_id: string, params: YoutubeChannelSearchInput) {
       try {
@@ -850,7 +992,7 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
   pi.registerTool({
     name: 'youtube_playlist_get',
     label: 'YouTube Playlist',
-    description: 'Fetch playlist metadata and compact entries.',
+    description: 'Fetch YouTube playlist metadata and compact video entries by URL or playlist ID.',
     parameters: playlistParameters,
     async execute(_id: string, params: PlaylistRefInput) {
       try {

@@ -100,13 +100,19 @@ export function buildSearchCommand(input: NormalizedSearchInput, binary?: string
 }
 
 export function buildVideoCommand(input: NormalizedVideoRef, binary?: string): string[] {
-  return [
+  const args = [
     commandBinary(binary),
     '--dump-json',
     '--no-playlist',
     '--write-info-json',
-    youtubeVideoUrl(input),
   ];
+
+  if (input.includeComments) {
+    args.push('--write-comments', '--extractor-args', `youtube:max_comments=${input.commentsLimit ?? 5}`);
+  }
+
+  args.push(youtubeVideoUrl(input));
+  return args;
 }
 
 export function buildPlaylistCommand(input: NormalizedPlaylistRef, binary?: string): string[] {

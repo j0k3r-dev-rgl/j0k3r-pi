@@ -15,6 +15,10 @@ export const SEARCH_LIMIT_MIN = 1;
 export const SEARCH_TYPES: Array<YoutubeSearchInput['type']> = ['video', 'channel', 'playlist', 'all', 'mixed'];
 export const SEARCH_DURATIONS: Array<NonNullable<YoutubeSearchInput['duration']>> = ['short', 'medium', 'long', 'any'];
 export const SEARCH_SORTS: Array<NonNullable<YoutubeSearchInput['sort']>> = ['relevance', 'date', 'views', 'rating'];
+export const SEARCH_ENRICH_DEFAULT_LIMIT = 3;
+export const SEARCH_ENRICH_MAX_LIMIT = 5;
+export const SEARCH_DESCRIPTION_PREVIEW_DEFAULT_CHARS = 300;
+export const SEARCH_DESCRIPTION_PREVIEW_MAX_CHARS = 2000;
 export const TRANSCRIPT_SOURCE_MODES: TranscriptSourceMode[] = ['auto', 'manual', 'automatic', 'translated', 'any-caption', 'best-effort'];
 
 export function isIsoDate(value: unknown): value is string {
@@ -80,6 +84,7 @@ export function validateSearchFilters(input: YoutubeSearchInput): NormalizedSear
   validateSearchDateRange(input.published_after, input.published_before);
 
   const type = normalizeSearchType(input.type);
+  const rawInput = input as unknown as Record<string, unknown>;
 
   return {
     query: normalizeSearchQuery(input),
@@ -92,6 +97,9 @@ export function validateSearchFilters(input: YoutubeSearchInput): NormalizedSear
     sort: input.sort,
     language: input.language,
     topic_tags: input.topic_tags,
+    enrich: optionalBoolean(rawInput, 'enrich', false),
+    enrichLimit: boundedInteger(rawInput, 'enrichLimit', SEARCH_ENRICH_DEFAULT_LIMIT, SEARCH_ENRICH_MAX_LIMIT),
+    descriptionPreviewChars: boundedInteger(rawInput, 'descriptionPreviewChars', SEARCH_DESCRIPTION_PREVIEW_DEFAULT_CHARS, SEARCH_DESCRIPTION_PREVIEW_MAX_CHARS),
   };
 }
 
@@ -109,6 +117,31 @@ export function normalizeSourceMode(input: unknown): Exclude<TranscriptSourceMod
   if (input === 'auto' || input === undefined) return 'best-effort';
   if (input === 'manual' || input === 'automatic' || input === 'translated' || input === 'any-caption' || input === 'best-effort') return input;
   throw new Error('source_mode must be one of auto, manual, automatic, translated, any-caption, best-effort');
+}
+
+function optionalBoolean(input: Record<string, unknown>, key: string, defaultValue: boolean): boolean {
+  const value = input[key];
+  if (value === undefined || value === null || value === '') {
+    return defaultValue;
+  }
+  if (typeof value !== 'boolean') {
+    throw new Error(`${key} must be a boolean`);
+  }
+  return value;
+}
+
+function boundedInteger(input: Record<string, unknown>, key: string, defaultValue: number, maxValue: number): number {
+  const value = input[key];
+  if (value === undefined || value === null || value === '') {
+    return defaultValue;
+  }
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new Error(`${key} must be an integer`);
+  }
+  if (value < 1 || value > maxValue) {
+    throw new Error(`${key} must be between 1 and ${maxValue}`);
+  }
+  return value;
 }
 
 function hasExactlyOneRef(ref: Partial<Record<string, string>>, keys: string[]): boolean {

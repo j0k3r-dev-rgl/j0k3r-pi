@@ -86,6 +86,12 @@ describe('youtube-research tool registration', () => {
       expect(typeof tool.description).toBe('string');
       expect(typeof tool.execute).toBe('function');
     }
+
+    expect(pi.tools.find((tool) => tool.name === 'youtube_search')?.description).toMatch(/enriched video metadata/i);
+    expect(pi.tools.find((tool) => tool.name === 'youtube_video_get')?.description).toMatch(/description preview.*comments/i);
+    expect(pi.tools.find((tool) => tool.name === 'youtube_transcript_get')?.description).toMatch(/source modes.*fallback/i);
+    expect(pi.tools.find((tool) => tool.name === 'youtube_channel_search')?.description).toMatch(/query.*channel ID.*handle.*URL/i);
+    expect(pi.tools.find((tool) => tool.name === 'youtube_playlist_get')?.description).toMatch(/URL.*playlist ID/i);
   });
 
   it('returns stable structured success/failure envelopes from all public tools', async () => {
@@ -200,6 +206,68 @@ describe('youtube-research tool registration', () => {
     expect(result.content[0].text).toContain('views: 50,123');
     expect(result.content[0].text).toContain('duration: 1:02:03');
     expect(result.content[0].text).toContain('snippet: A deep dive into youtube architecture');
+    expect(client.getVideo).not.toHaveBeenCalled();
+  });
+
+  it('enriches selected video search results with metadata useful for choosing a video', async () => {
+    const pi = createMockPi();
+    const { client } = createMockClient();
+
+    (client.search as any).mockResolvedValueOnce([
+      { _type: 'url', ie_key: 'Youtube', title: 'Video A', webpage_url: 'https://youtube.com/watch?v=aaa111', id: 'aaa111', channel: 'Chan A' },
+      { _type: 'url', ie_key: 'Youtube', title: 'Video B', webpage_url: 'https://youtube.com/watch?v=bbb222', id: 'bbb222', channel: 'Chan B' },
+      { _type: 'url', ie_key: 'YoutubeTab', title: 'Playlist', webpage_url: 'https://youtube.com/playlist?list=PL1', id: 'PL1' },
+    ]);
+    (client.getVideo as any)
+      .mockResolvedValueOnce({
+        id: 'aaa111',
+        title: 'Video A enriched',
+        webpage_url: 'https://youtube.com/watch?v=aaa111',
+        channel: 'Chan A',
+        description: 'This description explains why Video A is the best result for the query.'.repeat(3),
+        like_count: 42,
+        comment_count: 7,
+        tags: ['rust', 'borrow checker', 'ownership', 'memory'],
+        chapters: [{ title: 'Intro', start_time: 0 }],
+      })
+      .mockResolvedValueOnce({
+        id: 'bbb222',
+        title: 'Video B enriched',
+        webpage_url: 'https://youtube.com/watch?v=bbb222',
+        channel: 'Chan B',
+        description: 'Second video description',
+        like_count: 5,
+        comment_count: 1,
+        tags: ['rust'],
+        chapters: [],
+      });
+
+    registerYoutubeResearchTools(pi, {
+      checkRuntime: vi.fn().mockResolvedValue({ runtime: { binary: 'yt-dlp' } }),
+      createClient: () => client,
+    });
+
+    const tool = pi.tools.find((entry) => entry.name === 'youtube_search');
+    const result = (await execute(tool!, { query: 'rust ownership', type: 'mixed', limit: 3, enrich: true, enrichLimit: 2, descriptionPreviewChars: 90 })) as {
+      content: Array<{ text: string }>;
+      details: { status: string; data: { results: YoutubeSearchResult[] } };
+    };
+
+    expect(client.getVideo).toHaveBeenCalledTimes(2);
+    expect(client.getVideo).toHaveBeenNthCalledWith(1, expect.objectContaining({ video_id: 'aaa111', descriptionPreviewChars: 90 }), undefined);
+    expect(result.details.data.results[0]).toMatchObject({
+      title: 'Video A enriched',
+      description_preview: expect.stringContaining('This description explains'),
+      like_count: 42,
+      comment_count: 7,
+      chapters_count: 1,
+      tags: ['rust', 'borrow checker', 'ownership', 'memory'],
+    });
+    expect(result.details.data.results[2].result_type).toBe('playlist');
+    expect(result.content[0].text).toContain('likes: 42');
+    expect(result.content[0].text).toContain('comments: 7');
+    expect(result.content[0].text).toContain('description: This description explains');
+    expect(result.content[0].text).toContain('tags: rust, borrow checker, ownership');
   });
 
   it('keeps video-only search results when live yt-dlp rows arrive as url entries', async () => {
@@ -536,12 +604,30 @@ describe('youtube-research tool registration', () => {
       title: 'Deep Video',
       webpage_url: 'https://youtube.com/watch?v=abc123',
       uploader: 'Host',
-      uploader_id: 'host1',
-      description: 'desc',
+      uploader_id: '@host',
+      channel_id: 'UChost123',
+      description: 'This intro explains why the video is useful before listing resources and links.'.repeat(4),
+      duration: 3723,
       view_count: 11,
       subtitles: {
         en: ['a'],
       },
+      automatic_captions: {
+        es: ['b'],
+        fr: ['c'],
+        de: ['d'],
+        it: ['e'],
+        pt: ['f'],
+        ja: ['g'],
+      },
+      comments: [{
+        id: 'comment-1',
+        author: '@viewer',
+        text: 'This helped me decide to watch the full video.',
+        like_count: 7,
+        timestamp: 1710000000,
+        parent: 'root',
+      }],
     };
 
     (client.getVideo as any).mockResolvedValue(rawVideo);
@@ -552,7 +638,7 @@ describe('youtube-research tool registration', () => {
     });
 
     const videoTool = pi.tools.find((tool) => tool.name === 'youtube_video_get');
-    const urlResult = (await execute(videoTool!, { url: 'https://youtu.be/abc123' })) as {
+    const urlResult = (await execute(videoTool!, { url: 'https://youtu.be/abc123', includeComments: true, commentsLimit: 1, descriptionPreviewChars: 80 })) as {
       content: Array<{ text: string }>;
       details: { status: 'success'; data: YoutubeVideoDetails };
     };
@@ -560,10 +646,41 @@ describe('youtube-research tool registration', () => {
     expect(urlResult.details.data.title).toBe('Deep Video');
     expect(urlResult.details.data.video_id).toBe('abc123');
     expect(urlResult.details.data.channel_name).toBe('Host');
+    expect(urlResult.details.data.channel_id).toBe('UChost123');
     expect(urlResult.content[0].text).toContain('Deep Video');
     expect(urlResult.content[0].text).toContain('abc123');
+    expect(urlResult.details.data.description_preview).toContain('This intro explains why the video is useful');
+    expect(urlResult.details.data.comments).toHaveLength(1);
+    expect(client.getVideo).toHaveBeenCalledWith(expect.objectContaining({ includeComments: true, commentsLimit: 1 }), undefined);
+    expect(urlResult.content[0].text).toContain('duration: 1:02:03');
+    expect(urlResult.content[0].text).toContain('views: 11');
+    expect(urlResult.content[0].text).toContain('description: This intro explains why the video is useful');
+    expect(urlResult.content[0].text).toContain('captions: manual en; automatic es, fr, de, it, pt… (+1 more)');
+    expect(urlResult.content[0].text).toContain('comments');
+    expect(urlResult.content[0].text).toContain('@viewer');
 
     const idResult = (await execute(videoTool!, { video_id: 'abc123' })) as { details: { status: 'success'; data: { video_id: string } } };
     expect(idResult.details.data.video_id).toBe('abc123');
+  });
+
+  it('maps unavailable youtube videos to not_found instead of a generic yt-dlp failure', async () => {
+    const pi = createMockPi();
+    const { client } = createMockClient();
+    (client.getVideo as any).mockRejectedValueOnce(new Error('ERROR: [youtube] missing123: Video unavailable'));
+
+    registerYoutubeResearchTools(pi, {
+      checkRuntime: vi.fn().mockResolvedValue({ runtime: { binary: 'yt-dlp' } }),
+      createClient: () => client,
+    });
+
+    const videoTool = pi.tools.find((tool) => tool.name === 'youtube_video_get');
+    const result = (await execute(videoTool!, { video_id: 'missing123' })) as {
+      isError?: boolean;
+      details: { status: 'failure'; error: { code: string; message: string; recoverable: boolean } };
+    };
+
+    expect(result.isError).toBe(true);
+    expect(result.details.error.code).toBe('not_found');
+    expect(result.details.error.message).toContain('Video unavailable');
   });
 });

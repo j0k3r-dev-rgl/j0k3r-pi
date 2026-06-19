@@ -76,7 +76,8 @@ describe('youtube-research normalization layer', () => {
       duration: 1234,
       view_count: 99,
       uploader: 'Creator',
-      uploader_id: 'creator-id',
+      uploader_id: '@creator-handle',
+      channel_id: 'UCcreator123',
       thumbnail: 'https://thumb.jpg',
       subtitles: {
         en: ['a'],
@@ -84,14 +85,25 @@ describe('youtube-research normalization layer', () => {
       automatic_captions: {
         en: ['b'],
       },
+      comments: [{
+        id: 'c1',
+        author: '@viewer',
+        text: 'Useful intro and explanation',
+        like_count: 3,
+        timestamp: 1710000000,
+        parent: 'root',
+      }],
     };
 
     const normalized = normalizeVideoDetails(raw);
     expect(normalized.video_id).toBe('abc');
     expect(normalized.url).toBe('https://youtube.com/watch?v=abc');
     expect(normalized.title).toBe('Deep Talk');
+    expect(normalized.channel_id).toBe('UCcreator123');
+    expect(normalized.description_preview).toBeUndefined();
     expect(normalized.caption_available).toBe(true);
     expect(normalized.caption_languages).toContain('en');
+    expect(normalized.comments).toEqual([{ id: 'c1', author: '@viewer', text: 'Useful intro and explanation', like_count: 3, timestamp: 1710000000, parent: 'root' }]);
   });
 
   it('normalizes channel search details and keeps optional fields explicit', () => {

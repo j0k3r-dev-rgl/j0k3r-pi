@@ -47,6 +47,9 @@ export interface YoutubeSearchInput {
   sort?: 'relevance' | 'date' | 'views' | 'rating';
   language?: string;
   topic_tags?: string[];
+  enrich?: boolean;
+  enrichLimit?: number;
+  descriptionPreviewChars?: number;
 }
 
 export interface NormalizedSearchInput {
@@ -60,6 +63,9 @@ export interface NormalizedSearchInput {
   sort?: 'relevance' | 'date' | 'views' | 'rating';
   language?: string;
   topic_tags?: string[];
+  enrich?: boolean;
+  enrichLimit?: number;
+  descriptionPreviewChars?: number;
 }
 
 export interface YoutubeSearchResult {
@@ -76,17 +82,38 @@ export interface YoutubeSearchResult {
   view_count?: number | null;
   thumbnail_url?: string | null;
   language_hint?: string | null;
+  description_preview?: string | null;
+  like_count?: number | null;
+  dislike_count?: number | null;
+  comment_count?: number | null;
+  chapters_count?: number | null;
+  tags?: string[];
 }
 
 export interface VideoRefInput {
   url?: string;
   video_id?: string;
+  includeComments?: boolean;
+  commentsLimit?: number;
+  descriptionPreviewChars?: number;
 }
 
 export interface NormalizedVideoRef {
   url?: string;
   video_id?: string;
   videoUrl?: string;
+  includeComments?: boolean;
+  commentsLimit?: number;
+  descriptionPreviewChars?: number;
+}
+
+export interface YoutubeVideoComment {
+  id: string;
+  author?: string | null;
+  text: string;
+  like_count?: number | null;
+  timestamp?: number | null;
+  parent?: string | null;
 }
 
 export interface YoutubeVideoDetails {
@@ -96,15 +123,20 @@ export interface YoutubeVideoDetails {
   channel_name?: string | null;
   channel_id?: string | null;
   full_description?: string | null;
+  description_preview?: string | null;
   published_date?: string | null;
   duration?: number | null;
   view_count?: number | null;
+  like_count?: number | null;
+  dislike_count?: number | null;
+  comment_count?: number | null;
   tags?: string[];
   chapters?: Array<{ title: string; start_time?: number; end_time?: number }>;
   thumbnail_url?: string | null;
   caption_available?: boolean;
   caption_languages?: string[];
   automatic_caption_languages?: string[];
+  comments?: YoutubeVideoComment[];
 }
 
 export interface YoutubeTranscriptInput extends VideoRefInput {

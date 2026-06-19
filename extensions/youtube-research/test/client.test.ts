@@ -130,6 +130,17 @@ describe('youtube-research yt-dlp command and parse contract', () => {
       'https://www.youtube.com/watch?v=abc123',
     ]);
 
+    expect(buildVideoCommand({ video_id: 'abc123', includeComments: true, commentsLimit: 5 })).toEqual([
+      'yt-dlp',
+      '--dump-json',
+      '--no-playlist',
+      '--write-info-json',
+      '--write-comments',
+      '--extractor-args',
+      'youtube:max_comments=5',
+      'https://www.youtube.com/watch?v=abc123',
+    ]);
+
     expect(buildPlaylistCommand({ playlist_id: 'PL123' })).toEqual([
       'yt-dlp',
       '--dump-json',
