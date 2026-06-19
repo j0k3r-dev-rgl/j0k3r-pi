@@ -66,12 +66,14 @@ Use this skill when configuring, creating, reviewing, or debugging Pi subagents,
 - The main agent remains the orchestrator; subagents must not delegate to other subagents.
 - Never allow `subagent_*` tools in subagent tool allowlists; the extension filters them, but configs should not include them.
 - Prefer narrow tool allowlists per subagent. Do not grant write/bash tools unless the subagent purpose requires them.
+- For SDD/PRD phase agents, prefer deterministic active-flow memory tools only: `memory_search`, `memory_get`, `memory_add`, and `memory_update`; avoid `memory_context` and `memory_recall` in subagent allowlists unless there is a specific reviewed need.
 - For SDD phase agents, memory write tools may be allowed only for active SDD flow memory/artifacts according to `sdd-workflow`.
 - Project subagents live in `.pi/subagents/*.md`; global user subagents live in `$PI_CODING_AGENT_DIR/subagents/*.md` or `~/.pi/agent/subagents/*.md`.
 - Project definitions override global definitions with the same normalized name.
 - Project `subagents.json` overrides global scalar config; `model_profiles` are merged by agent name.
-- Nested subagent sessions should use `session_resources: "lean"` by default so they do not auto-load workflow skills, prompt templates, themes, or context files; opt into `full` only for agents that intentionally need those resources.
-- Subagent task history is stored globally under data storage, but rows remain project-scoped by `cwd`.
+- Nested subagent sessions should use `session_resources: "lean"` by default so the subagent markdown body becomes the nested session system prompt, the delegated user prompt contains only orchestrator context/task, and workflow skills, prompt templates, themes, context files, and startup context injections are not auto-loaded.
+- In lean mode, extensions are loaded for allowlisted tools and tool-safety hooks only; prompt/context lifecycle hooks such as `before_agent_start` and `context` must not inject hidden messages into subagent turns.
+- Subagent task history is stored globally under data storage, but rows remain project-scoped by `cwd`; history stores delegated prompt and subagent system prompt separately.
 - After changing subagent markdown/config or extension code, tell the user to `/reload` or restart Pi.
 
 Recommended `subagents.json` starter:
@@ -138,7 +140,7 @@ Return:
 - Skill applied: `subagents-configuration`.
 - Scope/path configured or reviewed.
 - Subagents/config fields added, changed, or preserved.
-- Tool allowlist and model/effort decisions.
+- Tool allowlist, system-prompt isolation, Context7 scope, memory-tool scope, and model/effort decisions.
 - Related skills considered or loaded.
 - Validation executed, or the concrete reason it was not run.
 - Required reload/restart note and open risks.

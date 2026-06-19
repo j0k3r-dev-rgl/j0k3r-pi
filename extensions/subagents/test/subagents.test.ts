@@ -1690,19 +1690,16 @@ describe('subagents extension', () => {
     expect(agents[0].tools).toEqual(['read', 'memory_search', 'memory_get', 'memory_add', 'memory_update']);
   });
 
-  it('builds read-only memory constraints when no memory write tools are available', () => {
-    const prompt = buildPrompt({ name: 'analyst', description: 'analyst', filePath: 'analyst.md', instructions: '# Analyst', tools: ['read', 'memory_search', 'memory_get'] }, 'inspect', undefined, ['read', 'memory_search', 'memory_get']);
-    expect(prompt).toContain('use memory tools read-only');
-    expect(prompt).toContain('do not save durable memory');
+  it('builds a delegated user prompt without embedding subagent system instructions', () => {
+    const prompt = buildPrompt({ name: 'analyst', description: 'analyst', filePath: 'analyst.md', instructions: '# Analyst\nSYSTEM_ONLY', tools: ['read', 'memory_search', 'memory_get'] }, 'inspect', undefined, ['read', 'memory_search', 'memory_get']);
+    expect(prompt).toBe('## delegated task\ninspect');
+    expect(prompt).not.toContain('SYSTEM_ONLY');
+    expect(prompt).not.toContain('operating constraints');
   });
 
-  it('builds sdd flow memory write constraints without read-only contradiction', () => {
-    const prompt = buildPrompt({ name: 'sdd-explore', description: 'sdd', filePath: 'sdd-explore.md', instructions: '# SDD Explore', tools: ['read', 'memory_search', 'memory_get', 'memory_add', 'memory_update'] }, 'explore feature', undefined, ['read', 'memory_search', 'memory_get', 'memory_add', 'memory_update']);
-    expect(prompt).toContain('may create or update memory only for the active sdd flow');
-    expect(prompt).toContain('search for the existing sdd flow memory before writing');
-    expect(prompt).toContain('when artifact_store is memory');
-    expect(prompt).not.toContain('do not save durable memory');
-    expect(prompt).not.toContain('use memory tools read-only');
+  it('keeps orchestrator context in the delegated user prompt when supplied', () => {
+    const prompt = buildPrompt({ name: 'sdd-explore', description: 'sdd', filePath: 'sdd-explore.md', instructions: '# SDD Explore', tools: ['read'] }, 'explore feature', 'CWD: /tmp/project', ['read']);
+    expect(prompt).toBe('## orchestrator context\nCWD: /tmp/project\n\n## delegated task\nexplore feature');
   });
 
   it('loads project subagents with no delegation tools and memory writes only for workflow phase agents', () => {
@@ -1720,11 +1717,32 @@ describe('subagents extension', () => {
       'sdd-spec',
       'sdd-task',
       'sdd-verify',
+      'tool-smoke',
+    ]);
+    const toolSmoke = agents.find((agent) => agent.name === 'tool-smoke');
+    expect(toolSmoke?.tools).toEqual(['read', 'bash', 'skill_registry_resolve', 'context7_status']);
+    const sddExplore = agents.find((agent) => agent.name === 'sdd-explore');
+    expect(sddExplore?.tools).toEqual([
+      'read',
+      'bash',
+      'skill_registry_resolve',
+      'context7_status',
+      'context7_search_library',
+      'context7_get_context',
+      'context7_resolve_and_get_context',
+      'write',
+      'edit',
+      'memory_search',
+      'memory_get',
+      'memory_add',
+      'memory_update',
     ]);
     for (const agent of agents) {
       if (agent.name.startsWith('sdd-') || agent.name === 'prd-review') {
         expect(agent.tools).toContain('memory_add');
         expect(agent.tools).toContain('memory_update');
+        expect(agent.tools).not.toContain('memory_context');
+        expect(agent.tools).not.toContain('memory_recall');
       } else {
         expect(agent.tools).not.toContain('memory_add');
         expect(agent.tools).not.toContain('memory_update');
@@ -1935,10 +1953,26 @@ describe('subagents extension', () => {
     expect(completed?.output_preview).toBe('final review');
   });
 
-  it('does not use sqlite schema migrations for subagent history', () => {
-    const source = fs.readFileSync(path.resolve(process.cwd(), 'src', 'history.ts'), 'utf8');
-    expect(source).not.toContain('ALTER TABLE');
-    expect(source).not.toContain('ensureColumn');
+  it('persists subagent system prompts separately from delegated user prompts', () => {
+    const history = new SubagentHistoryStore();
+    const task: SubagentTask = {
+      id: 'subtask_system_prompt_history',
+      agent: 'analyst',
+      mode: 'task',
+      status: 'completed',
+      task: 'ping',
+      prompt: '## delegated task\nping',
+      system_prompt: '# Analyst\nSYSTEM_ONLY',
+      created_at: new Date().toISOString(),
+      result: 'pong',
+    } as any;
+
+    history.upsertTask(tmp, task);
+    const persisted = history.getTask(tmp, task.id);
+
+    expect(persisted?.prompt).toBe('## delegated task\nping');
+    expect(persisted?.system_prompt).toBe('# Analyst\nSYSTEM_ONLY');
+    expect(persisted?.prompt).not.toContain('SYSTEM_ONLY');
   });
 
   it('lists persisted current-session tasks after manager reload while excluding other sessions', () => {

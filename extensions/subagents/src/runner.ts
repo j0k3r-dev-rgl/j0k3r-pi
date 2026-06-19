@@ -19,39 +19,27 @@ function resolveModel(ctx: any, ref?: ModelRef): any | undefined {
   return ctx?.modelRegistry?.find?.(ref.provider, ref.id);
 }
 
-const MEMORY_WRITE_TOOLS = new Set(['memory_add', 'memory_update', 'memory_archive', 'memory_project_profile']);
-
-function memoryConstraintLines(tools: string[]): string[] {
-  const canWriteMemory = tools.some((tool) => MEMORY_WRITE_TOOLS.has(tool));
-  if (!canWriteMemory) {
-    return [
-      '- use memory tools read-only when project context or previous decisions matter.',
-      '- do not save durable memory; report memory candidates to the orchestrator instead.',
-    ];
-  }
+export function buildPrompt(_definition: SubagentDefinition, task: string, context?: string, _tools: string[] = _definition.tools): string {
   return [
-    '- you may create or update memory only for the active sdd flow or when the delegated task explicitly asks for memory maintenance.',
-    '- search for the existing sdd flow memory before writing; update it when it exists instead of creating duplicates.',
-    '- keep sdd flow memory as a compact state/index/handoff when OpenSpec files exist; when artifact_store is memory, include enough phase artifact detail in that single flow memory for downstream phases to continue without files.',
-    '- do not save secrets, raw logs, speculative findings, or unrelated project-wide decisions as durable memory.',
-    '- report every memory id you created or updated in your final response.',
-  ];
+    context ? `## orchestrator context\n${context}` : '',
+    `## delegated task\n${task}`,
+  ].filter(Boolean).join('\n\n');
 }
 
-export function buildPrompt(definition: SubagentDefinition, task: string, context?: string, tools: string[] = definition.tools): string {
-  return [
-    definition.instructions,
-    '',
-    '## operating constraints',
-    '- you are a delegated subagent working for the main orchestrator.',
-    ...memoryConstraintLines(tools),
-    '- do not edit or write files unless explicitly allowed by your agent definition.',
-    '- do not delegate to other subagents or call subagent_* tools; only the main orchestrator delegates.',
-    '- produce a concise structured result for the orchestrator.',
-    '',
-    context ? `## orchestrator context\n${context}\n` : '',
-    `## delegated task\n${task}`,
-  ].join('\n');
+const SUBAGENT_ALLOWED_EXTENSION_EVENTS = new Set(['tool_call', 'tool_result', 'user_bash']);
+
+function isolateSubagentExtensions(base: any): any {
+  return {
+    ...base,
+    extensions: (base?.extensions ?? []).map((extension: any) => ({
+      ...extension,
+      handlers: new Map([...((extension.handlers as Map<string, unknown[]>) ?? new Map())]
+        .filter(([event]) => SUBAGENT_ALLOWED_EXTENSION_EVENTS.has(event))),
+      commands: new Map(),
+      flags: new Map(),
+      shortcuts: new Map(),
+    })),
+  };
 }
 
 function emptyUsage(): UsageStats {
@@ -485,17 +473,18 @@ async function promptWithInactivity(
   prompt: string,
   stallTimeoutMs: number,
   signal: AbortSignal,
-  onActivity?: (activity: { message: string; output?: string; prompt?: string; transcript?: string; usage?: UsageStats; effort?: ThinkingEffort; thread_snapshot?: SubagentThreadSnapshot; permission_request?: PermissionRequiredPayload }) => void,
+  onActivity?: (activity: { message: string; output?: string; prompt?: string; system_prompt?: string; transcript?: string; usage?: UsageStats; effort?: ThinkingEffort; thread_snapshot?: SubagentThreadSnapshot; permission_request?: PermissionRequiredPayload }) => void,
   delegatedContext?: string,
   cwd?: string,
+  systemPrompt?: string,
 ): Promise<{ result: string; usage: UsageStats; thread_snapshot?: SubagentThreadSnapshot; permission_request?: PermissionRequiredPayload }> {
   let output = '';
   const snapshotBuilder = new ThreadSnapshotBuilder(prompt, delegatedContext, cwd);
   let latestPermissionRequest: PermissionRequiredPayload | undefined;
   let usage = emptyUsage();
-  let transcript = `# orchestrator prompt\n\n${prompt}\n\n# subagent execution\n`;
+  let transcript = `${systemPrompt ? `# system prompt\n\n${systemPrompt}\n\n` : ''}# delegated prompt\n\n${prompt}\n\n# subagent execution\n`;
   let lastActivity = Date.now();
-  onActivity?.({ message: 'session started', prompt, transcript, usage, thread_snapshot: snapshotBuilder.snapshot() });
+  onActivity?.({ message: 'session started', prompt, system_prompt: systemPrompt, transcript, usage, thread_snapshot: snapshotBuilder.snapshot() });
   const unsubscribe = session.subscribe?.((event: any) => {
     lastActivity = Date.now();
     debugLog(cwd, 'runner_event', {
@@ -607,7 +596,7 @@ async function loadPiSdkModule(): Promise<any> {
   return piSdkModulePromise;
 }
 
-async function createSession(model: any, cwd: string, tools: string[], effort: ThinkingEffort | undefined, config: SubagentsConfig, ctx: any) {
+async function createSession(model: any, cwd: string, tools: string[], effort: ThinkingEffort | undefined, config: SubagentsConfig, ctx: any, systemPrompt: string) {
   const piSdk = await loadPiSdkModule();
   const { createAgentSession, SessionManager } = piSdk;
   const options: Record<string, unknown> = {
@@ -632,6 +621,8 @@ async function createSession(model: any, cwd: string, tools: string[], effort: T
       noPromptTemplates: true,
       noThemes: true,
       noContextFiles: true,
+      systemPrompt,
+      extensionsOverride: isolateSubagentExtensions,
     });
     await resourceLoader.reload();
     options.agentDir = agentDir;
@@ -655,24 +646,26 @@ export const sdkSubagentRunner: SubagentRunner = async ({ definition, task, task
   const current = ctx?.model;
   const effort = profile.effort.value;
   const tools = definition.tools?.length ? definition.tools : config.default_tools;
+  const systemPrompt = definition.instructions;
   const prompt = buildPrompt(definition, task, context, tools);
-  onActivity?.({ message: 'orchestrator prompt prepared', prompt, transcript: `# orchestrator prompt\n\n${prompt}\n`, effort });
+  onActivity?.({ message: 'orchestrator prompt prepared', prompt, system_prompt: systemPrompt, transcript: `# system prompt\n\n${systemPrompt}\n\n# delegated prompt\n\n${prompt}\n`, effort });
 
   async function attempt(model: any) {
-    onActivity?.({ message: `starting ${definition.name} with model ${modelLabel(model) ?? 'unknown'}${effort ? ` effort ${effort}` : ''}`, prompt, effort });
-    const { session } = await createSession(model, cwd, tools, effort, config, ctx);
+    onActivity?.({ message: `starting ${definition.name} with model ${modelLabel(model) ?? 'unknown'}${effort ? ` effort ${effort}` : ''}`, prompt, system_prompt: systemPrompt, effort });
+    const { session } = await createSession(model, cwd, tools, effort, config, ctx, systemPrompt);
     const unregisterPermissionSession = registerPermissionSubagentSession(session, definition, taskId, parentPiSessionId ?? ctx?.sessionManager?.getSessionId?.());
     try {
-      const { result, usage, thread_snapshot, permission_request } = await promptWithInactivity(session, prompt, config.stall_timeout_ms, signal, onActivity, context, cwd);
-      return { result, usage, thread_snapshot, permission_request };
+      const effectiveSystemPrompt = typeof session.systemPrompt === 'string' ? session.systemPrompt : systemPrompt;
+      const { result, usage, thread_snapshot, permission_request } = await promptWithInactivity(session, prompt, config.stall_timeout_ms, signal, onActivity, context, cwd, effectiveSystemPrompt);
+      return { result, usage, thread_snapshot, permission_request, system_prompt: effectiveSystemPrompt };
     } finally {
       unregisterPermissionSession();
     }
   }
 
   try {
-    const { result, usage, thread_snapshot, permission_request } = await attempt(preferred);
-    return { result, usage, thread_snapshot, permission_request, model: modelLabel(preferred) ?? modelRefLabel(profile.model.value), effort, fallback_used: false };
+    const { result, usage, thread_snapshot, permission_request, system_prompt } = await attempt(preferred);
+    return { result, usage, thread_snapshot, permission_request, system_prompt, model: modelLabel(preferred) ?? modelRefLabel(profile.model.value), effort, fallback_used: false };
   } catch (error) {
     if (signal.aborted) throw new Error('Subagent was aborted');
     const preferredLabel = modelLabel(preferred) ?? modelRefLabel(profile.model.value) ?? 'unknown';
@@ -681,7 +674,7 @@ export const sdkSubagentRunner: SubagentRunner = async ({ definition, task, task
     const message = error instanceof Error ? error.message : String(error);
     ctx?.ui?.notify?.(`Subagent ${definition.name} failed/stalled on selected model ${preferredLabel}: ${message}. Falling back to current model ${currentLabel}.`, 'warning');
     if (!current || current === preferred) throw new Error(`Subagent ${definition.name} failed on selected model ${preferredLabel}: ${message}`);
-    const { result, usage, thread_snapshot, permission_request } = await attempt(current);
-    return { result, usage, thread_snapshot, permission_request, model: currentLabel, effort, fallback_used: true };
+    const { result, usage, thread_snapshot, permission_request, system_prompt } = await attempt(current);
+    return { result, usage, thread_snapshot, permission_request, system_prompt, model: currentLabel, effort, fallback_used: true };
   }
 };

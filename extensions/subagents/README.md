@@ -8,6 +8,7 @@ Pi extension for delegating work to markdown-defined subagents. It registers too
 - `subagent_run` for task-mode or background delegation to one or many agents.
 - Status/result/list/cancel tools for delegated tasks.
 - Isolated in-memory agent sessions for each subagent run.
+- Subagent markdown used as system prompt, with delegated task/context as the user prompt.
 - Project-scoped task history in a global SQLite data/cache location.
 - TUI history panel via `/subagents` or `ctrl+,`.
 - TUI execution rendering can expand/collapse tool and rendered component output with `ctrl+o`.
@@ -140,7 +141,7 @@ Example:
 | `timeout_ms` | `600000` | Total timeout per subagent task. |
 | `stall_timeout_ms` | `120000` | Inactivity timeout for a subagent session. |
 | `max_concurrency` | `5` | Max concurrent subagent tasks per cwd/config pair. |
-| `session_resources` | `lean` | SDK resource loading mode. `lean` skips skills, prompt templates, themes, and context files in nested subagent sessions while keeping extensions/tools available. Use explicit `full` only when a subagent intentionally needs the full Pi resource set. Also accepts camelCase `sessionResources`. |
+| `session_resources` | `lean` | SDK resource loading mode. `lean` uses the subagent markdown body as the nested session system prompt, skips skills, prompt templates, themes, and context files, and loads extensions in tools-only/safety-hook mode so allowlisted extension tools remain available without startup context injection. Use explicit `full` only when a subagent intentionally needs the full Pi resource set. Also accepts camelCase `sessionResources`. |
 | `default_tools` | see below | Fallback tool allowlist used by the runner when an agent definition has an empty tool list. Omitted frontmatter `tools` uses the built-in default list. |
 
 Default tools:
@@ -288,6 +289,7 @@ The history DB stores:
 - model/effort used;
 - usage stats when available;
 - result/error/output preview;
+- delegated user prompt and subagent system prompt separately;
 - compact thread snapshots;
 - task events.
 
@@ -313,13 +315,15 @@ If a subagent emits a structured permission-required request from Permission Gua
 
 Background subagent tasks cannot request interactive permission approval. Rerun in `task` mode if approval is needed.
 
-## Memory behavior
+## Prompt and memory behavior
 
-The runner injects memory constraints into every subagent prompt.
+In the default `lean` mode, the runner treats the subagent markdown body as the nested session system prompt. The delegated user prompt contains only the orchestrator-provided context and task. The runner does not inject `AGENTS.md`, workflow skills, memory startup context, or generated memory constraints into the delegated user prompt.
 
-If the subagent does not have memory write tools, it must use memory read-only and report memory candidates to the orchestrator.
+Extensions are loaded in an isolated tools-only/safety-hook mode for subagents: allowlisted extension tools remain available, while context/prompt lifecycle hooks such as `before_agent_start` and `context` are removed so extensions cannot add hidden startup messages. Tool-safety hooks (`tool_call`, `tool_result`, and `user_bash`) are preserved for permission handling.
 
-If the subagent has memory write tools (`memory_add`, `memory_update`, `memory_archive`, `memory_project_profile`), it may write memory only for the active SDD flow or when explicitly delegated memory maintenance.
+Memory behavior should be specified in each subagent markdown definition. A subagent can use memory only when its tool allowlist includes the relevant memory tools. SDD/PRD phase agents use deterministic `memory_search`/`memory_get` plus `memory_add`/`memory_update` for active-flow state; they intentionally do not receive `memory_context` or `memory_recall`.
+
+Context7 access is limited to `discovery`, `tool-smoke`, and `sdd-explore`; downstream SDD phase agents should consume curated evidence from artifacts or orchestrator context instead of performing broad external-doc discovery.
 
 ## Current project subagents
 
@@ -328,6 +332,7 @@ This project currently defines:
 | Subagent | Purpose |
 |---|---|
 | `discovery` | Read-only standalone/pre-SDD research and option reporting. |
+| `prd-review` | PRD quality/readiness review before downstream SDD planning. |
 | `sdd-explore` | Formal SDD exploration for an approved named change. |
 | `sdd-proposal` | Product/PRD proposal artifact. |
 | `sdd-spec` | Normative requirement/spec artifact. |
@@ -336,6 +341,7 @@ This project currently defines:
 | `sdd-apply` | Approved SDD task implementation. |
 | `sdd-verify` | Verification report without applying fixes. |
 | `sdd-archive` | Archive verified SDD changes and sync specs. |
+| `tool-smoke` | Dedicated subagent isolation/tool allowlist smoke testing. |
 
 See `subagents/*.md`, `AGENTS.md`, and `skills/sdd-workflow/SKILL.md` for the workflow policy in this checkout. In project-local installs, subagent definitions live under `.pi/subagents/*.md`.
 

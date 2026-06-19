@@ -198,6 +198,7 @@ export type SubagentTask = {
   last_activity?: string;
   output_preview?: string;
   prompt?: string;
+  system_prompt?: string;
   transcript?: string;
   usage?: UsageStats;
   model?: string;
@@ -222,5 +223,5 @@ export type SubagentRunner = (input: {
   config: SubagentsConfig;
   signal: AbortSignal;
   effectiveProfile?: EffectiveSubagentProfile;
-  onActivity?: (activity: { message: string; output?: string; prompt?: string; transcript?: string; usage?: UsageStats; effort?: ThinkingEffort; thread_snapshot?: SubagentThreadSnapshot; permission_request?: PermissionRequiredPayload }) => void;
-}) => Promise<{ result: string; model?: string; effort?: ThinkingEffort; fallback_used?: boolean; usage?: UsageStats; thread_snapshot?: SubagentThreadSnapshot; permission_request?: PermissionRequiredPayload }>;
+  onActivity?: (activity: { message: string; output?: string; prompt?: string; system_prompt?: string; transcript?: string; usage?: UsageStats; effort?: ThinkingEffort; thread_snapshot?: SubagentThreadSnapshot; permission_request?: PermissionRequiredPayload }) => void;
+}) => Promise<{ result: string; model?: string; effort?: ThinkingEffort; fallback_used?: boolean; usage?: UsageStats; thread_snapshot?: SubagentThreadSnapshot; permission_request?: PermissionRequiredPayload; system_prompt?: string }>;

@@ -7,9 +7,7 @@ tools:
   - skill_registry_resolve
   - write
   - edit
-  - memory_context
   - memory_search
-  - memory_recall
   - memory_get
   - memory_add
   - memory_update

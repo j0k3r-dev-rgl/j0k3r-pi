@@ -5,11 +5,13 @@ tools:
   - read
   - bash
   - skill_registry_resolve
+  - context7_status
+  - context7_search_library
+  - context7_get_context
+  - context7_resolve_and_get_context
   - write
   - edit
-  - memory_context
   - memory_search
-  - memory_recall
   - memory_get
   - memory_add
   - memory_update

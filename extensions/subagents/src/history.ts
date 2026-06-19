@@ -41,6 +41,11 @@ function parseSnapshotJson(text: unknown): SubagentThreadSnapshot | undefined {
 }
 type HistoryReadOptions = { includeSnapshots?: boolean };
 
+function ensureColumn(db: Db, table: string, column: string, definition: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name?: string }>;
+  if (!columns.some((row) => row.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
 export class SubagentHistoryStore {
   private dbs = new Map<string, Db>();
 
@@ -70,6 +75,7 @@ export class SubagentHistoryStore {
         last_activity TEXT,
         output_preview TEXT,
         prompt TEXT,
+        system_prompt TEXT,
         transcript TEXT,
         usage_input INTEGER,
         usage_output INTEGER,
@@ -100,6 +106,7 @@ export class SubagentHistoryStore {
       CREATE INDEX IF NOT EXISTS idx_subagent_tasks_created ON subagent_tasks(created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_subagent_events_task ON subagent_events(task_id, created_at);
     `);
+    ensureColumn(db, 'subagent_tasks', 'system_prompt', 'TEXT');
     this.dbs.set(file, db);
     return db;
   }
@@ -108,10 +115,10 @@ export class SubagentHistoryStore {
     this.db(cwd).prepare(`
       INSERT INTO subagent_tasks (
         id, cwd, agent, mode, status, task, context, created_at, session_id, started_at, ended_at,
-        last_activity_at, last_activity, output_preview, prompt, transcript,
+        last_activity_at, last_activity, output_preview, prompt, system_prompt, transcript,
         usage_input, usage_output, usage_cache_read, usage_cache_write, usage_cost, usage_context_tokens, usage_turns,
         model, effort, model_source, effort_source, fallback_used, error, result, thread_snapshot_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         status=excluded.status,
         session_id=excluded.session_id,
@@ -121,6 +128,7 @@ export class SubagentHistoryStore {
         last_activity=excluded.last_activity,
         output_preview=excluded.output_preview,
         prompt=excluded.prompt,
+        system_prompt=excluded.system_prompt,
         transcript=excluded.transcript,
         usage_input=excluded.usage_input,
         usage_output=excluded.usage_output,
@@ -153,6 +161,7 @@ export class SubagentHistoryStore {
       value(task.last_activity),
       value(task.output_preview),
       value(task.prompt),
+      value(task.system_prompt),
       value(task.transcript),
       task.usage?.input ?? null,
       task.usage?.output ?? null,
@@ -215,6 +224,7 @@ function rowToTask(row: any, options: HistoryReadOptions = {}): SubagentTask {
     last_activity: row.last_activity ?? undefined,
     output_preview: row.output_preview ?? undefined,
     prompt: row.prompt ?? undefined,
+    system_prompt: row.system_prompt ?? undefined,
     transcript: row.transcript ?? undefined,
     usage: row.usage_input === null && row.usage_output === null && row.usage_cache_read === null && row.usage_cache_write === null && row.usage_cost === null && row.usage_context_tokens === null && row.usage_turns === null ? undefined : {
       input: row.usage_input ?? 0,

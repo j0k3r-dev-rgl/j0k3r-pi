@@ -385,6 +385,7 @@ export class SubagentManager {
               task.last_activity = activity.message;
               if (activity.output) task.output_preview = compactOutput(activity.output);
               if (activity.prompt) task.prompt = sanitizePermissionTransportText(activity.prompt);
+              if (activity.system_prompt) task.system_prompt = sanitizePermissionTransportText(activity.system_prompt);
               if (activity.transcript) task.transcript = sanitizePermissionTransportText(activity.transcript);
               if (activity.usage) task.usage = activity.usage;
               if (activity.effort) task.effort = activity.effort;
@@ -437,6 +438,7 @@ export class SubagentManager {
           task.last_activity = 'permission required; awaiting main-thread decision';
           task.last_activity_at = nowIso();
           task.usage = result.usage ?? task.usage;
+          if (result.system_prompt ?? task.system_prompt) task.system_prompt = sanitizePermissionTransportText(result.system_prompt ?? task.system_prompt!);
           task.model = result.model;
           task.effort = result.effort ?? task.effort;
           task.fallback_used = result.fallback_used;
@@ -469,6 +471,7 @@ export class SubagentManager {
         task.last_activity = 'completed';
         task.last_activity_at = nowIso();
         task.usage = result.usage ?? task.usage;
+        if (result.system_prompt ?? task.system_prompt) task.system_prompt = sanitizePermissionTransportText(result.system_prompt ?? task.system_prompt!);
         task.model = result.model;
         task.effort = result.effort ?? task.effort;
         task.fallback_used = result.fallback_used;

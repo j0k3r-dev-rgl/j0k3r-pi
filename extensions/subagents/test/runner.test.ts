@@ -5,11 +5,13 @@ import path from 'node:path';
 import type { SubagentDefinition, SubagentsConfig } from '../src/types.js';
 
 describe('subagent runner permission-required bridge', () => {
-  it('uses a lean resource loader for subagent sessions when configured', async () => {
+  it('uses a lean isolated resource loader with subagent markdown as system prompt', async () => {
     vi.resetModules();
+    let delegatedPrompt = '';
     const session = {
+      systemPrompt: '# Analyst\nSYSTEM_SENTINEL',
       subscribe: vi.fn(() => vi.fn()),
-      prompt: vi.fn(async () => undefined),
+      prompt: vi.fn(async (prompt: string) => { delegatedPrompt = prompt; }),
       messages: [{ role: 'assistant', content: 'lean done' }],
       dispose: vi.fn(async () => undefined),
     };
@@ -33,7 +35,7 @@ describe('subagent runner permission-required bridge', () => {
       name: 'analyst',
       description: 'analysis',
       filePath: '/tmp/analyst.md',
-      instructions: 'return a concise result',
+      instructions: '# Analyst\nSYSTEM_SENTINEL',
       tools: ['read'],
     };
     const config: SubagentsConfig = {
@@ -44,6 +46,7 @@ describe('subagent runner permission-required bridge', () => {
       model_profiles: {},
       session_resources: 'lean',
     };
+    const activities: any[] = [];
 
     const result = await sdkSubagentRunner({
       definition,
@@ -52,14 +55,82 @@ describe('subagent runner permission-required bridge', () => {
       ctx: { model: { provider: 'test', id: 'model' } },
       config,
       signal: new AbortController().signal,
+      onActivity: (activity) => activities.push(activity),
     });
 
     expect(result.result).toBe('lean done');
     expect(loaderInstances).toHaveLength(1);
     expect(loaderInstances[0].reload).toHaveBeenCalledTimes(1);
-    expect(loaderInstances[0].options).toMatchObject({ cwd: '/workspace', agentDir: '/agent-dir', noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true });
+    expect(loaderInstances[0].options).toMatchObject({ cwd: '/workspace', agentDir: '/agent-dir', noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true, systemPrompt: '# Analyst\nSYSTEM_SENTINEL' });
+    expect(typeof loaderInstances[0].options.extensionsOverride).toBe('function');
     expect(inMemory).toHaveBeenCalledWith('/workspace');
     expect(createAgentSession).toHaveBeenCalledWith(expect.objectContaining({ resourceLoader: loaderInstances[0], cwd: '/workspace', tools: ['read'] }));
+    expect(delegatedPrompt).toBe('## delegated task\nlean startup');
+    expect(delegatedPrompt).not.toContain('SYSTEM_SENTINEL');
+    expect(activities.some((activity) => activity.system_prompt === '# Analyst\nSYSTEM_SENTINEL')).toBe(true);
+  });
+
+  it('filters subagent extension hooks to tools and tool-safety events only', async () => {
+    vi.resetModules();
+    const loaderInstances: any[] = [];
+    class DefaultResourceLoader {
+      options: any;
+      reload = vi.fn(async () => undefined);
+      constructor(options: any) { this.options = options; loaderInstances.push(this); }
+    }
+    const session = { systemPrompt: 'system', subscribe: vi.fn(() => vi.fn()), prompt: vi.fn(async () => undefined), messages: [{ role: 'assistant', content: 'ok' }], dispose: vi.fn(async () => undefined) };
+    vi.doMock('@earendil-works/pi-coding-agent', () => ({
+      DefaultResourceLoader,
+      getAgentDir: () => '/agent-dir',
+      SessionManager: { inMemory: () => ({}) },
+      createAgentSession: vi.fn(() => ({ session })),
+    }));
+
+    const { sdkSubagentRunner } = await import('../src/runner.js');
+    await sdkSubagentRunner({
+      definition: { name: 'analyst', description: 'analysis', filePath: '/tmp/analyst.md', instructions: 'system', tools: ['read'] },
+      task: 'ping',
+      cwd: '/workspace',
+      ctx: { model: { provider: 'test', id: 'model' } },
+      config: { timeout_ms: 10_000, stall_timeout_ms: 10_000, max_concurrency: 1, default_tools: ['read'], model_profiles: {}, session_resources: 'lean' },
+      signal: new AbortController().signal,
+    });
+
+    const beforeAgentStart = vi.fn();
+    const toolCall = vi.fn();
+    const tool = { name: 'memory_search' };
+    const filtered = loaderInstances[0].options.extensionsOverride({
+      runtime: { keep: true },
+      errors: [],
+      extensions: [{
+        path: 'memory',
+        resolvedPath: 'memory',
+        sourceInfo: {},
+        handlers: new Map<string, any[]>([
+          ['before_agent_start', [beforeAgentStart]],
+          ['context', [vi.fn()]],
+          ['tool_call', [toolCall]],
+          ['user_bash', [vi.fn()]],
+          ['message_update', [vi.fn()]],
+        ]),
+        tools: new Map([['memory_search', tool]]),
+        messageRenderers: new Map([['memory-context', vi.fn()]]),
+        commands: new Map([['memory', vi.fn()]]),
+        flags: new Map([['flag', {}]]),
+        shortcuts: new Map([['ctrl+x', {}]]),
+      }],
+    });
+
+    const extension = filtered.extensions[0];
+    expect(extension.tools.get('memory_search')).toBe(tool);
+    expect(extension.handlers.has('before_agent_start')).toBe(false);
+    expect(extension.handlers.has('context')).toBe(false);
+    expect(extension.handlers.has('message_update')).toBe(false);
+    expect(extension.handlers.get('tool_call')).toEqual([toolCall]);
+    expect(extension.handlers.has('user_bash')).toBe(true);
+    expect(extension.commands.size).toBe(0);
+    expect(extension.flags.size).toBe(0);
+    expect(extension.shortcuts.size).toBe(0);
   });
 
   it('preserves structured permission requests from nested tool failures while keeping result surfaces marker-free', async () => {
