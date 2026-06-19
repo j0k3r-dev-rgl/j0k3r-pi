@@ -70,6 +70,7 @@ Use this skill when configuring, creating, reviewing, or debugging Pi subagents,
 - Project subagents live in `.pi/subagents/*.md`; global user subagents live in `$PI_CODING_AGENT_DIR/subagents/*.md` or `~/.pi/agent/subagents/*.md`.
 - Project definitions override global definitions with the same normalized name.
 - Project `subagents.json` overrides global scalar config; `model_profiles` are merged by agent name.
+- Nested subagent sessions should use `session_resources: "lean"` by default so they do not auto-load workflow skills, prompt templates, themes, or context files; opt into `full` only for agents that intentionally need those resources.
 - Subagent task history is stored globally under data storage, but rows remain project-scoped by `cwd`.
 - After changing subagent markdown/config or extension code, tell the user to `/reload` or restart Pi.
 
@@ -80,6 +81,7 @@ Recommended `subagents.json` starter:
   "timeout_ms": 600000,
   "stall_timeout_ms": 120000,
   "max_concurrency": 5,
+  "session_resources": "lean",
   "default_tools": [
     "read",
     "memory_context",

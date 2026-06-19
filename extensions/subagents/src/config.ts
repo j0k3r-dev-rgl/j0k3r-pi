@@ -105,8 +105,8 @@ export function parseEffort(value: any): ThinkingEffort | undefined {
 }
 
 function parseSessionResources(value: any): SubagentSessionResources {
-  const resources = String(value ?? 'full').trim().toLowerCase();
-  return resources === 'lean' ? 'lean' : 'full';
+  const resources = String(value ?? 'lean').trim().toLowerCase();
+  return resources === 'full' ? 'full' : 'lean';
 }
 
 function parseModelProfile(value: unknown): SubagentModelProfile | undefined {

@@ -109,7 +109,7 @@ Example:
   "timeout_ms": 600000,
   "stall_timeout_ms": 120000,
   "max_concurrency": 5,
-  "session_resources": "full",
+  "session_resources": "lean",
   "default_tools": [
     "read",
     "memory_context",
@@ -140,7 +140,7 @@ Example:
 | `timeout_ms` | `600000` | Total timeout per subagent task. |
 | `stall_timeout_ms` | `120000` | Inactivity timeout for a subagent session. |
 | `max_concurrency` | `5` | Max concurrent subagent tasks per cwd/config pair. |
-| `session_resources` | `full` | SDK resource loading mode. Use `lean` to skip skills, prompt templates, themes, and context files in nested subagent sessions while keeping extensions/tools available. Also accepts camelCase `sessionResources`. |
+| `session_resources` | `lean` | SDK resource loading mode. `lean` skips skills, prompt templates, themes, and context files in nested subagent sessions while keeping extensions/tools available. Use explicit `full` only when a subagent intentionally needs the full Pi resource set. Also accepts camelCase `sessionResources`. |
 | `default_tools` | see below | Fallback tool allowlist used by the runner when an agent definition has an empty tool list. Omitted frontmatter `tools` uses the built-in default list. |
 
 Default tools:

@@ -1010,7 +1010,7 @@ describe('subagents extension', () => {
     });
   });
 
-  it('defaults missing model_profiles to an empty map and preserves legacy config behavior', () => {
+  it('defaults nested subagent sessions to lean resources and preserves legacy config behavior', () => {
     const agentDir = path.join(tmp, 'isolated-global-agent');
     fs.mkdirSync(agentDir, { recursive: true });
     fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({
@@ -1031,6 +1031,21 @@ describe('subagents extension', () => {
     expect(config.stall_timeout_ms).toBe(45);
     expect(config.max_concurrency).toBe(3);
     expect(config.default_tools).toEqual(['read', 'memory_search']);
+    expect(config.session_resources).toBe('lean');
+  });
+
+  it('allows explicitly opting nested subagent sessions back into full resource loading', () => {
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ session_resources: 'full' }));
+
+    expect(readSubagentsConfig(tmp).session_resources).toBe('full');
+
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ sessionResources: 'full' }));
+
+    expect(readSubagentsConfig(tmp).session_resources).toBe('full');
+
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ session_resources: 'invalid' }));
+
+    expect(readSubagentsConfig(tmp).session_resources).toBe('lean');
   });
 
   it('deep-merges model_profiles with project field precedence while scalar config precedence is unchanged', () => {
@@ -1690,12 +1705,13 @@ describe('subagents extension', () => {
     expect(prompt).not.toContain('use memory tools read-only');
   });
 
-  it('loads project subagents with no delegation tools and memory writes only for sdd agents', () => {
+  it('loads project subagents with no delegation tools and memory writes only for workflow phase agents', () => {
     const repoRoot = path.resolve(process.cwd(), '..', '..', '..');
     const agentDir = path.resolve(process.cwd(), '..', '..');
     const agents = withAgentDir(agentDir, () => loadSubagents(repoRoot));
     expect(agents.map((agent) => agent.name).sort()).toEqual([
       'discovery',
+      'prd-review',
       'sdd-apply',
       'sdd-archive',
       'sdd-design',
@@ -1706,7 +1722,7 @@ describe('subagents extension', () => {
       'sdd-verify',
     ]);
     for (const agent of agents) {
-      if (agent.name.startsWith('sdd-')) {
+      if (agent.name.startsWith('sdd-') || agent.name === 'prd-review') {
         expect(agent.tools).toContain('memory_add');
         expect(agent.tools).toContain('memory_update');
       } else {
