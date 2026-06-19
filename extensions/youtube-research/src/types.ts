@@ -96,6 +96,7 @@ export interface VideoRefInput {
   includeComments?: boolean;
   commentsLimit?: number;
   descriptionPreviewChars?: number;
+  cleanTranscript?: boolean;
 }
 
 export interface NormalizedVideoRef {
@@ -105,6 +106,7 @@ export interface NormalizedVideoRef {
   includeComments?: boolean;
   commentsLimit?: number;
   descriptionPreviewChars?: number;
+  cleanTranscript?: boolean;
 }
 
 export interface YoutubeVideoComment {
@@ -286,7 +288,7 @@ export interface YtDlpClient {
   getChannelVideos(input: YoutubeChannelSearchInput, signal?: AbortSignal): Promise<unknown>;
   getChannelPlaylists(input: YoutubeChannelSearchInput, signal?: AbortSignal): Promise<unknown>;
   listTranscriptSources(input: NormalizedVideoRef, signal?: AbortSignal): Promise<TranscriptSourceInventory>;
-  fetchTranscript(input: TranscriptSourceSelection, signal?: AbortSignal): Promise<string>;
+  fetchTranscript(input: TranscriptSourceSelection & { video_id?: string; url?: string }, signal?: AbortSignal): Promise<string>;
 }
 
 export interface TranscriptSource {

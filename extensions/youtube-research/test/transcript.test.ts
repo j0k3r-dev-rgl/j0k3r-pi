@@ -67,6 +67,24 @@ describe('youtube-research transcript fallback engine', () => {
     expect(() => pickTranscriptCandidate(plan, 'translated')).toThrowError(TranscriptFallbackError);
   });
 
+  it('prefers original automatic captions before requested translated captions in best-effort', () => {
+    const plan = buildTranscriptPlan(
+      {
+        manual: [],
+        automatic: [
+          { source: 'automatic_subtitle', language: 'es', requested: 'es', generated: true },
+          { source: 'automatic_subtitle', language: 'en-orig', requested: 'en-orig', generated: true },
+        ],
+        translated: [{ source: 'translated_subtitle', language: 'es', requested: 'es', generated: true }],
+      },
+      { sourceMode: 'best-effort', language: 'es' },
+    );
+
+    expect(plan.candidates[0].source).toBe('automatic_subtitle');
+    expect(plan.candidates[0].language).toBe('en-orig');
+    expect(plan.candidates.findIndex((candidate) => candidate.source === 'translated_subtitle')).toBeGreaterThan(0);
+  });
+
   it('prefers translated source only after caption alternatives in best-effort', () => {
     const plan = buildTranscriptPlan(
       {

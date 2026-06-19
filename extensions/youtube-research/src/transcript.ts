@@ -69,6 +69,31 @@ function addRequestedSourceCandidates(
   }
 }
 
+function addOriginalSourceCandidates(
+  sources: TranscriptSource[],
+  requestedLanguage: string,
+  sourceMode: Exclude<TranscriptSourceMode, 'auto'>,
+  candidates: TranscriptPlan['candidates'],
+): void {
+  const normalizedRequested = requestedLanguage.toLowerCase();
+  const originals = sources.filter((source) => {
+    const language = source.language.toLowerCase();
+    return language !== normalizedRequested && (language.endsWith('-orig') || source.requested?.toLowerCase().endsWith('-orig'));
+  });
+
+  for (const source of originals) {
+    candidates.push(
+      toPlanCandidate(
+        source,
+        source.language,
+        sourceMode,
+        true,
+        `using original caption language ${source.language} before translated/requested alternatives`,
+      ),
+    );
+  }
+}
+
 function addAlternateSourceCandidates(
   sources: TranscriptSource[],
   requestedLanguage: string,
@@ -76,7 +101,10 @@ function addAlternateSourceCandidates(
   candidates: TranscriptPlan['candidates'],
 ): void {
   const normalizedRequested = requestedLanguage.toLowerCase();
-  const alternates = sources.filter((source) => source.language.toLowerCase() !== normalizedRequested);
+  const alternates = sources.filter((source) => {
+    const language = source.language.toLowerCase();
+    return language !== normalizedRequested && !language.endsWith('-orig') && !source.requested?.toLowerCase().endsWith('-orig');
+  });
 
   for (const source of alternates) {
     candidates.push(
@@ -161,8 +189,10 @@ export function buildTranscriptPlan(inventory: TranscriptSourceInventory, option
     };
   }
 
-  // best-effort / auto alias
+  // best-effort / auto alias: prioritize reliable/original captions before translated fallbacks.
   addRequestedSourceCandidates(inventory.manual, requestedLanguage, 'best-effort', candidates);
+  addOriginalSourceCandidates(inventory.manual, requestedLanguage, 'best-effort', candidates);
+  addOriginalSourceCandidates(inventory.automatic, requestedLanguage, 'best-effort', candidates);
   addRequestedSourceCandidates(inventory.automatic, requestedLanguage, 'best-effort', candidates);
   addAlternateSourceCandidates(inventory.manual, requestedLanguage, 'best-effort', candidates);
   addAlternateSourceCandidates(inventory.automatic, requestedLanguage, 'best-effort', candidates);

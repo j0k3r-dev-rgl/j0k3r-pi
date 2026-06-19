@@ -218,12 +218,12 @@ function summarizeVideo(details: YoutubeVideoDetails): string {
 }
 
 function summarizeTranscript(result: YoutubeTranscriptResult): string {
-  const preview = result.text.split('\n').slice(0, 3).join(' ').slice(0, 240);
   const lines = [
     `youtube_transcript_get: ${result.content_source} [language=${result.language}]`,
     `video: ${result.video_ref}`,
     `fallback: ${result.used_fallback ? 'yes' : 'no'}`,
-    preview ? `preview: ${preview}` : undefined,
+    'transcript:',
+    result.text,
   ].filter(Boolean);
 
   return lines.join('\n');
@@ -469,6 +469,7 @@ function normalizeVideoReference(input: VideoRefInput): NormalizedVideoRef {
   const includeComments = input.includeComments === true;
   const commentsLimit = normalizeVideoOptionLimit(input.commentsLimit, 'commentsLimit', includeComments ? VIDEO_COMMENTS_DEFAULT_LIMIT : 0, VIDEO_COMMENTS_MAX_LIMIT);
   const descriptionPreviewChars = normalizeVideoOptionLimit(input.descriptionPreviewChars, 'descriptionPreviewChars', DESCRIPTION_PREVIEW_DEFAULT_CHARS, DESCRIPTION_PREVIEW_MAX_CHARS);
+  const cleanTranscript = input.cleanTranscript !== false;
 
   if (input.url) {
     const url = input.url.trim();
@@ -477,7 +478,7 @@ function normalizeVideoReference(input: VideoRefInput): NormalizedVideoRef {
       throw new Error('invalid video url');
     }
 
-    return { video_id: videoId, videoUrl: url, includeComments, commentsLimit, descriptionPreviewChars };
+    return { video_id: videoId, videoUrl: url, includeComments, commentsLimit, descriptionPreviewChars, cleanTranscript };
   }
 
   if (input.video_id) {
@@ -491,6 +492,7 @@ function normalizeVideoReference(input: VideoRefInput): NormalizedVideoRef {
       includeComments,
       commentsLimit,
       descriptionPreviewChars,
+      cleanTranscript,
     };
   }
 
@@ -734,22 +736,33 @@ async function enrichPlaylistEntries(playlist: YoutubePlaylistDetails, reference
 }
 
 function cleanTranscriptText(raw: string): string {
-  return raw
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .filter((line) => {
-      if (/^WEBVTT/i.test(line)) return false;
-      if (/^NOTE/.test(line)) return false;
-      if (/^\d+$/.test(line)) return false;
-      if (/^\d{2}:\d{2}:\d{2}\.?\d*/.test(line)) return false;
-      if (/-->/.test(line)) return false;
-      return true;
-    })
-    .map((line) => line.replace(/<[^>]+>/g, '').trim())
-    .filter(Boolean)
-    .join('\n')
-    .trim();
+  const lines: string[] = [];
+  for (const rawLine of raw.split('\n')) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (/^WEBVTT/i.test(line)) continue;
+    if (/^NOTE\b/i.test(line)) continue;
+    if (/^(Kind|Language):\s*/i.test(line)) continue;
+    if (/^\d+$/.test(line)) continue;
+    if (/^\d{2}:\d{2}:\d{2}[.,]?\d*/.test(line)) continue;
+    if (/-->/.test(line)) continue;
+
+    const cleaned = line
+      .replace(/<\d{2}:\d{2}:\d{2}[.,]?\d*>/g, '')
+      .replace(/<[^>]+>/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!cleaned) continue;
+
+    const previous = lines.at(-1);
+    if (previous === cleaned) continue;
+    if (previous && cleaned.startsWith(previous) && cleaned.length > previous.length) {
+      lines[lines.length - 1] = cleaned;
+      continue;
+    }
+    lines.push(cleaned);
+  }
+  return lines.join(' ').replace(/\s+/g, ' ').trim();
 }
 
 function buildFallbackTranscriptText(video: YoutubeVideoDetails, source: TranscriptSource['source']): string {
@@ -812,6 +825,7 @@ const transcriptParameters = Type.Object({
   video_id: Type.Optional(Type.String()),
   source_mode: Type.Optional(Type.String()),
   language: Type.Optional(Type.String()),
+  cleanTranscript: Type.Optional(Type.Boolean()),
 });
 
 const channelSearchParameters = Type.Object({
@@ -951,54 +965,74 @@ async function runTranscriptGet(
   const transcriptInventory = await client.listTranscriptSources(reference);
   const plan = buildTranscriptPlan(transcriptInventory, { sourceMode: params.source_mode ?? 'auto', language });
 
-  const candidate = pickTranscriptCandidate(plan, params.source_mode ?? 'best-effort');
-  const selectedPlan = plan.candidates.find(
-    (entry) => entry.source === candidate.source && entry.language === candidate.language && entry.generated === candidate.generated,
-  );
+  pickTranscriptCandidate(plan, params.source_mode ?? 'best-effort');
 
-  const usedFallback = selectedPlan?.fallback ?? false;
-  const fallbackReason = selectedPlan?.reason;
-  const usedActualSource = candidate.source;
+  let fallbackVideo: YoutubeVideoDetails | null = null;
+  const failures: string[] = [];
 
-  let text = '';
+  for (const selectedPlan of plan.candidates) {
+    const candidate = {
+      source: selectedPlan.source,
+      language: selectedPlan.language,
+      sourceLanguage: selectedPlan.language,
+      generated: selectedPlan.generated,
+    };
+    const usedFallback = selectedPlan.fallback ?? false;
+    const fallbackReason = selectedPlan.reason;
+    const usedActualSource = candidate.source;
+    let text = '';
 
-  if (usedFallback) {
-    const rawVideo = await client.getVideo(reference);
-    if (!rawVideo) {
-      return buildFailure('not_found', `No video metadata found for ${reference.video_id}`, false);
+    try {
+      if (usedFallback && /_fallback$/.test(usedActualSource)) {
+        if (!fallbackVideo) {
+          const rawVideo = await client.getVideo(reference);
+          if (!rawVideo) {
+            failures.push(`${usedActualSource}:${candidate.language}: no video metadata`);
+            continue;
+          }
+          fallbackVideo = normalizeVideoDetails(rawVideo as RawYtDlpItem);
+        }
+        text = buildFallbackTranscriptText(fallbackVideo, usedActualSource);
+      } else {
+        text = await client.fetchTranscript({
+          source: usedActualSource,
+          language: candidate.language,
+          sourceLanguage: candidate.language,
+          generated: candidate.generated,
+          video_id: reference.video_id,
+          url: reference.videoUrl,
+        });
+        if (reference.cleanTranscript !== false) {
+          text = cleanTranscriptText(text);
+        }
+      }
+    } catch (error) {
+      failures.push(`${usedActualSource}:${candidate.language}: ${error instanceof Error ? error.message : 'failed'}`);
+      continue;
     }
-    const video = normalizeVideoDetails(rawVideo as RawYtDlpItem);
-    text = buildFallbackTranscriptText(video, usedActualSource);
-    if (!text) {
-      return buildFailure('source_unavailable', `No transcript fallback text found for ${reference.video_id}`, false);
+
+    if (!text.trim()) {
+      failures.push(`${usedActualSource}:${candidate.language}: empty text`);
+      continue;
     }
-  } else {
-    text = await client.fetchTranscript({
-      source: usedActualSource,
+
+    const transcriptResult: YoutubeTranscriptResult = {
+      video_ref: reference.videoUrl ?? `https://www.youtube.com/watch?v=${reference.video_id}`,
+      text,
+      content_source: usedActualSource,
       language: candidate.language,
-      sourceLanguage: candidate.language,
-      generated: candidate.generated,
-      url: reference.videoUrl,
-    });
-    text = cleanTranscriptText(text);
-    if (!text) {
-      return buildFailure('source_unavailable', `Transcript source ${usedActualSource} returned no text`, false);
-    }
+      is_generated: candidate.generated,
+      used_fallback: usedFallback,
+      fallback_reason: usedFallback ? fallbackReason : undefined,
+      source_mode_requested: params.source_mode,
+      source_mode_effective: effectiveMode,
+    };
+
+    return buildSuccess(summarizeTranscript(transcriptResult), transcriptResult);
   }
 
-  const transcriptResult: YoutubeTranscriptResult = {
-    video_ref: reference.videoUrl ?? `https://www.youtube.com/watch?v=${reference.video_id}`,
-    text,
-    content_source: usedActualSource,
-    language: candidate.language,
-    is_generated: candidate.generated,
-    used_fallback: usedFallback,
-    fallback_reason: usedFallback ? fallbackReason : undefined,
-    source_mode_requested: params.source_mode,
-    source_mode_effective: effectiveMode,
-  };
-
-  return buildSuccess(summarizeTranscript(transcriptResult), transcriptResult);
+  const detail = failures.length ? ` Attempts: ${failures.slice(0, 3).join('; ')}` : '';
+  return buildFailure('source_unavailable', `No usable transcript source found for ${reference.video_id}.${detail}`, false);
 }
 
 function isDirectChannelLookup(params: YoutubeChannelSearchInput): boolean {

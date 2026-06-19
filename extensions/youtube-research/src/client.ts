@@ -1,4 +1,6 @@
 import { promises as fs } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, isAbsolute } from 'node:path';
 import type {
   NormalizedSearchInput,
   NormalizedVideoRef,
@@ -194,6 +196,8 @@ export function buildTranscriptFetchCommand(selection: TranscriptFetchCommandOpt
     selection.language,
     '--sub-format',
     'vtt',
+    '-o',
+    '%(id)s.%(ext)s',
     youtubeVideoUrl({ video_id: selection.video_id, url: selection.url, videoUrl: selection.url }),
   ];
 
@@ -364,17 +368,24 @@ function parseSubtitlePath(result: { stdout: string; stderr: string }): string |
   return match[1].trim().replace(/["']/g, '');
 }
 
-async function readTranscriptFile(pathname: string): Promise<string> {
-  const normalized = pathname;
-  const text = await fs.readFile(normalized, 'utf8');
-
-  try {
-    await fs.unlink(normalized);
-  } catch {
-    // best-effort cleanup only
+async function findSubtitleFile(directory: string, parsedPath?: string | null): Promise<string | null> {
+  if (parsedPath) {
+    const candidate = isAbsolute(parsedPath) ? parsedPath : join(directory, parsedPath);
+    try {
+      await fs.access(candidate);
+      return candidate;
+    } catch {
+      // Fall through to directory discovery.
+    }
   }
 
-  return text;
+  const entries = await fs.readdir(directory);
+  const subtitle = entries.find((entry) => /\.(?:vtt|srt|ttml|srv\d|json3)$/i.test(entry));
+  return subtitle ? join(directory, subtitle) : null;
+}
+
+async function readTranscriptFile(pathname: string): Promise<string> {
+  return fs.readFile(pathname, 'utf8');
 }
 
 async function runAndParseJson(run: YtDlpExecutor, args: string[]): Promise<unknown[]> {
@@ -436,22 +447,27 @@ export class YoutubeResearchClient implements YtDlpClient {
   }
 
   async fetchTranscript(input: TranscriptFetchCommandOptions, _signal?: AbortSignal): Promise<string> {
-    const result = await this.options.run(buildTranscriptFetchCommand(input, this.options.binary));
-    if (result.exitCode !== 0) {
-      throw new Error(result.stderr || 'yt-dlp transcript fetch failed');
-    }
+    const workdir = await fs.mkdtemp(join(tmpdir(), 'pi-youtube-transcript-'));
+    try {
+      const result = await this.options.run(buildTranscriptFetchCommand(input, this.options.binary), { cwd: workdir });
+      if (result.exitCode !== 0) {
+        throw new Error(result.stderr || 'yt-dlp transcript fetch failed');
+      }
 
-    const subtitlePath = parseSubtitlePath(result);
-    if (subtitlePath) {
-      return readTranscriptFile(subtitlePath);
-    }
+      const subtitlePath = await findSubtitleFile(workdir, parseSubtitlePath(result));
+      if (subtitlePath) {
+        return await readTranscriptFile(subtitlePath);
+      }
 
-    const trimmed = `${result.stdout}`.trim();
-    if (trimmed.length > 0) {
-      return trimmed;
-    }
+      const trimmed = `${result.stdout}`.trim();
+      if (trimmed.length > 0) {
+        return trimmed;
+      }
 
-    throw new Error('yt-dlp did not produce subtitle output for transcript fetch');
+      throw new Error('yt-dlp did not produce subtitle output for transcript fetch');
+    } finally {
+      await fs.rm(workdir, { recursive: true, force: true });
+    }
   }
 }
 

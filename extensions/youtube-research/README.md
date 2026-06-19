@@ -21,7 +21,9 @@ A standalone Pi extension that adds five focused YouTube research tools.
 3. `youtube_transcript_get`
    - Fetch transcript text for a video by URL or video ID.
    - `source_mode`: `manual | automatic | translated | any-caption | auto | best-effort`.
-   - `best-effort` follows strict fallback chain and reports whether fallback was used.
+   - `best-effort` follows a fidelity-first fallback chain and reports whether fallback was used.
+   - Transcript downloads use a temporary directory and deterministic subtitle filenames to avoid title/unicode path issues.
+   - `cleanTranscript` defaults to `true` and returns text-only transcript; set `cleanTranscript: false` to preserve raw subtitle timing/metadata when timestamps are needed.
 4. `youtube_channel_search`
    - Search channels by query or inspect a specific channel by channel ID, handle, or URL.
    - Returns channel metadata useful for treating channels as recurring research sources: channel ID, handle, description preview, subscribers, verified signal, and thumbnail when available.

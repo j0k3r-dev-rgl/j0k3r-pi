@@ -455,6 +455,71 @@ describe('youtube-research tool registration', () => {
     expect(fallbackResult.details.data.fallback_reason).toBeDefined();
   });
 
+  it('sanitizes transcript text by default and can preserve raw timestamps when requested', async () => {
+    const rawVtt = [
+      'WEBVTT',
+      'Kind: captions',
+      'Language: en',
+      '',
+      '00:00:00.000 --> 00:00:01.000 align:start position:0%',
+      'Hello<00:00:00.100><c> world</c>',
+      '',
+      '00:00:01.000 --> 00:00:02.000',
+      'Hello world',
+    ].join('\n');
+    const pi = createMockPi();
+    const { client } = createMockClient();
+    (client.listTranscriptSources as any).mockResolvedValue({
+      manual: [],
+      automatic: [{ source: 'automatic_subtitle', language: 'en', requested: 'en', generated: true }],
+      translated: [],
+    });
+    (client.fetchTranscript as any).mockResolvedValue(rawVtt);
+
+    registerYoutubeResearchTools(pi, {
+      checkRuntime: vi.fn().mockResolvedValue({ runtime: { binary: 'yt-dlp' } }),
+      createClient: () => client,
+    });
+
+    const transcriptTool = pi.tools.find((tool) => tool.name === 'youtube_transcript_get');
+    const clean = (await execute(transcriptTool!, { video_id: 'abc123', language: 'en', source_mode: 'automatic' })) as { content: Array<{ text: string }>; details: { data: { text: string } } };
+    expect(clean.details.data.text).toBe('Hello world');
+    expect(clean.details.data.text).not.toContain('Kind: captions');
+    expect(clean.details.data.text).not.toContain('-->');
+    expect(clean.content[0].text).toContain('transcript:\nHello world');
+
+    const raw = (await execute(transcriptTool!, { video_id: 'abc123', language: 'en', source_mode: 'automatic', cleanTranscript: false })) as { content: Array<{ text: string }>; details: { data: { text: string } } };
+    expect(raw.details.data.text).toContain('Kind: captions');
+    expect(raw.details.data.text).toContain('00:00:00.000 --> 00:00:01.000');
+    expect(raw.content[0].text).toContain('00:00:00.000 --> 00:00:01.000');
+  });
+
+  it('compacts cleaned transcript line breaks into readable continuous text', async () => {
+    const pi = createMockPi();
+    const { client } = createMockClient();
+    (client.listTranscriptSources as any).mockResolvedValue({
+      manual: [],
+      automatic: [{ source: 'automatic_subtitle', language: 'es', requested: 'es', generated: true }],
+      translated: [],
+    });
+    (client.fetchTranscript as any).mockResolvedValue([
+      'WEBVTT',
+      '00:00:00.000 --> 00:00:01.000',
+      'Hola gente, ¿cómo andan? Espero que muy',
+      '00:00:01.000 --> 00:00:02.000',
+      'bien. Acá estamos en un nuevo video.',
+    ].join('\n'));
+
+    registerYoutubeResearchTools(pi, {
+      checkRuntime: vi.fn().mockResolvedValue({ runtime: { binary: 'yt-dlp' } }),
+      createClient: () => client,
+    });
+
+    const transcriptTool = pi.tools.find((tool) => tool.name === 'youtube_transcript_get');
+    const result = (await execute(transcriptTool!, { video_id: 'abc123', language: 'es', source_mode: 'automatic' })) as { details: { data: { text: string } } };
+    expect(result.details.data.text).toBe('Hola gente, ¿cómo andan? Espero que muy bien. Acá estamos en un nuevo video.');
+  });
+
   it('returns metadata-rich channel search entries separate from mixed search discovery', async () => {
     const pi = createMockPi();
     const { client } = createMockClient();

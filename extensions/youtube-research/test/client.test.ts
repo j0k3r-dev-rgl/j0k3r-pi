@@ -215,6 +215,8 @@ describe('youtube-research yt-dlp command and parse contract', () => {
       'en',
       '--sub-format',
       'vtt',
+      '-o',
+      '%(id)s.%(ext)s',
       'https://www.youtube.com/watch?v=abc123',
     ]);
 
@@ -232,6 +234,8 @@ describe('youtube-research yt-dlp command and parse contract', () => {
       'en',
       '--sub-format',
       'vtt',
+      '-o',
+      '%(id)s.%(ext)s',
       'https://www.youtube.com/watch?v=abc123',
     ]);
 
@@ -250,6 +254,8 @@ describe('youtube-research yt-dlp command and parse contract', () => {
       'es',
       '--sub-format',
       'vtt',
+      '-o',
+      '%(id)s.%(ext)s',
       'https://www.youtube.com/watch?v=abc123',
     ]);
   });
@@ -309,38 +315,50 @@ describe('youtube-research yt-dlp command and parse contract', () => {
     expect(result.automatic.map((source) => source.language)).toEqual(['es']);
   });
 
-  it('fetchTranscript reads subtitle text from generated subtitle files when yt-dlp writes output files', async () => {
-    const outputDir = join(tmpdir(), 'youtube-research-client-tests');
-    const outputPath = join(outputDir, 'abc123.en.vtt');
-    mkdirSync(outputDir, { recursive: true });
-    writeFileSync(outputPath, 'WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nHello world\n');
-
-    try {
-      const run = vi.fn().mockResolvedValue({
+  it('fetchTranscript uses a temporary working directory and deterministic subtitle filename', async () => {
+    let capturedCwd = '';
+    const run = vi.fn(async (_args: string[], options?: { cwd?: string }) => {
+      capturedCwd = options?.cwd ?? '';
+      mkdirSync(capturedCwd, { recursive: true });
+      writeFileSync(join(capturedCwd, 'abc123.en.vtt'), 'WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nHello world\n');
+      return {
         stdout: '',
-        stderr: `[info] Writing video subtitles to: ${outputPath}\n`,
+        stderr: '[info] Writing video subtitles to: abc123.en.vtt\n',
         exitCode: 0,
-      });
+      };
+    });
 
-      const client = new YoutubeResearchClient({
-        binary: 'yt-dlp',
-        run,
-      });
+    const client = new YoutubeResearchClient({
+      binary: 'yt-dlp',
+      run,
+    });
 
-      const text = await client.fetchTranscript({
-        source: 'manual_subtitle',
-        language: 'en',
-        sourceLanguage: 'en',
-        generated: false,
-        video_id: 'abc123',
-      });
+    const text = await client.fetchTranscript({
+      source: 'manual_subtitle',
+      language: 'en',
+      sourceLanguage: 'en',
+      generated: false,
+      video_id: 'abc123',
+    });
 
-      expect(text).toContain('Hello world');
-    } finally {
-      rmSync(outputPath, { force: true });
-    }
+    expect(text).toContain('Hello world');
+    expect(capturedCwd).toContain(tmpdir());
+    expect(run.mock.calls[0][0]).toContain('-o');
+    expect(run.mock.calls[0][0]).toContain('%(id)s.%(ext)s');
+    expect(run.mock.calls[0][1]?.cwd).toBe(capturedCwd);
+  });
 
-    rmSync(outputDir, { recursive: true, force: true });
+  it('fetchTranscript discovers generated subtitle files when yt-dlp output path parsing is absent', async () => {
+    const run = vi.fn(async (_args: string[], options?: { cwd?: string }) => {
+      const cwd = options?.cwd ?? '';
+      mkdirSync(cwd, { recursive: true });
+      writeFileSync(join(cwd, 'unicode-title-file.en.vtt'), 'WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nFallback file discovery works\n');
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+
+    const client = new YoutubeResearchClient({ binary: 'yt-dlp', run });
+    const text = await client.fetchTranscript({ source: 'automatic_subtitle', language: 'en', sourceLanguage: 'en', generated: true, video_id: 'abc123' });
+    expect(text).toContain('Fallback file discovery works');
   });
 
   it('uses injectable executor for test-driven command verification', async () => {
