@@ -686,6 +686,51 @@ describe('subagent runner thread snapshots', () => {
     expect(bashItem.truncated).toBe(true);
   });
 
+  it('fails stalled tool sessions instead of returning streamed tool-call json as the final result', async () => {
+    vi.useFakeTimers();
+    vi.resetModules();
+    let subscriber: ((event: unknown) => void) | undefined;
+    let resolvePrompt: (() => void) | undefined;
+    const session = {
+      subscribe: vi.fn((callback: (event: unknown) => void) => {
+        subscriber = callback;
+        return vi.fn();
+      }),
+      prompt: vi.fn(async () => {
+        subscriber?.({ type: 'message_update', assistantMessageEvent: { delta: '{"path":"openspec/changes/websearch-extension/spec.md"}' } });
+        subscriber?.({ type: 'tool_execution_start', toolCallId: 'read-1', toolName: 'read', args: { path: 'openspec/changes/websearch-extension/spec.md' } });
+        subscriber?.({ type: 'tool_execution_end', toolCallId: 'read-1', toolName: 'read', isError: false, result: { content: [{ type: 'text', text: 'spec body' }] } });
+        return new Promise<void>((resolve) => { resolvePrompt = resolve; });
+      }),
+      abort: vi.fn(async () => { resolvePrompt?.(); }),
+      messages: [{ role: 'assistant', content: [{ type: 'toolCall', id: 'read-1', name: 'read', arguments: { path: 'openspec/changes/websearch-extension/spec.md' } }] }],
+      dispose: vi.fn(async () => undefined),
+    };
+    vi.doMock('@earendil-works/pi-coding-agent', () => ({
+      SessionManager: { inMemory: () => ({}) },
+      createAgentSession: vi.fn(() => ({ session })),
+    }));
+
+    try {
+      const { sdkSubagentRunner } = await import('../src/runner.js');
+      const promise = sdkSubagentRunner({
+        definition,
+        task: 'apply work that stalls after tools',
+        cwd: '/workspace',
+        ctx: { model: { provider: 'test', id: 'model' } },
+        config: { ...config, stall_timeout_ms: 20 },
+        signal: new AbortController().signal,
+      });
+      const rejection = expect(promise).rejects.toThrow(/stalled for 20ms/i);
+
+      await vi.advanceTimersByTimeAsync(600);
+      await rejection;
+      expect(session.abort).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('logs when streamed raw tool-call json is dropped from live thread snapshots', async () => {
     let subscriber: ((event: unknown) => void) | undefined;
     const session = {

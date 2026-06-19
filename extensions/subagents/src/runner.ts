@@ -28,6 +28,14 @@ export function buildPrompt(_definition: SubagentDefinition, task: string, conte
 
 const SUBAGENT_ALLOWED_EXTENSION_EVENTS = new Set(['tool_call', 'tool_result', 'user_bash']);
 
+class NonRetryableSubagentError extends Error {
+  readonly nonRetryable = true;
+}
+
+function isNonRetryableSubagentError(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && (error as { nonRetryable?: unknown }).nonRetryable);
+}
+
 function isolateSubagentExtensions(base: any): any {
   return {
     ...base,
@@ -484,6 +492,8 @@ async function promptWithInactivity(
   let usage = emptyUsage();
   let transcript = `${systemPrompt ? `# system prompt\n\n${systemPrompt}\n\n` : ''}# delegated prompt\n\n${prompt}\n\n# subagent execution\n`;
   let lastActivity = Date.now();
+  let stalled = false;
+  let sawToolActivity = false;
   onActivity?.({ message: 'session started', prompt, system_prompt: systemPrompt, transcript, usage, thread_snapshot: snapshotBuilder.snapshot() });
   const unsubscribe = session.subscribe?.((event: any) => {
     lastActivity = Date.now();
@@ -498,6 +508,7 @@ async function promptWithInactivity(
       resultKeys: event?.result && typeof event.result === 'object' ? Object.keys(event.result) : undefined,
       permissionCarrier: event?.type === 'tool_execution_end' ? summarizePermissionCarrier(event?.result) : undefined,
     });
+    if (typeof event?.type === 'string' && event.type.startsWith('tool_execution_')) sawToolActivity = true;
     snapshotBuilder.update(event);
     const thread_snapshot = snapshotBuilder.snapshot();
     const transcriptChunk = eventTranscript(event);
@@ -554,18 +565,42 @@ async function promptWithInactivity(
     if (message) onActivity?.({ message, transcript, usage, thread_snapshot, permission_request: latestPermissionRequest });
   }) ?? (() => {});
   const interval = setInterval(() => {
-    if (Date.now() - lastActivity > stallTimeoutMs) {
+    if (!stalled && Date.now() - lastActivity > stallTimeoutMs) {
+      stalled = true;
       transcript += `\n\n--- stall ---\nstalled for ${stallTimeoutMs}ms; aborting session\n`;
       onActivity?.({ message: `stalled for ${stallTimeoutMs}ms; aborting session`, output, transcript, usage, thread_snapshot: snapshotBuilder.snapshot(), permission_request: latestPermissionRequest });
       session.abort?.().catch?.(() => {});
     }
   }, Math.min(5000, Math.max(500, stallTimeoutMs / 4)));
   try {
-    await session.prompt(prompt, { signal });
-    let collected = sanitizePermissionTransportText(collectAssistantText(session.messages ?? []) || output.trim());
-    transcript += `\n\n# final assistant text\n\n${collected}`;
+    let promptError: unknown;
+    try {
+      await session.prompt(prompt, { signal });
+    } catch (error) {
+      promptError = error;
+    }
     const thread_snapshot = snapshotBuilder.finalize(session.messages ?? []);
     debugLog(cwd, 'runner_final_snapshot', { source: thread_snapshot?.source, items: thread_snapshot?.items.map((item) => ({ type: item.type, label: (item as any).label, name: (item as any).name, status: (item as any).status, assistantContent: item.type === 'assistant' ? item.message.content.map((part: any) => part.type) : undefined })) });
+    if (stalled) {
+      const message = `Subagent stalled for ${stallTimeoutMs}ms without final response.`;
+      transcript += `\n\n# subagent failure\n\n${message}`;
+      onActivity?.({ message: `failed: ${message}`, output: '', transcript, usage, thread_snapshot, permission_request: latestPermissionRequest });
+      throw new NonRetryableSubagentError(message);
+    }
+    if (promptError) throw promptError;
+    const messageText = collectAssistantText(session.messages ?? []);
+    const streamedFallback = sawToolActivity ? '' : output.trim();
+    const collected = sanitizePermissionTransportText(messageText || streamedFallback);
+    if (!collected.trim()) {
+      const message = sawToolActivity
+        ? 'Subagent completed tool execution but did not produce a final response.'
+        : 'Subagent finished without a final response.';
+      transcript += `\n\n# subagent failure\n\n${message}`;
+      onActivity?.({ message: `failed: ${message}`, output: '', transcript, usage, thread_snapshot, permission_request: latestPermissionRequest });
+      const error = sawToolActivity ? new NonRetryableSubagentError(message) : new Error(message);
+      throw error;
+    }
+    transcript += `\n\n# final assistant text\n\n${collected}`;
     onActivity?.({ message: 'collected final response', output: collected, transcript, usage, thread_snapshot, permission_request: latestPermissionRequest });
     return { result: collected, usage, thread_snapshot, permission_request: latestPermissionRequest };
   } finally {
@@ -668,6 +703,7 @@ export const sdkSubagentRunner: SubagentRunner = async ({ definition, task, task
     return { result, usage, thread_snapshot, permission_request, system_prompt, model: modelLabel(preferred) ?? modelRefLabel(profile.model.value), effort, fallback_used: false };
   } catch (error) {
     if (signal.aborted) throw new Error('Subagent was aborted');
+    if (isNonRetryableSubagentError(error)) throw error;
     const preferredLabel = modelLabel(preferred) ?? modelRefLabel(profile.model.value) ?? 'unknown';
     const currentLabel = modelLabel(current) ?? 'unknown';
     onActivity?.({ message: `failed/stalled on ${preferredLabel}; falling back to ${currentLabel}`, effort });

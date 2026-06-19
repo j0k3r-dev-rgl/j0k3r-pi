@@ -1866,6 +1866,22 @@ describe('subagents extension', () => {
     expect(result.results?.[0].error).toContain('timed out');
   });
 
+  it('marks tasks failed when a runner returns no final response text', async () => {
+    writeAgent('analyst');
+    const runner: SubagentRunner = async ({ onActivity }) => {
+      onActivity?.({ message: 'collected final response', output: '{"path":"not-a-final-answer.md"}' });
+      return { result: '', model: 'mock/model', fallback_used: false };
+    };
+    const manager = new SubagentManager(runner);
+
+    const result = await manager.run({ agent: 'analyst', task: 'empty final response', mode: 'task' }, { cwd: tmp });
+
+    expect(result.results?.[0].status).toBe('failed');
+    expect(result.results?.[0].error).toMatch(/final response/i);
+    expect(result.results?.[0].result).toBeUndefined();
+    expect(result.results?.[0].output_preview).toContain('not-a-final-answer');
+  });
+
   it('starts background tasks and notifies completion', async () => {
     writeAgent('analyst');
     const notifications: string[] = [];

@@ -464,10 +464,12 @@ export class SubagentManager {
         }
 
         if (!result) throw new Error('Subagent finished without a result.');
+        const finalResult = sanitizePermissionTransportText(result.result ?? '');
+        if (!finalResult.trim()) throw new Error('Subagent finished without a final response.');
         task.status = 'completed';
-        task.result = sanitizePermissionTransportText(result.result);
-        task.output_preview = compactOutput(result.result);
-        task.transcript = sanitizePermissionTransportText(`${task.transcript ?? ''}\n\n# response sent to orchestrator\n\n${result.result}`.trim());
+        task.result = finalResult;
+        task.output_preview = compactOutput(finalResult);
+        task.transcript = sanitizePermissionTransportText(`${task.transcript ?? ''}\n\n# response sent to orchestrator\n\n${finalResult}`.trim());
         task.last_activity = 'completed';
         task.last_activity_at = nowIso();
         task.usage = result.usage ?? task.usage;
