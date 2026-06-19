@@ -3,8 +3,10 @@ import type {
   HackerNewsClient,
   StackExchangeClient,
   StackOverflowAnswersRequest,
+  StackOverflowCommentsRequest,
   StackOverflowQuestionRef,
   StackOverflowRawAnswer,
+  StackOverflowRawComment,
   StackOverflowRawQuestion,
   StackOverflowSearchRequest,
   WebsearchClients,
@@ -22,7 +24,7 @@ type StackExchangeConfig = {
   key?: string;
 };
 
-async function readStackExchangeJson(response: Response): Promise<{ items?: unknown[] }> {
+async function readStackExchangeJson(response: Response): Promise<{ items?: unknown[]; has_more?: boolean }> {
   if (!response.ok) {
     throw new ProviderFailure(providerErrorFromResponse('stack_overflow', response));
   }
@@ -46,6 +48,7 @@ class DirectFetchStackExchangeClient implements StackExchangeClient {
     url.searchParams.set('pagesize', String(input.limit));
     url.searchParams.set('order', 'desc');
     url.searchParams.set('sort', 'relevance');
+    url.searchParams.set('filter', STACK_EXCHANGE_BODY_FILTER);
     return this.items(url, signal) as Promise<StackOverflowRawQuestion[]>;
   }
 
@@ -64,6 +67,20 @@ class DirectFetchStackExchangeClient implements StackExchangeClient {
     return this.items(url, signal) as Promise<StackOverflowRawAnswer[]>;
   }
 
+  async getQuestionComments(input: StackOverflowCommentsRequest, signal?: AbortSignal): Promise<{ items: StackOverflowRawComment[]; hasMore: boolean }> {
+    const url = this.url(`/questions/${encodeURIComponent(input.questionId)}/comments`);
+    url.searchParams.set('pagesize', String(input.commentsLimit));
+    url.searchParams.set('page', String(Math.floor(input.commentsOffset / input.commentsLimit) + 1));
+    url.searchParams.set('order', 'asc');
+    url.searchParams.set('sort', 'creation');
+    url.searchParams.set('filter', STACK_EXCHANGE_BODY_FILTER);
+    const payload = await this.payload(url, signal);
+    return {
+      items: (payload.items ?? []) as StackOverflowRawComment[],
+      hasMore: payload.has_more === true,
+    };
+  }
+
   private url(path: string): URL {
     const url = new URL(`${STACK_EXCHANGE_API_BASE}${path}`);
     url.searchParams.set('site', 'stackoverflow');
@@ -74,8 +91,12 @@ class DirectFetchStackExchangeClient implements StackExchangeClient {
   }
 
   private async items(url: URL, signal?: AbortSignal): Promise<unknown[]> {
-    const payload = await readStackExchangeJson(await this.fetchImpl(url.toString(), { method: 'GET', signal }));
+    const payload = await this.payload(url, signal);
     return payload.items ?? [];
+  }
+
+  private async payload(url: URL, signal?: AbortSignal): Promise<{ items?: unknown[]; has_more?: boolean }> {
+    return readStackExchangeJson(await this.fetchImpl(url.toString(), { method: 'GET', signal }));
   }
 }
 

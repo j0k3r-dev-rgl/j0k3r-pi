@@ -7,6 +7,7 @@ import type {
   HackerNewsSearchRequest,
   HackerNewsStoryRequest,
   StackOverflowAnswersRequest,
+  StackOverflowCommentsRequest,
   StackOverflowQuestionRef,
   StackOverflowSearchRequest,
 } from './types.js';
@@ -15,6 +16,8 @@ export const SEARCH_DEFAULT_LIMIT = 5;
 export const SEARCH_MAX_LIMIT = 10;
 const STACK_OVERFLOW_ANSWERS_DEFAULT_LIMIT = 10;
 const STACK_OVERFLOW_ANSWERS_MAX_LIMIT = 30;
+const STACK_OVERFLOW_COMMENTS_DEFAULT_LIMIT = 10;
+const STACK_OVERFLOW_COMMENTS_MAX_LIMIT = 30;
 export const GITHUB_COMMENTS_DEFAULT_LIMIT = 5;
 export const GITHUB_COMMENTS_MAX_LIMIT = 20;
 export const DEVTO_TOP_LEVEL_COMMENTS_DEFAULT_LIMIT = 10;
@@ -78,6 +81,20 @@ function boundedInteger(input: Input, key: string, defaultValue: number, max: nu
   }
   if (value > max) {
     throw new ValidationError(`${key} must be at most ${max}.`);
+  }
+  return value;
+}
+
+function boundedOffset(input: Input, key: string, defaultValue: number): number {
+  const value = input[key];
+  if (value === undefined || value === null || value === '') {
+    return defaultValue;
+  }
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new ValidationError(`${key} must be an integer.`);
+  }
+  if (value < 0) {
+    throw new ValidationError(`${key} must be at least 0.`);
   }
   return value;
 }
@@ -176,6 +193,15 @@ export function validateStackOverflowAnswers(value: unknown): StackOverflowAnswe
   return {
     ...parseStackOverflowQuestion(requiredString(input, 'question')),
     limit: boundedInteger(input, 'limit', STACK_OVERFLOW_ANSWERS_DEFAULT_LIMIT, STACK_OVERFLOW_ANSWERS_MAX_LIMIT),
+  };
+}
+
+export function validateStackOverflowComments(value: unknown): StackOverflowCommentsRequest {
+  const input = asInput(value);
+  return {
+    ...parseStackOverflowQuestion(requiredString(input, 'question')),
+    commentsLimit: boundedInteger(input, 'commentsLimit', STACK_OVERFLOW_COMMENTS_DEFAULT_LIMIT, STACK_OVERFLOW_COMMENTS_MAX_LIMIT),
+    commentsOffset: boundedOffset(input, 'commentsOffset', 0),
   };
 }
 

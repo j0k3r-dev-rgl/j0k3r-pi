@@ -15,8 +15,10 @@ import type {
   NormalizedGitHubIssueComment,
   NormalizedHackerNewsStory,
   NormalizedStackOverflowAnswer,
+  NormalizedStackOverflowComment,
   NormalizedStackOverflowQuestion,
   StackOverflowRawAnswer,
+  StackOverflowRawComment,
   StackOverflowRawQuestion,
 } from './types.js';
 import { truncateText } from './security.js';
@@ -41,9 +43,34 @@ function createdAt(value: unknown): string | undefined {
   return new Date(timestamp * 1000).toISOString();
 }
 
+function decodeHtmlEntities(value: string): string {
+  const namedEntities: Record<string, string> = {
+    amp: '&',
+    apos: "'",
+    gt: '>',
+    hellip: '…',
+    lt: '<',
+    nbsp: ' ',
+    quot: '"',
+  };
+  return value
+    .replace(/&#(\d+);/g, (_match, codepoint: string) => String.fromCodePoint(Number(codepoint)))
+    .replace(/&#x([0-9a-f]+);/gi, (_match, codepoint: string) => String.fromCodePoint(parseInt(codepoint, 16)))
+    .replace(/&([a-z][a-z0-9]+);/gi, (match, name: string) => namedEntities[name] ?? match);
+}
+
 function ownerName(data: Record<string, unknown>): string | undefined {
   const owner = data.owner as Record<string, unknown> | undefined;
-  return owner ? stringValue(owner.display_name) : undefined;
+  const name = owner ? stringValue(owner.display_name) : undefined;
+  return name ? decodeHtmlEntities(name) : undefined;
+}
+
+function htmlToText(value: string | undefined): string | undefined {
+  const text = value
+    ?.replace(/<pre[^>]*><code>/gi, ' ')
+    .replace(/<\/code><\/pre>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ');
+  return text ? decodeHtmlEntities(text).replace(/\s+([,.;:!?])/g, '$1').replace(/\s+/g, ' ').trim() || undefined : undefined;
 }
 
 function stringArray(value: unknown): string[] | undefined {
@@ -88,20 +115,30 @@ function githubFollowUpRef(repository: string, number: number): string {
 export function normalizeStackOverflowQuestion(raw: StackOverflowRawQuestion): NormalizedStackOverflowQuestion {
   const data = raw as Record<string, unknown>;
   const id = String(numberValue(data.question_id) ?? stringValue(data.question_id) ?? 'unknown');
-  const body = stringValue(data.body_markdown) ?? stringValue(data.body);
+  const body = stringValue(data.body_markdown) ?? htmlToText(stringValue(data.body));
   return {
     platform: 'stack_overflow',
     id,
     question_id: id,
     url: stringValue(data.link) ?? `https://stackoverflow.com/questions/${id}`,
-    title: truncateText(stringValue(data.title), 300),
+    title: truncateText(stringValue(data.title) ? decodeHtmlEntities(stringValue(data.title)!) : undefined, 300),
     score: numberValue(data.score),
     answer_count: numberValue(data.answer_count),
+    is_answered: booleanValue(data.is_answered),
+    accepted_answer_id: numberValue(data.accepted_answer_id) === undefined && stringValue(data.accepted_answer_id) === undefined ? undefined : String(numberValue(data.accepted_answer_id) ?? stringValue(data.accepted_answer_id)),
+    view_count: numberValue(data.view_count),
     tags: stringArray(data.tags),
     author: truncateText(ownerName(data), 120),
     created_at: createdAt(data.creation_date),
+    last_activity_at: createdAt(data.last_activity_date),
     snippet: truncateText(body ?? stringValue(data.title), 300),
     body: truncateText(body, 4000),
+    follow_up: {
+      answers_tool: 'stack_overflow_answers_get',
+      answers_ref: id,
+      comments_tool: 'stack_overflow_comments_get',
+      comments_ref: id,
+    },
     availability: body || data.body_markdown !== undefined ? { status: 'available' } : { status: 'unavailable', reason: 'body_unavailable' },
   };
 }
@@ -110,7 +147,7 @@ export function normalizeStackOverflowAnswer(raw: StackOverflowRawAnswer): Norma
   const data = raw as Record<string, unknown>;
   const id = String(numberValue(data.answer_id) ?? stringValue(data.answer_id) ?? 'unknown');
   const questionId = numberValue(data.question_id) ?? stringValue(data.question_id);
-  const body = stringValue(data.body_markdown) ?? stringValue(data.body);
+  const body = stringValue(data.body_markdown) ?? htmlToText(stringValue(data.body));
   return {
     platform: 'stack_overflow',
     id,
@@ -121,8 +158,24 @@ export function normalizeStackOverflowAnswer(raw: StackOverflowRawAnswer): Norma
     accepted: booleanValue(data.is_accepted),
     author: truncateText(ownerName(data), 120),
     created_at: createdAt(data.creation_date),
-    body: truncateText(body, 2000),
+    body: truncateText(body, 12000),
     availability: body || data.body_markdown !== undefined ? { status: 'available' } : { status: 'unavailable', reason: 'body_unavailable' },
+  };
+}
+
+export function normalizeStackOverflowComment(raw: StackOverflowRawComment): NormalizedStackOverflowComment {
+  const data = raw as Record<string, unknown>;
+  const id = String(numberValue(data.comment_id) ?? stringValue(data.comment_id) ?? 'unknown');
+  const postId = numberValue(data.post_id) ?? stringValue(data.post_id);
+  const body = stringValue(data.body_markdown) ?? htmlToText(stringValue(data.body));
+  return {
+    id,
+    comment_id: id,
+    post_id: postId === undefined ? undefined : String(postId),
+    score: numberValue(data.score),
+    author: truncateText(ownerName(data), 120),
+    created_at: createdAt(data.creation_date),
+    body: truncateText(body, 2000),
   };
 }
 

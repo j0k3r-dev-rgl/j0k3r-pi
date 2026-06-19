@@ -8,6 +8,7 @@ import {
   normalizeHackerNewsStory,
   normalizeHackerNewsStoryDetail,
   normalizeStackOverflowAnswer,
+  normalizeStackOverflowComment,
   normalizeStackOverflowQuestion,
 } from './normalize.js';
 import { ProviderFailure, isAbortLike, redactSecretsDeep, truncateText } from './security.js';
@@ -22,6 +23,7 @@ import type {
   PiToolResult,
   RegisterWebsearchToolsDeps,
   StackOverflowAnswersResult,
+  StackOverflowCommentsResult,
   StackOverflowSearchResult,
   ToolError,
   WebsearchRuntime,
@@ -36,6 +38,7 @@ import {
   validateHackerNewsSearch,
   validateHackerNewsStoryGet,
   validateStackOverflowAnswers,
+  validateStackOverflowComments,
   validateStackOverflowQuestionRef,
   validateStackOverflowSearch,
   ValidationError,
@@ -45,6 +48,7 @@ export const WEBSEARCH_TOOL_NAMES = [
   'search_stack_overflow',
   'stack_overflow_question_get',
   'stack_overflow_answers_get',
+  'stack_overflow_comments_get',
   'search_github_issues',
   'github_issue_get',
   'search_devto_articles',
@@ -68,6 +72,12 @@ const stackQuestionParameters = Type.Object({
 const stackAnswersParameters = Type.Object({
   question: Type.String(),
   limit: Type.Optional(Type.Number()),
+});
+
+const stackCommentsParameters = Type.Object({
+  question: Type.String(),
+  commentsLimit: Type.Optional(Type.Number()),
+  commentsOffset: Type.Optional(Type.Number()),
 });
 
 const githubSearchParameters = Type.Object({
@@ -102,9 +112,9 @@ const hackerNewsStoryParameters = Type.Object({
   commentsLimit: Type.Optional(Type.Number()),
 });
 
-function buildSuccess<T>(text: string, data: T): PiToolResult<T> {
+function buildSuccess<T>(text: string, data: T, maxContentChars = 450): PiToolResult<T> {
   return {
-    content: [{ type: 'text', text: truncateText(text, 450) ?? '' }],
+    content: [{ type: 'text', text: truncateText(text, maxContentChars) ?? '' }],
     details: {
       status: 'success',
       data: redactSecretsDeep(data),
@@ -199,7 +209,36 @@ function stackSearchSummary(data: StackOverflowSearchResult): string {
   if (data.items.length === 0) {
     return `No Stack Overflow results found for "${data.query}".`;
   }
-  return data.items.map((item, index) => `${index + 1}. ${item.title ?? item.id} — ${item.url}`).join('\n');
+  return data.items.map((item, index) => {
+    const metadata = [
+      `question_id: ${item.question_id}`,
+      item.score === undefined ? undefined : `score: ${item.score}`,
+      item.answer_count === undefined ? undefined : `answers: ${item.answer_count}`,
+      item.is_answered === undefined ? undefined : `answered: ${item.is_answered ? 'yes' : 'no'}`,
+      item.tags && item.tags.length > 0 ? `tags: ${item.tags.join(', ')}` : undefined,
+    ].filter(Boolean).join('; ');
+    const snippet = item.snippet ? `\n   snippet: ${item.snippet}` : '';
+    return `${index + 1}. ${item.title ?? item.id} — ${item.url}${metadata ? ` (${metadata})` : ''}${snippet}`;
+  }).join('\n');
+}
+
+function stackQuestionSummary(data: NormalizedStackOverflowQuestion): string {
+  const metadata = [
+    `question_id: ${data.question_id}`,
+    data.score === undefined ? undefined : `score: ${data.score}`,
+    data.answer_count === undefined ? undefined : `answers: ${data.answer_count}`,
+    data.is_answered === undefined ? undefined : `answered: ${data.is_answered ? 'yes' : 'no'}`,
+    data.accepted_answer_id === undefined ? undefined : `accepted_answer_id: ${data.accepted_answer_id}`,
+    data.tags && data.tags.length > 0 ? `tags: ${data.tags.join(', ')}` : undefined,
+  ].filter(Boolean).join('; ');
+  return [
+    data.title ?? data.id,
+    data.url,
+    metadata,
+    `use stack_overflow_answers_get with question: ${data.question_id}`,
+    `use stack_overflow_comments_get with question: ${data.question_id}`,
+    data.body,
+  ].filter(Boolean).join('\n');
 }
 
 function stackAnswersSummary(data: StackOverflowAnswersResult): string {
@@ -207,6 +246,15 @@ function stackAnswersSummary(data: StackOverflowAnswersResult): string {
     return `No Stack Overflow answers found for ${data.questionId}.`;
   }
   return data.answers.map((answer, index) => `${index + 1}. ${answer.accepted ? '[accepted] ' : ''}${answer.author ?? 'unknown'}: ${answer.body ?? ''}`).join('\n');
+}
+
+function stackCommentsSummary(data: StackOverflowCommentsResult): string {
+  if (data.comments.length === 0) {
+    return `No Stack Overflow comments found for question ${data.question_id}.`;
+  }
+  const comments = data.comments.map((comment, index) => `${data.comments_offset + index + 1}. ${comment.author ?? 'unknown'}: ${comment.body ?? ''}`);
+  const continuation = data.has_more_comments && data.next_comments_offset !== undefined ? `next_comments_offset: ${data.next_comments_offset}` : undefined;
+  return [`Stack Overflow comments for question ${data.question_id}`, ...comments, continuation].filter(Boolean).join('\n');
 }
 
 function githubSearchSummary(data: GitHubIssueSearchResult): string {
@@ -263,7 +311,7 @@ export function registerWebsearchTools(pi: any, deps: RegisterWebsearchToolsDeps
         const input = validateStackOverflowSearch(params);
         const items = (await clientsFromDeps(deps).stackExchange.searchQuestions(input, signalFromContext(context))).map(normalizeStackOverflowQuestion);
         const data = { ...input, items };
-        return buildSuccess(stackSearchSummary(data), data);
+        return buildSuccess(stackSearchSummary(data), data, 5000);
       } catch (error) {
         return buildFailure(toToolError(error));
       }
@@ -282,7 +330,7 @@ export function registerWebsearchTools(pi: any, deps: RegisterWebsearchToolsDeps
           return buildFailure({ code: 'not_found', category: 'not_found', message: 'Stack Overflow question was not found.', recoverable: true, provider: 'stack_overflow' });
         }
         const data = normalizeStackOverflowQuestion(raw);
-        return buildSuccess(`${data.title ?? data.id}\n${data.url}`, data);
+        return buildSuccess(stackQuestionSummary(data), data, 4500);
       } catch (error) {
         return buildFailure(toToolError(error));
       }
@@ -298,7 +346,33 @@ export function registerWebsearchTools(pi: any, deps: RegisterWebsearchToolsDeps
         const input = validateStackOverflowAnswers(params);
         const answers = (await clientsFromDeps(deps).stackExchange.getAnswers(input, signalFromContext(context))).map(normalizeStackOverflowAnswer);
         const data = { questionId: input.questionId, limit: input.limit, answers };
-        return buildSuccess(stackAnswersSummary(data), data);
+        return buildSuccess(stackAnswersSummary(data), data, 12000);
+      } catch (error) {
+        return buildFailure(toToolError(error));
+      }
+    },
+  });
+
+  registerTool(pi, {
+    name: 'stack_overflow_comments_get',
+    description: 'Fetch bounded Stack Overflow question comments with offset pagination.',
+    parameters: stackCommentsParameters,
+    async execute(_id: string, params: unknown, _unused1?: unknown, _unused2?: unknown, context?: ExecuteContext): Promise<PiToolResult<StackOverflowCommentsResult>> {
+      try {
+        const input = validateStackOverflowComments(params);
+        const raw = await clientsFromDeps(deps).stackExchange.getQuestionComments(input, signalFromContext(context));
+        const comments = raw.items.map(normalizeStackOverflowComment);
+        const data: StackOverflowCommentsResult = {
+          platform: 'stack_overflow',
+          question_id: input.questionId,
+          comments_limit: input.commentsLimit,
+          comments_offset: input.commentsOffset,
+          comments_returned: comments.length,
+          has_more_comments: raw.hasMore,
+          next_comments_offset: raw.hasMore ? input.commentsOffset + comments.length : undefined,
+          comments,
+        };
+        return buildSuccess(stackCommentsSummary(data), data, 12000);
       } catch (error) {
         return buildFailure(toToolError(error));
       }
