@@ -168,6 +168,20 @@ export type GitHubIssueSearchRequest = {
   state?: 'open' | 'closed' | 'all';
 };
 
+export type GitHubPullRequestRef = {
+  owner: string;
+  repo: string;
+  pullNumber: number;
+  url: string;
+};
+
+export type GitHubPullRequestSearchRequest = {
+  query: string;
+  limit: number;
+  repo?: string;
+  state?: 'open' | 'closed' | 'merged' | 'all';
+};
+
 export type GitHubIssueCommentsRequest = GitHubIssueRef & {
   limit: number;
   offset: number;
@@ -181,6 +195,26 @@ export type GitHubIssueGetRequest = GitHubIssueRef & {
 export type GitHubRawIssueSearchItem = Record<string, unknown>;
 export type GitHubRawIssue = Record<string, unknown>;
 export type GitHubRawIssueComment = Record<string, unknown>;
+export type GitHubRawIssueTimelineEvent = Record<string, unknown>;
+export type GitHubRawPullRequest = Record<string, unknown>;
+export type GitHubRawPullRequestComment = Record<string, unknown>;
+export type GitHubRawPullRequestReview = Record<string, unknown>;
+
+export type GitHubIssueRelation = {
+  type: 'pull_request' | 'issue';
+  repository: string;
+  number: number;
+  ref: string;
+  url?: string;
+  title?: string;
+  state?: string;
+  event?: string;
+};
+
+export type GitHubIssueRelations = {
+  pull_requests: GitHubIssueRelation[];
+  issues: GitHubIssueRelation[];
+};
 
 export type NormalizedGitHubIssue = {
   platform: 'github';
@@ -199,6 +233,8 @@ export type NormalizedGitHubIssue = {
   snippet?: string;
   body?: string;
   follow_up_ref: string;
+  related_pull_requests?: GitHubIssueRelation[];
+  related_issues?: GitHubIssueRelation[];
 };
 
 export type NormalizedGitHubIssueComment = {
@@ -208,6 +244,34 @@ export type NormalizedGitHubIssueComment = {
   created_at?: string;
   updated_at?: string;
   body?: string;
+};
+
+export type NormalizedGitHubPullRequestReviewComment = NormalizedGitHubIssueComment & {
+  path?: string;
+  commit_id?: string;
+};
+
+export type NormalizedGitHubPullRequestReview = {
+  id: string;
+  url?: string;
+  author?: string;
+  state?: string;
+  submitted_at?: string;
+  body?: string;
+};
+
+export type NormalizedGitHubPullRequest = NormalizedGitHubIssue & {
+  merged?: boolean;
+  merged_at?: string;
+  review_comments_count?: number;
+  commits_count?: number;
+  changed_files_count?: number;
+  additions?: number;
+  deletions?: number;
+  base_ref?: string;
+  base_repo?: string;
+  head_ref?: string;
+  head_repo?: string;
 };
 
 export type GitHubIssueSearchResult = {
@@ -223,6 +287,37 @@ export type GitHubIssueDetailResult = NormalizedGitHubIssue & {
   comments_limit: number;
   comments_offset: number;
   next_comments_offset?: number;
+  bounds: {
+    comments_default: number;
+    comments_max: number;
+  };
+};
+
+export type GitHubPullRequestSearchResult = {
+  query: string;
+  limit: number;
+  repo?: string;
+  state?: 'open' | 'closed' | 'merged' | 'all';
+  items: NormalizedGitHubPullRequest[];
+};
+
+export type GitHubPullRequestGetRequest = GitHubPullRequestRef & {
+  commentsLimit: number;
+  commentsOffset: number;
+  reviewCommentsLimit: number;
+  reviewCommentsOffset: number;
+};
+
+export type GitHubPullRequestDetailResult = NormalizedGitHubPullRequest & {
+  comments: NormalizedGitHubIssueComment[];
+  review_comments: NormalizedGitHubPullRequestReviewComment[];
+  reviews: NormalizedGitHubPullRequestReview[];
+  comments_limit: number;
+  comments_offset: number;
+  next_comments_offset?: number;
+  review_comments_limit: number;
+  review_comments_offset: number;
+  next_review_comments_offset?: number;
   bounds: {
     comments_default: number;
     comments_max: number;
@@ -363,6 +458,11 @@ export interface GitHubClient {
   searchIssues(input: GitHubIssueSearchRequest, signal?: AbortSignal): Promise<GitHubRawIssueSearchItem[]>;
   getIssue(input: GitHubIssueRef, signal?: AbortSignal): Promise<GitHubRawIssue | null>;
   listIssueComments(input: GitHubIssueCommentsRequest, signal?: AbortSignal): Promise<GitHubRawIssueComment[]>;
+  listIssueTimelineEvents(input: GitHubIssueRef, signal?: AbortSignal): Promise<GitHubRawIssueTimelineEvent[]>;
+  searchPullRequests(input: GitHubPullRequestSearchRequest, signal?: AbortSignal): Promise<GitHubRawIssueSearchItem[]>;
+  getPullRequest(input: GitHubPullRequestRef, signal?: AbortSignal): Promise<GitHubRawPullRequest | null>;
+  listPullRequestReviewComments(input: GitHubPullRequestRef & { limit: number; offset: number }, signal?: AbortSignal): Promise<GitHubRawPullRequestComment[]>;
+  listPullRequestReviews(input: GitHubPullRequestRef, signal?: AbortSignal): Promise<GitHubRawPullRequestReview[]>;
 }
 
 export interface DevtoClient {

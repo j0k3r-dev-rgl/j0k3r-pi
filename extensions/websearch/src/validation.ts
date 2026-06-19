@@ -4,6 +4,9 @@ import type {
   GitHubIssueGetRequest,
   GitHubIssueRef,
   GitHubIssueSearchRequest,
+  GitHubPullRequestGetRequest,
+  GitHubPullRequestRef,
+  GitHubPullRequestSearchRequest,
   HackerNewsSearchRequest,
   HackerNewsStoryRequest,
   StackOverflowAnswersRequest,
@@ -176,6 +179,52 @@ function optionalGitHubState(input: Input, key: string): 'open' | 'closed' | 'al
   return value;
 }
 
+function optionalGitHubPullRequestState(input: Input, key: string): 'open' | 'closed' | 'merged' | 'all' | undefined {
+  const value = input[key];
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+  if (value !== 'open' && value !== 'closed' && value !== 'merged' && value !== 'all') {
+    throw new ValidationError(`${key} must be "open", "closed", "merged", or "all".`);
+  }
+  return value;
+}
+
+export function validateGitHubPullRequestRef(value: unknown): GitHubPullRequestRef {
+  const raw = requiredString(asInput(value), 'pull_request');
+  const refMatch = /^(?<owner>[A-Za-z0-9_.-]+)\/(?<repo>[A-Za-z0-9_.-]+)#(?<pullNumber>\d+)$/.exec(raw);
+  if (refMatch?.groups?.owner && refMatch.groups.repo && refMatch.groups.pullNumber) {
+    return {
+      owner: refMatch.groups.owner,
+      repo: refMatch.groups.repo,
+      pullNumber: Number(refMatch.groups.pullNumber),
+      url: `https://github.com/${refMatch.groups.owner}/${refMatch.groups.repo}/pull/${refMatch.groups.pullNumber}`,
+    };
+  }
+
+  try {
+    const url = new URL(raw);
+    if (!/(^|\.)github\.com$/i.test(url.hostname)) {
+      throw new ValidationError('pull_request must be a GitHub pull request url or owner/repo#number reference.');
+    }
+    const match = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)$/.exec(url.pathname);
+    if (!match) {
+      throw new ValidationError('GitHub pull request url must include /owner/repo/pull/number.');
+    }
+    return {
+      owner: match[1]!,
+      repo: match[2]!,
+      pullNumber: Number(match[3]!),
+      url: `https://github.com/${match[1]!}/${match[2]!}/pull/${match[3]!}`,
+    };
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      throw error;
+    }
+    throw new ValidationError('pull_request must be a GitHub pull request url or owner/repo#number reference.');
+  }
+}
+
 export function validateStackOverflowSearch(value: unknown): StackOverflowSearchRequest {
   const input = asInput(value);
   return {
@@ -225,6 +274,31 @@ export function validateGitHubIssueGet(value: unknown): GitHubIssueGetRequest {
     ...validateGitHubIssueRef(input),
     commentsLimit: boundedInteger(input, 'commentsLimit', GITHUB_COMMENTS_DEFAULT_LIMIT, GITHUB_COMMENTS_MAX_LIMIT),
     commentsOffset: boundedOffset(input, 'commentsOffset', 0),
+  };
+}
+
+export function validateGitHubPullRequestSearch(value: unknown): GitHubPullRequestSearchRequest {
+  const input = asInput(value);
+  const repoInput = optionalString(input, 'repo');
+  if (repoInput) {
+    parseGitHubRepoScope(repoInput);
+  }
+  return {
+    query: requiredString(input, 'query'),
+    limit: boundedInteger(input, 'limit', SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT),
+    repo: repoInput,
+    state: optionalGitHubPullRequestState(input, 'state'),
+  };
+}
+
+export function validateGitHubPullRequestGet(value: unknown): GitHubPullRequestGetRequest {
+  const input = asInput(value);
+  return {
+    ...validateGitHubPullRequestRef(input),
+    commentsLimit: boundedInteger(input, 'commentsLimit', GITHUB_COMMENTS_DEFAULT_LIMIT, GITHUB_COMMENTS_MAX_LIMIT),
+    commentsOffset: boundedOffset(input, 'commentsOffset', 0),
+    reviewCommentsLimit: boundedInteger(input, 'reviewCommentsLimit', GITHUB_COMMENTS_DEFAULT_LIMIT, GITHUB_COMMENTS_MAX_LIMIT),
+    reviewCommentsOffset: boundedOffset(input, 'reviewCommentsOffset', 0),
   };
 }
 

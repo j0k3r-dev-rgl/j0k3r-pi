@@ -6,13 +6,22 @@ import type {
   GitHubRawIssue,
   GitHubRawIssueComment,
   GitHubRawIssueSearchItem,
+  GitHubRawIssueTimelineEvent,
+  GitHubRawPullRequest,
+  GitHubRawPullRequestComment,
+  GitHubRawPullRequestReview,
   HackerNewsCommentNode,
   HackerNewsRawItem,
   HackerNewsRawStory,
   HackerNewsStoryDetailResult,
   NormalizedDevtoArticle,
+  GitHubIssueRelations,
+  GitHubIssueRelation,
   NormalizedGitHubIssue,
   NormalizedGitHubIssueComment,
+  NormalizedGitHubPullRequest,
+  NormalizedGitHubPullRequestReview,
+  NormalizedGitHubPullRequestReviewComment,
   NormalizedHackerNewsStory,
   NormalizedStackOverflowAnswer,
   NormalizedStackOverflowComment,
@@ -232,6 +241,108 @@ export function normalizeGitHubIssueComment(raw: GitHubRawIssueComment): Normali
     created_at: stringValue(data.created_at),
     updated_at: stringValue(data.updated_at),
     body: truncateText(stringValue(data.body), 1000),
+  };
+}
+
+export function normalizeGitHubPullRequest(raw: GitHubRawIssueSearchItem | GitHubRawPullRequest): NormalizedGitHubPullRequest {
+  const data = raw as Record<string, unknown>;
+  const baseIssue = normalizeGitHubIssue(raw);
+  const pullRequest = data.pull_request as Record<string, unknown> | undefined;
+  const base = data.base as Record<string, unknown> | undefined;
+  const head = data.head as Record<string, unknown> | undefined;
+  const baseRepo = base?.repo as Record<string, unknown> | undefined;
+  const headRepo = head?.repo as Record<string, unknown> | undefined;
+  return {
+    ...baseIssue,
+    url: stringValue(data.html_url) ?? stringValue(pullRequest?.html_url) ?? baseIssue.url,
+    merged: booleanValue(data.merged) ?? Boolean(stringValue(pullRequest?.merged_at)),
+    merged_at: stringValue(data.merged_at) ?? stringValue(pullRequest?.merged_at),
+    review_comments_count: numberValue(data.review_comments),
+    commits_count: numberValue(data.commits),
+    changed_files_count: numberValue(data.changed_files),
+    additions: numberValue(data.additions),
+    deletions: numberValue(data.deletions),
+    base_ref: stringValue(base?.ref),
+    base_repo: stringValue(baseRepo?.full_name),
+    head_ref: stringValue(head?.ref),
+    head_repo: stringValue(headRepo?.full_name),
+  };
+}
+
+export function normalizeGitHubPullRequestReviewComment(raw: GitHubRawPullRequestComment): NormalizedGitHubPullRequestReviewComment {
+  const data = raw as Record<string, unknown>;
+  return {
+    ...normalizeGitHubIssueComment(raw),
+    path: stringValue(data.path),
+    commit_id: stringValue(data.commit_id),
+  };
+}
+
+export function normalizeGitHubPullRequestReview(raw: GitHubRawPullRequestReview): NormalizedGitHubPullRequestReview {
+  const data = raw as Record<string, unknown>;
+  return {
+    id: String(numberValue(data.id) ?? stringValue(data.id) ?? 'unknown'),
+    url: stringValue(data.html_url),
+    author: truncateText(githubUserLogin(data), 120),
+    state: stringValue(data.state),
+    submitted_at: stringValue(data.submitted_at),
+    body: truncateText(stringValue(data.body), 1000),
+  };
+}
+
+function normalizeGitHubTimelineRelation(raw: GitHubRawIssueTimelineEvent): GitHubIssueRelation | null {
+  const data = raw as Record<string, unknown>;
+  if (stringValue(data.event) !== 'cross-referenced') {
+    return null;
+  }
+  const source = data.source as Record<string, unknown> | undefined;
+  const issue = source?.issue as Record<string, unknown> | undefined;
+  if (!issue) {
+    return null;
+  }
+  const number = numberValue(issue.number);
+  const repository = githubRepository(issue);
+  if (!number || !repository) {
+    return null;
+  }
+  const isPullRequest = Boolean(issue.pull_request);
+  return {
+    type: isPullRequest ? 'pull_request' : 'issue',
+    repository,
+    number,
+    ref: `${repository}#${number}`,
+    url: stringValue(issue.html_url),
+    title: truncateText(stringValue(issue.title), 300),
+    state: stringValue(issue.state),
+    event: stringValue(data.event),
+  };
+}
+
+export function normalizeGitHubIssueRelations(rawEvents: GitHubRawIssueTimelineEvent[], maxPerType = 5): GitHubIssueRelations {
+  const seen = new Set<string>();
+  const pullRequests: GitHubIssueRelation[] = [];
+  const issues: GitHubIssueRelation[] = [];
+  for (const raw of rawEvents) {
+    const relation = normalizeGitHubTimelineRelation(raw);
+    if (!relation) {
+      continue;
+    }
+    const key = `${relation.type}:${relation.ref}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    const bucket = relation.type === 'pull_request' ? pullRequests : issues;
+    if (bucket.length < maxPerType) {
+      bucket.push(relation);
+    }
+    if (pullRequests.length >= maxPerType && issues.length >= maxPerType) {
+      break;
+    }
+  }
+  return {
+    pull_requests: pullRequests,
+    issues,
   };
 }
 

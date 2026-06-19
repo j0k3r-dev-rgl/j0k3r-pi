@@ -7,6 +7,10 @@ import {
   normalizeDevtoComments,
   normalizeGitHubIssue,
   normalizeGitHubIssueComment,
+  normalizeGitHubIssueRelations,
+  normalizeGitHubPullRequest,
+  normalizeGitHubPullRequestReview,
+  normalizeGitHubPullRequestReviewComment,
   normalizeHackerNewsStory,
   normalizeHackerNewsStoryDetail,
   normalizeStackOverflowAnswer,
@@ -19,6 +23,8 @@ import type {
   DevtoCommentsResult,
   GitHubIssueDetailResult,
   GitHubIssueSearchResult,
+  GitHubPullRequestDetailResult,
+  GitHubPullRequestSearchResult,
   HackerNewsSearchResult,
   HackerNewsStoryDetailResult,
   NormalizedStackOverflowQuestion,
@@ -37,6 +43,8 @@ import {
   validateDevtoCommentsGet,
   validateGitHubIssueGet,
   validateGitHubIssueSearch,
+  validateGitHubPullRequestGet,
+  validateGitHubPullRequestSearch,
   validateHackerNewsSearch,
   validateHackerNewsStoryGet,
   validateStackOverflowAnswers,
@@ -53,6 +61,8 @@ export const WEBSEARCH_TOOL_NAMES = [
   'stack_overflow_comments_get',
   'search_github_issues',
   'github_issue_get',
+  'search_github_pull_requests',
+  'github_pull_request_get',
   'search_devto_articles',
   'devto_comments_get',
   'search_hackernews',
@@ -93,6 +103,21 @@ const githubIssueParameters = Type.Object({
   issue: Type.String(),
   commentsLimit: Type.Optional(Type.Number()),
   commentsOffset: Type.Optional(Type.Number()),
+});
+
+const githubPullRequestSearchParameters = Type.Object({
+  query: Type.String(),
+  repo: Type.Optional(Type.String()),
+  state: Type.Optional(Type.Union([Type.Literal('open'), Type.Literal('closed'), Type.Literal('merged'), Type.Literal('all')])),
+  limit: Type.Optional(Type.Number()),
+});
+
+const githubPullRequestParameters = Type.Object({
+  pull_request: Type.String(),
+  commentsLimit: Type.Optional(Type.Number()),
+  commentsOffset: Type.Optional(Type.Number()),
+  reviewCommentsLimit: Type.Optional(Type.Number()),
+  reviewCommentsOffset: Type.Optional(Type.Number()),
 });
 
 const devtoSearchParameters = Type.Object({
@@ -276,6 +301,17 @@ function stackCommentsSummary(data: StackOverflowCommentsResult): string {
   return [`Stack Overflow comments for question ${data.question_id}`, ...comments, continuation].filter(Boolean).join('\n');
 }
 
+function githubRelationsSummary(item: { related_pull_requests?: GitHubIssueSearchResult['items'][number]['related_pull_requests']; related_issues?: GitHubIssueSearchResult['items'][number]['related_issues'] }, indent = ''): string | undefined {
+  const lines: string[] = [];
+  if (item.related_pull_requests && item.related_pull_requests.length > 0) {
+    lines.push(`${indent}related PRs: ${item.related_pull_requests.map((relation) => `${relation.ref}${relation.state ? ` (${relation.state})` : ''}`).join(', ')}`);
+  }
+  if (item.related_issues && item.related_issues.length > 0) {
+    lines.push(`${indent}related issues: ${item.related_issues.map((relation) => `${relation.ref}${relation.state ? ` (${relation.state})` : ''}`).join(', ')}`);
+  }
+  return lines.length > 0 ? lines.join('\n') : undefined;
+}
+
 function githubSearchSummary(data: GitHubIssueSearchResult): string {
   if (data.items.length === 0) {
     return `No GitHub issues found for "${data.query}".`;
@@ -287,7 +323,8 @@ function githubSearchSummary(data: GitHubIssueSearchResult): string {
       item.labels && item.labels.length > 0 ? `labels: ${item.labels.join(', ')}` : undefined,
     ].filter(Boolean).join('; ');
     const snippet = item.snippet ? `\n   snippet: ${item.snippet}` : '';
-    return `${index + 1}. ${item.title ?? item.follow_up_ref} — ${item.follow_up_ref} — ${item.url}${metadata ? ` (${metadata})` : ''}${snippet}`;
+    const relations = githubRelationsSummary(item, '   ');
+    return `${index + 1}. ${item.title ?? item.follow_up_ref} — ${item.follow_up_ref} — ${item.url}${metadata ? ` (${metadata})` : ''}${snippet}${relations ? `\n${relations}` : ''}`;
   }).join('\n');
 }
 
@@ -304,12 +341,84 @@ function githubIssueSummary(data: GitHubIssueDetailResult): string {
         ...data.comments.map((comment, index) => `${data.comments_offset + index + 1}. ${comment.author ?? 'unknown'}: ${comment.body ?? ''}`),
       ].join('\n')
     : undefined;
+  const relatedPullRequests = data.related_pull_requests && data.related_pull_requests.length > 0
+    ? ['Related pull requests', ...data.related_pull_requests.map((relation) => `- ${relation.ref}${relation.title ? ` — ${relation.title}` : ''}${relation.state ? ` (${relation.state})` : ''}${relation.url ? ` — ${relation.url}` : ''}`)].join('\n')
+    : undefined;
+  const relatedIssues = data.related_issues && data.related_issues.length > 0
+    ? ['Related issues', ...data.related_issues.map((relation) => `- ${relation.ref}${relation.title ? ` — ${relation.title}` : ''}${relation.state ? ` (${relation.state})` : ''}${relation.url ? ` — ${relation.url}` : ''}`)].join('\n')
+    : undefined;
   return [
     data.title ?? data.follow_up_ref,
     data.url,
     metadata,
     data.body ?? '',
+    relatedPullRequests,
+    relatedIssues,
     comments,
+  ].filter(Boolean).join('\n');
+}
+
+function githubPullRequestSearchSummary(data: GitHubPullRequestSearchResult): string {
+  if (data.items.length === 0) {
+    return `No GitHub pull requests found for "${data.query}".`;
+  }
+  return data.items.map((item, index) => {
+    const metadata = [
+      item.state ? `state: ${item.state}` : undefined,
+      item.merged === undefined ? undefined : `merged: ${item.merged}`,
+      item.merged_at ? `merged_at: ${item.merged_at}` : undefined,
+      item.comments_count === undefined ? undefined : `comments: ${item.comments_count}`,
+      item.labels && item.labels.length > 0 ? `labels: ${item.labels.join(', ')}` : undefined,
+    ].filter(Boolean).join('; ');
+    const snippet = item.snippet ? `\n   snippet: ${item.snippet}` : '';
+    const relations = githubRelationsSummary(item, '   ');
+    return `${index + 1}. ${item.title ?? item.follow_up_ref} — ${item.follow_up_ref} — ${item.url}${metadata ? ` (${metadata})` : ''}${snippet}${relations ? `\n${relations}` : ''}`;
+  }).join('\n');
+}
+
+function githubPullRequestSummary(data: GitHubPullRequestDetailResult): string {
+  const metadata = [
+    data.follow_up_ref,
+    data.state ? `state: ${data.state}` : undefined,
+    data.merged === undefined ? undefined : `merged: ${data.merged}`,
+    data.merged_at ? `merged_at: ${data.merged_at}` : undefined,
+    data.comments_count === undefined ? undefined : `comments: ${data.comments_count}`,
+    data.review_comments_count === undefined ? undefined : `review_comments: ${data.review_comments_count}`,
+    data.commits_count === undefined ? undefined : `commits: ${data.commits_count}`,
+    data.changed_files_count === undefined ? undefined : `changed_files: ${data.changed_files_count}`,
+    data.additions === undefined ? undefined : `additions: ${data.additions}`,
+    data.deletions === undefined ? undefined : `deletions: ${data.deletions}`,
+  ].filter(Boolean).join('; ');
+  const refs = [
+    data.base_ref ? `base: ${data.base_repo ?? data.repository}:${data.base_ref}` : undefined,
+    data.head_ref ? `head: ${data.head_repo ?? data.repository}:${data.head_ref}` : undefined,
+  ].filter(Boolean).join('\n');
+  const relatedPullRequests = data.related_pull_requests && data.related_pull_requests.length > 0
+    ? ['Related pull requests', ...data.related_pull_requests.map((relation) => `- ${relation.ref}${relation.title ? ` — ${relation.title}` : ''}${relation.state ? ` (${relation.state})` : ''}${relation.url ? ` — ${relation.url}` : ''}`)].join('\n')
+    : undefined;
+  const relatedIssues = data.related_issues && data.related_issues.length > 0
+    ? ['Related issues', ...data.related_issues.map((relation) => `- ${relation.ref}${relation.title ? ` — ${relation.title}` : ''}${relation.state ? ` (${relation.state})` : ''}${relation.url ? ` — ${relation.url}` : ''}`)].join('\n')
+    : undefined;
+  const comments = data.comments.length > 0
+    ? [`Comments offset ${data.comments_offset} limit ${data.comments_limit}`, ...data.comments.map((comment, index) => `${data.comments_offset + index + 1}. ${comment.author ?? 'unknown'}: ${comment.body ?? ''}`)].join('\n')
+    : undefined;
+  const reviewComments = data.review_comments.length > 0
+    ? [`Review comments offset ${data.review_comments_offset} limit ${data.review_comments_limit}`, ...data.review_comments.map((comment, index) => `${data.review_comments_offset + index + 1}. ${comment.author ?? 'unknown'}${comment.path ? ` on ${comment.path}` : ''}: ${comment.body ?? ''}`)].join('\n')
+    : undefined;
+  const reviews = data.reviews.length > 0
+    ? ['Reviews', ...data.reviews.map((review) => `- ${review.author ?? 'unknown'}${review.state ? ` ${review.state}` : ''}${review.body ? `: ${review.body}` : ''}`)].join('\n')
+    : undefined;
+  return [
+    data.title ?? data.follow_up_ref,
+    data.url,
+    metadata,
+    refs,
+    data.body ?? '',
+    relatedPullRequests,
+    relatedIssues,
+    reviews,
+    comments,
+    reviewComments,
   ].filter(Boolean).join('\n');
 }
 
@@ -484,7 +593,22 @@ export function registerWebsearchTools(pi: any, deps: RegisterWebsearchToolsDeps
     async execute(_id: string, params: unknown, _unused1?: unknown, _unused2?: unknown, context?: ExecuteContext): Promise<PiToolResult<GitHubIssueSearchResult>> {
       try {
         const input = validateGitHubIssueSearch(params);
-        const items = (await clientsFromDeps(deps).github.searchIssues(input, signalFromContext(context))).map(normalizeGitHubIssue);
+        const signal = signalFromContext(context);
+        const github = clientsFromDeps(deps).github;
+        const rawItems = await github.searchIssues(input, signal);
+        const items = await Promise.all(rawItems.map(async (raw) => {
+          const normalized = normalizeGitHubIssue(raw);
+          const [owner, repo] = normalized.repository.split('/');
+          if (!owner || !repo || !normalized.number) {
+            return normalized;
+          }
+          const relations = normalizeGitHubIssueRelations(await github.listIssueTimelineEvents({ owner, repo, issueNumber: normalized.number, url: normalized.url }, signal));
+          return {
+            ...normalized,
+            related_pull_requests: relations.pull_requests,
+            related_issues: relations.issues,
+          };
+        }));
         const data = { ...input, items };
         return buildSuccess(githubSearchSummary(data), data, 5000);
       } catch (error) {
@@ -507,8 +631,11 @@ export function registerWebsearchTools(pi: any, deps: RegisterWebsearchToolsDeps
           return buildFailure({ code: 'not_found', category: 'not_found', message: 'GitHub issue was not found.', recoverable: true, provider: 'github' });
         }
         const comments = (await github.listIssueComments({ ...input, limit: input.commentsLimit, offset: input.commentsOffset }, signal)).map(normalizeGitHubIssueComment);
+        const relations = normalizeGitHubIssueRelations(await github.listIssueTimelineEvents(input, signal));
         const data: GitHubIssueDetailResult = {
           ...normalizeGitHubIssue(rawIssue),
+          related_pull_requests: relations.pull_requests,
+          related_issues: relations.issues,
           comments,
           comments_limit: input.commentsLimit,
           comments_offset: input.commentsOffset,
@@ -519,6 +646,79 @@ export function registerWebsearchTools(pi: any, deps: RegisterWebsearchToolsDeps
           },
         };
         return buildSuccess(githubIssueSummary(data), data, 12000);
+      } catch (error) {
+        return buildFailure(toToolError(error));
+      }
+    },
+  });
+
+  registerTool(pi, {
+    name: 'search_github_pull_requests',
+    description: 'Search public GitHub pull requests with bounded read-only results.',
+    parameters: githubPullRequestSearchParameters,
+    async execute(_id: string, params: unknown, _unused1?: unknown, _unused2?: unknown, context?: ExecuteContext): Promise<PiToolResult<GitHubPullRequestSearchResult>> {
+      try {
+        const input = validateGitHubPullRequestSearch(params);
+        const signal = signalFromContext(context);
+        const github = clientsFromDeps(deps).github;
+        const rawItems = await github.searchPullRequests(input, signal);
+        const items = await Promise.all(rawItems.map(async (raw) => {
+          const normalized = normalizeGitHubPullRequest(raw);
+          const [owner, repo] = normalized.repository.split('/');
+          if (!owner || !repo || !normalized.number) {
+            return normalized;
+          }
+          const relations = normalizeGitHubIssueRelations(await github.listIssueTimelineEvents({ owner, repo, issueNumber: normalized.number, url: normalized.url }, signal));
+          return {
+            ...normalized,
+            related_pull_requests: relations.pull_requests,
+            related_issues: relations.issues,
+          };
+        }));
+        const data: GitHubPullRequestSearchResult = { ...input, items };
+        return buildSuccess(githubPullRequestSearchSummary(data), data, 5000);
+      } catch (error) {
+        return buildFailure(toToolError(error));
+      }
+    },
+  });
+
+  registerTool(pi, {
+    name: 'github_pull_request_get',
+    description: 'Fetch a GitHub pull request by URL or owner/repo#number with bounded comments and review comments.',
+    parameters: githubPullRequestParameters,
+    async execute(_id: string, params: unknown, _unused1?: unknown, _unused2?: unknown, context?: ExecuteContext): Promise<PiToolResult<GitHubPullRequestDetailResult>> {
+      try {
+        const input = validateGitHubPullRequestGet(params);
+        const signal = signalFromContext(context);
+        const github = clientsFromDeps(deps).github;
+        const rawPullRequest = await github.getPullRequest(input, signal);
+        if (!rawPullRequest) {
+          return buildFailure({ code: 'not_found', category: 'not_found', message: 'GitHub pull request was not found.', recoverable: true, provider: 'github' });
+        }
+        const comments = (await github.listIssueComments({ owner: input.owner, repo: input.repo, issueNumber: input.pullNumber, url: input.url, limit: input.commentsLimit, offset: input.commentsOffset }, signal)).map(normalizeGitHubIssueComment);
+        const reviewComments = (await github.listPullRequestReviewComments({ ...input, limit: input.reviewCommentsLimit, offset: input.reviewCommentsOffset }, signal)).map(normalizeGitHubPullRequestReviewComment);
+        const reviews = (await github.listPullRequestReviews(input, signal)).map(normalizeGitHubPullRequestReview);
+        const relations = normalizeGitHubIssueRelations(await github.listIssueTimelineEvents({ owner: input.owner, repo: input.repo, issueNumber: input.pullNumber, url: input.url }, signal));
+        const data: GitHubPullRequestDetailResult = {
+          ...normalizeGitHubPullRequest(rawPullRequest),
+          related_pull_requests: relations.pull_requests,
+          related_issues: relations.issues,
+          comments,
+          review_comments: reviewComments,
+          reviews,
+          comments_limit: input.commentsLimit,
+          comments_offset: input.commentsOffset,
+          next_comments_offset: comments.length === input.commentsLimit ? input.commentsOffset + comments.length : undefined,
+          review_comments_limit: input.reviewCommentsLimit,
+          review_comments_offset: input.reviewCommentsOffset,
+          next_review_comments_offset: reviewComments.length === input.reviewCommentsLimit ? input.reviewCommentsOffset + reviewComments.length : undefined,
+          bounds: {
+            comments_default: GITHUB_COMMENTS_DEFAULT_LIMIT,
+            comments_max: GITHUB_COMMENTS_MAX_LIMIT,
+          },
+        };
+        return buildSuccess(githubPullRequestSummary(data), data, 14000);
       } catch (error) {
         return buildFailure(toToolError(error));
       }

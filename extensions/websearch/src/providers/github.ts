@@ -5,9 +5,15 @@ import type {
   GitHubIssueCommentsRequest,
   GitHubIssueRef,
   GitHubIssueSearchRequest,
+  GitHubPullRequestRef,
+  GitHubPullRequestSearchRequest,
   GitHubRawIssue,
   GitHubRawIssueComment,
   GitHubRawIssueSearchItem,
+  GitHubRawIssueTimelineEvent,
+  GitHubRawPullRequest,
+  GitHubRawPullRequestComment,
+  GitHubRawPullRequestReview,
   WebsearchRuntime,
 } from '../types.js';
 
@@ -17,6 +23,19 @@ function issueSearchQuery(input: GitHubIssueSearchRequest): string {
     parts.push(`repo:${input.repo}`);
   }
   if (input.state && input.state !== 'all') {
+    parts.push(`state:${input.state}`);
+  }
+  return parts.filter(Boolean).join(' ');
+}
+
+function pullRequestSearchQuery(input: GitHubPullRequestSearchRequest): string {
+  const parts = [input.query.trim(), 'is:pr'];
+  if (input.repo) {
+    parts.push(`repo:${input.repo}`);
+  }
+  if (input.state === 'merged') {
+    parts.push('is:merged');
+  } else if (input.state && input.state !== 'all') {
     parts.push(`state:${input.state}`);
   }
   return parts.filter(Boolean).join(' ');
@@ -45,6 +64,8 @@ function ghError(error: unknown, fallback: string): ProviderFailure {
 }
 
 const GITHUB_COMMENTS_PAGE_SIZE = 100;
+const GITHUB_TIMELINE_PAGE_SIZE = 100;
+const GITHUB_TIMELINE_MAX_PAGES = 3;
 
 function commentsPageForOffset(offset: number): { page: number; index: number } {
   return {
@@ -144,6 +165,106 @@ class OctokitGitHubClient implements GitHubClient {
     });
     return response.data as unknown as GitHubRawIssueComment[];
   }
+
+  async listIssueTimelineEvents(input: GitHubIssueRef, signal?: AbortSignal): Promise<GitHubRawIssueTimelineEvent[]> {
+    try {
+      return this.listTimelineEvents(input.owner, input.repo, input.issueNumber, signal);
+    } catch (error) {
+      throw new ProviderFailure(githubProviderErrorFromError(error));
+    }
+  }
+
+  async searchPullRequests(input: GitHubPullRequestSearchRequest, signal?: AbortSignal): Promise<GitHubRawIssueSearchItem[]> {
+    try {
+      const response = await this.octokit.rest.search.issuesAndPullRequests({
+        q: pullRequestSearchQuery(input),
+        per_page: input.limit,
+        page: 1,
+        request: signal ? { signal } : undefined,
+      });
+      return response.data.items as GitHubRawIssueSearchItem[];
+    } catch (error) {
+      throw new ProviderFailure(githubProviderErrorFromError(error));
+    }
+  }
+
+  async getPullRequest(input: GitHubPullRequestRef, signal?: AbortSignal): Promise<GitHubRawPullRequest | null> {
+    try {
+      const response = await this.octokit.rest.pulls.get({
+        owner: input.owner,
+        repo: input.repo,
+        pull_number: input.pullNumber,
+        request: signal ? { signal } : undefined,
+      });
+      return response.data as unknown as GitHubRawPullRequest;
+    } catch (error) {
+      const mapped = githubProviderErrorFromError(error);
+      if (mapped.code === 'not_found') {
+        return null;
+      }
+      throw new ProviderFailure(mapped);
+    }
+  }
+
+  async listPullRequestReviewComments(input: GitHubPullRequestRef & { limit: number; offset: number }, signal?: AbortSignal): Promise<GitHubRawPullRequestComment[]> {
+    const { page, index } = commentsPageForOffset(input.offset);
+    try {
+      const firstPage = await this.listPullRequestReviewCommentsPage(input, page, signal);
+      const needsNextPage = index + input.limit > GITHUB_COMMENTS_PAGE_SIZE && firstPage.length === GITHUB_COMMENTS_PAGE_SIZE;
+      const combined = needsNextPage ? firstPage.concat(await this.listPullRequestReviewCommentsPage(input, page + 1, signal)) : firstPage;
+      return combined.slice(index, index + input.limit);
+    } catch (error) {
+      throw new ProviderFailure(githubProviderErrorFromError(error));
+    }
+  }
+
+  private async listPullRequestReviewCommentsPage(input: GitHubPullRequestRef, page: number, signal?: AbortSignal): Promise<GitHubRawPullRequestComment[]> {
+    const response = await this.octokit.rest.pulls.listReviewComments({
+      owner: input.owner,
+      repo: input.repo,
+      pull_number: input.pullNumber,
+      per_page: GITHUB_COMMENTS_PAGE_SIZE,
+      page,
+      request: signal ? { signal } : undefined,
+    });
+    return response.data as unknown as GitHubRawPullRequestComment[];
+  }
+
+  async listPullRequestReviews(input: GitHubPullRequestRef, signal?: AbortSignal): Promise<GitHubRawPullRequestReview[]> {
+    try {
+      const response = await this.octokit.rest.pulls.listReviews({
+        owner: input.owner,
+        repo: input.repo,
+        pull_number: input.pullNumber,
+        per_page: 10,
+        page: 1,
+        request: signal ? { signal } : undefined,
+      });
+      return response.data as unknown as GitHubRawPullRequestReview[];
+    } catch (error) {
+      throw new ProviderFailure(githubProviderErrorFromError(error));
+    }
+  }
+
+  private async listTimelineEvents(owner: string, repo: string, issueNumber: number, signal?: AbortSignal): Promise<GitHubRawIssueTimelineEvent[]> {
+    const events: GitHubRawIssueTimelineEvent[] = [];
+    for (let page = 1; page <= GITHUB_TIMELINE_MAX_PAGES; page += 1) {
+      const response = await this.octokit.rest.issues.listEventsForTimeline({
+        owner,
+        repo,
+        issue_number: issueNumber,
+        per_page: GITHUB_TIMELINE_PAGE_SIZE,
+        page,
+        request: signal ? { signal } : undefined,
+      });
+      const pageEvents = response.data as unknown as GitHubRawIssueTimelineEvent[];
+      events.push(...pageEvents);
+      if (pageEvents.length < GITHUB_TIMELINE_PAGE_SIZE) {
+        break;
+      }
+    }
+    return events;
+  }
 }
 
 class GhGitHubClient implements GitHubClient {
@@ -192,6 +313,81 @@ class GhGitHubClient implements GitHubClient {
       '-f', `per_page=${GITHUB_COMMENTS_PAGE_SIZE}`,
       '-f', `page=${page}`,
     ], signal);
+  }
+
+  async listIssueTimelineEvents(input: GitHubIssueRef, signal?: AbortSignal): Promise<GitHubRawIssueTimelineEvent[]> {
+    return this.listTimelineEvents(input.owner, input.repo, input.issueNumber, signal);
+  }
+
+  async searchPullRequests(input: GitHubPullRequestSearchRequest, signal?: AbortSignal): Promise<GitHubRawIssueSearchItem[]> {
+    const payload = await ghJson<{ items?: unknown[] }>(this.runtime, [
+      'api',
+      '-X', 'GET',
+      'search/issues',
+      '-f', `q=${pullRequestSearchQuery(input)}`,
+      '-f', `per_page=${input.limit}`,
+    ], signal);
+    return (payload.items ?? []) as GitHubRawIssueSearchItem[];
+  }
+
+  async getPullRequest(input: GitHubPullRequestRef, signal?: AbortSignal): Promise<GitHubRawPullRequest | null> {
+    try {
+      return await ghJson<GitHubRawPullRequest>(this.runtime, [
+        'api',
+        `repos/${input.owner}/${input.repo}/pulls/${input.pullNumber}`,
+      ], signal);
+    } catch (error) {
+      if (error instanceof ProviderFailure && error.toolError.category === 'not_found') {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async listPullRequestReviewComments(input: GitHubPullRequestRef & { limit: number; offset: number }, signal?: AbortSignal): Promise<GitHubRawPullRequestComment[]> {
+    const { page, index } = commentsPageForOffset(input.offset);
+    const firstPage = await this.listPullRequestReviewCommentsPage(input, page, signal);
+    const needsNextPage = index + input.limit > GITHUB_COMMENTS_PAGE_SIZE && firstPage.length === GITHUB_COMMENTS_PAGE_SIZE;
+    const combined = needsNextPage ? firstPage.concat(await this.listPullRequestReviewCommentsPage(input, page + 1, signal)) : firstPage;
+    return combined.slice(index, index + input.limit);
+  }
+
+  private listPullRequestReviewCommentsPage(input: GitHubPullRequestRef, page: number, signal?: AbortSignal): Promise<GitHubRawPullRequestComment[]> {
+    return ghJson<GitHubRawPullRequestComment[]>(this.runtime, [
+      'api',
+      '-X', 'GET',
+      `repos/${input.owner}/${input.repo}/pulls/${input.pullNumber}/comments`,
+      '-f', `per_page=${GITHUB_COMMENTS_PAGE_SIZE}`,
+      '-f', `page=${page}`,
+    ], signal);
+  }
+
+  async listPullRequestReviews(input: GitHubPullRequestRef, signal?: AbortSignal): Promise<GitHubRawPullRequestReview[]> {
+    return ghJson<GitHubRawPullRequestReview[]>(this.runtime, [
+      'api',
+      '-X', 'GET',
+      `repos/${input.owner}/${input.repo}/pulls/${input.pullNumber}/reviews`,
+      '-f', 'per_page=10',
+      '-f', 'page=1',
+    ], signal);
+  }
+
+  private async listTimelineEvents(owner: string, repo: string, issueNumber: number, signal?: AbortSignal): Promise<GitHubRawIssueTimelineEvent[]> {
+    const events: GitHubRawIssueTimelineEvent[] = [];
+    for (let page = 1; page <= GITHUB_TIMELINE_MAX_PAGES; page += 1) {
+      const pageEvents = await ghJson<GitHubRawIssueTimelineEvent[]>(this.runtime, [
+        'api',
+        '-X', 'GET',
+        `repos/${owner}/${repo}/issues/${issueNumber}/timeline`,
+        '-f', `per_page=${GITHUB_TIMELINE_PAGE_SIZE}`,
+        '-f', `page=${page}`,
+      ], signal);
+      events.push(...pageEvents);
+      if (pageEvents.length < GITHUB_TIMELINE_PAGE_SIZE) {
+        break;
+      }
+    }
+    return events;
   }
 }
 
