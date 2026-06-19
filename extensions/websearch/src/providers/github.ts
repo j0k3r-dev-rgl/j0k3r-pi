@@ -7,6 +7,7 @@ import type {
   GitHubIssueSearchRequest,
   GitHubPullRequestRef,
   GitHubPullRequestSearchRequest,
+  GitHubReleaseGetRequest,
   GitHubRawIssue,
   GitHubRawIssueComment,
   GitHubRawIssueSearchItem,
@@ -14,6 +15,8 @@ import type {
   GitHubRawPullRequest,
   GitHubRawPullRequestComment,
   GitHubRawPullRequestReview,
+  GitHubRawRelease,
+  GitHubReleasesGetRequest,
   WebsearchRuntime,
 } from '../types.js';
 
@@ -246,6 +249,39 @@ class OctokitGitHubClient implements GitHubClient {
     }
   }
 
+  async listReleases(input: GitHubReleasesGetRequest, signal?: AbortSignal): Promise<GitHubRawRelease[]> {
+    try {
+      const response = await this.octokit.rest.repos.listReleases({
+        owner: input.owner,
+        repo: input.repo,
+        per_page: input.limit,
+        page: 1,
+        request: signal ? { signal } : undefined,
+      });
+      return response.data as unknown as GitHubRawRelease[];
+    } catch (error) {
+      throw new ProviderFailure(githubProviderErrorFromError(error));
+    }
+  }
+
+  async getReleaseByTag(input: GitHubReleaseGetRequest, signal?: AbortSignal): Promise<GitHubRawRelease | null> {
+    try {
+      const response = await this.octokit.rest.repos.getReleaseByTag({
+        owner: input.owner,
+        repo: input.repo,
+        tag: input.tag,
+        request: signal ? { signal } : undefined,
+      });
+      return response.data as unknown as GitHubRawRelease;
+    } catch (error) {
+      const mapped = githubProviderErrorFromError(error);
+      if (mapped.code === 'not_found') {
+        return null;
+      }
+      throw new ProviderFailure(mapped);
+    }
+  }
+
   private async listTimelineEvents(owner: string, repo: string, issueNumber: number, signal?: AbortSignal): Promise<GitHubRawIssueTimelineEvent[]> {
     const events: GitHubRawIssueTimelineEvent[] = [];
     for (let page = 1; page <= GITHUB_TIMELINE_MAX_PAGES; page += 1) {
@@ -370,6 +406,31 @@ class GhGitHubClient implements GitHubClient {
       '-f', 'per_page=10',
       '-f', 'page=1',
     ], signal);
+  }
+
+  async listReleases(input: GitHubReleasesGetRequest, signal?: AbortSignal): Promise<GitHubRawRelease[]> {
+    return ghJson<GitHubRawRelease[]>(this.runtime, [
+      'api',
+      '-X', 'GET',
+      `repos/${input.owner}/${input.repo}/releases`,
+      '-f', `per_page=${input.limit}`,
+      '-f', 'page=1',
+    ], signal);
+  }
+
+  async getReleaseByTag(input: GitHubReleaseGetRequest, signal?: AbortSignal): Promise<GitHubRawRelease | null> {
+    try {
+      return await ghJson<GitHubRawRelease>(this.runtime, [
+        'api',
+        '-X', 'GET',
+        `repos/${input.owner}/${input.repo}/releases/tags/${input.tag}`,
+      ], signal);
+    } catch (error) {
+      if (error instanceof ProviderFailure && error.toolError.category === 'not_found') {
+        return null;
+      }
+      throw error;
+    }
   }
 
   private async listTimelineEvents(owner: string, repo: string, issueNumber: number, signal?: AbortSignal): Promise<GitHubRawIssueTimelineEvent[]> {

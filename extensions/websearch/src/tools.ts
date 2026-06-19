@@ -11,6 +11,7 @@ import {
   normalizeGitHubPullRequest,
   normalizeGitHubPullRequestReview,
   normalizeGitHubPullRequestReviewComment,
+  normalizeGitHubRelease,
   normalizeHackerNewsStory,
   normalizeHackerNewsStoryDetail,
   normalizeStackOverflowAnswer,
@@ -25,6 +26,8 @@ import type {
   GitHubIssueSearchResult,
   GitHubPullRequestDetailResult,
   GitHubPullRequestSearchResult,
+  GitHubReleaseResult,
+  GitHubReleasesResult,
   HackerNewsSearchResult,
   HackerNewsStoryDetailResult,
   NormalizedStackOverflowQuestion,
@@ -45,6 +48,8 @@ import {
   validateGitHubIssueSearch,
   validateGitHubPullRequestGet,
   validateGitHubPullRequestSearch,
+  validateGitHubReleaseGet,
+  validateGitHubReleasesGet,
   validateHackerNewsSearch,
   validateHackerNewsStoryGet,
   validateStackOverflowAnswers,
@@ -63,6 +68,8 @@ export const WEBSEARCH_TOOL_NAMES = [
   'github_issue_get',
   'search_github_pull_requests',
   'github_pull_request_get',
+  'github_releases_get',
+  'github_release_get',
   'search_devto_articles',
   'devto_comments_get',
   'search_hackernews',
@@ -118,6 +125,17 @@ const githubPullRequestParameters = Type.Object({
   commentsOffset: Type.Optional(Type.Number()),
   reviewCommentsLimit: Type.Optional(Type.Number()),
   reviewCommentsOffset: Type.Optional(Type.Number()),
+});
+
+const githubReleasesParameters = Type.Object({
+  repo: Type.String(),
+  limit: Type.Optional(Type.Number()),
+  includePrereleases: Type.Optional(Type.Boolean()),
+});
+
+const githubReleaseParameters = Type.Object({
+  repo: Type.String(),
+  tag: Type.String(),
 });
 
 const devtoSearchParameters = Type.Object({
@@ -482,6 +500,36 @@ function githubPullRequestSummary(data: GitHubPullRequestDetailResult): string {
   ].filter(Boolean).join('\n');
 }
 
+function githubReleasesSummary(data: GitHubReleasesResult): string {
+  if (data.items.length === 0) {
+    return `No GitHub releases found for ${data.repository}.`;
+  }
+  return data.items.map((item, index) => {
+    const metadata = [
+      item.published_at ? `published: ${item.published_at}` : undefined,
+      item.prerelease === undefined ? undefined : `prerelease: ${item.prerelease}`,
+      item.draft === undefined ? undefined : `draft: ${item.draft}`,
+      item.assets_count === undefined ? undefined : `assets: ${item.assets_count}`,
+      item.author ? `author: ${item.author}` : undefined,
+    ].filter(Boolean).join('; ');
+    const body = item.body ? `\n   notes: ${item.body}` : '';
+    return `${index + 1}. ${item.name ?? item.tag} — ${item.tag} — ${item.url ?? `${data.repository}/releases/tag/${item.tag}`}${metadata ? ` (${metadata})` : ''}${body}`;
+  }).join('\n');
+}
+
+function githubReleaseSummary(data: GitHubReleaseResult): string {
+  const metadata = [
+    data.published_at ? `published: ${data.published_at}` : undefined,
+    data.target_commitish ? `target: ${data.target_commitish}` : undefined,
+    data.prerelease === undefined ? undefined : `prerelease: ${data.prerelease}`,
+    data.draft === undefined ? undefined : `draft: ${data.draft}`,
+    data.assets_count === undefined ? undefined : `assets: ${data.assets_count}`,
+    data.author ? `author: ${data.author}` : undefined,
+  ].filter(Boolean).join('; ');
+  const body = data.body ? `\nnotes: ${data.body}` : '';
+  return `${data.name ?? data.tag} — ${data.tag} — ${data.url ?? `${data.repository}/releases/tag/${data.tag}`}${metadata ? ` (${metadata})` : ''}${body}`;
+}
+
 function devtoSearchSummary(data: DevtoArticleSearchResult): string {
   if (data.items.length === 0) {
     return `No Dev.to articles found for tag "${data.tag}".`;
@@ -779,6 +827,51 @@ export function registerWebsearchTools(pi: any, deps: RegisterWebsearchToolsDeps
           },
         };
         return buildSuccess(githubPullRequestSummary(data), data, 14000);
+      } catch (error) {
+        return buildFailure(toToolError(error));
+      }
+    },
+  });
+
+  registerTool(pi, {
+    name: 'github_releases_get',
+    description: 'Fetch recent GitHub releases for a repository with bounded read-only results.',
+    parameters: githubReleasesParameters,
+    async execute(_id: string, params: unknown, _unused1?: unknown, _unused2?: unknown, context?: ExecuteContext): Promise<PiToolResult<GitHubReleasesResult>> {
+      try {
+        const input = validateGitHubReleasesGet(params);
+        const rawReleases = await clientsFromDeps(deps).github.listReleases(input, signalFromContext(context));
+        const repository = `${input.owner}/${input.repo}`;
+        const items = rawReleases
+          .map((raw) => normalizeGitHubRelease(raw, repository))
+          .filter((release) => input.includePrereleases || !release.prerelease)
+          .slice(0, input.limit);
+        const data: GitHubReleasesResult = {
+          repository,
+          limit: input.limit,
+          include_prereleases: input.includePrereleases,
+          items,
+        };
+        return buildSuccess(githubReleasesSummary(data), data, 8000);
+      } catch (error) {
+        return buildFailure(toToolError(error));
+      }
+    },
+  });
+
+  registerTool(pi, {
+    name: 'github_release_get',
+    description: 'Fetch one GitHub release by repository and tag with bounded read-only output.',
+    parameters: githubReleaseParameters,
+    async execute(_id: string, params: unknown, _unused1?: unknown, _unused2?: unknown, context?: ExecuteContext): Promise<PiToolResult<GitHubReleaseResult>> {
+      try {
+        const input = validateGitHubReleaseGet(params);
+        const rawRelease = await clientsFromDeps(deps).github.getReleaseByTag(input, signalFromContext(context));
+        if (!rawRelease) {
+          return buildFailure({ code: 'not_found', category: 'not_found', message: 'GitHub release was not found for the requested tag.', recoverable: true, provider: 'github' });
+        }
+        const data = normalizeGitHubRelease(rawRelease, `${input.owner}/${input.repo}`);
+        return buildSuccess(githubReleaseSummary(data), data, 8000);
       } catch (error) {
         return buildFailure(toToolError(error));
       }

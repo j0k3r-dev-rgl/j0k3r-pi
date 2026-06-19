@@ -4,9 +4,11 @@ import type {
   GitHubIssueGetRequest,
   GitHubIssueRef,
   GitHubIssueSearchRequest,
+  GitHubReleaseGetRequest,
   GitHubPullRequestGetRequest,
   GitHubPullRequestRef,
   GitHubPullRequestSearchRequest,
+  GitHubReleasesGetRequest,
   HackerNewsSearchRequest,
   HackerNewsStoryRequest,
   StackOverflowAnswersRequest,
@@ -84,6 +86,17 @@ function boundedInteger(input: Input, key: string, defaultValue: number, max: nu
   }
   if (value > max) {
     throw new ValidationError(`${key} must be at most ${max}.`);
+  }
+  return value;
+}
+
+function optionalBoolean(input: Input, key: string, defaultValue: boolean): boolean {
+  const value = input[key];
+  if (value === undefined || value === null || value === '') {
+    return defaultValue;
+  }
+  if (typeof value !== 'boolean') {
+    throw new ValidationError(`${key} must be a boolean.`);
   }
   return value;
 }
@@ -299,6 +312,27 @@ export function validateGitHubPullRequestGet(value: unknown): GitHubPullRequestG
     commentsOffset: boundedOffset(input, 'commentsOffset', 0),
     reviewCommentsLimit: boundedInteger(input, 'reviewCommentsLimit', GITHUB_COMMENTS_DEFAULT_LIMIT, GITHUB_COMMENTS_MAX_LIMIT),
     reviewCommentsOffset: boundedOffset(input, 'reviewCommentsOffset', 0),
+  };
+}
+
+export function validateGitHubReleasesGet(value: unknown): GitHubReleasesGetRequest {
+  const input = asInput(value);
+  const repo = parseGitHubRepoScope(requiredString(input, 'repo'));
+  return {
+    owner: repo.owner,
+    repo: repo.repo,
+    limit: boundedInteger(input, 'limit', SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT),
+    includePrereleases: optionalBoolean(input, 'includePrereleases', false),
+  };
+}
+
+export function validateGitHubReleaseGet(value: unknown): GitHubReleaseGetRequest {
+  const input = asInput(value);
+  const repo = parseGitHubRepoScope(requiredString(input, 'repo'));
+  return {
+    owner: repo.owner,
+    repo: repo.repo,
+    tag: requiredString(input, 'tag'),
   };
 }
 

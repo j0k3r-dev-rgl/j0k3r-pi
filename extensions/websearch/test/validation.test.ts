@@ -74,6 +74,8 @@ describe('websearch community-platform validation contracts', () => {
     const validateGitHubIssueGet = contracts.validateGitHubIssueGet as ((value: unknown) => unknown) | undefined;
     const validateGitHubPullRequestSearch = contracts.validateGitHubPullRequestSearch as ((value: unknown) => unknown) | undefined;
     const validateGitHubPullRequestGet = contracts.validateGitHubPullRequestGet as ((value: unknown) => unknown) | undefined;
+    const validateGitHubReleasesGet = contracts.validateGitHubReleasesGet as ((value: unknown) => unknown) | undefined;
+    const validateGitHubReleaseGet = contracts.validateGitHubReleaseGet as ((value: unknown) => unknown) | undefined;
     const validateDevtoArticleSearch = contracts.validateDevtoArticleSearch as ((value: unknown) => unknown) | undefined;
     const validateDevtoCommentsGet = contracts.validateDevtoCommentsGet as ((value: unknown) => unknown) | undefined;
     const validateHackerNewsSearch = contracts.validateHackerNewsSearch as ((value: unknown) => unknown) | undefined;
@@ -83,6 +85,8 @@ describe('websearch community-platform validation contracts', () => {
     expect(validateGitHubIssueGet).toBeTypeOf('function');
     expect(validateGitHubPullRequestSearch).toBeTypeOf('function');
     expect(validateGitHubPullRequestGet).toBeTypeOf('function');
+    expect(validateGitHubReleasesGet).toBeTypeOf('function');
+    expect(validateGitHubReleaseGet).toBeTypeOf('function');
     expect(validateDevtoArticleSearch).toBeTypeOf('function');
     expect(validateDevtoCommentsGet).toBeTypeOf('function');
     expect(validateHackerNewsSearch).toBeTypeOf('function');
@@ -103,6 +107,17 @@ describe('websearch community-platform validation contracts', () => {
       repo: 'octo/widgets',
       state: 'merged',
       limit: 5,
+    });
+    expect(validateGitHubReleasesGet?.({ repo: 'octo/widgets', includePrereleases: true })).toEqual({
+      owner: 'octo',
+      repo: 'widgets',
+      limit: 5,
+      includePrereleases: true,
+    });
+    expect(validateGitHubReleaseGet?.({ repo: 'octo/widgets', tag: 'v1.2.3' })).toEqual({
+      owner: 'octo',
+      repo: 'widgets',
+      tag: 'v1.2.3',
     });
     expect(() => validateGitHubIssueSearch?.({ query: 'vitest', repo: 'octo' })).toThrow(/repo must be an owner\/repo reference/i);
     expect(validateDevtoArticleSearch?.({ tag: 'typescript' })).toEqual({
@@ -149,6 +164,8 @@ describe('websearch community-platform validation contracts', () => {
     expect(() => validateGitHubPullRequestSearch?.({ query: 'oops', state: 'draft' })).toThrow(/open.*closed.*merged.*all/i);
     expect(() => validateGitHubIssueGet?.({ issue: 'octo/widgets#42', commentsLimit: 21 })).toThrow(/at most 20/i);
     expect(() => validateGitHubPullRequestGet?.({ pull_request: 'octo/widgets#42', reviewCommentsLimit: 21 })).toThrow(/at most 20/i);
+    expect(() => validateGitHubReleasesGet?.({ repo: 'octo', limit: 11 })).toThrow(/repo must be an owner\/repo reference|at most 10/i);
+    expect(() => validateGitHubReleaseGet?.({ repo: 'octo/widgets', tag: '' })).toThrow(/tag is required/i);
     expect(() => validateDevtoCommentsGet?.({ article_id: 1234, topLevelLimit: 26 })).toThrow(/at most 25/i);
     expect(() => validateHackerNewsStoryGet?.({ story_id: 9876, commentsLimit: 26 })).toThrow(/at most 25/i);
   });

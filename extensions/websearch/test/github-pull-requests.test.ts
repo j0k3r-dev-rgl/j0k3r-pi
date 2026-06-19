@@ -19,6 +19,8 @@ function baseClients(githubOverrides: Record<string, unknown>) {
       getPullRequest: vi.fn(),
       listPullRequestReviewComments: vi.fn().mockResolvedValue([]),
       listPullRequestReviews: vi.fn().mockResolvedValue([]),
+      listReleases: vi.fn().mockResolvedValue([]),
+      getReleaseByTag: vi.fn(),
       ...githubOverrides,
     },
     devto: {

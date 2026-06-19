@@ -182,6 +182,19 @@ export type GitHubPullRequestSearchRequest = {
   state?: 'open' | 'closed' | 'merged' | 'all';
 };
 
+export type GitHubReleasesGetRequest = {
+  owner: string;
+  repo: string;
+  limit: number;
+  includePrereleases: boolean;
+};
+
+export type GitHubReleaseGetRequest = {
+  owner: string;
+  repo: string;
+  tag: string;
+};
+
 export type GitHubIssueCommentsRequest = GitHubIssueRef & {
   limit: number;
   offset: number;
@@ -199,6 +212,7 @@ export type GitHubRawIssueTimelineEvent = Record<string, unknown>;
 export type GitHubRawPullRequest = Record<string, unknown>;
 export type GitHubRawPullRequestComment = Record<string, unknown>;
 export type GitHubRawPullRequestReview = Record<string, unknown>;
+export type GitHubRawRelease = Record<string, unknown>;
 
 export type GitHubIssueRelation = {
   type: 'pull_request' | 'issue';
@@ -307,6 +321,32 @@ export type GitHubPullRequestGetRequest = GitHubPullRequestRef & {
   reviewCommentsLimit: number;
   reviewCommentsOffset: number;
 };
+
+export type NormalizedGitHubRelease = {
+  platform: 'github';
+  repository: string;
+  id: string;
+  tag: string;
+  name?: string;
+  url?: string;
+  author?: string;
+  draft?: boolean;
+  prerelease?: boolean;
+  published_at?: string;
+  created_at?: string;
+  body?: string;
+  assets_count?: number;
+  target_commitish?: string;
+};
+
+export type GitHubReleasesResult = {
+  repository: string;
+  limit: number;
+  include_prereleases: boolean;
+  items: NormalizedGitHubRelease[];
+};
+
+export type GitHubReleaseResult = NormalizedGitHubRelease;
 
 export type GitHubPullRequestDetailResult = NormalizedGitHubPullRequest & {
   comments: NormalizedGitHubIssueComment[];
@@ -463,6 +503,8 @@ export interface GitHubClient {
   getPullRequest(input: GitHubPullRequestRef, signal?: AbortSignal): Promise<GitHubRawPullRequest | null>;
   listPullRequestReviewComments(input: GitHubPullRequestRef & { limit: number; offset: number }, signal?: AbortSignal): Promise<GitHubRawPullRequestComment[]>;
   listPullRequestReviews(input: GitHubPullRequestRef, signal?: AbortSignal): Promise<GitHubRawPullRequestReview[]>;
+  listReleases(input: GitHubReleasesGetRequest, signal?: AbortSignal): Promise<GitHubRawRelease[]>;
+  getReleaseByTag(input: GitHubReleaseGetRequest, signal?: AbortSignal): Promise<GitHubRawRelease | null>;
 }
 
 export interface DevtoClient {

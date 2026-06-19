@@ -23,6 +23,8 @@ describe('github issue tool behavior', () => {
           getPullRequest: vi.fn(),
           listPullRequestReviewComments: vi.fn().mockResolvedValue([]),
           listPullRequestReviews: vi.fn().mockResolvedValue([]),
+          listReleases: vi.fn().mockResolvedValue([]),
+          getReleaseByTag: vi.fn(),
         },
         devto: {
           searchArticles: vi.fn(),
@@ -108,6 +110,8 @@ describe('github issue tool behavior', () => {
           getPullRequest: vi.fn(),
           listPullRequestReviewComments: vi.fn().mockResolvedValue([]),
           listPullRequestReviews: vi.fn().mockResolvedValue([]),
+          listReleases: vi.fn().mockResolvedValue([]),
+          getReleaseByTag: vi.fn(),
         },
         devto: {
           searchArticles: vi.fn(),
@@ -399,6 +403,8 @@ describe('github issue tool behavior', () => {
           getPullRequest: vi.fn(),
           listPullRequestReviewComments: vi.fn().mockResolvedValue([]),
           listPullRequestReviews: vi.fn().mockResolvedValue([]),
+          listReleases: vi.fn().mockResolvedValue([]),
+          getReleaseByTag: vi.fn(),
         },
         devto: {
           searchArticles: vi.fn(),

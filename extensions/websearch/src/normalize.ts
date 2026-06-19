@@ -10,6 +10,7 @@ import type {
   GitHubRawPullRequest,
   GitHubRawPullRequestComment,
   GitHubRawPullRequestReview,
+  GitHubRawRelease,
   HackerNewsCommentNode,
   HackerNewsRawItem,
   HackerNewsRawStory,
@@ -22,6 +23,7 @@ import type {
   NormalizedGitHubPullRequest,
   NormalizedGitHubPullRequestReview,
   NormalizedGitHubPullRequestReviewComment,
+  NormalizedGitHubRelease,
   NormalizedHackerNewsStory,
   NormalizedStackOverflowAnswer,
   NormalizedStackOverflowComment,
@@ -287,6 +289,28 @@ export function normalizeGitHubPullRequestReview(raw: GitHubRawPullRequestReview
     state: stringValue(data.state),
     submitted_at: stringValue(data.submitted_at),
     body: truncateText(stringValue(data.body), 1000),
+  };
+}
+
+export function normalizeGitHubRelease(raw: GitHubRawRelease, repository: string): NormalizedGitHubRelease {
+  const data = raw as Record<string, unknown>;
+  const assets = Array.isArray(data.assets) ? data.assets : [];
+  const author = data.author as Record<string, unknown> | undefined;
+  return {
+    platform: 'github',
+    repository,
+    id: String(numberValue(data.id) ?? stringValue(data.id) ?? stringValue(data.tag_name) ?? 'unknown'),
+    tag: stringValue(data.tag_name) ?? 'unknown',
+    name: truncateText(stringValue(data.name), 300),
+    url: stringValue(data.html_url),
+    author: truncateText(author ? stringValue(author.login) : githubUserLogin(data), 120),
+    draft: booleanValue(data.draft),
+    prerelease: booleanValue(data.prerelease),
+    published_at: stringValue(data.published_at),
+    created_at: stringValue(data.created_at),
+    body: truncateText(cleanGitHubMarkdown(stringValue(data.body)), 2000),
+    assets_count: assets.length,
+    target_commitish: stringValue(data.target_commitish),
   };
 }
 

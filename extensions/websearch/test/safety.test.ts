@@ -89,6 +89,8 @@ describe('websearch output safety', () => {
           getPullRequest: vi.fn(),
           listPullRequestReviewComments: vi.fn(),
           listPullRequestReviews: vi.fn(),
+          listReleases: vi.fn(),
+          getReleaseByTag: vi.fn(),
         },
         devto: {
           searchArticles: vi.fn(),
@@ -138,6 +140,8 @@ describe('websearch output safety', () => {
           getPullRequest: vi.fn(),
           listPullRequestReviewComments: vi.fn().mockResolvedValue([]),
           listPullRequestReviews: vi.fn().mockResolvedValue([]),
+          listReleases: vi.fn().mockResolvedValue([]),
+          getReleaseByTag: vi.fn(),
         },
         devto: {
           searchArticles: vi.fn().mockRejectedValue({ name: 'AbortError' }),
@@ -186,6 +190,8 @@ describe('websearch output safety', () => {
         getPullRequest: vi.fn(),
         listPullRequestReviewComments: vi.fn().mockResolvedValue([]),
         listPullRequestReviews: vi.fn().mockResolvedValue([]),
+          listReleases: vi.fn().mockResolvedValue([]),
+          getReleaseByTag: vi.fn(),
       },
       devto: {
         searchArticles: vi.fn().mockResolvedValue([]),
