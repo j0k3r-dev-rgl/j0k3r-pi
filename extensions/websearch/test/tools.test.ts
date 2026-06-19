@@ -133,22 +133,25 @@ describe('websearch community-platform validation contracts', () => {
       query: 'typescript',
       limit: 5,
     });
-    expect(validateGitHubIssueGet?.({ issue: 'octo/widgets#42' })).toEqual({
+    expect(validateGitHubIssueGet?.({ issue: 'octo/widgets#42', commentsLimit: 3, commentsOffset: 6 })).toEqual({
       owner: 'octo',
       repo: 'widgets',
       issueNumber: 42,
       url: 'https://github.com/octo/widgets/issues/42',
-      commentsLimit: 5,
+      commentsLimit: 3,
+      commentsOffset: 6,
     });
-    expect(validateDevtoCommentsGet?.({ article_id: 1234 })).toEqual({
+    expect(validateDevtoCommentsGet?.({ article_id: 1234, topLevelLimit: 2, topLevelOffset: 4 })).toEqual({
       articleId: 1234,
-      topLevelLimit: 10,
+      topLevelLimit: 2,
+      topLevelOffset: 4,
       totalLimit: 25,
       maxDepth: 2,
     });
-    expect(validateHackerNewsStoryGet?.({ story_id: 9876 })).toEqual({
+    expect(validateHackerNewsStoryGet?.({ story_id: 9876, commentsLimit: 2, commentsOffset: 4 })).toEqual({
       storyId: 9876,
-      commentsLimit: 10,
+      commentsLimit: 2,
+      commentsOffset: 4,
       maxDepth: 3,
     });
 
@@ -457,19 +460,209 @@ describe('stack overflow tool behavior', () => {
   });
 });
 
+describe('github issue tool behavior', () => {
+  it('search_github_issues returns multiple reusable issue refs with metadata and semantic snippets', async () => {
+    const searchIssues = vi.fn().mockResolvedValue([{ 
+      id: 1,
+      number: 10,
+      html_url: 'https://github.com/nodejs/node/issues/10',
+      repository_url: 'https://api.github.com/repos/nodejs/node',
+      title: 'Fetch abort timeout behavior',
+      user: { login: 'reporter' },
+      state: 'closed',
+      comments: 4,
+      score: 2,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-02T00:00:00Z',
+      labels: [{ name: 'bug' }, { name: 'fetch' }],
+      body: `<!-- template noise -->\n${'First issue semantic body about fetch abort timeout. '.repeat(12)}`,
+    }, {
+      id: 2,
+      number: 11,
+      html_url: 'https://github.com/nodejs/node/issues/11',
+      repository_url: 'https://api.github.com/repos/nodejs/node',
+      title: 'AbortSignal timeout should reject',
+      user: { login: 'maintainer' },
+      state: 'open',
+      comments: 7,
+      score: 1,
+      created_at: '2026-01-03T00:00:00Z',
+      updated_at: '2026-01-04T00:00:00Z',
+      labels: [{ name: 'question' }],
+      body: 'Second issue semantic snippet about AbortSignal timeout rejection.',
+    }]);
+
+    const pi = createMockPi();
+    registerWebsearchTools(pi, {
+      env: {},
+      fetch: vi.fn<typeof fetch>(),
+      createClients: () => ({
+        stackExchange: {
+          searchQuestions: vi.fn(),
+          getQuestion: vi.fn(),
+          getAnswers: vi.fn(),
+          getQuestionComments: vi.fn(),
+        },
+        github: {
+          searchIssues,
+          getIssue: vi.fn(),
+          listIssueComments: vi.fn(),
+        },
+        devto: {
+          searchArticles: vi.fn(),
+          getComments: vi.fn(),
+        },
+        hackerNews: {
+          searchStories: vi.fn(),
+          getStory: vi.fn(),
+        },
+      }),
+    });
+
+    const tool = pi.tools.find((entry) => entry.name === 'search_github_issues');
+    const result = (await execute(tool!, { repo: 'nodejs/node', query: 'fetch abort timeout', state: 'closed', limit: 2 })) as {
+      content: Array<{ type: 'text'; text: string }>;
+      details: { status: 'success'; data: { items: Array<Record<string, unknown>>; limit: number } };
+    };
+
+    expect(result.details.status).toBe('success');
+    expect(result.details.data.limit).toBe(2);
+    expect(result.details.data.items[0]).toMatchObject({
+      platform: 'github',
+      number: 10,
+      repository: 'nodejs/node',
+      follow_up_ref: 'nodejs/node#10',
+      state: 'closed',
+      comments_count: 4,
+      labels: ['bug', 'fetch'],
+      snippet: expect.stringContaining('First issue semantic body about fetch abort timeout.'),
+    });
+    expect(result.content[0]?.text).toContain('1. Fetch abort timeout behavior — nodejs/node#10');
+    expect(result.content[0]?.text).toContain('state: closed');
+    expect(result.content[0]?.text).toContain('comments: 4');
+    expect(result.content[0]?.text).toContain('labels: bug, fetch');
+    expect(result.content[0]?.text).toContain('snippet: First issue semantic body about fetch abort timeout.');
+    expect(result.content[0]?.text).toContain('2. AbortSignal timeout should reject — nodejs/node#11');
+    expect(result.content[0]?.text).toContain('question');
+    expect(result.content[0]?.text).not.toContain('template noise');
+    expect(searchIssues).toHaveBeenCalledWith({ repo: 'nodejs/node', query: 'fetch abort timeout', state: 'closed', limit: 2 }, undefined);
+  });
+
+  it('github_issue_get returns full readable issue body and bounded comments with offset metadata', async () => {
+    const getIssue = vi.fn().mockResolvedValue({
+      id: 1,
+      number: 10,
+      html_url: 'https://github.com/nodejs/node/issues/10',
+      repository_url: 'https://api.github.com/repos/nodejs/node',
+      title: 'Fetch abort timeout behavior',
+      user: { login: 'reporter' },
+      state: 'closed',
+      comments: 4,
+      score: 2,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-02T00:00:00Z',
+      closed_at: '2026-01-03T00:00:00Z',
+      labels: [{ name: 'bug' }, { name: 'fetch' }],
+      body: `${'Full issue body about fetch abort timeout. '.repeat(80)}final issue sentence should remain visible.`,
+    });
+    const listIssueComments = vi.fn().mockResolvedValue([{ 
+      id: 100,
+      html_url: 'https://github.com/nodejs/node/issues/10#issuecomment-100',
+      user: { login: 'commenter' },
+      created_at: '2026-01-04T00:00:00Z',
+      updated_at: '2026-01-05T00:00:00Z',
+      body: 'First returned comment after offset.',
+    }]);
+
+    const pi = createMockPi();
+    registerWebsearchTools(pi, {
+      env: {},
+      fetch: vi.fn<typeof fetch>(),
+      createClients: () => ({
+        stackExchange: {
+          searchQuestions: vi.fn(),
+          getQuestion: vi.fn(),
+          getAnswers: vi.fn(),
+          getQuestionComments: vi.fn(),
+        },
+        github: {
+          searchIssues: vi.fn(),
+          getIssue,
+          listIssueComments,
+        },
+        devto: {
+          searchArticles: vi.fn(),
+          getComments: vi.fn(),
+        },
+        hackerNews: {
+          searchStories: vi.fn(),
+          getStory: vi.fn(),
+        },
+      }),
+    });
+
+    const tool = pi.tools.find((entry) => entry.name === 'github_issue_get');
+    const result = (await execute(tool!, { issue: 'nodejs/node#10', commentsLimit: 1, commentsOffset: 2 })) as {
+      content: Array<{ type: 'text'; text: string }>;
+      details: { status: 'success'; data: Record<string, unknown> };
+    };
+
+    expect(result.details.status).toBe('success');
+    expect(result.details.data).toMatchObject({
+      platform: 'github',
+      number: 10,
+      repository: 'nodejs/node',
+      follow_up_ref: 'nodejs/node#10',
+      state: 'closed',
+      comments_count: 4,
+      labels: ['bug', 'fetch'],
+      comments_limit: 1,
+      comments_offset: 2,
+      next_comments_offset: 3,
+      comments: [{
+        id: '100',
+        author: 'commenter',
+        body: 'First returned comment after offset.',
+      }],
+    });
+    expect(result.content[0]?.text).toContain('Fetch abort timeout behavior');
+    expect(result.content[0]?.text).toContain('nodejs/node#10');
+    expect(result.content[0]?.text).toContain('state: closed');
+    expect(result.content[0]?.text).toContain('labels: bug, fetch');
+    expect(result.content[0]?.text).toContain('Full issue body about fetch abort timeout.');
+    expect(result.content[0]?.text).toContain('final issue sentence should remain visible.');
+    expect(result.content[0]?.text).toContain('Comments offset 2 limit 1');
+    expect(result.content[0]?.text).toContain('3. commenter: First returned comment after offset.');
+    expect(listIssueComments).toHaveBeenCalledWith(expect.objectContaining({ owner: 'nodejs', repo: 'node', issueNumber: 10, limit: 1, offset: 2 }), undefined);
+  });
+});
+
 describe('dev.to tool behavior', () => {
   it('search_devto_articles uses the public Forem API tag search and normalizes bounded results', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(response([
       {
         id: 321,
         title: 'TypeScript token=secret-value',
-        description: 'Learn with AKIA1234567890ABCDEF',
+        description: `${'Learn with AKIA1234567890ABCDEF and enough semantic context. '.repeat(6)}`,
         url: 'https://dev.to/dev/typescript-post-321',
         published_at: '2026-06-19T00:00:00Z',
         tag_list: ['typescript', 'testing'],
         public_reactions_count: 42,
         comments_count: 7,
+        reading_time_minutes: 5,
         user: { name: 'dev author' },
+      },
+      {
+        id: 654,
+        title: 'Second JavaScript article',
+        description: 'Second article semantic description.',
+        url: 'https://dev.to/dev/second-javascript-article-654',
+        published_at: '2026-06-19T01:00:00Z',
+        tag_list: ['javascript', 'webdev'],
+        public_reactions_count: 3,
+        comments_count: 1,
+        reading_time_minutes: 2,
+        user: { username: 'second-dev' },
       },
     ]));
 
@@ -487,16 +680,26 @@ describe('dev.to tool behavior', () => {
     expect(result.details.data.items[0]).toMatchObject({
       platform: 'devto',
       id: '321',
+      article_id: 321,
       url: 'https://dev.to/dev/typescript-post-321',
       author: 'dev author',
       published_at: '2026-06-19T00:00:00Z',
       tags: ['typescript', 'testing'],
       reactions_count: 42,
       comments_count: 7,
+      reading_time_minutes: 5,
       follow_up_article_id: 321,
     });
     expect(JSON.stringify(result)).toContain('[REDACTED_SECRET]');
     expect(JSON.stringify(result)).not.toContain('AKIA1234567890ABCDEF');
+    expect(result.content[0]?.text).toContain('1. TypeScript token=[REDACTED_SECRET] — article_id: 321');
+    expect(result.content[0]?.text).toContain('author: dev author');
+    expect(result.content[0]?.text).toContain('reactions: 42');
+    expect(result.content[0]?.text).toContain('comments: 7');
+    expect(result.content[0]?.text).toContain('reading: 5 min');
+    expect(result.content[0]?.text).toContain('tags: typescript, testing');
+    expect(result.content[0]?.text).toContain('snippet: Learn with [REDACTED_SECRET] and enough semantic context.');
+    expect(result.content[0]?.text).toContain('2. Second JavaScript article — article_id: 654');
     const url = fetchMock.mock.calls[0]?.[0].toString() ?? '';
     expect(url).toContain('https://dev.to/api/articles');
     expect(url).toContain('tag=typescript');
@@ -514,7 +717,7 @@ describe('dev.to tool behavior', () => {
           {
             id_code: 'c1-1',
             created_at: '2026-06-19T00:01:00Z',
-            body_markdown: 'child comment',
+            body_html: '<p>child <strong>comment</strong></p>',
             user: { name: 'child' },
             children: [
               {
@@ -531,7 +734,7 @@ describe('dev.to tool behavior', () => {
       {
         id_code: 'c2',
         created_at: '2026-06-19T00:03:00Z',
-        body_markdown: 'second root',
+        body_html: '<p>second root with &hellip;</p>',
         user: { name: 'root-2' },
         children: [],
       },
@@ -541,7 +744,8 @@ describe('dev.to tool behavior', () => {
     registerWebsearchTools(pi, { env: {}, fetch: fetchMock });
 
     const tool = pi.tools.find((entry) => entry.name === 'devto_comments_get');
-    const result = (await execute(tool!, { article_id: 99 })) as {
+    const result = (await execute(tool!, { article_id: 99, topLevelLimit: 1, topLevelOffset: 1 })) as {
+      content: Array<{ type: 'text'; text: string }>;
       details: { status: 'success'; data: Record<string, unknown> };
     };
 
@@ -549,19 +753,29 @@ describe('dev.to tool behavior', () => {
     expect(result.details.data).toMatchObject({
       platform: 'devto',
       article_id: 99,
-      top_level_limit: 10,
+      top_level_limit: 1,
+      top_level_offset: 1,
       total_limit: 25,
       max_depth: 2,
+      has_more_top_level_comments: false,
       bounds: {
-        returned_top_level_comments: 2,
-        returned_total_nodes: 3,
-        truncated_by_depth: true,
+        returned_top_level_comments: 1,
+        returned_total_nodes: 1,
+        truncated_by_depth: false,
       },
     });
     const comments = (result.details.data.comments as Array<Record<string, unknown>>);
-    expect(comments).toHaveLength(2);
-    expect(comments[0]?.children).toHaveLength(1);
-    expect((comments[0]?.children as Array<Record<string, unknown>>)[0]?.children ?? []).toHaveLength(0);
+    expect(comments).toHaveLength(1);
+    expect(comments[0]).toMatchObject({
+      id: 'c2',
+      author: 'root-2',
+      body: 'second root with …',
+      children: [],
+    });
+    expect(result.content[0]?.text).toContain('Dev.to comments for article 99');
+    expect(result.content[0]?.text).toContain('2. root-2: second root with …');
+    expect(result.content[0]?.text).toContain('top_level_offset: 1');
+    expect(result.content[0]?.text).not.toContain('<p>');
     const url = fetchMock.mock.calls[0]?.[0].toString() ?? '';
     expect(url).toContain('https://dev.to/api/comments');
     expect(url).toContain('a_id=99');
@@ -632,6 +846,11 @@ describe('hacker news tool behavior', () => {
       comments_count: 12,
       follow_up_story_id: 123,
     });
+    expect(result.content[0]?.text).toContain('1. Show HN token=[REDACTED_SECRET] — story_id: 123');
+    expect(result.content[0]?.text).toContain('points: 99');
+    expect(result.content[0]?.text).toContain('comments: 12');
+    expect(result.content[0]?.text).toContain('author: pg');
+    expect(result.content[0]?.text).toContain('snippet: Body with [REDACTED_SECRET]');
     expect(JSON.stringify(result)).toContain('[REDACTED_SECRET]');
     expect(JSON.stringify(result)).not.toContain('AKIA1234567890ABCDEF');
     const url = fetchMock.mock.calls[0]?.[0].toString() ?? '';
@@ -650,6 +869,12 @@ describe('hacker news tool behavior', () => {
       points: 50,
       text: 'story body',
       children: [{
+        id: 0,
+        author: 'skip-me',
+        created_at: '2026-06-19T00:00:30Z',
+        text: 'skipped comment',
+        children: [],
+      }, {
         id: 1,
         author: 'a',
         created_at: '2026-06-19T00:01:00Z',
@@ -673,6 +898,18 @@ describe('hacker news tool behavior', () => {
             }],
           }],
         }],
+      }, {
+        id: 5,
+        author: 'second-top-level',
+        created_at: '2026-06-19T00:05:00Z',
+        text: 'second top-level comment',
+        children: [],
+      }, {
+        id: 6,
+        author: 'third-top-level',
+        created_at: '2026-06-19T00:06:00Z',
+        text: 'third top-level comment',
+        children: [],
       }],
     }));
 
@@ -680,7 +917,8 @@ describe('hacker news tool behavior', () => {
     registerWebsearchTools(pi, { env: {}, fetch: fetchMock });
 
     const tool = pi.tools.find((entry) => entry.name === 'hackernews_story_get');
-    const result = (await execute(tool!, { story_id: 123 })) as {
+    const result = (await execute(tool!, { story_id: 123, commentsLimit: 2, commentsOffset: 1 })) as {
+      content: Array<{ type: 'text'; text: string }>;
       details: { status: 'success'; data: Record<string, unknown> };
     };
 
@@ -689,19 +927,26 @@ describe('hacker news tool behavior', () => {
       platform: 'hacker_news',
       id: '123',
       follow_up_story_id: 123,
-      comments_limit: 10,
+      comments_limit: 2,
+      comments_offset: 1,
       max_depth: 3,
+      next_comments_offset: 3,
       bounds: {
-        returned_total_comments: 3,
+        returned_top_level_comments: 2,
+        returned_total_comments: 4,
         truncated_by_depth: true,
         truncated_by_total_limit: false,
       },
     });
     const comments = result.details.data.comments as Array<Record<string, unknown>>;
-    expect(comments).toHaveLength(1);
+    expect(comments).toHaveLength(2);
     expect(comments[0]?.children).toHaveLength(1);
-    expect((comments[0]?.children as Array<Record<string, unknown>>)[0]?.children).toHaveLength(1);
-    expect((((comments[0]?.children as Array<Record<string, unknown>>)[0]?.children as Array<Record<string, unknown>>)[0]?.children) ?? []).toHaveLength(0);
+    expect(comments[1]).toMatchObject({ author: 'second-top-level', body: 'second top-level comment', children: [] });
+    expect(result.content[0]?.text).toContain('HN detail');
+    expect(result.content[0]?.text).toContain('story_id: 123');
+    expect(result.content[0]?.text).toContain('Comments offset 1 limit 2');
+    expect(result.content[0]?.text).toContain('2. a: root comment');
+    expect(result.content[0]?.text).toContain('↳ b: child comment');
     const url = fetchMock.mock.calls[0]?.[0].toString() ?? '';
     expect(url).toContain('https://hn.algolia.com/api/v1/items/123');
   });

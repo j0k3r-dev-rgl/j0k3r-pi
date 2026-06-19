@@ -112,6 +112,23 @@ function githubFollowUpRef(repository: string, number: number): string {
   return `${repository}#${number}`;
 }
 
+function githubLabels(data: Record<string, unknown>): string[] | undefined {
+  const labels = data.labels;
+  if (!Array.isArray(labels)) {
+    return undefined;
+  }
+  return labels
+    .map((label) => typeof label === 'string' ? label : stringValue((label as Record<string, unknown> | undefined)?.name))
+    .filter((label): label is string => Boolean(label));
+}
+
+function cleanGitHubMarkdown(value: string | undefined): string | undefined {
+  return value
+    ?.replace(/<!--[^]*?-->/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim() || undefined;
+}
+
 export function normalizeStackOverflowQuestion(raw: StackOverflowRawQuestion): NormalizedStackOverflowQuestion {
   const data = raw as Record<string, unknown>;
   const id = String(numberValue(data.question_id) ?? stringValue(data.question_id) ?? 'unknown');
@@ -184,7 +201,7 @@ export function normalizeGitHubIssue(raw: GitHubRawIssueSearchItem | GitHubRawIs
   const id = String(numberValue(data.id) ?? stringValue(data.id) ?? 'unknown');
   const number = numberValue(data.number) ?? 0;
   const repository = githubRepository(data);
-  const body = stringValue(data.body);
+  const body = cleanGitHubMarkdown(stringValue(data.body));
   const title = stringValue(data.title);
   return {
     platform: 'github',
@@ -199,6 +216,7 @@ export function normalizeGitHubIssue(raw: GitHubRawIssueSearchItem | GitHubRawIs
     state: stringValue(data.state),
     score: numberValue(data.score),
     comments_count: numberValue(data.comments),
+    labels: githubLabels(data),
     snippet: truncateText(body ?? title, 300),
     body: truncateText(body, 4000),
     follow_up_ref: githubFollowUpRef(repository, number),
@@ -240,6 +258,7 @@ export function normalizeDevtoArticle(raw: DevtoRawArticle): NormalizedDevtoArti
   return {
     platform: 'devto',
     id,
+    article_id: Number(id),
     url: stringValue(data.url),
     title: truncateText(title, 300),
     author: devtoUserName(data),
@@ -247,19 +266,18 @@ export function normalizeDevtoArticle(raw: DevtoRawArticle): NormalizedDevtoArti
     tags: devtoTags(data),
     reactions_count: numberValue(data.public_reactions_count) ?? numberValue(data.positive_reactions_count),
     comments_count: numberValue(data.comments_count),
+    reading_time_minutes: numberValue(data.reading_time_minutes),
     snippet: truncateText(description ?? title, 300),
     follow_up_article_id: Number(id),
   };
 }
 
 function devtoCommentBody(data: Record<string, unknown>): string | undefined {
-  return truncateText(
-    stringValue(data.body_markdown)
-      ?? stringValue(data.body_html)
-      ?? stringValue(data.body_text)
-      ?? stringValue(data.body),
-    1000,
-  );
+  const body = stringValue(data.body_markdown)
+    ?? htmlToText(stringValue(data.body_html))
+    ?? stringValue(data.body_text)
+    ?? stringValue(data.body);
+  return truncateText(body, 1000);
 }
 
 function normalizeDevtoCommentNode(raw: DevtoRawComment, depth: number, state: { total: number; truncatedByDepth: boolean; truncatedByTotalLimit: boolean }, totalLimit: number, maxDepth: number): DevtoCommentNode | null {
@@ -298,9 +316,9 @@ function normalizeDevtoCommentNode(raw: DevtoRawComment, depth: number, state: {
   return node;
 }
 
-export function normalizeDevtoComments(rawComments: DevtoRawComment[], articleId: number, topLevelLimit: number, totalLimit: number, maxDepth: number): DevtoCommentsResult {
+export function normalizeDevtoComments(rawComments: DevtoRawComment[], articleId: number, topLevelLimit: number, topLevelOffset: number, totalLimit: number, maxDepth: number): DevtoCommentsResult {
   const state = { total: 0, truncatedByDepth: false, truncatedByTotalLimit: false };
-  const topLevel = rawComments.slice(0, topLevelLimit);
+  const topLevel = rawComments.slice(topLevelOffset, topLevelOffset + topLevelLimit);
   const comments: DevtoCommentNode[] = [];
   for (const raw of topLevel) {
     const node = normalizeDevtoCommentNode(raw, 1, state, totalLimit, maxDepth);
@@ -314,15 +332,18 @@ export function normalizeDevtoComments(rawComments: DevtoRawComment[], articleId
     platform: 'devto',
     article_id: articleId,
     top_level_limit: topLevelLimit,
+    top_level_offset: topLevelOffset,
     total_limit: totalLimit,
     max_depth: maxDepth,
+    has_more_top_level_comments: rawComments.length > topLevelOffset + comments.length,
+    next_top_level_offset: rawComments.length > topLevelOffset + comments.length ? topLevelOffset + comments.length : undefined,
     comments,
     bounds: {
       returned_top_level_comments: comments.length,
       returned_total_nodes: state.total,
       truncated_by_depth: state.truncatedByDepth,
       truncated_by_total_limit: state.truncatedByTotalLimit,
-      truncated_by_top_level_limit: rawComments.length > topLevelLimit,
+      truncated_by_top_level_limit: rawComments.length > topLevelOffset + topLevelLimit,
     },
   };
 }
@@ -346,7 +367,7 @@ export function normalizeHackerNewsStory(raw: HackerNewsRawStory | HackerNewsRaw
   const idNumber = hackerNewsItemId(data);
   const id = String(idNumber || 'unknown');
   const title = stringValue(data.title);
-  const text = stringValue(data.story_text) ?? stringValue(data.text);
+  const text = htmlToText(stringValue(data.story_text) ?? stringValue(data.text));
   const children = Array.isArray(data.children) ? data.children : [];
   return {
     platform: 'hacker_news',
@@ -374,7 +395,7 @@ function normalizeHackerNewsCommentNode(raw: HackerNewsRawItem, depth: number, s
     id: String(hackerNewsItemId(data) || `comment-${state.total}`),
     author: truncateText(stringValue(data.author), 120),
     created_at: createdAtString(data),
-    body: truncateText(stringValue(data.text), 1000),
+    body: truncateText(htmlToText(stringValue(data.text)), 1000),
   };
 
   const childrenRaw = Array.isArray(data.children) ? data.children : [];
@@ -398,15 +419,17 @@ function normalizeHackerNewsCommentNode(raw: HackerNewsRawItem, depth: number, s
   return node;
 }
 
-export function normalizeHackerNewsStoryDetail(raw: HackerNewsRawItem, commentsLimit: number, maxDepth: number): HackerNewsStoryDetailResult {
+export function normalizeHackerNewsStoryDetail(raw: HackerNewsRawItem, commentsLimit: number, commentsOffset: number, maxDepth: number): HackerNewsStoryDetailResult {
   const story = normalizeHackerNewsStory(raw);
   const data = raw as Record<string, unknown>;
   const state = { total: 0, truncatedByDepth: false, truncatedByTotalLimit: false };
   const comments: HackerNewsCommentNode[] = [];
-  const childrenRaw = Array.isArray(data.children) ? data.children : [];
+  const allChildrenRaw = Array.isArray(data.children) ? data.children : [];
+  const topLevelRaw = allChildrenRaw.slice(commentsOffset, commentsOffset + commentsLimit);
+  const totalNodeLimit = commentsLimit * 10;
 
-  for (const childRaw of childrenRaw) {
-    const comment = normalizeHackerNewsCommentNode(childRaw as HackerNewsRawItem, 1, state, commentsLimit, maxDepth);
+  for (const childRaw of topLevelRaw) {
+    const comment = normalizeHackerNewsCommentNode(childRaw as HackerNewsRawItem, 1, state, totalNodeLimit, maxDepth);
     if (!comment) {
       break;
     }
@@ -415,11 +438,14 @@ export function normalizeHackerNewsStoryDetail(raw: HackerNewsRawItem, commentsL
 
   return {
     ...story,
-    body: truncateText(stringValue(data.story_text) ?? stringValue(data.text), 4000),
+    body: truncateText(htmlToText(stringValue(data.story_text) ?? stringValue(data.text)), 4000),
     comments_limit: commentsLimit,
+    comments_offset: commentsOffset,
+    next_comments_offset: allChildrenRaw.length > commentsOffset + comments.length ? commentsOffset + comments.length : undefined,
     max_depth: maxDepth,
     comments,
     bounds: {
+      returned_top_level_comments: comments.length,
       returned_total_comments: state.total,
       truncated_by_depth: state.truncatedByDepth,
       truncated_by_total_limit: state.truncatedByTotalLimit,

@@ -224,6 +224,7 @@ export function validateGitHubIssueGet(value: unknown): GitHubIssueGetRequest {
   return {
     ...validateGitHubIssueRef(input),
     commentsLimit: boundedInteger(input, 'commentsLimit', GITHUB_COMMENTS_DEFAULT_LIMIT, GITHUB_COMMENTS_MAX_LIMIT),
+    commentsOffset: boundedOffset(input, 'commentsOffset', 0),
   };
 }
 
@@ -240,6 +241,7 @@ export function validateDevtoCommentsGet(value: unknown): DevtoCommentsRequest {
   return {
     articleId: requiredInteger(input, 'article_id'),
     topLevelLimit: boundedInteger(input, 'topLevelLimit', DEVTO_TOP_LEVEL_COMMENTS_DEFAULT_LIMIT, DEVTO_TOTAL_COMMENTS_MAX),
+    topLevelOffset: boundedOffset(input, 'topLevelOffset', 0),
     totalLimit: DEVTO_TOTAL_COMMENTS_MAX,
     maxDepth: DEVTO_MAX_DEPTH,
   };
@@ -258,6 +260,7 @@ export function validateHackerNewsStoryGet(value: unknown): HackerNewsStoryReque
   return {
     storyId: requiredInteger(input, 'story_id'),
     commentsLimit: boundedInteger(input, 'commentsLimit', HN_COMMENTS_DEFAULT_LIMIT, HN_COMMENTS_MAX_LIMIT),
+    commentsOffset: boundedOffset(input, 'commentsOffset', 0),
     maxDepth: HN_MAX_DEPTH,
   };
 }

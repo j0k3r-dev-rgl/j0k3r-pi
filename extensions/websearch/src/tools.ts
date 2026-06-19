@@ -90,6 +90,7 @@ const githubSearchParameters = Type.Object({
 const githubIssueParameters = Type.Object({
   issue: Type.String(),
   commentsLimit: Type.Optional(Type.Number()),
+  commentsOffset: Type.Optional(Type.Number()),
 });
 
 const devtoSearchParameters = Type.Object({
@@ -100,6 +101,7 @@ const devtoSearchParameters = Type.Object({
 const devtoCommentsParameters = Type.Object({
   article_id: Type.Number(),
   topLevelLimit: Type.Optional(Type.Number()),
+  topLevelOffset: Type.Optional(Type.Number()),
 });
 
 const hackerNewsSearchParameters = Type.Object({
@@ -110,6 +112,7 @@ const hackerNewsSearchParameters = Type.Object({
 const hackerNewsStoryParameters = Type.Object({
   story_id: Type.Number(),
   commentsLimit: Type.Optional(Type.Number()),
+  commentsOffset: Type.Optional(Type.Number()),
 });
 
 function buildSuccess<T>(text: string, data: T, maxContentChars = 450): PiToolResult<T> {
@@ -261,44 +264,123 @@ function githubSearchSummary(data: GitHubIssueSearchResult): string {
   if (data.items.length === 0) {
     return `No GitHub issues found for "${data.query}".`;
   }
-  return data.items.map((item, index) => `${index + 1}. ${item.title ?? item.follow_up_ref} — ${item.url}`).join('\n');
+  return data.items.map((item, index) => {
+    const metadata = [
+      item.state ? `state: ${item.state}` : undefined,
+      item.comments_count === undefined ? undefined : `comments: ${item.comments_count}`,
+      item.labels && item.labels.length > 0 ? `labels: ${item.labels.join(', ')}` : undefined,
+    ].filter(Boolean).join('; ');
+    const snippet = item.snippet ? `\n   snippet: ${item.snippet}` : '';
+    return `${index + 1}. ${item.title ?? item.follow_up_ref} — ${item.follow_up_ref} — ${item.url}${metadata ? ` (${metadata})` : ''}${snippet}`;
+  }).join('\n');
 }
 
 function githubIssueSummary(data: GitHubIssueDetailResult): string {
+  const metadata = [
+    data.follow_up_ref,
+    data.state ? `state: ${data.state}` : undefined,
+    data.comments_count === undefined ? undefined : `comments: ${data.comments_count}`,
+    data.labels && data.labels.length > 0 ? `labels: ${data.labels.join(', ')}` : undefined,
+  ].filter(Boolean).join('; ');
+  const comments = data.comments.length > 0
+    ? [
+        `Comments offset ${data.comments_offset} limit ${data.comments_limit}`,
+        ...data.comments.map((comment, index) => `${data.comments_offset + index + 1}. ${comment.author ?? 'unknown'}: ${comment.body ?? ''}`),
+      ].join('\n')
+    : undefined;
   return [
-    `${data.title ?? data.follow_up_ref}`,
+    data.title ?? data.follow_up_ref,
     data.url,
+    metadata,
     data.body ?? '',
-  ].filter(Boolean).join('\n').slice(0, 450);
+    comments,
+  ].filter(Boolean).join('\n');
 }
 
 function devtoSearchSummary(data: DevtoArticleSearchResult): string {
   if (data.items.length === 0) {
     return `No Dev.to articles found for tag "${data.tag}".`;
   }
-  return data.items.map((item, index) => `${index + 1}. ${item.title ?? item.id} — ${item.url ?? `article ${item.follow_up_article_id}`}`).join('\n');
+  return data.items.map((item, index) => {
+    const metadata = [
+      item.author ? `author: ${item.author}` : undefined,
+      item.reactions_count === undefined ? undefined : `reactions: ${item.reactions_count}`,
+      item.comments_count === undefined ? undefined : `comments: ${item.comments_count}`,
+      item.reading_time_minutes === undefined ? undefined : `reading: ${item.reading_time_minutes} min`,
+      item.tags && item.tags.length > 0 ? `tags: ${item.tags.join(', ')}` : undefined,
+    ].filter(Boolean).join('; ');
+    const snippet = item.snippet ? `\n   snippet: ${item.snippet}` : '';
+    return `${index + 1}. ${item.title ?? item.id} — article_id: ${item.follow_up_article_id} — ${item.url ?? `article ${item.follow_up_article_id}`}${metadata ? ` (${metadata})` : ''}${snippet}`;
+  }).join('\n');
+}
+
+function flattenDevtoCommentSummary(comments: DevtoCommentsResult['comments'], startIndex: number): string[] {
+  const lines: string[] = [];
+  comments.forEach((comment, index) => {
+    lines.push(`${startIndex + index}. ${comment.author ?? 'unknown'}: ${comment.body ?? ''}`);
+    for (const child of comment.children ?? []) {
+      lines.push(`   ↳ ${child.author ?? 'unknown'}: ${child.body ?? ''}`);
+    }
+  });
+  return lines;
 }
 
 function devtoCommentsSummary(data: DevtoCommentsResult): string {
   if (data.comments.length === 0) {
     return `No Dev.to comments found for article ${data.article_id}.`;
   }
-  return `Dev.to article ${data.article_id} comments: ${data.bounds.returned_total_nodes} node(s) across ${data.bounds.returned_top_level_comments} top-level comment(s).`;
+  const continuation = data.next_top_level_offset === undefined ? undefined : `next_top_level_offset: ${data.next_top_level_offset}`;
+  return [
+    `Dev.to comments for article ${data.article_id}`,
+    `top_level_offset: ${data.top_level_offset}; top_level_limit: ${data.top_level_limit}; returned_nodes: ${data.bounds.returned_total_nodes}`,
+    ...flattenDevtoCommentSummary(data.comments, data.top_level_offset + 1),
+    continuation,
+  ].filter(Boolean).join('\n');
 }
 
 function hackerNewsSearchSummary(data: HackerNewsSearchResult): string {
   if (data.items.length === 0) {
     return `No Hacker News stories found for "${data.query}".`;
   }
-  return data.items.map((item, index) => `${index + 1}. ${item.title ?? item.id} — ${item.url ?? `story ${item.follow_up_story_id}`}`).join('\n');
+  return data.items.map((item, index) => {
+    const metadata = [
+      item.author ? `author: ${item.author}` : undefined,
+      item.points === undefined ? undefined : `points: ${item.points}`,
+      item.comments_count === undefined ? undefined : `comments: ${item.comments_count}`,
+    ].filter(Boolean).join('; ');
+    const snippet = item.snippet ? `\n   snippet: ${item.snippet}` : '';
+    return `${index + 1}. ${item.title ?? item.id} — story_id: ${item.follow_up_story_id} — ${item.url ?? `story ${item.follow_up_story_id}`}${metadata ? ` (${metadata})` : ''}${snippet}`;
+  }).join('\n');
+}
+
+function flattenHackerNewsCommentSummary(comments: HackerNewsStoryDetailResult['comments'], startIndex: number): string[] {
+  const lines: string[] = [];
+  comments.forEach((comment, index) => {
+    lines.push(`${startIndex + index}. ${comment.author ?? 'unknown'}: ${comment.body ?? ''}`);
+    for (const child of comment.children ?? []) {
+      lines.push(`   ↳ ${child.author ?? 'unknown'}: ${child.body ?? ''}`);
+    }
+  });
+  return lines;
 }
 
 function hackerNewsStorySummary(data: HackerNewsStoryDetailResult): string {
+  const metadata = [
+    `story_id: ${data.follow_up_story_id}`,
+    data.author ? `author: ${data.author}` : undefined,
+    data.points === undefined ? undefined : `points: ${data.points}`,
+    data.comments_count === undefined ? undefined : `comments: ${data.comments_count}`,
+  ].filter(Boolean).join('; ');
+  const continuation = data.next_comments_offset === undefined ? undefined : `next_comments_offset: ${data.next_comments_offset}`;
   return [
     data.title ?? `Hacker News story ${data.follow_up_story_id}`,
     data.url,
+    metadata,
     data.body ?? '',
-  ].filter(Boolean).join('\n').slice(0, 450);
+    data.comments.length > 0 ? `Comments offset ${data.comments_offset} limit ${data.comments_limit}` : undefined,
+    ...flattenHackerNewsCommentSummary(data.comments, data.comments_offset + 1),
+    continuation,
+  ].filter(Boolean).join('\n');
 }
 
 export function registerWebsearchTools(pi: any, deps: RegisterWebsearchToolsDeps = {}): void {
@@ -388,7 +470,7 @@ export function registerWebsearchTools(pi: any, deps: RegisterWebsearchToolsDeps
         const input = validateGitHubIssueSearch(params);
         const items = (await clientsFromDeps(deps).github.searchIssues(input, signalFromContext(context))).map(normalizeGitHubIssue);
         const data = { ...input, items };
-        return buildSuccess(githubSearchSummary(data), data);
+        return buildSuccess(githubSearchSummary(data), data, 5000);
       } catch (error) {
         return buildFailure(toToolError(error));
       }
@@ -408,17 +490,19 @@ export function registerWebsearchTools(pi: any, deps: RegisterWebsearchToolsDeps
         if (!rawIssue) {
           return buildFailure({ code: 'not_found', category: 'not_found', message: 'GitHub issue was not found.', recoverable: true, provider: 'github' });
         }
-        const comments = (await github.listIssueComments({ ...input, limit: input.commentsLimit }, signal)).map(normalizeGitHubIssueComment);
+        const comments = (await github.listIssueComments({ ...input, limit: input.commentsLimit, offset: input.commentsOffset }, signal)).map(normalizeGitHubIssueComment);
         const data: GitHubIssueDetailResult = {
           ...normalizeGitHubIssue(rawIssue),
           comments,
           comments_limit: input.commentsLimit,
+          comments_offset: input.commentsOffset,
+          next_comments_offset: comments.length === input.commentsLimit ? input.commentsOffset + comments.length : undefined,
           bounds: {
             comments_default: GITHUB_COMMENTS_DEFAULT_LIMIT,
             comments_max: GITHUB_COMMENTS_MAX_LIMIT,
           },
         };
-        return buildSuccess(githubIssueSummary(data), data);
+        return buildSuccess(githubIssueSummary(data), data, 12000);
       } catch (error) {
         return buildFailure(toToolError(error));
       }
@@ -434,7 +518,7 @@ export function registerWebsearchTools(pi: any, deps: RegisterWebsearchToolsDeps
         const input = validateDevtoArticleSearch(params);
         const items = (await clientsFromDeps(deps).devto.searchArticles(input, signalFromContext(context))).map(normalizeDevtoArticle);
         const data = { ...input, items };
-        return buildSuccess(devtoSearchSummary(data), data);
+        return buildSuccess(devtoSearchSummary(data), data, 5000);
       } catch (error) {
         return buildFailure(toToolError(error));
       }
@@ -449,8 +533,8 @@ export function registerWebsearchTools(pi: any, deps: RegisterWebsearchToolsDeps
       try {
         const input = validateDevtoCommentsGet(params);
         const rawComments = await clientsFromDeps(deps).devto.getComments(input, signalFromContext(context));
-        const data = normalizeDevtoComments(rawComments, input.articleId, input.topLevelLimit, input.totalLimit, input.maxDepth);
-        return buildSuccess(devtoCommentsSummary(data), data);
+        const data = normalizeDevtoComments(rawComments, input.articleId, input.topLevelLimit, input.topLevelOffset, input.totalLimit, input.maxDepth);
+        return buildSuccess(devtoCommentsSummary(data), data, 12000);
       } catch (error) {
         return buildFailure(toToolError(error));
       }
@@ -466,7 +550,7 @@ export function registerWebsearchTools(pi: any, deps: RegisterWebsearchToolsDeps
         const input = validateHackerNewsSearch(params);
         const items = (await clientsFromDeps(deps).hackerNews.searchStories(input, signalFromContext(context))).map(normalizeHackerNewsStory);
         const data = { ...input, items };
-        return buildSuccess(hackerNewsSearchSummary(data), data);
+        return buildSuccess(hackerNewsSearchSummary(data), data, 5000);
       } catch (error) {
         return buildFailure(toToolError(error));
       }
@@ -484,8 +568,8 @@ export function registerWebsearchTools(pi: any, deps: RegisterWebsearchToolsDeps
         if (!rawStory) {
           return buildFailure({ code: 'not_found', category: 'not_found', message: 'Hacker News story was not found.', recoverable: true, provider: 'hacker_news' });
         }
-        const data = normalizeHackerNewsStoryDetail(rawStory, input.commentsLimit, input.maxDepth);
-        return buildSuccess(hackerNewsStorySummary(data), data);
+        const data = normalizeHackerNewsStoryDetail(rawStory, input.commentsLimit, input.commentsOffset, input.maxDepth);
+        return buildSuccess(hackerNewsStorySummary(data), data, 12000);
       } catch (error) {
         return buildFailure(toToolError(error));
       }

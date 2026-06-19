@@ -168,10 +168,12 @@ export type GitHubIssueSearchRequest = {
 
 export type GitHubIssueCommentsRequest = GitHubIssueRef & {
   limit: number;
+  offset: number;
 };
 
 export type GitHubIssueGetRequest = GitHubIssueRef & {
   commentsLimit: number;
+  commentsOffset: number;
 };
 
 export type GitHubRawIssueSearchItem = Record<string, unknown>;
@@ -191,6 +193,7 @@ export type NormalizedGitHubIssue = {
   state?: string;
   score?: number;
   comments_count?: number;
+  labels?: string[];
   snippet?: string;
   body?: string;
   follow_up_ref: string;
@@ -216,6 +219,8 @@ export type GitHubIssueSearchResult = {
 export type GitHubIssueDetailResult = NormalizedGitHubIssue & {
   comments: NormalizedGitHubIssueComment[];
   comments_limit: number;
+  comments_offset: number;
+  next_comments_offset?: number;
   bounds: {
     comments_default: number;
     comments_max: number;
@@ -230,6 +235,7 @@ export type DevtoArticleSearchRequest = {
 export type DevtoCommentsRequest = {
   articleId: number;
   topLevelLimit: number;
+  topLevelOffset: number;
   totalLimit: number;
   maxDepth: number;
 };
@@ -240,6 +246,7 @@ export type DevtoRawComment = Record<string, unknown>;
 export type NormalizedDevtoArticle = {
   platform: 'devto';
   id: string;
+  article_id: number;
   url?: string;
   title?: string;
   author?: string;
@@ -247,6 +254,7 @@ export type NormalizedDevtoArticle = {
   tags?: string[];
   reactions_count?: number;
   comments_count?: number;
+  reading_time_minutes?: number;
   snippet?: string;
   follow_up_article_id: number;
 };
@@ -270,8 +278,11 @@ export type DevtoCommentsResult = {
   article_id: number;
   url?: string;
   top_level_limit: number;
+  top_level_offset: number;
   total_limit: number;
   max_depth: number;
+  has_more_top_level_comments: boolean;
+  next_top_level_offset?: number;
   comments: DevtoCommentNode[];
   bounds: {
     returned_top_level_comments: number;
@@ -290,6 +301,7 @@ export type HackerNewsSearchRequest = {
 export type HackerNewsStoryRequest = {
   storyId: number;
   commentsLimit: number;
+  commentsOffset: number;
   maxDepth: number;
 };
 
@@ -326,9 +338,12 @@ export type HackerNewsCommentNode = {
 export type HackerNewsStoryDetailResult = NormalizedHackerNewsStory & {
   body?: string;
   comments_limit: number;
+  comments_offset: number;
+  next_comments_offset?: number;
   max_depth: number;
   comments: HackerNewsCommentNode[];
   bounds: {
+    returned_top_level_comments: number;
     returned_total_comments: number;
     truncated_by_depth: boolean;
     truncated_by_total_limit: boolean;

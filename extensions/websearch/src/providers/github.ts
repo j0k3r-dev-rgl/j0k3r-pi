@@ -68,7 +68,7 @@ class OctokitGitHubClient implements GitHubClient {
         repo: input.repo,
         issue_number: input.issueNumber,
         per_page: input.limit,
-        page: 1,
+        page: Math.floor(input.offset / input.limit) + 1,
         request: signal ? { signal } : undefined,
       });
       return response.data as unknown as GitHubRawIssueComment[];
