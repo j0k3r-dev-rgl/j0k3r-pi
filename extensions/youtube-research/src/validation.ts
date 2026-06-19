@@ -25,6 +25,15 @@ export const PLAYLIST_ENTRIES_MAX_OFFSET = 99;
 export const PLAYLIST_ACCESSIBLE_ENTRY_WINDOW = 100;
 export const PLAYLIST_DESCRIPTION_PREVIEW_DEFAULT_CHARS = 500;
 export const PLAYLIST_DESCRIPTION_PREVIEW_MAX_CHARS = 2000;
+export const CHANNEL_LIMIT_DEFAULT = 5;
+export const CHANNEL_LIMIT_MAX = 20;
+export const CHANNEL_VIDEOS_DEFAULT_LIMIT = 5;
+export const CHANNEL_VIDEOS_MAX_LIMIT = 20;
+export const CHANNEL_PLAYLISTS_DEFAULT_LIMIT = 5;
+export const CHANNEL_PLAYLISTS_MAX_LIMIT = 20;
+export const CHANNEL_OFFSET_MAX = 99;
+export const CHANNEL_DESCRIPTION_PREVIEW_DEFAULT_CHARS = 500;
+export const CHANNEL_DESCRIPTION_PREVIEW_MAX_CHARS = 2000;
 export const TRANSCRIPT_SOURCE_MODES: TranscriptSourceMode[] = ['auto', 'manual', 'automatic', 'translated', 'any-caption', 'best-effort'];
 
 export function isIsoDate(value: unknown): value is string {
@@ -198,7 +207,17 @@ export function validateChannelInput(input: YoutubeChannelSearchInput): void {
   if (present.length === 0) {
     throw new Error('one of query, channel_id, handle, or url is required');
   }
-  if (input.limit !== undefined) {
-    normalizeLimit(input.limit);
+  if (present.length > 1) {
+    throw new Error('exactly one of query, channel_id, handle, or url is required');
   }
+  const rawInput = input as unknown as Record<string, unknown>;
+  boundedInteger(rawInput, 'limit', CHANNEL_LIMIT_DEFAULT, CHANNEL_LIMIT_MAX);
+  boundedNonNegativeInteger(rawInput, 'videosOffset', 0, CHANNEL_OFFSET_MAX);
+  boundedInteger(rawInput, 'videosLimit', CHANNEL_VIDEOS_DEFAULT_LIMIT, CHANNEL_VIDEOS_MAX_LIMIT);
+  boundedNonNegativeInteger(rawInput, 'playlistsOffset', 0, CHANNEL_OFFSET_MAX);
+  boundedInteger(rawInput, 'playlistsLimit', CHANNEL_PLAYLISTS_DEFAULT_LIMIT, CHANNEL_PLAYLISTS_MAX_LIMIT);
+  optionalBoolean(rawInput, 'includeVideos', false);
+  optionalBoolean(rawInput, 'enrichVideos', false);
+  optionalBoolean(rawInput, 'includePlaylists', false);
+  boundedInteger(rawInput, 'descriptionPreviewChars', CHANNEL_DESCRIPTION_PREVIEW_DEFAULT_CHARS, CHANNEL_DESCRIPTION_PREVIEW_MAX_CHARS);
 }

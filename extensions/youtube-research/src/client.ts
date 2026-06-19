@@ -128,31 +128,57 @@ export function buildPlaylistCommand(input: NormalizedPlaylistRef, binary?: stri
   ];
 }
 
-function ensureChannelVideosUrl(url: string): string {
-  const trimmed = url.trim().replace(/\/+$/, '');
-  if (/\/videos$/i.test(trimmed)) return trimmed;
-  return `${trimmed}/videos`;
+function ensureChannelTabUrl(input: YoutubeChannelSearchInput, tab: 'about' | 'videos' | 'playlists'): string {
+  if (input.channel_id) {
+    return `https://www.youtube.com/channel/${input.channel_id.trim()}/${tab}`;
+  }
+  if (input.handle) {
+    const cleanHandle = input.handle.trim().replace(/^\//, '').replace(/^@/, '');
+    return `https://www.youtube.com/@${cleanHandle}/${tab}`;
+  }
+  const trimmed = input.url?.trim().replace(/\/+$/, '').replace(/\/(about|videos|playlists)$/i, '') ?? '';
+  return `${trimmed}/${tab}`;
+}
+
+function playlistItems(offset = 0, limit = 5): string {
+  return `${offset + 1}:${offset + limit}`;
 }
 
 export function buildChannelSearchCommand(input: YoutubeChannelSearchInput, binary?: string): string[] {
-  const command = commandBinary(binary);
-
-  if (input.channel_id) {
-    return [command, '--flat-playlist', `https://www.youtube.com/channel/${input.channel_id.trim()}/videos`, '--dump-json'];
-  }
-
-  if (input.handle) {
-    const cleanHandle = input.handle.trim().replace(/^\//, '').replace(/^@/, '');
-    return [command, '--flat-playlist', `https://www.youtube.com/@${cleanHandle}/videos`, '--dump-json'];
-  }
-
-  if (input.url) {
-    return [command, '--flat-playlist', ensureChannelVideosUrl(input.url), '--dump-json'];
-  }
-
   const query = input.query?.trim() ?? '';
   const encodedQuery = encodeURIComponent(query).replace(/%20/g, '+');
-  return [command, '--flat-playlist', `https://www.youtube.com/results?search_query=${encodedQuery}&sp=${YOUTUBE_SEARCH_SP.channel}`, '--dump-json'];
+  return [
+    commandBinary(binary),
+    '--dump-single-json',
+    '--flat-playlist',
+    '--playlist-items',
+    playlistItems(0, input.limit ?? 5),
+    `https://www.youtube.com/results?search_query=${encodedQuery}&sp=${YOUTUBE_SEARCH_SP.channel}`,
+  ];
+}
+
+export function buildChannelAboutCommand(input: YoutubeChannelSearchInput, binary?: string): string[] {
+  return [commandBinary(binary), '--dump-single-json', '--skip-download', ensureChannelTabUrl(input, 'about')];
+}
+
+export function buildChannelVideosCommand(input: YoutubeChannelSearchInput, binary?: string): string[] {
+  const args = [commandBinary(binary), '--dump-single-json'];
+  if (!input.enrichVideos) {
+    args.push('--flat-playlist');
+  }
+  args.push('--playlist-items', playlistItems(input.videosOffset ?? 0, input.videosLimit ?? 5), ensureChannelTabUrl(input, 'videos'));
+  return args;
+}
+
+export function buildChannelPlaylistsCommand(input: YoutubeChannelSearchInput, binary?: string): string[] {
+  return [
+    commandBinary(binary),
+    '--dump-single-json',
+    '--flat-playlist',
+    '--playlist-items',
+    playlistItems(input.playlistsOffset ?? 0, input.playlistsLimit ?? 5),
+    ensureChannelTabUrl(input, 'playlists'),
+  ];
 }
 
 export function buildTranscriptSourcesCommand(input: NormalizedVideoRef, binary?: string): string[] {
@@ -377,7 +403,24 @@ export class YoutubeResearchClient implements YtDlpClient {
   }
 
   async searchChannels(input: YoutubeChannelSearchInput, _signal?: AbortSignal): Promise<unknown[]> {
-    return runAndParseJson(this.options.run, buildChannelSearchCommand(input, this.options.binary));
+    const payloads = await runAndParseJson(this.options.run, buildChannelSearchCommand(input, this.options.binary));
+    const first = payloads[0] as { entries?: unknown[] } | undefined;
+    return Array.isArray(first?.entries) ? first.entries : payloads;
+  }
+
+  async getChannelAbout(input: YoutubeChannelSearchInput, _signal?: AbortSignal): Promise<unknown> {
+    const payloads = await runAndParseJson(this.options.run, buildChannelAboutCommand(input, this.options.binary));
+    return payloads[0] ?? null;
+  }
+
+  async getChannelVideos(input: YoutubeChannelSearchInput, _signal?: AbortSignal): Promise<unknown> {
+    const payloads = await runAndParseJson(this.options.run, buildChannelVideosCommand(input, this.options.binary));
+    return payloads[0] ?? null;
+  }
+
+  async getChannelPlaylists(input: YoutubeChannelSearchInput, _signal?: AbortSignal): Promise<unknown> {
+    const payloads = await runAndParseJson(this.options.run, buildChannelPlaylistsCommand(input, this.options.binary));
+    return payloads[0] ?? null;
   }
 
   async listTranscriptSources(input: NormalizedVideoRef, _signal?: AbortSignal): Promise<TranscriptSourceInventory> {

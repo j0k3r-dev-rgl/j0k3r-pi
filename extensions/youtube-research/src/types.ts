@@ -162,6 +162,37 @@ export interface YoutubeChannelSearchInput {
   handle?: string;
   url?: string;
   limit?: number;
+  includeVideos?: boolean;
+  videosOffset?: number;
+  videosLimit?: number;
+  enrichVideos?: boolean;
+  includePlaylists?: boolean;
+  playlistsOffset?: number;
+  playlistsLimit?: number;
+  descriptionPreviewChars?: number;
+}
+
+export interface YoutubeChannelVideoEntry {
+  title: string;
+  url?: string | null;
+  video_id?: string | null;
+  duration?: number | null;
+  description_preview?: string | null;
+  published_date?: string | null;
+  view_count?: number | null;
+  like_count?: number | null;
+  dislike_count?: number | null;
+  comment_count?: number | null;
+  chapters_count?: number | null;
+  tags?: string[];
+}
+
+export interface YoutubeChannelPlaylistEntry {
+  playlist_title: string;
+  playlist_id?: string | null;
+  url?: string | null;
+  video_count?: number | null;
+  description_preview?: string | null;
 }
 
 export interface YoutubeChannelResult {
@@ -169,9 +200,13 @@ export interface YoutubeChannelResult {
   url: string;
   channel_id?: string | null;
   description_snippet?: string | null;
+  description_preview?: string | null;
   subscriber_count?: number | null;
   video_count?: number | null;
   handle?: string | null;
+  thumbnail_url?: string | null;
+  recent_videos?: YoutubeChannelVideoEntry[];
+  playlists?: YoutubeChannelPlaylistEntry[];
   source_signals?: Record<string, unknown>;
 }
 
@@ -247,6 +282,9 @@ export interface YtDlpClient {
   getVideo(input: NormalizedVideoRef, signal?: AbortSignal): Promise<unknown>;
   getPlaylist(input: NormalizedPlaylistRef, signal?: AbortSignal): Promise<unknown>;
   searchChannels(input: YoutubeChannelSearchInput, signal?: AbortSignal): Promise<unknown[]>;
+  getChannelAbout(input: YoutubeChannelSearchInput, signal?: AbortSignal): Promise<unknown>;
+  getChannelVideos(input: YoutubeChannelSearchInput, signal?: AbortSignal): Promise<unknown>;
+  getChannelPlaylists(input: YoutubeChannelSearchInput, signal?: AbortSignal): Promise<unknown>;
   listTranscriptSources(input: NormalizedVideoRef, signal?: AbortSignal): Promise<TranscriptSourceInventory>;
   fetchTranscript(input: TranscriptSourceSelection, signal?: AbortSignal): Promise<string>;
 }

@@ -7,6 +7,8 @@ import type {
   YoutubeChannelSearchInput,
   YoutubeVideoComment,
   YoutubePlaylistEntry,
+  YoutubeChannelVideoEntry,
+  YoutubeChannelPlaylistEntry,
 } from './types.js';
 
 export interface RawYtDlpItem {
@@ -106,13 +108,18 @@ function pickPublishedDate(raw: RawYtDlpItem): string | null {
   return null;
 }
 
+function normalizeThumbnailUrl(url: string): string {
+  return url.startsWith('//') ? `https:${url}` : url;
+}
+
 function firstThumbnail(raw: RawYtDlpItem): string | null {
   const direct = toStringOrUndefined(raw.thumbnail);
-  if (direct) return direct;
+  if (direct) return normalizeThumbnailUrl(direct);
   const thumbs = raw.thumbnails;
   if (Array.isArray(thumbs) && thumbs.length > 0) {
     const first = thumbs[0] as { url?: unknown };
-    return toStringOrUndefined(first?.url) ?? null;
+    const url = toStringOrUndefined(first?.url);
+    return url ? normalizeThumbnailUrl(url) : null;
   }
   return null;
 }
@@ -186,28 +193,72 @@ export function normalizeVideoDetails(raw: RawYtDlpItem): YoutubeVideoDetails {
   };
 }
 
-export function normalizeChannelResult(raw: RawYtDlpItem): YoutubeChannelResult {
+export function normalizeChannelVideoEntry(item: RawYtDlpItem, descriptionPreviewChars = 500): YoutubeChannelVideoEntry {
+  const id = toStringOrUndefined(item.id) ?? toStringOrUndefined(item.video_id) ?? null;
+  const description = toStringOrUndefined(item.description) ?? null;
+  const rawUrl = toStringOrUndefined(item.webpage_url) ?? toStringOrUndefined(item.url);
+  const url = rawUrl && /^https?:\/\//i.test(rawUrl) ? rawUrl : id ? `https://www.youtube.com/watch?v=${id}` : rawUrl ?? null;
+  return {
+    title: toStringOrUndefined(item.title) ?? 'untitled',
+    url,
+    video_id: id,
+    duration: toNumber(item.duration) ?? null,
+    description_preview: description ? compactText(description, descriptionPreviewChars) : null,
+    published_date: pickPublishedDate(item),
+    view_count: toNumber(item.view_count) ?? null,
+    like_count: toNumber(item.like_count) ?? null,
+    dislike_count: toNumber(item.dislike_count) ?? null,
+    comment_count: toNumber(item.comment_count) ?? null,
+    chapters_count: Array.isArray(item.chapters) ? item.chapters.length : null,
+    tags: Array.isArray(item.tags) ? item.tags.filter((tag): tag is string => typeof tag === 'string').slice(0, 8) : undefined,
+  };
+}
+
+export function normalizeChannelPlaylistEntry(item: RawYtDlpItem, descriptionPreviewChars = 500): YoutubeChannelPlaylistEntry {
+  const id = toStringOrUndefined(item.id) ?? null;
+  const rawUrl = toStringOrUndefined(item.webpage_url) ?? toStringOrUndefined(item.url);
+  const url = rawUrl && /^https?:\/\//i.test(rawUrl) ? rawUrl : id ? `https://www.youtube.com/playlist?list=${id}` : rawUrl ?? null;
+  const description = toStringOrUndefined(item.description) ?? null;
+  return {
+    playlist_title: toStringOrUndefined(item.title) ?? 'untitled',
+    playlist_id: id,
+    url,
+    video_count: toNumber(item.playlist_count) ?? null,
+    description_preview: description ? compactText(description, descriptionPreviewChars) : null,
+  };
+}
+
+export function normalizeChannelResult(raw: RawYtDlpItem, descriptionPreviewChars = 500): YoutubeChannelResult {
   const playlistChannelName = toStringOrUndefined((raw as { playlist_channel?: unknown }).playlist_channel)
     ?? toStringOrUndefined((raw as { playlist_uploader?: unknown }).playlist_uploader);
   const playlistChannelId = toStringOrUndefined((raw as { playlist_channel_id?: unknown }).playlist_channel_id)
     ?? toStringOrUndefined((raw as { playlist_id?: unknown }).playlist_id);
   const playlistChannelUrl = toStringOrUndefined((raw as { playlist_webpage_url?: unknown }).playlist_webpage_url);
-  const channelName = playlistChannelName ?? toStringOrUndefined(raw.title) ?? toStringOrUndefined(raw.channel) ?? 'unknown channel';
+  const channelName = playlistChannelName ?? toStringOrUndefined(raw.title) ?? toStringOrUndefined(raw.channel) ?? toStringOrUndefined(raw.uploader) ?? 'unknown channel';
+  const channelId = playlistChannelId ?? toStringOrUndefined(raw.channel_id) ?? toStringOrUndefined(raw.id) ?? null;
+  const handle = toStringOrUndefined(raw.uploader_id)
+    ?? toStringOrUndefined((raw as { playlist_uploader_id?: unknown }).playlist_uploader_id)
+    ?? (toStringOrUndefined(raw.id)?.startsWith('@') ? toStringOrUndefined(raw.id) : undefined)
+    ?? null;
+  const description = toStringOrUndefined(raw.description) ?? null;
+  const url = playlistChannelUrl
+    ?? toStringOrUndefined(raw.channel_url)
+    ?? (channelId && channelId.startsWith('UC') ? `https://www.youtube.com/channel/${channelId}` : undefined)
+    ?? toStringOrUndefined(raw.webpage_url)
+    ?? 'unknown';
 
   return {
     channel_name: channelName,
-    url: playlistChannelUrl ?? toStringOrUndefined(raw.webpage_url) ?? toStringOrUndefined(raw.channel_url) ?? 'unknown',
-    channel_id: playlistChannelId ?? toStringOrUndefined(raw.channel_id) ?? toStringOrUndefined(raw.id) ?? null,
-    description_snippet: toStringOrUndefined(raw.description) ?? null,
-    subscriber_count:
-      toNumber(raw.channel_follower_count) ?? toNumber((raw as { subscriber_count?: unknown }).subscriber_count) ?? null,
+    url,
+    channel_id: channelId,
+    description_snippet: description,
+    description_preview: description ? compactText(description, descriptionPreviewChars) : null,
+    subscriber_count: toNumber(raw.channel_follower_count) ?? toNumber((raw as { subscriber_count?: unknown }).subscriber_count) ?? null,
     video_count: toNumber(raw.channel_video_count) ?? toNumber((raw as { video_count?: unknown }).video_count) ?? null,
-    handle: toStringOrUndefined((raw as { playlist_uploader_id?: unknown }).playlist_uploader_id)
-      ?? toStringOrUndefined(raw.channel)
-      ?? toStringOrUndefined(raw.uploader)
-      ?? null,
+    handle,
+    thumbnail_url: firstThumbnail(raw),
     source_signals: {
-      isVerified: !!toBoolean((raw as { is_verified?: unknown }).is_verified),
+      isVerified: !!(toBoolean((raw as { is_verified?: unknown }).is_verified) ?? toBoolean((raw as { channel_is_verified?: unknown }).channel_is_verified)),
       rawType: toStringOrUndefined((raw as { _type?: unknown })._type) ?? null,
     },
   };

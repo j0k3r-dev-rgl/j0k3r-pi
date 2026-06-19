@@ -7,6 +7,9 @@ import {
   buildVideoCommand,
   buildPlaylistCommand,
   buildChannelSearchCommand,
+  buildChannelAboutCommand,
+  buildChannelVideosCommand,
+  buildChannelPlaylistsCommand,
   buildTranscriptSourcesCommand,
   buildTranscriptFetchCommand,
   parseYtDlpJsonPayload,
@@ -150,32 +153,46 @@ describe('youtube-research yt-dlp command and parse contract', () => {
       'https://www.youtube.com/playlist?list=PL123',
     ]);
 
-    expect(buildChannelSearchCommand({ query: 'kubernetes' })).toEqual([
+    expect(buildChannelSearchCommand({ query: 'kubernetes', limit: 3 })).toEqual([
       'yt-dlp',
+      '--dump-single-json',
       '--flat-playlist',
+      '--playlist-items',
+      '1:3',
       'https://www.youtube.com/results?search_query=kubernetes&sp=EgIQAg%253D%253D',
-      '--dump-json',
     ]);
 
-    expect(buildChannelSearchCommand({ channel_id: 'UC123', limit: 3 })).toEqual([
+    expect(buildChannelAboutCommand({ handle: '@openai', limit: 3 })).toEqual([
       'yt-dlp',
+      '--dump-single-json',
+      '--skip-download',
+      'https://www.youtube.com/@openai/about',
+    ]);
+
+    expect(buildChannelVideosCommand({ channel_id: 'UC123', videosOffset: 5, videosLimit: 3 })).toEqual([
+      'yt-dlp',
+      '--dump-single-json',
       '--flat-playlist',
+      '--playlist-items',
+      '6:8',
       'https://www.youtube.com/channel/UC123/videos',
-      '--dump-json',
     ]);
 
-    expect(buildChannelSearchCommand({ handle: '@openai' })).toEqual([
+    expect(buildChannelVideosCommand({ handle: '@openai', videosLimit: 2, enrichVideos: true })).toEqual([
       'yt-dlp',
-      '--flat-playlist',
+      '--dump-single-json',
+      '--playlist-items',
+      '1:2',
       'https://www.youtube.com/@openai/videos',
-      '--dump-json',
     ]);
 
-    expect(buildChannelSearchCommand({ url: 'https://www.youtube.com/channel/UC123' })).toEqual([
+    expect(buildChannelPlaylistsCommand({ url: 'https://www.youtube.com/channel/UC123', playlistsOffset: 10, playlistsLimit: 5 })).toEqual([
       'yt-dlp',
+      '--dump-single-json',
       '--flat-playlist',
-      'https://www.youtube.com/channel/UC123/videos',
-      '--dump-json',
+      '--playlist-items',
+      '11:15',
+      'https://www.youtube.com/channel/UC123/playlists',
     ]);
 
     expect(buildTranscriptSourcesCommand({ video_id: 'abc123' })).toEqual([

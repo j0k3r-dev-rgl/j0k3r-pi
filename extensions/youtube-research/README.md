@@ -23,7 +23,11 @@ A standalone Pi extension that adds five focused YouTube research tools.
    - `source_mode`: `manual | automatic | translated | any-caption | auto | best-effort`.
    - `best-effort` follows strict fallback chain and reports whether fallback was used.
 4. `youtube_channel_search`
-   - Search channels by query, channel ID, handle, or URL and return metadata-rich channel entries.
+   - Search channels by query or inspect a specific channel by channel ID, handle, or URL.
+   - Returns channel metadata useful for treating channels as recurring research sources: channel ID, handle, description preview, subscribers, verified signal, and thumbnail when available.
+   - Supports optional recent videos with `includeVideos`, `videosOffset`, `videosLimit`, and opt-in `enrichVideos` for per-video descriptions, views, likes, comments, and published dates.
+   - Supports optional channel playlists with `includePlaylists`, `playlistsOffset`, and `playlistsLimit`.
+   - Uses bounded pagination to avoid fetching entire large channels.
 5. `youtube_playlist_get`
    - Fetch rich playlist metadata by URL or playlist ID, including description, total video count, channel/uploader, playlist views when available, and modified date when available.
    - Supports pagination with `entriesOffset` and `entriesLimit` so large playlists do not return every video at once; current `yt-dlp` extraction reliably exposes the first 100 playlist entries, so `entriesOffset` is bounded to `0..99`.

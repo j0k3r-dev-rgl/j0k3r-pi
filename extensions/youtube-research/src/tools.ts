@@ -14,12 +14,20 @@ import {
   PLAYLIST_ENTRIES_MAX_OFFSET,
   PLAYLIST_DESCRIPTION_PREVIEW_DEFAULT_CHARS,
   PLAYLIST_DESCRIPTION_PREVIEW_MAX_CHARS,
+  CHANNEL_LIMIT_MAX,
+  CHANNEL_VIDEOS_MAX_LIMIT,
+  CHANNEL_PLAYLISTS_MAX_LIMIT,
+  CHANNEL_OFFSET_MAX,
+  CHANNEL_DESCRIPTION_PREVIEW_MAX_CHARS,
+  CHANNEL_DESCRIPTION_PREVIEW_DEFAULT_CHARS,
 } from './validation.js';
 import {
   normalizeSearchResults,
   normalizeSearchResult,
   normalizeVideoDetails,
   normalizeChannelResult,
+  normalizeChannelVideoEntry,
+  normalizeChannelPlaylistEntry,
   normalizePlaylistDetails,
   RawYtDlpItem,
 } from './normalize.js';
@@ -226,7 +234,32 @@ function summarizeChannelSearch(params: YoutubeChannelSearchInput, results: Retu
   const header = `youtube_channel_search: ${results.length} result(s) for "${identity}"`;
   if (!results.length) return header;
 
-  const lines = results.slice(0, 10).map((entry, index) => `${index + 1}. ${entry.channel_name} — ${entry.url}`);
+  const lines = results.slice(0, 10).flatMap((entry, index) => {
+    const meta = [
+      entry.subscriber_count === null || entry.subscriber_count === undefined ? undefined : `subscribers: ${entry.subscriber_count.toLocaleString('en-US')}`,
+      entry.video_count === null || entry.video_count === undefined ? undefined : `videos: ${entry.video_count.toLocaleString('en-US')}`,
+      entry.handle ? `handle: ${entry.handle}` : undefined,
+      entry.recent_videos ? `recent videos: ${entry.recent_videos.length}` : undefined,
+      entry.playlists ? `playlists: ${entry.playlists.length}` : undefined,
+    ].filter(Boolean).join(' | ');
+    return [
+      `${index + 1}. ${entry.channel_name} — ${entry.url}${meta ? ` — ${meta}` : ''}`,
+      entry.description_preview ? `   description: ${entry.description_preview}` : undefined,
+      ...(entry.recent_videos ?? []).slice(0, 5).flatMap((video, videoIndex) => {
+        const videoMeta = [
+          formatDuration(video.duration) ? `duration: ${formatDuration(video.duration)}` : undefined,
+          formatViewCount(video.view_count) ? `views: ${formatViewCount(video.view_count)}` : undefined,
+          formatViewCount(video.like_count) ? `likes: ${formatViewCount(video.like_count)}` : undefined,
+          video.published_date ? `published: ${video.published_date}` : undefined,
+        ].filter(Boolean).join(' | ');
+        return [
+          `   video ${videoIndex + 1}. ${video.title} (${video.video_id ?? 'unknown'})${videoMeta ? ` — ${videoMeta}` : ''}`,
+          video.description_preview ? `      description: ${video.description_preview}` : undefined,
+        ].filter(Boolean);
+      }),
+      ...(entry.playlists ?? []).slice(0, 5).map((playlist, playlistIndex) => `   playlist ${playlistIndex + 1}. ${playlist.playlist_title} (${playlist.playlist_id ?? 'unknown'})`),
+    ].filter(Boolean);
+  });
   return `${header}\n${lines.join('\n')}`;
 }
 
@@ -330,6 +363,7 @@ function createDefaultExecutor(runtime: YtDlpRuntime): YtDlpExecutor {
         cwd: options?.cwd,
         encoding: 'utf8',
         windowsHide: true,
+        maxBuffer: 64 * 1024 * 1024,
       });
       return {
         stdout: String(stdout ?? ''),
@@ -785,7 +819,15 @@ const channelSearchParameters = Type.Object({
   channel_id: Type.Optional(Type.String()),
   handle: Type.Optional(Type.String()),
   url: Type.Optional(Type.String()),
-  limit: Type.Optional(Type.Number({ minimum: 1, maximum: 20 })),
+  limit: Type.Optional(Type.Number({ minimum: 1, maximum: CHANNEL_LIMIT_MAX })),
+  includeVideos: Type.Optional(Type.Boolean()),
+  videosOffset: Type.Optional(Type.Number({ minimum: 0, maximum: CHANNEL_OFFSET_MAX })),
+  videosLimit: Type.Optional(Type.Number({ minimum: 1, maximum: CHANNEL_VIDEOS_MAX_LIMIT })),
+  enrichVideos: Type.Optional(Type.Boolean()),
+  includePlaylists: Type.Optional(Type.Boolean()),
+  playlistsOffset: Type.Optional(Type.Number({ minimum: 0, maximum: CHANNEL_OFFSET_MAX })),
+  playlistsLimit: Type.Optional(Type.Number({ minimum: 1, maximum: CHANNEL_PLAYLISTS_MAX_LIMIT })),
+  descriptionPreviewChars: Type.Optional(Type.Number({ minimum: 1, maximum: CHANNEL_DESCRIPTION_PREVIEW_MAX_CHARS })),
 });
 
 const playlistParameters = Type.Object({
@@ -984,17 +1026,60 @@ async function runChannelSearch(
   }
 
   const client = createClient(dependency.runtime);
-  const raw = await client.searchChannels(params);
-  const limit = params.limit ?? 5;
+  const descriptionPreviewChars = params.descriptionPreviewChars ?? CHANNEL_DESCRIPTION_PREVIEW_DEFAULT_CHARS;
   const directLookup = isDirectChannelLookup(params);
-  const results = raw
-    .filter((entry) => directLookup || normalizeSearchResult(entry as RawYtDlpItem).result_type === 'channel')
-    .map((entry) => normalizeChannelResult(entry as RawYtDlpItem))
-    .filter((entry) => {
-      return entry.channel_name || entry.channel_id || entry.subscriber_count !== undefined || entry.video_count !== undefined;
-    })
-    .filter((entry, index, all) => index === all.findIndex((candidate) => candidate.channel_id === entry.channel_id && candidate.url === entry.url))
-    .slice(0, directLookup ? 1 : limit);
+  let results: ReturnType<typeof normalizeChannelResult>[] = [];
+
+  if (directLookup) {
+    const about = await client.getChannelAbout(params);
+    if (!about) {
+      return buildFailure('not_found', `No channel metadata found for ${params.channel_id ?? params.handle ?? params.url}`, false);
+    }
+    results = [normalizeChannelResult(about as RawYtDlpItem, descriptionPreviewChars)];
+  } else {
+    const raw = await client.searchChannels(params);
+    const limit = params.limit ?? 5;
+    results = raw
+      .filter((entry) => normalizeSearchResult(entry as RawYtDlpItem).result_type === 'channel')
+      .map((entry) => normalizeChannelResult(entry as RawYtDlpItem, descriptionPreviewChars))
+      .filter((entry) => {
+        return entry.channel_name || entry.channel_id || entry.subscriber_count !== undefined || entry.video_count !== undefined;
+      })
+      .filter((entry, index, all) => index === all.findIndex((candidate) => candidate.channel_id === entry.channel_id && candidate.url === entry.url))
+      .slice(0, limit);
+  }
+
+  if ((params.includeVideos || params.includePlaylists) && results.length > 0) {
+    const [first] = results;
+    const lookupInput: YoutubeChannelSearchInput = {
+      ...params,
+      channel_id: params.channel_id ?? first.channel_id ?? undefined,
+      handle: params.handle ?? first.handle ?? undefined,
+      url: params.url ?? first.url,
+    };
+    if (params.includeVideos) {
+      try {
+        const rawVideos = await client.getChannelVideos(lookupInput);
+        const entries = Array.isArray((rawVideos as { entries?: unknown[] } | null)?.entries)
+          ? ((rawVideos as { entries?: unknown[] }).entries ?? [])
+          : [];
+        first.recent_videos = entries.map((entry) => normalizeChannelVideoEntry(entry as RawYtDlpItem, descriptionPreviewChars));
+      } catch {
+        first.recent_videos = [];
+      }
+    }
+    if (params.includePlaylists) {
+      try {
+        const rawPlaylists = await client.getChannelPlaylists(lookupInput);
+        const entries = Array.isArray((rawPlaylists as { entries?: unknown[] } | null)?.entries)
+          ? ((rawPlaylists as { entries?: unknown[] }).entries ?? [])
+          : [];
+        first.playlists = entries.map((entry) => normalizeChannelPlaylistEntry(entry as RawYtDlpItem, descriptionPreviewChars));
+      } catch {
+        first.playlists = [];
+      }
+    }
+  }
 
   return buildSuccess(summarizeChannelSearch(params, results), {
     results,
@@ -1087,7 +1172,7 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
   pi.registerTool({
     name: 'youtube_channel_search',
     label: 'YouTube Channel Search',
-    description: 'Search and inspect YouTube channels by query, channel ID, handle, or URL as recurring research sources.',
+    description: 'Search or inspect YouTube channels by query, channel ID, handle, or URL, with optional recent videos and playlists for recurring research sources.',
     parameters: channelSearchParameters,
     async execute(_id: string, params: YoutubeChannelSearchInput) {
       try {

@@ -52,6 +52,18 @@ function createMockClient(): { client: YtDlpClient; calls: string[] } {
       calls.push('searchChannels');
       return [];
     }),
+    getChannelAbout: vi.fn(async (_input) => {
+      calls.push('getChannelAbout');
+      return null;
+    }),
+    getChannelVideos: vi.fn(async (_input) => {
+      calls.push('getChannelVideos');
+      return null;
+    }),
+    getChannelPlaylists: vi.fn(async (_input) => {
+      calls.push('getChannelPlaylists');
+      return null;
+    }),
     listTranscriptSources: vi.fn(async (_input) => {
       calls.push('listTranscriptSources');
       const inventory: TranscriptSourceInventory = {
@@ -90,7 +102,7 @@ describe('youtube-research tool registration', () => {
     expect(pi.tools.find((tool) => tool.name === 'youtube_search')?.description).toMatch(/enriched video metadata/i);
     expect(pi.tools.find((tool) => tool.name === 'youtube_video_get')?.description).toMatch(/description preview.*comments/i);
     expect(pi.tools.find((tool) => tool.name === 'youtube_transcript_get')?.description).toMatch(/source modes.*fallback/i);
-    expect(pi.tools.find((tool) => tool.name === 'youtube_channel_search')?.description).toMatch(/query.*channel ID.*handle.*URL/i);
+    expect(pi.tools.find((tool) => tool.name === 'youtube_channel_search')?.description).toMatch(/query.*channel ID.*handle.*URL.*recent videos.*playlists/i);
     expect(pi.tools.find((tool) => tool.name === 'youtube_playlist_get')?.description).toMatch(/pagination.*optional enriched video entries/i);
   });
 
@@ -525,23 +537,17 @@ describe('youtube-research tool registration', () => {
     const pi = createMockPi();
     const { client } = createMockClient();
 
-    (client.searchChannels as any).mockResolvedValueOnce([
-      {
-        _type: 'url',
-        ie_key: 'Youtube',
-        title: 'Some channel video',
-        webpage_url: 'https://www.youtube.com/watch?v=SOxuW5K2FFY',
-        id: 'SOxuW5K2FFY',
-        playlist: 'Gentleman Programming - Videos',
-        playlist_id: 'UCbx_d228PdYwgB4Jz202SIQ',
-        playlist_title: 'Gentleman Programming - Videos',
-        playlist_uploader: 'Gentleman Programming',
-        playlist_uploader_id: '@gentlemanprogramming',
-        playlist_channel: 'Gentleman Programming',
-        playlist_channel_id: 'UCbx_d228PdYwgB4Jz202SIQ',
-        playlist_webpage_url: 'https://www.youtube.com/channel/UCbx_d228PdYwgB4Jz202SIQ/videos',
-      },
-    ]);
+    (client.getChannelAbout as any).mockResolvedValueOnce({
+      _type: 'playlist',
+      id: '@gentlemanprogramming',
+      title: 'Gentleman Programming',
+      webpage_url: 'https://www.youtube.com/channel/UCbx_d228PdYwgB4Jz202SIQ/about',
+      channel: 'Gentleman Programming',
+      channel_id: 'UCbx_d228PdYwgB4Jz202SIQ',
+      uploader_id: '@gentlemanprogramming',
+      description: 'software engineering channel',
+      channel_follower_count: 100000,
+    });
 
     registerYoutubeResearchTools(pi, {
       checkRuntime: vi.fn().mockResolvedValue({ runtime: { binary: 'yt-dlp' } }),
@@ -558,6 +564,73 @@ describe('youtube-research tool registration', () => {
     expect(result.details.data.results[0].channel_name).toBe('Gentleman Programming');
     expect(result.details.data.results[0].channel_id).toBe('UCbx_d228PdYwgB4Jz202SIQ');
     expect(result.details.data.results[0].url).toContain('/channel/UCbx_d228PdYwgB4Jz202SIQ');
+  });
+
+  it('can inspect a channel with optional recent videos and playlists for agent research', async () => {
+    const pi = createMockPi();
+    const { client } = createMockClient();
+
+    (client.getChannelAbout as any).mockResolvedValueOnce({
+      _type: 'playlist',
+      id: '@computerphile',
+      title: 'Computerphile',
+      webpage_url: 'https://www.youtube.com/@Computerphile/about',
+      channel: 'Computerphile',
+      channel_id: 'UC9-y-6csu5WGm29I7JiwpnA',
+      uploader_id: '@Computerphile',
+      description: 'Videos about computers and computer stuff.'.repeat(4),
+      channel_follower_count: 2620000,
+      channel_is_verified: true,
+      thumbnails: [{ url: 'https://thumb.jpg' }],
+    });
+    (client.getChannelVideos as any).mockResolvedValueOnce({
+      title: 'Computerphile - Videos',
+      entries: [{
+        id: 'v1',
+        title: 'Recent Video',
+        webpage_url: 'https://youtube.com/watch?v=v1',
+        duration: 120,
+        description: 'Recent video description useful for deciding whether to inspect transcript.'.repeat(2),
+        view_count: 1000,
+        like_count: 50,
+        comment_count: 7,
+        upload_date: '20260616',
+        channel: 'Computerphile',
+        channel_id: 'UC9-y-6csu5WGm29I7JiwpnA',
+      }],
+    });
+    (client.getChannelPlaylists as any).mockResolvedValueOnce({
+      title: 'Computerphile - Playlists',
+      entries: [{ id: 'PL123', title: 'Networking', url: 'https://youtube.com/playlist?list=PL123' }],
+    });
+
+    registerYoutubeResearchTools(pi, {
+      checkRuntime: vi.fn().mockResolvedValue({ runtime: { binary: 'yt-dlp' } }),
+      createClient: () => client,
+    });
+
+    const channelTool = pi.tools.find((tool) => tool.name === 'youtube_channel_search');
+    const result = (await execute(channelTool!, {
+      handle: '@Computerphile',
+      includeVideos: true,
+      videosLimit: 1,
+      enrichVideos: true,
+      includePlaylists: true,
+      playlistsLimit: 1,
+      descriptionPreviewChars: 80,
+    })) as { details: { status: 'success'; data: { results: YoutubeChannelResult[] } }; content: Array<{ text: string }> };
+
+    const channel = result.details.data.results[0];
+    expect(channel.description_preview).toContain('Videos about computers');
+    expect(channel.subscriber_count).toBe(2620000);
+    expect(channel.source_signals?.isVerified).toBe(true);
+    expect(channel.recent_videos).toHaveLength(1);
+    expect(channel.recent_videos?.[0].description_preview).toContain('Recent video description');
+    expect(channel.recent_videos?.[0].like_count).toBe(50);
+    expect(channel.playlists).toHaveLength(1);
+    expect(channel.playlists?.[0].playlist_id).toBe('PL123');
+    expect(result.content[0].text).toContain('recent videos: 1');
+    expect(result.content[0].text).toContain('playlists: 1');
   });
 
   it('fetches playlist details with rich metadata, pagination, optional entry enrichment, and direct URL/ID support', async () => {
