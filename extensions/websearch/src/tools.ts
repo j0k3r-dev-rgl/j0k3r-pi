@@ -1,5 +1,7 @@
+import { execFile } from 'node:child_process';
 import { Type } from 'typebox';
 import { createWebsearchClients } from './client.js';
+import { loadWebsearchConfig, WebsearchConfigError } from './config.js';
 import {
   normalizeDevtoArticle,
   normalizeDevtoComments,
@@ -83,7 +85,7 @@ const stackCommentsParameters = Type.Object({
 const githubSearchParameters = Type.Object({
   query: Type.String(),
   repo: Type.Optional(Type.String()),
-  state: Type.Optional(Type.Union([Type.Literal('open'), Type.Literal('closed')])),
+  state: Type.Optional(Type.Union([Type.Literal('open'), Type.Literal('closed'), Type.Literal('all')])),
   limit: Type.Optional(Type.Number()),
 });
 
@@ -144,7 +146,7 @@ function toToolError(error: unknown): ToolError {
   if (error instanceof ProviderFailure) {
     return error.toolError;
   }
-  if (error instanceof ValidationError) {
+  if (error instanceof ValidationError || error instanceof WebsearchConfigError) {
     return {
       code: 'validation_error',
       category: 'validation',
@@ -169,6 +171,18 @@ function toToolError(error: unknown): ToolError {
   };
 }
 
+function defaultCommandRunner(file: string, args: string[], options?: { signal?: AbortSignal }): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024, signal: options?.signal }, (error, stdout, stderr) => {
+      if (error) {
+        reject(Object.assign(error, { stdout, stderr }));
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
 function runtimeFromDeps(deps: RegisterWebsearchToolsDeps): WebsearchRuntime {
   const fetchImpl = deps.fetch ?? globalThis.fetch;
   if (!fetchImpl) {
@@ -182,6 +196,8 @@ function runtimeFromDeps(deps: RegisterWebsearchToolsDeps): WebsearchRuntime {
   return {
     env: deps.env ?? process.env,
     fetch: fetchImpl,
+    config: deps.config ?? loadWebsearchConfig(),
+    commandRunner: deps.commandRunner ?? defaultCommandRunner,
   };
 }
 

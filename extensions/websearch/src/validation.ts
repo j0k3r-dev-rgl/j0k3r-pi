@@ -125,7 +125,7 @@ function parseStackOverflowQuestion(raw: string): StackOverflowQuestionRef {
 function parseGitHubRepoScope(value: string): { owner: string; repo: string } {
   const match = /^(?<owner>[A-Za-z0-9_.-]+)\/(?<repo>[A-Za-z0-9_.-]+)$/.exec(value.trim());
   if (!match?.groups?.owner || !match.groups.repo) {
-    throw new ValidationError('issue must be a GitHub issue url or owner/repo#number reference.');
+    throw new ValidationError('repo must be an owner/repo reference.');
   }
   return { owner: match.groups.owner, repo: match.groups.repo };
 }
@@ -165,13 +165,13 @@ export function validateGitHubIssueRef(value: unknown): GitHubIssueRef {
   }
 }
 
-function optionalGitHubState(input: Input, key: string): 'open' | 'closed' | undefined {
+function optionalGitHubState(input: Input, key: string): 'open' | 'closed' | 'all' | undefined {
   const value = input[key];
   if (value === undefined || value === null || value === '') {
     return undefined;
   }
-  if (value !== 'open' && value !== 'closed') {
-    throw new ValidationError(`${key} must be "open" or "closed".`);
+  if (value !== 'open' && value !== 'closed' && value !== 'all') {
+    throw new ValidationError(`${key} must be "open", "closed", or "all".`);
   }
   return value;
 }

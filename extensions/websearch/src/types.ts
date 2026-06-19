@@ -1,3 +1,5 @@
+import type { WebsearchConfig } from './config.js';
+
 export type ToolContent = {
   type: 'text';
   text: string;
@@ -163,7 +165,7 @@ export type GitHubIssueSearchRequest = {
   query: string;
   limit: number;
   repo?: string;
-  state?: 'open' | 'closed';
+  state?: 'open' | 'closed' | 'all';
 };
 
 export type GitHubIssueCommentsRequest = GitHubIssueRef & {
@@ -212,7 +214,7 @@ export type GitHubIssueSearchResult = {
   query: string;
   limit: number;
   repo?: string;
-  state?: 'open' | 'closed';
+  state?: 'open' | 'closed' | 'all';
   items: NormalizedGitHubIssue[];
 };
 
@@ -380,14 +382,25 @@ export interface WebsearchClients {
   hackerNews: HackerNewsClient;
 }
 
+export type CommandRunnerResult = {
+  stdout: string;
+  stderr: string;
+};
+
+export type CommandRunner = (file: string, args: string[], options?: { signal?: AbortSignal }) => Promise<CommandRunnerResult>;
+
 export interface RegisterWebsearchToolsDeps {
   clients?: Partial<WebsearchClients>;
   createClients?: (runtime: WebsearchRuntime) => WebsearchClients;
   env?: Record<string, string | undefined>;
   fetch?: typeof globalThis.fetch;
+  commandRunner?: CommandRunner;
+  config?: WebsearchConfig;
 }
 
 export type WebsearchRuntime = {
   env: Record<string, string | undefined>;
   fetch: typeof globalThis.fetch;
+  config: WebsearchConfig;
+  commandRunner?: CommandRunner;
 };
