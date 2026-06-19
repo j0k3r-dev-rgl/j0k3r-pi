@@ -71,6 +71,7 @@ Field conventions:
 Use this skill when the user asks how to configure, enable, reload, troubleshoot, validate, or use the Pi `websearch` extension, especially questions like:
 
 - "What do I need to use websearch?"
+- "Do I need to do anything so websearch works reliably / without problems?"
 - "Which env vars are required or optional?"
 - "Do I need a GitHub token?"
 - "What parameters do the websearch tools accept?"
@@ -87,6 +88,8 @@ Do not load this skill for unrelated browser search, Context7 documentation look
 - The `websearch` extension is read-only. It must not post, vote, comment, edit, delete, moderate, scrape HTML, automate browsers, persist indexes, or background-crawl providers.
 - No Reddit support is configured or implemented. Do not suggest Reddit setup, Reddit credentials, or `snoowrap`.
 - Required environment variables: none for basic use.
+- For direct setup, configuration, or usage-readiness questions, answer from this skill's current contract first. Do not read Pi extension docs, examples, package files, or source code by default.
+- Inspect docs/source only when the user asks for implementation details, asks to troubleshoot a runtime mismatch, requests validation, or when the current contract is insufficient/contradicted by observed behavior.
 - Optional environment variables:
   - `STACK_EXCHANGE_KEY`: optional, improves Stack Exchange / Stack Overflow quota.
   - `GITHUB_TOKEN`: optional, env-only, improves GitHub public API quota.
@@ -124,11 +127,13 @@ Current tools exposed by `extensions/websearch`:
 ## Execution Steps
 
 1. Identify whether the user is asking for configuration, usage, troubleshooting, validation, or implementation.
-2. For direct configuration/usage questions, answer from the current contract:
-   - no required env vars;
-   - `STACK_EXCHANGE_KEY` and `GITHUB_TOKEN` are optional;
+2. For direct configuration/usage-readiness questions, do not inspect files unless needed by a decision gate. Answer from the current contract with a short setup checklist:
+   - no required setup or env vars for basic use;
+   - optional `STACK_EXCHANGE_KEY` and `GITHUB_TOKEN` only improve quotas;
    - Dev.to and Hacker News need no credentials;
-   - reload/restart Pi after extension changes.
+   - credentials must be environment variables only;
+   - reload/restart Pi only after installing, enabling, or changing the extension;
+   - if the websearch tools are already visible in the current session, the extension is already loaded.
 3. When parameters matter, list only the relevant tool parameters and bounds from the table above.
 4. For runtime validation, run bounded smoke tests using the websearch tools; avoid broad or unbounded searches.
 5. For implementation changes, follow project workflow rules: choose the workflow first, use strict TDD, preserve no-Reddit and read-only constraints, and validate the package.
@@ -148,6 +153,7 @@ Return:
 - Relevant tool names and parameters when the user asks about usage.
 - Reload/restart advice when tools were just added or changed.
 - Validation or smoke tests executed, or why they were not needed.
+- Whether docs/source inspection was intentionally skipped for a direct configuration answer.
 - Risks or follow-ups, especially quota limits, missing optional tokens, audit failures, or readability/usability gaps.
 
 ## References
