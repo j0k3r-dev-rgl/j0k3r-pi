@@ -30,6 +30,9 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "websearch",
       "websearch extension",
       "search_stack_overflow",
+      "stack_overflow_question_get",
+      "stack_overflow_answers_get",
+      "stack_overflow_comments_get",
       "search_github_issues",
       "github_issue_get",
       "search_devto_articles",
@@ -109,6 +112,7 @@ Current tools exposed by `extensions/websearch`:
 | `search_stack_overflow` | `query` | `limit` default 5, max 10 | Stack Overflow search via Stack Exchange API. |
 | `stack_overflow_question_get` | `question` | none | `question` accepts a Stack Overflow question ID or URL. |
 | `stack_overflow_answers_get` | `question` | `limit` default 10, max 30 | `question` accepts a Stack Overflow question ID or URL. |
+| `stack_overflow_comments_get` | `question` | `commentsLimit` default 10, max 30; `commentsOffset` default 0 | Fetches bounded Stack Overflow question comments with offset-style pagination. |
 | `search_github_issues` | `query` | `repo`, `state`, `limit` default 5, max 10 | `repo` is `owner/repo`; `state` is `open` or `closed`; search always forces `is:issue`. |
 | `github_issue_get` | `issue` | `commentsLimit` default 5, max 20 | `issue` accepts a GitHub issue URL or `owner/repo#number`. |
 | `search_devto_articles` | `tag` | `limit` default 5, max 10 | Dev.to / Forem article search is tag-first for MVP. |

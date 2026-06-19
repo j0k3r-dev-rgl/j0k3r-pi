@@ -6,6 +6,7 @@ Read-only Pi extension for bounded community research across Stack Overflow, Git
 - `search_stack_overflow`
 - `stack_overflow_question_get`
 - `stack_overflow_answers_get`
+- `stack_overflow_comments_get`
 - `search_github_issues`
 - `github_issue_get`
 - `search_devto_articles`
