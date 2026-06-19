@@ -82,7 +82,7 @@ export function validateSearchFilters(input: YoutubeSearchInput): NormalizedSear
   const type = normalizeSearchType(input.type);
 
   return {
-    query: input.query.trim(),
+    query: normalizeSearchQuery(input),
     limit,
     type,
     channel: input.channel,

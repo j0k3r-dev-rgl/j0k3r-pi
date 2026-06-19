@@ -57,7 +57,7 @@ describe('youtube-research yt-dlp command and parse contract', () => {
     ]);
   });
 
-  it('switches video search to enriched non-flat mode when date-aware behavior is requested', () => {
+  it('keeps date-aware video search flat and overfetches for local filters', () => {
     expect(buildSearchCommand({
       query: 'python tutorial',
       limit: 5,
@@ -65,8 +65,9 @@ describe('youtube-research yt-dlp command and parse contract', () => {
       sort: 'date',
     })).toEqual([
       'yt-dlp',
+      '--flat-playlist',
+      'ytsearch25:python tutorial',
       '--dump-json',
-      'ytsearch5:python tutorial',
     ]);
 
     expect(buildSearchCommand({
@@ -76,8 +77,9 @@ describe('youtube-research yt-dlp command and parse contract', () => {
       published_after: '2024-01-01',
     })).toEqual([
       'yt-dlp',
+      '--flat-playlist',
+      'ytsearch25:python tutorial',
       '--dump-json',
-      'ytsearch5:python tutorial',
     ]);
 
     expect(buildSearchCommand({
@@ -87,8 +89,35 @@ describe('youtube-research yt-dlp command and parse contract', () => {
       published_before: '2024-12-31',
     })).toEqual([
       'yt-dlp',
+      '--flat-playlist',
+      'ytsearch25:python tutorial',
       '--dump-json',
-      'ytsearch5:python tutorial',
+    ]);
+  });
+
+  it('overfetches for duration and channel filters without switching to large non-flat payloads', () => {
+    expect(buildSearchCommand({
+      query: 'rust ownership explained',
+      limit: 3,
+      type: 'video',
+      duration: 'short',
+    })).toEqual([
+      'yt-dlp',
+      '--flat-playlist',
+      'ytsearch15:rust ownership explained',
+      '--dump-json',
+    ]);
+
+    expect(buildSearchCommand({
+      query: 'rust ownership',
+      limit: 5,
+      type: 'video',
+      channel: "Let's Get Rusty",
+    })).toEqual([
+      'yt-dlp',
+      '--flat-playlist',
+      'ytsearch25:rust ownership',
+      '--dump-json',
     ]);
   });
 

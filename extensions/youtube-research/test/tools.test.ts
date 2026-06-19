@@ -229,6 +229,55 @@ describe('youtube-research tool registration', () => {
     expect(result.details.data.results.every((entry: YoutubeSearchResult) => entry.result_type === 'video')).toBe(true);
   });
 
+  it('passes topic tags as additional search text to the yt-dlp client', async () => {
+    const pi = createMockPi();
+    const { client } = createMockClient();
+    (client.search as any).mockResolvedValueOnce([
+      { _type: 'url', ie_key: 'Youtube', title: 'Borrow Checker', webpage_url: 'https://youtube.com/watch?v=borrow1', id: 'borrow1' },
+    ]);
+
+    registerYoutubeResearchTools(pi, {
+      checkRuntime: vi.fn().mockResolvedValue({ runtime: { binary: 'yt-dlp' } }),
+      createClient: () => client,
+    });
+
+    const tool = pi.tools.find((entry) => entry.name === 'youtube_search');
+    const result = (await execute(tool!, { query: 'rust ownership', topic_tags: ['borrow checker'], type: 'video', limit: 5 })) as {
+      content: Array<{ text: string }>;
+      details: { status: string; data: { query: string } };
+    };
+
+    expect(client.search).toHaveBeenCalledWith(expect.objectContaining({ query: 'rust ownership borrow checker' }));
+    expect(result.details.data.query).toBe('rust ownership borrow checker');
+    expect(result.content[0].text).toContain('rust ownership borrow checker');
+  });
+
+  it('keeps matching short-duration results found beyond the visible limit because the client overfetches', async () => {
+    const pi = createMockPi();
+    const { client } = createMockClient();
+
+    (client.search as any).mockResolvedValueOnce([
+      { _type: 'url', ie_key: 'Youtube', title: 'Long', webpage_url: 'https://youtube.com/watch?v=long111', id: 'long111', duration: 1530 },
+      { _type: 'url', ie_key: 'Youtube', title: 'Medium', webpage_url: 'https://youtube.com/watch?v=med111', id: 'med111', duration: 361 },
+      { _type: 'url', ie_key: 'Youtube', title: 'Short A', webpage_url: 'https://youtube.com/watch?v=short1', id: 'short1', duration: 206 },
+      { _type: 'url', ie_key: 'Youtube', title: 'Short B', webpage_url: 'https://youtube.com/watch?v=short2', id: 'short2', duration: 149 },
+    ]);
+
+    registerYoutubeResearchTools(pi, {
+      checkRuntime: vi.fn().mockResolvedValue({ runtime: { binary: 'yt-dlp' } }),
+      createClient: () => client,
+    });
+
+    const tool = pi.tools.find((entry) => entry.name === 'youtube_search');
+    const result = (await execute(tool!, { query: 'rust ownership explained', type: 'video', duration: 'short', limit: 1 })) as {
+      details: { status: string; data: { results: YoutubeSearchResult[]; total: number } };
+    };
+
+    expect(result.details.status).toBe('success');
+    expect(result.details.data.total).toBe(1);
+    expect(result.details.data.results[0]?.title).toBe('Short A');
+  });
+
   it('uses published dates for date-aware video search behavior when search rows include upload_date', async () => {
     const pi = createMockPi();
     const { client } = createMockClient();

@@ -69,26 +69,27 @@ function buildTypedYoutubeSearchUrl(input: NormalizedSearchInput): string | null
   return `https://www.youtube.com/results?search_query=${encodedQuery}&sp=${YOUTUBE_SEARCH_SP[input.type]}`;
 }
 
-function needsDateAwareVideoSearch(input: NormalizedSearchInput): boolean {
-  return input.type === 'video' && (
-    input.sort === 'date'
-    || Boolean(input.published_after)
-    || Boolean(input.published_before)
+function needsSearchOverfetch(input: NormalizedSearchInput): boolean {
+  return Boolean(
+    input.channel
+    || (input.duration && input.duration !== 'any')
+    || input.published_after
+    || input.published_before
+    || input.language
+    || input.sort === 'date'
+    || input.sort === 'views',
   );
 }
 
-export function buildSearchCommand(input: NormalizedSearchInput, binary?: string): string[] {
-  const target = input.type === 'video'
-    ? `ytsearch${input.limit}:${input.query}`
-    : buildTypedYoutubeSearchUrl(input) ?? `ytsearch${input.limit}:${input.query}`;
+function searchFetchLimit(input: NormalizedSearchInput): number {
+  return needsSearchOverfetch(input) ? Math.min(Math.max(input.limit * 5, input.limit), 50) : input.limit;
+}
 
-  if (needsDateAwareVideoSearch(input)) {
-    return [
-      commandBinary(binary),
-      '--dump-json',
-      target,
-    ];
-  }
+export function buildSearchCommand(input: NormalizedSearchInput, binary?: string): string[] {
+  const fetchLimit = searchFetchLimit(input);
+  const target = input.type === 'video'
+    ? `ytsearch${fetchLimit}:${input.query}`
+    : buildTypedYoutubeSearchUrl(input) ?? `ytsearch${fetchLimit}:${input.query}`;
 
   return [
     commandBinary(binary),
