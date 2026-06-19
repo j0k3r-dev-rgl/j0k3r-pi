@@ -192,7 +192,7 @@ describe('github pull request tool behavior', () => {
     registerWebsearchTools(pi, {
       env: {},
       fetch: vi.fn<typeof fetch>(),
-      config: { github: { provider: 'gh' } },
+      config: { github: { provider: 'gh' }, request: { timeoutMs: 120_000, maxRetries: 1 } },
       commandRunner,
     });
 
@@ -244,7 +244,7 @@ describe('github pull request tool behavior', () => {
     registerWebsearchTools(pi, {
       env: {},
       fetch: vi.fn<typeof fetch>(),
-      config: { github: { provider: 'gh' } },
+      config: { github: { provider: 'gh' }, request: { timeoutMs: 120_000, maxRetries: 1 } },
       commandRunner,
     });
 

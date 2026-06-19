@@ -1,5 +1,9 @@
 {
   "github": {
     "provider": "gh"
+  },
+  "request": {
+    "timeoutMs": 120000,
+    "maxRetries": 1
   }
 }

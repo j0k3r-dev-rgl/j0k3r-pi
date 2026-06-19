@@ -208,6 +208,61 @@ function defaultCommandRunner(file: string, args: string[], options?: { signal?:
   });
 }
 
+function timeoutSignal(timeoutMs: number, parent?: AbortSignal): { signal: AbortSignal; cleanup: () => void } {
+  const controller = new AbortController();
+  const abort = () => controller.abort(parent?.reason);
+  if (parent?.aborted) {
+    abort();
+    return { signal: controller.signal, cleanup: () => undefined };
+  }
+  const timer = setTimeout(() => controller.abort(new Error(`Request timed out after ${timeoutMs}ms.`)), timeoutMs);
+  parent?.addEventListener('abort', abort, { once: true });
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timer);
+      parent?.removeEventListener('abort', abort);
+    },
+  };
+}
+
+async function retrying<T>(maxRetries: number, run: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    try {
+      return await run();
+    } catch (error) {
+      lastError = error;
+      if (isAbortLike(error) || attempt >= maxRetries) {
+        throw error;
+      }
+    }
+  }
+  throw lastError;
+}
+
+function withRequestConfig(runtime: WebsearchRuntime, fetchImpl: typeof fetch, commandRunner: NonNullable<WebsearchRuntime['commandRunner']>): Pick<WebsearchRuntime, 'fetch' | 'commandRunner'> {
+  const { timeoutMs, maxRetries } = runtime.config.request;
+  return {
+    fetch: ((input: RequestInfo | URL, init?: RequestInit) => retrying(maxRetries, async () => {
+      const { signal, cleanup } = timeoutSignal(timeoutMs, init?.signal ?? undefined);
+      try {
+        return await fetchImpl(input, { ...init, signal });
+      } finally {
+        cleanup();
+      }
+    })) as typeof fetch,
+    commandRunner: (file, args, options) => retrying(maxRetries, async () => {
+      const { signal, cleanup } = timeoutSignal(timeoutMs, options?.signal);
+      try {
+        return await commandRunner(file, args, { ...options, signal });
+      } finally {
+        cleanup();
+      }
+    }),
+  };
+}
+
 function runtimeFromDeps(deps: RegisterWebsearchToolsDeps): WebsearchRuntime {
   const fetchImpl = deps.fetch ?? globalThis.fetch;
   if (!fetchImpl) {
@@ -218,11 +273,16 @@ function runtimeFromDeps(deps: RegisterWebsearchToolsDeps): WebsearchRuntime {
       recoverable: true,
     });
   }
-  return {
+  const config = deps.config ?? loadWebsearchConfig();
+  const baseRuntime: WebsearchRuntime = {
     env: deps.env ?? process.env,
     fetch: fetchImpl,
-    config: deps.config ?? loadWebsearchConfig(),
+    config,
     commandRunner: deps.commandRunner ?? defaultCommandRunner,
+  };
+  return {
+    ...baseRuntime,
+    ...withRequestConfig(baseRuntime, fetchImpl, baseRuntime.commandRunner ?? defaultCommandRunner),
   };
 }
 

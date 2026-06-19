@@ -8,7 +8,18 @@ export type WebsearchConfig = {
   github: {
     provider: GitHubWebsearchProvider;
   };
+  request: {
+    timeoutMs: number;
+    maxRetries: number;
+  };
 };
+
+const DEFAULT_TIMEOUT_MS = 120_000;
+const MIN_TIMEOUT_MS = 1_000;
+const MAX_TIMEOUT_MS = 300_000;
+const DEFAULT_MAX_RETRIES = 1;
+const MIN_MAX_RETRIES = 0;
+const MAX_MAX_RETRIES = 5;
 
 export class WebsearchConfigError extends Error {
   readonly code = 'invalid_configuration' as const;
@@ -34,6 +45,10 @@ function defaultWebsearchConfig(): WebsearchConfig {
     github: {
       provider: 'api',
     },
+    request: {
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+      maxRetries: DEFAULT_MAX_RETRIES,
+    },
   };
 }
 
@@ -45,6 +60,16 @@ function parseProvider(value: unknown): GitHubWebsearchProvider {
     return value;
   }
   throw new WebsearchConfigError('Invalid websearch config: github.provider must be "api" or "gh".');
+}
+
+function parseBoundedInteger(value: unknown, path: string, defaultValue: number, min: number, max: number): number {
+  if (value === undefined || value === null) {
+    return defaultValue;
+  }
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
+    throw new WebsearchConfigError(`Invalid websearch config: ${path} must be an integer between ${min} and ${max}.`);
+  }
+  return value;
 }
 
 export function loadWebsearchConfig(deps: ConfigLoaderDeps = {}): WebsearchConfig {
@@ -67,10 +92,15 @@ export function loadWebsearchConfig(deps: ConfigLoaderDeps = {}): WebsearchConfi
 
   const root = parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
   const github = root.github && typeof root.github === 'object' ? root.github as Record<string, unknown> : {};
+  const request = root.request && typeof root.request === 'object' ? root.request as Record<string, unknown> : {};
 
   return {
     github: {
       provider: parseProvider(github.provider),
+    },
+    request: {
+      timeoutMs: parseBoundedInteger(request.timeoutMs, 'request.timeoutMs', DEFAULT_TIMEOUT_MS, MIN_TIMEOUT_MS, MAX_TIMEOUT_MS),
+      maxRetries: parseBoundedInteger(request.maxRetries, 'request.maxRetries', DEFAULT_MAX_RETRIES, MIN_MAX_RETRIES, MAX_MAX_RETRIES),
     },
   };
 }

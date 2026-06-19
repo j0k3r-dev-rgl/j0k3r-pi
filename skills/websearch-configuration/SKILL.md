@@ -93,6 +93,10 @@ Do not use this skill to teach individual websearch tool parameters or research 
 {
   "github": {
     "provider": "api"
+  },
+  "request": {
+    "timeoutMs": 120000,
+    "maxRetries": 1
   }
 }
 ```
@@ -101,6 +105,9 @@ Do not use this skill to teach individual websearch tool parameters or research 
   - `api`: use the GitHub API client; this is the default.
   - `gh`: use GitHub CLI via `gh api`.
 - `github.provider = "gh"` requires `gh` installed in `PATH` and authenticated with `gh auth login`.
+- Request runtime options are optional:
+  - `request.timeoutMs`: default `120000`, valid range `1000` to `300000`.
+  - `request.maxRetries`: default `1`, valid range `0` to `5`.
 - Credentials must not be stored in `~/.pi/agent/websearch.json` or passed as tool parameters.
 - Optional environment variables:
   - `STACK_EXCHANGE_KEY`: optional; improves Stack Exchange / Stack Overflow quota.
@@ -127,6 +134,7 @@ Do not use this skill to teach individual websearch tool parameters or research 
    - global config path is `~/.pi/agent/websearch.json`;
    - missing config defaults GitHub to `api`;
    - `github.provider` may be `api` or `gh`;
+   - `request.timeoutMs` defaults to `120000` and `request.maxRetries` defaults to `1`;
    - `gh` mode requires installed/authenticated GitHub CLI;
    - optional `STACK_EXCHANGE_KEY` and `GITHUB_TOKEN` improve quotas;
    - credentials are env-only or provider-native auth, never config-file secrets;
@@ -145,7 +153,7 @@ Return:
 
 - Skill applied: `websearch-configuration`.
 - Whether the user needs required setup: normally "none".
-- Global config path and effective GitHub provider behavior.
+- Global config path, effective GitHub provider behavior, timeout, and retry behavior.
 - Optional credentials/auth setup relevant to the selected provider.
 - Reload/restart advice when config or extension behavior was just changed.
 - Validation or smoke tests executed, or why they were not needed.

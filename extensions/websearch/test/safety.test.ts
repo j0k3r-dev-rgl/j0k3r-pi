@@ -37,7 +37,7 @@ describe('websearch output safety', () => {
     registerWebsearchTools(pi, {
       env: { GITHUB_TOKEN: 'ghp_secret_token' },
       fetch: vi.fn<typeof fetch>(),
-      config: { github: { provider: 'gh' } },
+      config: { github: { provider: 'gh' }, request: { timeoutMs: 120_000, maxRetries: 1 } },
       commandRunner,
     });
 

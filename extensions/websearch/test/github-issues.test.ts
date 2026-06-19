@@ -35,7 +35,7 @@ describe('github issue tool behavior', () => {
       }),
       env: {},
       fetch: vi.fn<typeof fetch>(),
-      config: { github: { provider: 'api' } },
+      config: { github: { provider: 'api' }, request: { timeoutMs: 120_000, maxRetries: 1 } },
     });
 
     const tool = pi.tools.find((entry) => entry.name === 'search_github_issues');
@@ -157,7 +157,7 @@ describe('github issue tool behavior', () => {
     registerWebsearchTools(pi, {
       env: {},
       fetch: vi.fn<typeof fetch>(),
-      config: { github: { provider: 'gh' } },
+      config: { github: { provider: 'gh' }, request: { timeoutMs: 120_000, maxRetries: 1 } },
       commandRunner,
     });
 
@@ -221,7 +221,7 @@ describe('github issue tool behavior', () => {
     registerWebsearchTools(pi, {
       env: {},
       fetch: vi.fn<typeof fetch>(),
-      config: { github: { provider: 'gh' } },
+      config: { github: { provider: 'gh' }, request: { timeoutMs: 120_000, maxRetries: 1 } },
       commandRunner,
     });
 
@@ -295,7 +295,7 @@ describe('github issue tool behavior', () => {
     registerWebsearchTools(pi, {
       env: {},
       fetch: vi.fn<typeof fetch>(),
-      config: { github: { provider: 'gh' } },
+      config: { github: { provider: 'gh' }, request: { timeoutMs: 120_000, maxRetries: 1 } },
       commandRunner,
     });
 
@@ -320,7 +320,7 @@ describe('github issue tool behavior', () => {
     registerWebsearchTools(pi, {
       env: {},
       fetch: vi.fn<typeof fetch>(),
-      config: { github: { provider: 'gh' } },
+      config: { github: { provider: 'gh' }, request: { timeoutMs: 120_000, maxRetries: 1 } },
       commandRunner: vi.fn().mockRejectedValue(missingGh),
     });
 
