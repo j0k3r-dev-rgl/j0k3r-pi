@@ -1,11 +1,11 @@
-import { normalizeHackerNewsStory, normalizeHackerNewsStoryDetail } from '../normalize.js';
-import { hackerNewsSearchParameters, hackerNewsStoryParameters } from '../schemas/hackernews.js';
-import { hackerNewsSearchSummary, hackerNewsStorySummary } from '../summaries/hackernews.js';
-import type { HackerNewsSearchResult, HackerNewsStoryDetailResult, PiToolResult, RegisterWebsearchToolsDeps } from '../types.js';
-import { validateHackerNewsSearch, validateHackerNewsStoryGet } from '../validation.js';
-import { buildFailure, buildSuccess, toToolError } from './result.js';
-import { clientsFromDeps, signalFromContext, type ExecuteContext } from './runtime.js';
-import { registerTool, type WebsearchToolModule } from './registry.js';
+import { normalizeHackerNewsStory, normalizeHackerNewsStoryDetail } from '../../normalize.js';
+import { hackerNewsSearchParameters, hackerNewsStoryParameters } from '../../schemas/discussions/hackernews.js';
+import { hackerNewsSearchSummary, hackerNewsStorySummary } from '../../summaries/discussions/hackernews.js';
+import type { HackerNewsSearchResult, HackerNewsStoryDetailResult, PiToolResult, RegisterWebsearchToolsDeps } from '../../types.js';
+import { validateHackerNewsSearch, validateHackerNewsStoryGet } from '../../validation.js';
+import { buildFailure, buildSuccess, toToolError } from '../result.js';
+import { clientsFromDeps, signalFromContext, type ExecuteContext } from '../runtime.js';
+import { registerTool, type WebsearchToolModule } from '../registry.js';
 
 export const hackerNewsToolNames = [
   'search_hackernews',

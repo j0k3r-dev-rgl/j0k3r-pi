@@ -8,8 +8,8 @@ import type {
   StackOverflowRawQuestion,
   StackOverflowSearchRequest,
   WebsearchRuntime,
-} from '../types.js';
-import { ProviderFailure, providerErrorFromResponse, stackExchangePayloadError } from '../security.js';
+} from '../../types.js';
+import { ProviderFailure, providerErrorFromResponse, stackExchangePayloadError } from '../../security.js';
 
 const STACK_EXCHANGE_API_BASE = 'https://api.stackexchange.com/2.3';
 export const STACK_EXCHANGE_BODY_FILTER = 'withbody';

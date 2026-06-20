@@ -6,7 +6,7 @@ import {
   normalizeGitHubPullRequestReview,
   normalizeGitHubPullRequestReviewComment,
   normalizeGitHubRelease,
-} from '../normalize.js';
+} from '../../normalize.js';
 import {
   githubIssueParameters,
   githubPullRequestParameters,
@@ -14,7 +14,7 @@ import {
   githubReleaseParameters,
   githubReleasesParameters,
   githubSearchParameters,
-} from '../schemas/github.js';
+} from '../../schemas/discussions/github.js';
 import {
   githubIssueSummary,
   githubPullRequestSearchSummary,
@@ -22,7 +22,7 @@ import {
   githubReleaseSummary,
   githubReleasesSummary,
   githubSearchSummary,
-} from '../summaries/github.js';
+} from '../../summaries/discussions/github.js';
 import type {
   GitHubIssueDetailResult,
   GitHubIssueSearchResult,
@@ -32,7 +32,7 @@ import type {
   GitHubReleasesResult,
   PiToolResult,
   RegisterWebsearchToolsDeps,
-} from '../types.js';
+} from '../../types.js';
 import {
   GITHUB_COMMENTS_DEFAULT_LIMIT,
   GITHUB_COMMENTS_MAX_LIMIT,
@@ -42,10 +42,10 @@ import {
   validateGitHubPullRequestSearch,
   validateGitHubReleaseGet,
   validateGitHubReleasesGet,
-} from '../validation.js';
-import { buildFailure, buildSuccess, toToolError } from './result.js';
-import { clientsFromDeps, signalFromContext, type ExecuteContext } from './runtime.js';
-import { registerTool, type WebsearchToolModule } from './registry.js';
+} from '../../validation.js';
+import { buildFailure, buildSuccess, toToolError } from '../result.js';
+import { clientsFromDeps, signalFromContext, type ExecuteContext } from '../runtime.js';
+import { registerTool, type WebsearchToolModule } from '../registry.js';
 
 export const githubToolNames = [
   'search_github_issues',

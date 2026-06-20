@@ -1,4 +1,4 @@
-import type { DevtoCommentsResult, DevtoArticleSearchResult } from '../types.js';
+import type { DevtoCommentsResult, DevtoArticleSearchResult } from '../../types.js';
 
 export function devtoSearchSummary(data: DevtoArticleSearchResult): string {
   if (data.items.length === 0) return `No Dev.to articles found for tag "${data.tag}".`;

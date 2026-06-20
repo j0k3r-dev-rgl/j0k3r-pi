@@ -1,4 +1,4 @@
-import { ProviderFailure, fetchProviderErrorFromError, providerErrorFromResponse } from '../security.js';
+import { ProviderFailure, fetchProviderErrorFromError, providerErrorFromResponse } from '../../security.js';
 import type {
   DevtoArticleSearchRequest,
   DevtoClient,
@@ -6,7 +6,7 @@ import type {
   DevtoRawArticle,
   DevtoRawComment,
   WebsearchRuntime,
-} from '../types.js';
+} from '../../types.js';
 
 const DEVTO_API_BASE = 'https://dev.to/api';
 

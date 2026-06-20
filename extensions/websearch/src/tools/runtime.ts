@@ -103,6 +103,7 @@ export function clientsFromDeps(deps: RegisterWebsearchToolsDeps) {
       github: deps.clients.github ?? fallback.github,
       devto: deps.clients.devto ?? fallback.devto,
       hackerNews: deps.clients.hackerNews ?? fallback.hackerNews,
+      research: deps.clients.research ?? fallback.research,
     };
   }
   const runtime = runtimeFromDeps(deps);

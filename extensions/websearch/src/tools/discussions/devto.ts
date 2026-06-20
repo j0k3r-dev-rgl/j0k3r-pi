@@ -1,11 +1,11 @@
-import { normalizeDevtoArticle, normalizeDevtoComments } from '../normalize.js';
-import { devtoCommentsParameters, devtoSearchParameters } from '../schemas/devto.js';
-import { devtoCommentsSummary, devtoSearchSummary } from '../summaries/devto.js';
-import type { DevtoArticleSearchResult, DevtoCommentsResult, PiToolResult, RegisterWebsearchToolsDeps } from '../types.js';
-import { validateDevtoArticleSearch, validateDevtoCommentsGet } from '../validation.js';
-import { buildFailure, buildSuccess, toToolError } from './result.js';
-import { clientsFromDeps, signalFromContext, type ExecuteContext } from './runtime.js';
-import { registerTool, type WebsearchToolModule } from './registry.js';
+import { normalizeDevtoArticle, normalizeDevtoComments } from '../../normalize.js';
+import { devtoCommentsParameters, devtoSearchParameters } from '../../schemas/discussions/devto.js';
+import { devtoCommentsSummary, devtoSearchSummary } from '../../summaries/discussions/devto.js';
+import type { DevtoArticleSearchResult, DevtoCommentsResult, PiToolResult, RegisterWebsearchToolsDeps } from '../../types.js';
+import { validateDevtoArticleSearch, validateDevtoCommentsGet } from '../../validation.js';
+import { buildFailure, buildSuccess, toToolError } from '../result.js';
+import { clientsFromDeps, signalFromContext, type ExecuteContext } from '../runtime.js';
+import { registerTool, type WebsearchToolModule } from '../registry.js';
 
 export const devtoToolNames = [
   'search_devto_articles',

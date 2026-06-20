@@ -179,23 +179,23 @@ describe('generic websearch meta-tools', () => {
     ]);
   });
 
-  it('research_search is registered as the academic parent tool and reports no configured sources yet', async () => {
+  it('research_search is registered as the academic parent tool', async () => {
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: {}, fetch: vi.fn<typeof fetch>() });
 
     const tool = pi.tools.find((entry) => entry.name === 'research_search');
     const result = (await execute(tool!, { query: 'agent memory sqlite' })) as {
-      content: Array<{ text: string }>;
-      details: { status: 'success'; data: Record<string, unknown> };
+      details: { status: 'success'; data: { query: string; sources_searched: string[]; available_sources: string[]; items: unknown[]; source_errors: unknown[] } };
     };
 
     expect(tool).toBeDefined();
     expect(result.details.status).toBe('success');
     expect(result.details.data).toMatchObject({
       query: 'agent memory sqlite',
-      sources_searched: [],
+      sources_searched: ['openalex', 'arxiv', 'crossref', 'europe_pmc', 'semantic_scholar'],
+      available_sources: ['openalex', 'arxiv', 'crossref', 'europe_pmc', 'semantic_scholar'],
       items: [],
     });
-    expect(result.content[0]?.text).toContain('No research sources are configured yet');
+    expect(result.details.data.source_errors).toHaveLength(5);
   });
 });

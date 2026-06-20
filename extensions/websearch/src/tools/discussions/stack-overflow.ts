@@ -2,9 +2,9 @@ import {
   normalizeStackOverflowAnswer,
   normalizeStackOverflowComment,
   normalizeStackOverflowQuestion,
-} from '../normalize.js';
-import { stackAnswersParameters, stackCommentsParameters, stackQuestionParameters, stackSearchParameters } from '../schemas/stack-overflow.js';
-import { stackAnswersSummary, stackCommentsSummary, stackQuestionSummary, stackSearchSummary } from '../summaries/stack-overflow.js';
+} from '../../normalize.js';
+import { stackAnswersParameters, stackCommentsParameters, stackQuestionParameters, stackSearchParameters } from '../../schemas/discussions/stack-overflow.js';
+import { stackAnswersSummary, stackCommentsSummary, stackQuestionSummary, stackSearchSummary } from '../../summaries/discussions/stack-overflow.js';
 import type {
   NormalizedStackOverflowQuestion,
   PiToolResult,
@@ -12,16 +12,16 @@ import type {
   StackOverflowAnswersResult,
   StackOverflowCommentsResult,
   StackOverflowSearchResult,
-} from '../types.js';
+} from '../../types.js';
 import {
   validateStackOverflowAnswers,
   validateStackOverflowComments,
   validateStackOverflowQuestionRef,
   validateStackOverflowSearch,
-} from '../validation.js';
-import { buildFailure, buildSuccess, toToolError } from './result.js';
-import { clientsFromDeps, signalFromContext, type ExecuteContext } from './runtime.js';
-import { registerTool, type WebsearchToolModule } from './registry.js';
+} from '../../validation.js';
+import { buildFailure, buildSuccess, toToolError } from '../result.js';
+import { clientsFromDeps, signalFromContext, type ExecuteContext } from '../runtime.js';
+import { registerTool, type WebsearchToolModule } from '../registry.js';
 
 export const stackOverflowToolNames = [
   'search_stack_overflow',

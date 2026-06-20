@@ -3,16 +3,32 @@ import { registerWebsearchTools, WEBSEARCH_TOOL_NAMES } from '../src/tools.js';
 import { createMockPi } from './helpers.js';
 
 describe('websearch tool registration', () => {
-  it('registers only the two generic parent tools without excluded-provider tools', () => {
+  it('registers parent search tools plus source detail tools without provider-specific search tools', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi);
 
     expect(WEBSEARCH_TOOL_NAMES).toEqual([
       'discussion_search',
       'research_search',
+      'stack_overflow_question_get',
+      'stack_overflow_answers_get',
+      'stack_overflow_comments_get',
+      'github_issue_get',
+      'github_pull_request_get',
+      'github_releases_get',
+      'github_release_get',
+      'devto_comments_get',
+      'hackernews_story_get',
     ]);
     expect(pi.tools.map((tool) => tool.name)).toEqual(WEBSEARCH_TOOL_NAMES);
-    expect(pi.tools).toHaveLength(2);
+    expect(pi.tools).toHaveLength(11);
+    expect(pi.tools.map((tool) => tool.name)).not.toEqual(expect.arrayContaining([
+      'search_stack_overflow',
+      'search_github_issues',
+      'search_github_pull_requests',
+      'search_devto_articles',
+      'search_hackernews',
+    ]));
     const excludedProviderPattern = new RegExp(`red${'dit'}`, 'i');
     expect(pi.tools.map((tool) => tool.name).join(' ')).not.toMatch(excludedProviderPattern);
 

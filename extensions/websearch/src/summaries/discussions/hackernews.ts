@@ -1,4 +1,4 @@
-import type { HackerNewsSearchResult, HackerNewsStoryDetailResult } from '../types.js';
+import type { HackerNewsSearchResult, HackerNewsStoryDetailResult } from '../../types.js';
 
 export function hackerNewsSearchSummary(data: HackerNewsSearchResult): string {
   if (data.items.length === 0) return `No Hacker News stories found for "${data.query}".`;

@@ -3,7 +3,7 @@ import type {
   StackOverflowAnswersResult,
   StackOverflowCommentsResult,
   StackOverflowSearchResult,
-} from '../types.js';
+} from '../../types.js';
 
 export function stackSearchSummary(data: StackOverflowSearchResult): string {
   if (data.items.length === 0) return `No Stack Overflow results found for "${data.query}".`;

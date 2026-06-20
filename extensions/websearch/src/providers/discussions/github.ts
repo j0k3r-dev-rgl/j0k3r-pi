@@ -1,5 +1,5 @@
 import { Octokit } from 'octokit';
-import { ProviderFailure, githubProviderErrorFromError, redactText } from '../security.js';
+import { ProviderFailure, githubProviderErrorFromError, redactText } from '../../security.js';
 import type {
   GitHubClient,
   GitHubIssueCommentsRequest,
@@ -18,7 +18,7 @@ import type {
   GitHubRawRelease,
   GitHubReleasesGetRequest,
   WebsearchRuntime,
-} from '../types.js';
+} from '../../types.js';
 
 function issueSearchQuery(input: GitHubIssueSearchRequest): string {
   const parts = [input.query.trim(), 'is:issue'];

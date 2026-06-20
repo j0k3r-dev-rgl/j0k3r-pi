@@ -5,7 +5,7 @@ import type {
   GitHubPullRequestSearchResult,
   GitHubReleaseResult,
   GitHubReleasesResult,
-} from '../types.js';
+} from '../../types.js';
 
 function githubRelationsSummary(item: { related_pull_requests?: GitHubIssueSearchResult['items'][number]['related_pull_requests']; related_issues?: GitHubIssueSearchResult['items'][number]['related_issues'] }, indent = ''): string | undefined {
   const lines: string[] = [];

@@ -1,15 +1,16 @@
 import type { WebsearchConfig } from '../config.js';
-import type { DevtoClient } from './devto.js';
-import type { GitHubClient } from './github.js';
-import type { HackerNewsClient } from './hackernews.js';
-import type { StackExchangeClient } from './stack-overflow.js';
+import type { DevtoClient } from './discussions/devto.js';
+import type { GitHubClient } from './discussions/github.js';
+import type { HackerNewsClient } from './discussions/hackernews.js';
+import type { ResearchClients } from './research/index.js';
+import type { StackExchangeClient } from './discussions/stack-overflow.js';
 
 export type ToolContent = {
   type: 'text';
   text: string;
 };
 
-export type Provider = 'stack_overflow' | 'github' | 'devto' | 'hacker_news';
+export type Provider = 'stack_overflow' | 'github' | 'devto' | 'hacker_news' | 'openalex' | 'arxiv' | 'crossref' | 'europe_pmc' | 'semantic_scholar';
 
 export type ErrorCategory =
   | 'validation'
@@ -67,6 +68,7 @@ export interface WebsearchClients {
   github: GitHubClient;
   devto: DevtoClient;
   hackerNews: HackerNewsClient;
+  research?: ResearchClients;
 }
 
 export type CommandRunnerResult = {

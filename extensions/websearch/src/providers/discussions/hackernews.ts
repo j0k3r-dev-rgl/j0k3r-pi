@@ -1,4 +1,4 @@
-import { ProviderFailure, fetchProviderErrorFromError, providerErrorFromResponse } from '../security.js';
+import { ProviderFailure, fetchProviderErrorFromError, providerErrorFromResponse } from '../../security.js';
 import type {
   HackerNewsClient,
   HackerNewsRawItem,
@@ -6,7 +6,7 @@ import type {
   HackerNewsSearchRequest,
   HackerNewsStoryRequest,
   WebsearchRuntime,
-} from '../types.js';
+} from '../../types.js';
 
 const HN_ALGOLIA_API_BASE = 'https://hn.algolia.com/api/v1';
 
