@@ -1,6 +1,9 @@
 import { createResearchClients } from '../../providers/research/index.js';
 import type { NormalizedResearchItem, RegisterWebsearchToolsDeps, ResearchClients, ResearchSource } from '../../types.js';
 import { ValidationError } from '../../validation.js';
+
+export const RESEARCH_GRAPH_DEFAULT_LIMIT = 5;
+export const RESEARCH_GRAPH_MAX_LIMIT = 20;
 import { runtimeFromDeps } from '../common/index.js';
 
 export function asInput(value: unknown): Record<string, unknown> {
@@ -10,6 +13,31 @@ export function asInput(value: unknown): Record<string, unknown> {
 export function requiredString(value: unknown, field: string): string {
   if (typeof value !== 'string' || value.trim() === '') throw new ValidationError(`${field} is required.`);
   return value.trim();
+}
+
+export function optionalBoundedLimit(input: Record<string, unknown>): number {
+  const value = input.limit;
+  if (value === undefined || value === null || value === '') return RESEARCH_GRAPH_DEFAULT_LIMIT;
+  if (typeof value !== 'number' || !Number.isInteger(value)) throw new ValidationError('limit must be an integer.');
+  if (value < 1) throw new ValidationError('limit must be at least 1.');
+  if (value > RESEARCH_GRAPH_MAX_LIMIT) throw new ValidationError(`limit must be at most ${RESEARCH_GRAPH_MAX_LIMIT}.`);
+  return value;
+}
+
+export function optionalOffset(input: Record<string, unknown>): number {
+  const value = input.offset;
+  if (value === undefined || value === null || value === '') return 0;
+  if (typeof value !== 'number' || !Number.isInteger(value)) throw new ValidationError('offset must be an integer.');
+  if (value < 0) throw new ValidationError('offset must be at least 0.');
+  return value;
+}
+
+export function optionalPage(input: Record<string, unknown>): number {
+  const value = input.page;
+  if (value === undefined || value === null || value === '') return 1;
+  if (typeof value !== 'number' || !Number.isInteger(value)) throw new ValidationError('page must be an integer.');
+  if (value < 1) throw new ValidationError('page must be at least 1.');
+  return value;
 }
 
 export function researchClientsFromDeps(deps: RegisterWebsearchToolsDeps): ResearchClients {

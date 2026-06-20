@@ -1,16 +1,23 @@
+import { openAlexWorkGraphParameters } from '../../schemas/research/graph.js';
 import { openAlexWorkParameters } from '../../schemas/research/openalex.js';
 import { truncateText } from '../../security.js';
+import { researchGraphSummary } from '../../summaries/research/graph.js';
 import { openAlexWorkSummary } from '../../summaries/research/openalex.js';
-import type { NormalizedResearchItem, PiToolResult, RawOpenAlexWork, RegisterWebsearchToolsDeps, ResearchClients, ResearchDetailResult } from '../../types.js';
+import type { NormalizedResearchItem, PiToolResult, RawOpenAlexWork, RegisterWebsearchToolsDeps, ResearchClients, ResearchDetailResult, ResearchGraphResult } from '../../types.js';
 import { FULL_TOOL_CONTENT, buildFailure, buildSuccess, toToolError } from '../common/index.js';
 import { registerTool, type WebsearchToolModule } from '../common/index.js';
 import { signalFromContext, type ExecuteContext } from '../common/index.js';
-import { asInput, normalizeDoi, numberValue, recordValue, requiredString, researchClientsFromDeps, stringValue, withFollowup } from './common.js';
+import { asInput, normalizeDoi, numberValue, optionalBoundedLimit, optionalPage, recordValue, requiredString, researchClientsFromDeps, stringValue, withFollowup } from './common.js';
 
-export const openAlexResearchToolNames = ['openalex_work_get'] as const;
+export const openAlexResearchToolNames = ['openalex_work_get', 'openalex_work_citations_get', 'openalex_work_references_get'] as const;
 
 function validateOpenAlexWorkGet(value: unknown): { work: string } {
   return { work: requiredString(asInput(value).work, 'work') };
+}
+
+function validateOpenAlexGraph(value: unknown): { work: string; limit: number; page: number } {
+  const input = asInput(value);
+  return { work: requiredString(input.work, 'work'), limit: optionalBoundedLimit(input), page: optionalPage(input) };
 }
 
 function reconstructOpenAlexAbstract(index: unknown): string | undefined {
@@ -80,6 +87,24 @@ async function getOpenAlexWork(input: { work: string }, clients: ResearchClients
   return raw ? { ...normalizeOpenAlexWork(raw, 1), rank: 1 } : undefined;
 }
 
+async function getOpenAlexGraph(input: { work: string; limit: number; page: number }, relation: 'citations' | 'references', clients: ResearchClients, signal?: AbortSignal): Promise<ResearchGraphResult> {
+  const response = relation === 'citations'
+    ? await clients.openAlex.getWorkCitations(input, signal)
+    : await clients.openAlex.getWorkReferences(input, signal);
+  const items = response.results.map((item, index) => ({ ...normalizeOpenAlexWork(item, index + 1), rank: index + 1 }));
+  return {
+    source: 'openalex',
+    relation,
+    subject: input.work,
+    limit: input.limit,
+    page: input.page,
+    total: response.total,
+    next_page: response.total !== undefined && input.page * input.limit < response.total ? input.page + 1 : undefined,
+    items,
+    metadata: response.meta,
+  };
+}
+
 export const openAlexResearchTools: WebsearchToolModule<typeof openAlexResearchToolNames[number]> = {
   names: openAlexResearchToolNames,
   register(pi: any, deps: RegisterWebsearchToolsDeps = {}) {
@@ -93,6 +118,36 @@ export const openAlexResearchTools: WebsearchToolModule<typeof openAlexResearchT
           const data = await getOpenAlexWork(input, researchClientsFromDeps(deps), signalFromContext(context));
           if (!data) return buildFailure({ code: 'not_found', category: 'not_found', message: 'OpenAlex work was not found.', recoverable: true, provider: 'openalex' });
           return buildSuccess(openAlexWorkSummary(data), data, FULL_TOOL_CONTENT);
+        } catch (error) {
+          return buildFailure(toToolError(error));
+        }
+      },
+    });
+
+    registerTool(pi, {
+      name: 'openalex_work_citations_get',
+      description: 'Fetch works that cite one OpenAlex work using the verified OpenAlex referenced_works filter.',
+      parameters: openAlexWorkGraphParameters,
+      async execute(_id: string, params: unknown, _unused1?: unknown, _unused2?: unknown, context?: ExecuteContext): Promise<PiToolResult<ResearchGraphResult>> {
+        try {
+          const input = validateOpenAlexGraph(params);
+          const data = await getOpenAlexGraph(input, 'citations', researchClientsFromDeps(deps), signalFromContext(context));
+          return buildSuccess(researchGraphSummary('openalex_work_citations_get', data), data, 12000);
+        } catch (error) {
+          return buildFailure(toToolError(error));
+        }
+      },
+    });
+
+    registerTool(pi, {
+      name: 'openalex_work_references_get',
+      description: 'Fetch referenced works for one OpenAlex work using the work referenced_works list and batch work lookup.',
+      parameters: openAlexWorkGraphParameters,
+      async execute(_id: string, params: unknown, _unused1?: unknown, _unused2?: unknown, context?: ExecuteContext): Promise<PiToolResult<ResearchGraphResult>> {
+        try {
+          const input = validateOpenAlexGraph(params);
+          const data = await getOpenAlexGraph(input, 'references', researchClientsFromDeps(deps), signalFromContext(context));
+          return buildSuccess(researchGraphSummary('openalex_work_references_get', data), data, 12000);
         } catch (error) {
           return buildFailure(toToolError(error));
         }

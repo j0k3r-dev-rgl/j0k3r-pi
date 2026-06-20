@@ -1,4 +1,4 @@
-import type { CrossrefClient, CrossrefSearchResult, RawCrossrefWork, WebsearchRuntime } from '../../types.js';
+import type { CrossrefClient, CrossrefReferencesResponse, CrossrefSearchResult, RawCrossrefWork, WebsearchRuntime } from '../../types.js';
 import { providerRequestFailure, readJsonObject } from '../common/index.js';
 
 const CROSSREF_WORKS_URL = 'https://api.crossref.org/works';
@@ -37,6 +37,13 @@ class FetchCrossrefClient implements CrossrefClient {
     } catch (error) {
       throw providerRequestFailure('crossref', error, 'Crossref work detail request failed.');
     }
+  }
+
+  async getWorkReferences(input: { doi: string; limit: number; offset: number }, signal?: AbortSignal): Promise<CrossrefReferencesResponse> {
+    const work = await this.getWork({ doi: input.doi }, signal);
+    const references = Array.isArray(work?.reference) ? work.reference.slice(input.offset, input.offset + input.limit).filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object' && !Array.isArray(entry))) : [];
+    const total = Array.isArray(work?.reference) ? work.reference.length : 0;
+    return { work, references, total };
   }
 }
 

@@ -8,13 +8,22 @@ Read-only Pi extension for bounded community/research search across discussion a
 
 Provider-specific search tools are intentionally hidden in favor of `discussion_search` and `research_search`, but detail/get tools remain public so agents can inspect selected results:
 
-Research detail tools:
+Research detail and graph tools:
 
 - `openalex_work_get`
+- `openalex_work_citations_get`
+- `openalex_work_references_get`
 - `arxiv_paper_get`
 - `crossref_work_get`
+- `crossref_work_references_get`
 - `europe_pmc_article_get`
+- `europe_pmc_article_citations_get`
+- `europe_pmc_article_references_get`
 - `semantic_scholar_paper_get`
+- `semantic_scholar_paper_citations_get`
+- `semantic_scholar_paper_references_get`
+
+Research graph decisions and provider evidence are documented in [`docs/research-graph-tools.md`](docs/research-graph-tools.md). arXiv graph tools and Crossref inbound citation tools are intentionally not exposed because the investigated APIs did not provide verified graph endpoints for those capabilities.
 
 Discussion detail tools:
 
@@ -81,6 +90,7 @@ Credentials stay in environment variables only. Tools never accept secrets as in
 ## Safety and bounds
 - Read-only only; no posting, editing, voting, moderation, or other mutation.
 - Search tools return bounded result counts with concise snippets.
+- Research graph tools return bounded citation/reference lists with explicit provider pagination (`limit` plus `page` or `offset`).
 - Detail/get tools expose the full text returned by the provider for selected bodies, abstracts, notes, and comments; they are bounded by explicit provider/API availability and pagination parameters such as comment limits, offsets, and nested comment depth, not by arbitrary summary truncation.
 - Secret-like strings are redacted as `[REDACTED_SECRET]` across `content`, `details`, and structured errors.
 - Provider errors are returned as structured recoverable failures when possible.

@@ -1,4 +1,4 @@
-import type { EuropePmcClient, EuropePmcSearchResult, RawEuropePmcWork, WebsearchRuntime } from '../../types.js';
+import type { EuropePmcClient, EuropePmcGraphResponse, EuropePmcSearchResult, RawEuropePmcWork, WebsearchRuntime } from '../../types.js';
 import { providerRequestFailure, readJsonObject } from '../common/index.js';
 
 const EUROPE_PMC_SEARCH_URL = 'https://www.ebi.ac.uk/europepmc/webservices/rest/search';
@@ -48,6 +48,32 @@ class FetchEuropePmcClient implements EuropePmcClient {
       return Array.isArray(items) ? items[0] : undefined;
     } catch (error) {
       throw providerRequestFailure('europe_pmc', error, 'Europe PMC article detail request failed.');
+    }
+  }
+
+  async getArticleCitations(input: { article: string; limit: number; page: number }, signal?: AbortSignal): Promise<EuropePmcGraphResponse> {
+    return this.getArticleGraph(input, 'citations', signal);
+  }
+
+  async getArticleReferences(input: { article: string; limit: number; page: number }, signal?: AbortSignal): Promise<EuropePmcGraphResponse> {
+    return this.getArticleGraph(input, 'references', signal);
+  }
+
+  private async getArticleGraph(input: { article: string; limit: number; page: number }, relation: 'citations' | 'references', signal?: AbortSignal): Promise<EuropePmcGraphResponse> {
+    const article = await this.getArticle({ article: input.article }, signal);
+    const source = String(article?.source ?? '').trim();
+    const id = String(article?.id ?? article?.pmid ?? article?.pmcid ?? '').trim();
+    if (!source || !id) return { hitCount: 0, resolvedArticle: article };
+    const url = new URL(`https://www.ebi.ac.uk/europepmc/webservices/rest/${encodeURIComponent(source)}/${encodeURIComponent(id)}/${relation}`);
+    url.searchParams.set('format', 'json');
+    url.searchParams.set('pageSize', String(input.limit));
+    url.searchParams.set('page', String(input.page));
+
+    try {
+      const payload = await readJsonObject<EuropePmcGraphResponse>('europe_pmc', await this.runtime.fetch(url.toString(), { method: 'GET', signal }));
+      return { ...payload, resolvedArticle: article };
+    } catch (error) {
+      throw providerRequestFailure('europe_pmc', error, `Europe PMC ${relation} request failed.`);
     }
   }
 }

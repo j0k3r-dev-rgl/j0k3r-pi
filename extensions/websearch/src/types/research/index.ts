@@ -2,6 +2,7 @@ export * from './arxiv.js';
 export * from './clients.js';
 export * from './crossref.js';
 export * from './europe-pmc.js';
+export * from './graph.js';
 export * from './item.js';
 export * from './openalex.js';
 export * from './search.js';
