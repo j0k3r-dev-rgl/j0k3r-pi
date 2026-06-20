@@ -95,6 +95,7 @@ export interface VideoRefInput {
   video_id?: string;
   includeComments?: boolean;
   commentsLimit?: number;
+  commentsOffset?: number;
   descriptionPreviewChars?: number;
   cleanTranscript?: boolean;
 }
@@ -105,6 +106,7 @@ export interface NormalizedVideoRef {
   videoUrl?: string;
   includeComments?: boolean;
   commentsLimit?: number;
+  commentsOffset?: number;
   descriptionPreviewChars?: number;
   cleanTranscript?: boolean;
 }
@@ -138,6 +140,9 @@ export interface YoutubeVideoDetails {
   caption_available?: boolean;
   caption_languages?: string[];
   automatic_caption_languages?: string[];
+  comments_offset?: number;
+  comments_limit?: number;
+  comments_returned?: number;
   comments?: YoutubeVideoComment[];
 }
 

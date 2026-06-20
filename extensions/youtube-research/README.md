@@ -15,9 +15,9 @@ A standalone Pi extension that adds five focused YouTube research tools.
    - Enrichment is opt-in and slower; it helps choose which video to inspect before fetching transcript by adding description previews, likes, comment counts, chapter counts, and compact tags when `yt-dlp` provides them.
 2. `youtube_video_get`
    - Fetch a single video by URL or video ID.
-   - Returns normalized metadata and a useful visible summary with title, URL, channel, duration, views, published date, description preview, and compact caption signals.
+   - Returns normalized metadata and a useful visible summary with title, URL, channel, duration, views, total comments when available, published date, description preview, and compact caption signals.
    - Supports `descriptionPreviewChars` to control the visible description preview.
-   - Supports opt-in bounded comments with `includeComments` and `commentsLimit`; comments are disabled by default because they add latency and payload size.
+   - Supports opt-in bounded comments with `includeComments`, `commentsLimit`, and `commentsOffset`; comments are disabled by default because they add latency and payload size.
 3. `youtube_transcript_get`
    - Fetch transcript text for a video by URL or video ID.
    - `source_mode`: `manual | automatic | translated | any-caption | auto | best-effort`.

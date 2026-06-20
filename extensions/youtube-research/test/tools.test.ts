@@ -800,6 +800,7 @@ describe('youtube-research tool registration', () => {
       description: 'This intro explains why the video is useful before listing resources and links.'.repeat(4),
       duration: 3723,
       view_count: 11,
+      comment_count: 46,
       subtitles: {
         en: ['a'],
       },
@@ -813,15 +814,25 @@ describe('youtube-research tool registration', () => {
       },
       comments: [{
         id: 'comment-1',
+        author: '@first-viewer',
+        text: 'This first comment should be skipped by commentsOffset.',
+        like_count: 3,
+        timestamp: 1710000000,
+        parent: 'root',
+      }, {
+        id: 'comment-2',
         author: '@viewer',
         text: 'This helped me decide to watch the full video.',
         like_count: 7,
-        timestamp: 1710000000,
+        timestamp: 1710000001,
         parent: 'root',
       }],
     };
 
-    (client.getVideo as any).mockResolvedValue(rawVideo);
+    (client.getVideo as any)
+      .mockResolvedValueOnce({ ...rawVideo, comments: undefined })
+      .mockResolvedValueOnce({ ...rawVideo, comment_count: 2 })
+      .mockResolvedValue(rawVideo);
 
     registerYoutubeResearchTools(pi, {
       checkRuntime: vi.fn().mockResolvedValue({ runtime: { binary: 'yt-dlp' } }),
@@ -829,7 +840,7 @@ describe('youtube-research tool registration', () => {
     });
 
     const videoTool = pi.tools.find((tool) => tool.name === 'youtube_video_get');
-    const urlResult = (await execute(videoTool!, { url: 'https://youtu.be/abc123', includeComments: true, commentsLimit: 1, descriptionPreviewChars: 80 })) as {
+    const urlResult = (await execute(videoTool!, { url: 'https://youtu.be/abc123', includeComments: true, commentsLimit: 1, commentsOffset: 1, descriptionPreviewChars: 80 })) as {
       content: Array<{ text: string }>;
       details: { status: 'success'; data: YoutubeVideoDetails };
     };
@@ -841,14 +852,19 @@ describe('youtube-research tool registration', () => {
     expect(urlResult.content[0].text).toContain('Deep Video');
     expect(urlResult.content[0].text).toContain('abc123');
     expect(urlResult.details.data.description_preview).toContain('This intro explains why the video is useful');
+    expect(urlResult.details.data.comment_count).toBe(46);
     expect(urlResult.details.data.comments).toHaveLength(1);
-    expect(client.getVideo).toHaveBeenCalledWith(expect.objectContaining({ includeComments: true, commentsLimit: 1 }), undefined);
+    expect(urlResult.details.data.comments?.[0].id).toBe('comment-2');
+    expect(client.getVideo).toHaveBeenNthCalledWith(1, expect.objectContaining({ includeComments: false, commentsLimit: 0 }), undefined);
+    expect(client.getVideo).toHaveBeenNthCalledWith(2, expect.objectContaining({ includeComments: true, commentsLimit: 2, commentsOffset: 1 }), undefined);
     expect(urlResult.content[0].text).toContain('duration: 1:02:03');
     expect(urlResult.content[0].text).toContain('views: 11');
+    expect(urlResult.content[0].text).toContain('comments: 46');
     expect(urlResult.content[0].text).toContain('description: This intro explains why the video is useful');
     expect(urlResult.content[0].text).toContain('captions: manual en; automatic es, fr, de, it, pt… (+1 more)');
-    expect(urlResult.content[0].text).toContain('comments');
+    expect(urlResult.content[0].text).toContain('comments shown: 1 from offset 1');
     expect(urlResult.content[0].text).toContain('@viewer');
+    expect(urlResult.content[0].text).not.toContain('@first-viewer');
 
     const idResult = (await execute(videoTool!, { video_id: 'abc123' })) as { details: { status: 'success'; data: { video_id: string } } };
     expect(idResult.details.data.video_id).toBe('abc123');

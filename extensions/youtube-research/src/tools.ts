@@ -186,11 +186,12 @@ function summarizeVideoComments(details: YoutubeVideoDetails): string | undefine
   if (!details.comments || details.comments.length === 0) {
     return undefined;
   }
+  const offset = details.comments_offset ?? 0;
   return [
-    'comments',
+    `comments shown: ${details.comments.length}${offset > 0 ? ` from offset ${offset}` : ''}`,
     ...details.comments.slice(0, VIDEO_COMMENTS_MAX_LIMIT).map((comment, index) => {
       const meta = [comment.like_count === null || comment.like_count === undefined ? undefined : `${comment.like_count} likes`].filter(Boolean).join('; ');
-      return `${index + 1}. ${comment.author ?? 'unknown'}${meta ? ` (${meta})` : ''}: ${compactSnippet(comment.text, 240) ?? ''}`;
+      return `${offset + index + 1}. ${comment.author ?? 'unknown'}${meta ? ` (${meta})` : ''}: ${compactSnippet(comment.text, 240) ?? ''}`;
     }),
   ].join('\n');
 }
@@ -203,6 +204,7 @@ function summarizeVideo(details: YoutubeVideoDetails): string {
   const metadata = [
     details.duration === null || details.duration === undefined ? undefined : `duration: ${formatDuration(details.duration)}`,
     details.view_count === null || details.view_count === undefined ? undefined : `views: ${details.view_count.toLocaleString('en-US')}`,
+    details.comment_count === null || details.comment_count === undefined ? undefined : `comments: ${details.comment_count.toLocaleString('en-US')}`,
     details.published_date ? `published: ${details.published_date}` : undefined,
   ].filter(Boolean).join(' | ');
   const lines = [
@@ -342,6 +344,7 @@ type SearchFilters = ReturnType<typeof validateSearchFilters>;
 
 const VIDEO_COMMENTS_DEFAULT_LIMIT = 5;
 const VIDEO_COMMENTS_MAX_LIMIT = 20;
+const VIDEO_COMMENTS_MAX_OFFSET = 99;
 const DESCRIPTION_PREVIEW_DEFAULT_CHARS = 600;
 const DESCRIPTION_PREVIEW_MAX_CHARS = 2000;
 const CAPTION_SUMMARY_MAX_LANGUAGES = 5;
@@ -466,9 +469,23 @@ function normalizeVideoOptionLimit(value: unknown, key: string, defaultValue: nu
   return value;
 }
 
+function normalizeVideoOptionOffset(value: unknown, key: string, defaultValue: number, maxValue: number): number {
+  if (value === undefined || value === null || value === '') {
+    return defaultValue;
+  }
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new Error(`${key} must be an integer`);
+  }
+  if (value < 0 || value > maxValue) {
+    throw new Error(`${key} must be between 0 and ${maxValue}`);
+  }
+  return value;
+}
+
 function normalizeVideoReference(input: VideoRefInput): NormalizedVideoRef {
   const includeComments = input.includeComments === true;
   const commentsLimit = normalizeVideoOptionLimit(input.commentsLimit, 'commentsLimit', includeComments ? VIDEO_COMMENTS_DEFAULT_LIMIT : 0, VIDEO_COMMENTS_MAX_LIMIT);
+  const commentsOffset = includeComments ? normalizeVideoOptionOffset(input.commentsOffset, 'commentsOffset', 0, VIDEO_COMMENTS_MAX_OFFSET) : 0;
   const descriptionPreviewChars = normalizeVideoOptionLimit(input.descriptionPreviewChars, 'descriptionPreviewChars', DESCRIPTION_PREVIEW_DEFAULT_CHARS, DESCRIPTION_PREVIEW_MAX_CHARS);
   const cleanTranscript = input.cleanTranscript !== false;
 
@@ -479,7 +496,7 @@ function normalizeVideoReference(input: VideoRefInput): NormalizedVideoRef {
       throw new Error('invalid video url');
     }
 
-    return { video_id: videoId, videoUrl: url, includeComments, commentsLimit, descriptionPreviewChars, cleanTranscript };
+    return { video_id: videoId, videoUrl: url, includeComments, commentsLimit, commentsOffset, descriptionPreviewChars, cleanTranscript };
   }
 
   if (input.video_id) {
@@ -492,6 +509,7 @@ function normalizeVideoReference(input: VideoRefInput): NormalizedVideoRef {
       videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
       includeComments,
       commentsLimit,
+      commentsOffset,
       descriptionPreviewChars,
       cleanTranscript,
     };
@@ -818,6 +836,7 @@ const videoParameters = Type.Object({
   video_id: Type.Optional(Type.String()),
   includeComments: Type.Optional(Type.Boolean()),
   commentsLimit: Type.Optional(Type.Number({ minimum: 1, maximum: VIDEO_COMMENTS_MAX_LIMIT })),
+  commentsOffset: Type.Optional(Type.Number({ minimum: 0, maximum: VIDEO_COMMENTS_MAX_OFFSET })),
   descriptionPreviewChars: Type.Optional(Type.Number({ minimum: 1, maximum: DESCRIPTION_PREVIEW_MAX_CHARS })),
 });
 
@@ -914,8 +933,21 @@ async function runVideoGet(
 
   const client = createClient(dependency.runtime);
   let raw: unknown;
+  let totalCommentCount: number | null | undefined;
   try {
-    raw = await client.getVideo(reference, undefined);
+    if (reference.includeComments) {
+      const metadataRaw = await client.getVideo({ ...reference, includeComments: false, commentsLimit: 0 }, undefined);
+      if (!metadataRaw) {
+        return buildFailure('not_found', `No video metadata found for ${reference.video_id}`, false);
+      }
+      totalCommentCount = normalizeVideoDetails(metadataRaw as RawYtDlpItem).comment_count;
+      raw = await client.getVideo({
+        ...reference,
+        commentsLimit: (reference.commentsOffset ?? 0) + (reference.commentsLimit ?? VIDEO_COMMENTS_DEFAULT_LIMIT),
+      }, undefined);
+    } else {
+      raw = await client.getVideo(reference, undefined);
+    }
   } catch (error) {
     if (error instanceof Error && isYtDlpVideoUnavailable(error.message)) {
       return buildFailure('not_found', error.message, false);
@@ -928,10 +960,16 @@ async function runVideoGet(
 
   const details = normalizeVideoDetails(raw as RawYtDlpItem);
   const preview = compactSnippet(details.full_description, reference.descriptionPreviewChars ?? DESCRIPTION_PREVIEW_DEFAULT_CHARS);
-  const comments = reference.includeComments ? (details.comments ?? []).slice(0, reference.commentsLimit ?? VIDEO_COMMENTS_DEFAULT_LIMIT) : undefined;
+  const commentsOffset = reference.commentsOffset ?? 0;
+  const commentsLimit = reference.commentsLimit ?? VIDEO_COMMENTS_DEFAULT_LIMIT;
+  const comments = reference.includeComments ? (details.comments ?? []).slice(commentsOffset, commentsOffset + commentsLimit) : undefined;
   const data: YoutubeVideoDetails = {
     ...details,
+    comment_count: reference.includeComments ? totalCommentCount ?? details.comment_count : details.comment_count,
     description_preview: preview,
+    comments_offset: reference.includeComments ? commentsOffset : undefined,
+    comments_limit: reference.includeComments ? commentsLimit : undefined,
+    comments_returned: comments?.length,
     comments,
   };
   return buildSuccess(summarizeVideo(data), data);
