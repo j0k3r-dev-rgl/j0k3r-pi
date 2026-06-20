@@ -1,4 +1,4 @@
-import type { RegisterWebsearchToolsDeps } from '../types.js';
+import type { RegisterWebsearchToolsDeps } from '../../types.js';
 
 export type ToolRegistrar = (pi: any, deps: RegisterWebsearchToolsDeps) => void;
 

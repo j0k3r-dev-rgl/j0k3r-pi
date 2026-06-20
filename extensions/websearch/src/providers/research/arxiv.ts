@@ -60,6 +60,12 @@ export function buildArxivSearchQuery(query: string): string {
   return terms.map((term) => `all:${term}`).join(' AND ');
 }
 
+function arxivLookupId(paper: string): string {
+  const trimmed = paper.trim();
+  const match = /arxiv\.org\/(?:abs|pdf)\/([^?#\s]+)(?:\.pdf)?/i.exec(trimmed);
+  return match?.[1] ?? trimmed.replace(/^arxiv:/i, '');
+}
+
 class FetchArxivClient implements ArxivClient {
   constructor(private readonly runtime: WebsearchRuntime) {}
 
@@ -76,6 +82,18 @@ class FetchArxivClient implements ArxivClient {
       return parseEntries(xml);
     } catch (error) {
       throw providerRequestFailure('arxiv', error, 'arXiv request failed.');
+    }
+  }
+
+  async getPaper(input: { paper: string }, signal?: AbortSignal): Promise<RawArxivEntry | undefined> {
+    const url = new URL(ARXIV_QUERY_URL);
+    url.searchParams.set('id_list', arxivLookupId(input.paper));
+    url.searchParams.set('max_results', '1');
+
+    try {
+      return parseEntries(await readText('arxiv', await this.runtime.fetch(url.toString(), { method: 'GET', signal })))[0];
+    } catch (error) {
+      throw providerRequestFailure('arxiv', error, 'arXiv paper detail request failed.');
     }
   }
 }

@@ -3,9 +3,9 @@ import { hackerNewsSearchParameters, hackerNewsStoryParameters } from '../../sch
 import { hackerNewsSearchSummary, hackerNewsStorySummary } from '../../summaries/discussions/hackernews.js';
 import type { HackerNewsSearchResult, HackerNewsStoryDetailResult, PiToolResult, RegisterWebsearchToolsDeps } from '../../types.js';
 import { validateHackerNewsSearch, validateHackerNewsStoryGet } from '../../validation.js';
-import { buildFailure, buildSuccess, toToolError } from '../result.js';
-import { clientsFromDeps, signalFromContext, type ExecuteContext } from '../runtime.js';
-import { registerTool, type WebsearchToolModule } from '../registry.js';
+import { buildFailure, buildSuccess, toToolError } from '../common/index.js';
+import { clientsFromDeps, signalFromContext, type ExecuteContext } from '../common/index.js';
+import { registerTool, type WebsearchToolModule } from '../common/index.js';
 
 export const hackerNewsToolNames = [
   'search_hackernews',

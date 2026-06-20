@@ -1,7 +1,7 @@
-import { WebsearchConfigError } from '../config.js';
-import { ProviderFailure, isAbortLike, redactSecretsDeep, truncateText } from '../security.js';
-import type { PiToolResult, ToolError } from '../types.js';
-import { ValidationError } from '../validation.js';
+import { WebsearchConfigError } from '../../config.js';
+import { ProviderFailure, isAbortLike, redactSecretsDeep, truncateText } from '../../security.js';
+import type { PiToolResult, ToolError } from '../../types.js';
+import { ValidationError } from '../../validation.js';
 
 export function buildSuccess<T>(text: string, data: T, maxContentChars = 450): PiToolResult<T> {
   return {

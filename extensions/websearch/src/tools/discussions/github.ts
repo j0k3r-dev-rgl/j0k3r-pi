@@ -43,9 +43,9 @@ import {
   validateGitHubReleaseGet,
   validateGitHubReleasesGet,
 } from '../../validation.js';
-import { buildFailure, buildSuccess, toToolError } from '../result.js';
-import { clientsFromDeps, signalFromContext, type ExecuteContext } from '../runtime.js';
-import { registerTool, type WebsearchToolModule } from '../registry.js';
+import { buildFailure, buildSuccess, toToolError } from '../common/index.js';
+import { clientsFromDeps, signalFromContext, type ExecuteContext } from '../common/index.js';
+import { registerTool, type WebsearchToolModule } from '../common/index.js';
 
 export const githubToolNames = [
   'search_github_issues',

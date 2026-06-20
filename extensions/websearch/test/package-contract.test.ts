@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -62,5 +62,16 @@ describe('websearch package contract', () => {
     expect(existsSync(join(process.cwd(), 'src'))).toBe(true);
     expect(existsSync(join(process.cwd(), 'test'))).toBe(true);
     expect(existsSync(join(process.cwd(), 'README.md'))).toBe(true);
+  });
+
+  it('keeps source-family modules isolated behind common/discussions/research folders', () => {
+    const src = join(process.cwd(), 'src');
+    for (const familyRoot of ['providers', 'schemas', 'summaries', 'tools', 'types']) {
+      expect(existsSync(join(src, familyRoot, 'common'))).toBe(true);
+      expect(existsSync(join(src, familyRoot, 'discussions'))).toBe(true);
+      expect(existsSync(join(src, familyRoot, 'research'))).toBe(true);
+    }
+    expect(existsSync(join(src, 'types', 'shared.ts'))).toBe(false);
+    expect(readdirSync(join(src, 'tools')).filter((file) => file.endsWith('.ts')).sort()).toEqual(['index.ts']);
   });
 });

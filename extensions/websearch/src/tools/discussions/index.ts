@@ -18,9 +18,9 @@ import type {
   ToolError,
 } from '../../types.js';
 import { SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT, ValidationError } from '../../validation.js';
-import { buildFailure, buildSuccess, toToolError } from '../result.js';
-import { registerTool, type WebsearchToolModule } from '../registry.js';
-import { clientsFromDeps, signalFromContext, type ExecuteContext } from '../runtime.js';
+import { buildFailure, buildSuccess, toToolError } from '../common/index.js';
+import { registerTool, type WebsearchToolModule } from '../common/index.js';
+import { clientsFromDeps, signalFromContext, type ExecuteContext } from '../common/index.js';
 
 const discussionSources = [
   'stack_overflow',

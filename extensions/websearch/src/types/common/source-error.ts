@@ -1,4 +1,4 @@
-import type { ToolError } from '../shared.js';
+import type { ToolError } from './error.js';
 
 export type SourceError<Source extends string = string> = {
   source: Source;

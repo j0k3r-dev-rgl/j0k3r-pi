@@ -3,9 +3,9 @@ import { devtoCommentsParameters, devtoSearchParameters } from '../../schemas/di
 import { devtoCommentsSummary, devtoSearchSummary } from '../../summaries/discussions/devto.js';
 import type { DevtoArticleSearchResult, DevtoCommentsResult, PiToolResult, RegisterWebsearchToolsDeps } from '../../types.js';
 import { validateDevtoArticleSearch, validateDevtoCommentsGet } from '../../validation.js';
-import { buildFailure, buildSuccess, toToolError } from '../result.js';
-import { clientsFromDeps, signalFromContext, type ExecuteContext } from '../runtime.js';
-import { registerTool, type WebsearchToolModule } from '../registry.js';
+import { buildFailure, buildSuccess, toToolError } from '../common/index.js';
+import { clientsFromDeps, signalFromContext, type ExecuteContext } from '../common/index.js';
+import { registerTool, type WebsearchToolModule } from '../common/index.js';
 
 export const devtoToolNames = [
   'search_devto_articles',

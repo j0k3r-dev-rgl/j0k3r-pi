@@ -1,9 +1,12 @@
 import type { HackerNewsClient, WebsearchClients, WebsearchRuntime } from './types.js';
-import { createDevtoClient } from './providers/discussions/devto.js';
-import { createGitHubClient } from './providers/discussions/github.js';
-import { createHackerNewsClient as createAlgoliaHackerNewsClient } from './providers/discussions/hackernews.js';
+import {
+  createDevtoClient,
+  createGitHubClient,
+  createHackerNewsClient as createAlgoliaHackerNewsClient,
+  createStackExchangeClient,
+  STACK_EXCHANGE_BODY_FILTER,
+} from './providers/discussions/index.js';
 import { createResearchClients } from './providers/research/index.js';
-import { createStackExchangeClient, STACK_EXCHANGE_BODY_FILTER } from './providers/discussions/stack-overflow.js';
 
 export { createStackExchangeClient, STACK_EXCHANGE_BODY_FILTER } from './providers/discussions/stack-overflow.js';
 

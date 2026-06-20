@@ -1,4 +1,4 @@
-import type { Availability } from '../shared.js';
+import type { Availability } from '../common/index.js';
 
 export type StackOverflowQuestionRef = {
   questionId: string;

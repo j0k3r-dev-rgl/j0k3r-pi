@@ -3,6 +3,10 @@ import { providerRequestFailure, readJsonObject } from '../common/index.js';
 
 const CROSSREF_WORKS_URL = 'https://api.crossref.org/works';
 
+function normalizeDoiInput(doi: string): string {
+  return doi.trim().replace(/^https?:\/\/(dx\.)?doi\.org\//i, '').replace(/^doi:/i, '');
+}
+
 class FetchCrossrefClient implements CrossrefClient {
   constructor(private readonly runtime: WebsearchRuntime) {}
 
@@ -19,6 +23,19 @@ class FetchCrossrefClient implements CrossrefClient {
       return Array.isArray(items) ? items : [];
     } catch (error) {
       throw providerRequestFailure('crossref', error, 'Crossref request failed.');
+    }
+  }
+
+  async getWork(input: { doi: string }, signal?: AbortSignal): Promise<RawCrossrefWork | undefined> {
+    const url = new URL(`${CROSSREF_WORKS_URL}/${encodeURIComponent(normalizeDoiInput(input.doi))}`);
+    const mailto = this.runtime.env.CROSSREF_MAILTO ?? this.runtime.env.OPENALEX_MAILTO;
+    if (mailto) url.searchParams.set('mailto', mailto);
+
+    try {
+      const payload = await readJsonObject<CrossrefSearchResult>('crossref', await this.runtime.fetch(url.toString(), { method: 'GET', signal }));
+      return payload.message as RawCrossrefWork | undefined;
+    } catch (error) {
+      throw providerRequestFailure('crossref', error, 'Crossref work detail request failed.');
     }
   }
 }

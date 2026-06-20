@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process';
-import { createWebsearchClients } from '../client.js';
-import { loadWebsearchConfig } from '../config.js';
-import { ProviderFailure, isAbortLike } from '../security.js';
-import type { RegisterWebsearchToolsDeps, WebsearchRuntime } from '../types.js';
+import { createWebsearchClients } from '../../client.js';
+import { loadWebsearchConfig } from '../../config.js';
+import { ProviderFailure, isAbortLike } from '../../security.js';
+import type { RegisterWebsearchToolsDeps, WebsearchRuntime } from '../../types.js';
 
 export type ExecuteContext = { signal?: AbortSignal } | undefined;
 
