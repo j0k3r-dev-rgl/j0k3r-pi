@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { registerWebsearchTools } from '../src/tools.js';
+import { registerWebsearchTools } from './legacy-tools.js';
 import { createMockPi, execute } from './helpers.js';
 
 function baseClients(githubOverrides: Record<string, unknown>) {

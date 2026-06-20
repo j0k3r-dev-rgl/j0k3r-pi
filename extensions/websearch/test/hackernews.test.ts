@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { registerWebsearchTools } from '../src/tools.js';
+import { registerWebsearchTools } from './legacy-tools.js';
 import { createMockPi, execute, response } from './helpers.js';
 
 describe('hacker news tool behavior', () => {
