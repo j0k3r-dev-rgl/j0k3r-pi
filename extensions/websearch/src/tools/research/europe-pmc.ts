@@ -2,7 +2,7 @@ import { europePmcArticleParameters } from '../../schemas/research/europe-pmc.js
 import { truncateText } from '../../security.js';
 import { europePmcArticleSummary } from '../../summaries/research/europe-pmc.js';
 import type { NormalizedResearchItem, PiToolResult, RawEuropePmcWork, RegisterWebsearchToolsDeps, ResearchClients, ResearchDetailResult } from '../../types.js';
-import { buildFailure, buildSuccess, toToolError } from '../common/index.js';
+import { FULL_TOOL_CONTENT, buildFailure, buildSuccess, toToolError } from '../common/index.js';
 import { registerTool, type WebsearchToolModule } from '../common/index.js';
 import { signalFromContext, type ExecuteContext } from '../common/index.js';
 import { asInput, normalizeDoi, numberValue, requiredString, researchClientsFromDeps, stringValue, withFollowup } from './common.js';
@@ -30,8 +30,8 @@ export function normalizeEuropePmcWork(raw: RawEuropePmcWork, sourceRank: number
     pmcid,
     year: numberValue(raw.pubYear),
     authors: authors && authors.length > 0 ? authors : undefined,
-    summary: truncateText(stringValue(raw.abstractText), 300),
-    abstract: truncateText(stringValue(raw.abstractText), 4000),
+    summary: stringValue(raw.abstractText),
+    abstract: stringValue(raw.abstractText),
     citation_count: numberValue(raw.citedByCount),
     open_access: raw.isOpenAccess === 'Y' ? true : raw.isOpenAccess === 'N' ? false : undefined,
     venue: stringValue(raw.journalTitle),
@@ -58,7 +58,7 @@ export const europePmcResearchTools: WebsearchToolModule<typeof europePmcResearc
           const input = validateEuropePmcArticleGet(params);
           const data = await getEuropePmcArticle(input, researchClientsFromDeps(deps), signalFromContext(context));
           if (!data) return buildFailure({ code: 'not_found', category: 'not_found', message: 'Europe PMC article was not found.', recoverable: true, provider: 'europe_pmc' });
-          return buildSuccess(europePmcArticleSummary(data), data, 12000);
+          return buildSuccess(europePmcArticleSummary(data), data, FULL_TOOL_CONTENT);
         } catch (error) {
           return buildFailure(toToolError(error));
         }

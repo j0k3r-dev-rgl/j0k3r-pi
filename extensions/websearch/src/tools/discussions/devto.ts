@@ -3,7 +3,7 @@ import { devtoCommentsParameters, devtoSearchParameters } from '../../schemas/di
 import { devtoCommentsSummary, devtoSearchSummary } from '../../summaries/discussions/devto.js';
 import type { DevtoArticleSearchResult, DevtoCommentsResult, PiToolResult, RegisterWebsearchToolsDeps } from '../../types.js';
 import { validateDevtoArticleSearch, validateDevtoCommentsGet } from '../../validation.js';
-import { buildFailure, buildSuccess, toToolError } from '../common/index.js';
+import { FULL_TOOL_CONTENT, buildFailure, buildSuccess, toToolError } from '../common/index.js';
 import { clientsFromDeps, signalFromContext, type ExecuteContext } from '../common/index.js';
 import { registerTool, type WebsearchToolModule } from '../common/index.js';
 
@@ -40,7 +40,7 @@ export const devtoTools: WebsearchToolModule<typeof devtoToolNames[number]> = {
           const input = validateDevtoCommentsGet(params);
           const rawComments = await clientsFromDeps(deps).devto.getComments(input, signalFromContext(context));
           const data = normalizeDevtoComments(rawComments, input.articleId, input.topLevelLimit, input.topLevelOffset, input.totalLimit, input.maxDepth);
-          return buildSuccess(devtoCommentsSummary(data), data, 12000);
+          return buildSuccess(devtoCommentsSummary(data), data, FULL_TOOL_CONTENT);
         } catch (error) {
           return buildFailure(toToolError(error));
         }

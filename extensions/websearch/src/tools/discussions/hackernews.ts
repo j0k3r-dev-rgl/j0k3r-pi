@@ -3,7 +3,7 @@ import { hackerNewsSearchParameters, hackerNewsStoryParameters } from '../../sch
 import { hackerNewsSearchSummary, hackerNewsStorySummary } from '../../summaries/discussions/hackernews.js';
 import type { HackerNewsSearchResult, HackerNewsStoryDetailResult, PiToolResult, RegisterWebsearchToolsDeps } from '../../types.js';
 import { validateHackerNewsSearch, validateHackerNewsStoryGet } from '../../validation.js';
-import { buildFailure, buildSuccess, toToolError } from '../common/index.js';
+import { FULL_TOOL_CONTENT, buildFailure, buildSuccess, toToolError } from '../common/index.js';
 import { clientsFromDeps, signalFromContext, type ExecuteContext } from '../common/index.js';
 import { registerTool, type WebsearchToolModule } from '../common/index.js';
 
@@ -43,7 +43,7 @@ export const hackerNewsTools: WebsearchToolModule<typeof hackerNewsToolNames[num
             return buildFailure({ code: 'not_found', category: 'not_found', message: 'Hacker News story was not found.', recoverable: true, provider: 'hacker_news' });
           }
           const data = normalizeHackerNewsStoryDetail(rawStory, input.commentsLimit, input.commentsOffset, input.maxDepth);
-          return buildSuccess(hackerNewsStorySummary(data), data, 12000);
+          return buildSuccess(hackerNewsStorySummary(data), data, FULL_TOOL_CONTENT);
         } catch (error) {
           return buildFailure(toToolError(error));
         }

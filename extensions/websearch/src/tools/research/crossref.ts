@@ -2,7 +2,7 @@ import { crossrefWorkParameters } from '../../schemas/research/crossref.js';
 import { truncateText } from '../../security.js';
 import { crossrefWorkSummary } from '../../summaries/research/crossref.js';
 import type { NormalizedResearchItem, PiToolResult, RawCrossrefWork, RegisterWebsearchToolsDeps, ResearchClients, ResearchDetailResult } from '../../types.js';
-import { buildFailure, buildSuccess, toToolError } from '../common/index.js';
+import { FULL_TOOL_CONTENT, buildFailure, buildSuccess, toToolError } from '../common/index.js';
 import { registerTool, type WebsearchToolModule } from '../common/index.js';
 import { signalFromContext, type ExecuteContext } from '../common/index.js';
 import { asInput, firstString, namesFromAuthorRecords, normalizeDoi, numberValue, recordValue, requiredString, researchClientsFromDeps, stringValue, withFollowup, yearFromDateParts } from './common.js';
@@ -52,7 +52,7 @@ export const crossrefResearchTools: WebsearchToolModule<typeof crossrefResearchT
           const input = validateCrossrefWorkGet(params);
           const data = await getCrossrefWork(input, researchClientsFromDeps(deps), signalFromContext(context));
           if (!data) return buildFailure({ code: 'not_found', category: 'not_found', message: 'Crossref work was not found.', recoverable: true, provider: 'crossref' });
-          return buildSuccess(crossrefWorkSummary(data), data, 12000);
+          return buildSuccess(crossrefWorkSummary(data), data, FULL_TOOL_CONTENT);
         } catch (error) {
           return buildFailure(toToolError(error));
         }

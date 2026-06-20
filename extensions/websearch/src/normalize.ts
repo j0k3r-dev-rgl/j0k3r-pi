@@ -160,7 +160,7 @@ export function normalizeStackOverflowQuestion(raw: StackOverflowRawQuestion): N
     created_at: createdAt(data.creation_date),
     last_activity_at: createdAt(data.last_activity_date),
     snippet: truncateText(body ?? stringValue(data.title), 300),
-    body: truncateText(body, 4000),
+    body,
     follow_up: {
       answers_tool: 'stack_overflow_answers_get',
       answers_ref: id,
@@ -186,7 +186,7 @@ export function normalizeStackOverflowAnswer(raw: StackOverflowRawAnswer): Norma
     accepted: booleanValue(data.is_accepted),
     author: truncateText(ownerName(data), 120),
     created_at: createdAt(data.creation_date),
-    body: truncateText(body, 12000),
+    body,
     availability: body || data.body_markdown !== undefined ? { status: 'available' } : { status: 'unavailable', reason: 'body_unavailable' },
   };
 }
@@ -203,7 +203,7 @@ export function normalizeStackOverflowComment(raw: StackOverflowRawComment): Nor
     score: numberValue(data.score),
     author: truncateText(ownerName(data), 120),
     created_at: createdAt(data.creation_date),
-    body: truncateText(body, 2000),
+    body,
   };
 }
 
@@ -229,7 +229,7 @@ export function normalizeGitHubIssue(raw: GitHubRawIssueSearchItem | GitHubRawIs
     comments_count: numberValue(data.comments),
     labels: githubLabels(data),
     snippet: truncateText(body ?? title, 300),
-    body: truncateText(body, 4000),
+    body,
     follow_up_ref: githubFollowUpRef(repository, number),
   };
 }
@@ -242,7 +242,7 @@ export function normalizeGitHubIssueComment(raw: GitHubRawIssueComment): Normali
     author: truncateText(githubUserLogin(data), 120),
     created_at: stringValue(data.created_at),
     updated_at: stringValue(data.updated_at),
-    body: truncateText(stringValue(data.body), 1000),
+    body: stringValue(data.body),
   };
 }
 
@@ -288,7 +288,7 @@ export function normalizeGitHubPullRequestReview(raw: GitHubRawPullRequestReview
     author: truncateText(githubUserLogin(data), 120),
     state: stringValue(data.state),
     submitted_at: stringValue(data.submitted_at),
-    body: truncateText(stringValue(data.body), 1000),
+    body: stringValue(data.body),
   };
 }
 
@@ -308,7 +308,7 @@ export function normalizeGitHubRelease(raw: GitHubRawRelease, repository: string
     prerelease: booleanValue(data.prerelease),
     published_at: stringValue(data.published_at),
     created_at: stringValue(data.created_at),
-    body: truncateText(cleanGitHubMarkdown(stringValue(data.body)), 2000),
+    body: cleanGitHubMarkdown(stringValue(data.body)),
     assets_count: assets.length,
     target_commitish: stringValue(data.target_commitish),
   };
@@ -412,7 +412,7 @@ function devtoCommentBody(data: Record<string, unknown>): string | undefined {
     ?? htmlToText(stringValue(data.body_html))
     ?? stringValue(data.body_text)
     ?? stringValue(data.body);
-  return truncateText(body, 1000);
+  return body;
 }
 
 function normalizeDevtoCommentNode(raw: DevtoRawComment, depth: number, state: { total: number; truncatedByDepth: boolean; truncatedByTotalLimit: boolean }, totalLimit: number, maxDepth: number): DevtoCommentNode | null {
@@ -530,7 +530,7 @@ function normalizeHackerNewsCommentNode(raw: HackerNewsRawItem, depth: number, s
     id: String(hackerNewsItemId(data) || `comment-${state.total}`),
     author: truncateText(stringValue(data.author), 120),
     created_at: createdAtString(data),
-    body: truncateText(htmlToText(stringValue(data.text)), 1000),
+    body: htmlToText(stringValue(data.text)),
   };
 
   const childrenRaw = Array.isArray(data.children) ? data.children : [];
@@ -573,7 +573,7 @@ export function normalizeHackerNewsStoryDetail(raw: HackerNewsRawItem, commentsL
 
   return {
     ...story,
-    body: truncateText(htmlToText(stringValue(data.story_text) ?? stringValue(data.text)), 4000),
+    body: htmlToText(stringValue(data.story_text) ?? stringValue(data.text)),
     comments_limit: commentsLimit,
     comments_offset: commentsOffset,
     next_comments_offset: allChildrenRaw.length > commentsOffset + comments.length ? commentsOffset + comments.length : undefined,

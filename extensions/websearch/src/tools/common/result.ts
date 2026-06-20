@@ -3,6 +3,8 @@ import { ProviderFailure, isAbortLike, redactSecretsDeep, truncateText } from '.
 import type { PiToolResult, ToolError } from '../../types.js';
 import { ValidationError } from '../../validation.js';
 
+export const FULL_TOOL_CONTENT = Number.POSITIVE_INFINITY;
+
 export function buildSuccess<T>(text: string, data: T, maxContentChars = 450): PiToolResult<T> {
   return {
     content: [{ type: 'text', text: truncateText(text, maxContentChars) ?? '' }],

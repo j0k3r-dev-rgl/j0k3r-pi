@@ -2,7 +2,7 @@ import { arxivPaperParameters } from '../../schemas/research/arxiv.js';
 import { truncateText } from '../../security.js';
 import { arxivPaperSummary } from '../../summaries/research/arxiv.js';
 import type { NormalizedResearchItem, PiToolResult, RawArxivEntry, RegisterWebsearchToolsDeps, ResearchClients, ResearchDetailResult } from '../../types.js';
-import { buildFailure, buildSuccess, toToolError } from '../common/index.js';
+import { FULL_TOOL_CONTENT, buildFailure, buildSuccess, toToolError } from '../common/index.js';
 import { registerTool, type WebsearchToolModule } from '../common/index.js';
 import { signalFromContext, type ExecuteContext } from '../common/index.js';
 import { asInput, normalizeDoi, requiredString, researchClientsFromDeps, withFollowup } from './common.js';
@@ -35,8 +35,8 @@ export function normalizeArxivEntry(raw: RawArxivEntry, sourceRank: number): Nor
     published_at: raw.published,
     updated_at: raw.updated,
     authors: raw.authors?.slice(0, 12),
-    summary: truncateText(raw.summary, 300),
-    abstract: truncateText(raw.summary, 4000),
+    summary: raw.summary,
+    abstract: raw.summary,
     open_access: true,
     pdf_url: pdfUrl,
     categories: raw.categories,
@@ -63,7 +63,7 @@ export const arxivResearchTools: WebsearchToolModule<typeof arxivResearchToolNam
           const input = validateArxivPaperGet(params);
           const data = await getArxivPaper(input, researchClientsFromDeps(deps), signalFromContext(context));
           if (!data) return buildFailure({ code: 'not_found', category: 'not_found', message: 'arXiv paper was not found.', recoverable: true, provider: 'arxiv' });
-          return buildSuccess(arxivPaperSummary(data), data, 12000);
+          return buildSuccess(arxivPaperSummary(data), data, FULL_TOOL_CONTENT);
         } catch (error) {
           return buildFailure(toToolError(error));
         }

@@ -43,7 +43,7 @@ import {
   validateGitHubReleaseGet,
   validateGitHubReleasesGet,
 } from '../../validation.js';
-import { buildFailure, buildSuccess, toToolError } from '../common/index.js';
+import { FULL_TOOL_CONTENT, buildFailure, buildSuccess, toToolError } from '../common/index.js';
 import { clientsFromDeps, signalFromContext, type ExecuteContext } from '../common/index.js';
 import { registerTool, type WebsearchToolModule } from '../common/index.js';
 
@@ -108,7 +108,7 @@ export const githubTools: WebsearchToolModule<typeof githubToolNames[number]> = 
             next_comments_offset: comments.length === input.commentsLimit ? input.commentsOffset + comments.length : undefined,
             bounds: { comments_default: GITHUB_COMMENTS_DEFAULT_LIMIT, comments_max: GITHUB_COMMENTS_MAX_LIMIT },
           };
-          return buildSuccess(githubIssueSummary(data), data, 12000);
+          return buildSuccess(githubIssueSummary(data), data, FULL_TOOL_CONTENT);
         } catch (error) {
           return buildFailure(toToolError(error));
         }
@@ -171,7 +171,7 @@ export const githubTools: WebsearchToolModule<typeof githubToolNames[number]> = 
             next_review_comments_offset: reviewComments.length === input.reviewCommentsLimit ? input.reviewCommentsOffset + reviewComments.length : undefined,
             bounds: { comments_default: GITHUB_COMMENTS_DEFAULT_LIMIT, comments_max: GITHUB_COMMENTS_MAX_LIMIT },
           };
-          return buildSuccess(githubPullRequestSummary(data), data, 14000);
+          return buildSuccess(githubPullRequestSummary(data), data, FULL_TOOL_CONTENT);
         } catch (error) {
           return buildFailure(toToolError(error));
         }
@@ -211,7 +211,7 @@ export const githubTools: WebsearchToolModule<typeof githubToolNames[number]> = 
           const rawRelease = await clientsFromDeps(deps).github.getReleaseByTag(input, signalFromContext(context));
           if (!rawRelease) return buildFailure({ code: 'not_found', category: 'not_found', message: 'GitHub release was not found for the requested tag.', recoverable: true, provider: 'github' });
           const data = normalizeGitHubRelease(rawRelease, `${input.owner}/${input.repo}`);
-          return buildSuccess(githubReleaseSummary(data), data, 8000);
+          return buildSuccess(githubReleaseSummary(data), data, FULL_TOOL_CONTENT);
         } catch (error) {
           return buildFailure(toToolError(error));
         }

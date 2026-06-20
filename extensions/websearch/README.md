@@ -80,7 +80,8 @@ Credentials stay in environment variables only. Tools never accept secrets as in
 
 ## Safety and bounds
 - Read-only only; no posting, editing, voting, moderation, or other mutation.
-- Output is bounded for search results, bodies, comments, and nested comment depth.
+- Search tools return bounded result counts with concise snippets.
+- Detail/get tools expose the full text returned by the provider for selected bodies, abstracts, notes, and comments; they are bounded by explicit provider/API availability and pagination parameters such as comment limits, offsets, and nested comment depth, not by arbitrary summary truncation.
 - Secret-like strings are redacted as `[REDACTED_SECRET]` across `content`, `details`, and structured errors.
 - Provider errors are returned as structured recoverable failures when possible.
 - Community content is untrusted display content only.

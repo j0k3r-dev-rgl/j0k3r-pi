@@ -3,6 +3,7 @@ export type Tool = {
   description: string;
   parameters: { type: string; [key: string]: unknown };
   execute: (...args: unknown[]) => Promise<unknown> | unknown;
+  renderResult?: (...args: any[]) => { render(width: number): string[] };
 };
 
 export type MockPi = {

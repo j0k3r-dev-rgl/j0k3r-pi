@@ -2,7 +2,7 @@ import { semanticScholarPaperParameters } from '../../schemas/research/semantic-
 import { truncateText } from '../../security.js';
 import { semanticScholarPaperSummary } from '../../summaries/research/semantic-scholar.js';
 import type { NormalizedResearchItem, PiToolResult, RawSemanticScholarPaper, RegisterWebsearchToolsDeps, ResearchClients, ResearchDetailResult } from '../../types.js';
-import { buildFailure, buildSuccess, toToolError } from '../common/index.js';
+import { FULL_TOOL_CONTENT, buildFailure, buildSuccess, toToolError } from '../common/index.js';
 import { registerTool, type WebsearchToolModule } from '../common/index.js';
 import { signalFromContext, type ExecuteContext } from '../common/index.js';
 import { asInput, normalizeDoi, numberValue, recordValue, requiredString, researchClientsFromDeps, stringValue, withFollowup } from './common.js';
@@ -31,8 +31,8 @@ export function normalizeSemanticScholarPaper(raw: RawSemanticScholarPaper, sour
     arxiv_id: arxiv,
     year: numberValue(raw.year),
     authors,
-    summary: truncateText(tldr ?? stringValue(raw.abstract), 300),
-    abstract: truncateText(stringValue(raw.abstract), 4000),
+    summary: tldr ?? stringValue(raw.abstract),
+    abstract: stringValue(raw.abstract),
     citation_count: numberValue(raw.citationCount),
     reference_count: numberValue(raw.referenceCount),
     open_access: Boolean(recordValue(raw.openAccessPdf)?.url) || undefined,
@@ -60,7 +60,7 @@ export const semanticScholarResearchTools: WebsearchToolModule<typeof semanticSc
           const input = validateSemanticScholarPaperGet(params);
           const data = await getSemanticScholarPaper(input, researchClientsFromDeps(deps), signalFromContext(context));
           if (!data) return buildFailure({ code: 'not_found', category: 'not_found', message: 'Semantic Scholar paper was not found.', recoverable: true, provider: 'semantic_scholar' });
-          return buildSuccess(semanticScholarPaperSummary(data), data, 12000);
+          return buildSuccess(semanticScholarPaperSummary(data), data, FULL_TOOL_CONTENT);
         } catch (error) {
           return buildFailure(toToolError(error));
         }

@@ -19,7 +19,7 @@ import {
   validateStackOverflowQuestionRef,
   validateStackOverflowSearch,
 } from '../../validation.js';
-import { buildFailure, buildSuccess, toToolError } from '../common/index.js';
+import { FULL_TOOL_CONTENT, buildFailure, buildSuccess, toToolError } from '../common/index.js';
 import { clientsFromDeps, signalFromContext, type ExecuteContext } from '../common/index.js';
 import { registerTool, type WebsearchToolModule } from '../common/index.js';
 
@@ -61,7 +61,7 @@ export const stackOverflowTools: WebsearchToolModule<typeof stackOverflowToolNam
             return buildFailure({ code: 'not_found', category: 'not_found', message: 'Stack Overflow question was not found.', recoverable: true, provider: 'stack_overflow' });
           }
           const data = normalizeStackOverflowQuestion(raw);
-          return buildSuccess(stackQuestionSummary(data), data, 4500);
+          return buildSuccess(stackQuestionSummary(data), data, FULL_TOOL_CONTENT);
         } catch (error) {
           return buildFailure(toToolError(error));
         }
@@ -77,7 +77,7 @@ export const stackOverflowTools: WebsearchToolModule<typeof stackOverflowToolNam
           const input = validateStackOverflowAnswers(params);
           const answers = (await clientsFromDeps(deps).stackExchange.getAnswers(input, signalFromContext(context))).map(normalizeStackOverflowAnswer);
           const data = { questionId: input.questionId, limit: input.limit, answers };
-          return buildSuccess(stackAnswersSummary(data), data, 12000);
+          return buildSuccess(stackAnswersSummary(data), data, FULL_TOOL_CONTENT);
         } catch (error) {
           return buildFailure(toToolError(error));
         }
@@ -103,7 +103,7 @@ export const stackOverflowTools: WebsearchToolModule<typeof stackOverflowToolNam
             next_comments_offset: raw.hasMore ? input.commentsOffset + comments.length : undefined,
             comments,
           };
-          return buildSuccess(stackCommentsSummary(data), data, 12000);
+          return buildSuccess(stackCommentsSummary(data), data, FULL_TOOL_CONTENT);
         } catch (error) {
           return buildFailure(toToolError(error));
         }

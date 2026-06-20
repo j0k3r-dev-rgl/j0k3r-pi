@@ -2,7 +2,7 @@ import { openAlexWorkParameters } from '../../schemas/research/openalex.js';
 import { truncateText } from '../../security.js';
 import { openAlexWorkSummary } from '../../summaries/research/openalex.js';
 import type { NormalizedResearchItem, PiToolResult, RawOpenAlexWork, RegisterWebsearchToolsDeps, ResearchClients, ResearchDetailResult } from '../../types.js';
-import { buildFailure, buildSuccess, toToolError } from '../common/index.js';
+import { FULL_TOOL_CONTENT, buildFailure, buildSuccess, toToolError } from '../common/index.js';
 import { registerTool, type WebsearchToolModule } from '../common/index.js';
 import { signalFromContext, type ExecuteContext } from '../common/index.js';
 import { asInput, normalizeDoi, numberValue, recordValue, requiredString, researchClientsFromDeps, stringValue, withFollowup } from './common.js';
@@ -59,8 +59,8 @@ export function normalizeOpenAlexWork(raw: RawOpenAlexWork, sourceRank: number):
     year: numberValue(raw.publication_year),
     published_at: stringValue(raw.publication_date),
     authors: openAlexAuthors(raw),
-    summary: truncateText(abstract, 300),
-    abstract: truncateText(abstract, 4000),
+    summary: abstract,
+    abstract,
     citation_count: numberValue(raw.cited_by_count),
     open_access: typeof openAccess?.is_oa === 'boolean' ? openAccess.is_oa : undefined,
     pdf_url: stringValue(primaryLocation?.pdf_url) ?? stringValue(openAccess?.oa_url),
@@ -92,7 +92,7 @@ export const openAlexResearchTools: WebsearchToolModule<typeof openAlexResearchT
           const input = validateOpenAlexWorkGet(params);
           const data = await getOpenAlexWork(input, researchClientsFromDeps(deps), signalFromContext(context));
           if (!data) return buildFailure({ code: 'not_found', category: 'not_found', message: 'OpenAlex work was not found.', recoverable: true, provider: 'openalex' });
-          return buildSuccess(openAlexWorkSummary(data), data, 12000);
+          return buildSuccess(openAlexWorkSummary(data), data, FULL_TOOL_CONTENT);
         } catch (error) {
           return buildFailure(toToolError(error));
         }
