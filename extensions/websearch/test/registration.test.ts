@@ -46,6 +46,18 @@ describe('websearch tool registration', () => {
     const excludedProviderPattern = new RegExp(`red${'dit'}`, 'i');
     expect(pi.tools.map((tool) => tool.name).join(' ')).not.toMatch(excludedProviderPattern);
 
+    const webSearch = pi.tools.find((tool) => tool.name === 'web_search');
+    expect(webSearch?.parameters.properties).toMatchObject({
+      query: expect.any(Object),
+      limit: expect.any(Object),
+      includeDomains: expect.any(Object),
+      excludeDomains: expect.any(Object),
+      afterDate: expect.any(Object),
+      beforeDate: expect.any(Object),
+      location: expect.any(Object),
+      mode: expect.any(Object),
+    });
+
     for (const tool of pi.tools) {
       expect(tool.parameters.type).toBe('object');
       expect(typeof tool.description).toBe('string');

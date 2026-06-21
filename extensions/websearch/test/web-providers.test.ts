@@ -25,7 +25,7 @@ describe('web MCP providers', () => {
 
     const results = await client.search({ query: 'nextjs 16 release notes', limit: 2 });
 
-    expect(fetchImpl).toHaveBeenCalledWith('https://mcp.exa.ai/mcp', expect.objectContaining({ method: 'POST' }));
+    expect(fetchImpl).toHaveBeenCalledWith(expect.stringContaining('https://mcp.exa.ai/mcp'), expect.objectContaining({ method: 'POST' }));
     const init = fetchImpl.mock.calls[0]?.[1] as RequestInit;
     expect(init.headers).toMatchObject({ 'x-api-key': 'exa-test-key' });
     expect(JSON.parse(String(init.body))).toMatchObject({
@@ -38,6 +38,69 @@ describe('web MCP providers', () => {
         { title: 'Upgrade guide', url: 'https://nextjs.org/docs/app/guides/upgrading/version-16', published_at: undefined, author: undefined, snippet: undefined },
       ],
       metadata: { search_time_ms: 123.4 },
+    });
+  });
+
+  it('uses Exa advanced MCP search and parses JSON-in-text results for normalized native filters', async () => {
+    const advancedPayload = {
+      requestId: 'exa_advanced_123',
+      searchTime: 321.5,
+      results: [
+        {
+          title: 'URL: URL() constructor - Web APIs | MDN',
+          url: 'https://developer.mozilla.org/en-US/docs/Web/API/URL/URL',
+          text: 'The URL() constructor returns a newly created URL object.',
+          publishedDate: '2025-11-09',
+          author: 'MDN Contributors',
+          score: 0.98,
+        },
+      ],
+    };
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(mcpResponse(JSON.stringify(advancedPayload)));
+    const client = createExaMcpSearchClient(runtime(fetchImpl));
+
+    const results = await client.search({
+      query: 'URL constructor documentation',
+      limit: 3,
+      includeDomains: ['developer.mozilla.org'],
+      excludeDomains: ['w3schools.com'],
+      afterDate: '2025-01-01',
+      beforeDate: '2025-12-31',
+      location: 'US',
+      mode: 'deep',
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(expect.stringContaining('tools=web_search_exa'), expect.objectContaining({ method: 'POST' }));
+    const init = fetchImpl.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      method: 'tools/call',
+      params: {
+        name: 'web_search_advanced_exa',
+        arguments: {
+          query: 'URL constructor documentation',
+          numResults: 3,
+          type: 'deep',
+          includeDomains: ['developer.mozilla.org'],
+          excludeDomains: ['w3schools.com'],
+          startPublishedDate: '2025-01-01',
+          endPublishedDate: '2025-12-31',
+          userLocation: 'US',
+        },
+      },
+    });
+    expect(results.items).toEqual([
+      {
+        title: 'URL: URL() constructor - Web APIs | MDN',
+        url: 'https://developer.mozilla.org/en-US/docs/Web/API/URL/URL',
+        snippet: 'The URL() constructor returns a newly created URL object.',
+        published_at: '2025-11-09',
+        author: 'MDN Contributors',
+        score: 0.98,
+      },
+    ]);
+    expect(results.metadata).toMatchObject({
+      search_time_ms: 321.5,
+      filter_application: { native: ['mode', 'includeDomains', 'excludeDomains', 'afterDate', 'beforeDate', 'location'] },
     });
   });
 
@@ -75,5 +138,39 @@ describe('web MCP providers', () => {
         usage: [{ name: 'sku_search', count: 1 }],
       },
     });
+  });
+
+  it('degrades normalized filters into Parallel MCP objective and query hints', async () => {
+    const parallelPayload = {
+      results: [
+        { title: 'MDN URL', url: 'https://developer.mozilla.org/en-US/docs/Web/API/URL/URL', excerpts: ['URL constructor docs.'] },
+      ],
+    };
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(mcpResponse(JSON.stringify(parallelPayload), { structuredContent: parallelPayload }));
+    const client = createParallelMcpSearchClient(runtime(fetchImpl));
+
+    await client.search({
+      query: 'URL constructor documentation',
+      limit: 5,
+      includeDomains: ['developer.mozilla.org'],
+      excludeDomains: ['w3schools.com'],
+      afterDate: '2025-01-01',
+      beforeDate: '2025-12-31',
+      location: 'US',
+      mode: 'deep',
+    });
+
+    const init = fetchImpl.mock.calls[0]?.[1] as RequestInit;
+    const body = JSON.parse(String(init.body));
+    expect(body.params.name).toBe('web_search');
+    expect(body.params.arguments.objective).toContain('Only include results from these domains: developer.mozilla.org.');
+    expect(body.params.arguments.objective).toContain('Exclude results from these domains: w3schools.com.');
+    expect(body.params.arguments.objective).toContain('Prefer results published on or after 2025-01-01.');
+    expect(body.params.arguments.objective).toContain('Prefer results published on or before 2025-12-31.');
+    expect(body.params.arguments.objective).toContain('Prefer results relevant to location US.');
+    expect(body.params.arguments.search_queries[0]).toContain('site:developer.mozilla.org');
+    expect(body.params.arguments.search_queries[0]).toContain('-site:w3schools.com');
+    expect(body.params.arguments.search_queries[0]).toContain('after:2025-01-01');
+    expect(body.params.arguments.search_queries[0]).toContain('before:2025-12-31');
   });
 });

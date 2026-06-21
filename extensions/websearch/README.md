@@ -52,8 +52,10 @@ Research sources are consulted when selected. If a source is rate-limited or una
 Current web tool behavior:
 - `web_search` uses Exa MCP (`https://mcp.exa.ai/mcp`) as the primary provider.
 - `web_search` uses Parallel MCP (`https://search.parallel.ai/mcp`) as the fallback provider when Exa fails or returns no usable results.
+- `web_search` defaults to `limit: 10`; agents may optionally pass `limit` from 1 to 10.
+- `web_search` accepts normalized optional filters: `includeDomains`, `excludeDomains`, `afterDate`, `beforeDate`, `location`, and `mode` (`fast`, `auto`, or `deep`). Exa receives supported filters natively via its advanced MCP search when needed; Parallel MCP receives equivalent objective/query hints because its MCP interface intentionally avoids dedicated date/domain parameters.
 - `EXA_API_KEY` and `PARALLEL_API_KEY` are optional; no-key best-effort calls are attempted when keys are absent.
-- Successful search results include derived item `domain` values plus provider metadata validated from the MCP payload (`exa.search_time_ms`; Parallel `search_id`, `session_id`, `warnings`, and `usage` when present).
+- Successful search results include derived item `domain` values plus provider metadata validated from the MCP payload (`exa.search_time_ms`; Parallel `search_id`, `session_id`, `warnings`, and `usage` when present). Provider metadata may include `filter_application` with `native`, `query_hint`, and `unsupported` arrays to show how requested filters were applied.
 - `web_fetch` is free/local: no browser, no JavaScript, no external extraction service. It allows only `https://`, blocks private/local/link-local targets, manually revalidates redirects, reads 2 MB by default, and accepts `maxBytes` up to 5 MB.
 
 Current `discussion_search` source filters:

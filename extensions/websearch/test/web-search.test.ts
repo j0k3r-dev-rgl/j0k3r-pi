@@ -76,6 +76,57 @@ describe('web_search', () => {
     expect(result.content[0]?.text).toContain('[exa] Next.js 16');
   });
 
+  it('uses a default limit of 10 and forwards normalized search filters', async () => {
+    const exaSearch = vi.fn().mockResolvedValue({
+      items: [
+        { title: 'URL constructor', url: 'https://developer.mozilla.org/en-US/docs/Web/API/URL/URL', snippet: 'MDN URL constructor docs.' },
+      ],
+      metadata: { filter_application: { native: ['mode', 'includeDomains', 'excludeDomains', 'afterDate', 'beforeDate', 'location'], query_hint: [], unsupported: [] } },
+    });
+    const parallelSearch = vi.fn().mockResolvedValue({ items: [] });
+    const clients = createClients({ web: { exa: { search: exaSearch }, parallel: { search: parallelSearch }, fetch: { fetch: vi.fn() } } });
+    const pi = createMockPi();
+
+    registerWebsearchTools(pi, { env: {}, fetch: vi.fn<typeof fetch>(), createClients: () => clients });
+
+    const tool = pi.tools.find((entry) => entry.name === 'web_search');
+    const result = (await execute(tool!, {
+      query: 'URL constructor documentation',
+      includeDomains: ['developer.mozilla.org'],
+      excludeDomains: ['w3schools.com'],
+      afterDate: '2025-01-01',
+      beforeDate: '2025-12-31',
+      location: 'us',
+      mode: 'deep',
+    })) as {
+      details: { status: 'success'; data: { limit: number; filters: Record<string, unknown>; provider_metadata: Record<string, unknown> } };
+    };
+
+    expect(exaSearch).toHaveBeenCalledWith({
+      query: 'URL constructor documentation',
+      limit: 10,
+      includeDomains: ['developer.mozilla.org'],
+      excludeDomains: ['w3schools.com'],
+      afterDate: '2025-01-01',
+      beforeDate: '2025-12-31',
+      location: 'US',
+      mode: 'deep',
+    }, undefined);
+    expect(parallelSearch).not.toHaveBeenCalled();
+    expect(result.details.data.limit).toBe(10);
+    expect(result.details.data.filters).toEqual({
+      includeDomains: ['developer.mozilla.org'],
+      excludeDomains: ['w3schools.com'],
+      afterDate: '2025-01-01',
+      beforeDate: '2025-12-31',
+      location: 'US',
+      mode: 'deep',
+    });
+    expect(result.details.data.provider_metadata.exa).toMatchObject({
+      filter_application: { native: ['mode', 'includeDomains', 'excludeDomains', 'afterDate', 'beforeDate', 'location'] },
+    });
+  });
+
   it('falls back to Parallel when Exa fails and records the Exa source error', async () => {
     const exaSearch = vi.fn().mockRejectedValue(new ProviderFailure({
       code: 'rate_limited',
@@ -102,8 +153,8 @@ describe('web_search', () => {
       details: { status: 'success'; data: { selected_provider: string; providers_tried: string[]; fallback_used: boolean; source_errors: Array<Record<string, unknown>>; provider_metadata: Record<string, unknown>; items: Array<Record<string, unknown>> } };
     };
 
-    expect(exaSearch).toHaveBeenCalledWith({ query: 'docker rootless networking', limit: 5 }, undefined);
-    expect(parallelSearch).toHaveBeenCalledWith({ query: 'docker rootless networking', limit: 5 }, undefined);
+    expect(exaSearch).toHaveBeenCalledWith({ query: 'docker rootless networking', limit: 10 }, undefined);
+    expect(parallelSearch).toHaveBeenCalledWith({ query: 'docker rootless networking', limit: 10 }, undefined);
     expect(result.details.status).toBe('success');
     expect(result.details.data.selected_provider).toBe('parallel');
     expect(result.details.data.providers_tried).toEqual(['exa', 'parallel']);

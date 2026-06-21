@@ -2,10 +2,26 @@ import type { ToolError } from '../common/index.js';
 import type { WebFetchClient } from './fetch.js';
 
 export type WebSearchProvider = 'exa' | 'parallel';
+export type WebSearchMode = 'fast' | 'auto' | 'deep';
+
+export type WebSearchFilters = {
+  includeDomains?: string[];
+  excludeDomains?: string[];
+  afterDate?: string;
+  beforeDate?: string;
+  location?: string;
+  mode?: WebSearchMode;
+};
 
 export type WebSearchRequest = {
   query: string;
   limit: number;
+} & WebSearchFilters;
+
+export type WebSearchFilterApplication = {
+  native: string[];
+  query_hint: string[];
+  unsupported: string[];
 };
 
 export type RawWebSearchItem = {
@@ -17,7 +33,9 @@ export type RawWebSearchItem = {
   score?: number;
 };
 
-export type RawWebSearchMetadata = Record<string, unknown>;
+export type RawWebSearchMetadata = Record<string, unknown> & {
+  filter_application?: WebSearchFilterApplication;
+};
 
 export type RawWebSearchResponse = {
   items: RawWebSearchItem[];
@@ -44,6 +62,7 @@ export type WebSearchSourceError = {
 export type WebSearchResult = {
   query: string;
   limit: number;
+  filters?: WebSearchFilters;
   selected_provider?: WebSearchProvider;
   providers_tried: WebSearchProvider[];
   fallback_used: boolean;
