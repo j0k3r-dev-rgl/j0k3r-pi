@@ -5,6 +5,15 @@ import { createMockPi, execute } from './helpers.js';
 const theme = { fg: (_name: string, text: string) => text, bold: (text: string) => text };
 const fullIssueBody = `${'GitHub body paragraph with implementation details. '.repeat(80)}WEBSEARCH_RENDER_FULL_BODY_END`;
 
+const ANSI_RE = /\u001b\][^\u001b\u0007]*(?:\u001b\\|\u0007)|\u001b\[[0-?]*[ -/]*[@-~]/g;
+const CJK_RE = /[\u1100-\u115f\u231a-\u231b\u2329-\u232a\u23e9-\u23ec\u23f0\u23f3\u25fd-\u25fe\u2614-\u2615\u2648-\u2653\u267f\u2693\u26a1\u26aa-\u26ab\u26bd-\u26be\u26c4-\u26c5\u26ce\u26d4\u26ea\u26f2-\u26f3\u26f5\u26fa\u26fd\u2705\u270a-\u270b\u2728\u274c\u274e\u2753-\u2755\u2757\u2795-\u2797\u27b0\u27bf\u2b1b-\u2b1c\u2b50\u2b55\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe10-\ufe19\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6]/u;
+
+function visibleTestWidth(text: string): number {
+  let width = 0;
+  for (const char of text.replace(ANSI_RE, '')) width += CJK_RE.test(char) ? 2 : 1;
+  return width;
+}
+
 function renderLines(tool: { renderResult?: (...args: any[]) => { render(width: number): string[] } }, result: unknown, expanded: boolean): string {
   expect(tool.renderResult).toBeTypeOf('function');
   return tool.renderResult!(result, { expanded, isPartial: false }, theme, {}).render(100).join('\n');
@@ -19,6 +28,35 @@ describe('websearch TUI rendering', () => {
     for (const tool of pi.tools) {
       expect(tool.renderResult, `${tool.name} renderResult`).toBeTypeOf('function');
     }
+  });
+
+  it('keeps compact search result lines within the requested visible width for CJK titles', () => {
+    const pi = createMockPi();
+    registerWebsearchTools(pi, { env: {}, fetch: vi.fn<typeof fetch>() });
+    const tool = pi.tools.find((entry) => entry.name === 'web_search')!;
+    const result = {
+      details: {
+        status: 'success',
+        data: {
+          query: 'Izure Saikyou no Renkinjutsushi anime adapts manga chapter volume',
+          items: [
+            {
+              source: 'exa',
+              title: '日本のアニメ総合データベース「アニメ大全」 ｜ アルファポリス『いずれ最強の錬金術師？』2025年1月TVアニメ化決定！ 豪華主要キャスト・スタッフ発表！ さらに、原作小説とコミカライズの最新巻刊行も決定！',
+              url: 'https://example.test/anime',
+            },
+          ],
+          source_errors: [],
+        },
+      },
+      content: [{ type: 'text', text: 'ok' }],
+    };
+
+    expect(tool.renderResult).toBeTypeOf('function');
+    const lines = tool.renderResult!(result, { expanded: false, isPartial: false }, theme, {}).render(126);
+
+    expect(lines.some((line) => line.includes('日本のアニメ総合データベース'))).toBe(true);
+    for (const line of lines) expect(visibleTestWidth(line)).toBeLessThanOrEqual(126);
   });
 
   it('keeps full detail content for the agent while rendering compact by default and full on expand', async () => {

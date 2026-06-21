@@ -4,22 +4,153 @@ type WebsearchRenderOptions = { expanded?: boolean; isPartial?: boolean };
 type Theme = { fg?: (name: string, text: string) => string; bold?: (text: string) => string };
 type ToolContent = { type?: string; text?: string };
 
+const ANSI_RE = /\u001b\][^\u001b\u0007]*(?:\u001b\\|\u0007)|\u001b\[[0-?]*[ -/]*[@-~]/g;
+const ANSI_TOKEN_RE = /(?:\u001b\][^\u001b\u0007]*(?:\u001b\\|\u0007)|\u001b\[[0-?]*[ -/]*[@-~])/g;
+const graphemeSegmenter = typeof Intl !== 'undefined' && 'Segmenter' in Intl
+  ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+  : undefined;
+
+function segmentText(text: string): string[] {
+  if (!graphemeSegmenter) return [...text];
+  return [...graphemeSegmenter.segment(text)].map((entry) => entry.segment);
+}
+
+function tokenize(text: string): string[] {
+  const tokens: string[] = [];
+  let lastIndex = 0;
+  for (const match of text.matchAll(ANSI_TOKEN_RE)) {
+    const index = match.index ?? 0;
+    if (index > lastIndex) tokens.push(...segmentText(text.slice(lastIndex, index)));
+    tokens.push(match[0]);
+    lastIndex = index + match[0].length;
+  }
+  if (lastIndex < text.length) tokens.push(...segmentText(text.slice(lastIndex)));
+  return tokens;
+}
+
+function isAnsi(token: string): boolean {
+  return token.startsWith('\u001b');
+}
+
 function stripAnsi(text: string): string {
-  return text.replace(/\u001b\[[0-9;]*m/g, '');
+  return text.replace(ANSI_RE, '');
+}
+
+function isZeroWidthCodePoint(codePoint: number): boolean {
+  return codePoint === 0x00ad
+    || codePoint === 0x034f
+    || codePoint === 0x061c
+    || codePoint === 0x180e
+    || codePoint === 0x200b
+    || codePoint === 0x200c
+    || codePoint === 0x200d
+    || codePoint === 0x2060
+    || codePoint === 0xfeff
+    || (codePoint >= 0x0000 && codePoint <= 0x001f)
+    || (codePoint >= 0x007f && codePoint <= 0x009f)
+    || (codePoint >= 0x0300 && codePoint <= 0x036f)
+    || (codePoint >= 0x0483 && codePoint <= 0x0489)
+    || (codePoint >= 0x0591 && codePoint <= 0x05bd)
+    || codePoint === 0x05bf
+    || (codePoint >= 0x05c1 && codePoint <= 0x05c2)
+    || (codePoint >= 0x05c4 && codePoint <= 0x05c5)
+    || codePoint === 0x05c7
+    || (codePoint >= 0x0610 && codePoint <= 0x061a)
+    || (codePoint >= 0x064b && codePoint <= 0x065f)
+    || codePoint === 0x0670
+    || (codePoint >= 0x06d6 && codePoint <= 0x06dc)
+    || (codePoint >= 0x06df && codePoint <= 0x06e4)
+    || (codePoint >= 0x06e7 && codePoint <= 0x06e8)
+    || (codePoint >= 0x06ea && codePoint <= 0x06ed)
+    || (codePoint >= 0xfe00 && codePoint <= 0xfe0f);
+}
+
+function isFullWidthCodePoint(codePoint: number): boolean {
+  return codePoint >= 0x1100 && (
+    codePoint <= 0x115f
+    || codePoint === 0x2329
+    || codePoint === 0x232a
+    || (codePoint >= 0x2e80 && codePoint <= 0xa4cf && codePoint !== 0x303f)
+    || (codePoint >= 0xac00 && codePoint <= 0xd7a3)
+    || (codePoint >= 0xf900 && codePoint <= 0xfaff)
+    || (codePoint >= 0xfe10 && codePoint <= 0xfe19)
+    || (codePoint >= 0xfe30 && codePoint <= 0xfe6f)
+    || (codePoint >= 0xff00 && codePoint <= 0xff60)
+    || (codePoint >= 0xffe0 && codePoint <= 0xffe6)
+    || (codePoint >= 0x1f300 && codePoint <= 0x1f64f)
+    || (codePoint >= 0x1f900 && codePoint <= 0x1f9ff)
+    || (codePoint >= 0x20000 && codePoint <= 0x3fffd)
+  );
+}
+
+function graphemeWidth(segment: string): number {
+  if (segment === '\t') return 3;
+  let width = 0;
+  for (const char of segment) {
+    const codePoint = char.codePointAt(0);
+    if (codePoint === undefined || isZeroWidthCodePoint(codePoint)) continue;
+    width += isFullWidthCodePoint(codePoint) ? 2 : 1;
+  }
+  return width;
 }
 
 function lineWidth(text: string): number {
-  return [...stripAnsi(text)].length;
+  return segmentText(stripAnsi(text).replace(/\t/g, '   ')).reduce((width, segment) => width + graphemeWidth(segment), 0);
 }
 
 function truncate(text: string, width: number): string {
-  return lineWidth(text) <= width ? text : `${text.slice(0, Math.max(0, width - 1))}…`;
+  if (width <= 0) return '';
+  if (lineWidth(text) <= width) return text;
+  if (width === 1) return '…';
+
+  const targetWidth = width - lineWidth('…');
+  let visible = 0;
+  let output = '';
+
+  for (const token of tokenize(text)) {
+    if (isAnsi(token)) {
+      output += token;
+      continue;
+    }
+    const tokenWidth = graphemeWidth(token);
+    if (visible + tokenWidth > targetWidth) break;
+    output += token;
+    visible += tokenWidth;
+  }
+
+  return `${output}…`;
 }
 
 function clip(text: unknown, limit: number): string {
   const normalized = String(text ?? '').replace(/\s+/g, ' ').trim();
   if (!normalized) return '';
-  return normalized.length > limit ? `${normalized.slice(0, Math.max(0, limit - 1))}…` : normalized;
+  return truncate(normalized, limit);
+}
+
+function hardWrap(text: string, width: number): string[] {
+  const lines: string[] = [];
+  let current = '';
+  let currentWidth = 0;
+
+  for (const token of tokenize(text)) {
+    if (isAnsi(token)) {
+      current += token;
+      continue;
+    }
+    const tokenWidth = graphemeWidth(token);
+    if (currentWidth > 0 && currentWidth + tokenWidth > width) {
+      lines.push(current);
+      current = '';
+      currentWidth = 0;
+    }
+    if (tokenWidth <= width) {
+      current += token;
+      currentWidth += tokenWidth;
+    }
+  }
+
+  if (current || lines.length === 0) lines.push(current);
+  return lines;
 }
 
 function wrapLine(text: string, width: number): string[] {
@@ -29,6 +160,14 @@ function wrapLine(text: string, width: number): string[] {
   const lines: string[] = [];
   let current = '';
   for (const word of words) {
+    if (lineWidth(word) > width) {
+      if (current) {
+        lines.push(current);
+        current = '';
+      }
+      lines.push(...hardWrap(word, width));
+      continue;
+    }
     if (!current) {
       current = word;
       continue;
@@ -41,12 +180,7 @@ function wrapLine(text: string, width: number): string[] {
     }
   }
   if (current) lines.push(current);
-  return lines.flatMap((line) => {
-    if (lineWidth(line) <= width) return [line];
-    const chunks: string[] = [];
-    for (let index = 0; index < line.length; index += width) chunks.push(line.slice(index, index + width));
-    return chunks;
-  });
+  return lines;
 }
 
 function wrapLines(lines: string[], width: number): string[] {
