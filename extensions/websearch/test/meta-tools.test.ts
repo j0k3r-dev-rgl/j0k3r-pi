@@ -115,9 +115,62 @@ describe('generic websearch meta-tools', () => {
     expect(result.content[0]?.text).toContain('[github/discussion] Agent memory discussion');
   });
 
+  it('discussion_search can target Stack Exchange network sites as selected sources', async () => {
+    const searchQuestions = vi.fn(async (input: Record<string, unknown>) => [{
+      question_id: 700 + String(input.site).length,
+      link: `https://${input.site}.example/questions/1/nginx`,
+      title: `${input.site} nginx answer`,
+      score: 9,
+      answer_count: 2,
+      body: `${input.site} semantic snippet about nginx and linux.`,
+    }]);
+    const clients = createClients({ stackExchange: { searchQuestions } });
+    const pi = createMockPi();
+
+    registerWebsearchTools(pi, { env: {}, fetch: vi.fn<typeof fetch>(), createClients: () => clients });
+
+    const tool = pi.tools.find((entry) => entry.name === 'discussion_search');
+    const cases = [
+      ['server_fault', 'serverfault'],
+      ['unix_linux', 'unix'],
+      ['super_user', 'superuser'],
+      ['dba', 'dba'],
+    ] as const;
+
+    for (const [source, site] of cases) {
+      const result = (await execute(tool!, { query: 'nginx linux', source, limit: 2 })) as {
+        content: Array<{ text: string }>;
+        details: { status: 'success'; data: { sources_searched: string[]; items: Array<Record<string, unknown>>; source_errors: Array<Record<string, unknown>> } };
+      };
+
+      expect(result.details.status).toBe('success');
+      expect(result.details.data.sources_searched).toEqual([source]);
+      expect(result.details.data.source_errors).toEqual([]);
+      expect(result.details.data.items[0]).toMatchObject({
+        source,
+        source_query: source,
+        kind: 'question',
+        title: `${site} nginx answer`,
+        followup_tool: 'stack_exchange_question_get',
+        followup_ref: `${site}:${700 + String(site).length}`,
+        metadata: { site },
+      });
+      expect(result.content[0]?.text).toContain(`[${source}/question] ${site} nginx answer`);
+    }
+
+    expect(searchQuestions).toHaveBeenCalledWith({ query: 'nginx linux', limit: 2, site: 'serverfault' }, undefined);
+    expect(searchQuestions).toHaveBeenCalledWith({ query: 'nginx linux', limit: 2, site: 'unix' }, undefined);
+    expect(searchQuestions).toHaveBeenCalledWith({ query: 'nginx linux', limit: 2, site: 'superuser' }, undefined);
+    expect(searchQuestions).toHaveBeenCalledWith({ query: 'nginx linux', limit: 2, site: 'dba' }, undefined);
+  });
+
   it('discussion_search fans out across current discussion sources when source is omitted', async () => {
+    const searchQuestions = vi.fn(async (input: Record<string, unknown>) => {
+      const site = String(input.site ?? 'stackoverflow');
+      return [{ question_id: site.length, link: `https://${site}.example/q/1`, title: `${site} answer`, score: 5, answer_count: 1, body: `${site} snippet.` }];
+    });
     const clients = createClients({
-      stackExchange: { searchQuestions: vi.fn().mockResolvedValue([{ question_id: 1, link: 'https://stackoverflow.com/q/1', title: 'Stack answer', score: 5, answer_count: 1, body: 'Stack snippet.' }]) },
+      stackExchange: { searchQuestions },
       github: {
         searchIssues: vi.fn().mockResolvedValue([{ number: 2, html_url: 'https://github.com/acme/repo/issues/2', repository_url: 'https://api.github.com/repos/acme/repo', title: 'Issue answer', state: 'open', comments: 1, body: 'Issue snippet.' }]),
         searchPullRequests: vi.fn().mockResolvedValue([{ number: 3, html_url: 'https://github.com/acme/repo/pull/3', repository_url: 'https://api.github.com/repos/acme/repo', title: 'PR answer', state: 'closed', comments: 2, body: 'PR snippet.' }]),
@@ -136,10 +189,14 @@ describe('generic websearch meta-tools', () => {
       details: { status: 'success'; data: { sources_searched: string[]; source_errors: Array<Record<string, unknown>>; items: Array<Record<string, unknown>> } };
     };
 
-    expect(result.details.data.sources_searched).toEqual(['stack_overflow', 'github_issues', 'github_pull_requests', 'github_discussions', 'devto', 'hacker_news']);
+    expect(result.details.data.sources_searched).toEqual(['stack_overflow', 'server_fault', 'unix_linux', 'super_user', 'dba', 'github_issues', 'github_pull_requests', 'github_discussions', 'devto', 'hacker_news']);
     expect(result.details.data.source_errors).toEqual([]);
     expect(result.details.data.items.map((item) => `${item.source}/${item.kind}`)).toEqual([
       'stack_overflow/question',
+      'server_fault/question',
+      'unix_linux/question',
+      'super_user/question',
+      'dba/question',
       'github/issue',
       'github/pull_request',
       'github/discussion',
@@ -150,7 +207,7 @@ describe('generic websearch meta-tools', () => {
 
   it('discussion_search returns partial fan-out results and source_errors when one source fails', async () => {
     const clients = createClients({
-      stackExchange: { searchQuestions: vi.fn().mockResolvedValue([{ question_id: 1, link: 'https://stackoverflow.com/q/1', title: 'Stack answer', body: 'Stack snippet.' }]) },
+      stackExchange: { searchQuestions: vi.fn(async (input: Record<string, unknown>) => input.site === 'stackoverflow' ? [{ question_id: 1, link: 'https://stackoverflow.com/q/1', title: 'Stack answer', body: 'Stack snippet.' }] : []) },
       github: {
         searchIssues: vi.fn().mockResolvedValue([]),
         searchPullRequests: vi.fn().mockResolvedValue([]),
@@ -179,11 +236,11 @@ describe('generic websearch meta-tools', () => {
 
   it('discussion_search interleaves sources before applying the global fan-out limit', async () => {
     const clients = createClients({
-      stackExchange: { searchQuestions: vi.fn().mockResolvedValue([
+      stackExchange: { searchQuestions: vi.fn(async (input: Record<string, unknown>) => input.site === 'stackoverflow' ? [
         { question_id: 1, link: 'https://stackoverflow.com/q/1', title: 'Stack one', body: 'Stack snippet 1.' },
         { question_id: 2, link: 'https://stackoverflow.com/q/2', title: 'Stack two', body: 'Stack snippet 2.' },
         { question_id: 3, link: 'https://stackoverflow.com/q/3', title: 'Stack three', body: 'Stack snippet 3.' },
-      ]) },
+      ] : []) },
       github: {
         searchIssues: vi.fn().mockResolvedValue([{ number: 10, html_url: 'https://github.com/acme/repo/issues/10', repository_url: 'https://api.github.com/repos/acme/repo', title: 'Issue one', body: 'Issue snippet.' }]),
         searchPullRequests: vi.fn().mockResolvedValue([]),

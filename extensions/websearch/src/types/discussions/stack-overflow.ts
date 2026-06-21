@@ -1,13 +1,18 @@
 import type { Availability } from '../common/index.js';
 
+export type StackExchangeSite = 'stackoverflow' | 'serverfault' | 'unix' | 'superuser' | 'dba';
+export type StackExchangePlatform = 'stack_overflow' | 'server_fault' | 'unix_linux' | 'super_user' | 'dba';
+
 export type StackOverflowQuestionRef = {
   questionId: string;
   url: string;
+  site?: StackExchangeSite;
 };
 
 export type StackOverflowSearchRequest = {
   query: string;
   limit: number;
+  site?: StackExchangeSite;
 };
 
 export type StackOverflowAnswersRequest = StackOverflowQuestionRef & {
@@ -24,7 +29,8 @@ export type StackOverflowRawAnswer = Record<string, unknown>;
 export type StackOverflowRawComment = Record<string, unknown>;
 
 export type NormalizedStackOverflowQuestion = {
-  platform: 'stack_overflow';
+  platform: StackExchangePlatform;
+  site?: StackExchangeSite;
   id: string;
   question_id: string;
   url: string;
@@ -41,16 +47,17 @@ export type NormalizedStackOverflowQuestion = {
   snippet?: string;
   body?: string;
   follow_up?: {
-    answers_tool: 'stack_overflow_answers_get';
+    answers_tool: 'stack_overflow_answers_get' | 'stack_exchange_answers_get';
     answers_ref: string;
-    comments_tool: 'stack_overflow_comments_get';
+    comments_tool: 'stack_overflow_comments_get' | 'stack_exchange_comments_get';
     comments_ref: string;
   };
   availability: Availability;
 };
 
 export type NormalizedStackOverflowAnswer = {
-  platform: 'stack_overflow';
+  platform: StackExchangePlatform;
+  site?: StackExchangeSite;
   id: string;
   answer_id: string;
   question_id?: string;
@@ -70,12 +77,16 @@ export type StackOverflowSearchResult = {
 };
 
 export type StackOverflowAnswersResult = {
+  platform?: StackExchangePlatform;
+  site?: StackExchangeSite;
   questionId: string;
   limit: number;
   answers: NormalizedStackOverflowAnswer[];
 };
 
 export type NormalizedStackOverflowComment = {
+  platform?: StackExchangePlatform;
+  site?: StackExchangeSite;
   id: string;
   comment_id: string;
   post_id?: string;
@@ -86,7 +97,8 @@ export type NormalizedStackOverflowComment = {
 };
 
 export type StackOverflowCommentsResult = {
-  platform: 'stack_overflow';
+  platform: StackExchangePlatform;
+  site?: StackExchangeSite;
   question_id: string;
   comments_limit: number;
   comments_offset: number;

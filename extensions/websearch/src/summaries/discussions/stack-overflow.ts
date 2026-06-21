@@ -22,6 +22,7 @@ export function stackSearchSummary(data: StackOverflowSearchResult): string {
 
 export function stackQuestionSummary(data: NormalizedStackOverflowQuestion): string {
   const metadata = [
+    data.site ? `site: ${data.site}` : undefined,
     `question_id: ${data.question_id}`,
     data.score === undefined ? undefined : `score: ${data.score}`,
     data.answer_count === undefined ? undefined : `answers: ${data.answer_count}`,
@@ -33,20 +34,22 @@ export function stackQuestionSummary(data: NormalizedStackOverflowQuestion): str
     data.title ?? data.id,
     data.url,
     metadata,
-    `use stack_overflow_answers_get with question: ${data.question_id}`,
-    `use stack_overflow_comments_get with question: ${data.question_id}`,
+    data.follow_up ? `use ${data.follow_up.answers_tool} with question: ${data.follow_up.answers_ref}` : undefined,
+    data.follow_up ? `use ${data.follow_up.comments_tool} with question: ${data.follow_up.comments_ref}` : undefined,
     data.body,
   ].filter(Boolean).join('\n');
 }
 
 export function stackAnswersSummary(data: StackOverflowAnswersResult): string {
-  if (data.answers.length === 0) return `No Stack Overflow answers found for ${data.questionId}.`;
+  const label = data.site && data.site !== 'stackoverflow' ? `Stack Exchange ${data.site}` : 'Stack Overflow';
+  if (data.answers.length === 0) return `No ${label} answers found for ${data.questionId}.`;
   return data.answers.map((answer, index) => `${index + 1}. ${answer.accepted ? '[accepted] ' : ''}${answer.author ?? 'unknown'}: ${answer.body ?? ''}`).join('\n');
 }
 
 export function stackCommentsSummary(data: StackOverflowCommentsResult): string {
-  if (data.comments.length === 0) return `No Stack Overflow comments found for question ${data.question_id}.`;
+  const networkLabel = data.site && data.site !== 'stackoverflow' ? `Stack Exchange comments for ${data.site}` : 'Stack Overflow comments for';
+  if (data.comments.length === 0) return `No ${networkLabel} question ${data.question_id}.`;
   const comments = data.comments.map((comment, index) => `${data.comments_offset + index + 1}. ${comment.author ?? 'unknown'}: ${comment.body ?? ''}`);
   const continuation = data.has_more_comments && data.next_comments_offset !== undefined ? `next_comments_offset: ${data.next_comments_offset}` : undefined;
-  return [`Stack Overflow comments for question ${data.question_id}`, ...comments, continuation].filter(Boolean).join('\n');
+  return [`${networkLabel} question ${data.question_id}`, ...comments, continuation].filter(Boolean).join('\n');
 }

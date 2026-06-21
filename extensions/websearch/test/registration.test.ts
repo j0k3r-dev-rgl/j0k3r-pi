@@ -25,8 +25,11 @@ describe('websearch tool registration', () => {
       'semantic_scholar_paper_citations_get',
       'semantic_scholar_paper_references_get',
       'stack_overflow_question_get',
+      'stack_exchange_question_get',
       'stack_overflow_answers_get',
+      'stack_exchange_answers_get',
       'stack_overflow_comments_get',
+      'stack_exchange_comments_get',
       'github_issue_get',
       'github_pull_request_get',
       'github_releases_get',
@@ -39,7 +42,7 @@ describe('websearch tool registration', () => {
       'hackernews_story_get',
     ]);
     expect(pi.tools.map((tool) => tool.name)).toEqual(WEBSEARCH_TOOL_NAMES);
-    expect(pi.tools).toHaveLength(29);
+    expect(pi.tools).toHaveLength(32);
     expect(pi.tools.map((tool) => tool.name)).not.toEqual(expect.arrayContaining([
       'search_stack_overflow',
       'search_github_issues',

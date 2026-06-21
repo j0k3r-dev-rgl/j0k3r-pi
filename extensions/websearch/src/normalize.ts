@@ -37,6 +37,8 @@ import type {
   NormalizedStackOverflowAnswer,
   NormalizedStackOverflowComment,
   NormalizedStackOverflowQuestion,
+  StackExchangePlatform,
+  StackExchangeSite,
   StackOverflowRawAnswer,
   StackOverflowRawComment,
   StackOverflowRawQuestion,
@@ -149,15 +151,39 @@ function cleanGitHubMarkdown(value: string | undefined): string | undefined {
     .trim() || undefined;
 }
 
+function stackExchangeSite(value: unknown): StackExchangeSite {
+  return value === 'serverfault' || value === 'unix' || value === 'superuser' || value === 'dba' ? value : 'stackoverflow';
+}
+
+function stackExchangePlatform(site: StackExchangeSite): StackExchangePlatform {
+  if (site === 'serverfault') return 'server_fault';
+  if (site === 'unix') return 'unix_linux';
+  if (site === 'superuser') return 'super_user';
+  if (site === 'dba') return 'dba';
+  return 'stack_overflow';
+}
+
+function stackExchangeQuestionUrl(site: StackExchangeSite, questionId: string): string {
+  if (site === 'serverfault') return `https://serverfault.com/questions/${questionId}`;
+  if (site === 'unix') return `https://unix.stackexchange.com/questions/${questionId}`;
+  if (site === 'superuser') return `https://superuser.com/questions/${questionId}`;
+  if (site === 'dba') return `https://dba.stackexchange.com/questions/${questionId}`;
+  return `https://stackoverflow.com/questions/${questionId}`;
+}
+
 export function normalizeStackOverflowQuestion(raw: StackOverflowRawQuestion): NormalizedStackOverflowQuestion {
   const data = raw as Record<string, unknown>;
   const id = String(numberValue(data.question_id) ?? stringValue(data.question_id) ?? 'unknown');
+  const site = stackExchangeSite(data.site);
   const body = stringValue(data.body_markdown) ?? htmlToText(stringValue(data.body));
+  const platform = stackExchangePlatform(site);
+  const followUpRef = site === 'stackoverflow' ? id : `${site}:${id}`;
   return {
-    platform: 'stack_overflow',
+    platform,
+    site,
     id,
     question_id: id,
-    url: stringValue(data.link) ?? `https://stackoverflow.com/questions/${id}`,
+    url: stringValue(data.link) ?? stackExchangeQuestionUrl(site, id),
     title: truncateText(stringValue(data.title) ? decodeHtmlEntities(stringValue(data.title)!) : undefined, 300),
     score: numberValue(data.score),
     answer_count: numberValue(data.answer_count),
@@ -171,10 +197,10 @@ export function normalizeStackOverflowQuestion(raw: StackOverflowRawQuestion): N
     snippet: truncateText(body ?? stringValue(data.title), 300),
     body,
     follow_up: {
-      answers_tool: 'stack_overflow_answers_get',
-      answers_ref: id,
-      comments_tool: 'stack_overflow_comments_get',
-      comments_ref: id,
+      answers_tool: site === 'stackoverflow' ? 'stack_overflow_answers_get' : 'stack_exchange_answers_get',
+      answers_ref: followUpRef,
+      comments_tool: site === 'stackoverflow' ? 'stack_overflow_comments_get' : 'stack_exchange_comments_get',
+      comments_ref: followUpRef,
     },
     availability: body || data.body_markdown !== undefined ? { status: 'available' } : { status: 'unavailable', reason: 'body_unavailable' },
   };
@@ -183,10 +209,12 @@ export function normalizeStackOverflowQuestion(raw: StackOverflowRawQuestion): N
 export function normalizeStackOverflowAnswer(raw: StackOverflowRawAnswer): NormalizedStackOverflowAnswer {
   const data = raw as Record<string, unknown>;
   const id = String(numberValue(data.answer_id) ?? stringValue(data.answer_id) ?? 'unknown');
+  const site = stackExchangeSite(data.site);
   const questionId = numberValue(data.question_id) ?? stringValue(data.question_id);
   const body = stringValue(data.body_markdown) ?? htmlToText(stringValue(data.body));
   return {
-    platform: 'stack_overflow',
+    platform: stackExchangePlatform(site),
+    site,
     id,
     answer_id: id,
     question_id: questionId === undefined ? undefined : String(questionId),
@@ -203,9 +231,12 @@ export function normalizeStackOverflowAnswer(raw: StackOverflowRawAnswer): Norma
 export function normalizeStackOverflowComment(raw: StackOverflowRawComment): NormalizedStackOverflowComment {
   const data = raw as Record<string, unknown>;
   const id = String(numberValue(data.comment_id) ?? stringValue(data.comment_id) ?? 'unknown');
+  const site = stackExchangeSite(data.site);
   const postId = numberValue(data.post_id) ?? stringValue(data.post_id);
   const body = stringValue(data.body_markdown) ?? htmlToText(stringValue(data.body));
   return {
+    platform: stackExchangePlatform(site),
+    site,
     id,
     comment_id: id,
     post_id: postId === undefined ? undefined : String(postId),

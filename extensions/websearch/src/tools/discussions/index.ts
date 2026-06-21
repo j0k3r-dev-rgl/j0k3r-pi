@@ -16,6 +16,7 @@ import type {
   NormalizedHackerNewsStory,
   NormalizedStackOverflowQuestion,
   PiToolResult,
+  StackExchangeSite,
   RegisterWebsearchToolsDeps,
   ToolError,
 } from '../../types.js';
@@ -26,6 +27,10 @@ import { clientsFromDeps, signalFromContext, type ExecuteContext } from '../comm
 
 const discussionSources = [
   'stack_overflow',
+  'server_fault',
+  'unix_linux',
+  'super_user',
+  'dba',
   'github',
   'github_issues',
   'github_pull_requests',
@@ -48,7 +53,7 @@ type DiscussionSearchInput = {
 };
 
 type UnifiedDiscussionItem = {
-  source: 'stack_overflow' | 'github' | 'devto' | 'hacker_news';
+  source: 'stack_overflow' | 'server_fault' | 'unix_linux' | 'super_user' | 'dba' | 'github' | 'devto' | 'hacker_news';
   source_query: ConcreteDiscussionSource;
   kind: DiscussionKind;
   title?: string;
@@ -151,7 +156,7 @@ function validateDiscussionSearch(value: unknown): DiscussionSearchInput {
 }
 
 function concreteSources(source: DiscussionSource): ConcreteDiscussionSource[] {
-  if (source === 'all') return ['stack_overflow', 'github_issues', 'github_pull_requests', 'github_discussions', 'devto', 'hacker_news'];
+  if (source === 'all') return ['stack_overflow', 'server_fault', 'unix_linux', 'super_user', 'dba', 'github_issues', 'github_pull_requests', 'github_discussions', 'devto', 'hacker_news'];
   if (source === 'github') return ['github_issues', 'github_pull_requests', 'github_discussions'];
   return [source];
 }
@@ -191,10 +196,22 @@ function interleaveSourceResults(groups: UnifiedDiscussionItem[][], limit: numbe
   return items;
 }
 
-function fromStackOverflow(item: NormalizedStackOverflowQuestion, sourceRank: number): UnifiedDiscussionItem {
+function stackExchangeSiteForSource(source: ConcreteDiscussionSource): StackExchangeSite | undefined {
+  if (source === 'stack_overflow') return 'stackoverflow';
+  if (source === 'server_fault') return 'serverfault';
+  if (source === 'unix_linux') return 'unix';
+  if (source === 'super_user') return 'superuser';
+  if (source === 'dba') return 'dba';
+  return undefined;
+}
+
+function fromStackExchangeQuestion(item: NormalizedStackOverflowQuestion, source: ConcreteDiscussionSource, sourceRank: number): UnifiedDiscussionItem {
+  const isStackOverflow = source === 'stack_overflow';
+  const site = item.site ?? stackExchangeSiteForSource(source);
+  const followupRef = isStackOverflow ? item.question_id : `${site}:${item.question_id}`;
   return {
-    source: 'stack_overflow',
-    source_query: 'stack_overflow',
+    source: isStackOverflow ? 'stack_overflow' : source as 'server_fault' | 'unix_linux' | 'super_user' | 'dba',
+    source_query: source,
     kind: 'question',
     title: item.title,
     url: item.url,
@@ -203,13 +220,17 @@ function fromStackOverflow(item: NormalizedStackOverflowQuestion, sourceRank: nu
     comments_count: item.answer_count,
     published_at: item.created_at,
     updated_at: item.last_activity_at,
-    entity_id: item.question_id,
-    followup_tool: 'stack_overflow_question_get',
-    followup_ref: item.question_id,
+    entity_id: followupRef,
+    followup_tool: isStackOverflow ? 'stack_overflow_question_get' : 'stack_exchange_question_get',
+    followup_ref: followupRef,
     rank: 0,
     source_rank: sourceRank,
-    metadata: { tags: item.tags, answered: item.is_answered, view_count: item.view_count },
+    metadata: { site, tags: item.tags, answered: item.is_answered, view_count: item.view_count },
   };
+}
+
+function fromStackOverflow(item: NormalizedStackOverflowQuestion, sourceRank: number): UnifiedDiscussionItem {
+  return fromStackExchangeQuestion(item, 'stack_overflow', sourceRank);
 }
 
 function fromGitHubIssue(item: NormalizedGitHubIssue, sourceRank: number): UnifiedDiscussionItem {
@@ -319,9 +340,10 @@ async function searchOneSource(source: ConcreteDiscussionSource, input: Discussi
   const clients = clientsFromDeps(deps);
   const limit = input.limit;
 
-  if (source === 'stack_overflow') {
-    const raw = await clients.stackExchange.searchQuestions({ query: input.query, limit }, signal);
-    return raw.map((item, index) => fromStackOverflow(normalizeStackOverflowQuestion(item), index + 1));
+  const stackExchangeSite = stackExchangeSiteForSource(source);
+  if (stackExchangeSite) {
+    const raw = await clients.stackExchange.searchQuestions({ query: input.query, limit, site: stackExchangeSite }, signal);
+    return raw.map((item, index) => fromStackExchangeQuestion(normalizeStackOverflowQuestion({ ...item, site: stackExchangeSite }), source, index + 1));
   }
 
   if (source === 'github_issues') {

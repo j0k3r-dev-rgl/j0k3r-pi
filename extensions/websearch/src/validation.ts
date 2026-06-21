@@ -16,6 +16,7 @@ import type {
   GitHubReleasesGetRequest,
   HackerNewsSearchRequest,
   HackerNewsStoryRequest,
+  StackExchangeSite,
   StackOverflowAnswersRequest,
   StackOverflowCommentsRequest,
   StackOverflowQuestionRef,
@@ -141,6 +142,70 @@ function parseStackOverflowQuestion(raw: string): StackOverflowQuestionRef {
     }
     throw new ValidationError('question must be a Stack Overflow question id or url.');
   }
+}
+
+function stackExchangeSiteFromSource(value: string | undefined): StackExchangeSite | undefined {
+  if (!value) return undefined;
+  if (value === 'stack_overflow' || value === 'stackoverflow') return 'stackoverflow';
+  if (value === 'server_fault' || value === 'serverfault') return 'serverfault';
+  if (value === 'unix_linux' || value === 'unix') return 'unix';
+  if (value === 'super_user' || value === 'superuser') return 'superuser';
+  if (value === 'dba') return 'dba';
+  throw new ValidationError('source must be one of: stack_overflow, server_fault, unix_linux, super_user, dba.');
+}
+
+function stackExchangeQuestionUrl(site: StackExchangeSite, questionId: string): string {
+  if (site === 'serverfault') return `https://serverfault.com/questions/${questionId}`;
+  if (site === 'unix') return `https://unix.stackexchange.com/questions/${questionId}`;
+  if (site === 'superuser') return `https://superuser.com/questions/${questionId}`;
+  if (site === 'dba') return `https://dba.stackexchange.com/questions/${questionId}`;
+  return `https://stackoverflow.com/questions/${questionId}`;
+}
+
+function stackExchangeSiteFromUrl(url: URL): StackExchangeSite | undefined {
+  if (/(^|\.)stackoverflow\.com$/i.test(url.hostname)) return 'stackoverflow';
+  if (/(^|\.)serverfault\.com$/i.test(url.hostname)) return 'serverfault';
+  if (/^unix\.stackexchange\.com$/i.test(url.hostname)) return 'unix';
+  if (/(^|\.)superuser\.com$/i.test(url.hostname)) return 'superuser';
+  if (/^dba\.stackexchange\.com$/i.test(url.hostname)) return 'dba';
+  return undefined;
+}
+
+function parseStackExchangeQuestion(raw: string, explicitSite?: StackExchangeSite): StackOverflowQuestionRef {
+  const value = raw.trim();
+  const prefixed = /^(?<site>[A-Za-z_]+):(?<questionId>\d+)$/.exec(value);
+  if (prefixed?.groups?.site && prefixed.groups.questionId) {
+    const site = stackExchangeSiteFromSource(prefixed.groups.site);
+    if (!site) throw new ValidationError('source must be one of: stack_overflow, server_fault, unix_linux, super_user, dba.');
+    return { questionId: prefixed.groups.questionId, url: stackExchangeQuestionUrl(site, prefixed.groups.questionId), site };
+  }
+  if (/^\d+$/.test(value)) {
+    const site = explicitSite ?? 'stackoverflow';
+    return { questionId: value, url: stackExchangeQuestionUrl(site, value), site };
+  }
+  try {
+    const url = new URL(value);
+    const site = stackExchangeSiteFromUrl(url);
+    if (!site) {
+      throw new ValidationError('question must be a Stack Exchange question id, source:id, or supported Stack Exchange URL.');
+    }
+    const match = /\/questions\/(\d+)/.exec(url.pathname);
+    if (!match) {
+      throw new ValidationError('Stack Exchange url must include a question id.');
+    }
+    return { questionId: match[1]!, url: url.toString(), site };
+  } catch (error) {
+    if (error instanceof ValidationError) throw error;
+    throw new ValidationError('question must be a Stack Exchange question id, source:id, or supported Stack Exchange URL.');
+  }
+}
+
+function stackExchangeSiteFromInput(input: Input): StackExchangeSite | undefined {
+  return stackExchangeSiteFromSource(optionalString(input, 'source') ?? optionalString(input, 'site'));
+}
+
+function parseStackExchangeQuestionInput(input: Input): StackOverflowQuestionRef {
+  return parseStackExchangeQuestion(requiredString(input, 'question'), stackExchangeSiteFromInput(input));
 }
 
 function parseGitHubRepoScope(value: string): { owner: string; repo: string } {
@@ -322,6 +387,27 @@ export function validateStackOverflowComments(value: unknown): StackOverflowComm
   const input = asInput(value);
   return {
     ...parseStackOverflowQuestion(requiredString(input, 'question')),
+    commentsLimit: boundedInteger(input, 'commentsLimit', STACK_OVERFLOW_COMMENTS_DEFAULT_LIMIT, STACK_OVERFLOW_COMMENTS_MAX_LIMIT),
+    commentsOffset: boundedOffset(input, 'commentsOffset', 0),
+  };
+}
+
+export function validateStackExchangeQuestionRef(value: unknown): StackOverflowQuestionRef {
+  return parseStackExchangeQuestionInput(asInput(value));
+}
+
+export function validateStackExchangeAnswers(value: unknown): StackOverflowAnswersRequest {
+  const input = asInput(value);
+  return {
+    ...parseStackExchangeQuestionInput(input),
+    limit: boundedInteger(input, 'limit', STACK_OVERFLOW_ANSWERS_DEFAULT_LIMIT, STACK_OVERFLOW_ANSWERS_MAX_LIMIT),
+  };
+}
+
+export function validateStackExchangeComments(value: unknown): StackOverflowCommentsRequest {
+  const input = asInput(value);
+  return {
+    ...parseStackExchangeQuestionInput(input),
     commentsLimit: boundedInteger(input, 'commentsLimit', STACK_OVERFLOW_COMMENTS_DEFAULT_LIMIT, STACK_OVERFLOW_COMMENTS_MAX_LIMIT),
     commentsOffset: boundedOffset(input, 'commentsOffset', 0),
   };

@@ -32,6 +32,9 @@ Discussion detail tools:
 - `stack_overflow_question_get`
 - `stack_overflow_answers_get`
 - `stack_overflow_comments_get`
+- `stack_exchange_question_get` — one Stack Exchange network question by URL, `site:id`, or id plus source/site: `{ question: "unix:535083", source?: "unix_linux", site?: "unix" }`
+- `stack_exchange_answers_get` — bounded answers for Stack Overflow, Server Fault, Unix & Linux, Super User, or DBA: `{ question: "serverfault:67316", limit?: 30 }`
+- `stack_exchange_comments_get` — bounded comments with offset pagination for Stack Exchange network questions: `{ question: "dba:80799", commentsLimit?: 30, commentsOffset?: 0 }`
 - `github_issue_get`
 - `github_pull_request_get`
 - `github_releases_get`
@@ -63,8 +66,12 @@ Current web tool behavior:
 - `web_fetch` is free/local: no browser, no JavaScript, no external extraction service. It allows only `https://`, blocks private/local/link-local targets, manually revalidates redirects, reads 2 MB by default, and accepts `maxBytes` up to 5 MB.
 
 Current `discussion_search` source filters:
-- `all` or omitted: Stack Overflow, GitHub issues, GitHub pull requests, GitHub Discussions, Dev.to, and Hacker News
+- `all` or omitted: Stack Overflow, Server Fault, Unix & Linux, Super User, DBA Stack Exchange, GitHub issues, GitHub pull requests, GitHub Discussions, Dev.to, and Hacker News
 - `stack_overflow`
+- `server_fault`
+- `unix_linux`
+- `super_user`
+- `dba`
 - `github` (issues + pull requests + discussions)
 - `github_issues`
 - `github_pull_requests`
@@ -74,10 +81,10 @@ Current `discussion_search` source filters:
 
 The legacy provider-specific tool modules remain internally testable so existing provider functionality, clients, normalization, bounds, and safety behavior are preserved behind the parent tools.
 
-Fan-out searches are resilient: if one source fails, `discussion_search` returns partial results plus `source_errors` instead of failing the entire tool call. Successful fan-out results are interleaved across sources before applying the global `limit`, avoiding first-source dominance. Dev.to currently uses a tag-based API, so multi-word queries derive a usable first tag before searching.
+Fan-out searches are resilient: if one source fails, `discussion_search` returns partial results plus `source_errors` instead of failing the entire tool call. Successful fan-out results are interleaved across sources before applying the global `limit`, avoiding first-source dominance. Stack Exchange network sources use the shared Stack Exchange API with the corresponding `site` parameter (`serverfault`, `unix`, `superuser`, `dba`) and return `stack_exchange_question_get` follow-ups for detail reads, with `stack_exchange_answers_get` and `stack_exchange_comments_get` available for deeper inspection. Dev.to currently uses a tag-based API, so multi-word queries derive a usable first tag before searching.
 
 ## Environment
-- `STACK_EXCHANGE_KEY` optional for higher Stack Exchange quota
+- `STACK_EXCHANGE_KEY` optional for higher Stack Exchange quota across Stack Overflow, Server Fault, Unix & Linux, Super User, and DBA Stack Exchange
 - `GITHUB_TOKEN` optional, env-only, public-read GitHub quota helper used by GitHub issue/PR/release/repo/file/code tools; required for GitHub Discussions when using the default API provider because GitHub GraphQL requires authentication
 - `OPENALEX_MAILTO` or `CROSSREF_MAILTO` optional, polite-pool identification for research APIs
 - `EXA_API_KEY` optional, higher quota/authenticated Exa MCP access for `web_search`
@@ -87,6 +94,7 @@ Fan-out searches are resilient: if one source fails, `discussion_search` returns
 Credentials stay in environment variables only. Tools never accept secrets as inputs and redact secret-like values from returned surfaces.
 
 ## Provider notes
+- Stack Exchange sources use the public Stack Exchange API via native `fetch`, with `site=stackoverflow`, `serverfault`, `unix`, `superuser`, or `dba` depending on the selected `discussion_search` source.
 - GitHub uses the official `octokit` SDK by default for read-only public issue, pull request, release, repository, file, code search, and Discussions tools; `~/.pi/agent/websearch.json` can select the `gh` CLI provider. GitHub Discussions use GraphQL (`SearchType.DISCUSSION` and `Repository.discussion`) and therefore require `GITHUB_TOKEN` with the API provider or an authenticated `gh` CLI with the `gh` provider.
 - Dev.to uses the public Forem API via native `fetch` with a tag-first MVP for article search.
 - Hacker News uses the Algolia HN Search API via native `fetch` for story search and story detail.
@@ -102,7 +110,7 @@ Credentials stay in environment variables only. Tools never accept secrets as in
 ## Source layout
 - `src/{providers,schemas,summaries,tools,types}/common/` contains cross-family primitives only: HTTP/text helpers, limits, formatting, tool runtime/registry/result helpers, provider/error/runtime/tool types.
 - `src/{providers,schemas,summaries,tools,types}/web/` contains general web modules and barrels for Exa/Parallel provider chaining plus safe `web_fetch`.
-- `src/{providers,schemas,summaries,tools,types}/discussions/` contains discussion-family source modules and barrels for Stack Overflow, GitHub, Dev.to, and Hacker News.
+- `src/{providers,schemas,summaries,tools,types}/discussions/` contains discussion-family source modules and barrels for Stack Exchange/Stack Overflow, GitHub, Dev.to, and Hacker News.
 - `src/{providers,schemas,summaries,tools,types}/research/` contains research-family source modules and barrels for OpenAlex, arXiv, Crossref, Europe PMC, and Semantic Scholar.
 - `src/tools/web/index.ts`, `src/tools/discussions/index.ts`, and `src/tools/research/index.ts` are parent-tool orchestrators (`web_search`, `discussion_search`, `research_search`) and source-module registrars.
 - Per-source research detail tools live in their source files (`src/tools/research/openalex.ts`, `arxiv.ts`, `crossref.ts`, `europe-pmc.ts`, `semantic-scholar.ts`).

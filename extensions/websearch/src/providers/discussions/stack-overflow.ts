@@ -1,5 +1,6 @@
 import type {
   StackExchangeClient,
+  StackExchangeSite,
   StackOverflowAnswersRequest,
   StackOverflowCommentsRequest,
   StackOverflowQuestionRef,
@@ -37,32 +38,37 @@ class DirectFetchStackExchangeClient implements StackExchangeClient {
   ) {}
 
   async searchQuestions(input: StackOverflowSearchRequest, signal?: AbortSignal): Promise<StackOverflowRawQuestion[]> {
-    const url = this.url('/search/advanced');
+    const site = input.site ?? 'stackoverflow';
+    const url = this.url('/search/advanced', site);
     url.searchParams.set('q', input.query);
     url.searchParams.set('pagesize', String(input.limit));
     url.searchParams.set('order', 'desc');
     url.searchParams.set('sort', 'relevance');
     url.searchParams.set('filter', STACK_EXCHANGE_BODY_FILTER);
-    return this.items(url, signal) as Promise<StackOverflowRawQuestion[]>;
+    return (await this.items(url, signal)).map((item) => ({ ...(item as Record<string, unknown>), site })) as StackOverflowRawQuestion[];
   }
 
   async getQuestion(input: StackOverflowQuestionRef, signal?: AbortSignal): Promise<StackOverflowRawQuestion | null> {
-    const url = this.url(`/questions/${encodeURIComponent(input.questionId)}`);
+    const site = input.site ?? 'stackoverflow';
+    const url = this.url(`/questions/${encodeURIComponent(input.questionId)}`, site);
     url.searchParams.set('filter', STACK_EXCHANGE_BODY_FILTER);
-    return ((await this.items(url, signal)) as StackOverflowRawQuestion[])[0] ?? null;
+    const item = ((await this.items(url, signal)) as StackOverflowRawQuestion[])[0];
+    return item ? { ...item, site } : null;
   }
 
   async getAnswers(input: StackOverflowAnswersRequest, signal?: AbortSignal): Promise<StackOverflowRawAnswer[]> {
-    const url = this.url(`/questions/${encodeURIComponent(input.questionId)}/answers`);
+    const site = input.site ?? 'stackoverflow';
+    const url = this.url(`/questions/${encodeURIComponent(input.questionId)}/answers`, site);
     url.searchParams.set('pagesize', String(input.limit));
     url.searchParams.set('order', 'desc');
     url.searchParams.set('sort', 'votes');
     url.searchParams.set('filter', STACK_EXCHANGE_BODY_FILTER);
-    return this.items(url, signal) as Promise<StackOverflowRawAnswer[]>;
+    return (await this.items(url, signal)).map((item) => ({ ...(item as Record<string, unknown>), site })) as StackOverflowRawAnswer[];
   }
 
   async getQuestionComments(input: StackOverflowCommentsRequest, signal?: AbortSignal): Promise<{ items: StackOverflowRawComment[]; hasMore: boolean }> {
-    const url = this.url(`/questions/${encodeURIComponent(input.questionId)}/comments`);
+    const site = input.site ?? 'stackoverflow';
+    const url = this.url(`/questions/${encodeURIComponent(input.questionId)}/comments`, site);
     url.searchParams.set('pagesize', String(input.commentsLimit));
     url.searchParams.set('page', String(Math.floor(input.commentsOffset / input.commentsLimit) + 1));
     url.searchParams.set('order', 'asc');
@@ -70,14 +76,14 @@ class DirectFetchStackExchangeClient implements StackExchangeClient {
     url.searchParams.set('filter', STACK_EXCHANGE_BODY_FILTER);
     const payload = await this.payload(url, signal);
     return {
-      items: (payload.items ?? []) as StackOverflowRawComment[],
+      items: (payload.items ?? []).map((item) => ({ ...(item as Record<string, unknown>), site })) as StackOverflowRawComment[],
       hasMore: payload.has_more === true,
     };
   }
 
-  private url(path: string): URL {
+  private url(path: string, site: StackExchangeSite = 'stackoverflow'): URL {
     const url = new URL(`${STACK_EXCHANGE_API_BASE}${path}`);
-    url.searchParams.set('site', 'stackoverflow');
+    url.searchParams.set('site', site);
     if (this.config.key) {
       url.searchParams.set('key', this.config.key);
     }
