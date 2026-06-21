@@ -4,10 +4,12 @@ import { discussionTools } from './discussions/index.js';
 import { githubTools } from './discussions/github.js';
 import { hackerNewsTools } from './discussions/hackernews.js';
 import { researchTools } from './research/index.js';
+import { webTools } from './web/index.js';
 import type { WebsearchToolModule } from './common/index.js';
 import { stackOverflowTools } from './discussions/stack-overflow.js';
 
 const parentToolModules = [
+  webTools,
   discussionTools,
   researchTools,
 ] as const satisfies readonly WebsearchToolModule[];

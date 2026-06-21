@@ -7,6 +7,7 @@ import {
   STACK_EXCHANGE_BODY_FILTER,
 } from './providers/discussions/index.js';
 import { createResearchClients } from './providers/research/index.js';
+import { createWebClients } from './providers/web/index.js';
 
 export { createStackExchangeClient, STACK_EXCHANGE_BODY_FILTER } from './providers/discussions/stack-overflow.js';
 
@@ -20,6 +21,7 @@ export function createWebsearchClients(runtime: WebsearchRuntime): WebsearchClie
     github: createGitHubClient(runtime),
     devto: createDevtoClient(runtime),
     hackerNews: createHackerNewsClient(runtime),
+    web: createWebClients(runtime),
     research: createResearchClients(runtime),
   };
 }

@@ -8,6 +8,7 @@ describe('websearch tool registration', () => {
     registerWebsearchTools(pi);
 
     expect(WEBSEARCH_TOOL_NAMES).toEqual([
+      'web_search',
       'discussion_search',
       'research_search',
       'openalex_work_get',
@@ -33,7 +34,7 @@ describe('websearch tool registration', () => {
       'hackernews_story_get',
     ]);
     expect(pi.tools.map((tool) => tool.name)).toEqual(WEBSEARCH_TOOL_NAMES);
-    expect(pi.tools).toHaveLength(23);
+    expect(pi.tools).toHaveLength(24);
     expect(pi.tools.map((tool) => tool.name)).not.toEqual(expect.arrayContaining([
       'search_stack_overflow',
       'search_github_issues',

@@ -4,6 +4,7 @@ import type { GitHubClient } from '../discussions/github.js';
 import type { HackerNewsClient } from '../discussions/hackernews.js';
 import type { StackExchangeClient } from '../discussions/stack-overflow.js';
 import type { ResearchClients } from '../research/index.js';
+import type { WebClients } from '../web/index.js';
 
 export interface WebsearchClients {
   stackExchange: StackExchangeClient;
@@ -11,6 +12,7 @@ export interface WebsearchClients {
   devto: DevtoClient;
   hackerNews: HackerNewsClient;
   research?: ResearchClients;
+  web?: WebClients;
 }
 
 export type CommandRunnerResult = {

@@ -103,6 +103,7 @@ export function clientsFromDeps(deps: RegisterWebsearchToolsDeps) {
       github: deps.clients.github ?? fallback.github,
       devto: deps.clients.devto ?? fallback.devto,
       hackerNews: deps.clients.hackerNews ?? fallback.hackerNews,
+      web: deps.clients.web ?? fallback.web,
       research: deps.clients.research ?? fallback.research,
     };
   }
