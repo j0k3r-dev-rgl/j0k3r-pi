@@ -87,14 +87,8 @@ export function namesFromAuthorRecords(value: unknown): string[] | undefined {
   return names.length > 0 ? names.slice(0, 12) : undefined;
 }
 
-export function followupTool(source: ResearchSource): string {
-  switch (source) {
-    case 'openalex': return 'openalex_work_get';
-    case 'arxiv': return 'arxiv_paper_get';
-    case 'crossref': return 'crossref_work_get';
-    case 'europe_pmc': return 'europe_pmc_article_get';
-    case 'semantic_scholar': return 'semantic_scholar_paper_get';
-  }
+export function followupTool(_source: ResearchSource): string {
+  return 'research_get';
 }
 
 export function withFollowup(item: NormalizedResearchItem, ref?: string | number): NormalizedResearchItem {

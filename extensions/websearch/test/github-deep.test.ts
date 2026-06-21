@@ -162,7 +162,7 @@ describe('github deep read-only tools', () => {
       name: 'oauth.ts',
       score: 3.14,
       snippet: 'createOAuthProvider({ provider: "github" })',
-      followup_tool: 'github_file_get',
+      followup_tool: 'github_get',
       followup_ref: 'acme/widgets:examples/oauth.ts',
     });
     expect(result.content[0]?.text).toContain('1. acme/widgets/examples/oauth.ts');

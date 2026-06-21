@@ -3,7 +3,7 @@ import { registerWebsearchTools, WEBSEARCH_TOOL_NAMES } from '../src/tools.js';
 import { createMockPi } from './helpers.js';
 
 describe('websearch tool registration', () => {
-  it('registers parent search tools plus source detail tools without provider-specific search tools', () => {
+  it('registers consolidated public tools without source-specific legacy detail tools', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi);
 
@@ -12,18 +12,23 @@ describe('websearch tool registration', () => {
       'web_fetch',
       'discussion_search',
       'research_search',
-      'openalex_work_get',
-      'openalex_work_citations_get',
-      'openalex_work_references_get',
-      'arxiv_paper_get',
-      'crossref_work_get',
-      'crossref_work_references_get',
-      'europe_pmc_article_get',
-      'europe_pmc_article_citations_get',
-      'europe_pmc_article_references_get',
-      'semantic_scholar_paper_get',
-      'semantic_scholar_paper_citations_get',
-      'semantic_scholar_paper_references_get',
+      'github_code_search',
+      'discussion_get',
+      'discussion_answers_get',
+      'discussion_comments_get',
+      'research_get',
+      'research_graph_get',
+      'github_get',
+    ]);
+    expect(pi.tools.map((tool) => tool.name)).toEqual(WEBSEARCH_TOOL_NAMES);
+    expect(pi.tools).toHaveLength(11);
+    expect(pi.tools.map((tool) => tool.name)).not.toEqual(expect.arrayContaining([
+      'search_stack_overflow',
+      'search_github_issues',
+      'search_github_pull_requests',
+      'github_discussion_search',
+      'search_devto_articles',
+      'search_hackernews',
       'stack_overflow_question_get',
       'stack_exchange_question_get',
       'stack_overflow_answers_get',
@@ -36,20 +41,21 @@ describe('websearch tool registration', () => {
       'github_release_get',
       'github_repo_get',
       'github_file_get',
-      'github_code_search',
       'github_discussion_get',
       'devto_comments_get',
       'hackernews_story_get',
-    ]);
-    expect(pi.tools.map((tool) => tool.name)).toEqual(WEBSEARCH_TOOL_NAMES);
-    expect(pi.tools).toHaveLength(32);
-    expect(pi.tools.map((tool) => tool.name)).not.toEqual(expect.arrayContaining([
-      'search_stack_overflow',
-      'search_github_issues',
-      'search_github_pull_requests',
-      'github_discussion_search',
-      'search_devto_articles',
-      'search_hackernews',
+      'openalex_work_get',
+      'openalex_work_citations_get',
+      'openalex_work_references_get',
+      'arxiv_paper_get',
+      'crossref_work_get',
+      'crossref_work_references_get',
+      'europe_pmc_article_get',
+      'europe_pmc_article_citations_get',
+      'europe_pmc_article_references_get',
+      'semantic_scholar_paper_get',
+      'semantic_scholar_paper_citations_get',
+      'semantic_scholar_paper_references_get',
     ]));
     const excludedProviderPattern = new RegExp(`red${'dit'}`, 'i');
     expect(pi.tools.map((tool) => tool.name).join(' ')).not.toMatch(excludedProviderPattern);

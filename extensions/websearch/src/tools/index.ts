@@ -1,54 +1,56 @@
 import type { RegisterWebsearchToolsDeps } from '../types.js';
+import type { WebsearchToolModule } from './common/index.js';
+import { withInternalTools } from './common/internal.js';
 import { devtoTools } from './discussions/devto.js';
-import { discussionTools } from './discussions/index.js';
+import { discussionGroupedTools } from './discussions/grouped.js';
 import { githubTools } from './discussions/github.js';
+import { githubGroupedTools } from './discussions/github-grouped.js';
 import { hackerNewsTools } from './discussions/hackernews.js';
+import { discussionTools } from './discussions/index.js';
+import { stackOverflowTools } from './discussions/stack-overflow.js';
+import { researchGroupedTools } from './research/grouped.js';
 import { researchTools } from './research/index.js';
 import { webTools } from './web/index.js';
-import type { WebsearchToolModule } from './common/index.js';
-import { stackOverflowTools } from './discussions/stack-overflow.js';
 
-const parentToolModules = [
-  webTools,
-  discussionTools,
-  researchTools,
-] as const satisfies readonly WebsearchToolModule[];
+const publicToolModules = [
+  { module: webTools },
+  { module: discussionTools },
+  { module: researchTools, names: ['research_search'] as const },
+  { module: githubTools, names: ['github_code_search'] as const },
+  { module: discussionGroupedTools },
+  { module: researchGroupedTools },
+  { module: githubGroupedTools },
+] as const satisfies readonly { module: WebsearchToolModule; names?: readonly string[] }[];
 
-const legacyToolModules = [
+const internalToolModules = [
   stackOverflowTools,
   githubTools,
   devtoTools,
   hackerNewsTools,
+  researchTools,
 ] as const satisfies readonly WebsearchToolModule[];
 
-const hiddenProviderSearchTools = new Set([
-  'search_stack_overflow',
-  'search_github_issues',
-  'search_github_pull_requests',
-  'github_discussion_search',
-  'search_devto_articles',
-  'search_hackernews',
-]);
+function publicNames(entry: typeof publicToolModules[number]): readonly string[] {
+  return 'names' in entry ? entry.names : entry.module.names;
+}
 
-export const WEBSEARCH_TOOL_NAMES = [
-  ...parentToolModules.flatMap((module) => [...module.names]),
-  ...legacyToolModules.flatMap((module) => [...module.names]).filter((name) => !hiddenProviderSearchTools.has(name)),
-] as readonly string[];
+export const WEBSEARCH_TOOL_NAMES = publicToolModules.flatMap((entry) => [...publicNames(entry)]) as readonly string[];
+
+const publicToolNames = new Set<string>(WEBSEARCH_TOOL_NAMES);
 
 export function registerWebsearchTools(pi: any, deps: RegisterWebsearchToolsDeps = {}): void {
-  for (const module of parentToolModules) {
-    module.register(pi, deps);
-  }
-
-  const filteredPi = {
+  const publicPi = {
     ...pi,
     registerTool(tool: { name: string }) {
-      if (!hiddenProviderSearchTools.has(tool.name)) {
+      if (publicToolNames.has(tool.name)) {
         pi.registerTool(tool);
       }
     },
   };
-  for (const module of legacyToolModules) {
-    module.register(filteredPi, deps);
+
+  const depsWithSharedInternalTools = withInternalTools(deps, internalToolModules);
+
+  for (const { module } of publicToolModules) {
+    module.register(publicPi, depsWithSharedInternalTools);
   }
 }

@@ -28,11 +28,12 @@ function semanticPaper(id: string, title: string) {
 }
 
 describe('research graph tools', () => {
-  it('registers graph tools only for sources with verified graph/reference support', () => {
+  it('registers the consolidated public research graph tool instead of provider-specific graph tools', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: {}, fetch: vi.fn<typeof fetch>() });
 
-    expect(WEBSEARCH_TOOL_NAMES).toEqual(expect.arrayContaining([
+    expect(WEBSEARCH_TOOL_NAMES).toEqual(expect.arrayContaining(['research_graph_get']));
+    expect(WEBSEARCH_TOOL_NAMES).not.toEqual(expect.arrayContaining([
       'openalex_work_citations_get',
       'openalex_work_references_get',
       'semantic_scholar_paper_citations_get',
@@ -40,8 +41,6 @@ describe('research graph tools', () => {
       'europe_pmc_article_citations_get',
       'europe_pmc_article_references_get',
       'crossref_work_references_get',
-    ]));
-    expect(WEBSEARCH_TOOL_NAMES).not.toEqual(expect.arrayContaining([
       'crossref_work_citations_get',
       'arxiv_paper_citations_get',
       'arxiv_paper_references_get',
@@ -49,7 +48,7 @@ describe('research graph tools', () => {
     expect(pi.tools.map((tool) => tool.name)).toEqual(WEBSEARCH_TOOL_NAMES);
   });
 
-  it('openalex_work_citations_get uses the referenced_works filter and normalizes citing works', async () => {
+  it('research_graph_get uses the OpenAlex referenced_works filter and normalizes citing works', async () => {
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
       const url = new URL(input.toString());
       expect(url.hostname).toBe('api.openalex.org');
@@ -61,16 +60,16 @@ describe('research graph tools', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: {}, fetch: fetchMock });
 
-    const result = await execute(pi.tools.find((tool) => tool.name === 'openalex_work_citations_get')!, { work: 'https://openalex.org/W4416037522', limit: 2 }) as any;
+    const result = await execute(pi.tools.find((tool) => tool.name === 'research_graph_get')!, { source: 'openalex', graph: 'citations', work: 'https://openalex.org/W4416037522', limit: 2 }) as any;
 
     expect(result.details.status).toBe('success');
     expect(result.details.data.relation).toBe('citations');
-    expect(result.details.data.items[0]).toMatchObject({ source: 'openalex', title: 'Citing OpenAlex Work', followup_tool: 'openalex_work_get' });
-    expect(result.content[0].text).toContain('openalex_work_citations_get');
+    expect(result.details.data.items[0]).toMatchObject({ source: 'openalex', title: 'Citing OpenAlex Work', followup_tool: 'research_get' });
+    expect(result.content[0].text).toContain('research_graph_get');
     expect(result.content[0].text).toContain('Citing OpenAlex Work');
   });
 
-  it('openalex_work_references_get resolves referenced_works and fetches referenced work details', async () => {
+  it('research_graph_get resolves OpenAlex referenced_works and fetches referenced work details', async () => {
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
       const url = new URL(input.toString());
       if (url.pathname === '/works/W3035965352') {
@@ -83,7 +82,7 @@ describe('research graph tools', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: {}, fetch: fetchMock });
 
-    const result = await execute(pi.tools.find((tool) => tool.name === 'openalex_work_references_get')!, { work: 'W3035965352', limit: 2 }) as any;
+    const result = await execute(pi.tools.find((tool) => tool.name === 'research_graph_get')!, { source: 'openalex', graph: 'references', work: 'W3035965352', limit: 2 }) as any;
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(result.details.data.relation).toBe('references');
@@ -103,8 +102,8 @@ describe('research graph tools', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: { SEMANTIC_SCHOLAR_API_KEY: 's2-key' }, fetch: fetchMock });
 
-    const citations = await execute(pi.tools.find((tool) => tool.name === 'semantic_scholar_paper_citations_get')!, { paper: '1706.03762v7', limit: 2 }) as any;
-    const references = await execute(pi.tools.find((tool) => tool.name === 'semantic_scholar_paper_references_get')!, { paper: '1706.03762v7', limit: 2 }) as any;
+    const citations = await execute(pi.tools.find((tool) => tool.name === 'research_graph_get')!, { source: 'semantic_scholar', graph: 'citations', paper: '1706.03762v7', limit: 2 }) as any;
+    const references = await execute(pi.tools.find((tool) => tool.name === 'research_graph_get')!, { source: 'semantic_scholar', graph: 'references', paper: '1706.03762v7', limit: 2 }) as any;
 
     expect(citations.details.data.items[0]).toMatchObject({ source: 'semantic_scholar', title: 'Citing Semantic Paper' });
     expect(citations.details.data.next_offset).toBe(2);
@@ -124,14 +123,14 @@ describe('research graph tools', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: {}, fetch: fetchMock });
 
-    const citations = await execute(pi.tools.find((tool) => tool.name === 'europe_pmc_article_citations_get')!, { article: '40603360', limit: 1 }) as any;
-    const references = await execute(pi.tools.find((tool) => tool.name === 'europe_pmc_article_references_get')!, { article: '40603360', limit: 1 }) as any;
+    const citations = await execute(pi.tools.find((tool) => tool.name === 'research_graph_get')!, { source: 'europe_pmc', graph: 'citations', article: '40603360', limit: 1 }) as any;
+    const references = await execute(pi.tools.find((tool) => tool.name === 'research_graph_get')!, { source: 'europe_pmc', graph: 'references', article: '40603360', limit: 1 }) as any;
 
     expect(citations.details.data.items[0]).toMatchObject({ source: 'europe_pmc', title: 'Citing Europe PMC Article', pmid: '40700000' });
     expect(references.details.data.items[0]).toMatchObject({ source: 'europe_pmc', title: 'Referenced Europe PMC Article', pmid: '30500000' });
   });
 
-  it('crossref_work_references_get slices deposited reference metadata without pretending inbound citations exist', async () => {
+  it('research_graph_get slices Crossref deposited reference metadata without pretending inbound citations exist', async () => {
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
       const url = new URL(input.toString());
       expect(url.pathname).toBe('/works/10.1038%2Fs41586-020-2649-2');
@@ -143,13 +142,13 @@ describe('research graph tools', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: {}, fetch: fetchMock });
 
-    const result = await execute(pi.tools.find((tool) => tool.name === 'crossref_work_references_get')!, { doi: '10.1038/s41586-020-2649-2', limit: 1, offset: 1 }) as any;
+    const result = await execute(pi.tools.find((tool) => tool.name === 'research_graph_get')!, { source: 'crossref', graph: 'references', doi: '10.1038/s41586-020-2649-2', limit: 1, offset: 1 }) as any;
 
     expect(result.details.status).toBe('success');
     expect(result.details.data.relation).toBe('references');
     expect(result.details.data.total).toBe(2);
     expect(result.details.data.items).toHaveLength(1);
     expect(result.details.data.items[0]).toMatchObject({ source: 'crossref', title: 'Numerical Python.' });
-    expect(result.content[0].text).toContain('crossref_work_references_get');
+    expect(result.content[0].text).toContain('research_graph_get');
   });
 });

@@ -302,7 +302,7 @@ export const githubTools: WebsearchToolModule<typeof githubToolNames[number]> = 
 
     registerTool(pi, {
       name: 'github_code_search',
-      description: 'Search GitHub code with bounded read-only results and github_file_get follow-up refs.',
+      description: 'Search GitHub code with bounded read-only results and github_get file follow-up refs.',
       parameters: githubCodeSearchParameters,
       async execute(_id: string, params: unknown, _unused1?: unknown, _unused2?: unknown, context?: ExecuteContext): Promise<PiToolResult<GitHubCodeSearchResult>> {
         try {

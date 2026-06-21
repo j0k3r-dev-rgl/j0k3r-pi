@@ -284,7 +284,7 @@ export type NormalizedGitHubCodeSearchItem = {
   url?: string;
   score?: number;
   snippet?: string;
-  followup_tool: 'github_file_get';
+  followup_tool: 'github_get';
   followup_ref: string;
 };
 

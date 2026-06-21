@@ -33,7 +33,7 @@ describe('stack exchange network discussion sources', () => {
       source_query: 'server_fault',
       kind: 'question',
       title: 'Nginx HTTPS rewrite on Server Fault',
-      followup_tool: 'stack_exchange_question_get',
+      followup_tool: 'discussion_get',
       followup_ref: 'serverfault:67316',
       metadata: { site: 'serverfault', tags: ['nginx', 'https'], answered: true },
     });

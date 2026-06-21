@@ -68,7 +68,7 @@ describe('generic websearch meta-tools', () => {
       title: 'SQLite vec discussion',
       url: 'https://example.com/sqlite-vec',
       entity_id: '123',
-      followup_tool: 'hackernews_story_get',
+      followup_tool: 'discussion_get',
       followup_ref: 123,
     });
     expect(result.content[0]?.text).toContain('[hacker_news/story] SQLite vec discussion');
@@ -111,7 +111,7 @@ describe('generic websearch meta-tools', () => {
     expect(result.details.status).toBe('success');
     expect(result.details.data.sources_searched).toEqual(['github_discussions']);
     expect(result.details.data.source_errors).toEqual([]);
-    expect(result.details.data.items[0]).toMatchObject({ source: 'github', source_query: 'github_discussions', kind: 'discussion', title: 'Agent memory discussion', followup_tool: 'github_discussion_get', followup_ref: 'acme/widgets#42' });
+    expect(result.details.data.items[0]).toMatchObject({ source: 'github', source_query: 'github_discussions', kind: 'discussion', title: 'Agent memory discussion', followup_tool: 'discussion_get', followup_ref: 'acme/widgets#42' });
     expect(result.content[0]?.text).toContain('[github/discussion] Agent memory discussion');
   });
 
@@ -151,7 +151,7 @@ describe('generic websearch meta-tools', () => {
         source_query: source,
         kind: 'question',
         title: `${site} nginx answer`,
-        followup_tool: 'stack_exchange_question_get',
+        followup_tool: 'discussion_get',
         followup_ref: `${site}:${700 + String(site).length}`,
         metadata: { site },
       });

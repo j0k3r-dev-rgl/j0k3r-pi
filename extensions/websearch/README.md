@@ -8,43 +8,32 @@ Read-only Pi extension for bounded web, community, and research search.
 - `discussion_search` — parent search tool for community/human discussion sources. It can fan out across current sources or target one source with `source`.
 - `research_search` — parent search tool for academic/research sources. It can fan out across OpenAlex, arXiv, Crossref, Europe PMC, and Semantic Scholar or target one source with `source`.
 
-Provider-specific search tools are intentionally hidden in favor of parent search tools (`web_search`, `discussion_search`, and `research_search`), while `web_fetch` and detail/get tools remain public so agents can inspect selected results:
+Provider-specific source tools are intentionally hidden in favor of parent search tools and grouped detail routers. The public tool surface is:
 
-Research detail and graph tools:
+Search and fetch tools:
 
-- `openalex_work_get`
-- `openalex_work_citations_get`
-- `openalex_work_references_get`
-- `arxiv_paper_get`
-- `crossref_work_get`
-- `crossref_work_references_get`
-- `europe_pmc_article_get`
-- `europe_pmc_article_citations_get`
-- `europe_pmc_article_references_get`
-- `semantic_scholar_paper_get`
-- `semantic_scholar_paper_citations_get`
-- `semantic_scholar_paper_references_get`
-
-Research graph decisions and provider evidence are documented in [`docs/research-graph-tools.md`](docs/research-graph-tools.md). arXiv graph tools and Crossref inbound citation tools are intentionally not exposed because the investigated APIs did not provide verified graph endpoints for those capabilities.
+- `web_search`
+- `web_fetch`
+- `discussion_search`
+- `research_search`
+- `github_code_search` — bounded code search with `github_get` file follow-ups: `{ query: "OAuth provider", repo?: "owner/repo", owner?: "org", language?: "TypeScript", path?: "examples", limit?: 10 }`
 
 Discussion detail tools:
 
-- `stack_overflow_question_get`
-- `stack_overflow_answers_get`
-- `stack_overflow_comments_get`
-- `stack_exchange_question_get` — one Stack Exchange network question by URL, `site:id`, or id plus source/site: `{ question: "unix:535083", source?: "unix_linux", site?: "unix" }`
-- `stack_exchange_answers_get` — bounded answers for Stack Overflow, Server Fault, Unix & Linux, Super User, or DBA: `{ question: "serverfault:67316", limit?: 30 }`
-- `stack_exchange_comments_get` — bounded comments with offset pagination for Stack Exchange network questions: `{ question: "dba:80799", commentsLimit?: 30, commentsOffset?: 0 }`
-- `github_issue_get`
-- `github_pull_request_get`
-- `github_releases_get`
-- `github_release_get`
-- `github_repo_get` — repository metadata plus README by default: `{ repo: "owner/repo", includeReadme?: boolean }`
-- `github_file_get` — one repository file by path/ref: `{ repo: "owner/repo", path: "README.md", ref?: "main" }`
-- `github_code_search` — bounded code search with `github_file_get` follow-ups: `{ query: "OAuth provider", repo?: "owner/repo", owner?: "org", language?: "TypeScript", path?: "examples", limit?: 10 }`
-- `github_discussion_get` — one GitHub Discussion by URL or `owner/repo#number` with bounded comments; use `discussion_search` with `source: "github_discussions"` to find discussions first: `{ discussion: "owner/repo#123", commentsLimit?: 20, commentsOffset?: 0 }`
-- `devto_comments_get`
-- `hackernews_story_get`
+- `discussion_get` — open one selected Stack Exchange question, GitHub issue/pull request/discussion, or Hacker News story: `{ source: "unix_linux", ref: "unix:535083" }`, `{ source: "github_issue", ref: "owner/repo#123" }`, `{ source: "hacker_news", ref: 123 }`.
+- `discussion_answers_get` — bounded Stack Exchange answers: `{ source: "server_fault", ref: "serverfault:67316", limit?: 30 }`.
+- `discussion_comments_get` — bounded comments/replies/review comments where supported, including Stack Exchange, GitHub issue/pull request/discussion, Dev.to article comments, and Hacker News story comments via the story detail path.
+
+Research detail and graph tools:
+
+- `research_get` — open one selected OpenAlex, arXiv, Crossref, Europe PMC, or Semantic Scholar item: `{ source: "openalex", ref: "W123" }`, `{ source: "crossref", doi: "10.1234/example" }`.
+- `research_graph_get` — fetch citations or references where provider support is verified: `{ source: "openalex", graph: "citations", ref: "W123", limit?: 5 }`.
+
+GitHub non-discussion detail tool:
+
+- `github_get` — fetch repository metadata, one file, one release, or recent releases: `{ kind: "repo", repo: "owner/repo" }`, `{ kind: "file", ref: "owner/repo:path/to/file.ts" }`, `{ kind: "release", repo: "owner/repo", tag: "v1.0.0" }`, `{ kind: "releases", repo: "owner/repo" }`.
+
+Research graph decisions and provider evidence are documented in [`docs/research-graph-tools.md`](docs/research-graph-tools.md). arXiv graph access and Crossref inbound citations are intentionally not exposed because the investigated APIs did not provide verified graph endpoints for those capabilities.
 
 Current `research_search` source filters:
 - `all` or omitted: OpenAlex, arXiv, Crossref, Europe PMC, and Semantic Scholar
@@ -54,7 +43,7 @@ Current `research_search` source filters:
 - `europe_pmc`
 - `semantic_scholar`
 
-Research sources are consulted when selected. If a source is rate-limited or unavailable, `research_search` returns partial results plus `source_errors` explaining the failure. Semantic Scholar automatically uses `SEMANTIC_SCHOLAR_API_KEY` when present and otherwise attempts the free quota. Research search results include `followup_tool` and `followup_ref` fields pointing to the matching detail tool.
+Research sources are consulted when selected. If a source is rate-limited or unavailable, `research_search` returns partial results plus `source_errors` explaining the failure. Semantic Scholar automatically uses `SEMANTIC_SCHOLAR_API_KEY` when present and otherwise attempts the free quota. Research search and graph results include `followup_tool: "research_get"` plus `followup_ref` and `source` so agents can inspect selected items through the grouped detail router.
 
 Current web tool behavior:
 - `web_search` uses Exa MCP (`https://mcp.exa.ai/mcp`) as the primary provider.
@@ -79,13 +68,13 @@ Current `discussion_search` source filters:
 - `devto`
 - `hacker_news`
 
-The legacy provider-specific tool modules remain internally testable so existing provider functionality, clients, normalization, bounds, and safety behavior are preserved behind the parent tools.
+The legacy provider-specific tool modules remain internally testable so existing provider functionality, clients, normalization, bounds, and safety behavior are preserved behind the public parent/grouped tools.
 
-Fan-out searches are resilient: if one source fails, `discussion_search` returns partial results plus `source_errors` instead of failing the entire tool call. Successful fan-out results are interleaved across sources before applying the global `limit`, avoiding first-source dominance. Stack Exchange network sources use the shared Stack Exchange API with the corresponding `site` parameter (`serverfault`, `unix`, `superuser`, `dba`) and return `stack_exchange_question_get` follow-ups for detail reads, with `stack_exchange_answers_get` and `stack_exchange_comments_get` available for deeper inspection. Dev.to currently uses a tag-based API, so multi-word queries derive a usable first tag before searching.
+Fan-out searches are resilient: if one source fails, `discussion_search` returns partial results plus `source_errors` instead of failing the entire tool call. Successful fan-out results are interleaved across sources before applying the global `limit`, avoiding first-source dominance. Stack Exchange network sources use the shared Stack Exchange API with the corresponding `site` parameter (`serverfault`, `unix`, `superuser`, `dba`) and return `discussion_get` follow-ups for detail reads, with `discussion_answers_get` and `discussion_comments_get` available for deeper inspection. Dev.to currently uses a tag-based API, so multi-word queries derive a usable first tag before searching and article comment follow-ups use `discussion_comments_get`.
 
 ## Environment
 - `STACK_EXCHANGE_KEY` optional for higher Stack Exchange quota across Stack Overflow, Server Fault, Unix & Linux, Super User, and DBA Stack Exchange
-- `GITHUB_TOKEN` optional, env-only, public-read GitHub quota helper used by GitHub issue/PR/release/repo/file/code tools; required for GitHub Discussions when using the default API provider because GitHub GraphQL requires authentication
+- `GITHUB_TOKEN` optional, env-only, public-read GitHub quota helper used by GitHub issue/PR/discussion/release/repo/file/code functionality; required for GitHub Discussions when using the default API provider because GitHub GraphQL requires authentication
 - `OPENALEX_MAILTO` or `CROSSREF_MAILTO` optional, polite-pool identification for research APIs
 - `EXA_API_KEY` optional, higher quota/authenticated Exa MCP access for `web_search`
 - `PARALLEL_API_KEY` optional, higher quota/authenticated Parallel MCP access for `web_search`
@@ -113,7 +102,8 @@ Credentials stay in environment variables only. Tools never accept secrets as in
 - `src/{providers,schemas,summaries,tools,types}/discussions/` contains discussion-family source modules and barrels for Stack Exchange/Stack Overflow, GitHub, Dev.to, and Hacker News.
 - `src/{providers,schemas,summaries,tools,types}/research/` contains research-family source modules and barrels for OpenAlex, arXiv, Crossref, Europe PMC, and Semantic Scholar.
 - `src/tools/web/index.ts`, `src/tools/discussions/index.ts`, and `src/tools/research/index.ts` are parent-tool orchestrators (`web_search`, `discussion_search`, `research_search`) and source-module registrars.
-- Per-source research detail tools live in their source files (`src/tools/research/openalex.ts`, `arxiv.ts`, `crossref.ts`, `europe-pmc.ts`, `semantic-scholar.ts`).
+- `src/tools/discussions/grouped.ts`, `src/tools/discussions/github-grouped.ts`, and `src/tools/research/grouped.ts` expose the public grouped routers while delegating to internally registered source modules.
+- Per-source research detail tools live in their source files (`src/tools/research/openalex.ts`, `arxiv.ts`, `crossref.ts`, `europe-pmc.ts`, `semantic-scholar.ts`) and remain internal behind `research_get` / `research_graph_get`.
 - `src/tools/index.ts`, `src/tools.ts`, `src/types.ts`, and `src/client.ts` remain entry/facade files; provider-specific implementation should not be added there.
 - `src/types/shared.ts` was removed; shared/common types belong under `src/types/common/` and family/source types belong under their family folders.
 
@@ -122,7 +112,7 @@ Credentials stay in environment variables only. Tools never accept secrets as in
 - Search tools return bounded result counts with concise snippets.
 - `web_fetch` only fetches HTTPS text-like content (`text/html`, `application/xhtml+xml`, text/plain/markdown, and JSON), blocks embedded credentials and unsafe/private/local resolved addresses, follows at most 3 safe redirects, reads 2 MB by default, and caps `maxBytes` at 5 MB.
 - Research graph tools return bounded citation/reference lists with explicit provider pagination (`limit` plus `page` or `offset`).
-- Detail/get tools expose the full text returned by the provider for selected bodies, abstracts, notes, comments, READMEs, repository files, and selected GitHub Discussion comments; they are bounded by explicit provider/API availability and pagination parameters such as comment limits, offsets, and nested comment depth, not by arbitrary summary truncation. GitHub code and discussion search remain bounded to at most 10 results and return follow-up refs instead of bulk content.
+- Grouped detail/get tools expose the full text returned by the provider for selected bodies, abstracts, notes, comments, READMEs, repository files, and selected GitHub Discussion comments; they are bounded by explicit provider/API availability and pagination parameters such as comment limits, offsets, and nested comment depth, not by arbitrary summary truncation. GitHub code and discussion search remain bounded to at most 10 results and return follow-up refs instead of bulk content.
 - Secret-like strings are redacted as `[REDACTED_SECRET]` across `content`, `details`, and structured errors.
 - Provider errors are returned as structured recoverable failures when possible.
 - Community content is untrusted display content only.

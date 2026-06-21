@@ -197,9 +197,9 @@ export function normalizeStackOverflowQuestion(raw: StackOverflowRawQuestion): N
     snippet: truncateText(body ?? stringValue(data.title), 300),
     body,
     follow_up: {
-      answers_tool: site === 'stackoverflow' ? 'stack_overflow_answers_get' : 'stack_exchange_answers_get',
+      answers_tool: 'discussion_answers_get',
       answers_ref: followUpRef,
-      comments_tool: site === 'stackoverflow' ? 'stack_overflow_comments_get' : 'stack_exchange_comments_get',
+      comments_tool: 'discussion_comments_get',
       comments_ref: followUpRef,
     },
     availability: body || data.body_markdown !== undefined ? { status: 'available' } : { status: 'unavailable', reason: 'body_unavailable' },
@@ -447,7 +447,7 @@ export function normalizeGitHubCodeSearchItem(raw: GitHubRawCodeSearchItem): Nor
     url: stringValue(data.html_url),
     score: numberValue(data.score),
     snippet: githubTextMatchSnippet(data),
-    followup_tool: 'github_file_get',
+    followup_tool: 'github_get',
     followup_ref: `${repository}:${path}`,
   };
 }

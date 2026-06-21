@@ -88,19 +88,19 @@ describe('websearch TUI rendering', () => {
     };
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: {}, fetch: vi.fn<typeof fetch>(), createClients: () => clients });
-    const tool = pi.tools.find((entry) => entry.name === 'github_issue_get')!;
+    const tool = pi.tools.find((entry) => entry.name === 'discussion_get')!;
 
-    const result = await execute(tool, { issue: 'acme/repo#42' }) as { content: Array<{ text: string }> };
+    const result = await execute(tool, { source: 'github_issue', issue: 'acme/repo#42' }) as { content: Array<{ text: string }> };
     expect(result.content[0]?.text).toContain('WEBSEARCH_RENDER_FULL_BODY_END');
 
     const compact = renderLines(tool, result, false);
     const expanded = renderLines(tool, result, true);
 
-    expect(compact).toContain('github_issue_get');
+    expect(compact).toContain('discussion_get');
     expect(compact).toContain('Long issue detail');
     expect(compact).toContain('ctrl+o expand');
     expect(compact).not.toContain('WEBSEARCH_RENDER_FULL_BODY_END');
-    expect(expanded).toContain('github_issue_get');
+    expect(expanded).toContain('discussion_get');
     expect(expanded).toContain('ctrl+o collapse');
     expect(expanded).toContain('WEBSEARCH_RENDER_FULL_BODY_END');
   });

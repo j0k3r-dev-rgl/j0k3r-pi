@@ -23,7 +23,7 @@ function arxivXml(summary: string) {
 }
 
 describe('detail tool output completeness', () => {
-  it('github_issue_get exposes the full available issue body in details and content', async () => {
+  it('discussion_get exposes the full available GitHub issue body in details and content', async () => {
     const clients = {
       stackExchange: { searchQuestions: vi.fn(), getQuestion: vi.fn(), getAnswers: vi.fn(), getQuestionComments: vi.fn() },
       github: {
@@ -53,7 +53,7 @@ describe('detail tool output completeness', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: {}, fetch: vi.fn<typeof fetch>(), createClients: () => clients });
 
-    const result = (await execute(pi.tools.find((tool) => tool.name === 'github_issue_get')!, { issue: 'acme/repo#42' })) as {
+    const result = (await execute(pi.tools.find((tool) => tool.name === 'discussion_get')!, { source: 'github_issue', issue: 'acme/repo#42' })) as {
       content: Array<{ text: string }>;
       details: { status: 'success'; data: { body?: string } };
     };
@@ -64,12 +64,12 @@ describe('detail tool output completeness', () => {
     expect(result.content[0]?.text).not.toMatch(/…$/);
   });
 
-  it('arxiv_paper_get exposes the full available abstract in details and content', async () => {
+  it('research_get exposes the full available arXiv abstract in details and content', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(arxivXml(longArxivAbstract), { status: 200, headers: { 'content-type': 'application/atom+xml' } }));
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: {}, fetch: fetchMock });
 
-    const result = (await execute(pi.tools.find((tool) => tool.name === 'arxiv_paper_get')!, { paper: '2604.15484v1' })) as {
+    const result = (await execute(pi.tools.find((tool) => tool.name === 'research_get')!, { source: 'arxiv', paper: '2604.15484v1' })) as {
       content: Array<{ text: string }>;
       details: { status: 'success'; data: { abstract?: string; summary?: string } };
     };
@@ -81,7 +81,7 @@ describe('detail tool output completeness', () => {
     expect(result.content[0]?.text).not.toMatch(/…$/);
   });
 
-  it('hackernews_story_get exposes full bounded story/comment text returned by the provider', async () => {
+  it('discussion_get exposes full bounded Hacker News story/comment text returned by the provider', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(response({
       id: 123,
       title: 'Long HN story',
@@ -97,7 +97,7 @@ describe('detail tool output completeness', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: {}, fetch: fetchMock });
 
-    const result = (await execute(pi.tools.find((tool) => tool.name === 'hackernews_story_get')!, { story_id: 123, commentsLimit: 1 })) as {
+    const result = (await execute(pi.tools.find((tool) => tool.name === 'discussion_get')!, { source: 'hacker_news', story_id: 123, commentsLimit: 1 })) as {
       content: Array<{ text: string }>;
       details: { status: 'success'; data: { body?: string; comments: Array<{ body?: string }> } };
     };

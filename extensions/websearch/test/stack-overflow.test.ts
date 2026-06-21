@@ -117,9 +117,9 @@ describe('stack overflow tool behavior', () => {
       body: `${'Full question body with semantic details about AbortController timeouts. '.repeat(12)}final sentence should remain visible.`,
       accepted_answer_id: '456',
       follow_up: {
-        answers_tool: 'stack_overflow_answers_get',
+        answers_tool: 'discussion_answers_get',
         answers_ref: '12345',
-        comments_tool: 'stack_overflow_comments_get',
+        comments_tool: 'discussion_comments_get',
         comments_ref: '12345',
       },
       availability: { status: 'available' },
@@ -127,8 +127,8 @@ describe('stack overflow tool behavior', () => {
     expect(result.content[0]?.text).toContain('Question detail');
     expect(result.content[0]?.text).toContain('question_id: 12345');
     expect(result.content[0]?.text).toContain('accepted_answer_id: 456');
-    expect(result.content[0]?.text).toContain('use stack_overflow_answers_get with question: 12345');
-    expect(result.content[0]?.text).toContain('use stack_overflow_comments_get with question: 12345');
+    expect(result.content[0]?.text).toContain('use discussion_answers_get with question: 12345');
+    expect(result.content[0]?.text).toContain('use discussion_comments_get with question: 12345');
     expect(result.content[0]?.text).toContain('Full question body with semantic details about AbortController timeouts.');
     expect(result.content[0]?.text).toContain('final sentence should remain visible.');
     const url = fetchMock.mock.calls[0]?.[0].toString() ?? '';

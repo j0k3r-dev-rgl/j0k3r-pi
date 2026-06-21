@@ -112,11 +112,12 @@ function createResearchDetailFetch(options: { missing?: string; semanticRateLimi
 }
 
 describe('research source detail tools', () => {
-  it('registers public get tools for every research source', () => {
+  it('registers the consolidated public research_get tool instead of provider-specific get tools', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: {}, fetch: vi.fn<typeof fetch>() });
 
-    expect(pi.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
+    expect(pi.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(['research_get']));
+    expect(pi.tools.map((tool) => tool.name)).not.toEqual(expect.arrayContaining([
       'openalex_work_get',
       'arxiv_paper_get',
       'crossref_work_get',
@@ -130,7 +131,7 @@ describe('research source detail tools', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: {}, fetch: fetchMock });
 
-    const result = (await execute(pi.tools.find((tool) => tool.name === 'openalex_work_get')!, { work: 'https://openalex.org/W123' })) as {
+    const result = (await execute(pi.tools.find((tool) => tool.name === 'research_get')!, { source: 'openalex', work: 'https://openalex.org/W123' })) as {
       content: Array<{ text: string }>;
       details: { status: 'success'; data: Record<string, unknown> };
     };
@@ -146,7 +147,7 @@ describe('research source detail tools', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: {}, fetch: fetchMock });
 
-    const result = (await execute(pi.tools.find((tool) => tool.name === 'arxiv_paper_get')!, { paper: '2506.23071v2' })) as {
+    const result = (await execute(pi.tools.find((tool) => tool.name === 'research_get')!, { source: 'arxiv', paper: '2506.23071v2' })) as {
       details: { status: 'success'; data: Record<string, unknown> };
     };
 
@@ -159,7 +160,7 @@ describe('research source detail tools', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: {}, fetch: fetchMock });
 
-    const result = (await execute(pi.tools.find((tool) => tool.name === 'crossref_work_get')!, { doi: 'https://doi.org/10.21105/joss.08033' })) as {
+    const result = (await execute(pi.tools.find((tool) => tool.name === 'research_get')!, { source: 'crossref', doi: 'https://doi.org/10.21105/joss.08033' })) as {
       details: { status: 'success'; data: Record<string, unknown> };
     };
 
@@ -172,7 +173,7 @@ describe('research source detail tools', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: {}, fetch: fetchMock });
 
-    const result = (await execute(pi.tools.find((tool) => tool.name === 'europe_pmc_article_get')!, { article: 'PMC12223224' })) as {
+    const result = (await execute(pi.tools.find((tool) => tool.name === 'research_get')!, { source: 'europe_pmc', article: 'PMC12223224' })) as {
       details: { status: 'success'; data: Record<string, unknown> };
     };
 
@@ -185,7 +186,7 @@ describe('research source detail tools', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: { SEMANTIC_SCHOLAR_API_KEY: 's2-key' }, fetch: fetchMock });
 
-    const result = (await execute(pi.tools.find((tool) => tool.name === 'semantic_scholar_paper_get')!, { paper: 'DOI:10.5555/s2' })) as {
+    const result = (await execute(pi.tools.find((tool) => tool.name === 'research_get')!, { source: 'semantic_scholar', paper: 'DOI:10.5555/s2' })) as {
       details: { status: 'success'; data: Record<string, unknown> };
     };
 
@@ -194,7 +195,7 @@ describe('research source detail tools', () => {
 
     const rateLimitedPi = createMockPi();
     registerWebsearchTools(rateLimitedPi, { env: {}, fetch: createResearchDetailFetch({ semanticRateLimited: true }) });
-    const failed = (await execute(rateLimitedPi.tools.find((tool) => tool.name === 'semantic_scholar_paper_get')!, { paper: 's2-123' })) as {
+    const failed = (await execute(rateLimitedPi.tools.find((tool) => tool.name === 'research_get')!, { source: 'semantic_scholar', paper: 's2-123' })) as {
       details: { status: 'failure'; error: Record<string, unknown> };
     };
     expect(failed.details.status).toBe('failure');

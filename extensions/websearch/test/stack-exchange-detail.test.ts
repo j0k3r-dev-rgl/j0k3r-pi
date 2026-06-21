@@ -3,7 +3,7 @@ import { registerWebsearchTools } from '../src/tools.js';
 import { createMockPi, execute, response } from './helpers.js';
 
 describe('stack exchange network detail tools', () => {
-  it('stack_exchange_question_get fetches one network question by URL and returns answer/comment followups', async () => {
+  it('discussion_get fetches one network question by URL and returns answer/comment followups', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(response({
       items: [{
         question_id: 535083,
@@ -23,9 +23,9 @@ describe('stack exchange network detail tools', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: { STACK_EXCHANGE_KEY: 'se-key' }, fetch: fetchMock });
 
-    const tool = pi.tools.find((entry) => entry.name === 'stack_exchange_question_get');
+    const tool = pi.tools.find((entry) => entry.name === 'discussion_get');
     expect(tool).toBeDefined();
-    const result = (await execute(tool!, { question: 'https://unix.stackexchange.com/questions/535083/nginx-emerg-getpwnam-nginx-failed' })) as {
+    const result = (await execute(tool!, { source: 'unix_linux', question: 'https://unix.stackexchange.com/questions/535083/nginx-emerg-getpwnam-nginx-failed' })) as {
       content: Array<{ text: string }>;
       details: { status: 'success'; data: Record<string, unknown> };
     };
@@ -38,15 +38,15 @@ describe('stack exchange network detail tools', () => {
       title: 'nginx getpwnam failed on Unix Linux',
       body: 'Unix Linux question body with nginx user troubleshooting details.',
       follow_up: {
-        answers_tool: 'stack_exchange_answers_get',
+        answers_tool: 'discussion_answers_get',
         answers_ref: 'unix:535083',
-        comments_tool: 'stack_exchange_comments_get',
+        comments_tool: 'discussion_comments_get',
         comments_ref: 'unix:535083',
       },
     });
     expect(result.content[0]?.text).toContain('site: unix');
-    expect(result.content[0]?.text).toContain('use stack_exchange_answers_get with question: unix:535083');
-    expect(result.content[0]?.text).toContain('use stack_exchange_comments_get with question: unix:535083');
+    expect(result.content[0]?.text).toContain('use discussion_answers_get with question: unix:535083');
+    expect(result.content[0]?.text).toContain('use discussion_comments_get with question: unix:535083');
     const url = fetchMock.mock.calls[0]?.[0].toString() ?? '';
     expect(url).toContain('/questions/535083');
     expect(url).toContain('site=unix');
@@ -54,7 +54,7 @@ describe('stack exchange network detail tools', () => {
     expect(url).toContain('key=se-key');
   });
 
-  it('stack_exchange_answers_get fetches network answers by source-prefixed id', async () => {
+  it('discussion_answers_get fetches network answers by source-prefixed id', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(response({
       items: [{
         answer_id: 9001,
@@ -70,9 +70,9 @@ describe('stack exchange network detail tools', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: {}, fetch: fetchMock });
 
-    const tool = pi.tools.find((entry) => entry.name === 'stack_exchange_answers_get');
+    const tool = pi.tools.find((entry) => entry.name === 'discussion_answers_get');
     expect(tool).toBeDefined();
-    const result = (await execute(tool!, { question: 'unix:535083', limit: 3 })) as {
+    const result = (await execute(tool!, { source: 'unix_linux', question: 'unix:535083', limit: 3 })) as {
       content: Array<{ text: string }>;
       details: { status: 'success'; data: { platform: string; site: string; questionId: string; limit: number; answers: Array<Record<string, unknown>> } };
     };
@@ -87,7 +87,7 @@ describe('stack exchange network detail tools', () => {
     expect(url).toContain('pagesize=3');
   });
 
-  it('stack_exchange_comments_get fetches network comments with pagination metadata', async () => {
+  it('discussion_comments_get fetches network comments with pagination metadata', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(response({
       items: [{
         comment_id: 77,
@@ -102,7 +102,7 @@ describe('stack exchange network detail tools', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: {}, fetch: fetchMock });
 
-    const tool = pi.tools.find((entry) => entry.name === 'stack_exchange_comments_get');
+    const tool = pi.tools.find((entry) => entry.name === 'discussion_comments_get');
     expect(tool).toBeDefined();
     const result = (await execute(tool!, { source: 'unix_linux', question: '535083', commentsLimit: 1, commentsOffset: 2 })) as {
       content: Array<{ text: string }>;

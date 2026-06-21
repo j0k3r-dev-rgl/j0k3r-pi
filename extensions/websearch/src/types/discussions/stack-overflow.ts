@@ -47,9 +47,9 @@ export type NormalizedStackOverflowQuestion = {
   snippet?: string;
   body?: string;
   follow_up?: {
-    answers_tool: 'stack_overflow_answers_get' | 'stack_exchange_answers_get';
+    answers_tool: 'discussion_answers_get';
     answers_ref: string;
-    comments_tool: 'stack_overflow_comments_get' | 'stack_exchange_comments_get';
+    comments_tool: 'discussion_comments_get';
     comments_ref: string;
   };
   availability: Availability;
