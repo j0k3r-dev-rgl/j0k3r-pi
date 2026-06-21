@@ -1,6 +1,7 @@
 import { createWebClients } from '../../providers/web/index.js';
-import { webSearchParameters } from '../../schemas/web/index.js';
-import { webSearchSummary } from '../../summaries/web/index.js';
+import { webFetchParameters, webSearchParameters } from '../../schemas/web/index.js';
+import { webFetchSummary, webSearchSummary } from '../../summaries/web/index.js';
+import { WEB_FETCH_DEFAULT_MAX_BYTES, WEB_FETCH_MAX_BYTES } from '../../types.js';
 import type {
   NormalizedWebSearchItem,
   PiToolResult,
@@ -8,6 +9,8 @@ import type {
   RawWebSearchMetadata,
   RawWebSearchResponse,
   RegisterWebsearchToolsDeps,
+  WebFetchRequest,
+  WebFetchResult,
   ToolError,
   WebClients,
   WebSearchProvider,
@@ -19,7 +22,7 @@ import { buildFailure, buildSuccess, toToolError } from '../common/index.js';
 import { registerTool, type WebsearchToolModule } from '../common/index.js';
 import { clientsFromDeps, runtimeFromDeps, signalFromContext, type ExecuteContext } from '../common/index.js';
 
-export const webToolNames = ['web_search'] as const;
+export const webToolNames = ['web_search', 'web_fetch'] as const;
 
 function asInput(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? value as Record<string, unknown> : {};
@@ -38,6 +41,21 @@ function validateWebSearch(value: unknown): WebSearchRequest {
     limit = limitValue;
   }
   return { query: query.trim(), limit };
+}
+
+function validateWebFetch(value: unknown): WebFetchRequest {
+  const input = asInput(value);
+  const url = input.url;
+  if (typeof url !== 'string' || url.trim() === '') throw new ValidationError('url is required.');
+  const maxBytesValue = input.maxBytes;
+  let maxBytes = WEB_FETCH_DEFAULT_MAX_BYTES;
+  if (maxBytesValue !== undefined && maxBytesValue !== null && maxBytesValue !== '') {
+    if (typeof maxBytesValue !== 'number' || !Number.isInteger(maxBytesValue)) throw new ValidationError('maxBytes must be an integer.');
+    if (maxBytesValue < 1) throw new ValidationError('maxBytes must be at least 1.');
+    if (maxBytesValue > WEB_FETCH_MAX_BYTES) throw new ValidationError(`maxBytes must be at most ${WEB_FETCH_MAX_BYTES}.`);
+    maxBytes = maxBytesValue;
+  }
+  return { url: url.trim(), maxBytes };
 }
 
 function webClientsFromDeps(deps: RegisterWebsearchToolsDeps): WebClients {
@@ -155,6 +173,22 @@ export const webTools: WebsearchToolModule<typeof webToolNames[number]> = {
           const clients = webClientsFromDeps(deps);
           const data = await runWebSearch(input, clients, signalFromContext(context));
           return buildSuccess(webSearchSummary(data), data, 12000);
+        } catch (error) {
+          return buildFailure(toToolError(error));
+        }
+      },
+    });
+
+    registerTool(pi, {
+      name: 'web_fetch',
+      description: 'Fetch one HTTPS page safely for agent reading. Enforces SSRF protections, bounded bytes, redirects, and text-like content extraction without JavaScript or subresources.',
+      parameters: webFetchParameters,
+      async execute(_id: string, params: unknown, _unused1?: unknown, _unused2?: unknown, context?: ExecuteContext): Promise<PiToolResult<WebFetchResult>> {
+        try {
+          const input = validateWebFetch(params);
+          const clients = webClientsFromDeps(deps);
+          const data = await clients.fetch.fetch(input, signalFromContext(context));
+          return buildSuccess(webFetchSummary(data), data, 12000);
         } catch (error) {
           return buildFailure(toToolError(error));
         }

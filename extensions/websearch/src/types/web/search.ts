@@ -1,4 +1,5 @@
 import type { ToolError } from '../common/index.js';
+import type { WebFetchClient } from './fetch.js';
 
 export type WebSearchProvider = 'exa' | 'parallel';
 
@@ -58,4 +59,5 @@ export interface WebSearchClient {
 export type WebClients = {
   exa: WebSearchClient;
   parallel: WebSearchClient;
+  fetch: WebFetchClient;
 };

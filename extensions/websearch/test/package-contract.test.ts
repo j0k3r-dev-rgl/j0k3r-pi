@@ -20,12 +20,13 @@ describe('websearch package contract', () => {
     });
   });
 
-  it('allows only the approved runtime dependencies for community-platform support', () => {
+  it('allows only the approved runtime dependencies for web/community-platform support', () => {
     const pkg = JSON.parse(readFileSync(packagePath, 'utf8')) as {
       dependencies?: Record<string, string>;
     };
 
     expect(pkg.dependencies).toEqual({
+      'html-to-text': expect.any(String),
       typebox: expect.any(String),
       octokit: expect.any(String),
     });
@@ -64,10 +65,11 @@ describe('websearch package contract', () => {
     expect(existsSync(join(process.cwd(), 'README.md'))).toBe(true);
   });
 
-  it('keeps source-family modules isolated behind common/discussions/research folders', () => {
+  it('keeps source-family modules isolated behind common/web/discussions/research folders', () => {
     const src = join(process.cwd(), 'src');
     for (const familyRoot of ['providers', 'schemas', 'summaries', 'tools', 'types']) {
       expect(existsSync(join(src, familyRoot, 'common'))).toBe(true);
+      expect(existsSync(join(src, familyRoot, 'web'))).toBe(true);
       expect(existsSync(join(src, familyRoot, 'discussions'))).toBe(true);
       expect(existsSync(join(src, familyRoot, 'research'))).toBe(true);
     }

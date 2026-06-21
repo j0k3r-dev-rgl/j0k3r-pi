@@ -8,10 +8,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "html-to-text": "^10.0.0",
     "octokit": "^5.0.5",
     "typebox": "^1.0.58"
   },
   "devDependencies": {
+    "@types/html-to-text": "^9.0.4",
     "@types/node": "^24.10.1",
     "typescript": "^5.9.3",
     "vitest": "^4.1.7"

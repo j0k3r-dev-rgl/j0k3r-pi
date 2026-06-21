@@ -23,6 +23,7 @@ function createClients(overrides: Record<string, unknown> = {}) {
     web: {
       exa: { search: vi.fn().mockResolvedValue([]) },
       parallel: { search: vi.fn().mockResolvedValue([]) },
+      fetch: { fetch: vi.fn() },
     },
     ...(overrides as Record<string, unknown>),
   };
@@ -42,7 +43,7 @@ describe('web_search', () => {
       ],
       metadata: { search_id: 'unused' },
     });
-    const clients = createClients({ web: { exa: { search: exaSearch }, parallel: { search: parallelSearch } } });
+    const clients = createClients({ web: { exa: { search: exaSearch }, parallel: { search: parallelSearch }, fetch: { fetch: vi.fn() } } });
     const pi = createMockPi();
 
     registerWebsearchTools(pi, { env: {}, fetch: vi.fn<typeof fetch>(), createClients: () => clients });
@@ -90,7 +91,7 @@ describe('web_search', () => {
       ],
       metadata: { search_id: 'search_parallel_123', usage: [{ name: 'sku_search', count: 1 }] },
     });
-    const clients = createClients({ web: { exa: { search: exaSearch }, parallel: { search: parallelSearch } } });
+    const clients = createClients({ web: { exa: { search: exaSearch }, parallel: { search: parallelSearch }, fetch: { fetch: vi.fn() } } });
     const pi = createMockPi();
 
     registerWebsearchTools(pi, { env: {}, fetch: vi.fn<typeof fetch>(), createClients: () => clients });
