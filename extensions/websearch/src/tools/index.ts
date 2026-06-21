@@ -25,6 +25,7 @@ const hiddenProviderSearchTools = new Set([
   'search_stack_overflow',
   'search_github_issues',
   'search_github_pull_requests',
+  'github_discussion_search',
   'search_devto_articles',
   'search_hackernews',
 ]);

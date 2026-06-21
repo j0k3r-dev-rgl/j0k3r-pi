@@ -6,11 +6,15 @@ import type {
   GitHubRawIssue,
   GitHubRawIssueComment,
   GitHubRawIssueSearchItem,
+  GitHubRawCodeSearchItem,
+  GitHubRawContentFile,
+  GitHubRawDiscussion,
   GitHubRawIssueTimelineEvent,
   GitHubRawPullRequest,
   GitHubRawPullRequestComment,
   GitHubRawPullRequestReview,
   GitHubRawRelease,
+  GitHubRawRepository,
   HackerNewsCommentNode,
   HackerNewsRawItem,
   HackerNewsRawStory,
@@ -18,12 +22,17 @@ import type {
   NormalizedDevtoArticle,
   GitHubIssueRelations,
   GitHubIssueRelation,
+  NormalizedGitHubCodeSearchItem,
+  NormalizedGitHubDiscussion,
+  NormalizedGitHubDiscussionComment,
+  NormalizedGitHubFile,
   NormalizedGitHubIssue,
   NormalizedGitHubIssueComment,
   NormalizedGitHubPullRequest,
   NormalizedGitHubPullRequestReview,
   NormalizedGitHubPullRequestReviewComment,
   NormalizedGitHubRelease,
+  NormalizedGitHubRepository,
   NormalizedHackerNewsStory,
   NormalizedStackOverflowAnswer,
   NormalizedStackOverflowComment,
@@ -312,6 +321,194 @@ export function normalizeGitHubRelease(raw: GitHubRawRelease, repository: string
     assets_count: assets.length,
     target_commitish: stringValue(data.target_commitish),
   };
+}
+
+function githubRepositoryFullName(data: Record<string, unknown>, fallback?: string): string {
+  return stringValue(data.full_name) ?? fallback ?? 'unknown/unknown';
+}
+
+function decodeGitHubContent(data: Record<string, unknown>): string | undefined {
+  const content = stringValue(data.content);
+  if (!content) return undefined;
+  const encoding = stringValue(data.encoding);
+  if (encoding === 'base64') {
+    try {
+      return Buffer.from(content.replace(/\s+/g, ''), 'base64').toString('utf8');
+    } catch {
+      return undefined;
+    }
+  }
+  return content;
+}
+
+export function normalizeGitHubFile(raw: GitHubRawContentFile, repository: string, ref?: string): NormalizedGitHubFile {
+  const data = raw as Record<string, unknown>;
+  const content = decodeGitHubContent(data);
+  return {
+    platform: 'github',
+    repository,
+    name: stringValue(data.name),
+    path: stringValue(data.path) ?? stringValue(data.name) ?? 'unknown',
+    ref,
+    sha: stringValue(data.sha),
+    size: numberValue(data.size),
+    type: stringValue(data.type),
+    encoding: stringValue(data.encoding),
+    url: stringValue(data.html_url),
+    download_url: stringValue(data.download_url),
+    content,
+    truncated: booleanValue(data.truncated),
+  };
+}
+
+export function normalizeGitHubRepository(raw: GitHubRawRepository, readme?: GitHubRawContentFile | null): NormalizedGitHubRepository {
+  const data = raw as Record<string, unknown>;
+  const repository = githubRepositoryFullName(data);
+  const license = data.license as Record<string, unknown> | undefined;
+  return {
+    platform: 'github',
+    repository,
+    id: String(numberValue(data.id) ?? stringValue(data.id) ?? repository),
+    name: stringValue(data.name),
+    url: stringValue(data.html_url),
+    description: truncateText(stringValue(data.description), 500),
+    homepage: stringValue(data.homepage),
+    topics: stringArray(data.topics),
+    default_branch: stringValue(data.default_branch),
+    stars: numberValue(data.stargazers_count),
+    forks: numberValue(data.forks_count),
+    open_issues_count: numberValue(data.open_issues_count),
+    language: stringValue(data.language),
+    license: stringValue(license?.spdx_id) ?? stringValue(license?.key) ?? stringValue(license?.name),
+    archived: booleanValue(data.archived),
+    private: booleanValue(data.private),
+    created_at: stringValue(data.created_at),
+    updated_at: stringValue(data.updated_at),
+    pushed_at: stringValue(data.pushed_at),
+    readme: readme ? normalizeGitHubFile(readme, repository) : undefined,
+  };
+}
+
+function githubCodeRepository(raw: Record<string, unknown>): string {
+  const repository = raw.repository as Record<string, unknown> | undefined;
+  return repository ? githubRepositoryFullName(repository) : 'unknown/unknown';
+}
+
+function githubTextMatchSnippet(raw: Record<string, unknown>): string | undefined {
+  const textMatches = raw.text_matches;
+  if (!Array.isArray(textMatches)) return undefined;
+  const fragments = textMatches
+    .map((entry) => stringValue((entry as Record<string, unknown> | undefined)?.fragment))
+    .filter((entry): entry is string => Boolean(entry));
+  return truncateText(fragments.join(' ').replace(/\s+/g, ' ').trim(), 500);
+}
+
+export function normalizeGitHubCodeSearchItem(raw: GitHubRawCodeSearchItem): NormalizedGitHubCodeSearchItem {
+  const data = raw as Record<string, unknown>;
+  const repository = githubCodeRepository(data);
+  const path = stringValue(data.path) ?? stringValue(data.name) ?? 'unknown';
+  return {
+    platform: 'github',
+    repository,
+    name: stringValue(data.name),
+    path,
+    sha: stringValue(data.sha),
+    url: stringValue(data.html_url),
+    score: numberValue(data.score),
+    snippet: githubTextMatchSnippet(data),
+    followup_tool: 'github_file_get',
+    followup_ref: `${repository}:${path}`,
+  };
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function actorLogin(value: unknown): string | undefined {
+  return truncateText(stringValue(objectValue(value)?.login), 120);
+}
+
+function labelNames(value: unknown): string[] | undefined {
+  const labels = objectValue(value);
+  const nodes = labels?.nodes;
+  if (!Array.isArray(nodes)) return undefined;
+  return nodes
+    .map((entry) => stringValue(objectValue(entry)?.name))
+    .filter((entry): entry is string => Boolean(entry));
+}
+
+function discussionRepository(data: Record<string, unknown>): string {
+  const repository = objectValue(data.repository);
+  return stringValue(repository?.nameWithOwner) ?? githubRepositoryFullName(repository ?? {}, 'unknown/unknown');
+}
+
+function discussionCommentsCount(data: Record<string, unknown>): number | undefined {
+  const comments = objectValue(data.comments);
+  return numberValue(comments?.totalCount) ?? numberValue(data.comments_count);
+}
+
+function discussionSnippet(data: Record<string, unknown>): string | undefined {
+  return githubTextMatchSnippet(data) ?? truncateText(stringValue(data.bodyText) ?? stringValue(data.body), 500);
+}
+
+export function normalizeGitHubDiscussionComment(raw: unknown, answerId?: string): NormalizedGitHubDiscussionComment {
+  const data = objectValue(raw) ?? {};
+  const id = String(stringValue(data.id) ?? numberValue(data.databaseId) ?? stringValue(data.url) ?? 'unknown');
+  return {
+    id,
+    url: stringValue(data.url),
+    author: actorLogin(data.author),
+    created_at: stringValue(data.createdAt) ?? stringValue(data.created_at),
+    updated_at: stringValue(data.updatedAt) ?? stringValue(data.updated_at),
+    body: truncateText(stringValue(data.bodyText) ?? stringValue(data.body), 5000),
+    upvote_count: numberValue(data.upvoteCount) ?? numberValue(data.upvote_count),
+    is_answer: answerId ? id === answerId : undefined,
+  };
+}
+
+export function normalizeGitHubDiscussion(raw: GitHubRawDiscussion): NormalizedGitHubDiscussion {
+  const data = raw as Record<string, unknown>;
+  const repository = discussionRepository(data);
+  const category = objectValue(data.category);
+  const answer = objectValue(data.answer);
+  const answerId = stringValue(answer?.id);
+  const number = numberValue(data.number) ?? 0;
+  return {
+    platform: 'github',
+    id: String(stringValue(data.id) ?? numberValue(data.databaseId) ?? `${repository}#${number}`),
+    number,
+    repository,
+    url: stringValue(data.url) ?? `https://github.com/${repository}/discussions/${number}`,
+    title: truncateText(stringValue(data.title), 300),
+    author: actorLogin(data.author),
+    created_at: stringValue(data.createdAt) ?? stringValue(data.created_at),
+    updated_at: stringValue(data.updatedAt) ?? stringValue(data.updated_at),
+    published_at: stringValue(data.publishedAt) ?? stringValue(data.published_at),
+    category: stringValue(category?.name),
+    category_slug: stringValue(category?.slug),
+    category_emoji: stringValue(category?.emoji),
+    upvote_count: numberValue(data.upvoteCount) ?? numberValue(data.upvote_count),
+    comments_count: discussionCommentsCount(data),
+    answered: Boolean(stringValue(data.answerChosenAt) ?? stringValue(data.answer_chosen_at) ?? answerId),
+    answer_chosen_at: stringValue(data.answerChosenAt) ?? stringValue(data.answer_chosen_at),
+    closed: booleanValue(data.closed),
+    locked: booleanValue(data.locked),
+    labels: labelNames(data.labels),
+    snippet: discussionSnippet(data),
+    body: truncateText(stringValue(data.bodyText) ?? stringValue(data.body), 10_000),
+    answer: answer ? { ...normalizeGitHubDiscussionComment(answer, answerId), is_answer: true } : undefined,
+    follow_up_ref: `${repository}#${number}`,
+  };
+}
+
+export function normalizeGitHubDiscussionComments(raw: GitHubRawDiscussion): NormalizedGitHubDiscussionComment[] {
+  const data = raw as Record<string, unknown>;
+  const answerId = stringValue(objectValue(data.answer)?.id);
+  const comments = objectValue(data.comments);
+  const nodes = comments?.nodes;
+  if (!Array.isArray(nodes)) return [];
+  return nodes.map((entry) => normalizeGitHubDiscussionComment(entry, answerId));
 }
 
 function normalizeGitHubTimelineRelation(raw: GitHubRawIssueTimelineEvent): GitHubIssueRelation | null {

@@ -39,6 +39,46 @@ export type GitHubReleaseGetRequest = {
   tag: string;
 };
 
+export type GitHubRepoRef = {
+  owner: string;
+  repo: string;
+};
+
+export type GitHubRepoGetRequest = GitHubRepoRef & {
+  includeReadme: boolean;
+};
+
+export type GitHubFileGetRequest = GitHubRepoRef & {
+  path: string;
+  ref?: string;
+};
+
+export type GitHubCodeSearchRequest = {
+  query: string;
+  limit: number;
+  repo?: string;
+  owner?: string;
+  language?: string;
+  path?: string;
+};
+
+export type GitHubDiscussionRef = GitHubRepoRef & {
+  discussionNumber: number;
+  url: string;
+};
+
+export type GitHubDiscussionSearchRequest = {
+  query: string;
+  limit: number;
+  repo?: string;
+  owner?: string;
+};
+
+export type GitHubDiscussionGetRequest = GitHubDiscussionRef & {
+  commentsLimit: number;
+  commentsOffset: number;
+};
+
 export type GitHubIssueCommentsRequest = GitHubIssueRef & {
   limit: number;
   offset: number;
@@ -57,6 +97,10 @@ export type GitHubRawPullRequest = Record<string, unknown>;
 export type GitHubRawPullRequestComment = Record<string, unknown>;
 export type GitHubRawPullRequestReview = Record<string, unknown>;
 export type GitHubRawRelease = Record<string, unknown>;
+export type GitHubRawRepository = Record<string, unknown>;
+export type GitHubRawContentFile = Record<string, unknown>;
+export type GitHubRawCodeSearchItem = Record<string, unknown>;
+export type GitHubRawDiscussion = Record<string, unknown>;
 
 export type GitHubIssueRelation = {
   type: 'pull_request' | 'issue';
@@ -192,6 +236,117 @@ export type GitHubReleasesResult = {
 
 export type GitHubReleaseResult = NormalizedGitHubRelease;
 
+export type NormalizedGitHubFile = {
+  platform: 'github';
+  repository: string;
+  name?: string;
+  path: string;
+  ref?: string;
+  sha?: string;
+  size?: number;
+  type?: string;
+  encoding?: string;
+  url?: string;
+  download_url?: string;
+  content?: string;
+  truncated?: boolean;
+};
+
+export type NormalizedGitHubRepository = {
+  platform: 'github';
+  repository: string;
+  id: string;
+  name?: string;
+  url?: string;
+  description?: string;
+  homepage?: string;
+  topics?: string[];
+  default_branch?: string;
+  stars?: number;
+  forks?: number;
+  open_issues_count?: number;
+  language?: string;
+  license?: string;
+  archived?: boolean;
+  private?: boolean;
+  created_at?: string;
+  updated_at?: string;
+  pushed_at?: string;
+  readme?: NormalizedGitHubFile;
+};
+
+export type NormalizedGitHubCodeSearchItem = {
+  platform: 'github';
+  repository: string;
+  name?: string;
+  path: string;
+  sha?: string;
+  url?: string;
+  score?: number;
+  snippet?: string;
+  followup_tool: 'github_file_get';
+  followup_ref: string;
+};
+
+export type GitHubRepoResult = NormalizedGitHubRepository;
+export type GitHubFileResult = NormalizedGitHubFile;
+export type GitHubCodeSearchResult = GitHubCodeSearchRequest & {
+  items: NormalizedGitHubCodeSearchItem[];
+};
+
+export type NormalizedGitHubDiscussionComment = {
+  id: string;
+  url?: string;
+  author?: string;
+  created_at?: string;
+  updated_at?: string;
+  body?: string;
+  upvote_count?: number;
+  is_answer?: boolean;
+};
+
+export type NormalizedGitHubDiscussion = {
+  platform: 'github';
+  id: string;
+  number: number;
+  repository: string;
+  url: string;
+  title?: string;
+  author?: string;
+  created_at?: string;
+  updated_at?: string;
+  published_at?: string;
+  category?: string;
+  category_slug?: string;
+  category_emoji?: string;
+  upvote_count?: number;
+  comments_count?: number;
+  answered?: boolean;
+  answer_chosen_at?: string;
+  closed?: boolean;
+  locked?: boolean;
+  labels?: string[];
+  snippet?: string;
+  body?: string;
+  answer?: NormalizedGitHubDiscussionComment;
+  follow_up_ref: string;
+};
+
+export type GitHubDiscussionSearchResult = GitHubDiscussionSearchRequest & {
+  items: NormalizedGitHubDiscussion[];
+};
+
+export type GitHubDiscussionDetailResult = NormalizedGitHubDiscussion & {
+  comments: NormalizedGitHubDiscussionComment[];
+  comments_limit: number;
+  comments_offset: number;
+  next_comments_offset?: number;
+  bounds: {
+    comments_default: number;
+    comments_max: number;
+  };
+};
+
 export type GitHubPullRequestDetailResult = NormalizedGitHubPullRequest & {
   comments: NormalizedGitHubIssueComment[];
   review_comments: NormalizedGitHubPullRequestReviewComment[];
@@ -219,4 +374,10 @@ export interface GitHubClient {
   listPullRequestReviews(input: GitHubPullRequestRef, signal?: AbortSignal): Promise<GitHubRawPullRequestReview[]>;
   listReleases(input: GitHubReleasesGetRequest, signal?: AbortSignal): Promise<GitHubRawRelease[]>;
   getReleaseByTag(input: GitHubReleaseGetRequest, signal?: AbortSignal): Promise<GitHubRawRelease | null>;
+  getRepository?(input: GitHubRepoRef, signal?: AbortSignal): Promise<GitHubRawRepository | null>;
+  getRepositoryReadme?(input: GitHubRepoRef & { ref?: string }, signal?: AbortSignal): Promise<GitHubRawContentFile | null>;
+  getFile?(input: GitHubFileGetRequest, signal?: AbortSignal): Promise<GitHubRawContentFile | null>;
+  searchCode?(input: GitHubCodeSearchRequest, signal?: AbortSignal): Promise<GitHubRawCodeSearchItem[]>;
+  searchDiscussions?(input: GitHubDiscussionSearchRequest, signal?: AbortSignal): Promise<GitHubRawDiscussion[]>;
+  getDiscussion?(input: GitHubDiscussionGetRequest, signal?: AbortSignal): Promise<GitHubRawDiscussion | null>;
 }

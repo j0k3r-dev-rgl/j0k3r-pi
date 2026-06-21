@@ -31,15 +31,20 @@ describe('websearch tool registration', () => {
       'github_pull_request_get',
       'github_releases_get',
       'github_release_get',
+      'github_repo_get',
+      'github_file_get',
+      'github_code_search',
+      'github_discussion_get',
       'devto_comments_get',
       'hackernews_story_get',
     ]);
     expect(pi.tools.map((tool) => tool.name)).toEqual(WEBSEARCH_TOOL_NAMES);
-    expect(pi.tools).toHaveLength(25);
+    expect(pi.tools).toHaveLength(29);
     expect(pi.tools.map((tool) => tool.name)).not.toEqual(expect.arrayContaining([
       'search_stack_overflow',
       'search_github_issues',
       'search_github_pull_requests',
+      'github_discussion_search',
       'search_devto_articles',
       'search_hackernews',
     ]));

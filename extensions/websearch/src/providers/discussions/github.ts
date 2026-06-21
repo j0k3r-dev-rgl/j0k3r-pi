@@ -2,12 +2,19 @@ import { Octokit } from 'octokit';
 import { ProviderFailure, githubProviderErrorFromError, redactText } from '../../security.js';
 import type {
   GitHubClient,
+  GitHubCodeSearchRequest,
+  GitHubDiscussionGetRequest,
+  GitHubDiscussionSearchRequest,
+  GitHubFileGetRequest,
   GitHubIssueCommentsRequest,
   GitHubIssueRef,
   GitHubIssueSearchRequest,
   GitHubPullRequestRef,
   GitHubPullRequestSearchRequest,
   GitHubReleaseGetRequest,
+  GitHubRawCodeSearchItem,
+  GitHubRawContentFile,
+  GitHubRawDiscussion,
   GitHubRawIssue,
   GitHubRawIssueComment,
   GitHubRawIssueSearchItem,
@@ -16,6 +23,8 @@ import type {
   GitHubRawPullRequestComment,
   GitHubRawPullRequestReview,
   GitHubRawRelease,
+  GitHubRawRepository,
+  GitHubRepoRef,
   GitHubReleasesGetRequest,
   WebsearchRuntime,
 } from '../../types.js';
@@ -42,6 +51,128 @@ function pullRequestSearchQuery(input: GitHubPullRequestSearchRequest): string {
     parts.push(`state:${input.state}`);
   }
   return parts.filter(Boolean).join(' ');
+}
+
+function codeSearchQuery(input: GitHubCodeSearchRequest): string {
+  const parts = [input.query.trim()];
+  if (input.repo) {
+    parts.push(`repo:${input.repo}`);
+  } else if (input.owner) {
+    parts.push(`org:${input.owner}`);
+  }
+  if (input.language) {
+    parts.push(`language:${JSON.stringify(input.language)}`);
+  }
+  if (input.path) {
+    parts.push(`path:${JSON.stringify(input.path)}`);
+  }
+  return parts.filter(Boolean).join(' ');
+}
+
+function discussionSearchQuery(input: GitHubDiscussionSearchRequest): string {
+  const parts = [input.query.trim()];
+  if (input.repo) {
+    parts.push(`repo:${input.repo}`);
+  } else if (input.owner) {
+    parts.push(`org:${input.owner}`);
+  }
+  return parts.filter(Boolean).join(' ');
+}
+
+const GITHUB_DISCUSSION_FIELDS = `
+fragment WebsearchDiscussionFields on Discussion {
+  id
+  databaseId
+  number
+  title
+  url
+  bodyText
+  createdAt
+  updatedAt
+  publishedAt
+  upvoteCount
+  answerChosenAt
+  closed
+  locked
+  author { login url }
+  category { name slug emoji }
+  repository { nameWithOwner }
+  comments { totalCount }
+  labels(first: 10) { nodes { name } }
+  answer { id databaseId url bodyText createdAt updatedAt upvoteCount author { login url } }
+}
+`;
+
+const GITHUB_DISCUSSION_SEARCH_QUERY = `
+${GITHUB_DISCUSSION_FIELDS}
+query WebsearchDiscussionSearch($searchQuery: String!, $first: Int!) {
+  search(query: $searchQuery, type: DISCUSSION, first: $first) {
+    edges {
+      textMatches { fragment property }
+      node {
+        ... on Discussion { ...WebsearchDiscussionFields }
+      }
+    }
+  }
+}
+`;
+
+const GITHUB_DISCUSSION_GET_QUERY = `
+fragment WebsearchDiscussionCommentFields on DiscussionComment {
+  id
+  databaseId
+  url
+  bodyText
+  createdAt
+  updatedAt
+  upvoteCount
+  author { login url }
+}
+fragment WebsearchDiscussionDetailFields on Discussion {
+  id
+  databaseId
+  number
+  title
+  url
+  bodyText
+  createdAt
+  updatedAt
+  publishedAt
+  upvoteCount
+  answerChosenAt
+  closed
+  locked
+  author { login url }
+  category { name slug emoji }
+  repository { nameWithOwner }
+  labels(first: 10) { nodes { name } }
+  answer { ...WebsearchDiscussionCommentFields }
+}
+query WebsearchDiscussionGet($owner: String!, $name: String!, $number: Int!, $commentsFirst: Int!, $commentsAfter: String) {
+  repository(owner: $owner, name: $name) {
+    discussion(number: $number) {
+      ...WebsearchDiscussionDetailFields
+      comments(first: $commentsFirst, after: $commentsAfter) {
+        totalCount
+        nodes { ...WebsearchDiscussionCommentFields }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}
+`;
+
+function githubContentEndpoint(owner: string, repo: string, path: string): string {
+  const encodedPath = path.split('/').map((segment) => encodeURIComponent(segment)).join('/');
+  return `repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodedPath}`;
+}
+
+function ghRefArgs(ref?: string): string[] {
+  return ref ? ['-f', `ref=${ref}`] : [];
+}
+
+function ghTextMatchAcceptArgs(): string[] {
+  return ['-H', 'Accept: application/vnd.github.text-match+json'];
 }
 
 function ghError(error: unknown, fallback: string): ProviderFailure {
@@ -104,11 +235,172 @@ async function ghJson<T>(runtime: WebsearchRuntime, args: string[], signal?: Abo
   }
 }
 
+function ghGraphqlArgs(query: string, variables: Record<string, string | number | boolean | undefined>): string[] {
+  const args = ['api', 'graphql', '-f', `query=${query}`];
+  for (const [key, value] of Object.entries(variables)) {
+    if (value === undefined) continue;
+    args.push('-F', `${key}=${value}`);
+  }
+  return args;
+}
+
 class OctokitGitHubClient implements GitHubClient {
   private readonly octokit: Octokit;
 
-  constructor(runtime: WebsearchRuntime) {
+  constructor(private readonly runtime: WebsearchRuntime) {
     this.octokit = new Octokit(runtime.env.GITHUB_TOKEN ? { auth: runtime.env.GITHUB_TOKEN } : {});
+  }
+
+  private requireGraphQLAuth(): void {
+    if (!this.runtime.env.GITHUB_TOKEN) {
+      throw new ProviderFailure({
+        code: 'missing_configuration',
+        category: 'provider_unavailable',
+        message: 'GitHub Discussions use the GitHub GraphQL API, which requires GITHUB_TOKEN for the api provider. Set GITHUB_TOKEN or use the gh provider with an authenticated GitHub CLI.',
+        recoverable: true,
+        provider: 'github',
+      });
+    }
+  }
+
+  private async graphql<T>(query: string, variables: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
+    this.requireGraphQLAuth();
+    try {
+      return await this.octokit.graphql<T>(query, {
+        ...variables,
+        request: signal ? { signal } : undefined,
+      });
+    } catch (error) {
+      throw new ProviderFailure(githubProviderErrorFromError(error));
+    }
+  }
+
+  async getRepository(input: GitHubRepoRef, signal?: AbortSignal): Promise<GitHubRawRepository | null> {
+    try {
+      const response = await this.octokit.rest.repos.get({
+        owner: input.owner,
+        repo: input.repo,
+        request: signal ? { signal } : undefined,
+      });
+      return response.data as unknown as GitHubRawRepository;
+    } catch (error) {
+      const mapped = githubProviderErrorFromError(error);
+      if (mapped.code === 'not_found') return null;
+      throw new ProviderFailure(mapped);
+    }
+  }
+
+  async getRepositoryReadme(input: GitHubRepoRef & { ref?: string }, signal?: AbortSignal): Promise<GitHubRawContentFile | null> {
+    try {
+      const response = await this.octokit.rest.repos.getReadme({
+        owner: input.owner,
+        repo: input.repo,
+        ref: input.ref,
+        request: signal ? { signal } : undefined,
+      });
+      return response.data as unknown as GitHubRawContentFile;
+    } catch (error) {
+      const mapped = githubProviderErrorFromError(error);
+      if (mapped.code === 'not_found') return null;
+      throw new ProviderFailure(mapped);
+    }
+  }
+
+  async getFile(input: GitHubFileGetRequest, signal?: AbortSignal): Promise<GitHubRawContentFile | null> {
+    try {
+      const response = await this.octokit.rest.repos.getContent({
+        owner: input.owner,
+        repo: input.repo,
+        path: input.path,
+        ref: input.ref,
+        request: signal ? { signal } : undefined,
+      });
+      if (Array.isArray(response.data)) {
+        throw new ProviderFailure({
+          code: 'validation_error',
+          category: 'validation',
+          message: 'GitHub path resolved to a directory; use github_code_search or request a file path.',
+          recoverable: true,
+          provider: 'github',
+        });
+      }
+      return response.data as unknown as GitHubRawContentFile;
+    } catch (error) {
+      if (error instanceof ProviderFailure) throw error;
+      const mapped = githubProviderErrorFromError(error);
+      if (mapped.code === 'not_found') return null;
+      throw new ProviderFailure(mapped);
+    }
+  }
+
+  async searchCode(input: GitHubCodeSearchRequest, signal?: AbortSignal): Promise<GitHubRawCodeSearchItem[]> {
+    try {
+      const response = await this.octokit.request('GET /search/code', {
+        q: codeSearchQuery(input),
+        per_page: input.limit,
+        page: 1,
+        headers: {
+          accept: 'application/vnd.github.text-match+json',
+        },
+        request: signal ? { signal } : undefined,
+      });
+      const data = response.data as { items?: unknown[] };
+      return Array.isArray(data.items) ? data.items as GitHubRawCodeSearchItem[] : [];
+    } catch (error) {
+      throw new ProviderFailure(githubProviderErrorFromError(error));
+    }
+  }
+
+  async searchDiscussions(input: GitHubDiscussionSearchRequest, signal?: AbortSignal): Promise<GitHubRawDiscussion[]> {
+    const response = await this.graphql<{ search?: { edges?: Array<{ node?: unknown; textMatches?: unknown[] }> } }>(GITHUB_DISCUSSION_SEARCH_QUERY, {
+      searchQuery: discussionSearchQuery(input),
+      first: input.limit,
+    }, signal);
+    const edges = response.search?.edges ?? [];
+    return edges
+      .map((edge): Record<string, unknown> | undefined => edge.node && typeof edge.node === 'object' ? { ...(edge.node as Record<string, unknown>), text_matches: edge.textMatches } : undefined)
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+  }
+
+  async getDiscussion(input: GitHubDiscussionGetRequest, signal?: AbortSignal): Promise<GitHubRawDiscussion | null> {
+    let cursor: string | undefined;
+    let remainingOffset = input.commentsOffset;
+    const collected: unknown[] = [];
+    let discussion: Record<string, unknown> | undefined;
+    let totalCount: unknown;
+    let pageInfo: Record<string, unknown> | undefined;
+
+    while (collected.length < input.commentsLimit) {
+      const first = Math.min(GITHUB_COMMENTS_PAGE_SIZE, remainingOffset + input.commentsLimit - collected.length);
+      const response = await this.graphql<{ repository?: { discussion?: Record<string, unknown> | null } }>(GITHUB_DISCUSSION_GET_QUERY, {
+        owner: input.owner,
+        name: input.repo,
+        number: input.discussionNumber,
+        commentsFirst: first,
+        commentsAfter: cursor,
+      }, signal);
+      const current = response.repository?.discussion;
+      if (!current) return null;
+      discussion ??= current;
+      const comments = current.comments as { nodes?: unknown[]; totalCount?: unknown; pageInfo?: Record<string, unknown> } | undefined;
+      const nodes = Array.isArray(comments?.nodes) ? comments.nodes : [];
+      totalCount = comments?.totalCount;
+      pageInfo = comments?.pageInfo;
+      const visible = remainingOffset > 0 ? nodes.slice(remainingOffset) : nodes;
+      collected.push(...visible);
+      remainingOffset = Math.max(0, remainingOffset - nodes.length);
+      cursor = typeof pageInfo?.endCursor === 'string' ? pageInfo.endCursor : undefined;
+      if (!pageInfo?.hasNextPage || !cursor) break;
+    }
+
+    return {
+      ...discussion,
+      comments: {
+        totalCount,
+        nodes: collected.slice(0, input.commentsLimit),
+        pageInfo,
+      },
+    };
   }
 
   async searchIssues(input: GitHubIssueSearchRequest, signal?: AbortSignal): Promise<GitHubRawIssueSearchItem[]> {
@@ -305,6 +597,127 @@ class OctokitGitHubClient implements GitHubClient {
 
 class GhGitHubClient implements GitHubClient {
   constructor(private readonly runtime: WebsearchRuntime) {}
+
+  async getRepository(input: GitHubRepoRef, signal?: AbortSignal): Promise<GitHubRawRepository | null> {
+    try {
+      return await ghJson<GitHubRawRepository>(this.runtime, [
+        'api',
+        `repos/${input.owner}/${input.repo}`,
+      ], signal);
+    } catch (error) {
+      if (error instanceof ProviderFailure && error.toolError.category === 'not_found') {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async getRepositoryReadme(input: GitHubRepoRef & { ref?: string }, signal?: AbortSignal): Promise<GitHubRawContentFile | null> {
+    try {
+      return await ghJson<GitHubRawContentFile>(this.runtime, [
+        'api',
+        '-X', 'GET',
+        `repos/${input.owner}/${input.repo}/readme`,
+        ...ghRefArgs(input.ref),
+      ], signal);
+    } catch (error) {
+      if (error instanceof ProviderFailure && error.toolError.category === 'not_found') {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async getFile(input: GitHubFileGetRequest, signal?: AbortSignal): Promise<GitHubRawContentFile | null> {
+    try {
+      const data = await ghJson<GitHubRawContentFile | GitHubRawContentFile[]>(this.runtime, [
+        'api',
+        '-X', 'GET',
+        githubContentEndpoint(input.owner, input.repo, input.path),
+        ...ghRefArgs(input.ref),
+      ], signal);
+      if (Array.isArray(data)) {
+        throw new ProviderFailure({
+          code: 'validation_error',
+          category: 'validation',
+          message: 'GitHub path resolved to a directory; use github_code_search or request a file path.',
+          recoverable: true,
+          provider: 'github',
+        });
+      }
+      return data;
+    } catch (error) {
+      if (error instanceof ProviderFailure && error.toolError.category === 'not_found') {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async searchCode(input: GitHubCodeSearchRequest, signal?: AbortSignal): Promise<GitHubRawCodeSearchItem[]> {
+    const payload = await ghJson<{ items?: unknown[] }>(this.runtime, [
+      'api',
+      '-X', 'GET',
+      'search/code',
+      ...ghTextMatchAcceptArgs(),
+      '-f', `q=${codeSearchQuery(input)}`,
+      '-f', `per_page=${input.limit}`,
+      '-f', 'page=1',
+    ], signal);
+    return (payload.items ?? []) as GitHubRawCodeSearchItem[];
+  }
+
+  async searchDiscussions(input: GitHubDiscussionSearchRequest, signal?: AbortSignal): Promise<GitHubRawDiscussion[]> {
+    const payload = await ghJson<{ data?: { search?: { edges?: Array<{ node?: unknown; textMatches?: unknown[] }> } } }>(this.runtime, ghGraphqlArgs(GITHUB_DISCUSSION_SEARCH_QUERY, {
+      searchQuery: discussionSearchQuery(input),
+      first: input.limit,
+    }), signal);
+    const edges = payload.data?.search?.edges ?? [];
+    return edges
+      .map((edge): Record<string, unknown> | undefined => edge.node && typeof edge.node === 'object' ? { ...(edge.node as Record<string, unknown>), text_matches: edge.textMatches } : undefined)
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+  }
+
+  async getDiscussion(input: GitHubDiscussionGetRequest, signal?: AbortSignal): Promise<GitHubRawDiscussion | null> {
+    let cursor: string | undefined;
+    let remainingOffset = input.commentsOffset;
+    const collected: unknown[] = [];
+    let discussion: Record<string, unknown> | undefined;
+    let totalCount: unknown;
+    let pageInfo: Record<string, unknown> | undefined;
+
+    while (collected.length < input.commentsLimit) {
+      const first = Math.min(GITHUB_COMMENTS_PAGE_SIZE, remainingOffset + input.commentsLimit - collected.length);
+      const payload = await ghJson<{ data?: { repository?: { discussion?: Record<string, unknown> | null } } }>(this.runtime, ghGraphqlArgs(GITHUB_DISCUSSION_GET_QUERY, {
+        owner: input.owner,
+        name: input.repo,
+        number: input.discussionNumber,
+        commentsFirst: first,
+        commentsAfter: cursor,
+      }), signal);
+      const current = payload.data?.repository?.discussion;
+      if (!current) return null;
+      discussion ??= current;
+      const comments = current.comments as { nodes?: unknown[]; totalCount?: unknown; pageInfo?: Record<string, unknown> } | undefined;
+      const nodes = Array.isArray(comments?.nodes) ? comments.nodes : [];
+      totalCount = comments?.totalCount;
+      pageInfo = comments?.pageInfo;
+      const visible = remainingOffset > 0 ? nodes.slice(remainingOffset) : nodes;
+      collected.push(...visible);
+      remainingOffset = Math.max(0, remainingOffset - nodes.length);
+      cursor = typeof pageInfo?.endCursor === 'string' ? pageInfo.endCursor : undefined;
+      if (!pageInfo?.hasNextPage || !cursor) break;
+    }
+
+    return {
+      ...discussion,
+      comments: {
+        totalCount,
+        nodes: collected.slice(0, input.commentsLimit),
+        pageInfo,
+      },
+    };
+  }
 
   async searchIssues(input: GitHubIssueSearchRequest, signal?: AbortSignal): Promise<GitHubRawIssueSearchItem[]> {
     const payload = await ghJson<{ items?: unknown[] }>(this.runtime, [

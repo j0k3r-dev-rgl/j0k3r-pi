@@ -1,6 +1,7 @@
 import { Type } from 'typebox';
 import {
   normalizeDevtoArticle,
+  normalizeGitHubDiscussion,
   normalizeGitHubIssue,
   normalizeGitHubIssueRelations,
   normalizeGitHubPullRequest,
@@ -9,6 +10,7 @@ import {
 } from '../../normalize.js';
 import type {
   NormalizedDevtoArticle,
+  NormalizedGitHubDiscussion,
   NormalizedGitHubIssue,
   NormalizedGitHubPullRequest,
   NormalizedHackerNewsStory,
@@ -27,6 +29,7 @@ const discussionSources = [
   'github',
   'github_issues',
   'github_pull_requests',
+  'github_discussions',
   'devto',
   'hacker_news',
   'all',
@@ -34,7 +37,7 @@ const discussionSources = [
 
 type DiscussionSource = typeof discussionSources[number];
 type ConcreteDiscussionSource = Exclude<DiscussionSource, 'all' | 'github'>;
-type DiscussionKind = 'question' | 'issue' | 'pull_request' | 'article' | 'story';
+type DiscussionKind = 'question' | 'issue' | 'pull_request' | 'discussion' | 'article' | 'story';
 
 type DiscussionSearchInput = {
   query: string;
@@ -80,7 +83,7 @@ type DiscussionSearchResult = {
 export const discussionSearchParameters = Type.Object({
   query: Type.String({ description: 'Search query to run across discussion sources.' }),
   source: Type.Optional(Type.Union(discussionSources.map((source) => Type.Literal(source)) as [ReturnType<typeof Type.Literal>, ReturnType<typeof Type.Literal>, ...ReturnType<typeof Type.Literal>[]], {
-    description: 'Optional source filter. Omit or use all for fan-out. Use github for both GitHub issues and pull requests.',
+    description: 'Optional source filter. Omit or use all for fan-out. Use github for GitHub issues, pull requests, and discussions.',
   })),
   limit: Type.Optional(Type.Number({ description: `Maximum unified results to return, 1-${SEARCH_MAX_LIMIT}.` })),
   repo: Type.Optional(Type.String({ description: 'Optional owner/repo scope for GitHub sources.' })),
@@ -148,8 +151,8 @@ function validateDiscussionSearch(value: unknown): DiscussionSearchInput {
 }
 
 function concreteSources(source: DiscussionSource): ConcreteDiscussionSource[] {
-  if (source === 'all') return ['stack_overflow', 'github_issues', 'github_pull_requests', 'devto', 'hacker_news'];
-  if (source === 'github') return ['github_issues', 'github_pull_requests'];
+  if (source === 'all') return ['stack_overflow', 'github_issues', 'github_pull_requests', 'github_discussions', 'devto', 'hacker_news'];
+  if (source === 'github') return ['github_issues', 'github_pull_requests', 'github_discussions'];
   return [source];
 }
 
@@ -251,6 +254,27 @@ function fromGitHubPullRequest(item: NormalizedGitHubPullRequest, sourceRank: nu
   };
 }
 
+function fromGitHubDiscussion(item: NormalizedGitHubDiscussion, sourceRank: number): UnifiedDiscussionItem {
+  return {
+    source: 'github',
+    source_query: 'github_discussions',
+    kind: 'discussion',
+    title: item.title,
+    url: item.url,
+    summary: item.snippet,
+    score: item.upvote_count,
+    comments_count: item.comments_count,
+    published_at: item.published_at ?? item.created_at,
+    updated_at: item.updated_at,
+    entity_id: item.follow_up_ref,
+    followup_tool: 'github_discussion_get',
+    followup_ref: item.follow_up_ref,
+    rank: 0,
+    source_rank: sourceRank,
+    metadata: { repository: item.repository, category: item.category, answered: item.answered, labels: item.labels },
+  };
+}
+
 function fromDevto(item: NormalizedDevtoArticle, sourceRank: number): UnifiedDiscussionItem {
   return {
     source: 'devto',
@@ -321,6 +345,13 @@ async function searchOneSource(source: ConcreteDiscussionSource, input: Discussi
       const relations = normalizeGitHubIssueRelations(await clients.github.listIssueTimelineEvents({ owner, repo, issueNumber: normalized.number, url: normalized.url }, signal));
       return fromGitHubPullRequest({ ...normalized, related_pull_requests: relations.pull_requests, related_issues: relations.issues }, index + 1);
     }));
+  }
+
+  if (source === 'github_discussions') {
+    if (input.state && input.source === 'github_discussions') throw new ValidationError('state is not supported for github_discussions.');
+    if (!clients.github.searchDiscussions) throw new ValidationError('GitHub discussions search is unavailable in this websearch client.');
+    const raw = await clients.github.searchDiscussions({ query: input.query, limit, repo: input.repo, owner: undefined }, signal);
+    return raw.map((item, index) => fromGitHubDiscussion(normalizeGitHubDiscussion(item), index + 1));
   }
 
   if (source === 'devto') {

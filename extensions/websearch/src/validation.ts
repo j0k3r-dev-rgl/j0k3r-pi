@@ -1,10 +1,15 @@
 import type {
   DevtoArticleSearchRequest,
   DevtoCommentsRequest,
+  GitHubCodeSearchRequest,
+  GitHubDiscussionGetRequest,
+  GitHubDiscussionSearchRequest,
+  GitHubFileGetRequest,
   GitHubIssueGetRequest,
   GitHubIssueRef,
   GitHubIssueSearchRequest,
   GitHubReleaseGetRequest,
+  GitHubRepoGetRequest,
   GitHubPullRequestGetRequest,
   GitHubPullRequestRef,
   GitHubPullRequestSearchRequest,
@@ -146,6 +151,23 @@ function parseGitHubRepoScope(value: string): { owner: string; repo: string } {
   return { owner: match.groups.owner, repo: match.groups.repo };
 }
 
+function optionalGitHubRepoScope(input: Input, key: string): string | undefined {
+  const repoInput = optionalString(input, key);
+  if (repoInput) {
+    parseGitHubRepoScope(repoInput);
+  }
+  return repoInput;
+}
+
+function githubPath(value: string, key: string): string {
+  const path = value.replace(/^\/+/, '').trim();
+  const segments = path.split('/');
+  if (!path || segments.some((segment) => segment === '' || segment === '.' || segment === '..')) {
+    throw new ValidationError(`${key} must be a repository-relative path.`);
+  }
+  return path;
+}
+
 export function validateGitHubIssueRef(value: unknown): GitHubIssueRef {
   const raw = requiredString(asInput(value), 'issue');
   const refMatch = /^(?<owner>[A-Za-z0-9_.-]+)\/(?<repo>[A-Za-z0-9_.-]+)#(?<issueNumber>\d+)$/.exec(raw);
@@ -235,6 +257,44 @@ export function validateGitHubPullRequestRef(value: unknown): GitHubPullRequestR
       throw error;
     }
     throw new ValidationError('pull_request must be a GitHub pull request url or owner/repo#number reference.');
+  }
+}
+
+function parseGitHubDiscussion(raw: string): GitHubDiscussionGetRequest {
+  const refMatch = /^(?<owner>[A-Za-z0-9_.-]+)\/(?<repo>[A-Za-z0-9_.-]+)#(?<discussionNumber>\d+)$/.exec(raw.trim());
+  if (refMatch?.groups?.owner && refMatch.groups.repo && refMatch.groups.discussionNumber && Number(refMatch.groups.discussionNumber) > 0) {
+    return {
+      owner: refMatch.groups.owner,
+      repo: refMatch.groups.repo,
+      discussionNumber: Number(refMatch.groups.discussionNumber),
+      url: `https://github.com/${refMatch.groups.owner}/${refMatch.groups.repo}/discussions/${refMatch.groups.discussionNumber}`,
+      commentsLimit: GITHUB_COMMENTS_DEFAULT_LIMIT,
+      commentsOffset: 0,
+    };
+  }
+
+  try {
+    const url = new URL(raw);
+    if (!/(^|\.)github\.com$/i.test(url.hostname)) {
+      throw new ValidationError('discussion must be a GitHub discussion url or owner/repo#number reference.');
+    }
+    const match = /^\/([^/]+)\/([^/]+)\/discussions\/(\d+)$/.exec(url.pathname);
+    if (!match || Number(match[3]!) < 1) {
+      throw new ValidationError('GitHub discussion url must include /owner/repo/discussions/number.');
+    }
+    return {
+      owner: match[1]!,
+      repo: match[2]!,
+      discussionNumber: Number(match[3]!),
+      url: `https://github.com/${match[1]!}/${match[2]!}/discussions/${match[3]!}`,
+      commentsLimit: GITHUB_COMMENTS_DEFAULT_LIMIT,
+      commentsOffset: 0,
+    };
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      throw error;
+    }
+    throw new ValidationError('discussion must be a GitHub discussion url or owner/repo#number reference.');
   }
 }
 
@@ -333,6 +393,70 @@ export function validateGitHubReleaseGet(value: unknown): GitHubReleaseGetReques
     owner: repo.owner,
     repo: repo.repo,
     tag: requiredString(input, 'tag'),
+  };
+}
+
+export function validateGitHubRepoGet(value: unknown): GitHubRepoGetRequest {
+  const input = asInput(value);
+  const repo = parseGitHubRepoScope(requiredString(input, 'repo'));
+  return {
+    owner: repo.owner,
+    repo: repo.repo,
+    includeReadme: optionalBoolean(input, 'includeReadme', true),
+  };
+}
+
+export function validateGitHubFileGet(value: unknown): GitHubFileGetRequest {
+  const input = asInput(value);
+  const repo = parseGitHubRepoScope(requiredString(input, 'repo'));
+  return {
+    owner: repo.owner,
+    repo: repo.repo,
+    path: githubPath(requiredString(input, 'path'), 'path'),
+    ref: optionalString(input, 'ref'),
+  };
+}
+
+export function validateGitHubCodeSearch(value: unknown): GitHubCodeSearchRequest {
+  const input = asInput(value);
+  const repo = optionalGitHubRepoScope(input, 'repo');
+  const owner = optionalString(input, 'owner');
+  if (!repo && owner && !/^[A-Za-z0-9_.-]+$/.test(owner)) {
+    throw new ValidationError('owner must be a GitHub owner name.');
+  }
+  const path = optionalString(input, 'path');
+  return {
+    query: requiredString(input, 'query'),
+    limit: boundedInteger(input, 'limit', SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT),
+    repo,
+    owner: repo ? undefined : owner,
+    language: optionalString(input, 'language'),
+    path: path ? githubPath(path, 'path') : undefined,
+  };
+}
+
+export function validateGitHubDiscussionSearch(value: unknown): GitHubDiscussionSearchRequest {
+  const input = asInput(value);
+  const repo = optionalGitHubRepoScope(input, 'repo');
+  const owner = optionalString(input, 'owner');
+  if (!repo && owner && !/^[A-Za-z0-9_.-]+$/.test(owner)) {
+    throw new ValidationError('owner must be a GitHub owner name.');
+  }
+  return {
+    query: requiredString(input, 'query'),
+    limit: boundedInteger(input, 'limit', SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT),
+    repo,
+    owner: repo ? undefined : owner,
+  };
+}
+
+export function validateGitHubDiscussionGet(value: unknown): GitHubDiscussionGetRequest {
+  const input = asInput(value);
+  const ref = parseGitHubDiscussion(requiredString(input, 'discussion'));
+  return {
+    ...ref,
+    commentsLimit: boundedInteger(input, 'commentsLimit', GITHUB_COMMENTS_DEFAULT_LIMIT, GITHUB_COMMENTS_MAX_LIMIT),
+    commentsOffset: boundedOffset(input, 'commentsOffset', 0),
   };
 }
 

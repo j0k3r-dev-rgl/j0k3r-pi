@@ -36,6 +36,10 @@ Discussion detail tools:
 - `github_pull_request_get`
 - `github_releases_get`
 - `github_release_get`
+- `github_repo_get` — repository metadata plus README by default: `{ repo: "owner/repo", includeReadme?: boolean }`
+- `github_file_get` — one repository file by path/ref: `{ repo: "owner/repo", path: "README.md", ref?: "main" }`
+- `github_code_search` — bounded code search with `github_file_get` follow-ups: `{ query: "OAuth provider", repo?: "owner/repo", owner?: "org", language?: "TypeScript", path?: "examples", limit?: 10 }`
+- `github_discussion_get` — one GitHub Discussion by URL or `owner/repo#number` with bounded comments; use `discussion_search` with `source: "github_discussions"` to find discussions first: `{ discussion: "owner/repo#123", commentsLimit?: 20, commentsOffset?: 0 }`
 - `devto_comments_get`
 - `hackernews_story_get`
 
@@ -59,11 +63,12 @@ Current web tool behavior:
 - `web_fetch` is free/local: no browser, no JavaScript, no external extraction service. It allows only `https://`, blocks private/local/link-local targets, manually revalidates redirects, reads 2 MB by default, and accepts `maxBytes` up to 5 MB.
 
 Current `discussion_search` source filters:
-- `all` or omitted: Stack Overflow, GitHub issues, GitHub pull requests, Dev.to, and Hacker News
+- `all` or omitted: Stack Overflow, GitHub issues, GitHub pull requests, GitHub Discussions, Dev.to, and Hacker News
 - `stack_overflow`
-- `github` (issues + pull requests)
+- `github` (issues + pull requests + discussions)
 - `github_issues`
 - `github_pull_requests`
+- `github_discussions`
 - `devto`
 - `hacker_news`
 
@@ -73,7 +78,7 @@ Fan-out searches are resilient: if one source fails, `discussion_search` returns
 
 ## Environment
 - `STACK_EXCHANGE_KEY` optional for higher Stack Exchange quota
-- `GITHUB_TOKEN` optional, env-only, public-read GitHub quota helper
+- `GITHUB_TOKEN` optional, env-only, public-read GitHub quota helper used by GitHub issue/PR/release/repo/file/code tools; required for GitHub Discussions when using the default API provider because GitHub GraphQL requires authentication
 - `OPENALEX_MAILTO` or `CROSSREF_MAILTO` optional, polite-pool identification for research APIs
 - `EXA_API_KEY` optional, higher quota/authenticated Exa MCP access for `web_search`
 - `PARALLEL_API_KEY` optional, higher quota/authenticated Parallel MCP access for `web_search`
@@ -82,7 +87,7 @@ Fan-out searches are resilient: if one source fails, `discussion_search` returns
 Credentials stay in environment variables only. Tools never accept secrets as inputs and redact secret-like values from returned surfaces.
 
 ## Provider notes
-- GitHub uses the official `octokit` SDK for read-only public issue search/detail.
+- GitHub uses the official `octokit` SDK by default for read-only public issue, pull request, release, repository, file, code search, and Discussions tools; `~/.pi/agent/websearch.json` can select the `gh` CLI provider. GitHub Discussions use GraphQL (`SearchType.DISCUSSION` and `Repository.discussion`) and therefore require `GITHUB_TOKEN` with the API provider or an authenticated `gh` CLI with the `gh` provider.
 - Dev.to uses the public Forem API via native `fetch` with a tag-first MVP for article search.
 - Hacker News uses the Algolia HN Search API via native `fetch` for story search and story detail.
 - Exa MCP is the primary hosted web search provider for `web_search` via native `fetch`.
@@ -109,7 +114,7 @@ Credentials stay in environment variables only. Tools never accept secrets as in
 - Search tools return bounded result counts with concise snippets.
 - `web_fetch` only fetches HTTPS text-like content (`text/html`, `application/xhtml+xml`, text/plain/markdown, and JSON), blocks embedded credentials and unsafe/private/local resolved addresses, follows at most 3 safe redirects, reads 2 MB by default, and caps `maxBytes` at 5 MB.
 - Research graph tools return bounded citation/reference lists with explicit provider pagination (`limit` plus `page` or `offset`).
-- Detail/get tools expose the full text returned by the provider for selected bodies, abstracts, notes, and comments; they are bounded by explicit provider/API availability and pagination parameters such as comment limits, offsets, and nested comment depth, not by arbitrary summary truncation.
+- Detail/get tools expose the full text returned by the provider for selected bodies, abstracts, notes, comments, READMEs, repository files, and selected GitHub Discussion comments; they are bounded by explicit provider/API availability and pagination parameters such as comment limits, offsets, and nested comment depth, not by arbitrary summary truncation. GitHub code and discussion search remain bounded to at most 10 results and return follow-up refs instead of bulk content.
 - Secret-like strings are redacted as `[REDACTED_SECRET]` across `content`, `details`, and structured errors.
 - Provider errors are returned as structured recoverable failures when possible.
 - Community content is untrusted display content only.

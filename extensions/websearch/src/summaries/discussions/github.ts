@@ -1,10 +1,15 @@
 import type {
+  GitHubCodeSearchResult,
+  GitHubDiscussionDetailResult,
+  GitHubDiscussionSearchResult,
+  GitHubFileResult,
   GitHubIssueDetailResult,
   GitHubIssueSearchResult,
   GitHubPullRequestDetailResult,
   GitHubPullRequestSearchResult,
   GitHubReleaseResult,
   GitHubReleasesResult,
+  GitHubRepoResult,
 } from '../../types.js';
 
 function githubRelationsSummary(item: { related_pull_requests?: GitHubIssueSearchResult['items'][number]['related_pull_requests']; related_issues?: GitHubIssueSearchResult['items'][number]['related_issues'] }, indent = ''): string | undefined {
@@ -128,4 +133,72 @@ export function githubReleaseSummary(data: GitHubReleaseResult): string {
   ].filter(Boolean).join('; ');
   const body = data.body ? `\nnotes: ${data.body}` : '';
   return `${data.name ?? data.tag} — ${data.tag} — ${data.url ?? `${data.repository}/releases/tag/${data.tag}`}${metadata ? ` (${metadata})` : ''}${body}`;
+}
+
+export function githubRepoSummary(data: GitHubRepoResult): string {
+  const metadata = [
+    data.stars === undefined ? undefined : `stars: ${data.stars}`,
+    data.forks === undefined ? undefined : `forks: ${data.forks}`,
+    data.language ? `language: ${data.language}` : undefined,
+    data.license ? `license: ${data.license}` : undefined,
+    data.default_branch ? `default_branch: ${data.default_branch}` : undefined,
+    data.topics && data.topics.length > 0 ? `topics: ${data.topics.join(', ')}` : undefined,
+  ].filter(Boolean).join('; ');
+  const readme = data.readme ? `\nREADME: ${data.readme.path}${data.readme.content ? `\n${data.readme.content}` : ''}` : '';
+  return `${data.repository}${data.description ? ` — ${data.description}` : ''}${data.url ? ` — ${data.url}` : ''}${metadata ? ` (${metadata})` : ''}${readme}`;
+}
+
+export function githubFileSummary(data: GitHubFileResult): string {
+  const ref = data.ref ? `@${data.ref}` : '';
+  const metadata = [
+    data.size === undefined ? undefined : `size: ${data.size}`,
+    data.sha ? `sha: ${data.sha}` : undefined,
+    data.encoding ? `encoding: ${data.encoding}` : undefined,
+  ].filter(Boolean).join('; ');
+  return `${data.repository}:${data.path}${ref}${data.url ? ` — ${data.url}` : ''}${metadata ? ` (${metadata})` : ''}\n${data.content ?? ''}`;
+}
+
+export function githubCodeSearchSummary(data: GitHubCodeSearchResult): string {
+  if (data.items.length === 0) return `No GitHub code results found for "${data.query}".`;
+  return data.items.map((item, index) => {
+    const metadata = [
+      item.score === undefined ? undefined : `score: ${item.score}`,
+      `follow-up: ${item.followup_tool} ${item.followup_ref}`,
+    ].filter(Boolean).join('; ');
+    const snippet = item.snippet ? `\n   snippet: ${item.snippet}` : '';
+    return `${index + 1}. ${item.repository}/${item.path}${item.url ? ` — ${item.url}` : ''}${metadata ? ` (${metadata})` : ''}${snippet}`;
+  }).join('\n');
+}
+
+export function githubDiscussionSearchSummary(data: GitHubDiscussionSearchResult): string {
+  if (data.items.length === 0) return `No GitHub discussions found for "${data.query}".`;
+  return data.items.map((item, index) => {
+    const metadata = [
+      item.category ? `category: ${item.category}` : undefined,
+      item.upvote_count === undefined ? undefined : `upvotes: ${item.upvote_count}`,
+      item.comments_count === undefined ? undefined : `comments: ${item.comments_count}`,
+      item.answered === undefined ? undefined : `answered: ${item.answered}`,
+      item.labels && item.labels.length > 0 ? `labels: ${item.labels.join(', ')}` : undefined,
+    ].filter(Boolean).join('; ');
+    const snippet = item.snippet ? `\n   snippet: ${item.snippet}` : '';
+    return `${index + 1}. ${item.title ?? item.follow_up_ref} — ${item.follow_up_ref} — ${item.url}${metadata ? ` (${metadata})` : ''}${snippet}`;
+  }).join('\n');
+}
+
+export function githubDiscussionSummary(data: GitHubDiscussionDetailResult): string {
+  const metadata = [
+    data.follow_up_ref,
+    data.category ? `category: ${data.category}` : undefined,
+    data.upvote_count === undefined ? undefined : `upvotes: ${data.upvote_count}`,
+    data.comments_count === undefined ? undefined : `comments: ${data.comments_count}`,
+    data.answered === undefined ? undefined : `answered: ${data.answered}`,
+    data.closed === undefined ? undefined : `closed: ${data.closed}`,
+    data.locked === undefined ? undefined : `locked: ${data.locked}`,
+    data.labels && data.labels.length > 0 ? `labels: ${data.labels.join(', ')}` : undefined,
+  ].filter(Boolean).join('; ');
+  const answer = data.answer ? `Answer\n- ${data.answer.author ?? 'unknown'}: ${data.answer.body ?? ''}` : undefined;
+  const comments = data.comments.length > 0
+    ? [`Comments offset ${data.comments_offset} limit ${data.comments_limit}`, ...data.comments.map((comment, index) => `${data.comments_offset + index + 1}. ${comment.author ?? 'unknown'}${comment.is_answer ? ' [answer]' : ''}: ${comment.body ?? ''}`)].join('\n')
+    : undefined;
+  return [data.title ?? data.follow_up_ref, data.url, metadata, data.body ?? '', answer, comments].filter(Boolean).join('\n');
 }

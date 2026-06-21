@@ -22,6 +22,8 @@ function createClients(overrides: Record<string, unknown> = {}) {
       listPullRequestReviews: vi.fn().mockResolvedValue([]),
       listReleases: vi.fn().mockResolvedValue([]),
       getReleaseByTag: vi.fn(),
+      searchDiscussions: vi.fn().mockResolvedValue([]),
+      getDiscussion: vi.fn(),
       ...(overrides.github as Record<string, unknown> | undefined),
     },
     devto: {
@@ -55,6 +57,7 @@ describe('generic websearch meta-tools', () => {
     expect(clients.stackExchange.searchQuestions).not.toHaveBeenCalled();
     expect(clients.github.searchIssues).not.toHaveBeenCalled();
     expect(clients.github.searchPullRequests).not.toHaveBeenCalled();
+    expect(clients.github.searchDiscussions).not.toHaveBeenCalled();
     expect(clients.devto.searchArticles).not.toHaveBeenCalled();
     expect(result.details.status).toBe('success');
     expect(result.details.data.sources_searched).toEqual(['hacker_news']);
@@ -89,12 +92,36 @@ describe('generic websearch meta-tools', () => {
     expect(result.details.data.items[0]).toMatchObject({ source: 'devto', kind: 'article', title: 'SQLite article' });
   });
 
+  it('discussion_search can target GitHub discussions as a selected source', async () => {
+    const searchDiscussions = vi.fn().mockResolvedValue([{ id: 'D_42', number: 42, title: 'Agent memory discussion', url: 'https://github.com/acme/widgets/discussions/42', repository: { nameWithOwner: 'acme/widgets' }, bodyText: 'Discussion snippet.', comments: { totalCount: 2 }, upvoteCount: 5 }]);
+    const clients = createClients({ github: { searchDiscussions } });
+    const pi = createMockPi();
+
+    registerWebsearchTools(pi, { env: {}, fetch: vi.fn<typeof fetch>(), createClients: () => clients });
+
+    const tool = pi.tools.find((entry) => entry.name === 'discussion_search');
+    const result = (await execute(tool!, { query: 'agent memory', source: 'github_discussions', repo: 'acme/widgets', limit: 3 })) as {
+      content: Array<{ text: string }>;
+      details: { status: 'success'; data: { sources_searched: string[]; items: Array<Record<string, unknown>>; source_errors: Array<Record<string, unknown>> } };
+    };
+
+    expect(searchDiscussions).toHaveBeenCalledWith({ query: 'agent memory', limit: 3, repo: 'acme/widgets', owner: undefined }, undefined);
+    expect(clients.github.searchIssues).not.toHaveBeenCalled();
+    expect(clients.github.searchPullRequests).not.toHaveBeenCalled();
+    expect(result.details.status).toBe('success');
+    expect(result.details.data.sources_searched).toEqual(['github_discussions']);
+    expect(result.details.data.source_errors).toEqual([]);
+    expect(result.details.data.items[0]).toMatchObject({ source: 'github', source_query: 'github_discussions', kind: 'discussion', title: 'Agent memory discussion', followup_tool: 'github_discussion_get', followup_ref: 'acme/widgets#42' });
+    expect(result.content[0]?.text).toContain('[github/discussion] Agent memory discussion');
+  });
+
   it('discussion_search fans out across current discussion sources when source is omitted', async () => {
     const clients = createClients({
       stackExchange: { searchQuestions: vi.fn().mockResolvedValue([{ question_id: 1, link: 'https://stackoverflow.com/q/1', title: 'Stack answer', score: 5, answer_count: 1, body: 'Stack snippet.' }]) },
       github: {
         searchIssues: vi.fn().mockResolvedValue([{ number: 2, html_url: 'https://github.com/acme/repo/issues/2', repository_url: 'https://api.github.com/repos/acme/repo', title: 'Issue answer', state: 'open', comments: 1, body: 'Issue snippet.' }]),
         searchPullRequests: vi.fn().mockResolvedValue([{ number: 3, html_url: 'https://github.com/acme/repo/pull/3', repository_url: 'https://api.github.com/repos/acme/repo', title: 'PR answer', state: 'closed', comments: 2, body: 'PR snippet.' }]),
+        searchDiscussions: vi.fn().mockResolvedValue([{ id: 'D_6', number: 6, url: 'https://github.com/acme/repo/discussions/6', repository: { nameWithOwner: 'acme/repo' }, title: 'Discussion answer', bodyText: 'Discussion snippet.', comments: { totalCount: 3 } }]),
         listIssueTimelineEvents: vi.fn().mockResolvedValue([]),
       },
       devto: { searchArticles: vi.fn().mockResolvedValue([{ id: 4, title: 'Article answer', url: 'https://dev.to/a/4', description: 'Article snippet.' }]) },
@@ -109,12 +136,13 @@ describe('generic websearch meta-tools', () => {
       details: { status: 'success'; data: { sources_searched: string[]; source_errors: Array<Record<string, unknown>>; items: Array<Record<string, unknown>> } };
     };
 
-    expect(result.details.data.sources_searched).toEqual(['stack_overflow', 'github_issues', 'github_pull_requests', 'devto', 'hacker_news']);
+    expect(result.details.data.sources_searched).toEqual(['stack_overflow', 'github_issues', 'github_pull_requests', 'github_discussions', 'devto', 'hacker_news']);
     expect(result.details.data.source_errors).toEqual([]);
     expect(result.details.data.items.map((item) => `${item.source}/${item.kind}`)).toEqual([
       'stack_overflow/question',
       'github/issue',
       'github/pull_request',
+      'github/discussion',
       'devto/article',
       'hacker_news/story',
     ]);
@@ -126,6 +154,7 @@ describe('generic websearch meta-tools', () => {
       github: {
         searchIssues: vi.fn().mockResolvedValue([]),
         searchPullRequests: vi.fn().mockResolvedValue([]),
+        searchDiscussions: vi.fn().mockResolvedValue([]),
         listIssueTimelineEvents: vi.fn().mockResolvedValue([]),
       },
       devto: { searchArticles: vi.fn().mockRejectedValue(new Error('devto resource was not found')) },
@@ -158,6 +187,7 @@ describe('generic websearch meta-tools', () => {
       github: {
         searchIssues: vi.fn().mockResolvedValue([{ number: 10, html_url: 'https://github.com/acme/repo/issues/10', repository_url: 'https://api.github.com/repos/acme/repo', title: 'Issue one', body: 'Issue snippet.' }]),
         searchPullRequests: vi.fn().mockResolvedValue([]),
+        searchDiscussions: vi.fn().mockResolvedValue([]),
         listIssueTimelineEvents: vi.fn().mockResolvedValue([]),
       },
       hackerNews: { searchStories: vi.fn().mockResolvedValue([{ objectID: '20', title: 'HN one', url: 'https://news.ycombinator.com/item?id=20', story_text: 'HN snippet.' }]) },

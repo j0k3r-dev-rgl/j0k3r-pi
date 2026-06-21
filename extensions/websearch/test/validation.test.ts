@@ -76,6 +76,11 @@ describe('websearch community-platform validation contracts', () => {
     const validateGitHubPullRequestGet = contracts.validateGitHubPullRequestGet as ((value: unknown) => unknown) | undefined;
     const validateGitHubReleasesGet = contracts.validateGitHubReleasesGet as ((value: unknown) => unknown) | undefined;
     const validateGitHubReleaseGet = contracts.validateGitHubReleaseGet as ((value: unknown) => unknown) | undefined;
+    const validateGitHubRepoGet = contracts.validateGitHubRepoGet as ((value: unknown) => unknown) | undefined;
+    const validateGitHubFileGet = contracts.validateGitHubFileGet as ((value: unknown) => unknown) | undefined;
+    const validateGitHubCodeSearch = contracts.validateGitHubCodeSearch as ((value: unknown) => unknown) | undefined;
+    const validateGitHubDiscussionSearch = contracts.validateGitHubDiscussionSearch as ((value: unknown) => unknown) | undefined;
+    const validateGitHubDiscussionGet = contracts.validateGitHubDiscussionGet as ((value: unknown) => unknown) | undefined;
     const validateDevtoArticleSearch = contracts.validateDevtoArticleSearch as ((value: unknown) => unknown) | undefined;
     const validateDevtoCommentsGet = contracts.validateDevtoCommentsGet as ((value: unknown) => unknown) | undefined;
     const validateHackerNewsSearch = contracts.validateHackerNewsSearch as ((value: unknown) => unknown) | undefined;
@@ -87,6 +92,11 @@ describe('websearch community-platform validation contracts', () => {
     expect(validateGitHubPullRequestGet).toBeTypeOf('function');
     expect(validateGitHubReleasesGet).toBeTypeOf('function');
     expect(validateGitHubReleaseGet).toBeTypeOf('function');
+    expect(validateGitHubRepoGet).toBeTypeOf('function');
+    expect(validateGitHubFileGet).toBeTypeOf('function');
+    expect(validateGitHubCodeSearch).toBeTypeOf('function');
+    expect(validateGitHubDiscussionSearch).toBeTypeOf('function');
+    expect(validateGitHubDiscussionGet).toBeTypeOf('function');
     expect(validateDevtoArticleSearch).toBeTypeOf('function');
     expect(validateDevtoCommentsGet).toBeTypeOf('function');
     expect(validateHackerNewsSearch).toBeTypeOf('function');
@@ -118,6 +128,64 @@ describe('websearch community-platform validation contracts', () => {
       owner: 'octo',
       repo: 'widgets',
       tag: 'v1.2.3',
+    });
+    expect(validateGitHubRepoGet?.({ repo: 'octo/widgets' })).toEqual({
+      owner: 'octo',
+      repo: 'widgets',
+      includeReadme: true,
+    });
+    expect(validateGitHubRepoGet?.({ repo: 'octo/widgets', includeReadme: false })).toEqual({
+      owner: 'octo',
+      repo: 'widgets',
+      includeReadme: false,
+    });
+    expect(validateGitHubFileGet?.({ repo: 'octo/widgets', path: '/src/index.ts', ref: 'main' })).toEqual({
+      owner: 'octo',
+      repo: 'widgets',
+      path: 'src/index.ts',
+      ref: 'main',
+    });
+    expect(validateGitHubCodeSearch?.({ query: 'OAuth provider', owner: 'octo-org', language: 'TypeScript', path: 'examples', limit: 2 })).toEqual({
+      query: 'OAuth provider',
+      owner: 'octo-org',
+      language: 'TypeScript',
+      path: 'examples',
+      limit: 2,
+    });
+    expect(validateGitHubCodeSearch?.({ query: 'OAuth provider', repo: 'octo/widgets', owner: 'ignored-owner' })).toEqual({
+      query: 'OAuth provider',
+      repo: 'octo/widgets',
+      owner: undefined,
+      limit: 5,
+      language: undefined,
+      path: undefined,
+    });
+    expect(validateGitHubDiscussionSearch?.({ query: 'agent memory', owner: 'octo-org', limit: 4 })).toEqual({
+      query: 'agent memory',
+      owner: 'octo-org',
+      limit: 4,
+    });
+    expect(validateGitHubDiscussionSearch?.({ query: 'agent memory', repo: 'octo/widgets', owner: 'ignored-owner' })).toEqual({
+      query: 'agent memory',
+      repo: 'octo/widgets',
+      owner: undefined,
+      limit: 5,
+    });
+    expect(validateGitHubDiscussionGet?.({ discussion: 'https://github.com/octo/widgets/discussions/42', commentsLimit: 3, commentsOffset: 6 })).toEqual({
+      owner: 'octo',
+      repo: 'widgets',
+      discussionNumber: 42,
+      url: 'https://github.com/octo/widgets/discussions/42',
+      commentsLimit: 3,
+      commentsOffset: 6,
+    });
+    expect(validateGitHubDiscussionGet?.({ discussion: 'octo/widgets#42' })).toEqual({
+      owner: 'octo',
+      repo: 'widgets',
+      discussionNumber: 42,
+      url: 'https://github.com/octo/widgets/discussions/42',
+      commentsLimit: 5,
+      commentsOffset: 0,
     });
     expect(() => validateGitHubIssueSearch?.({ query: 'vitest', repo: 'octo' })).toThrow(/repo must be an owner\/repo reference/i);
     expect(validateDevtoArticleSearch?.({ tag: 'typescript' })).toEqual({
@@ -166,6 +234,12 @@ describe('websearch community-platform validation contracts', () => {
     expect(() => validateGitHubPullRequestGet?.({ pull_request: 'octo/widgets#42', reviewCommentsLimit: 21 })).toThrow(/at most 20/i);
     expect(() => validateGitHubReleasesGet?.({ repo: 'octo', limit: 11 })).toThrow(/repo must be an owner\/repo reference|at most 10/i);
     expect(() => validateGitHubReleaseGet?.({ repo: 'octo/widgets', tag: '' })).toThrow(/tag is required/i);
+    expect(() => validateGitHubFileGet?.({ repo: 'octo/widgets', path: '../secret' })).toThrow(/repository-relative path/i);
+    expect(() => validateGitHubCodeSearch?.({ query: 'oops', owner: 'bad/owner' })).toThrow(/owner must be a GitHub owner name/i);
+    expect(() => validateGitHubCodeSearch?.({ query: 'oops', limit: 11 })).toThrow(/at most 10/i);
+    expect(() => validateGitHubDiscussionSearch?.({ query: 'oops', owner: 'bad/owner' })).toThrow(/owner must be a GitHub owner name/i);
+    expect(() => validateGitHubDiscussionSearch?.({ query: 'oops', limit: 11 })).toThrow(/at most 10/i);
+    expect(() => validateGitHubDiscussionGet?.({ discussion: 'octo/widgets#0' })).toThrow(/discussion must be a GitHub discussion url or owner\/repo#number reference/i);
     expect(() => validateDevtoCommentsGet?.({ article_id: 1234, topLevelLimit: 26 })).toThrow(/at most 25/i);
     expect(() => validateHackerNewsStoryGet?.({ story_id: 9876, commentsLimit: 26 })).toThrow(/at most 25/i);
   });
