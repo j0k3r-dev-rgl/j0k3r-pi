@@ -2231,6 +2231,41 @@ describe('subagents extension', () => {
     expect(serialized).not.toContain('oversized snapshot text oversized snapshot text oversized snapshot text');
   });
 
+  it('renders completed subagent_run results as collapsed width-safe summaries without raw response text', () => {
+    const manager = new SubagentManager(mockRunner());
+    let runTool: any;
+    const theme = {
+      fg: (_name: string, text: string) => `\u001b[2m${text}\u001b[22m`,
+      bold: (text: string) => `\u001b[1m${text}\u001b[22m`,
+    };
+    registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
+    const rawResponse = '{"id":"mem_j0k3r_j0k3r-pi_1782144305930_cc027e8afb154ba5"} to=functions.memory_get '.repeat(4);
+
+    const renderedLines = runTool.renderResult({
+      content: [{ type: 'text', text: `Completed 1 subagent task:\n${rawResponse}` }],
+      details: {
+        task: {
+          id: 'subtask_sdd-verify_1782157254429_2b614a8e',
+          agent: 'sdd-verify',
+          mode: 'task',
+          status: 'completed',
+          task: 'verify',
+          created_at: new Date().toISOString(),
+          result: rawResponse,
+          usage: { turns: 11, input: 87000, output: 6800, cacheRead: 574000, cost: 0.462, contextTokens: 79000 },
+          model: 'openai-codex/gpt-5.4',
+          effort: 'medium',
+        },
+      },
+    }, { isPartial: false }, theme).render(60);
+    const plain = renderedLines.map(stripAnsi);
+
+    expect(plain.join('\n')).toContain('response: collapsed');
+    expect(plain.join('\n')).toContain('/subagents');
+    expect(plain.join('\n')).not.toContain('to=functions.memory_get');
+    expect(plain.every((line: string) => line.length <= 60)).toBe(true);
+  });
+
   it('renders agent, model, and effort as explicit labels in the history panel', () => {
     const task: SubagentTask = {
       id: 'subtask_analyst_1',

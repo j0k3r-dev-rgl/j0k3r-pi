@@ -136,6 +136,12 @@ function compactResultDetails<T extends Record<string, any>>(details: T): T {
   };
 }
 
+function collapsedResultHint(task: SubagentTask | undefined, failed: boolean): string {
+  if (!task) return failed ? 'result: collapsed · see tool output text for details' : 'response: collapsed · see tool output text for details';
+  const label = failed ? 'error' : 'response';
+  return `${label}: collapsed · open /subagents or call subagent_result ${task.id}`;
+}
+
 export function registerSubagentTools(pi: any, manager: SubagentManager): void {
   pi.registerTool({
     name: 'subagent_list_agents',
@@ -222,8 +228,8 @@ export function registerSubagentTools(pi: any, manager: SubagentManager): void {
           `${theme.fg?.('dim', `model: ${task.model ?? 'default/current'} · id: ${task.id}`) ?? `model: ${task.model ?? 'default/current'} · id: ${task.id}`}${usage ? `\n${theme.fg?.('dim', `usage: ${usage}`) ?? `usage: ${usage}`}` : ''}`,
         ].join('\n')
         : status;
-      const preview = clip(task?.result ?? task?.error ?? task?.output_preview ?? result?.content?.[0]?.text, 220);
-      return textComponent(preview ? `${summary}\n${theme.fg?.('dim', preview) ?? preview}` : summary);
+      const hint = collapsedResultHint(task, failed);
+      return textComponent(`${summary}\n${theme.fg?.('dim', hint) ?? hint}`);
     },
   });
 
