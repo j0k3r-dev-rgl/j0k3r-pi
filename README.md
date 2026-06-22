@@ -103,6 +103,7 @@ See [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 | Extension | README | Purpose |
 |---|---|---|
 | Agent Todo | [`extensions/agent-todo/README.md`](extensions/agent-todo/README.md) | Single active task checklist for the current conversation branch, plus widget/provider integration. |
+| API Tools | [`extensions/api-tools/README.md`](extensions/api-tools/README.md) | Project-local REST and GraphQL tools gated by exact `<ctx.cwd>/.pi/api.json`, with login/access-token persistence, per-request token use, bounded output, and secret-safe diagnostics. |
 | Context7 | [`extensions/context7/README.md`](extensions/context7/README.md) | Safe, bounded Context7 library documentation tools without MCP. |
 | Memory | [`extensions/memory/README.md`](extensions/memory/README.md) | Local-first project-aware persistent memory backed by SQLite/FTS5. Opt-in via `.pi/memory.json` with `enabled: true`. |
 | PDF Review | [`extensions/pdf-review/README.md`](extensions/pdf-review/README.md) | Local PDF extraction with optional OCR via OCRmyPDF/Tesseract. |

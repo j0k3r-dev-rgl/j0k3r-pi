@@ -47,4 +47,5 @@ extensions/telegram-pi-control/telegram-pi-control.env
 openspec/
 .pi/skill-registry.json
 .pi/skill-registry.md
+.pi/api.json
 bin
