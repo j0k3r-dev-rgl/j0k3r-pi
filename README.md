@@ -41,6 +41,7 @@ What it intentionally does **not** install:
 - `.pi/` runtime/project data
 - `sessions/`
 - `auth.json`, `trust.json`, or other local secrets/runtime identity files
+- `websearch.json` or other local runtime config files
 - `node_modules/` from the checkout
 
 Useful installer options:
@@ -74,7 +75,7 @@ See [`AGENTS.md`](AGENTS.md) for the full policy.
 
 [`extensions/skill-registry`](extensions/skill-registry/) generates `.pi/skill-registry.json` and `.pi/skill-registry.md` from both project-local and global/user skills.
 
-The extension is opt-in at project scope: it only registers when `.pi/skill-registry.config.json` exists with `{"enabled": true}`. Missing or invalid config keeps it disabled.
+The extension is opt-in at project scope: it only registers when `.pi/skill-registry.config.json` exists with `{"enabled": true}`. Missing or invalid config keeps it disabled. It has no dedicated environment variables; the config file is the project enable gate.
 
 Scanned skill roots:
 
@@ -104,10 +105,14 @@ See [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 | Agent Todo | [`extensions/agent-todo/README.md`](extensions/agent-todo/README.md) | Single active task checklist for the current conversation branch, plus widget/provider integration. |
 | Context7 | [`extensions/context7/README.md`](extensions/context7/README.md) | Safe, bounded Context7 library documentation tools without MCP. |
 | Memory | [`extensions/memory/README.md`](extensions/memory/README.md) | Local-first project-aware persistent memory backed by SQLite/FTS5. Opt-in via `.pi/memory.json` with `enabled: true`. |
+| PDF Review | [`extensions/pdf-review/README.md`](extensions/pdf-review/README.md) | Local PDF extraction with optional OCR via OCRmyPDF/Tesseract. |
 | Permission Guard | [`extensions/permission-guard/README.md`](extensions/permission-guard/README.md) | In-process permission policy for supported tools and user bash commands. |
 | Sidebar | [`extensions/sidebar/README.md`](extensions/sidebar/README.md) | HUD-style sidebar with chat, subagents, todo, and git status. |
-| Skill Registry | [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md) | Routing index generator for global and project skills. Opt-in via `.pi/skill-registry.config.json` with `enabled: true`. |
+| Skill Registry | [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md) | Routing index generator for global and project skills. Opt-in via `.pi/skill-registry.config.json` with `enabled: true`; no dedicated environment variables. |
 | Subagents | [`extensions/subagents/README.md`](extensions/subagents/README.md) | Markdown-defined subagent delegation, history, TUI panel, model profiles, and permission handoff. |
+| Telegram Pi Control | [`extensions/telegram-pi-control/README.md`](extensions/telegram-pi-control/README.md) | Telegram gateway for authorized remote Pi session control. Requires Telegram bot/user environment variables. |
+| Websearch | [`extensions/websearch/README.md`](extensions/websearch/README.md) | Bounded web, community, GitHub, and research search with grouped public tool routers. Optional global config: `~/.pi/agent/websearch.json`; credentials are env-only. |
+| YouTube Research | [`extensions/youtube-research/README.md`](extensions/youtube-research/README.md) | YouTube search, metadata, transcript, channel, and playlist research tools using `yt-dlp`. |
 
 After changing extension code, markdown subagents, skills, or config during an interactive Pi session, run `/reload` or restart Pi when the relevant README/skill says so.
 
@@ -137,13 +142,22 @@ npm test
 npm run typecheck
 ```
 
-The Memory extension requires a Node version with built-in `node:sqlite` support.
+```bash
+cd extensions/websearch
+npm test
+npm run typecheck
+```
+
+The Memory extension requires a Node version with built-in `node:sqlite` support. YouTube Research requires `yt-dlp` on `PATH` at runtime; PDF Review OCR mode requires OCRmyPDF/Tesseract only when OCR is requested.
 
 ## Security notes
 
 - Do not store secrets in skills, README files, memories, `.pi/*.json`, or extension config.
 - Live Context7 calls require `CONTEXT7_API_KEY` in the Pi process environment, not in repository files.
+- Skill Registry has no dedicated environment variables; project opt-in is controlled by `.pi/skill-registry.config.json` with `enabled: true`.
 - Memory/cloud token fields should use environment variable names, never raw token values.
+- Websearch credentials such as `EXA_API_KEY`, `PARALLEL_API_KEY`, `GITHUB_TOKEN`, `STACK_EXCHANGE_KEY`, `OPENALEX_MAILTO`, `CROSSREF_MAILTO`, and `SEMANTIC_SCHOLAR_API_KEY` belong in the process environment, not repository files.
+- Telegram Pi Control requires `PI_TELEGRAM_CONTROL_BOT_TOKEN` and `PI_TELEGRAM_CONTROL_USER_ID` from environment or ignored local runtime files only.
 - Permission Guard is an in-process guard, not an OS sandbox.
 - Emergency `bypassAll` settings disable normal guard behavior; inspect active config before enforcement validation.
 

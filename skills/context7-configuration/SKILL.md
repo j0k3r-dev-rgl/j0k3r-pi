@@ -16,27 +16,34 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
 ```json
 {
   "category": "runtime",
-  "domains": ["context7", "documentation", "library-docs", "cache", "configuration"],
+  "domains": ["context7-configuration", "context7-cache-config", "context7-credentials"],
   "triggers": {
     "paths": [
       ".pi/context7.json",
-      "context7.json",
-      "extensions/context7/**",
-      "skills/context7-configuration/SKILL.md"
+      "context7.json"
     ],
     "keywords": [
-      "context7",
-      "context7_status",
+      "context7 configuration",
+      "configure context7",
+      "configurar context7",
+      "configuro context7",
+      "como configurar context7",
+      "cómo configurar context7",
+      "como configuro context7",
+      "cómo configuro context7",
+      "como se configura context7",
+      "cómo se configura context7",
+      "configuracion context7",
+      "configuración context7",
+      "context7 config",
+      "context7.json",
       "context7 api key",
-      "context7 cache",
-      "library docs",
-      "up-to-date docs"
+      "context7 cache"
     ]
   },
-  "sdd_phases": ["explore", "design", "apply", "verify"],
+  "sdd_phases": [],
   "related_skills": [
-    "permission-guard-configuration",
-    "skill-authoring"
+    "permission-guard-configuration"
   ],
   "priority": 70
 }
@@ -47,24 +54,25 @@ Field conventions:
 - `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
 - `domains`: stable domain tags used for routing.
 - `triggers.paths`: glob-like project paths that should activate this skill.
-- `triggers.keywords`: user/request/code keywords that should activate this skill.
-- `sdd_phases`: phases where this skill is usually useful: `explore`, `proposal`, `spec`, `design`, `task`, `apply`, `verify`, `archive`.
-- `related_skills`: skills that should be considered when this skill is active.
+- `triggers.keywords`: configuration-only keywords that should activate this skill.
+- `sdd_phases`: keep empty for configuration-only skills so phase routing alone does not load them.
+- `related_skills`: configuration-adjacent skills only; do not add usage, implementation, or workflow skills.
 - `priority`: routing priority from 0 to 100. Higher means consider earlier when multiple skills match.
 
 ## Activation Contract
 
-Use this skill when configuring or troubleshooting Context7 in Pi, especially `.pi/context7.json`, cache settings, defaults for documentation output, readiness/API-key checks, or deciding how agents should fetch up-to-date library documentation.
+Use this skill only when the user asks how to configure Context7 in Pi or when editing/reviewing Context7 configuration files such as `.pi/context7.json` or agent-root `context7.json`. Cover cache settings, output defaults, and API-key readiness as configuration topics only.
+
+Do not load this skill for ordinary library documentation lookup, tool usage, implementation work under `extensions/context7/**`, or editing this skill file; those are not configuration questions.
 
 ## Hard Rules
 
 - Never store `CONTEXT7_API_KEY` or any token in `.pi/context7.json` or repository files.
 - Use environment variables for live Context7 credentials.
-- Run `context7_status` before live documentation calls when readiness is uncertain.
+- Run `context7_status` only for configuration readiness checks when readiness is uncertain.
 - Keep cache outside the repository; the extension disables unsafe cache locations.
 - Keep output bounded with `defaults.max_chars` and `defaults.result_limit`.
-- Prefer focused documentation queries over broad library dumps.
-- After changing `.pi/context7.json` or extension code, tell the user to `/reload` or restart Pi.
+- After changing `.pi/context7.json` or agent-root `context7.json`, tell the user to `/reload` or restart Pi.
 
 Recommended project config:
 
@@ -86,17 +94,15 @@ Recommended project config:
 - If the user wants live Context7 calls, confirm the API key is available in the Pi process environment, not in config.
 - If documentation output risks flooding context, lower `max_chars` or ask for a narrower query.
 - If cache is disabled for privacy or freshness reasons, do not re-enable it without user confirmation.
-- If Context7 docs are needed for SDD discovery, consider `sdd-workflow` routing and use Context7 as evidence, not as implementation approval.
 
 ## Execution Steps
 
-1. Identify whether the task is configuration, readiness troubleshooting, or documentation retrieval.
+1. Identify whether the task is configuration or readiness troubleshooting.
 2. Read existing `.pi/context7.json` before editing.
 3. Configure only non-secret fields: `cache.enabled`, `cache.ttl_seconds`, `defaults.max_chars`, and `defaults.result_limit`.
 4. Validate JSON syntax after edits.
 5. Tell the user to `/reload` or restart Pi.
 6. Run `context7_status` when practical to verify effective defaults, cache state, and API-key presence without exposing secrets.
-7. For docs retrieval, search by human library name first unless the exact Context7 library ID is known.
 
 ## Output Contract
 
@@ -111,7 +117,7 @@ Return:
 
 ## References
 
-- `extensions/context7/README.md` — Context7 configuration, cache behavior, and tool usage.
+- `extensions/context7/README.md` — Context7 configuration and cache behavior.
 - `extensions/context7/src/config.ts` — config parsing and default validation.
 - `extensions/context7/src/cache.ts` — cache location and safety behavior.
 - `extensions/context7/src/security.ts` — secret redaction behavior.

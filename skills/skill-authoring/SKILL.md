@@ -34,7 +34,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "lanzadores",
       "activation contract",
       "SKILL.md",
-      "skill registry",
+      "skill registry contract",
       "skill-template",
       "registry contract"
     ]

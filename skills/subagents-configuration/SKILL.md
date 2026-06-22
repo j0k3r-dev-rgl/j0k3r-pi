@@ -16,7 +16,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
 ```json
 {
   "category": "workflow",
-  "domains": ["subagents", "delegation", "model-profiles", "tools", "history"],
+  "domains": ["subagents-configuration", "subagent-config", "model-profile-config", "tool-allowlist-config", "subagent-history-config"],
   "triggers": {
     "paths": [
       ".pi/subagents/**/*.md",
@@ -24,24 +24,42 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "subagents/**/*.md",
       "subagents.json",
       "~/.pi/agent/subagents/**/*.md",
-      "~/.pi/agent/subagents.json",
-      "extensions/subagents/**"
+      "~/.pi/agent/subagents.json"
     ],
     "keywords": [
-      "subagent",
+      "subagents configuration",
+      "configure subagents",
+      "configurar subagents",
+      "configuro subagents",
+      "como configurar subagents",
+      "cómo configurar subagents",
+      "como configuro subagents",
+      "cómo configuro subagents",
+      "como se configura subagents",
+      "cómo se configura subagents",
+      "configurar subagentes",
+      "configuro subagentes",
+      "como configurar subagentes",
+      "cómo configurar subagentes",
+      "como configuro subagentes",
+      "cómo configuro subagentes",
+      "como se configura subagentes",
+      "cómo se configura subagentes",
+      "configuracion subagents",
+      "configuración subagents",
+      "configuracion subagentes",
+      "configuración subagentes",
+      "subagent config",
       "subagents.json",
-      "subagent_run",
-      "model profiles",
-      "delegation",
-      "tool allowlist",
-      "subagent history"
+      "model profiles configuration",
+      "tool allowlist configuration",
+      "subagent history configuration",
+      "permission handoff configuration"
     ]
   },
-  "sdd_phases": ["explore", "design", "task", "apply", "verify"],
+  "sdd_phases": [],
   "related_skills": [
-    "permission-guard-configuration",
-    "skill-authoring",
-    "sdd-workflow"
+    "permission-guard-configuration"
   ],
   "priority": 88
 }
@@ -52,14 +70,16 @@ Field conventions:
 - `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
 - `domains`: stable domain tags used for routing.
 - `triggers.paths`: glob-like project paths that should activate this skill.
-- `triggers.keywords`: user/request/code keywords that should activate this skill.
-- `sdd_phases`: phases where this skill is usually useful: `explore`, `proposal`, `spec`, `design`, `task`, `apply`, `verify`, `archive`.
-- `related_skills`: skills that should be considered when this skill is active.
+- `triggers.keywords`: configuration-only keywords that should activate this skill.
+- `sdd_phases`: keep empty for configuration-only skills so phase routing alone does not load them.
+- `related_skills`: configuration-adjacent skills only; do not add usage, implementation, or workflow skills.
 - `priority`: routing priority from 0 to 100. Higher means consider earlier when multiple skills match.
 
 ## Activation Contract
 
-Use this skill when configuring, creating, reviewing, or debugging Pi subagents, including markdown subagent files, project/global `subagents.json`, model profiles, allowed tools, task history, background tasks, or permission handoff between subagents and the main orchestrator.
+Use this skill only when the user asks how to configure Pi Subagents or when editing/reviewing subagent configuration files: markdown subagent definitions and project/global `subagents.json`. Cover model profiles, allowed tools, history settings, background task config, lean resources, and permission handoff as configuration topics only.
+
+Do not load this skill for ordinary subagent delegation/use (`subagent_run`, task status/result polling), extension implementation work, task history browsing, or editing this skill file; those are not configuration questions.
 
 ## Hard Rules
 
@@ -117,7 +137,6 @@ Instructions...
 
 - If the subagent will modify files, run bash, or write memory, ask whether a full SDD workflow or stricter review is required.
 - If the subagent needs permission-sensitive tools, also consider `permission-guard-configuration`.
-- If the subagent participates in PRD/SDD/OpenSpec, load `sdd-workflow` and preserve its phase responsibilities.
 - If a project wants many subagents or broad tools, recommend starting with read-only discovery agents and expanding deliberately.
 - If model profiles are global, confirm the user wants global behavior rather than project-only config.
 
@@ -130,8 +149,7 @@ Instructions...
 5. Configure `model_profiles`, `default_model`, and `default_effort` only when the user wants explicit routing.
 6. Validate JSON syntax for `subagents.json` and frontmatter/body structure for markdown agents.
 7. Tell the user to `/reload` or restart Pi.
-8. Use `subagent_list_agents` to verify loading when practical.
-9. Use a small read-only `subagent_run` smoke test only when the user approves execution.
+8. If validating configuration after reload, use `subagent_list_agents` only when the user asks for runtime verification; do not run delegated tasks just to validate configuration.
 
 ## Output Contract
 
@@ -141,15 +159,13 @@ Return:
 - Scope/path configured or reviewed.
 - Subagents/config fields added, changed, or preserved.
 - Tool allowlist, system-prompt isolation, Context7 scope, memory-tool scope, and model/effort decisions.
-- Related skills considered or loaded.
+- Related configuration skills considered or loaded.
 - Validation executed, or the concrete reason it was not run.
 - Required reload/restart note and open risks.
 
 ## References
 
-- `extensions/subagents/README.md` — Subagents configuration, commands, history, and model profiles.
+- `extensions/subagents/README.md` — Subagents configuration, history settings, and model profiles.
 - `extensions/subagents/src/config.ts` — subagent/config loading and tool filtering.
 - `extensions/subagents/src/history.ts` — global history storage behavior.
-- `extensions/subagents/src/runner.ts` — prompt building and execution behavior.
-- `~/.pi/agent/skills/sdd-workflow/SKILL.md` or project-local equivalent selected by the skill registry — SDD phase responsibilities and subagent orchestration rules.
-- `~/.pi/agent/skills/permission-guard-configuration/SKILL.md` or project-local equivalent selected by the skill registry — permission handoff and approval policy.
+- `~/.pi/agent/skills/permission-guard-configuration/SKILL.md` or project-local equivalent selected by the skill registry — permission handoff configuration.

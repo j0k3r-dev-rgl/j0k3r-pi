@@ -16,29 +16,42 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
 ```json
 {
   "category": "security",
-  "domains": ["permissions", "security", "bash-policy", "path-policy", "audit"],
+  "domains": ["permission-guard-configuration", "permission-policy-config", "bash-policy-config", "path-policy-config", "audit-config"],
   "triggers": {
     "paths": [
       ".pi/permissions.json",
       "permissions.json",
-      "extensions/permission-guard/**",
-      ".pi/subagents-debug.log"
+      "$PI_CODING_AGENT_DIR/extensions/permission-guard.json",
+      "~/.pi/agent/extensions/permission-guard.json"
     ],
     "keywords": [
-      "permission guard",
+      "permission guard configuration",
+      "configure permission guard",
+      "configurar permission guard",
+      "configuro permission guard",
+      "como configurar permission guard",
+      "cómo configurar permission guard",
+      "como configuro permission guard",
+      "cómo configuro permission guard",
+      "como se configura permission guard",
+      "cómo se configura permission guard",
+      "configuracion permission guard",
+      "configuración permission guard",
+      "configurar permisos",
+      "configuracion permisos",
+      "configuración permisos",
+      "permission guard config",
       "permissions.json",
-      "allow once",
-      "allow for project",
-      "bash policy",
-      "path approval",
-      "outside workspace",
-      "secrets policy"
+      "bash policy configuration",
+      "path approval policy",
+      "outside workspace policy",
+      "secrets policy configuration",
+      "audit configuration"
     ]
   },
-  "sdd_phases": ["explore", "design", "task", "apply", "verify"],
+  "sdd_phases": [],
   "related_skills": [
-    "subagents-configuration",
-    "skill-authoring"
+    "subagents-configuration"
   ],
   "priority": 90
 }
@@ -49,14 +62,16 @@ Field conventions:
 - `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
 - `domains`: stable domain tags used for routing.
 - `triggers.paths`: glob-like project paths that should activate this skill.
-- `triggers.keywords`: user/request/code keywords that should activate this skill.
-- `sdd_phases`: phases where this skill is usually useful: `explore`, `proposal`, `spec`, `design`, `task`, `apply`, `verify`, `archive`.
-- `related_skills`: skills that should be considered when this skill is active.
+- `triggers.keywords`: configuration-only keywords that should activate this skill.
+- `sdd_phases`: keep empty for configuration-only skills so phase routing alone does not load them.
+- `related_skills`: configuration-adjacent skills only; do not add usage, implementation, or workflow skills.
 - `priority`: routing priority from 0 to 100. Higher means consider earlier when multiple skills match.
 
 ## Activation Contract
 
-Use this skill when configuring, reviewing, or explaining Permission Guard policy for a project or global agent setup, especially `.pi/permissions.json`, `$PI_CODING_AGENT_DIR/extensions/permission-guard.json`, bash approvals, outside-workspace access, secret denial, audit behavior, or subagent permission handoff.
+Use this skill only when the user asks how to configure Permission Guard policy for a project or global agent setup, or when editing/reviewing Permission Guard configuration files such as `.pi/permissions.json`, agent-root `permissions.json`, or `$PI_CODING_AGENT_DIR/extensions/permission-guard.json`. Cover bash policy, workspace/outside-workspace policy, secret-denial policy, audit config, and permission-handoff settings as configuration topics only.
+
+Do not load this skill for ordinary permission prompts, one-off allow/deny decisions, extension implementation work, audit log inspection, or editing this skill file; those are not configuration questions.
 
 ## Hard Rules
 
@@ -119,7 +134,7 @@ Recommended conservative project policy:
 5. Prefer narrow scoped approvals over broad allow rules.
 6. Validate JSON syntax after editing.
 7. Tell the user to `/reload` or restart Pi.
-8. When validating behavior, use safe read-only commands first, then controlled ask cases if needed.
+8. If validating configuration, prefer static policy review; run behavior smoke checks only when the user explicitly asks.
 
 ## Output Contract
 
@@ -135,8 +150,6 @@ Return:
 
 ## References
 
-- `extensions/permission-guard/README.md` — Permission Guard behavior, defaults, and config reference.
+- `extensions/permission-guard/README.md` — Permission Guard configuration defaults and config reference.
 - `extensions/permission-guard/src/config.ts` — config loading and validation.
 - `extensions/permission-guard/src/defaults.ts` — default safety policy.
-- `extensions/permission-guard/src/bash-policy.ts` — bash policy behavior.
-- `extensions/permission-guard/src/path-policy.ts` — workspace/outside-workspace path policy.
