@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import extension, { createSubagentsPanelKeyMatcher, resolveRegisteredToolDefinition } from '../index.js';
+import extension, { ClaudeBackgroundWidget, ClaudeBackgroundWidgetState, createSubagentsPanelKeyMatcher, moveClaudeBackgroundWidgetSelection, renderClaudeBackgroundWidgetLines, resolveRegisteredToolDefinition } from '../index.js';
 import { loadSubagents, parseFrontmatter, readSubagentsConfig, resetGlobalSubagentModelProfileField, saveGlobalSubagentModelProfile } from '../src/config.js';
 import { resolveEffectiveSubagentProfile } from '../src/profile-resolver.js';
 import { buildPrompt, ThreadSnapshotBuilder } from '../src/runner.js';
@@ -300,6 +300,108 @@ describe('subagents extension', () => {
     expect(text).toContain('AGENTS.md');
     expect(text).toContain('# Agent Guide');
     expect(text).not.toContain('tool read requested');
+  });
+
+  it('renders claude background widget lines for running background tasks only', () => {
+    const now = new Date().toISOString();
+    const tasks = [
+      { id: 'task-main-ignore', agent: 'main-agent', mode: 'task', status: 'running', task: 'foreground task', created_at: now },
+      { id: 'task-finished-ignore', agent: 'reviewer', mode: 'background', status: 'completed', task: 'finished task', created_at: now },
+      { id: 'task-1', agent: 'claude', mode: 'background', status: 'running', task: 'ping-pong loop command', last_activity: 'Running ping-pong loop command.', created_at: now },
+      { id: 'task-2', agent: 'claude', mode: 'background', status: 'queued', task: 'PING-PONG loop bash', last_activity: 'Running PING-PONG loop bash.', created_at: now },
+    ] as any;
+
+    expect(renderClaudeBackgroundWidgetLines(tasks)).toEqual([
+      '› main',
+      '  ○ claude Running ping-pong loop command.',
+      '  ○ claude Running PING-PONG loop bash.',
+    ]);
+    expect(renderClaudeBackgroundWidgetLines(tasks, 'task-2')).toEqual([
+      '• main',
+      '  ○ claude Running ping-pong loop command.',
+      '› claude Running PING-PONG loop bash.',
+    ]);
+    expect(moveClaudeBackgroundWidgetSelection(tasks, 'main', 'down')).toBe('task-1');
+    expect(moveClaudeBackgroundWidgetSelection(tasks, 'task-1', 'down')).toBe('task-2');
+    expect(moveClaudeBackgroundWidgetSelection(tasks, 'task-2', 'up')).toBe('task-1');
+    expect(renderClaudeBackgroundWidgetLines([{ id: 'done', agent: 'claude', mode: 'background', status: 'completed', task: 'done', created_at: now }] as any)).toBeUndefined();
+  });
+
+  it('allows navigating the claude background widget selection with arrow keys', () => {
+    const now = new Date().toISOString();
+    const requestRender = vi.fn();
+    const state = new ClaudeBackgroundWidgetState(
+      () => [
+        { id: 'task-1', agent: 'tool-smoke', mode: 'background', status: 'running', task: 'sleep 15', last_activity: 'Running sleep 15.', created_at: now },
+        { id: 'task-2', agent: 'tool-smoke', mode: 'background', status: 'queued', task: 'sleep 30', last_activity: 'Queued sleep 30.', created_at: now },
+      ] as any,
+      requestRender,
+    );
+    const widget = new ClaudeBackgroundWidget(
+      state,
+      { fg: (_name: string, text: string) => text, bold: (text: string) => text },
+    );
+
+    expect(widget.render(200)).toEqual([
+      '› main',
+      '  ○ tool-smoke Running sleep 15.',
+      '  ○ tool-smoke Queued sleep 30.',
+    ]);
+
+    expect(state.handleTerminalInput('\u001b[B')).toEqual({ consume: true });
+    expect(requestRender).toHaveBeenCalledTimes(1);
+    expect(widget.render(200)).toEqual([
+      '• main',
+      '› tool-smoke Running sleep 15.',
+      '  ○ tool-smoke Queued sleep 30.',
+    ]);
+
+    expect(state.handleTerminalInput('q')).toEqual({ consume: true });
+    expect(widget.render(200)).toEqual([
+      '• main',
+      '› tool-smoke Running sleep 15.',
+      '  ○ tool-smoke Queued sleep 30.',
+    ]);
+
+    expect(state.handleTerminalInput('\u001b[B')).toEqual({ consume: true });
+    expect(widget.render(200)).toEqual([
+      '• main',
+      '  ○ tool-smoke Running sleep 15.',
+      '› tool-smoke Queued sleep 30.',
+    ]);
+
+    expect(state.handleTerminalInput('\u001b[A')).toEqual({ consume: true });
+    expect(widget.render(200)).toEqual([
+      '• main',
+      '› tool-smoke Running sleep 15.',
+      '  ○ tool-smoke Queued sleep 30.',
+    ]);
+
+    expect(state.handleTerminalInput('\u001b[A')).toEqual({ consume: true });
+    expect(widget.render(200)).toEqual([
+      '› main',
+      '  ○ tool-smoke Running sleep 15.',
+      '  ○ tool-smoke Queued sleep 30.',
+    ]);
+
+    expect(state.handleTerminalInput('\u001b[A')).toEqual({ consume: true });
+    expect(state.handleTerminalInput('x')).toBeUndefined();
+  });
+
+  it('returns to input on main enter and opens the selected subagent on enter', () => {
+    const now = new Date().toISOString();
+    const state = new ClaudeBackgroundWidgetState(
+      () => [
+        { id: 'task-1', agent: 'tool-smoke', mode: 'background', status: 'running', task: 'sleep 15', last_activity: 'Running sleep 15.', created_at: now },
+      ] as any,
+    );
+
+    expect(state.handleTerminalInput('\u001b[B')).toEqual({ consume: true });
+    expect(state.handleTerminalInput('\r')).toEqual({ consume: true, action: { type: 'open-task', taskId: 'task-1' } });
+
+    expect(state.handleTerminalInput('\u001b[B')).toEqual({ consume: true });
+    expect(state.handleTerminalInput('\u001b[A')).toEqual({ consume: true });
+    expect(state.handleTerminalInput('\r')).toEqual({ consume: true, action: { type: 'focus-editor' } });
   });
 
   it('filters assistant toolCall parts before using Pi assistant components to avoid duplicate raw JSON', () => {
@@ -1011,6 +1113,75 @@ describe('subagents extension', () => {
     expect(shortcuts).toEqual(['ctrl+,']);
   });
 
+  it('subagents history panel can start focused on a selected task id', () => {
+    const now = new Date().toISOString();
+    const tasks = [
+      { id: 'task-1', agent: 'first', mode: 'background', status: 'running', task: 'first task', created_at: now, last_activity_at: now, last_activity: 'running first' },
+      { id: 'task-2', agent: 'second', mode: 'background', status: 'running', task: 'second task', created_at: now, last_activity_at: now, last_activity: 'running second' },
+    ] as any;
+    const panel = new SubagentsHistoryPanel(
+      tasks,
+      { fg: (_name: string, text: string) => text, bold: (text: string) => text },
+      () => undefined,
+      () => false,
+      (text) => text.length,
+      (text, width) => text.length > width ? text.slice(0, width) : text,
+      {},
+      () => 30,
+      undefined,
+      'task-2',
+    );
+
+    const rendered = panel.render(120).join('\n');
+    expect(rendered).toContain('2/2');
+    expect(rendered).toContain('agent: second');
+  });
+
+  it('registers terminal input routing in claude mode and cleans it up on shutdown', async () => {
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ mode: 'claude' }));
+    const handlers: Record<string, any> = {};
+    const off = vi.fn();
+    const setWidget = vi.fn();
+    extension({
+      on: (event: string, handler: any) => { handlers[event] = handler; },
+      registerTool: () => undefined,
+      registerCommand: () => undefined,
+      registerShortcut: () => undefined,
+    });
+
+    await handlers.session_start?.({}, {
+      cwd: tmp,
+      ui: {
+        setWidget,
+        onTerminalInput: vi.fn(() => off),
+      },
+    });
+
+    expect(setWidget).toHaveBeenCalled();
+    expect(off).not.toHaveBeenCalled();
+
+    await handlers.session_shutdown?.({}, { ui: { setWidget } });
+    expect(off).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables ctrl+, in claude mode while keeping the command available', async () => {
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ mode: 'claude' }));
+    let shortcutHandler: any;
+    let subagentsCommand: any;
+    const custom = vi.fn();
+    extension({
+      registerTool: () => undefined,
+      registerCommand: (name: string, command: any) => { if (name === 'subagents') subagentsCommand = command; },
+      registerShortcut: (_key: string, shortcut: any) => { shortcutHandler = shortcut.handler; },
+    });
+
+    await shortcutHandler({ cwd: tmp, ui: { custom } });
+    expect(custom).not.toHaveBeenCalled();
+
+    await subagentsCommand.handler('', { cwd: tmp, ui: { custom } });
+    expect(custom).toHaveBeenCalledTimes(1);
+  });
+
   it('enables mouse tracking while the subagents history panel is open and disables it on close', async () => {
     let subagentsCommand: any;
     const writes: string[] = [];
@@ -1141,6 +1312,17 @@ describe('subagents extension', () => {
     fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ session_resources: 'invalid' }));
 
     expect(readSubagentsConfig(tmp).session_resources).toBe('lean');
+  });
+
+  it('supports mode values with opencode fallback', () => {
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ mode: 'claude' }));
+    expect(readSubagentsConfig(tmp).mode).toBe('claude');
+
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ mode: 'opencode' }));
+    expect(readSubagentsConfig(tmp).mode).toBe('opencode');
+
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ mode: 'invalid' }));
+    expect(readSubagentsConfig(tmp).mode).toBe('opencode');
   });
 
   it('deep-merges model_profiles with project field precedence while scalar config precedence is unchanged', () => {

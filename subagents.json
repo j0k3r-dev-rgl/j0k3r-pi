@@ -4,6 +4,7 @@
   "stall_timeout_ms": 120000,
   "max_concurrency": 5,
   "session_resources": "lean",
+  "mode": "claude",
   "default_tools": [
     "read",
     "memory_context",
@@ -17,39 +18,39 @@
       "effort": "medium"
     },
     "prd-review": {
-      "model": "openai-codex/gpt-5.4",
-      "effort": "medium"
+      "model": "opencode-go/kimi-k2.7-code",
+      "effort": "off"
     },
     "sdd-apply": {
       "model": "openai-codex/gpt-5.4",
       "effort": "medium"
     },
     "sdd-archive": {
-      "model": "openai-codex/gpt-5.4-mini",
-      "effort": "medium"
+      "model": "opencode-go/deepseek-v4-flash",
+      "effort": "off"
     },
     "sdd-design": {
       "model": "openai-codex/gpt-5.5",
       "effort": "medium"
     },
     "sdd-explore": {
-      "model": "openai-codex/gpt-5.4-mini",
-      "effort": "medium"
+      "model": "opencode-go/kimi-k2.7-code",
+      "effort": "off"
     },
     "sdd-proposal": {
       "model": "openai-codex/gpt-5.5",
       "effort": "medium"
     },
     "sdd-spec": {
-      "model": "openai-codex/gpt-5.5",
-      "effort": "medium"
+      "model": "opencode-go/kimi-k2.7-code",
+      "effort": "off"
     },
     "sdd-task": {
       "model": "openai-codex/gpt-5.4",
       "effort": "medium"
     },
     "sdd-verify": {
-      "model": "openai-codex/gpt-5.4",
+      "model": "openai-codex/gpt-5.5",
       "effort": "medium"
     }
   }

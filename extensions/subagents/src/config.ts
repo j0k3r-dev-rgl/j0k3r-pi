@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { ModelRef, SubagentDefinition, SubagentModelProfile, SubagentModelProfiles, SubagentSessionResources, SubagentsConfig, ThinkingEffort } from './types.js';
+import type { ModelRef, SubagentDefinition, SubagentModelProfile, SubagentModelProfiles, SubagentSessionResources, SubagentsConfig, SubagentUiMode, ThinkingEffort } from './types.js';
 
 const DEFAULT_TOOLS = ['read', 'memory_context', 'memory_search', 'memory_recall', 'memory_get'];
 const DEFAULT_MAX_CONCURRENCY = 5;
@@ -109,6 +109,11 @@ function parseSessionResources(value: any): SubagentSessionResources {
   return resources === 'full' ? 'full' : 'lean';
 }
 
+function parseMode(value: any): SubagentUiMode {
+  const mode = String(value ?? 'opencode').trim().toLowerCase();
+  return mode === 'claude' ? 'claude' : 'opencode';
+}
+
 function parseModelProfile(value: unknown): SubagentModelProfile | undefined {
   if (!isPlainObject(value)) return undefined;
   const profile: SubagentModelProfile = {};
@@ -165,6 +170,7 @@ export function readSubagentsConfig(cwd: string): SubagentsConfig {
     max_concurrency: positiveInteger(raw.max_concurrency, DEFAULT_MAX_CONCURRENCY),
     default_tools: sanitizeTools(Array.isArray(raw.default_tools) ? raw.default_tools.map(String) : DEFAULT_TOOLS),
     session_resources: parseSessionResources(raw.session_resources ?? raw.sessionResources),
+    mode: parseMode(raw.mode),
   };
 }
 

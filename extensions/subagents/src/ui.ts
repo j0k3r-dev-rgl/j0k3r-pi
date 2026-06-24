@@ -75,6 +75,7 @@ export class SubagentsHistoryPanel {
     private renderContext: Partial<SubagentThreadRenderContext> = {},
     private maxLinesProvider: number | (() => number) = 42,
     private taskResolver?: (id: string) => SubagentTask | undefined,
+    private initialSelectedTaskId?: string,
   ) {}
 
   invalidate(): void {}
@@ -157,6 +158,11 @@ export class SubagentsHistoryPanel {
     lines.push(divider);
 
     const tasks = this.tasks();
+    if (this.initialSelectedTaskId) {
+      const initialIndex = tasks.findIndex((entry) => entry.id === this.initialSelectedTaskId);
+      if (initialIndex >= 0) this.selected = initialIndex;
+      this.initialSelectedTaskId = undefined;
+    }
     if (this.selected >= tasks.length) this.selected = Math.max(0, tasks.length - 1);
 
     if (!tasks.length) {

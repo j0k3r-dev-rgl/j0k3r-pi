@@ -1,7 +1,24 @@
 import { SubagentManager } from './src/manager.js';
+import { readSubagentsConfig } from './src/config.js';
 import { registerSubagentTools } from './src/tools.js';
 import { runSubagentModelsCommand } from './src/model-profiles-ui.js';
 import { SubagentsHistoryPanel } from './src/ui.js';
+import type { SubagentTask } from './src/types.js';
+
+type ClaudeBackgroundWidgetEntry = {
+  key: string;
+  line: string;
+};
+
+type ClaudeBackgroundTerminalAction =
+  | { type: 'focus-editor' }
+  | { type: 'open-task'; taskId: string };
+
+type ClaudeBackgroundTerminalInputResult = {
+  consume?: boolean;
+  data?: string;
+  action?: ClaudeBackgroundTerminalAction;
+} | undefined;
 
 function matchesKey(data: string, key: string): boolean {
   const keys: Record<string, string[]> = {
@@ -82,6 +99,150 @@ export function resolveRegisteredToolDefinition(ctx: any, pi: any, name: string)
     ?? toolFromRegistry(ctx?.tools, name);
 }
 
+function clip(text: string | undefined, limit = 120): string {
+  if (!text) return '';
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  return normalized.length > limit ? `${normalized.slice(0, Math.max(0, limit - 1))}…` : normalized;
+}
+
+function isActiveBackgroundTask(task: SubagentTask): boolean {
+  return task.mode === 'background' && (task.status === 'queued' || task.status === 'running');
+}
+
+function buildClaudeBackgroundWidgetEntries(tasks: SubagentTask[]): ClaudeBackgroundWidgetEntry[] {
+  const active = tasks.filter(isActiveBackgroundTask);
+  if (!active.length) return [];
+  return [
+    { key: 'main', line: 'main' },
+    ...active.map((task) => ({ key: task.id, line: `${task.agent} ${clip(task.last_activity ?? task.task ?? task.id)}` })),
+  ];
+}
+
+function coerceClaudeBackgroundSelection(entries: ClaudeBackgroundWidgetEntry[], selectedKey: string | undefined): string {
+  if (!entries.length) return 'main';
+  return entries.some((entry) => entry.key === selectedKey) ? selectedKey! : entries[0]!.key;
+}
+
+export function moveClaudeBackgroundWidgetSelection(tasks: SubagentTask[], selectedKey: string | undefined, direction: 'up' | 'down'): string {
+  const entries = buildClaudeBackgroundWidgetEntries(tasks);
+  if (!entries.length) return 'main';
+  const current = coerceClaudeBackgroundSelection(entries, selectedKey);
+  const index = entries.findIndex((entry) => entry.key === current);
+  const nextIndex = direction === 'down'
+    ? Math.min(index + 1, entries.length - 1)
+    : Math.max(index - 1, 0);
+  return entries[nextIndex]?.key ?? current;
+}
+
+export function renderClaudeBackgroundWidgetLines(tasks: SubagentTask[], selectedKey?: string): string[] | undefined {
+  const entries = buildClaudeBackgroundWidgetEntries(tasks);
+  if (!entries.length) return undefined;
+  const current = coerceClaudeBackgroundSelection(entries, selectedKey);
+  return entries.map((entry, index) => {
+    if (entry.key === current) return `› ${entry.line}`;
+    return index === 0 ? `• ${entry.line}` : `  ○ ${entry.line}`;
+  });
+}
+
+export class ClaudeBackgroundWidgetState {
+  private selectedKey = 'main';
+  private navigationActive = false;
+
+  constructor(
+    private getTasks: () => SubagentTask[],
+    private onChange?: () => void,
+  ) {}
+
+  getSelectedKey(): string {
+    this.selectedKey = coerceClaudeBackgroundSelection(buildClaudeBackgroundWidgetEntries(this.getTasks()), this.selectedKey);
+    return this.selectedKey;
+  }
+
+  renderLines(): string[] {
+    return renderClaudeBackgroundWidgetLines(this.getTasks(), this.getSelectedKey()) ?? [];
+  }
+
+  handleWidgetInput(data: string): void {
+    this.handleTerminalInput(data);
+  }
+
+  handleTerminalInput(data: string): ClaudeBackgroundTerminalInputResult {
+    const tasks = this.getTasks();
+    if (!tasks.some(isActiveBackgroundTask)) {
+      if (this.navigationActive || this.selectedKey !== 'main') {
+        this.selectedKey = 'main';
+        this.navigationActive = false;
+        this.onChange?.();
+      }
+      return undefined;
+    }
+
+    if (matchesKey(data, 'down')) {
+      this.navigationActive = true;
+      const next = moveClaudeBackgroundWidgetSelection(tasks, this.getSelectedKey(), 'down');
+      if (next !== this.selectedKey) {
+        this.selectedKey = next;
+        this.onChange?.();
+      }
+      return { consume: true };
+    }
+
+    if (matchesKey(data, 'up')) {
+      if (!this.navigationActive) return undefined;
+      if (this.getSelectedKey() === 'main') {
+        this.navigationActive = false;
+        this.onChange?.();
+        return { consume: true };
+      }
+      const next = moveClaudeBackgroundWidgetSelection(tasks, this.selectedKey, 'up');
+      if (next !== this.selectedKey) {
+        this.selectedKey = next;
+        this.onChange?.();
+      }
+      return { consume: true };
+    }
+
+    if (this.navigationActive && (data === '\r' || data === '\n')) {
+      const selectedKey = this.getSelectedKey();
+      this.navigationActive = false;
+      this.onChange?.();
+      if (selectedKey === 'main') return { consume: true, action: { type: 'focus-editor' } };
+      return { consume: true, action: { type: 'open-task', taskId: selectedKey } };
+    }
+
+    if (this.navigationActive && (matchesKey(data, 'left') || matchesKey(data, 'right') || matchesKey(data, 'escape'))) {
+      this.navigationActive = false;
+      this.onChange?.();
+      return { consume: true, action: { type: 'focus-editor' } };
+    }
+
+    if (this.navigationActive) return { consume: true };
+    return undefined;
+  }
+}
+
+export class ClaudeBackgroundWidget {
+  constructor(
+    private state: ClaudeBackgroundWidgetState,
+    private theme: any,
+  ) {}
+
+  invalidate(): void {}
+
+  render(width: number): string[] {
+    return this.state.renderLines().map((line) => truncateToWidth(this.decorate(line), width));
+  }
+
+  handleInput(data: string): void {
+    this.state.handleWidgetInput(data);
+  }
+
+  private decorate(line: string): string {
+    if (!line.startsWith('› ')) return line;
+    return this.theme?.fg?.('accent', this.theme?.bold?.(line) ?? line) ?? line;
+  }
+}
+
 function completionMessage(task: any): string {
   const result = task.result ?? task.error ?? task.output_preview ?? '(no result captured)';
   return [
@@ -115,11 +276,73 @@ export default function subagentsExtension(pi: any): void {
   });
   registerSubagentTools(pi, manager);
 
-  async function showSubagentsPanel(ctx: any) {
+  let widgetTimer: NodeJS.Timeout | undefined;
+  let widgetCtx: any;
+  let widgetRequestRender: (() => void) | undefined;
+  let removeTerminalInputListener: (() => void) | undefined;
+  let widgetState: ClaudeBackgroundWidgetState | undefined;
+  let widgetInputSuspended = false;
+
+  const installClaudeBackgroundWidget = (ctx: any): boolean => {
+    if (typeof ctx?.ui?.setWidget !== 'function') return false;
+    const cwd = ctx?.cwd ?? process.cwd();
+    const config = readSubagentsConfig(cwd);
+    if (config.mode !== 'claude') {
+      ctx.ui.setWidget('subagents-claude-background', undefined);
+      return false;
+    }
+    const sessionId = currentSessionId(ctx);
+    widgetState = new ClaudeBackgroundWidgetState(
+      () => manager.listSessionTasks(cwd, sessionId).slice(0, 100),
+      () => widgetRequestRender?.(),
+    );
+    if (typeof ctx?.ui?.onTerminalInput === 'function') {
+      removeTerminalInputListener = ctx.ui.onTerminalInput((data: string) => {
+        if (widgetInputSuspended) return undefined;
+        const result = widgetState?.handleTerminalInput(data);
+        if (result?.action?.type === 'open-task' && widgetCtx) void showSubagentsPanel(widgetCtx, result.action.taskId);
+        return result;
+      });
+    }
+    ctx.ui.setWidget('subagents-claude-background', (tui: any, theme: any) => {
+      widgetRequestRender = () => tui?.requestRender?.();
+      return new ClaudeBackgroundWidget(widgetState!, theme);
+    }, { placement: 'belowEditor' });
+    return true;
+  };
+
+  const clearClaudeBackgroundWidget = () => {
+    if (widgetTimer) clearInterval(widgetTimer);
+    widgetTimer = undefined;
+    widgetRequestRender = undefined;
+    removeTerminalInputListener?.();
+    removeTerminalInputListener = undefined;
+    widgetState = undefined;
+    widgetInputSuspended = false;
+    widgetCtx?.ui?.setWidget?.('subagents-claude-background', undefined);
+    widgetCtx = undefined;
+  };
+
+  pi.on?.('session_start', (_event: unknown, ctx: any) => {
+    clearClaudeBackgroundWidget();
+    if (typeof ctx?.ui?.setWidget !== 'function') return;
+    widgetCtx = ctx;
+    if (!installClaudeBackgroundWidget(ctx)) return;
+    widgetTimer = setInterval(() => widgetRequestRender?.(), 250);
+    widgetTimer.unref?.();
+  });
+
+  pi.on?.('session_shutdown', () => {
+    clearClaudeBackgroundWidget();
+  });
+
+  async function showSubagentsPanel(ctx: any, selectedTaskId?: string) {
     const cwd = ctx?.cwd ?? process.cwd();
     const sessionId = currentSessionId(ctx);
     let refresh: NodeJS.Timeout | undefined;
-    await ctx.ui.custom(
+    widgetInputSuspended = true;
+    try {
+      await ctx.ui.custom(
       (tui: any, theme: any, _keybindings: any, done: () => void) => {
         setMouseTracking(tui, true);
         const close = () => {
@@ -147,6 +370,7 @@ export default function subagentsExtension(pi: any): void {
           },
           () => Math.max(12, process.stdout.rows || 42),
           (id: string) => manager.getTask(id, cwd),
+          selectedTaskId,
         );
         refresh = setInterval(() => tui.requestRender?.(), 1000);
         return {
@@ -157,11 +381,18 @@ export default function subagentsExtension(pi: any): void {
       },
       undefined,
     );
+    } finally {
+      widgetInputSuspended = false;
+    }
   }
 
   pi.registerShortcut?.('ctrl+,', {
     description: 'Show subagent history panel',
-    handler: showSubagentsPanel,
+    handler: async (ctx: any) => {
+      const cwd = ctx?.cwd ?? process.cwd();
+      if (readSubagentsConfig(cwd).mode === 'claude') return;
+      await showSubagentsPanel(ctx);
+    },
   });
 
   pi.registerCommand?.('subagents', {

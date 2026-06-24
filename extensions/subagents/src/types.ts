@@ -38,6 +38,7 @@ export type SubagentDefinition = {
 };
 
 export type SubagentSessionResources = 'full' | 'lean';
+export type SubagentUiMode = 'opencode' | 'claude';
 
 export type SubagentsConfig = {
   default_model?: ModelRef;
@@ -48,6 +49,7 @@ export type SubagentsConfig = {
   max_concurrency: number;
   default_tools: string[];
   session_resources?: SubagentSessionResources;
+  mode?: SubagentUiMode;
 };
 
 export type SubagentRunInput = {
