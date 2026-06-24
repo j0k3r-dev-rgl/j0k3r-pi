@@ -66,6 +66,8 @@ describe('extension setup', () => {
       expect(tools).toContain('memory_sync_status');
       expect(commands).toContain('memory-status');
       expect(commands).toContain('memory-sync-status');
+      expect(commands).toContain('memory-export');
+      expect(commands).toContain('memory-import');
       expect(events).toContain('before_agent_start');
       expect(renderers).toContain('memory-context');
     } finally {
@@ -73,6 +75,64 @@ describe('extension setup', () => {
       if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
     }
   });
+  it('registers and runs memory-export/import command handlers', async () => {
+    const projectDir = path.join(tmp, 'command-project');
+    fs.mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Cmd Project', enabled: true }));
+
+    const oldCwd = process.cwd();
+    const old = process.env.PI_MEMORY_DB_PATH;
+    const dbPath = path.join(tmp, 'memory-command.sqlite');
+    const messagesExport: string[] = [];
+    const messagesDryRun: string[] = [];
+    const messagesMerge: string[] = [];
+
+    process.env.PI_MEMORY_DB_PATH = dbPath;
+    process.chdir(projectDir);
+
+    const db = openMemoryDb(dbPath);
+    migrate(db);
+    const context = resolveMemoryContext(projectDir);
+    addMemory(db, { kind: 'note', content: 'command roundtrip memory' }, context);
+
+    const commands: Record<string, any> = {};
+    extension({
+      registerTool: () => {},
+      registerCommand: (name: string, command: any) => {
+        commands[name] = command;
+      },
+      registerMessageRenderer: () => {},
+      on: () => {},
+    });
+
+    try {
+      await commands['memory-export'].handler('', {
+        cwd: projectDir,
+        ui: { notify: (text: string) => messagesExport.push(text) },
+      });
+      const backupPath = resolveBackupPath(projectDir, undefined);
+      expect(messagesExport.some((message) => message.includes(`Memory backup exported to ${backupPath}`))).toBe(true);
+
+      db.prepare('DELETE FROM memories').run();
+      await commands['memory-import'].handler('', {
+        cwd: projectDir,
+        ui: { notify: (text: string) => messagesDryRun.push(text) },
+      });
+      expect(messagesDryRun.some((message) => message.includes('Memory import validated: inserted=0'))).toBe(true);
+
+      await commands['memory-import'].handler('merge', {
+        cwd: projectDir,
+        ui: { notify: (text: string) => messagesMerge.push(text) },
+      });
+      expect(messagesMerge.some((message) => message.includes('Memory import merged: inserted=1'))).toBe(true);
+    } finally {
+      process.chdir(oldCwd);
+      if (old === undefined) delete process.env.PI_MEMORY_DB_PATH;
+      else process.env.PI_MEMORY_DB_PATH = old;
+      db.close();
+    }
+  });
+
   it('memory context messages render compact by default and expand full agent instructions on demand', () => {
     const content = [
       'Pi Memory Extension is active. Treat it as the agent persistent brain.',

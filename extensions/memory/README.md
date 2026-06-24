@@ -132,8 +132,9 @@ Never store cloud tokens directly in `.pi/memory.json`.
 2. Keep `backups.path` relative to the project working directory. Absolute paths and `..` escapes are rejected/ignored.
 3. Run `/reload` or restart Pi after changing `.pi/memory.json` or extension code.
 4. Use `memory_context` to verify the resolved project identity.
-5. Run `memory_export` from the project cwd. The agent does not need to pass a path.
-6. Inspect the backup meta if needed: `format` should be `pi-memory-backup`, `version` should be `2`, `mirror` should be `true`, and `includes_sessions` should match `backups.include_sessions`.
+5. Run `memory_export` (tool) or `/memory-export` (command) from the project cwd. The agent or user does not need to pass a path.
+6. To restore from that backup, run `memory_import` (default respects configured defaults) or `/memory-import dry_run` for an explicit dry-run, then use `memory_import` with merge mode or `/memory-import merge` when you want to apply changes.
+7. Inspect the backup meta if needed: `format` should be `pi-memory-backup`, `version` should be `2`, `mirror` should be `true`, and `includes_sessions` should match `backups.include_sessions`.
 
 A dedicated agent skill for this is available as `memory-configuration`.
 
@@ -233,6 +234,8 @@ Shutdown behavior:
 | `/memory-sync-status` | Show counts by sync status. |
 | `/memory-consolidate [kind]` | Dry-run duplicate detection. |
 | `/memory-project-profile` | Ensure and show current project profile. |
+| `/memory-export [jsonl|sqlite] [sessions] [active-only]` | Export scoped memory backup. |
+| `/memory-import [merge|dry_run] [keep_local|keep_imported|mark_conflict]` | Import memory backup (defaults to configured import mode; often `dry_run`). |
 | `/memory-browser` | Open the interactive memory browser. |
 
 ## Memory browser
@@ -247,6 +250,34 @@ Shutdown behavior:
 ```
 
 ## Export and import
+
+`memory_export`/`memory_import` tools and `/memory-export`/`/memory-import` commands use an automatic mirror backup path; no `path` argument is required.
+
+### User command usage
+
+- Export: `/memory-export`
+  - `jsonl` (default)
+  - `sessions` to include sessions and prompts (or `sessions=false` / `include_sessions=false`)
+  - `active-only` to export only active memories
+  - `active` is equivalent to `active-only` (`include_archived=false`)
+  - `help` to show usage
+
+  Examples:
+
+  - `/memory-export`
+  - `/memory-export sessions`
+  - `/memory-export jsonl active-only`
+
+- Import: `/memory-import`
+  - `dry_run` (default, or project-configured default)
+  - `merge` to apply changes
+  - `keep_local|keep_imported|mark_conflict` for conflict handling
+  - `help` to show usage
+
+  Recommended flow:
+  1. `/memory-import dry_run`
+  2. Review inserted/conflict output.
+  3. `/memory-import merge` to apply.
 
 `memory_export` and `memory_import` use an automatic mirror backup path. The agent does not need to pass a `path` parameter.
 
