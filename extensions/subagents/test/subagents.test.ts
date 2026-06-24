@@ -732,6 +732,101 @@ describe('subagents extension', () => {
     }
   });
 
+  it('matches injected keybindings for panel navigation and scrolling controls', () => {
+    const matcher = createSubagentsPanelKeyMatcher({
+      matches: (data: string, keybinding: string) => ({
+        navUp: ['tui.select.up', 'tui.editor.cursorUp'],
+        navDown: ['tui.select.down', 'tui.editor.cursorDown'],
+        navLeft: ['tui.editor.cursorLeft'],
+        navRight: ['tui.editor.cursorRight'],
+        pageUpKey: ['tui.select.pageUp', 'tui.editor.pageUp'],
+        pageDownKey: ['tui.select.pageDown', 'tui.editor.pageDown'],
+        homeKey: ['tui.editor.cursorLineStart'],
+        endKey: ['tui.editor.cursorLineEnd'],
+        escKey: ['app.interrupt', 'tui.select.cancel'],
+      }[data] ?? []).includes(keybinding),
+    });
+
+    expect(matcher('navUp', 'up')).toBe(true);
+    expect(matcher('navDown', 'down')).toBe(true);
+    expect(matcher('navLeft', 'left')).toBe(true);
+    expect(matcher('navRight', 'right')).toBe(true);
+    expect(matcher('pageUpKey', 'pageUp')).toBe(true);
+    expect(matcher('pageDownKey', 'pageDown')).toBe(true);
+    expect(matcher('homeKey', 'home')).toBe(true);
+    expect(matcher('endKey', 'end')).toBe(true);
+    expect(matcher('escKey', 'escape')).toBe(true);
+    expect(matcher('other', 'down')).toBe(false);
+  });
+
+  it('navigates tasks and scrolls snapshots with injected tui keybindings', () => {
+    const tasks: SubagentTask[] = [
+      {
+        id: 'subtask_keybinding_nav_1',
+        agent: 'analyst',
+        mode: 'task',
+        status: 'completed',
+        task: 'first task',
+        created_at: new Date().toISOString(),
+        thread_snapshot: {
+          version: 1,
+          source: 'events',
+          items: Array.from({ length: 160 }, (_, i) => ({ type: 'status' as const, text: `first line ${String(i).padStart(3, '0')}` })),
+        },
+      },
+      {
+        id: 'subtask_keybinding_nav_2',
+        agent: 'reviewer',
+        mode: 'task',
+        status: 'completed',
+        task: 'second task',
+        created_at: new Date().toISOString(),
+        thread_snapshot: {
+          version: 1,
+          source: 'events',
+          items: [{ type: 'status' as const, text: 'second task body' }],
+        },
+      },
+    ];
+    const matcher = createSubagentsPanelKeyMatcher({
+      matches: (data: string, keybinding: string) => ({
+        keyDown: ['tui.select.down'],
+        keyUp: ['tui.select.up'],
+        keyRight: ['tui.editor.cursorRight'],
+        keyLeft: ['tui.editor.cursorLeft'],
+        keyPageDown: ['tui.editor.pageDown'],
+        keyHome: ['tui.editor.cursorLineStart'],
+      }[data] ?? []).includes(keybinding),
+    });
+    const panel = new SubagentsHistoryPanel(tasks, { fg: (_name: string, text: string) => text }, () => undefined, matcher, (text) => text.length, (text, width) => text.length > width ? text.slice(0, width) : text);
+    const body = () => panel.render(120).join('\n');
+
+    expect(body()).toContain('agent: analyst');
+    expect(body()).toContain('first line 159');
+
+    panel.handleInput('keyHome');
+    expect(body()).toContain('first line 000');
+
+    panel.handleInput('keyDown');
+    expect(body()).toContain('first line 001');
+
+    panel.handleInput('keyPageDown');
+    expect(body()).toContain('first line 013');
+
+    panel.handleInput('keyRight');
+    expect(body()).toContain('agent: reviewer');
+    expect(body()).toContain('second task body');
+
+    panel.handleInput('keyLeft');
+    expect(body()).toContain('agent: analyst');
+
+    panel.handleInput('keyHome');
+    expect(body()).toContain('first line 000');
+
+    panel.handleInput('keyUp');
+    expect(body()).toContain('first line 000');
+  });
+
   it('preserves panel chrome while rendering selected thread snapshots', () => {
     const task: SubagentTask = {
       id: 'subtask_thread_2',

@@ -21,9 +21,24 @@ function matchesKey(data: string, key: string): boolean {
   return keys[key]?.includes(data) ?? data === key;
 }
 
+const PANEL_KEYBINDINGS: Record<string, string[]> = {
+  escape: ['app.interrupt', 'tui.select.cancel'],
+  'ctrl+c': ['tui.select.cancel'],
+  'ctrl+o': ['app.tools.expand'],
+  up: ['tui.select.up', 'tui.editor.cursorUp'],
+  down: ['tui.select.down', 'tui.editor.cursorDown'],
+  right: ['tui.editor.cursorRight'],
+  left: ['tui.editor.cursorLeft'],
+  pageUp: ['tui.select.pageUp', 'tui.editor.pageUp'],
+  pageDown: ['tui.select.pageDown', 'tui.editor.pageDown'],
+  home: ['tui.editor.cursorLineStart'],
+  end: ['tui.editor.cursorLineEnd'],
+};
+
 export function createSubagentsPanelKeyMatcher(keybindings?: { matches?: (data: string, keybinding: string) => boolean }) {
   return (data: string, key: string): boolean => {
-    if (key === 'ctrl+o' && keybindings?.matches?.(data, 'app.tools.expand')) return true;
+    const bindings = PANEL_KEYBINDINGS[key];
+    if (bindings?.some((binding) => keybindings?.matches?.(data, binding))) return true;
     return matchesKey(data, key);
   };
 }
