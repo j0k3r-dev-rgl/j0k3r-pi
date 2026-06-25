@@ -312,14 +312,14 @@ describe('subagents extension', () => {
     ] as any;
 
     expect(renderClaudeBackgroundWidgetLines(tasks)).toEqual([
-      '› main',
-      '  ○ claude Running ping-pong loop command.',
-      '  ○ claude Running PING-PONG loop bash.',
+      '○ main',
+      '○ claude Running ping-pong loop command.',
+      '○ claude Running PING-PONG loop bash.',
     ]);
     expect(renderClaudeBackgroundWidgetLines(tasks, 'task-2')).toEqual([
-      '• main',
-      '  ○ claude Running ping-pong loop command.',
-      '› claude Running PING-PONG loop bash.',
+      '○ main',
+      '○ claude Running ping-pong loop command.',
+      '● claude Running PING-PONG loop bash.',
     ]);
     expect(moveClaudeBackgroundWidgetSelection(tasks, 'main', 'down')).toBe('task-1');
     expect(moveClaudeBackgroundWidgetSelection(tasks, 'task-1', 'down')).toBe('task-2');
@@ -343,49 +343,77 @@ describe('subagents extension', () => {
     );
 
     expect(widget.render(200)).toEqual([
-      '› main',
-      '  ○ tool-smoke Running sleep 15.',
-      '  ○ tool-smoke Queued sleep 30.',
+      '○ main',
+      '○ tool-smoke Running sleep 15.',
+      '○ tool-smoke Queued sleep 30.',
     ]);
 
     expect(state.handleTerminalInput('\u001b[B')).toEqual({ consume: true });
     expect(requestRender).toHaveBeenCalledTimes(1);
     expect(widget.render(200)).toEqual([
-      '• main',
-      '› tool-smoke Running sleep 15.',
-      '  ○ tool-smoke Queued sleep 30.',
+      '○ main',
+      '● tool-smoke Running sleep 15.',
+      '○ tool-smoke Queued sleep 30.',
     ]);
 
     expect(state.handleTerminalInput('q')).toEqual({ consume: true });
     expect(widget.render(200)).toEqual([
-      '• main',
-      '› tool-smoke Running sleep 15.',
-      '  ○ tool-smoke Queued sleep 30.',
+      '○ main',
+      '● tool-smoke Running sleep 15.',
+      '○ tool-smoke Queued sleep 30.',
     ]);
 
     expect(state.handleTerminalInput('\u001b[B')).toEqual({ consume: true });
     expect(widget.render(200)).toEqual([
-      '• main',
-      '  ○ tool-smoke Running sleep 15.',
-      '› tool-smoke Queued sleep 30.',
+      '○ main',
+      '○ tool-smoke Running sleep 15.',
+      '● tool-smoke Queued sleep 30.',
     ]);
 
     expect(state.handleTerminalInput('\u001b[A')).toEqual({ consume: true });
     expect(widget.render(200)).toEqual([
-      '• main',
-      '› tool-smoke Running sleep 15.',
-      '  ○ tool-smoke Queued sleep 30.',
+      '○ main',
+      '● tool-smoke Running sleep 15.',
+      '○ tool-smoke Queued sleep 30.',
     ]);
 
     expect(state.handleTerminalInput('\u001b[A')).toEqual({ consume: true });
     expect(widget.render(200)).toEqual([
-      '› main',
-      '  ○ tool-smoke Running sleep 15.',
-      '  ○ tool-smoke Queued sleep 30.',
+      '● main',
+      '○ tool-smoke Running sleep 15.',
+      '○ tool-smoke Queued sleep 30.',
     ]);
 
-    expect(state.handleTerminalInput('\u001b[A')).toEqual({ consume: true });
+    expect(state.handleTerminalInput('\u001b[D')).toEqual({ consume: true, action: { type: 'focus-editor' } });
+    expect(widget.render(200)).toEqual([
+      '○ main',
+      '○ tool-smoke Running sleep 15.',
+      '○ tool-smoke Queued sleep 30.',
+    ]);
+
+    expect(state.handleTerminalInput('\u001b[A')).toBeUndefined();
     expect(state.handleTerminalInput('x')).toBeUndefined();
+  });
+
+  it('renders the selected claude background widget row with warning styling only while navigation is active', () => {
+    const now = new Date().toISOString();
+    const state = new ClaudeBackgroundWidgetState(
+      () => [
+        { id: 'task-1', agent: 'tool-smoke', mode: 'background', status: 'running', task: 'sleep 15', last_activity: 'Running sleep 15.', created_at: now },
+      ] as any,
+    );
+    const fg = vi.fn((_: string, text: string) => text);
+    const bold = vi.fn((text: string) => text);
+    const widget = new ClaudeBackgroundWidget(state, { fg, bold });
+
+    widget.render(200);
+    expect(fg).not.toHaveBeenCalledWith('warning', expect.any(String));
+
+    state.handleTerminalInput('\u001b[B');
+    widget.render(200);
+
+    expect(fg).toHaveBeenCalledWith('warning', '● tool-smoke Running sleep 15.');
+    expect(bold).toHaveBeenCalledWith('● tool-smoke Running sleep 15.');
   });
 
   it('returns to input on main enter and opens the selected subagent on enter', () => {

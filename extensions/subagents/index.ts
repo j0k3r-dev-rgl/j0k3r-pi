@@ -137,11 +137,8 @@ export function moveClaudeBackgroundWidgetSelection(tasks: SubagentTask[], selec
 export function renderClaudeBackgroundWidgetLines(tasks: SubagentTask[], selectedKey?: string): string[] | undefined {
   const entries = buildClaudeBackgroundWidgetEntries(tasks);
   if (!entries.length) return undefined;
-  const current = coerceClaudeBackgroundSelection(entries, selectedKey);
-  return entries.map((entry, index) => {
-    if (entry.key === current) return `› ${entry.line}`;
-    return index === 0 ? `• ${entry.line}` : `  ○ ${entry.line}`;
-  });
+  const current = selectedKey === undefined ? undefined : coerceClaudeBackgroundSelection(entries, selectedKey);
+  return entries.map((entry) => `${entry.key === current ? '●' : '○'} ${entry.line}`);
 }
 
 export class ClaudeBackgroundWidgetState {
@@ -159,7 +156,7 @@ export class ClaudeBackgroundWidgetState {
   }
 
   renderLines(): string[] {
-    return renderClaudeBackgroundWidgetLines(this.getTasks(), this.getSelectedKey()) ?? [];
+    return renderClaudeBackgroundWidgetLines(this.getTasks(), this.navigationActive ? this.getSelectedKey() : undefined) ?? [];
   }
 
   handleWidgetInput(data: string): void {
@@ -238,8 +235,8 @@ export class ClaudeBackgroundWidget {
   }
 
   private decorate(line: string): string {
-    if (!line.startsWith('› ')) return line;
-    return this.theme?.fg?.('accent', this.theme?.bold?.(line) ?? line) ?? line;
+    if (!line.startsWith('● ')) return line;
+    return this.theme?.fg?.('warning', this.theme?.bold?.(line) ?? line) ?? line;
   }
 }
 
