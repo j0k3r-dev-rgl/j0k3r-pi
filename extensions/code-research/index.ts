@@ -25,7 +25,7 @@ export default function findSymbolExtension(pi: any) {
       }),
       language: Type.Optional(
         Type.Union(
-          [Type.Literal('ts'), Type.Literal('js'), Type.Literal('auto')],
+          [Type.Literal('ts'), Type.Literal('js'), Type.Literal('java'), Type.Literal('auto')],
           { description: 'Language to use for parsing. Default: auto (detect from file extension).' }
         )
       ),

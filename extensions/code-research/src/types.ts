@@ -1,4 +1,4 @@
-export type SupportedLanguage = 'ts' | 'js' | 'auto';
+export type SupportedLanguage = 'ts' | 'js' | 'java' | 'auto';
 export type SymbolKind = 'function' | 'class' | 'method' | 'interface' | 'variable' | 'unknown';
 export type SearchScope = 'file' | 'directory';
 

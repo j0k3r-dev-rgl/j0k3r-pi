@@ -1,21 +1,58 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
-import { join, resolve, relative } from 'node:path';
+import { join, resolve } from 'node:path';
 import { minimatch } from 'minimatch';
 import { getParser } from './parser.js';
-import {
-  buildSymbolLocation,
-  detectLanguage,
-  extractSymbols,
-  findImplementationsOf,
-  isSupportedFile,
-} from '../languages/typescript.js';
+import * as TypeScript from '../languages/typescript.js';
+import * as Java from '../languages/java.js';
 import type { FindSymbolInput, SearchMode, SupportedLanguage, SymbolLocation } from '../types.js';
+
+interface LanguageAdapter {
+  detectLanguage(filePath: string, explicit: SupportedLanguage): Exclude<SupportedLanguage, 'auto'>;
+  isSupportedFile(filePath: string): boolean;
+  extractSymbols(rootNode: any): Array<{
+    name: string;
+    kind: import('../types.js').SymbolKind;
+    node: any;
+    isDefinition: boolean;
+    isImplementation: boolean;
+  }>;
+  findImplementationsOf(
+    symbolName: string,
+    files: Array<{ path: string; rootNode: any; language: Exclude<SupportedLanguage, 'auto'> }>
+  ): SymbolLocation[];
+  buildSymbolLocation(
+    filePath: string,
+    symbolName: string,
+    kind: import('../types.js').SymbolKind,
+    node: any,
+    isDefinition: boolean,
+    isImplementation: boolean,
+    includeSignature?: boolean,
+    includeCode?: boolean,
+    source?: string
+  ): SymbolLocation;
+}
 
 interface ParsedFile {
   path: string;
   language: Exclude<SupportedLanguage, 'auto'>;
   rootNode: any;
   source: string;
+}
+
+function getLanguageAdapter(language: Exclude<SupportedLanguage, 'auto'>): LanguageAdapter {
+  if (language === 'java') return Java;
+  return TypeScript;
+}
+
+function isSupportedFile(filePath: string): boolean {
+  return TypeScript.isSupportedFile(filePath) || Java.isSupportedFile(filePath);
+}
+
+function detectLanguage(filePath: string, explicit: SupportedLanguage): Exclude<SupportedLanguage, 'auto'> {
+  if (explicit !== 'auto') return explicit;
+  if (Java.isSupportedFile(filePath)) return 'java';
+  return TypeScript.detectLanguage(filePath, explicit);
 }
 
 export async function findSymbol(
@@ -74,12 +111,13 @@ export async function findSymbol(
   const matches: SymbolLocation[] = [];
 
   for (const file of parsedFiles) {
-    const symbols = extractSymbols(file.rootNode);
+    const adapter = getLanguageAdapter(file.language);
+    const symbols = adapter.extractSymbols(file.rootNode);
     for (const sym of symbols) {
       if (!matchesSymbol(sym.name, input.symbol, searchMode)) continue;
       if (input.kind && sym.kind !== input.kind) continue;
 
-      const location = buildSymbolLocation(
+      const location = adapter.buildSymbolLocation(
         file.path,
         sym.name,
         sym.kind,
@@ -98,7 +136,8 @@ export async function findSymbol(
   // Enrich interface definitions with implementation locations
   for (const match of matches) {
     if (match.kind === 'interface' && match.is_definition) {
-      match.implementation_locations = findImplementationsOf(
+      const adapter = getLanguageAdapter(detectLanguage(match.file, 'auto'));
+      match.implementation_locations = adapter.findImplementationsOf(
         match.symbol,
         parsedFiles
       );
@@ -154,12 +193,13 @@ function findDefinitionFor(
   includeSignature = false
 ): SymbolLocation | undefined {
   for (const file of files) {
-    const symbols = extractSymbols(file.rootNode);
+    const adapter = getLanguageAdapter(file.language);
+    const symbols = adapter.extractSymbols(file.rootNode);
     for (const sym of symbols) {
       if (sym.name !== implementation.symbol) continue;
       if (!sym.isDefinition) continue;
 
-      return buildSymbolLocation(
+      return adapter.buildSymbolLocation(
         file.path,
         sym.name,
         sym.kind,
