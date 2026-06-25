@@ -43,13 +43,24 @@ describe('function_call_tree Java', () => {
 
     expect(result.root.symbol).toBe('handle');
     expect(result.root.class).toBe('Controller');
+    expect(result.root.owner_kind).toBe('class');
+    expect(result.root.signature).toContain('public void handle()');
+    expect(result.root.start_line).toBeDefined();
+    expect(result.root.end_line).toBeDefined();
     expect(result.root.children).toBeDefined();
     expect(result.root.children).toHaveLength(1);
     expect(result.root.children?.[0].class).toBe('AppService');
     expect(result.root.children?.[0].symbol).toBe('run');
     expect(result.root.children?.[0].is_application).toBe(true);
+    expect(result.root.children?.[0].called_as).toBe('service.run()');
+    expect(result.root.children?.[0].receiver_name).toBe('service');
+    expect(result.root.children?.[0].receiver_type).toBe('Service');
+    expect(result.root.children?.[0].owner_kind).toBe('class');
+    expect(result.root.children?.[0].signature).toContain('public void run()');
     expect(result.root.children?.[0].children?.[0].symbol).toBe('helper');
     expect(result.root.children?.[0].children?.[0].class).toBe('AppService');
+    expect(result.root.children?.[0].children?.[0].called_as).toBe('helper()');
+    expect(result.root.children?.[0].children?.[0].signature).toContain('private void helper()');
     expect(result.stats.application_nodes).toBe(3);
   });
 
@@ -94,6 +105,74 @@ describe('function_call_tree Java', () => {
     if (execution.status !== 'ok') return;
     expect(execution.rootClassName).toBe('Controller');
     expect(execution.result.root.children?.[0].class).toBe('AppService');
+    expect(execution.result.root.children?.[0].called_as).toBe('service.run()');
     expect(execution.result.root.children?.[0].children?.[0].symbol).toBe('helper');
+    expect(execution.result.root.children?.[0].children?.[0].called_as).toBe('helper()');
+  });
+
+  it('infers string receiver type for chained external calls from known request methods', async () => {
+    const rootDir = await createProject({
+      'Controller.java': `import jakarta.servlet.http.HttpServletRequest;\n\npublic class Controller {\n  public void handle(HttpServletRequest request) {\n    request.getHeader("Authorization").replace("Bearer ", "");\n  }\n}\n`,
+    });
+
+    const index = await buildProjectIndex(rootDir);
+    const rootMethod = index.methods.find((m) => m.className === 'Controller' && m.symbol === 'handle');
+    expect(rootMethod).toBeDefined();
+
+    const result = buildCallTree({
+      rootFile: rootMethod!.file,
+      rootMethod: rootMethod!,
+      index,
+      maxDepth: 5,
+      includeExternal: true,
+    });
+
+    expect(result.root.children?.[0].symbol).toBe('replace');
+    expect(result.root.children?.[0].receiver_type).toBe('String');
+    expect(result.root.children?.[0].source).toBe('language');
+  });
+
+  it('infers fluent receiver type for builder chains', async () => {
+    const rootDir = await createProject({
+      'BuilderExample.java': `import org.springframework.data.mongodb.core.query.Update;\n\npublic class BuilderExample {\n  public void handle() {\n    new Update().set("a", 1).set("b", 2);\n  }\n}\n`,
+    });
+
+    const index = await buildProjectIndex(rootDir);
+    const rootMethod = index.methods.find((m) => m.className === 'BuilderExample' && m.symbol === 'handle');
+    expect(rootMethod).toBeDefined();
+
+    const result = buildCallTree({
+      rootFile: rootMethod!.file,
+      rootMethod: rootMethod!,
+      index,
+      maxDepth: 5,
+      includeExternal: true,
+    });
+
+    expect(result.root.children?.[0].symbol).toBe('set');
+    expect(result.root.children?.[0].receiver_type).toBe('Update');
+  });
+
+  it('marks chained external calls that contain lambdas without splitting the chain', async () => {
+    const rootDir = await createProject({
+      'Example.java': `import java.util.Optional;\n\npublic class Example {\n  public void run(Optional<String> value) {\n    value.orElseThrow(() -> new RuntimeException("missing"));\n  }\n}\n`,
+    });
+
+    const index = await buildProjectIndex(rootDir);
+    const rootMethod = index.methods.find((m) => m.className === 'Example' && m.symbol === 'run');
+    expect(rootMethod).toBeDefined();
+
+    const result = buildCallTree({
+      rootFile: rootMethod!.file,
+      rootMethod: rootMethod!,
+      index,
+      maxDepth: 5,
+      includeExternal: true,
+    });
+
+    expect(result.root.children?.[0].symbol).toBe('orElseThrow');
+    expect(result.root.children?.[0].called_as).toContain('orElseThrow');
+    expect(result.root.children?.[0].has_callback).toBe(true);
+    expect(result.root.children?.[0].callback_kind).toBe('lambda');
   });
 });

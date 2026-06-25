@@ -177,20 +177,23 @@ describe('findSymbol Java', () => {
     expect(results[0].kind).toBe('variable');
   });
 
-  it('throws a clear error when a specific real-world java file cannot be parsed', async () => {
+  it('parses a specific large real-world java file when buffer size is increased', async () => {
     const realFile = '/home/j0k3r/sias/app/back/src/main/java/com/sistemasias/ar/modules/user/infrastructure/persistence/dao/UserQueryMongoSupport.java';
 
-    await expect(
-      findSymbol(tmpDir, {
-        path: realFile,
-        symbol: 'NotificationCommandInputPort',
-        language: 'java',
-        kind: 'interface',
-      })
-    ).rejects.toThrow(`Failed to parse file: ${realFile}`);
+    const results = await findSymbol(tmpDir, {
+      path: realFile,
+      symbol: 'UserQueryMongoSupport',
+      language: 'java',
+      kind: 'class',
+      include_signature: true,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].symbol).toBe('UserQueryMongoSupport');
+    expect(results[0].kind).toBe('class');
   });
 
-  it('skips unparsable files during directory scans and still finds symbols', async () => {
+  it('finds symbols during real project directory scans including large java files', async () => {
     const results = await findSymbol('/home/j0k3r/sias/app/back', {
       path: 'src/main/java',
       symbol: 'NotificationCommandInputPort',

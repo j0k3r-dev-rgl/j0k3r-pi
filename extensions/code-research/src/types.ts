@@ -42,6 +42,7 @@ export interface FunctionCallTreeInput {
 }
 
 export type CallSource = 'application' | 'language' | 'framework' | 'library' | 'unknown';
+export type OwnerKind = 'class' | 'interface' | 'unknown';
 
 export interface CallTreeNode {
   file?: string;
@@ -49,8 +50,21 @@ export interface CallTreeNode {
   kind: SymbolKind;
   class?: string;
   package?: string;
+  owner_kind?: OwnerKind;
   line?: number;
   column?: number;
+  start_line?: number;
+  start_column?: number;
+  end_line?: number;
+  end_column?: number;
+  call_line?: number;
+  call_column?: number;
+  signature?: string;
+  called_as?: string;
+  receiver_name?: string;
+  receiver_type?: string;
+  has_callback?: boolean;
+  callback_kind?: 'lambda' | 'method_reference' | 'anonymous_class';
   is_application: boolean;
   is_external: boolean;
   source: CallSource;

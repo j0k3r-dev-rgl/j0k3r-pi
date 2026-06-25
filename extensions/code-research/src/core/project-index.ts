@@ -1,13 +1,14 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { join, extname } from 'node:path';
-import Parser from 'tree-sitter';
-import Java from 'tree-sitter-java';
+import { getParser, parseSource } from './parser.js';
 
 export interface IndexedMethod {
   file: string;
   package: string;
   className: string;
   symbol: string;
+  returnType?: string;
+  fullReturnType?: string;
   line: number;
   column: number;
   node: any;
@@ -49,16 +50,6 @@ export interface ProjectIndex {
   imports: Map<string, FileImports>;
 }
 
-let javaParser: Parser | undefined;
-
-function getParser(): Parser {
-  if (!javaParser) {
-    javaParser = new Parser();
-    javaParser.setLanguage(Java);
-  }
-  return javaParser;
-}
-
 export async function buildProjectIndex(rootDir: string): Promise<ProjectIndex> {
   const index: ProjectIndex = {
     methods: [],
@@ -71,8 +62,8 @@ export async function buildProjectIndex(rootDir: string): Promise<ProjectIndex> 
 
   for (const file of javaFiles) {
     const source = await readFile(file, 'utf8');
-    const parser = getParser();
-    const tree = parser.parse(source);
+    const parser = getParser('java');
+    const tree = parseSource(parser, source);
     indexFile(file, tree.rootNode, index);
   }
 
@@ -194,11 +185,15 @@ function indexClassMembers(
     if (node.type === 'method_declaration' || node.type === 'constructor_declaration') {
       const nameNode = node.childForFieldName('name');
       if (nameNode) {
+        const methodTypeNode = node.type === 'method_declaration' ? node.childForFieldName('type') : undefined;
+        const returnType = normalizeTypeName(methodTypeNode?.text);
         index.methods.push({
           file,
           package: packageName,
           className,
           symbol: nameNode.text,
+          returnType: returnType || undefined,
+          fullReturnType: returnType ? resolveFullTypeName(returnType, packageName, fileImports) : undefined,
           line: node.startPosition.row + 1,
           column: node.startPosition.column,
           node,

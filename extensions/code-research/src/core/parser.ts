@@ -8,6 +8,8 @@ const { typescript, tsx } = tsModule;
 const JavaScript = jsModule;
 const Java = javaModule;
 
+const DEFAULT_PARSE_BUFFER_SIZE = 1024 * 1024;
+
 let tsParser: Parser | undefined;
 let tsxParser: Parser | undefined;
 let jsParser: Parser | undefined;
@@ -35,4 +37,13 @@ export function getParser(language: Exclude<SupportedLanguage, 'auto'>): Parser 
     jsParser.setLanguage(JavaScript);
   }
   return jsParser;
+}
+
+export function parseSource(
+  parser: Parser,
+  source: string,
+  options?: { bufferSize?: number }
+): Parser.Tree {
+  const bufferSize = options?.bufferSize ?? DEFAULT_PARSE_BUFFER_SIZE;
+  return parser.parse(source, undefined, { bufferSize });
 }

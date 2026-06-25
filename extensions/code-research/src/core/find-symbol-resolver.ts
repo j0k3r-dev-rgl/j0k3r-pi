@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { getParser } from './parser.js';
+import { getParser, parseSource } from './parser.js';
 import { detectLanguage, resolveTargetFiles } from './shared.js';
 import {
   buildSymbolLocation as buildTypeScriptSymbolLocation,
@@ -97,7 +97,7 @@ export async function findSymbol(
 
       let tree: any;
       try {
-        tree = parser.parse(source);
+        tree = parseSource(parser, source);
       } catch (error: any) {
         if (filesToScan.length === 1) {
           throw new Error(`Failed to parse file: ${filePath} (${error?.message ?? 'unknown parse error'})`);
