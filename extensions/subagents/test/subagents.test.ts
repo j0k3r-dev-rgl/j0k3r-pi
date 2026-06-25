@@ -2200,6 +2200,26 @@ describe('subagents extension', () => {
     expect(notifications.some((n) => n.includes('completed'))).toBe(true);
   });
 
+  it('can move a running task-mode subagent to background and notify on completion', async () => {
+    writeAgent('analyst');
+    const notifications: string[] = [];
+    const manager = new SubagentManager(mockRunner(20));
+    const runPromise = manager.run({ agent: 'analyst', task: 'task work', mode: 'task' }, { cwd: tmp, ui: { notify: (msg: string) => notifications.push(msg) } });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    const running = manager.listTasks(tmp).find((task) => task.task === 'task work');
+    expect(running?.mode).toBe('task');
+
+    const backgrounded = manager.sendToBackground([running!.id]);
+    expect(backgrounded.map((task) => task.id)).toEqual([running!.id]);
+    expect(manager.getTask(running!.id)?.mode).toBe('background');
+
+    const result = await runPromise;
+    expect(result.results?.[0]?.status).toBe('completed');
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(notifications.some((n) => n.includes('completed'))).toBe(true);
+  });
+
   it('cancels running background tasks', async () => {
     writeAgent('analyst');
     const manager = new SubagentManager(mockRunner(100));
@@ -2487,7 +2507,34 @@ describe('subagents extension', () => {
     expect(rendered).toContain('effort: high');
   });
 
-  it('renders a dim ctrl+, and command hint in the subagent_run title', () => {
+  it('returns a background handoff result when ctrl+b is pressed in claude task mode', async () => {
+    writeAgent('analyst');
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ mode: 'claude' }));
+    const manager = new SubagentManager(mockRunner(50));
+    let runTool: any;
+    let terminalHandler: ((data: string) => any) | undefined;
+    registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
+
+    const resultPromise = runTool.execute(
+      '1',
+      { agent: 'analyst', task: 'render clearly', mode: 'task' },
+      undefined,
+      undefined,
+      { cwd: tmp, ui: { onTerminalInput: (handler: (data: string) => any) => { terminalHandler = handler; return () => { terminalHandler = undefined; }; } } },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(terminalHandler?.('\u0002')).toEqual({ consume: true });
+
+    const result = await resultPromise;
+    const text = result.content[0].text;
+    expect(result.isError).not.toBe(true);
+    expect(text).toContain('Sent 1 subagent task(s) to background');
+    const taskId = text.trim().split('\n').at(-1)!;
+    expect(manager.getTask(taskId, tmp)?.mode).toBe('background');
+  });
+
+  it('renders a dim ctrl+, and command hint in the subagent_run title outside claude mode', () => {
     const manager = new SubagentManager(mockRunner());
     let runTool: any;
     const dim = vi.fn((_name: string, text: string) => text);
@@ -2498,6 +2545,27 @@ describe('subagents extension', () => {
     expect(rendered).toContain('subagent analyst (task)');
     expect(rendered).toContain('(ctrl+, or /subagents for details)');
     expect(dim).toHaveBeenCalledWith('dim', '(ctrl+, or /subagents for details)');
+  });
+
+  it('hides ctrl+, from the subagent_run title in claude mode', () => {
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ mode: 'claude' }));
+    const previousCwd = process.cwd();
+    process.chdir(tmp);
+    try {
+      const manager = new SubagentManager(mockRunner());
+      let runTool: any;
+      const dim = vi.fn((_name: string, text: string) => text);
+      registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
+
+      const rendered = runTool.renderCall({ agent: 'analyst', mode: 'task' }, { fg: dim, bold: (text: string) => text }).render(200).join('\n');
+
+      expect(rendered).toContain('subagent analyst (task)');
+      expect(rendered).toContain('(/subagents for details)');
+      expect(rendered).not.toContain('ctrl+,');
+      expect(dim).toHaveBeenCalledWith('dim', '(/subagents for details)');
+    } finally {
+      process.chdir(previousCwd);
+    }
   });
 
   it('keeps ansi-styled subagent_run title hints visible when visual width fits', () => {
@@ -2515,6 +2583,16 @@ describe('subagents extension', () => {
     expect(plain).toContain('subagent discovery (task)');
     expect(plain).toContain('(ctrl+, or /subagents for details)');
     expect(plain).not.toContain('�');
+  });
+
+  it('renders a ctrl+b background hint in partial claude task-mode results', () => {
+    const manager = new SubagentManager(mockRunner());
+    let runTool: any;
+    registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
+
+    const rendered = runTool.renderResult({ details: { frame: 0, backgroundable: true, tasks: [{ agent: 'analyst', status: 'running', effort: 'high', model: 'mock/model', last_activity: 'working' }] } }, { isPartial: true }, { fg: (_name: string, text: string) => text }).render(200).join('\n');
+
+    expect(rendered).toContain('ctrl+b to send to background');
   });
 
   it('keeps subagent_run command results compact when tasks include large thread snapshots', async () => {

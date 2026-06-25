@@ -1,4 +1,5 @@
 import { Type } from 'typebox';
+import { readSubagentsConfig } from './config.js';
 import type { SubagentManager } from './manager.js';
 import type { SubagentTask } from './types.js';
 
@@ -45,7 +46,7 @@ function formatTask(task: SubagentTask): string {
   return lines.join('\n');
 }
 
-function progressText(tasks: SubagentTask[], frame = 0): string {
+function progressText(tasks: SubagentTask[], frame = 0, options: { backgroundable?: boolean } = {}): string {
   const spinner = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'][frame % 10];
   const active = tasks.find((task) => task.status === 'running') ?? tasks[0];
   if (!active) return `${spinner} Starting subagent…`;
@@ -54,7 +55,8 @@ function progressText(tasks: SubagentTask[], frame = 0): string {
     `${spinner} agent: ${active.agent} · status: ${active.status} · effort: ${active.effort ?? 'default/current'}`,
     `↳ model: ${active.model ?? 'starting'}${usage ? ` · usage: ${usage}` : ''}`,
     `↳ ${clip(active.last_activity ?? active.task ?? active.id, 160)}`,
-  ].join('\n');
+    options.backgroundable ? '↳ ctrl+b to send to background' : undefined,
+  ].filter(Boolean).join('\n');
 }
 
 function installDoubleEscapeCancel(ctx: any, manager: SubagentManager, onCancel: () => void): () => void {
@@ -73,6 +75,26 @@ function installDoubleEscapeCancel(ctx: any, manager: SubagentManager, onCancel:
       'warning',
     );
     lastEscapeAt = 0;
+    return { consume: true };
+  });
+  return typeof unsubscribe === 'function' ? unsubscribe : () => {};
+}
+
+function installCtrlBBackground(
+  ctx: any,
+  manager: SubagentManager,
+  getTaskIds: () => string[],
+  onBackground: (tasks: SubagentTask[]) => void,
+): () => void {
+  const unsubscribe = ctx?.ui?.onTerminalInput?.((data: string) => {
+    if (data !== '\u0002') return undefined;
+    const backgrounded = manager.sendToBackground(getTaskIds());
+    if (!backgrounded.length) return undefined;
+    ctx?.ui?.notify?.(
+      backgrounded.length === 1 ? `Sent subagent to background: ${backgrounded[0]!.id}` : `Sent ${backgrounded.length} subagent task(s) to background.`,
+      'info',
+    );
+    onBackground(backgrounded);
     return { consume: true };
   });
   return typeof unsubscribe === 'function' ? unsubscribe : () => {};
@@ -172,20 +194,39 @@ export function registerSubagentTools(pi: any, manager: SubagentManager): void {
       let active = true;
       let latestTasks: SubagentTask[] = [];
       const isBackground = params.mode === 'background';
+      const canBackgroundInClaude = !isBackground && readSubagentsConfig(ctx?.cwd ?? process.cwd()).mode === 'claude';
+      let resolveBackground: ((value: { mode: 'background'; task_ids: string[] }) => void) | undefined;
+      const backgroundPromise = canBackgroundInClaude
+        ? new Promise<{ mode: 'background'; task_ids: string[] }>((resolve) => { resolveBackground = resolve; })
+        : undefined;
       const emit = () => {
         if (!active || isBackground) return;
         try {
-          onUpdate?.({ content: [{ type: 'text', text: progressText(latestTasks, frame) }], details: { tasks: latestTasks.map(compactTaskForToolResult), frame: frame++ } });
+          onUpdate?.({
+            content: [{ type: 'text', text: progressText(latestTasks, frame, { backgroundable: canBackgroundInClaude }) }],
+            details: { tasks: latestTasks.map(compactTaskForToolResult), frame: frame++, backgroundable: canBackgroundInClaude },
+          });
         } catch {
           active = false;
         }
       };
       const interval = isBackground ? undefined : setInterval(emit, 500);
       const uninstallCancel = isBackground ? () => {} : installDoubleEscapeCancel(ctx, manager, () => { cancelledByDoubleEscape = true; });
+      const uninstallBackground = canBackgroundInClaude
+        ? installCtrlBBackground(ctx, manager, () => latestTasks.map((task) => task.id), (tasks) => {
+          active = false;
+          resolveBackground?.({ mode: 'background', task_ids: tasks.map((task) => task.id) });
+        })
+        : () => {};
       try {
         emit();
-        const result = await manager.run(params, { ...ctx, pi }, _signal, isBackground ? undefined : (tasks) => { latestTasks = tasks; emit(); });
+        const runPromise = manager.run(params, { ...ctx, pi }, _signal, isBackground ? undefined : (tasks) => { latestTasks = tasks; emit(); });
+        const result = backgroundPromise ? await Promise.race([runPromise, backgroundPromise]) : await runPromise;
         if (cancelledByDoubleEscape) throw new Error('Subagent run cancelled by double escape');
+        if (!('results' in result)) {
+          const details = compactResultDetails(result as any);
+          return ok(`Sent ${result.task_ids.length} subagent task(s) to background:\n${result.task_ids.join('\n')}`, details);
+        }
         const failedTasks = (result.results ?? []).filter((task) => task.status === 'failed' || task.status === 'cancelled');
         const text = result.mode === 'background'
           ? `Started ${result.task_ids.length} background subagent task(s):\n${result.task_ids.join('\n')}`
@@ -197,12 +238,14 @@ export function registerSubagentTools(pi: any, manager: SubagentManager): void {
         active = false;
         if (interval) clearInterval(interval);
         uninstallCancel();
+        uninstallBackground();
       }
     },
     renderCall(args: any, theme: any) {
       const agents = args.agents?.length ? args.agents.join(', ') : args.agent ?? 'subagent';
       const mode = args.mode ?? 'task';
-      const detailsHint = '(ctrl+, or /subagents for details)';
+      const uiMode = readSubagentsConfig(process.cwd()).mode;
+      const detailsHint = uiMode === 'claude' ? '(/subagents for details)' : '(ctrl+, or /subagents for details)';
       const text = `${theme.fg?.('toolTitle', theme.bold?.('subagent ') ?? 'subagent ') ?? 'subagent '}${theme.fg?.('accent', agents) ?? agents}${theme.fg?.('dim', ` (${mode})`) ?? ` (${mode})`} ${theme.fg?.('dim', detailsHint) ?? detailsHint}`;
       return textComponent(text);
     },
@@ -210,13 +253,15 @@ export function registerSubagentTools(pi: any, manager: SubagentManager): void {
       const task = taskFromDetails(result);
       if (isPartial) {
         const frame = result?.details?.frame ?? 0;
-        const raw = task ? progressText([task], frame) : progressText([], frame);
+        const raw = task
+          ? progressText([task], frame, { backgroundable: Boolean(result?.details?.backgroundable) })
+          : progressText([], frame, { backgroundable: Boolean(result?.details?.backgroundable) });
         const lines = raw.split('\n');
-        const styled = [
-          theme.fg?.('warning', lines[0] ?? 'subagent running') ?? (lines[0] ?? 'subagent running'),
-          theme.fg?.('dim', lines[1] ?? '') ?? (lines[1] ?? ''),
-          theme.fg?.('dim', lines[2] ?? '') ?? (lines[2] ?? ''),
-        ].filter(Boolean).join('\n');
+        const styled = lines.map((line: string, index: number) => (
+          index === 0
+            ? (theme.fg?.('warning', line) ?? line)
+            : (theme.fg?.('dim', line) ?? line)
+        )).filter(Boolean).join('\n');
         return textComponent(styled);
       }
       const failed = result?.isError || task?.status === 'failed' || task?.status === 'cancelled';

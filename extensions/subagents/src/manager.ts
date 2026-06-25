@@ -256,6 +256,21 @@ export class SubagentManager {
       .map((task) => this.cancel(task.id, reason));
   }
 
+  sendToBackground(ids: string[]): SubagentTask[] {
+    const changed: SubagentTask[] = [];
+    for (const id of ids) {
+      const task = this.tasks.get(id);
+      const cwd = this.taskCwds.get(id);
+      if (!task || !cwd) continue;
+      if (task.mode === 'background') continue;
+      if (task.status !== 'queued' && task.status !== 'running') continue;
+      task.mode = 'background';
+      this.record(cwd, task, task.last_activity ?? 'running', true);
+      changed.push(task);
+    }
+    return changed;
+  }
+
   hasRunning(): boolean {
     return [...this.tasks.values()].some((task) => task.status === 'queued' || task.status === 'running');
   }
@@ -425,7 +440,7 @@ export class SubagentManager {
             break;
           }
           subagentAuditLog(cwd, 'permission_bridge_request_detected', { taskId: id, agent: definition.name, ...permissionLogFields(permissionRequired) });
-          if (mode === 'background') {
+          if (task.mode === 'background') {
             subagentAuditLog(cwd, 'permission_bridge_background_blocked', { taskId: id, agent: definition.name, ...permissionLogFields(permissionRequired) });
             throw new Error('Subagent permission requires main-thread approval; rerun in task mode to approve or deny it.');
           }
@@ -482,7 +497,7 @@ export class SubagentManager {
         task.ended_at = task.last_activity_at;
         this.record(cwd, task, 'completed', true);
         this.notifyTaskUpdate(id, onTaskUpdate, true);
-        if (mode === 'background') {
+        if (task.mode === 'background') {
           ctx?.ui?.notify?.(`Subagent ${definition.name} completed: ${id}`, 'info');
           this.onTerminalBackgroundTask?.(task);
         }
@@ -496,7 +511,7 @@ export class SubagentManager {
         this.record(cwd, task, task.last_activity, true);
         this.notifyTaskUpdate(id, onTaskUpdate, true);
         ctx?.ui?.notify?.(`Subagent ${definition.name} failed: ${task.error}`, 'warning');
-        if (mode === 'background') this.onTerminalBackgroundTask?.(task);
+        if (task.mode === 'background') this.onTerminalBackgroundTask?.(task);
       } finally {
         if (timeout) clearTimeout(timeout);
         if (acquired) limiter.release();
