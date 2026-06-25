@@ -1,0 +1,23 @@
+{
+  "name": "pi-code-research-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "minimatch": "10.2.5",
+    "tree-sitter": "0.21.1",
+    "tree-sitter-javascript": "0.23.1",
+    "tree-sitter-typescript": "0.23.2",
+    "typebox": "1.1.38"
+  },
+  "devDependencies": {
+    "@types/node": "26.0.1",
+    "jiti": "2.7.0",
+    "typescript": "6.0.3",
+    "vitest": "4.1.9"
+  }
+}
