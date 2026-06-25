@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { mkdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { findSymbol } from '../src/core/resolver.js';
+import { findSymbol } from '../src/core/find-symbol-resolver.js';
 import type { FindSymbolInput, SymbolLocation } from '../src/types.js';
 
 describe('findSymbol', () => {

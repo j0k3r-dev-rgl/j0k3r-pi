@@ -1,14 +1,19 @@
-import { readFile, readdir, stat } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
-import { minimatch } from 'minimatch';
+import { readFile } from 'node:fs/promises';
 import { getParser } from './parser.js';
-import * as TypeScript from '../languages/typescript.js';
-import * as Java from '../languages/java.js';
+import { detectLanguage, resolveTargetFiles } from './shared.js';
+import {
+  buildSymbolLocation as buildTypeScriptSymbolLocation,
+  extractSymbols as extractTypeScriptSymbols,
+  findImplementationsOf as findTypeScriptImplementationsOf,
+} from '../languages/typescript/find-symbol.js';
+import {
+  buildSymbolLocation as buildJavaSymbolLocation,
+  extractSymbols as extractJavaSymbols,
+  findImplementationsOf as findJavaImplementationsOf,
+} from '../languages/java/find-symbol.js';
 import type { FindSymbolInput, SearchMode, SupportedLanguage, SymbolLocation } from '../types.js';
 
 interface LanguageAdapter {
-  detectLanguage(filePath: string, explicit: SupportedLanguage): Exclude<SupportedLanguage, 'auto'>;
-  isSupportedFile(filePath: string): boolean;
   extractSymbols(rootNode: any): Array<{
     name: string;
     kind: import('../types.js').SymbolKind;
@@ -40,20 +45,23 @@ interface ParsedFile {
   source: string;
 }
 
+const typeScriptAdapter: LanguageAdapter = {
+  extractSymbols: extractTypeScriptSymbols,
+  findImplementationsOf: findTypeScriptImplementationsOf,
+  buildSymbolLocation: buildTypeScriptSymbolLocation,
+};
+
+const javaAdapter: LanguageAdapter = {
+  extractSymbols: extractJavaSymbols,
+  findImplementationsOf: findJavaImplementationsOf,
+  buildSymbolLocation: buildJavaSymbolLocation,
+};
+
 function getLanguageAdapter(language: Exclude<SupportedLanguage, 'auto'>): LanguageAdapter {
-  if (language === 'java') return Java;
-  return TypeScript;
+  if (language === 'java') return javaAdapter;
+  return typeScriptAdapter;
 }
 
-function isSupportedFile(filePath: string): boolean {
-  return TypeScript.isSupportedFile(filePath) || Java.isSupportedFile(filePath);
-}
-
-function detectLanguage(filePath: string, explicit: SupportedLanguage): Exclude<SupportedLanguage, 'auto'> {
-  if (explicit !== 'auto') return explicit;
-  if (Java.isSupportedFile(filePath)) return 'java';
-  return TypeScript.detectLanguage(filePath, explicit);
-}
 
 export async function findSymbol(
   cwd: string,
@@ -62,7 +70,6 @@ export async function findSymbol(
   // In-memory cache scoped to this single tool invocation
   const parseCache = new Map<string, ParsedFile>();
 
-  const targetPath = resolve(cwd, input.path);
   const explicitLanguage = input.language ?? 'auto';
   const includeSignature = input.include_signature ?? false;
   const searchMode = input.search_mode ?? 'exact';
@@ -78,21 +85,7 @@ export async function findSymbol(
     includeCode = false;
   }
 
-  let targetStat;
-  try {
-    targetStat = await stat(targetPath);
-  } catch (err: any) {
-    if (err.code === 'ENOENT') {
-      throw new Error(`Path not found: ${input.path}`);
-    }
-    throw err;
-  }
-
-  const isDirectory = targetStat.isDirectory();
-
-  const filesToScan: string[] = isDirectory
-    ? await collectSupportedFiles(targetPath, input.glob)
-    : [targetPath];
+  const { filesToScan } = await resolveTargetFiles(cwd, input.path, input.glob);
 
   const parsedFiles: ParsedFile[] = [];
   for (const filePath of filesToScan) {
@@ -101,7 +94,17 @@ export async function findSymbol(
       const language = detectLanguage(filePath, explicitLanguage);
       const source = await readFile(filePath, 'utf8');
       const parser = getParser(language);
-      const tree = parser.parse(source);
+
+      let tree: any;
+      try {
+        tree = parser.parse(source);
+      } catch (error: any) {
+        if (filesToScan.length === 1) {
+          throw new Error(`Failed to parse file: ${filePath} (${error?.message ?? 'unknown parse error'})`);
+        }
+        continue;
+      }
+
       parsed = { path: filePath, language, rootNode: tree.rootNode, source };
       parseCache.set(filePath, parsed);
     }
@@ -167,24 +170,6 @@ function matchesSymbol(name: string, query: string, mode: SearchMode): boolean {
     default:
       return name === query;
   }
-}
-
-async function collectSupportedFiles(dir: string, glob?: string): Promise<string[]> {
-  const files: string[] = [];
-  const entries = await readdir(dir, { withFileTypes: true });
-
-  for (const entry of entries) {
-    const fullPath = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
-      files.push(...(await collectSupportedFiles(fullPath, glob)));
-    } else if (entry.isFile() && isSupportedFile(fullPath)) {
-      if (glob && !minimatch(fullPath, glob) && !minimatch(entry.name, glob)) continue;
-      files.push(fullPath);
-    }
-  }
-
-  return files;
 }
 
 function findDefinitionFor(

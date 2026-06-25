@@ -31,3 +31,39 @@ export interface FindSymbolInput {
 }
 
 export type SearchMode = 'exact' | 'prefix' | 'contains';
+
+export interface FunctionCallTreeInput {
+  path: string;
+  symbol: string;
+  language?: SupportedLanguage;
+  kind?: SymbolKind;
+  max_depth?: number;
+  include_external?: boolean;
+}
+
+export type CallSource = 'application' | 'language' | 'framework' | 'library' | 'unknown';
+
+export interface CallTreeNode {
+  file?: string;
+  symbol: string;
+  kind: SymbolKind;
+  class?: string;
+  package?: string;
+  line?: number;
+  column?: number;
+  is_application: boolean;
+  is_external: boolean;
+  source: CallSource;
+  reason?: string;
+  children?: CallTreeNode[];
+}
+
+export interface FunctionCallTreeResult {
+  root: CallTreeNode;
+  stats: {
+    total_nodes: number;
+    application_nodes: number;
+    external_nodes: number;
+    max_depth_reached: number;
+  };
+}

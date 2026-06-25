@@ -1,18 +1,5 @@
-import { extname, basename } from 'node:path';
-import type { SymbolKind, SupportedLanguage, SymbolLocation } from '../types.js';
-
-export function detectLanguage(filePath: string, explicit: SupportedLanguage): Exclude<SupportedLanguage, 'auto'> {
-  if (explicit !== 'auto') return explicit;
-
-  const ext = extname(filePath).toLowerCase();
-  if (ext === '.js' || ext === '.jsx' || ext === '.mjs' || ext === '.cjs') return 'js';
-  return 'ts';
-}
-
-export function isSupportedFile(filePath: string): boolean {
-  const ext = extname(filePath).toLowerCase();
-  return ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'].includes(ext);
-}
+import { extractSignature } from './shared.js';
+import type { SymbolKind, SupportedLanguage, SymbolLocation } from '../../types.js';
 
 export function nodeKindToSymbolKind(nodeType: string): SymbolKind {
   switch (nodeType) {
@@ -42,7 +29,7 @@ export function nodeKindToSymbolKind(nodeType: string): SymbolKind {
 export interface ExtractedSymbol {
   name: string;
   kind: SymbolKind;
-  node: any; // SyntaxNode
+  node: any;
   isDefinition: boolean;
   isImplementation: boolean;
 }
@@ -85,7 +72,6 @@ function getNameNode(node: any): { text: string; node: any } | undefined {
       child = node.childForFieldName('name');
       break;
     case 'arrow_function':
-      // Arrow functions in variable declarations use variable_declarator name
       return undefined;
     case 'method_definition':
     case 'method_signature':
@@ -143,7 +129,7 @@ function isImplementationNode(node: any): boolean {
     type === 'method_definition' ||
     type === 'abstract_method_signature' ||
     type === 'function_declaration' ||
-    (type === 'class_declaration') ||
+    type === 'class_declaration' ||
     type === 'abstract_class_declaration' ||
     type === 'function_expression' ||
     type === 'arrow_function' ||
@@ -168,6 +154,18 @@ function hasClassImplements(node: any): boolean {
   const heritage = node.children.find((c: any) => c.type === 'class_heritage');
   if (!heritage) return false;
   return heritage.children.some((c: any) => c.type === 'implements_clause');
+}
+
+function implementsInterface(classNode: any, interfaceName: string): boolean {
+  const heritage = classNode.children.find((c: any) => c.type === 'class_heritage');
+  if (!heritage) return false;
+
+  const implementsClause = heritage.children.find((c: any) => c.type === 'implements_clause');
+  if (!implementsClause) return false;
+
+  return implementsClause.children.some(
+    (c: any) => c.type === 'type_identifier' && c.text === interfaceName
+  );
 }
 
 export function findImplementationsOf(
@@ -202,18 +200,6 @@ export function findImplementationsOf(
   return locations;
 }
 
-function implementsInterface(classNode: any, interfaceName: string): boolean {
-  const heritage = classNode.children.find((c: any) => c.type === 'class_heritage');
-  if (!heritage) return false;
-
-  const implementsClause = heritage.children.find((c: any) => c.type === 'implements_clause');
-  if (!implementsClause) return false;
-
-  return implementsClause.children.some(
-    (c: any) => c.type === 'type_identifier' && c.text === interfaceName
-  );
-}
-
 export function buildSymbolLocation(
   filePath: string,
   symbolName: string,
@@ -246,56 +232,4 @@ export function buildSymbolLocation(
   }
 
   return location;
-}
-
-function extractSignature(node: any): string {
-  const bodyTypes = new Set([
-    'statement_block',
-    'class_body',
-    'interface_body',
-    'object',
-  ]);
-
-  interface Range {
-    start: number;
-    end: number;
-  }
-
-  const ranges: Range[] = [];
-
-  function collect(n: any) {
-    if (bodyTypes.has(n.type)) {
-      ranges.push({ start: n.startIndex, end: n.endIndex });
-      return;
-    }
-    for (const child of n.children) {
-      collect(child);
-    }
-  }
-
-  collect(node);
-
-  // Sort and merge overlapping ranges
-  ranges.sort((a, b) => a.start - b.start);
-  const merged: Range[] = [];
-  for (const range of ranges) {
-    const last = merged[merged.length - 1];
-    if (last && range.start <= last.end) {
-      last.end = Math.max(last.end, range.end);
-    } else {
-      merged.push(range);
-    }
-  }
-
-  // Build signature replacing bodies with " ... "
-  let result = '';
-  let last = node.startIndex;
-  for (const range of merged) {
-    result += node.text.slice(last - node.startIndex, range.start - node.startIndex);
-    result += ' ... ';
-    last = range.end;
-  }
-  result += node.text.slice(last - node.startIndex);
-
-  return result.replace(/\s+/g, ' ').trim();
 }

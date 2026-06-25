@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { mkdir, writeFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { findSymbol } from '../src/core/resolver.js';
+import { findSymbol } from '../src/core/find-symbol-resolver.js';
 import type { SymbolLocation } from '../src/types.js';
 
 describe('findSymbol Java', () => {
@@ -15,6 +15,7 @@ describe('findSymbol Java', () => {
 
   async function writeTestFile(name: string, content: string) {
     const path = join(tmpDir, name);
+    await mkdir(dirname(path), { recursive: true });
     await writeFile(path, content, 'utf8');
     return path;
   }
@@ -62,7 +63,7 @@ describe('findSymbol Java', () => {
     expect(results[0].is_implementation).toBe(true);
   });
 
-  it('finds a Java interface and its implementation', async () => {
+  it('finds a Java interface and its implementation in the same file', async () => {
     const file = await writeTestFile(
       'Service.java',
       `public interface Service {\n  String run();\n}\n\nclass LocalService implements Service {\n  public String run() {\n    return "local";\n  }\n}\n`
@@ -80,6 +81,30 @@ describe('findSymbol Java', () => {
     expect(results[0].is_definition).toBe(true);
     expect(results[0].implementation_locations?.length).toBe(1);
     expect(results[0].implementation_locations?.[0].symbol).toBe('LocalService');
+  });
+
+  it('finds Java interface implementations across a directory', async () => {
+    const projectRoot = join(tmpDir, 'cross-file-project');
+    await mkdir(projectRoot, { recursive: true });
+    await writeTestFile(
+      'cross-file-project/ports/Service.java',
+      `package ports;\npublic interface Service {\n  String run();\n}\n`
+    );
+    await writeTestFile(
+      'cross-file-project/impl/LocalService.java',
+      `package impl;\n\nimport ports.Service;\n\npublic class LocalService implements Service {\n  public String run() {\n    return "local";\n  }\n}\n`
+    );
+
+    const results = await findSymbol(tmpDir, {
+      path: projectRoot,
+      symbol: 'Service',
+      language: 'java',
+      kind: 'interface',
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].kind).toBe('interface');
+    expect(results[0].implementation_locations?.some((location) => location.symbol === 'LocalService')).toBe(true);
   });
 
   it('finds a Java constructor', async () => {
@@ -150,5 +175,30 @@ describe('findSymbol Java', () => {
 
     expect(results).toHaveLength(1);
     expect(results[0].kind).toBe('variable');
+  });
+
+  it('throws a clear error when a specific real-world java file cannot be parsed', async () => {
+    const realFile = '/home/j0k3r/sias/app/back/src/main/java/com/sistemasias/ar/modules/user/infrastructure/persistence/dao/UserQueryMongoSupport.java';
+
+    await expect(
+      findSymbol(tmpDir, {
+        path: realFile,
+        symbol: 'NotificationCommandInputPort',
+        language: 'java',
+        kind: 'interface',
+      })
+    ).rejects.toThrow(`Failed to parse file: ${realFile}`);
+  });
+
+  it('skips unparsable files during directory scans and still finds symbols', async () => {
+    const results = await findSymbol('/home/j0k3r/sias/app/back', {
+      path: 'src/main/java',
+      symbol: 'NotificationCommandInputPort',
+      language: 'java',
+      kind: 'interface',
+    });
+
+    expect(results.length).toBeGreaterThanOrEqual(1);
+    expect(results.some((result) => result.symbol === 'NotificationCommandInputPort')).toBe(true);
   });
 });

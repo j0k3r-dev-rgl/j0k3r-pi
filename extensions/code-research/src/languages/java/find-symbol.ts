@@ -1,18 +1,5 @@
-import { extname } from 'node:path';
-import type { SymbolKind, SupportedLanguage, SymbolLocation } from '../types.js';
-
-export function detectLanguage(filePath: string, explicit: SupportedLanguage): Exclude<SupportedLanguage, 'auto'> {
-  if (explicit !== 'auto') return explicit;
-
-  const ext = extname(filePath).toLowerCase();
-  if (ext === '.java') return 'java';
-  throw new Error(`Cannot auto-detect language for ${filePath}`);
-}
-
-export function isSupportedFile(filePath: string): boolean {
-  const ext = extname(filePath).toLowerCase();
-  return ext === '.java';
-}
+import { extractSignature } from './shared.js';
+import type { SymbolKind, SupportedLanguage, SymbolLocation } from '../../types.js';
 
 export function nodeKindToSymbolKind(nodeType: string): SymbolKind {
   switch (nodeType) {
@@ -104,6 +91,23 @@ function isImplementationNode(node: any): boolean {
   );
 }
 
+function hasClassImplements(node: any): boolean {
+  const interfaces = node.childForFieldName('interfaces');
+  return interfaces != null;
+}
+
+function implementsInterface(classNode: any, interfaceName: string): boolean {
+  const interfaces = classNode.childForFieldName('interfaces');
+  if (!interfaces) return false;
+
+  const typeList = interfaces.children.find((c: any) => c.type === 'type_list');
+  if (!typeList) return false;
+
+  return typeList.children.some(
+    (c: any) => c.type === 'type_identifier' && c.text === interfaceName
+  );
+}
+
 export function findImplementationsOf(
   symbolName: string,
   files: Array<{ path: string; rootNode: any; language: Exclude<SupportedLanguage, 'auto'> }>
@@ -113,8 +117,7 @@ export function findImplementationsOf(
   for (const file of files) {
     function visit(node: any) {
       if (node.isNamed && node.type === 'class_declaration') {
-        const interfaces = node.childForFieldName('interfaces');
-        if (interfaces && implementsInterface(interfaces, symbolName)) {
+        if (hasClassImplements(node) && implementsInterface(node, symbolName)) {
           const nameNode = node.childForFieldName('name');
           if (nameNode) {
             locations.push(buildSymbolLocation(file.path, nameNode.text, 'class', node, true, true));
@@ -131,15 +134,6 @@ export function findImplementationsOf(
   }
 
   return locations;
-}
-
-function implementsInterface(interfacesNode: any, interfaceName: string): boolean {
-  const typeList = interfacesNode.children.find((c: any) => c.type === 'type_list');
-  if (!typeList) return false;
-
-  return typeList.children.some(
-    (c: any) => c.type === 'type_identifier' && c.text === interfaceName
-  );
 }
 
 export function buildSymbolLocation(
@@ -174,49 +168,4 @@ export function buildSymbolLocation(
   }
 
   return location;
-}
-
-function extractSignature(node: any): string {
-  const bodyTypes = new Set(['block', 'constructor_body', 'interface_body', 'class_body']);
-
-  interface Range {
-    start: number;
-    end: number;
-  }
-
-  const ranges: Range[] = [];
-
-  function collect(n: any) {
-    if (bodyTypes.has(n.type)) {
-      ranges.push({ start: n.startIndex, end: n.endIndex });
-      return;
-    }
-    for (const child of n.children) {
-      collect(child);
-    }
-  }
-
-  collect(node);
-
-  ranges.sort((a, b) => a.start - b.start);
-  const merged: Range[] = [];
-  for (const range of ranges) {
-    const last = merged[merged.length - 1];
-    if (last && range.start <= last.end) {
-      last.end = Math.max(last.end, range.end);
-    } else {
-      merged.push(range);
-    }
-  }
-
-  let result = '';
-  let last = node.startIndex;
-  for (const range of merged) {
-    result += node.text.slice(last - node.startIndex, range.start - node.startIndex);
-    result += ' ... ';
-    last = range.end;
-  }
-  result += node.text.slice(last - node.startIndex);
-
-  return result.replace(/\s+/g, ' ').trim();
 }
