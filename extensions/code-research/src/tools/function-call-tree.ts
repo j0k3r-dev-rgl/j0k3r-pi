@@ -42,6 +42,11 @@ export function registerFunctionCallTreeTool(pi: any) {
           description: 'If true, include framework/language calls as external leaf nodes. Default: false.',
         })
       ),
+      compacted: Type.Optional(
+        Type.Boolean({
+          description: 'If true, compact trivial data-access sibling nodes while preserving the call tree structure.',
+        })
+      ),
     }),
 
     async execute(_toolCallId: any, params: any, _signal: any, _onUpdate: any, ctx: any) {
@@ -52,6 +57,7 @@ export function registerFunctionCallTreeTool(pi: any) {
         kind: params.kind,
         max_depth: params.max_depth ?? 10,
         include_external: params.include_external ?? false,
+        compacted: params.compacted ?? false,
       };
 
       const execution = await executeFunctionCallTree(ctx.cwd, input);

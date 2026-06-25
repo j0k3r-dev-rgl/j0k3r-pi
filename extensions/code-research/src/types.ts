@@ -39,15 +39,18 @@ export interface FunctionCallTreeInput {
   kind?: SymbolKind;
   max_depth?: number;
   include_external?: boolean;
+  compacted?: boolean;
 }
 
 export type CallSource = 'application' | 'language' | 'framework' | 'library' | 'unknown';
 export type OwnerKind = 'class' | 'interface' | 'unknown';
+export type CallNodeType = 'application' | 'external' | 'callback' | 'data_access' | 'fluent_chain' | 'framework';
 
 export interface CallTreeNode {
   file?: string;
   symbol: string;
   kind: SymbolKind;
+  node_type: CallNodeType;
   class?: string;
   package?: string;
   owner_kind?: OwnerKind;

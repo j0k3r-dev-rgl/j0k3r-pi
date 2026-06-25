@@ -1,6 +1,6 @@
 import { readFile, stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import type { CallSource, CallTreeNode, FunctionCallTreeInput, FunctionCallTreeResult, OwnerKind } from '../../types.js';
+import type { CallNodeType, CallSource, CallTreeNode, FunctionCallTreeInput, FunctionCallTreeResult, OwnerKind } from '../../types.js';
 import { buildProjectIndex } from '../../core/project-index.js';
 import { extractSignature } from './shared.js';
 import type {
@@ -17,8 +17,15 @@ export interface BuildCallTreeOptions {
   index: ProjectIndex;
   maxDepth: number;
   includeExternal: boolean;
+  compacted?: boolean;
   currentDepth?: number;
   visited?: Set<string>;
+}
+
+interface CallbackInfo {
+  kind: 'lambda' | 'method_reference' | 'anonymous_class';
+  text: string;
+  calls: MethodCall[];
 }
 
 interface MethodCall {
@@ -28,6 +35,7 @@ interface MethodCall {
   callText: string;
   line: number;
   column: number;
+  callbacks?: CallbackInfo[];
 }
 
 interface ResolvedCall {
@@ -126,6 +134,7 @@ export async function executeJavaFunctionCallTree(
       index,
       maxDepth: input.max_depth ?? 10,
       includeExternal: input.include_external ?? false,
+      compacted: input.compacted ?? false,
     }),
   };
 }
@@ -137,11 +146,13 @@ export function buildCallTree(options: BuildCallTreeOptions): FunctionCallTreeRe
     index,
     maxDepth,
     includeExternal,
+    compacted = false,
     currentDepth = 0,
     visited = new Set(),
   } = options;
 
   const rootNode = buildNode(rootMethod, index, maxDepth, includeExternal, currentDepth, visited);
+  const resultRoot = compacted ? compactNodeTree(rootNode) : rootNode;
 
   const stats = {
     total_nodes: 0,
@@ -150,8 +161,8 @@ export function buildCallTree(options: BuildCallTreeOptions): FunctionCallTreeRe
     max_depth_reached: 0,
   };
 
-  countNodes(rootNode, 0, stats);
-  return { root: rootNode, stats };
+  countNodes(resultRoot, 0, stats);
+  return { root: resultRoot, stats };
 }
 
 function buildNode(
@@ -168,6 +179,7 @@ function buildNode(
     file: method.file,
     symbol: method.symbol,
     kind: 'method',
+    node_type: 'application',
     class: method.className,
     package: method.package,
     owner_kind: ownerClass?.kind ?? 'unknown',
@@ -197,21 +209,44 @@ function buildNode(
   }
   visited.add(visitKey);
 
+  const invocationCallbackChildren = invocation
+    ? buildCallbackChildren(method, invocation.call.callbacks ?? [], index, maxDepth, includeExternal, depth, visited)
+    : [];
+
   const calls = extractMethodCalls(method.node);
+  const methodChildren = buildChildrenFromCalls(method, calls, index, maxDepth, includeExternal, depth, visited);
+  const children = [...invocationCallbackChildren, ...methodChildren];
+
+  if (children.length > 0) {
+    node.children = children;
+  }
+
+  return node;
+}
+
+function buildChildrenFromCalls(
+  currentMethod: IndexedMethod,
+  calls: MethodCall[],
+  index: ProjectIndex,
+  maxDepth: number,
+  includeExternal: boolean,
+  depth: number,
+  visited: Set<string>
+): CallTreeNode[] {
   const children: CallTreeNode[] = [];
 
   for (const call of calls) {
-    const resolved = resolveCall(method, call, index);
+    const resolved = resolveCall(currentMethod, call, index);
     if (!resolved) {
       if (includeExternal) {
-        children.push(createExternalNode(call, 'unknown'));
+        children.push(createExternalNode(currentMethod, call, 'unknown', undefined, undefined, index, maxDepth, includeExternal, depth, visited));
       }
       continue;
     }
 
     if (resolved.isExternal) {
       if (includeExternal) {
-        children.push(createExternalNode(call, resolved.source, resolved.reason, resolved));
+        children.push(createExternalNode(currentMethod, call, resolved.source, resolved.reason, resolved, index, maxDepth, includeExternal, depth, visited));
       }
       continue;
     }
@@ -220,15 +255,11 @@ function buildNode(
     if (targetMethod) {
       children.push(buildNode(targetMethod, index, maxDepth, includeExternal, depth + 1, visited, { call, resolved }));
     } else if (includeExternal) {
-      children.push(createExternalNode(call, resolved.source, resolved.reason, resolved));
+      children.push(createExternalNode(currentMethod, call, resolved.source, resolved.reason, resolved, index, maxDepth, includeExternal, depth, visited));
     }
   }
 
-  if (children.length > 0) {
-    node.children = children;
-  }
-
-  return node;
+  return children;
 }
 
 function extractMethodCalls(methodNode: any): MethodCall[] {
@@ -248,6 +279,7 @@ function extractMethodCalls(methodNode: any): MethodCall[] {
           callText: node.text,
           line: node.startPosition.row + 1,
           column: node.startPosition.column,
+          callbacks: extractCallbacks(node),
         });
       }
       return;
@@ -260,6 +292,74 @@ function extractMethodCalls(methodNode: any): MethodCall[] {
 
   const body = methodNode.childForFieldName('body');
   if (body) visit(body);
+  return calls;
+}
+
+function extractCallbacks(methodInvocationNode: any): CallbackInfo[] {
+  const callbacks: CallbackInfo[] = [];
+
+  function visit(node: any) {
+    if (!node?.isNamed) return;
+
+    if (node.type === 'lambda_expression') {
+      callbacks.push({
+        kind: 'lambda',
+        text: node.text,
+        calls: extractMethodCallsFromNode(node),
+      });
+      return;
+    }
+
+    if (node.type === 'method_reference') {
+      callbacks.push({
+        kind: 'method_reference',
+        text: node.text,
+        calls: [],
+      });
+      return;
+    }
+
+    for (const child of node.children) {
+      visit(child);
+    }
+  }
+
+  for (const child of methodInvocationNode.children) {
+    visit(child);
+  }
+
+  return callbacks;
+}
+
+function extractMethodCallsFromNode(rootNode: any): MethodCall[] {
+  const calls: MethodCall[] = [];
+
+  function visit(node: any) {
+    if (!node?.isNamed) return;
+
+    if (node.type === 'method_invocation') {
+      const nameNode = node.childForFieldName('name');
+      const objectNode = node.childForFieldName('object');
+      if (nameNode) {
+        calls.push({
+          methodName: nameNode.text,
+          object: objectNode ? objectNode.text : undefined,
+          objectNodeType: objectNode ? objectNode.type : undefined,
+          callText: node.text,
+          line: node.startPosition.row + 1,
+          column: node.startPosition.column,
+          callbacks: extractCallbacks(node),
+        });
+      }
+      return;
+    }
+
+    for (const child of node.children) {
+      visit(child);
+    }
+  }
+
+  visit(rootNode);
   return calls;
 }
 
@@ -759,14 +859,21 @@ function isLanguagePackage(fullName: string): boolean {
 }
 
 function createExternalNode(
+  currentMethod: IndexedMethod,
   call: MethodCall,
   source: CallSource,
-  reason?: string,
-  resolved?: ResolvedCall
+  reason: string | undefined,
+  resolved: ResolvedCall | undefined,
+  index: ProjectIndex,
+  maxDepth: number,
+  includeExternal: boolean,
+  depth: number,
+  visited: Set<string>
 ): CallTreeNode {
   const node: CallTreeNode = {
     symbol: call.methodName,
     kind: 'method',
+    node_type: classifyExternalNodeType(call, source),
     called_as: call.callText,
     is_application: false,
     is_external: true,
@@ -787,7 +894,121 @@ function createExternalNode(
     node.reason = reason;
   }
 
+  const callbackChildren = buildCallbackChildren(currentMethod, call.callbacks ?? [], index, maxDepth, includeExternal, depth, visited);
+  if (callbackChildren.length > 0) {
+    node.children = callbackChildren;
+  }
+
   return node;
+}
+
+function buildCallbackChildren(
+  currentMethod: IndexedMethod,
+  callbacks: CallbackInfo[],
+  index: ProjectIndex,
+  maxDepth: number,
+  includeExternal: boolean,
+  depth: number,
+  visited: Set<string>
+): CallTreeNode[] {
+  const nodes: CallTreeNode[] = [];
+
+  for (const callback of callbacks) {
+    const callbackCallChildren = buildChildrenFromCalls(currentMethod, callback.calls, index, maxDepth, includeExternal, depth + 1, visited);
+    if (callbackCallChildren.length === 0) {
+      continue;
+    }
+
+    nodes.push({
+      symbol: '<callback>',
+      kind: 'function',
+      node_type: 'callback',
+      called_as: callback.text,
+      has_callback: true,
+      callback_kind: callback.kind,
+      is_application: false,
+      is_external: true,
+      source: 'unknown',
+      children: callbackCallChildren,
+    });
+  }
+
+  return nodes;
+}
+
+function classifyExternalNodeType(call: MethodCall, source: CallSource): CallNodeType {
+  if (source === 'framework') return 'framework';
+  if (call.methodName === '<callback>') return 'callback';
+  if (looksLikeDataAccess(call)) return 'data_access';
+  if (looksLikeFluentChain(call)) return 'fluent_chain';
+  return 'external';
+}
+
+function looksLikeDataAccess(call: MethodCall): boolean {
+  if (call.callbacks && call.callbacks.length > 0) return false;
+  if (!call.object) return false;
+  if (!/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\.[A-Za-z_$][\w$]*\(\)$/.test(call.callText.replace(/\s+/g, ''))) {
+    return false;
+  }
+  if (/^(get|set|with|build|stream|map|flatMap|filter|collect|forEach|orElseThrow|toList)$/.test(call.methodName)) {
+    return false;
+  }
+  if (/^(is|has)[A-Z_]/.test(call.methodName) || /^[a-z][A-Za-z0-9_]*$/.test(call.methodName)) {
+    return true;
+  }
+  return false;
+}
+
+function looksLikeFluentChain(call: MethodCall): boolean {
+  const compact = call.callText.replace(/\s+/g, '');
+  return compact.includes(').') || compact.includes('().');
+}
+
+function compactNodeTree(node: CallTreeNode): CallTreeNode {
+  const compactedChildren = node.children?.map(compactNodeTree);
+  const nextNode: CallTreeNode = compactedChildren ? { ...node, children: compactedChildren } : { ...node };
+
+  if (!compactedChildren || compactedChildren.length === 0) {
+    return nextNode;
+  }
+
+  nextNode.children = compactDataAccessSiblings(compactedChildren);
+  return nextNode;
+}
+
+function compactDataAccessSiblings(children: CallTreeNode[]): CallTreeNode[] {
+  const compacted: CallTreeNode[] = [];
+  let group: CallTreeNode[] = [];
+
+  const flush = () => {
+    if (group.length === 0) return;
+    if (group.length === 1) {
+      compacted.push(group[0]);
+    } else {
+      compacted.push({
+        symbol: '<data_access_group>',
+        kind: 'function',
+        node_type: 'data_access',
+        called_as: group.map((node) => node.called_as ?? node.symbol).join(', '),
+        is_application: false,
+        is_external: true,
+        source: 'unknown',
+      });
+    }
+    group = [];
+  };
+
+  for (const child of children) {
+    if (child.node_type === 'data_access') {
+      group.push(child);
+      continue;
+    }
+    flush();
+    compacted.push(child);
+  }
+
+  flush();
+  return compacted;
 }
 
 function countNodes(

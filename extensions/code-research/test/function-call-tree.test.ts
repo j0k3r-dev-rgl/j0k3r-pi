@@ -42,6 +42,7 @@ describe('function_call_tree Java', () => {
     });
 
     expect(result.root.symbol).toBe('handle');
+    expect(result.root.node_type).toBe('application');
     expect(result.root.class).toBe('Controller');
     expect(result.root.owner_kind).toBe('class');
     expect(result.root.signature).toContain('public void handle()');
@@ -51,6 +52,7 @@ describe('function_call_tree Java', () => {
     expect(result.root.children).toHaveLength(1);
     expect(result.root.children?.[0].class).toBe('AppService');
     expect(result.root.children?.[0].symbol).toBe('run');
+    expect(result.root.children?.[0].node_type).toBe('application');
     expect(result.root.children?.[0].is_application).toBe(true);
     expect(result.root.children?.[0].called_as).toBe('service.run()');
     expect(result.root.children?.[0].receiver_name).toBe('service');
@@ -128,6 +130,7 @@ describe('function_call_tree Java', () => {
     });
 
     expect(result.root.children?.[0].symbol).toBe('replace');
+    expect(result.root.children?.[0].node_type).toBe('fluent_chain');
     expect(result.root.children?.[0].receiver_type).toBe('String');
     expect(result.root.children?.[0].source).toBe('language');
   });
@@ -171,8 +174,144 @@ describe('function_call_tree Java', () => {
     });
 
     expect(result.root.children?.[0].symbol).toBe('orElseThrow');
+    expect(result.root.children?.[0].node_type).toBe('external');
     expect(result.root.children?.[0].called_as).toContain('orElseThrow');
     expect(result.root.children?.[0].has_callback).toBe(true);
     expect(result.root.children?.[0].callback_kind).toBe('lambda');
+  });
+
+  it('expands application calls inside callback lambdas', async () => {
+    const rootDir = await createProject({
+      'Example.java': `import java.util.List;\n\npublic class Example {\n  public void run(List<String> items) {\n    items.stream().map(item -> helper(item)).toList();\n  }\n\n  private String helper(String item) {\n    return item.trim();\n  }\n}\n`,
+    });
+
+    const index = await buildProjectIndex(rootDir);
+    const rootMethod = index.methods.find((m) => m.className === 'Example' && m.symbol === 'run');
+    expect(rootMethod).toBeDefined();
+
+    const result = buildCallTree({
+      rootFile: rootMethod!.file,
+      rootMethod: rootMethod!,
+      index,
+      maxDepth: 5,
+      includeExternal: true,
+    });
+
+    const mapCall = result.root.children?.[0];
+    expect(mapCall?.symbol).toBe('toList');
+    expect(mapCall?.node_type).toBe('fluent_chain');
+    expect(mapCall?.has_callback).toBe(true);
+    expect(mapCall?.children?.[0].symbol).toBe('<callback>');
+    expect(mapCall?.children?.[0].node_type).toBe('callback');
+    expect(mapCall?.children?.[0].children?.[0].symbol).toBe('helper');
+    expect(mapCall?.children?.[0].children?.[0].class).toBe('Example');
+    expect(mapCall?.children?.[0].children?.[0].node_type).toBe('application');
+  });
+
+  it('surfaces relevant callbacks inside application call arguments without adding unrelated noise', async () => {
+    const rootDir = await createProject({
+      'Example.java': `import java.util.List;\n\npublic class Example {\n  public void run(List<String> items) {\n    execute(items.stream().map(item -> helper(item)).toList());\n  }\n\n  private void execute(List<String> values) {}\n\n  private String helper(String item) {\n    return item.trim();\n  }\n}\n`,
+    });
+
+    const index = await buildProjectIndex(rootDir);
+    const rootMethod = index.methods.find((m) => m.className === 'Example' && m.symbol === 'run');
+    expect(rootMethod).toBeDefined();
+
+    const result = buildCallTree({
+      rootFile: rootMethod!.file,
+      rootMethod: rootMethod!,
+      index,
+      maxDepth: 5,
+      includeExternal: true,
+    });
+
+    const executeCall = result.root.children?.[0];
+    expect(executeCall?.symbol).toBe('execute');
+    expect(executeCall?.node_type).toBe('application');
+    expect(executeCall?.class).toBe('Example');
+    expect(executeCall?.children).toHaveLength(1);
+    expect(executeCall?.children?.[0].symbol).toBe('<callback>');
+    expect(executeCall?.children?.[0].node_type).toBe('callback');
+    expect(executeCall?.children?.[0].called_as).toContain('item -> helper(item)');
+    expect(executeCall?.children?.[0].children).toHaveLength(1);
+    expect(executeCall?.children?.[0].children?.[0].symbol).toBe('helper');
+    expect(executeCall?.children?.[0].children?.[0].class).toBe('Example');
+    expect(executeCall?.children?.[0].children?.[0].node_type).toBe('application');
+  });
+
+  it('compacts sibling data access nodes without removing callback structure', async () => {
+    const rootDir = await createProject({
+      'Example.java': `import java.util.List;\n\npublic class Example {\n  public void run(List<String> items) {\n    execute(items.stream().map(item -> dto(item)).toList());\n  }\n\n  private void execute(List<String> values) {}\n\n  private String dto(String item) {\n    return item.trim();\n  }\n}\n`,
+    });
+
+    const index = await buildProjectIndex(rootDir);
+    const rootMethod = index.methods.find((m) => m.className === 'Example' && m.symbol === 'run');
+    expect(rootMethod).toBeDefined();
+
+    const full = buildCallTree({
+      rootFile: rootMethod!.file,
+      rootMethod: rootMethod!,
+      index,
+      maxDepth: 5,
+      includeExternal: true,
+      compacted: false,
+    });
+
+    const compact = buildCallTree({
+      rootFile: rootMethod!.file,
+      rootMethod: rootMethod!,
+      index,
+      maxDepth: 5,
+      includeExternal: true,
+      compacted: true,
+    });
+
+    expect(full.root.children?.[0].children?.[0].symbol).toBe('<callback>');
+    expect(compact.root.children?.[0].children?.[0].symbol).toBe('<callback>');
+
+    const fullCallback = full.root.children?.[0].children?.[0];
+    const compactCallback = compact.root.children?.[0].children?.[0];
+
+    expect(fullCallback?.children?.some((node) => node.node_type === 'data_access')).toBe(false);
+    expect(compactCallback?.children?.some((node) => node.symbol === '<data_access_group>')).toBe(false);
+  });
+
+  it('compacts trivial accessor siblings into one data access group', async () => {
+    const rootDir = await createProject({
+      'Example.java': `import java.util.List;\n\npublic class Example {\n  public void run(List<String> items) {\n    execute(items.stream().map(item -> new Pair(item.trim(), item.isBlank())).toList());\n  }\n\n  private void execute(List<Pair> values) {}\n\n  record Pair(String value, boolean blank) {}\n}\n`,
+    });
+
+    const index = await buildProjectIndex(rootDir);
+    const rootMethod = index.methods.find((m) => m.className === 'Example' && m.symbol === 'run');
+    expect(rootMethod).toBeDefined();
+
+    const full = buildCallTree({
+      rootFile: rootMethod!.file,
+      rootMethod: rootMethod!,
+      index,
+      maxDepth: 5,
+      includeExternal: true,
+      compacted: false,
+    });
+
+    const compact = buildCallTree({
+      rootFile: rootMethod!.file,
+      rootMethod: rootMethod!,
+      index,
+      maxDepth: 5,
+      includeExternal: true,
+      compacted: true,
+    });
+
+    const fullCallback = full.root.children?.[0].children?.[0];
+    const compactCallback = compact.root.children?.[0].children?.[0];
+
+    expect(fullCallback?.children).toHaveLength(2);
+    expect(fullCallback?.children?.every((node) => node.node_type === 'data_access')).toBe(true);
+    expect(compactCallback?.children).toHaveLength(1);
+    expect(compactCallback?.children?.[0].symbol).toBe('<data_access_group>');
+    expect(compactCallback?.children?.[0].node_type).toBe('data_access');
+    expect(compactCallback?.children?.[0].called_as).toContain('item.trim()');
+    expect(compactCallback?.children?.[0].called_as).toContain('item.isBlank()');
   });
 });
