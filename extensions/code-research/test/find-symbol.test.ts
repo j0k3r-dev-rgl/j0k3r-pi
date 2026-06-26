@@ -355,6 +355,92 @@ describe('findSymbol', () => {
     expect(results[0].is_implementation).toBe(true);
   });
 
+  it('finds destructured exported function bindings in typescript files', async () => {
+    const file = await writeTestFile(
+      'destructured-export.ts',
+      `const authSessionStorage = {
+  getSession: async function getSession(cookieHeader: string | null) {
+    return { cookieHeader };
+  },
+};
+
+export const { getSession, commitSession } = authSessionStorage;
+`
+    );
+
+    const results = await findSymbol(tmpDir, {
+      path: file,
+      symbol: 'getSession',
+      language: 'ts',
+      include_signature: true,
+      include_code: true,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].symbol).toBe('getSession');
+    expect(results[0].kind).toBe('function');
+    expect(results[0].is_definition).toBe(true);
+    expect(results[0].is_implementation).toBe(true);
+    expect(results[0].signature).toContain('async function getSession');
+    expect(results[0].code).toContain('async function getSession');
+  });
+
+  it('finds destructured exported function bindings in javascript files', async () => {
+    const file = await writeTestFile(
+      'destructured-export.js',
+      `const authSessionStorage = {
+  getSession: async function getSession(cookieHeader) {
+    return { cookieHeader };
+  },
+};
+
+export const { getSession, commitSession } = authSessionStorage;
+`
+    );
+
+    const results = await findSymbol(tmpDir, {
+      path: file,
+      symbol: 'getSession',
+      language: 'js',
+      include_signature: true,
+      include_code: true,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].symbol).toBe('getSession');
+    expect(results[0].kind).toBe('function');
+    expect(results[0].is_definition).toBe(true);
+    expect(results[0].is_implementation).toBe(true);
+    expect(results[0].signature).toContain('async function getSession');
+    expect(results[0].code).toContain('async function getSession');
+  });
+
+  it('finds destructured exported bindings from factory results as variables', async () => {
+    const file = await writeTestFile(
+      'destructured-factory.ts',
+      `declare function createCookieSessionStorage(): {
+  getSession(cookieHeader: string | null): Promise<unknown>;
+  commitSession(): Promise<void>;
+};
+
+export const authSessionStorage = createCookieSessionStorage();
+export const { getSession, commitSession } = authSessionStorage;
+`
+    );
+
+    const results = await findSymbol(tmpDir, {
+      path: file,
+      symbol: 'getSession',
+      language: 'ts',
+    });
+
+    expect(results.length).toBeGreaterThanOrEqual(1);
+    const exportedBinding = results.find((result) => result.kind === 'variable');
+    expect(exportedBinding).toBeDefined();
+    expect(exportedBinding?.symbol).toBe('getSession');
+    expect(exportedBinding?.is_definition).toBe(true);
+  });
+
   it('finds abstract classes and abstract methods', async () => {
     const file = await writeTestFile(
       'abstract.ts',

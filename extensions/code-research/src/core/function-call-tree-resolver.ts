@@ -1,5 +1,6 @@
 import type { FunctionCallTreeInput, FunctionCallTreeResult } from '../types.js';
 import { executeJavaFunctionCallTree } from '../languages/java/function-call-tree.js';
+import { executeTypeScriptFunctionCallTree } from '../languages/typescript/function-call-tree.js';
 
 export type FunctionCallTreeExecutionResult =
   | {
@@ -29,7 +30,7 @@ export async function executeFunctionCallTree(
       return executeJavaFunctionCallTree(cwd, input);
     case 'ts':
     case 'js':
-      throw new Error(`function_call_tree currently does not support ${language}`);
+      return executeTypeScriptFunctionCallTree(cwd, input);
     case 'auto':
       throw new Error('function_call_tree does not support auto language detection yet');
     default:

@@ -7,10 +7,10 @@ export function registerFunctionCallTreeTool(pi: any) {
     name: 'function_call_tree',
     label: 'Function Call Tree',
     description:
-      'Build a recursive call tree for a Java function/method, expanding only application-internal calls. Framework and language calls appear as external leaf nodes.',
-    promptSnippet: 'Trace the call tree of a Java method to understand its application-internal dependencies.',
+      'Build a recursive call tree for a Java, TypeScript, or JavaScript function/method, expanding only application-internal calls. Framework and language calls appear as external leaf nodes.',
+    promptSnippet: 'Trace the call tree of a Java, TypeScript, or JavaScript method/function to understand its application-internal dependencies.',
     promptGuidelines: [
-      'Use function_call_tree when you need to understand what a Java method does and which application methods it calls.',
+      'Use function_call_tree when you need to understand what a Java, TypeScript, or JavaScript method/function does and which application methods it calls.',
       'Set max_depth to control recursion depth (default 10).',
       'Set include_external=true to see framework and language calls as leaf nodes.',
     ],
@@ -22,8 +22,12 @@ export function registerFunctionCallTreeTool(pi: any) {
         description: 'Name of the root method/function to trace.',
       }),
       language: Type.Optional(
-        Type.Literal('java', {
-          description: 'Language to use. Currently only java is supported.',
+        Type.Union([
+          Type.Literal('java'),
+          Type.Literal('ts'),
+          Type.Literal('js'),
+        ], {
+          description: 'Language to use. Supported: java, ts, js. Default: java.',
         })
       ),
       kind: Type.Optional(

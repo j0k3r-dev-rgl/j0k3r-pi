@@ -1,6 +1,6 @@
 # pi-code-research-extension
 
-Extensión global de Pi para navegar símbolos TypeScript/JavaScript/Java con Tree-sitter nativo.
+Extensión global de Pi para navegar símbolos TypeScript/JavaScript/Java con Tree-sitter nativo y construir call trees de funciones/métodos.
 
 ## Tool registrada
 
@@ -32,6 +32,30 @@ Array de ubicaciones con:
 - `signature` (si `include_signature=true`)
 - `code` (si `include_code=true`)
 
+### `function_call_tree`
+
+Construye un árbol recursivo de llamadas para una función o método de Java, TypeScript o JavaScript, expandiendo llamadas internas de la aplicación.
+
+#### Parámetros
+
+- `path` *(string, requerido)*: archivo raíz o directorio a escanear.
+- `symbol` *(string, requerido)*: nombre de la función o método raíz.
+- `language` *(string, opcional)*: `java`, `ts` o `js`. Por defecto: `java`.
+- `kind` *(string, opcional)*: `function`, `method` o `class`.
+- `max_depth` *(number, opcional)*: profundidad máxima recursiva. Por defecto: `10`.
+- `include_external` *(boolean, opcional)*: si es `true`, incluye llamadas externas como hojas.
+- `compacted` *(boolean, opcional)*: compresión opcional de nodos triviales donde el lenguaje lo soporte.
+
+#### Resultado
+
+Objeto con:
+
+- `root`: nodo raíz del árbol
+- `stats.total_nodes`
+- `stats.application_nodes`
+- `stats.external_nodes`
+- `stats.max_depth_reached`
+
 ## Instalación
 
 La extensión está en `~/.pi/agent/extensions/code-research/`. Pi la auto-descubre al arrancar.
@@ -51,10 +75,11 @@ code-research/
 │   ├── types.ts          # tipos compartidos
 │   ├── core/
 │   │   ├── parser.ts     # caché de parsers Tree-sitter
-│   │   └── resolver.ts   # orquestación de búsqueda
+│   │   ├── find-symbol-resolver.ts
+│   │   └── function-call-tree-resolver.ts
 │   ├── languages/
-│   │   ├── typescript.ts # extracción de símbolos TS/JS
-│   │   └── java.ts       # extracción de símbolos Java
+│   │   ├── typescript/   # extracción de símbolos y call tree TS/JS
+│   │   └── java/         # extracción de símbolos y call tree Java
 │   └── tools/
 │       └── ...           # futuras tools adicionales
 ├── test/
@@ -71,3 +96,4 @@ code-research/
 
 - Usa `tree-sitter` nativo con parsers fijos y versiones exactas.
 - La detección de implementaciones es sintáctica (basada en `implements Nombre` en TS/Java).
+- El soporte TS/JS de `function_call_tree` prioriza llamadas locales/importadas y métodos de instancias construidas localmente.

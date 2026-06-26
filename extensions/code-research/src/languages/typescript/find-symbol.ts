@@ -36,14 +36,28 @@ export interface ExtractedSymbol {
 
 export function extractSymbols(rootNode: any): ExtractedSymbol[] {
   const symbols: ExtractedSymbol[] = [];
+  const seen = new Set<string>();
+  const objectCallableBindings = collectTopLevelObjectCallableBindings(rootNode);
+
+  function pushSymbol(symbol: ExtractedSymbol) {
+    const key = `${symbol.name}:${symbol.kind}:${symbol.node.startIndex}:${symbol.node.endIndex}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    symbols.push(symbol);
+  }
 
   function visit(node: any) {
     if (node.isNamed) {
+      const destructuredSymbols = extractDestructuredSymbols(node, objectCallableBindings);
+      for (const symbol of destructuredSymbols) {
+        pushSymbol(symbol);
+      }
+
       const kind = nodeKindToSymbolKind(node.type);
       if (kind !== 'unknown') {
         const name = getNameNode(node);
         if (name) {
-          symbols.push({
+          pushSymbol({
             name: name.text,
             kind,
             node,
@@ -60,6 +74,105 @@ export function extractSymbols(rootNode: any): ExtractedSymbol[] {
   }
 
   visit(rootNode);
+  return symbols;
+}
+
+function collectTopLevelObjectCallableBindings(rootNode: any): Map<string, Map<string, any>> {
+  const bindings = new Map<string, Map<string, any>>();
+
+  for (const child of rootNode.children) {
+    if (child.type !== 'lexical_declaration' && child.type !== 'variable_declaration') continue;
+    const declarator = child.children.find((c: any) => c.type === 'variable_declarator');
+    const nameNode = declarator?.childForFieldName('name');
+    const valueNode = declarator?.childForFieldName('value');
+    if (!nameNode || !valueNode || valueNode.type !== 'object') continue;
+
+    const properties = new Map<string, any>();
+    for (const property of valueNode.children) {
+      if (!property.isNamed || property.type !== 'pair') continue;
+      const keyNode = property.childForFieldName('key') ?? property.children.find((c: any) => c.type === 'property_identifier' || c.type === 'string');
+      const propertyValueNode = property.childForFieldName('value') ?? property.children.find((c: any) => isCallableNode(c));
+      if (!keyNode || !propertyValueNode || !isCallableNode(propertyValueNode)) continue;
+      properties.set(normalizeSymbolText(keyNode.text), propertyValueNode);
+    }
+
+    if (properties.size > 0) {
+      bindings.set(normalizeSymbolText(nameNode.text), properties);
+    }
+  }
+
+  return bindings;
+}
+
+function extractDestructuredSymbols(
+  node: any,
+  objectCallableBindings: Map<string, Map<string, any>>
+): ExtractedSymbol[] {
+  if (node.type !== 'lexical_declaration' && node.type !== 'variable_declaration') return [];
+
+  const declarator = node.children.find((c: any) => c.type === 'variable_declarator');
+  const nameNode = declarator?.childForFieldName('name');
+  const valueNode = declarator?.childForFieldName('value');
+  if (!declarator || !nameNode || nameNode.type !== 'object_pattern') return [];
+
+  const sourceBindings = valueNode?.type === 'identifier'
+    ? objectCallableBindings.get(normalizeSymbolText(valueNode.text))
+    : undefined;
+
+  const symbols: ExtractedSymbol[] = [];
+  for (const child of nameNode.children) {
+    if (!child.isNamed) continue;
+
+    if (child.type === 'shorthand_property_identifier_pattern') {
+      const symbolName = normalizeSymbolText(child.text);
+      const callableNode = sourceBindings?.get(symbolName);
+      if (callableNode) {
+        symbols.push({
+          name: symbolName,
+          kind: 'function',
+          node: callableNode,
+          isDefinition: true,
+          isImplementation: true,
+        });
+      } else {
+        symbols.push({
+          name: symbolName,
+          kind: 'variable',
+          node: child,
+          isDefinition: true,
+          isImplementation: true,
+        });
+      }
+      continue;
+    }
+
+    if (child.type === 'pair_pattern') {
+      const keyNode = child.childForFieldName('key');
+      const valuePatternNode = child.childForFieldName('value');
+      const symbolName = normalizeSymbolText(valuePatternNode?.text ?? '');
+      const sourceKey = normalizeSymbolText(keyNode?.text ?? '');
+      if (!symbolName) continue;
+      const callableNode = sourceBindings?.get(sourceKey);
+      if (callableNode) {
+        symbols.push({
+          name: symbolName,
+          kind: 'function',
+          node: callableNode,
+          isDefinition: true,
+          isImplementation: true,
+        });
+      } else {
+        symbols.push({
+          name: symbolName,
+          kind: 'variable',
+          node: valuePatternNode ?? child,
+          isDefinition: true,
+          isImplementation: true,
+        });
+      }
+    }
+  }
+
   return symbols;
 }
 
@@ -118,6 +231,7 @@ function isDefinitionNode(node: any): boolean {
     type === 'abstract_class_declaration' ||
     type === 'type_alias_declaration' ||
     type === 'function_declaration' ||
+    isCallableNode(node) ||
     (type === 'lexical_declaration' && isVariableWithFunctionValue(node)) ||
     (type === 'variable_declaration' && isVariableWithFunctionValue(node))
   );
@@ -136,6 +250,14 @@ function isImplementationNode(node: any): boolean {
     (type === 'lexical_declaration' && isVariableWithFunctionValue(node)) ||
     (type === 'variable_declaration' && isVariableWithFunctionValue(node))
   );
+}
+
+function isCallableNode(node: any): boolean {
+  return node?.type === 'arrow_function' || node?.type === 'function_expression' || node?.type === 'function_declaration';
+}
+
+function normalizeSymbolText(text: string): string {
+  return text.replace(/^#/, '').replace(/^['"]|['"]$/g, '');
 }
 
 function isVariableWithFunctionValue(node: any): boolean {
