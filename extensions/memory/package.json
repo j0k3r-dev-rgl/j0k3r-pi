@@ -8,11 +8,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "typebox": "^1.0.58"
+    "typebox": "1.0.58"
   },
   "devDependencies": {
-    "@types/node": "^24.10.1",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.7"
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.7"
   }
 }
