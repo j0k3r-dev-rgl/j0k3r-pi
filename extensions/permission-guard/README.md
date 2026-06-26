@@ -7,6 +7,7 @@
 - Policy checks for supported built-in tool calls.
 - Policy checks for user `!` and `!!` bash commands via `user_bash` events.
 - Workspace and outside-workspace path policy.
+- Default read-only passthrough for valid Pi skill files in recognized global and project skill locations.
 - Optional `bypassWorkspace` mode for provably workspace-contained operations only.
 - Secret path and secret-like command denial by default.
 - Conservative safe-subset bash analysis for simple commands, quoted literals, environment assignments, `&&`, `||`, `;`, newlines, safe `cd`, basic redirections, and narrowly recognized read-only pipelines.
@@ -45,6 +46,8 @@ The bash policy is a conservative safe subset, not a full shell parser or sandbo
 
 MVP enforcement covers supported built-in tools and user bash events that pass through Pi runtime hooks. Custom and third-party tools are out of MVP scope unless they explicitly integrate with the guard.
 
+Skill loading passthrough covers read-only access to loadable skill markdown files in recognized Pi skill roots only. It does not allow writes, bash execution, arbitrary skill scripts, malformed skill files, or symlink escapes outside the skill root.
+
 ## Runtime hooks
 
 This extension does not register LLM tools or slash commands. It registers Pi event handlers:
@@ -66,6 +69,7 @@ Built-in defaults are conservative. Project or global config can override them, 
 - Workspace reads/writes/creates/lists/searches are allowed unless matched by ask/deny globs.
 - Workspace `.git/**` and `node_modules/**` default to `ask`.
 - Non-secret outside-workspace reads, lists, searches, writes, and creates default to `ask`.
+- Valid skill file reads from recognized global and project skill roots are allowed by default without project configuration.
 - Non-interactive ask decisions fail closed by default.
 - Secrets are denied by default.
 - Default protected paths include `.env`, `.env.*`, key/certificate files, and common SSH/AWS/GPG credential locations.

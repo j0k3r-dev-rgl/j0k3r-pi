@@ -218,7 +218,7 @@ export interface PermissionDecisionDetails {
   safeCommandSummary?: string;
   workspaceRoot?: string;
   matchedRule?: string;
-  matchedLayer: 'disabled' | 'tool' | 'secret' | 'workspace' | 'outsideWorkspace' | 'bash' | 'session' | 'project' | 'nonInteractive';
+  matchedLayer: 'disabled' | 'tool' | 'secret' | 'workspace' | 'outsideWorkspace' | 'trustedSkill' | 'bash' | 'session' | 'project' | 'nonInteractive';
   noPreview: boolean;
   shellAnalysis?: Pick<ShellAnalysisResult, 'commandSignature' | 'effectSignature' | 'effectsComplete' | 'riskClasses' | 'summary'>;
   pathEffects?: Array<{

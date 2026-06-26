@@ -174,6 +174,97 @@ describe('pure permission policy engine', () => {
     expect(evaluatePermission(config, outside)).toMatchObject({ decision: 'deny', reasonCode: 'outside_workspace_read_denied' });
   });
 
+  it('allows valid global skill files to load without outside-workspace approval', async () => {
+    const cwd = await tempWorkspace('permission-guard-policy-trusted-global-skill-');
+    const agentDir = await mkdtemp(join(tmpdir(), 'permission-guard-policy-agent-dir-'));
+    const skillFile = join(agentDir, 'skills', 'workflow-triage', 'SKILL.md');
+    await mkdir(join(agentDir, 'skills', 'workflow-triage'), { recursive: true });
+    await writeFile(skillFile, '---\nname: workflow-triage\ndescription: choose the lightest workflow\n---\n# Workflow\n', 'utf8');
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+
+    try {
+      const request = await pathRequest(skillFile, cwd, 'read');
+
+      expect(evaluatePermission(policy({ workspace: { root: cwd } }), request)).toMatchObject({
+        decision: 'allow',
+        finalDecision: 'allow',
+        reasonCode: 'trusted_skill_read_allowed',
+        details: { matchedLayer: 'trustedSkill' },
+      });
+    } finally {
+      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    }
+  });
+
+  it('does not auto-allow malformed files in skill locations', async () => {
+    const cwd = await tempWorkspace('permission-guard-policy-trusted-malformed-skill-');
+    const agentDir = await mkdtemp(join(tmpdir(), 'permission-guard-policy-agent-dir-'));
+    const skillFile = join(agentDir, 'skills', 'broken-skill', 'SKILL.md');
+    await mkdir(join(agentDir, 'skills', 'broken-skill'), { recursive: true });
+    await writeFile(skillFile, '---\nname: broken-skill\n---\n# Missing description\n', 'utf8');
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+
+    try {
+      const request = await pathRequest(skillFile, cwd, 'read');
+
+      expect(evaluatePermission(policy({ workspace: { root: cwd } }), request)).toMatchObject({
+        decision: 'ask',
+        finalDecision: 'requires_approval',
+        reasonCode: 'outside_workspace_read_requires_approval',
+      });
+    } finally {
+      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    }
+  });
+
+  it('does not auto-allow skill location symlink escapes', async () => {
+    const cwd = await tempWorkspace('permission-guard-policy-trusted-symlink-skill-');
+    const agentDir = await mkdtemp(join(tmpdir(), 'permission-guard-policy-agent-dir-'));
+    const outsideSkill = await mkdtemp(join(tmpdir(), 'permission-guard-policy-external-skill-'));
+    const skillLink = join(agentDir, 'skills', 'linked-skill');
+    await mkdir(join(agentDir, 'skills'), { recursive: true });
+    await writeFile(join(outsideSkill, 'SKILL.md'), '---\nname: linked-skill\ndescription: external skill through symlink\n---\n# External\n', 'utf8');
+    await symlink(outsideSkill, skillLink, 'dir');
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+
+    try {
+      const request = await pathRequest(join(skillLink, 'SKILL.md'), cwd, 'read');
+
+      expect(evaluatePermission(policy({ workspace: { root: cwd } }), request)).toMatchObject({
+        decision: 'ask',
+        finalDecision: 'requires_approval',
+        reasonCode: 'outside_workspace_read_requires_approval',
+      });
+    } finally {
+      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    }
+  });
+
+  it('allows valid project .agents skills from trusted ancestor locations without approval', async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), 'permission-guard-policy-project-agents-skill-'));
+    const cwd = join(repoRoot, 'packages', 'app');
+    const skillFile = join(repoRoot, '.agents', 'skills', 'project-skill', 'SKILL.md');
+    await mkdir(join(repoRoot, '.git'), { recursive: true });
+    await mkdir(cwd, { recursive: true });
+    await mkdir(join(repoRoot, '.agents', 'skills', 'project-skill'), { recursive: true });
+    await writeFile(skillFile, '---\nname: project-skill\ndescription: project-local workflow guidance\n---\n# Project skill\n', 'utf8');
+
+    const request = await pathRequest(skillFile, cwd, 'read');
+
+    expect(evaluatePermission(policy({ workspace: { root: cwd } }), request)).toMatchObject({
+      decision: 'allow',
+      finalDecision: 'allow',
+      reasonCode: 'trusted_skill_read_allowed',
+      details: { matchedLayer: 'trustedSkill' },
+    });
+  });
+
   it('auto-allows workspace-confined non-bash requests when workspace policy already allows', async () => {
     const cwd = await tempWorkspace('permission-guard-policy-bypass-workspace-');
     await writeFile(join(cwd, 'src', 'index.ts'), 'inside', 'utf8');

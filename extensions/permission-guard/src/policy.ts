@@ -3,6 +3,7 @@ import { classifyBashCommand } from './bash-policy.js';
 import { isPathContainedByRoot, isRequestPathCoveredByApproval, matchesWorkspaceGlob } from './path-policy.js';
 import type { ProjectPathApproval, ScopedBashApproval } from './types.js';
 import { evaluateSecretDeny } from './secrets.js';
+import { isTrustedSkillReadRequest } from './trusted-skill.js';
 import type { Action, PermissionDecisionResult, PermissionPolicyConfig, PermissionRequest, PolicyDecision, RiskLevel, ToolMode } from './types.js';
 
 export interface SessionApprovalEntry {
@@ -205,6 +206,27 @@ function outsideDecision(config: PermissionPolicyConfig, request: PermissionRequ
   });
 }
 
+function trustedSkillReadDecision(
+  config: PermissionPolicyConfig,
+  request: PermissionRequest,
+  baseResult: PermissionDecisionResult,
+): PermissionDecisionResult | undefined {
+  if (baseResult.decision !== 'ask') return undefined;
+  if (!request.target || !isTrustedSkillReadRequest(request)) return undefined;
+
+  return decisionResult({
+    config,
+    request,
+    decision: 'allow',
+    reason: 'Read access to a valid skill file in a recognized Pi skill location is allowed by default.',
+    reasonCode: 'trusted_skill_read_allowed',
+    riskLevel: 'low',
+    matchedLayer: 'trustedSkill',
+    matchedRule: 'trusted-skill-read',
+    target: request.target,
+  });
+}
+
 function rootContains(approvedRoot: string, requestedRoot: string): boolean {
   if (approvedRoot === requestedRoot) return true;
   const rel = relative(approvedRoot, requestedRoot);
@@ -381,6 +403,11 @@ export function evaluatePermission(
     ? workspaceBypassDecision(config, request, baseResult)
     : undefined;
   if (workspaceBypassResult) return workspaceBypassResult;
+
+  const trustedSkillRead = request.action !== 'bash'
+    ? trustedSkillReadDecision(config, request, baseResult)
+    : undefined;
+  if (trustedSkillRead) return trustedSkillRead;
 
   const projectPathApproval = request.action !== 'bash'
     ? applyProjectPathApproval(config, request, baseResult)
