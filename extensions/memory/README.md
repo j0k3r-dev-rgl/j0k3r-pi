@@ -45,7 +45,7 @@ Minimal config:
 }
 ```
 
-Recommended project config for automatic project-scoped mirror backups and safe restores. This example intentionally overrides the built-in legacy default backup path (`.pi/mempry-backups/...`) with the clearer `.pi/memory-backups/...` path:
+Recommended project config for automatic project-scoped backups and safe restores. This example intentionally overrides the built-in legacy default backup path (`.pi/mempry-backups/...`) with the clearer `.pi/memory-backups/...` path:
 
 ```json
 {
@@ -63,6 +63,7 @@ Recommended project config for automatic project-scoped mirror backups and safe 
   "enabled": true,
   "backups": {
     "path": ".pi/memory-backups/memory-backup.jsonl",
+    "mode": "mirror",
     "include_sessions": true
   },
   "cloud": {
@@ -90,6 +91,7 @@ Full supported shape:
   },
   "backups": {
     "path": ".pi/mempry-backups/memory-backup.jsonl",
+    "mode": "mirror",
     "include_sessions": false
   },
   "cloud": {
@@ -114,7 +116,8 @@ Full supported shape:
 | `session_end.semantic` | `false` | Enables model-backed shutdown summary/profile update. Off by default for fast exit. |
 | `import.mode` | `dry_run` | Default `memory_import` mode when the tool call omits `mode`. Valid values: `dry_run`, `merge`. Invalid config values are ignored with a warning. |
 | `import.on_conflict` | `mark_conflict` | Default `memory_import` conflict policy when omitted. Valid values: `keep_local`, `keep_imported`, `mark_conflict`. Invalid config values are ignored with a warning. |
-| `backups.path` | `.pi/mempry-backups/memory-backup.jsonl` | Relative path, resolved from the current working directory, for automatic import/export mirror backups. Absolute paths and paths escaping the workdir are rejected with a warning. |
+| `backups.path` | `.pi/mempry-backups/memory-backup.jsonl` | Relative path, resolved from the current working directory, for automatic import/export backups. Absolute paths and paths escaping the workdir are rejected with a warning. |
+| `backups.mode` | `mirror` | Export write mode. `mirror` rewrites the file from current scoped DB state. `merge` preserves existing backup rows and updates/adds current rows. Invalid values are ignored with a warning. |
 | `backups.include_sessions` | `false` | When `true`, automatic `memory_export` includes `memory_sessions` and linked `memory_session_prompts` for the current project. Session prompts are audit data, so this is opt-in. |
 | `enabled` | `false` | Enable memory extension registration for this project when true. |
 | `cloud.enabled` | `false` | Marks project rows as cloud-sync pending and enables cloud readiness checks. |
@@ -134,7 +137,7 @@ Never store cloud tokens directly in `.pi/memory.json`.
 4. Use `memory_context` to verify the resolved project identity.
 5. Run `memory_export` (tool) or `/memory-export` (command) from the project cwd. The agent or user does not need to pass a path.
 6. To restore from that backup, run `memory_import` (default respects configured defaults) or `/memory-import dry_run` for an explicit dry-run, then use `memory_import` with merge mode or `/memory-import merge` when you want to apply changes.
-7. Inspect the backup meta if needed: `format` should be `pi-memory-backup`, `version` should be `2`, `mirror` should be `true`, and `includes_sessions` should match `backups.include_sessions`.
+7. Inspect the backup meta if needed: `format` should be `pi-memory-backup`, `version` should be `2`, `mode` should match `backups.mode`, `mirror` should be `true` for mirror mode and `false` for merge mode, and `includes_sessions` should match `backups.include_sessions`.
 
 A dedicated agent skill for this is available as `memory-configuration`.
 
@@ -234,7 +237,7 @@ Shutdown behavior:
 | `/memory-sync-status` | Show counts by sync status. |
 | `/memory-consolidate [kind]` | Dry-run duplicate detection. |
 | `/memory-project-profile` | Ensure and show current project profile. |
-| `/memory-export [jsonl|sqlite] [sessions] [active-only]` | Export scoped memory backup. |
+| `/memory-export [jsonl|sqlite] [mirror|merge] [sessions] [active-only]` | Export scoped memory backup. |
 | `/memory-import [merge|dry_run] [keep_local|keep_imported|mark_conflict]` | Import memory backup (defaults to configured import mode; often `dry_run`). |
 | `/memory-browser` | Open the interactive memory browser. |
 
@@ -251,12 +254,13 @@ Shutdown behavior:
 
 ## Export and import
 
-`memory_export`/`memory_import` tools and `/memory-export`/`/memory-import` commands use an automatic mirror backup path; no `path` argument is required.
+`memory_export`/`memory_import` tools and `/memory-export`/`/memory-import` commands use an automatic configured backup path; no `path` argument is required.
 
 ### User command usage
 
 - Export: `/memory-export`
   - `jsonl` (default)
+  - `mirror|merge` to override `backups.mode` for this export
   - `sessions` to include sessions and prompts (or `sessions=false` / `include_sessions=false`)
   - `active-only` to export only active memories
   - `active` is equivalent to `active-only` (`include_archived=false`)
@@ -265,6 +269,7 @@ Shutdown behavior:
   Examples:
 
   - `/memory-export`
+  - `/memory-export merge`
   - `/memory-export sessions`
   - `/memory-export jsonl active-only`
 
@@ -279,7 +284,7 @@ Shutdown behavior:
   2. Review inserted/conflict output.
   3. `/memory-import merge` to apply.
 
-`memory_export` and `memory_import` use an automatic mirror backup path. The agent does not need to pass a `path` parameter.
+`memory_export` and `memory_import` use an automatic configured backup path. The agent does not need to pass a `path` parameter.
 
 Default backup file:
 
@@ -293,6 +298,7 @@ Project override:
 {
   "backups": {
     "path": "relative/path/to/memory-backup.jsonl",
+    "mode": "mirror",
     "include_sessions": true
   }
 }
@@ -301,9 +307,10 @@ Project override:
 Notes:
 
 - `backups.path` must be relative to the current working directory. Absolute paths and `..` escapes are ignored with warnings.
-- `memory_export` writes a mirror JSONL backup with a `meta` record, `manifest`, and hashed row records.
-- Export is scoped to the current memory context/project: project backups contain only that project's memories, sessions, prompts (when sessions are included), and related entities/links.
-- Export is mirror-style: the file is rewritten from current scoped DB state, so scoped rows removed locally are removed from the backup too.
+- `memory_export` writes a JSONL backup with a `meta` record, `manifest`, and hashed row records.
+- Export is scoped to the current memory context/project for rows read from the DB: project backups contain that project's memories, sessions, prompts (when sessions are included), and related entities/links.
+- `backups.mode="mirror"` rewrites the file from current scoped DB state, so scoped rows removed locally are removed from the backup too.
+- `backups.mode="merge"` preserves existing backup rows and updates/adds current rows. Use this when the backup should accumulate restored/older rows instead of being pruned by the current DB. Use `mirror` when you intentionally want deletions or privacy cleanup reflected in the backup.
 - `memory_export` defaults to JSONL and includes archived memories unless `include_archived=false` is passed.
 - SQLite export is reserved for future implementation.
 - Session prompt rows are included only when `backups.include_sessions=true` or the tool call explicitly passes `include_sessions=true`.
@@ -370,4 +377,4 @@ typecheck passes
 - `skills/persistent-memory/SKILL.md` — agent operating policy for using memory.
 - `skills/memory-configuration/SKILL.md` — `.pi/memory.json`, backup, import, and restore configuration policy.
 - `extensions/memory/src/config.ts` — config parsing and defaults.
-- `extensions/memory/src/export-import.ts` — mirror backup format and import behavior.
+- `extensions/memory/src/export-import.ts` — backup format and import behavior.

@@ -15,7 +15,7 @@ import { getSyncStatus } from './sync-status.js';
 import { renderMemoryToolResult } from './render.js';
 import { addChangelogEntry, addCommitChangelogLink, addCommitRecord, addReleaseRecord, previewReleaseNotes, searchCommitChangelog, searchReleaseCandidates } from './commit-changelog.js';
 import { MEMORY_KINDS } from './types.js';
-import type { MemoryImportConflictPolicy, MemoryImportMode, ToolResult } from './types.js';
+import type { MemoryExportMode, MemoryImportConflictPolicy, MemoryImportMode, ToolResult } from './types.js';
 
 function ok(text: string, details: Record<string, unknown> = {}): ToolResult {
   return { content: [{ type: 'text', text }], details };
@@ -59,6 +59,7 @@ const ImportConflictPolicy = Type.Union([
   Type.Literal('keep_imported'),
   Type.Literal('mark_conflict'),
 ]);
+const ExportMode = Type.Union([Type.Literal('mirror'), Type.Literal('merge')]);
 const RecallContext = Type.Union([
   'startup',
   'before_task',
@@ -156,12 +157,14 @@ function resolveExportDefaults(
   return {
     ...params,
     path: resolveBackupPath(context.cwd, context.config?.backups?.path),
+    mode: params?.mode ?? context.config?.backups.mode ?? 'mirror',
     include_sessions: hasExplicitIncludeSessions ? params?.include_sessions : context.config?.backups?.include_sessions,
     include_git: context.config?.git.enabled === true && context.config.git.sync.export === true,
     context,
   } as {
     path: string;
     format?: 'jsonl' | 'sqlite';
+    mode: MemoryExportMode;
     include_archived?: boolean;
     include_sessions?: boolean;
     include_git?: boolean;
@@ -912,9 +915,10 @@ export function registerMemoryTools(pi: any, db: Db): void {
   pi.registerTool({
     name: 'memory_export',
     label: 'Memory Export',
-    description: 'Export local memory to the configured mirror JSONL backup.',
+    description: 'Export local memory to the configured JSONL backup.',
     parameters: Type.Object({
       format: Type.Optional(Type.Union([Type.Literal('jsonl'), Type.Literal('sqlite')])),
+      mode: Type.Optional(ExportMode),
       include_archived: Type.Optional(Type.Boolean()),
       include_sessions: Type.Optional(Type.Boolean()),
     }),
@@ -923,7 +927,7 @@ export function registerMemoryTools(pi: any, db: Db): void {
         const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
         const input = resolveExportDefaults(params, context);
         const result = exportMemory(db, input);
-        return ok(`Memory mirror backup exported: ${result.path}`, { ...result, warnings: context.warnings });
+        return ok(`Memory backup exported (${result.mode}): ${result.path}`, { ...result, warnings: context.warnings });
       } catch (e) {
         return fail(e);
       }
@@ -940,7 +944,7 @@ export function registerMemoryTools(pi: any, db: Db): void {
         const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
         const input = resolveImportDefaults(params, context);
         const result = importMemory(db, input);
-        return ok(`Memory import ${result.mode}: ${result.inserted} inserted, ${result.conflicts} conflicts.`, {
+        return ok(`Memory import ${result.mode}: ${result.inserted} inserted, ${result.would_insert} would insert, ${result.conflicts} conflicts.`, {
           ...result,
           warnings: context.warnings,
         });

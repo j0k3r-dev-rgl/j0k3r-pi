@@ -14,9 +14,10 @@ import { exportMemory, importMemory } from './export-import.js';
 type MemoryImportMode = 'merge' | 'dry_run';
 type MemoryImportConflictPolicy = 'keep_local' | 'keep_imported' | 'mark_conflict';
 type MemoryExportFormat = 'jsonl' | 'sqlite';
+type MemoryExportMode = 'mirror' | 'merge';
 
 const IMPORT_USAGE = 'Usage: /memory-import [merge|dry_run] [keep_local|keep_imported|mark_conflict]. Unknown options show usage.';
-const EXPORT_USAGE = 'Usage: /memory-export [jsonl|sqlite] [sessions] [active-only]. sqlite mode is reserved and will fail until implemented.';
+const EXPORT_USAGE = 'Usage: /memory-export [jsonl|sqlite] [mirror|merge] [sessions] [active-only]. sqlite mode is reserved and will fail until implemented.';
 
 function parseBooleanInput(value: string): boolean | undefined {
   if (value === 'true' || value === '1' || value === 'yes' || value === 'on') return true;
@@ -64,12 +65,13 @@ function parseImportArgs(raw: string): { mode?: MemoryImportMode; on_conflict?: 
   return { mode, on_conflict };
 }
 
-function parseExportArgs(raw: string): { format?: MemoryExportFormat; include_sessions?: boolean; include_archived?: boolean; showUsage?: boolean } {
+function parseExportArgs(raw: string): { format?: MemoryExportFormat; mode?: MemoryExportMode; include_sessions?: boolean; include_archived?: boolean; showUsage?: boolean } {
   const args = (raw ?? '').trim().split(/\s+/).filter(Boolean);
   const isHelp = args.some((arg) => ['--help', '-h', 'help', '?'].includes(arg.toLowerCase()));
   if (isHelp) return { showUsage: true };
 
   let format: MemoryExportFormat | undefined;
+  let mode: MemoryExportMode | undefined;
   let include_sessions: boolean | undefined;
   let include_archived: boolean | undefined;
 
@@ -77,6 +79,10 @@ function parseExportArgs(raw: string): { format?: MemoryExportFormat; include_se
     const arg = token.toLowerCase();
     if (arg === 'jsonl' || arg === 'sqlite') {
       format = arg;
+      continue;
+    }
+    if (arg === 'mirror' || arg === 'merge') {
+      mode = arg;
       continue;
     }
     if (arg === 'sessions') {
@@ -94,6 +100,14 @@ function parseExportArgs(raw: string): { format?: MemoryExportFormat; include_se
         continue;
       }
       throw new Error(`Invalid format: ${value}. Use jsonl.`);
+    }
+    if (arg.startsWith('mode=')) {
+      const value = arg.slice(5);
+      if (value === 'mirror' || value === 'merge') {
+        mode = value;
+        continue;
+      }
+      throw new Error(`Invalid export mode: ${value}. Use mirror|merge.`);
     }
     if (arg.startsWith('include_sessions=')) {
       const value = parseBooleanInput(arg.slice(16));
@@ -114,7 +128,7 @@ function parseExportArgs(raw: string): { format?: MemoryExportFormat; include_se
     if (arg) throw new Error(`Unknown /memory-export option: ${arg}`);
   }
 
-  return { format, include_sessions, include_archived };
+  return { format, mode, include_sessions, include_archived };
 }
 
 function withWarnings(message: string, warnings: string[]): string {
@@ -208,14 +222,16 @@ export function registerMemoryCommands(pi: any, db: Db): void {
           return;
         }
         const includeSessions = parsed.include_sessions ?? context.config?.backups?.include_sessions;
+        const mode = parsed.mode ?? context.config?.backups?.mode ?? 'mirror';
         const result = exportMemory(db, {
           format: parsed.format,
+          mode,
           include_archived: parsed.include_archived,
           include_sessions: includeSessions,
           context,
           path: resolveBackupPath(context.cwd, context.config?.backups?.path),
         });
-        ctx.ui.notify(withWarnings(`Memory backup exported to ${result.path} (${result.rows} rows).`, context.warnings), 'info');
+        ctx.ui.notify(withWarnings(`Memory backup exported to ${result.path} (${result.rows} rows, mode=${result.mode}).`, context.warnings), 'info');
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         ctx.ui.notify(`memory-export failed: ${message}`, 'error');
@@ -241,7 +257,7 @@ export function registerMemoryCommands(pi: any, db: Db): void {
           include_git: context.config?.git?.enabled === true && context.config.git.sync?.import === true,
         });
         const verb = result.mode === 'merge' ? 'merged' : 'validated';
-        ctx.ui.notify(withWarnings(`Memory import ${verb}: inserted=${result.inserted}, conflicts=${result.conflicts}, skipped_git=${result.skipped_git}.`, context.warnings), 'info');
+        ctx.ui.notify(withWarnings(`Memory import ${verb}: inserted=${result.inserted}, would_insert=${result.would_insert}, conflicts=${result.conflicts}, skipped_git=${result.skipped_git}.`, context.warnings), 'info');
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         ctx.ui.notify(`memory-import failed: ${message}`, 'error');

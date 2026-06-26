@@ -65,7 +65,7 @@ function buildBaseConfig(): Omit<ProjectMemoryConfig, 'project_name' | 'aliases'
     debug: false,
     session_end: { semantic: false },
     import: {},
-    backups: { include_sessions: false },
+    backups: { include_sessions: false, mode: 'mirror' },
     cloud: {
       enabled: false,
       organization_id: null,
@@ -114,6 +114,10 @@ export function readProjectMemoryConfig(cwd: string, env: NodeJS.ProcessEnv = pr
     if (importRaw.on_conflict !== undefined && importOnConflict === undefined) warnings.push('Ignoring invalid import.on_conflict in .pi/memory.json; expected "keep_local", "keep_imported", or "mark_conflict".');
 
     const backupPath = normalizeRelativeBackupPath(backupsRaw.path, warnings);
+    const backupMode = backupsRaw.mode === 'mirror' || backupsRaw.mode === 'merge' ? backupsRaw.mode : 'mirror';
+    if (backupsRaw.mode !== undefined && backupsRaw.mode !== 'mirror' && backupsRaw.mode !== 'merge') {
+      warnings.push('Ignoring invalid backups.mode in .pi/memory.json; expected "mirror" or "merge".');
+    }
 
     const includeSessionsRaw = backupsRaw.include_sessions;
     const hasLegacyIncludePrompts = backupsRaw.include_prompts;
@@ -172,6 +176,7 @@ export function readProjectMemoryConfig(cwd: string, env: NodeJS.ProcessEnv = pr
       backups: {
         path: backupPath,
         include_sessions: includeSessions,
+        mode: backupMode,
       },
       cloud: {
         enabled: cloudRaw.enabled === true,

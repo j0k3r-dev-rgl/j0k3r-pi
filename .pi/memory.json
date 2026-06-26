@@ -13,6 +13,7 @@
   },
   "backups": {
     "path": ".pi/memory-backups/memory-backup.jsonl",
+    "mode": "merge",
     "include_sessions": true
   },
   "cloud": {

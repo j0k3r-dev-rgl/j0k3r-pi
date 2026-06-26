@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Db } from './db.js';
-import type { MemoryImportConflictPolicy, MemoryImportMode, ResolvedContext } from './types.js';
+import type { MemoryExportMode, MemoryImportConflictPolicy, MemoryImportMode, ResolvedContext } from './types.js';
 import { getMeta, SCHEMA_VERSION } from './migrations.js';
 import { nowIso, sha256 } from './utils.js';
 
@@ -11,6 +11,16 @@ const TABLES = ['memories', 'memory_sessions', 'memory_session_prompts', 'memory
 const GIT_MEMORY_KINDS = new Set(['commit_record', 'changelog_entry', 'release_record']);
 type TableName = typeof TABLES[number];
 type BackupRecord = { type: TableName; id: string; hash: string; row: Record<string, unknown> };
+type BackupItem = { type: string; format?: string; version?: number; schema_version?: number; row?: Record<string, unknown> };
+type ExportMemoryInput = { path?: string; format?: 'jsonl' | 'sqlite'; mode?: MemoryExportMode; include_archived?: boolean; include_sessions?: boolean; include_git?: boolean; context?: ResolvedContext };
+
+const IMPORT_TABLE_ORDER: Record<TableName, number> = {
+  memories: 0,
+  memory_sessions: 1,
+  memory_entities: 2,
+  memory_links: 3,
+  memory_session_prompts: 4,
+};
 
 function shouldIncludeGit(input: { include_git?: boolean; context?: ResolvedContext }): boolean {
   if (typeof input.include_git === 'boolean') return input.include_git;
@@ -74,10 +84,31 @@ function exportRows(
   return db.prepare(`SELECT e.* FROM memory_entities e JOIN memories m ON m.id = e.memory_id WHERE ${memoryScoped.sql}${gitWhere} ORDER BY e.id`).all(...memoryScoped.args as any[], ...(shouldIncludeGit(input) ? [] : Array.from(GIT_MEMORY_KINDS)) as any[]) as Record<string, unknown>[];
 }
 
-export function exportMemory(db: Db, input: { path?: string; format?: 'jsonl' | 'sqlite'; include_archived?: boolean; include_sessions?: boolean; include_git?: boolean; context?: ResolvedContext } = {}) {
-  const outPath = input.path ?? path.resolve(process.cwd(), '.pi', 'mempry-backups', 'memory-backup.jsonl');
-  if (input.format === 'sqlite') throw new Error('sqlite export is reserved for future implementation; use jsonl.');
-  fs.mkdirSync(path.dirname(outPath), { recursive: true, mode: 0o700 });
+function backupRecordKey(record: Pick<BackupRecord, 'type' | 'id'>): string {
+  return `${record.type}:${record.id}`;
+}
+
+function readBackupItems(inputPath: string): BackupItem[] {
+  const lines = fs.readFileSync(inputPath, 'utf8').split(/\r?\n/).filter(Boolean);
+  return lines.map((line, index) => {
+    try { return JSON.parse(line) as BackupItem; }
+    catch (error) { throw new Error(`Invalid JSONL at line ${index + 1}: ${error instanceof Error ? error.message : String(error)}`); }
+  });
+}
+
+function validateBackupMeta(items: BackupItem): BackupItem;
+function validateBackupMeta(items: BackupItem[]): BackupItem;
+function validateBackupMeta(items: BackupItem | BackupItem[]): BackupItem {
+  const allItems = Array.isArray(items) ? items : [items];
+  const meta = allItems.find((item) => item.type === 'meta');
+  if (!meta) throw new Error('Invalid memory backup: missing meta record.');
+  if (meta.format !== BACKUP_FORMAT || meta.version !== BACKUP_VERSION) throw new Error(`Invalid memory backup: expected ${BACKUP_FORMAT} v${BACKUP_VERSION}.`);
+  if (typeof meta.schema_version !== 'number') throw new Error('Invalid memory backup: missing schema_version.');
+  if (meta.schema_version > SCHEMA_VERSION) throw new Error(`Unsupported schema_version ${meta.schema_version}; current schema_version is ${SCHEMA_VERSION}.`);
+  return meta;
+}
+
+function buildBackupRecords(db: Db, input: ExportMemoryInput): BackupRecord[] {
   const records: BackupRecord[] = [];
   for (const table of TABLES) {
     const rows = exportRows(db, table, input);
@@ -87,11 +118,43 @@ export function exportMemory(db: Db, input: { path?: string; format?: 'jsonl' | 
       records.push({ type: table, id, hash: rowHash(table, row), row });
     }
   }
-  records.sort((a, b) => `${a.type}:${a.id}`.localeCompare(`${b.type}:${b.id}`));
+  return records;
+}
+
+function readExistingBackupRecords(outPath: string): BackupRecord[] {
+  if (!fs.existsSync(outPath)) return [];
+  const items = readBackupItems(outPath);
+  validateBackupMeta(items);
+  return items
+    .filter((item): item is BackupItem & { type: TableName; row: Record<string, unknown> } => TABLES.includes(item.type as TableName) && !!item.row?.id)
+    .map((item) => {
+      const id = String(item.row.id);
+      return { type: item.type, id, hash: rowHash(item.type, item.row), row: item.row };
+    });
+}
+
+function mergeBackupRecords(currentRecords: BackupRecord[], existingRecords: BackupRecord[]): BackupRecord[] {
+  const merged = new Map<string, BackupRecord>();
+  for (const record of existingRecords) merged.set(backupRecordKey(record), record);
+  for (const record of currentRecords) merged.set(backupRecordKey(record), record);
+  return Array.from(merged.values());
+}
+
+export function exportMemory(db: Db, input: ExportMemoryInput = {}) {
+  const outPath = input.path ?? path.resolve(process.cwd(), '.pi', 'mempry-backups', 'memory-backup.jsonl');
+  const mode = input.mode ?? input.context?.config?.backups.mode ?? 'mirror';
+  if (input.format === 'sqlite') throw new Error('sqlite export is reserved for future implementation; use jsonl.');
+  fs.mkdirSync(path.dirname(outPath), { recursive: true, mode: 0o700 });
+  const currentRecords = buildBackupRecords(db, input);
+  const records = mode === 'merge'
+    ? mergeBackupRecords(currentRecords, readExistingBackupRecords(outPath))
+    : currentRecords;
+  records.sort((a, b) => backupRecordKey(a).localeCompare(backupRecordKey(b)));
+  const isMirror = mode === 'mirror';
   const manifest = records.reduce((acc, record) => {
     (acc.rows[record.type] ??= {})[record.id] = record.hash;
     return acc;
-  }, { mirror: true, rows: {} as Record<TableName, Record<string, string>> });
+  }, { mirror: isMirror, mode, rows: {} as Record<TableName, Record<string, string>> });
   const includeSessions = input.include_sessions === true;
   const includeGit = shouldIncludeGit(input);
   const lines = [
@@ -104,13 +167,14 @@ export function exportMemory(db: Db, input: { path?: string; format?: 'jsonl' | 
       exported_at: nowIso(),
       includes_sessions: includeSessions,
       includes_git: includeGit,
-      mirror: true,
+      mirror: isMirror,
+      mode,
     }),
     JSON.stringify({ type: 'manifest', ...manifest }),
     ...records.map((record) => JSON.stringify(record)),
   ];
   fs.writeFileSync(outPath, `${lines.join('\n')}\n`, { mode: 0o600 });
-  return { path: outPath, rows: records.length, mirror: true, format: BACKUP_FORMAT, version: BACKUP_VERSION, includes_git: includeGit };
+  return { path: outPath, rows: records.length, mirror: isMirror, mode, format: BACKUP_FORMAT, version: BACKUP_VERSION, includes_git: includeGit };
 }
 
 function rebuildFts(db: Db): void {
@@ -123,27 +187,26 @@ export function importMemory(db: Db, input: { path: string; mode?: MemoryImportM
   const mode = input.mode ?? 'dry_run';
   const onConflict = input.on_conflict ?? 'mark_conflict';
   const includeGit = input.include_git === true;
-  const lines = fs.readFileSync(input.path, 'utf8').split(/\r?\n/).filter(Boolean);
-  const items = lines.map((line, index) => {
-    try { return JSON.parse(line) as { type: string; format?: string; version?: number; schema_version?: number; row?: Record<string, unknown> }; }
-    catch (error) { throw new Error(`Invalid JSONL at line ${index + 1}: ${error instanceof Error ? error.message : String(error)}`); }
-  });
-  const meta = items.find((item) => item.type === 'meta');
-  if (!meta) throw new Error('Invalid memory import: missing meta record.');
-  if (meta.format !== BACKUP_FORMAT || meta.version !== BACKUP_VERSION) throw new Error(`Invalid memory import: expected ${BACKUP_FORMAT} v${BACKUP_VERSION}.`);
-  if (typeof meta.schema_version !== 'number') throw new Error('Invalid memory import: missing schema_version.');
-  if (meta.schema_version > SCHEMA_VERSION) throw new Error(`Unsupported schema_version ${meta.schema_version}; current schema_version is ${SCHEMA_VERSION}.`);
+  const items = readBackupItems(input.path);
+  validateBackupMeta(items);
 
   const gitMemoryIds = new Set(items
     .filter((item) => item.type === 'memories' && item.row?.id && isGitMemoryRow(item.row))
     .map((item) => String(item.row!.id)));
 
-  let seen = 0, inserted = 0, conflicts = 0, replaced = 0, skippedGit = 0;
+  const rowItems = items
+    .filter((item): item is { type: TableName; row: Record<string, unknown> } => TABLES.includes(item.type as TableName) && !!item.row?.id)
+    .sort((a, b) => {
+      const tableOrder = IMPORT_TABLE_ORDER[a.type] - IMPORT_TABLE_ORDER[b.type];
+      if (tableOrder !== 0) return tableOrder;
+      return String(a.row.id).localeCompare(String(b.row.id));
+    });
+
+  let seen = 0, inserted = 0, wouldInsert = 0, conflicts = 0, replaced = 0, skippedGit = 0;
   const seenByTable: Record<string, number> = {};
   const insertedByTable: Record<string, number> = {};
   const conflictDetails: Array<{ table: string; id: unknown; action: string }> = [];
-  for (const item of items) {
-    if (!TABLES.includes(item.type as any) || !item.row?.id) continue;
+  for (const item of rowItems) {
     seen++;
     seenByTable[item.type] = (seenByTable[item.type] ?? 0) + 1;
     const skipGit = includeGit === false && (
@@ -175,6 +238,7 @@ export function importMemory(db: Db, input: { path: string; mode?: MemoryImportM
       conflictDetails.push({ table, id, action });
       continue;
     }
+    wouldInsert++;
     if (mode === 'merge') {
       const cols = Object.keys(item.row);
       const placeholders = cols.map(() => '?').join(',');
@@ -185,5 +249,5 @@ export function importMemory(db: Db, input: { path: string; mode?: MemoryImportM
   }
   const rebuiltFts = mode === 'merge';
   if (rebuiltFts) rebuildFts(db);
-  return { mode, on_conflict: onConflict, seen, inserted, conflicts, replaced, skipped_git: skippedGit, includes_git: includeGit, seen_by_table: seenByTable, inserted_by_table: insertedByTable, rebuilt_fts: rebuiltFts, conflict_details: conflictDetails };
+  return { mode, on_conflict: onConflict, seen, inserted, would_insert: wouldInsert, conflicts, replaced, skipped_git: skippedGit, includes_git: includeGit, seen_by_table: seenByTable, inserted_by_table: insertedByTable, rebuilt_fts: rebuiltFts, conflict_details: conflictDetails };
 }

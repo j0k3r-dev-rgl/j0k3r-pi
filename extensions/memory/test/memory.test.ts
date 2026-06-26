@@ -337,12 +337,19 @@ describe('config', () => {
     const cfg = readProjectMemoryConfig(tmp, {});
     expect(cfg.backups.path).toBe('custom/memory.jsonl');
     expect(cfg.backups.include_sessions).toBe(true);
+    expect(cfg.backups.mode).toBe('mirror');
     expect(resolveBackupPath(tmp, cfg.backups.path)).toBe(path.join(tmp, 'custom', 'memory.jsonl'));
 
-    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'X', backups: { path: '/tmp/memory.jsonl' } }));
+    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'X', backups: { path: '/tmp/memory.jsonl', mode: 'merge' } }));
     const invalid = readProjectMemoryConfig(tmp, {});
     expect(invalid.backups.path).toBeUndefined();
+    expect(invalid.backups.mode).toBe('merge');
     expect(invalid.warnings.join('\n')).toContain('absolute paths are not allowed');
+
+    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'X', backups: { mode: 'append' } }));
+    const invalidMode = readProjectMemoryConfig(tmp, {});
+    expect(invalidMode.backups.mode).toBe('mirror');
+    expect(invalidMode.warnings.join('\n')).toContain('invalid backups.mode');
   });
   it('supports legacy include_prompts as fallback for include_sessions with deprecation warning', () => {
     fs.mkdirSync(path.join(tmp, '.pi'));

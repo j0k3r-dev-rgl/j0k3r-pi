@@ -1021,6 +1021,34 @@ describe('semantic profile, consolidation links, and entities', () => {
     expect(conflict.conflict_details[0].action).toBe('kept_local');
   });
 
+  it('imports missing sessions before their prompts when existing memory rows conflict', () => {
+    const source = db(), c = project();
+    addMemory(source, { scope: 'project', kind: 'note', content: 'session restore ordering memory' }, c);
+    const session: any = startMemorySession(source, { title: 'session restore ordering' }, c);
+    addSessionPrompt(source, { session_id: session.id, role: 'user', prompt: 'restore this prompt after its session exists', prompt_index: 1 }, c);
+
+    const memoryOnly = path.join(tmp, 'memory-only.jsonl');
+    const withSessions = path.join(tmp, 'with-sessions.jsonl');
+    exportMemory(source, { path: memoryOnly, context: c, include_sessions: false });
+    exportMemory(source, { path: withSessions, context: c, include_sessions: true });
+
+    const target = db();
+    importMemory(target, { path: memoryOnly, mode: 'merge' });
+
+    const dryRun = importMemory(target, { path: withSessions, mode: 'dry_run', on_conflict: 'keep_local' });
+    expect(dryRun.inserted).toBe(0);
+    expect(dryRun.would_insert).toBe(2);
+
+    const result = importMemory(target, { path: withSessions, mode: 'merge', on_conflict: 'keep_local' });
+    expect(result.inserted).toBe(2);
+    expect(result.inserted_by_table.memory_sessions).toBe(1);
+    expect(result.inserted_by_table.memory_session_prompts).toBe(1);
+    const sessionCount = target.prepare('SELECT COUNT(*) AS count FROM memory_sessions').get() as { count: number };
+    const promptCount = target.prepare('SELECT COUNT(*) AS count FROM memory_session_prompts').get() as { count: number };
+    expect(sessionCount.count).toBe(1);
+    expect(promptCount.count).toBe(1);
+  });
+
   it('exports to the automatic default mirror backup path', async () => {
     const { projectDir, details } = await runMemoryExportTool();
     expect(details.path).toBe(path.join(projectDir, '.pi', 'mempry-backups', 'memory-backup.jsonl'));
@@ -1093,7 +1121,28 @@ describe('semantic profile, consolidation links, and entities', () => {
     d.prepare('DELETE FROM memories WHERE id=?').run(mem.id);
     const result = exportMemory(d, { path: out });
     expect(result.mirror).toBe(true);
+    expect(result.mode).toBe('mirror');
     expect(fs.readFileSync(out, 'utf8')).not.toContain(mem.id);
+  });
+
+  it('merge export preserves existing backup rows that are missing locally', () => {
+    const d = db(), c = project();
+    const preserved = addMemory(d, { scope: 'project', kind: 'note', content: 'row preserved by merge backup mode' }, c).memory;
+    const current = addMemory(d, { scope: 'project', kind: 'note', content: 'row still present in local db' }, c).memory;
+    const out = path.join(tmp, 'merge.jsonl');
+    exportMemory(d, { path: out, mode: 'mirror' });
+
+    d.prepare('DELETE FROM memories WHERE id=?').run(preserved.id);
+    const result = exportMemory(d, { path: out, mode: 'merge' });
+    const lines = fs.readFileSync(out, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    const meta = lines[0];
+    const text = JSON.stringify(lines);
+
+    expect(result.mirror).toBe(false);
+    expect(result.mode).toBe('merge');
+    expect(meta.mode).toBe('merge');
+    expect(text).toContain(preserved.id);
+    expect(text).toContain(current.id);
   });
 
   it('exports only the current project memories, sessions, prompts, and entities', () => {

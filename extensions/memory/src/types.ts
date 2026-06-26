@@ -20,6 +20,7 @@ export interface ProjectCloudConfig {
 
 export type MemoryImportMode = 'merge' | 'dry_run';
 export type MemoryImportConflictPolicy = 'keep_local' | 'keep_imported' | 'mark_conflict';
+export type MemoryExportMode = 'mirror' | 'merge';
 
 export interface ProjectSessionEndConfig {
   semantic: boolean;
@@ -33,6 +34,7 @@ export interface ProjectImportConfig {
 export interface ProjectBackupsConfig {
   path?: string;
   include_sessions: boolean;
+  mode: MemoryExportMode;
 }
 
 export interface ProjectGitSyncConfig {

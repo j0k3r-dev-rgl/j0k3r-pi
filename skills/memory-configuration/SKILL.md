@@ -1,6 +1,6 @@
 ---
 name: memory-configuration
-description: "configure Pi Memory Extension project settings, especially .pi/memory.json opt-in enablement, session-backed mirror backups, and safe import policy."
+description: "configure Pi Memory Extension project settings, especially .pi/memory.json opt-in enablement, session-backed mirror/merge backups, and safe import policy."
 license: Apache-2.0
 metadata:
   author: j0k3r
@@ -51,6 +51,9 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "memory backup configuration",
       "memory import defaults",
       "backups.include_sessions",
+      "backups.mode",
+      "backup mode",
+      "export mode",
       "git memory configuration",
       "git.enabled",
       "git.sync.cloud",
@@ -88,12 +91,13 @@ Do not load this skill for ordinary memory recall/search/save usage, memory impo
 - `enabled` defaults to `false`; the extension should be considered off unless the project explicitly opts in with `enabled: true`.
 - Keep `backups.path` relative to the current working directory; do not use absolute paths.
 - Do not use `..` path escapes in `backups.path`.
-- Prefer project-scoped mirror backups so exports contain only the current memory context/project.
+- Prefer `backups.mode="mirror"` by default so exports contain only the current memory context/project and deletions are reflected intentionally.
 - Keep backup/import default guidance focused on `.pi/memory.json` fields, not on ordinary Memory tool usage.
 - Never store secrets, tokens, passwords, private keys, or cloud tokens in `.pi/memory.json`.
 - Keep `git.enabled=false` by default; set it to `true` only when the project intentionally wants git commit/changelog memory tools available.
 - Keep `git.sync.cloud=false`, `git.sync.export=false`, and `git.sync.import=false` by default. `git.sync.export` controls whether configured memory exports include git memory records; `git.sync.import` controls whether configured memory imports apply git memory records. None of these flags authorize Git commits, tags, pushes, cloud calls, or automatic release/changelog generation.
-- Use `backups.include_sessions=true` only when the project intentionally wants session and linked prompt rows in mirror backups.
+- `backups.mode` supports only `mirror` or `merge`; invalid values are ignored with warnings and should be corrected.
+- Use `backups.include_sessions=true` only when the project intentionally wants session and linked prompt rows in backups.
 - Legacy `backups.include_prompts` is fallback-only compatibility; prefer `backups.include_sessions` in all new configs.
 - Keep `debug=false` by default; enable it only for temporary lifecycle auditing because it writes local session identity logs.
 - After changing `.pi/memory.json` or extension code, tell the user to `/reload` or restart Pi before relying on the new behavior.
@@ -117,6 +121,7 @@ Recommended project config:
   },
   "backups": {
     "path": ".pi/memory-backups/memory-backup.jsonl",
+    "mode": "mirror",
     "include_sessions": true
   },
   "cloud": {
@@ -140,7 +145,8 @@ Field rules:
 - `aliases`: optional legacy project-name aliases kept for compatibility; keep small and intentional.
 - `import.mode`: `dry_run` or `merge`; recommended restore policy is `merge`.
 - `import.on_conflict`: `keep_local`, `keep_imported`, or `mark_conflict`; recommended restore policy is `keep_local`.
-- `backups.path`: automatic mirror backup file path; default is `.pi/mempry-backups/memory-backup.jsonl` unless configured.
+- `backups.path`: automatic backup file path; default is `.pi/mempry-backups/memory-backup.jsonl` unless configured.
+- `backups.mode`: `mirror` or `merge`; defaults to `mirror`. `mirror` rewrites the backup from current scoped DB state. `merge` preserves existing backup rows and updates/adds current rows.
 - `backups.include_sessions`: defaults to `false`; set `true` to export `memory_sessions` and linked `memory_session_prompts` for the current project.
 - `debug`: defaults to `false`; set `true` only while auditing memory lifecycle/session identity behavior. It writes local `memory-session-debug.log` entries without prompt text.
 - `session_end.semantic`: keep `false` unless the project explicitly wants model-backed shutdown summaries/profile updates.
@@ -155,7 +161,7 @@ Field rules:
 - If the user wants memory available in the project at all, confirm whether `enabled: true` is intentional, because disabled is now the safe default.
 - If the user asks for prompt export, explain that prompts travel with sessions; recommend `backups.include_sessions=false` unless the project intentionally wants session audit data in backups.
 - If the user asks to import with overwrite behavior, confirm whether `keep_imported` is acceptable before recommending it.
-- If a backup contains another project's memories, verify the extension version/reload state and export context before changing project config.
+- If a backup contains another project's memories, verify the extension version/reload state, export context, and `backups.mode` before changing project config.
 - If configuring memory as part of a broader PRD/SDD workflow, also consider `persistent-memory` and `sdd-workflow`.
 - If the user wants commit/changelog/release tools but `.pi/memory.json` omits `git.enabled`, explain that git memory is off by default and ask whether to enable it.
 - If the user expects commit/tag/release memories to travel through backup files, confirm `git.sync.export=true` on the exporting project and `git.sync.import=true` on the importing project.
@@ -172,7 +178,8 @@ Field rules:
 8. If reviewing an existing backup file only to validate config expectations, check metadata without teaching restore/export usage:
    - `format` should be `pi-memory-backup`;
    - `version` should be `2`;
-   - `mirror` should be `true`;
+   - `mode` should match `backups.mode` when present;
+   - `mirror` should be `true` for `mirror` mode and `false` for `merge` mode;
    - `includes_sessions` should match `backups.include_sessions`;
    - `includes_git` should match `git.enabled && git.sync.export` for configured exports.
 
@@ -181,7 +188,7 @@ Field rules:
 - `import.mode` configures the default import policy only; keep it at `dry_run` unless the project intentionally wants no-argument imports to apply.
 - `import.on_conflict` configures conflict policy only; prefer `keep_local` unless the user explicitly accepts overwrite behavior.
 - Legacy configs that still mention `include_prompts` are tolerated only as fallback compatibility. Prefer updating them to `include_sessions`.
-- After adding or changing import defaults in `.pi/memory.json`, tell the user to `/reload` or restart Pi before relying on omitted parameters.
+- After adding or changing import defaults or `backups.mode` in `.pi/memory.json`, tell the user to `/reload` or restart Pi before relying on omitted parameters.
 
 ## Output Contract
 
@@ -193,6 +200,7 @@ Return:
 - Whether memory is enabled and why.
 - Whether session export is enabled and why.
 - Backup path and whether it is relative/safe.
+- Backup mode (`mirror` or `merge`) and why it is appropriate.
 - Reload/config validation performed, or the concrete reason it was not run.
 - Risks, drift, or open decisions, especially whether git memory should remain disabled by default.
 
