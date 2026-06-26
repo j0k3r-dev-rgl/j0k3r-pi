@@ -181,11 +181,21 @@ function resolveBaseUrl(config: TypeScriptProjectConfig): string {
 }
 
 function buildModuleCandidates(basePath: string): string[] {
-  return [
-    basePath,
-    ...SUPPORTED_EXTENSIONS.map((ext) => `${basePath}${ext}`),
-    ...SUPPORTED_EXTENSIONS.map((ext) => join(basePath, `index${ext}`)),
-  ];
+  const candidates = new Set<string>();
+  const parsedExt = extname(basePath).toLowerCase();
+  const withoutExt = parsedExt ? basePath.slice(0, -parsedExt.length) : basePath;
+
+  candidates.add(basePath);
+  candidates.add(withoutExt);
+
+  for (const ext of SUPPORTED_EXTENSIONS) {
+    candidates.add(`${basePath}${ext}`);
+    candidates.add(`${withoutExt}${ext}`);
+    candidates.add(join(basePath, `index${ext}`));
+    candidates.add(join(withoutExt, `index${ext}`));
+  }
+
+  return [...candidates];
 }
 
 function matchAliasPattern(pattern: string, source: string): { matched: boolean; wildcardValue?: string } {

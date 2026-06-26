@@ -1,4 +1,7 @@
 import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { loadCodeResearchConfig } from '../config.js';
+import { readWorkspaceGraphManifest, readWorkspaceGraphState, readSubprojectGraphShard } from './graph-persistence.js';
 import { getParser, parseSource } from './parser.js';
 import { detectLanguage, resolveTargetFiles } from './shared.js';
 import {
@@ -64,6 +67,16 @@ function getLanguageAdapter(language: Exclude<SupportedLanguage, 'auto'>): Langu
 
 
 export async function findSymbol(
+  cwd: string,
+  input: FindSymbolInput
+): Promise<SymbolLocation[]> {
+  const config = await loadCodeResearchConfig(cwd);
+  const graphResults = config.graph.enable ? await findSymbolFromGraph(cwd, input) : undefined;
+  if (graphResults) return graphResults;
+  return findSymbolDirect(cwd, input);
+}
+
+async function findSymbolDirect(
   cwd: string,
   input: FindSymbolInput
 ): Promise<SymbolLocation[]> {
@@ -160,6 +173,74 @@ export async function findSymbol(
   return matches;
 }
 
+async function findSymbolFromGraph(cwd: string, input: FindSymbolInput): Promise<SymbolLocation[] | undefined> {
+  const state = await readWorkspaceGraphState(cwd);
+  if (state.status !== 'ok') return undefined;
+  if (state.data.status === 'partial' || state.data.status === 'errored' || state.data.status === 'incompatible' || state.data.status === 'refreshing') return undefined;
+
+  const manifest = await readWorkspaceGraphManifest(cwd);
+  if (manifest.status !== 'ok') return undefined;
+
+  const includeSignature = input.include_signature ?? false;
+  const searchMode = input.search_mode ?? 'exact';
+  let includeCode = input.include_code ?? false;
+  if (includeCode && input.kind && input.kind !== 'function' && input.kind !== 'method') includeCode = false;
+  if (includeCode && searchMode !== 'exact') includeCode = false;
+
+  const { targetPath, isDirectory } = await resolveTargetFiles(cwd, input.path, input.glob);
+  const relativeTarget = targetPath.startsWith(cwd) ? targetPath.slice(cwd.length + 1).replace(/\\/g, '/') : input.path.replace(/\\/g, '/');
+
+  const shards = await Promise.all(
+    manifest.data.subprojects.map(async (subproject) => {
+      const shard = await readSubprojectGraphShard(cwd, subproject.id);
+      return shard.status === 'ok' ? shard.data : undefined;
+    })
+  );
+  const allShards = shards.filter(Boolean);
+  if (allShards.length === 0) return undefined;
+
+  const allNodes = allShards.flatMap((shard) => shard!.nodes);
+  const allEdges = allShards.flatMap((shard) => shard!.edges);
+  const symbolNodes = allNodes.filter((node): node is Extract<(typeof allNodes)[number], { kind: 'symbol' }> => node.kind === 'symbol');
+
+  const matches = symbolNodes.filter((node) => {
+    if (!matchesSymbol(node.name, input.symbol, searchMode)) return false;
+    if (input.kind && node.symbolKind !== input.kind) return false;
+    if (!isDirectory) {
+      return node.file === relativeTarget || node.file.endsWith(`/${relativeTarget}`) || relativeTarget.endsWith(node.file);
+    }
+    return node.file === relativeTarget || node.file.endsWith(`/${relativeTarget}`) || node.file.startsWith(`${relativeTarget}/`) || relativeTarget === '.';
+  });
+
+  const results = await Promise.all(matches.map(async (node) => {
+    const location: SymbolLocation = {
+      file: resolve(cwd, node.file),
+      symbol: node.name,
+      kind: node.symbolKind,
+      start_line: node.range.startLine,
+      start_column: node.range.startColumn,
+      end_line: node.range.endLine,
+      end_column: node.range.endColumn,
+      is_definition: node.symbolKind !== 'interface' ? true : true,
+      is_implementation: node.symbolKind !== 'interface',
+    };
+
+    if (includeSignature && node.signature) location.signature = node.signature;
+    if (includeCode) {
+      const source = await readFile(resolve(cwd, node.file), 'utf8').catch(() => undefined);
+      if (source) location.code = extractCodeRange(source, node.range.startLine, node.range.startColumn, node.range.endLine, node.range.endColumn);
+    }
+
+    if (node.symbolKind === 'interface') {
+      location.implementation_locations = buildImplementationLocationsFromGraph(node.id, allNodes, allEdges, cwd);
+    }
+
+    return location;
+  }));
+
+  return results.length > 0 ? results : undefined;
+}
+
 function matchesSymbol(name: string, query: string, mode: SearchMode): boolean {
   switch (mode) {
     case 'prefix':
@@ -170,6 +251,40 @@ function matchesSymbol(name: string, query: string, mode: SearchMode): boolean {
     default:
       return name === query;
   }
+}
+
+function buildImplementationLocationsFromGraph(
+  interfaceNodeId: string,
+  allNodes: Array<any>,
+  allEdges: Array<any>,
+  cwd: string
+): SymbolLocation[] {
+  const nodeById = new Map(allNodes.map((node) => [node.id, node]));
+  return allEdges
+    .filter((edge) => edge.kind === 'implements' && edge.to === interfaceNodeId)
+    .map((edge) => nodeById.get(edge.from))
+    .filter((node): node is Extract<(typeof allNodes)[number], { kind: 'symbol' }> => Boolean(node && node.kind === 'symbol'))
+    .map((node) => ({
+      file: resolve(cwd, node.file),
+      symbol: node.name,
+      kind: node.symbolKind,
+      start_line: node.range.startLine,
+      start_column: node.range.startColumn,
+      end_line: node.range.endLine,
+      end_column: node.range.endColumn,
+      is_definition: true,
+      is_implementation: true,
+      signature: node.signature,
+    }));
+}
+
+function extractCodeRange(source: string, startLine: number, startColumn: number, endLine: number, endColumn: number): string {
+  const lines = source.split('\n');
+  const slice = lines.slice(startLine - 1, endLine);
+  if (slice.length === 0) return '';
+  slice[0] = slice[0].slice(startColumn);
+  slice[slice.length - 1] = slice[slice.length - 1].slice(0, endColumn);
+  return slice.join('\n');
 }
 
 function findDefinitionFor(

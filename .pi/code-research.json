@@ -1,0 +1,6 @@
+{
+  "graph": {
+    "enable": true,
+    "addGitignore": true
+  }
+}

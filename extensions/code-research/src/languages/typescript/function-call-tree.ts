@@ -1,5 +1,5 @@
-import { readFile, readdir, stat } from 'node:fs/promises';
-import { basename, extname, join, resolve } from 'node:path';
+import { readFile, stat } from 'node:fs/promises';
+import { basename, extname, resolve } from 'node:path';
 import { getParser, parseSource } from '../../core/parser.js';
 import type {
   CallSource,
@@ -9,6 +9,7 @@ import type {
   OwnerKind,
   SupportedLanguage,
 } from '../../types.js';
+import { collectWorkspaceSourceFiles } from '../../core/source-policy.js';
 import {
   detectLanguage,
   extractSignature,
@@ -22,7 +23,7 @@ import {
 
 type CallableKind = 'function' | 'method';
 
-interface IndexedCallable {
+export interface IndexedCallable {
   file: string;
   language: Exclude<SupportedLanguage, 'auto'>;
   symbol: string;
@@ -35,7 +36,7 @@ interface IndexedCallable {
   exportedName?: string;
 }
 
-interface IndexedClass {
+export interface IndexedClass {
   file: string;
   language: Exclude<SupportedLanguage, 'auto'>;
   className: string;
@@ -45,14 +46,14 @@ interface IndexedClass {
   exportedName?: string;
 }
 
-interface ImportBinding {
+export interface ImportBinding {
   localName: string;
   importedName: string;
   source: string;
   kind: 'named' | 'default' | 'namespace';
 }
 
-interface IndexedFile {
+export interface IndexedFile {
   file: string;
   language: Exclude<SupportedLanguage, 'auto'>;
   rootNode: any;
@@ -60,7 +61,7 @@ interface IndexedFile {
   imports: Map<string, ImportBinding>;
 }
 
-interface TypeScriptProjectIndex {
+export interface TypeScriptProjectIndex {
   projectRoot: string;
   projectConfig: TypeScriptProjectConfig;
   callables: IndexedCallable[];
@@ -208,7 +209,7 @@ export function buildCallTree(options: {
   return { root, stats };
 }
 
-async function buildTypeScriptProjectIndex(rootDir: string): Promise<TypeScriptProjectIndex> {
+export async function buildTypeScriptProjectIndex(rootDir: string): Promise<TypeScriptProjectIndex> {
   const index: TypeScriptProjectIndex = {
     projectRoot: rootDir,
     projectConfig: await loadTypeScriptProjectConfig(rootDir),
@@ -247,20 +248,7 @@ async function buildTypeScriptProjectIndex(rootDir: string): Promise<TypeScriptP
 }
 
 async function collectSupportedFiles(dir: string): Promise<string[]> {
-  const files: string[] = [];
-  const entries = await readdir(dir, { withFileTypes: true });
-
-  for (const entry of entries) {
-    const fullPath = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name.startsWith('.') || EXCLUDED_DIRECTORY_NAMES.has(entry.name)) continue;
-      files.push(...(await collectSupportedFiles(fullPath)));
-    } else if (entry.isFile() && isSupportedFile(fullPath)) {
-      files.push(fullPath);
-    }
-  }
-
-  return files;
+  return (await collectWorkspaceSourceFiles(dir)).filter((file) => isSupportedFile(file));
 }
 
 function indexImports(file: IndexedFile): void {

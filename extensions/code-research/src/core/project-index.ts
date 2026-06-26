@@ -1,6 +1,6 @@
-import { readFile, readdir } from 'node:fs/promises';
-import { join, extname } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { getParser, parseSource } from './parser.js';
+import { collectWorkspaceSourceFiles } from './source-policy.js';
 
 export interface IndexedMethod {
   file: string;
@@ -32,6 +32,7 @@ export interface IndexedClass {
   fullName: string;
   kind: 'class' | 'interface';
   implements: string[];
+  extends?: string[];
   line: number;
   column: number;
 }
@@ -58,7 +59,7 @@ export async function buildProjectIndex(rootDir: string): Promise<ProjectIndex> 
     imports: new Map(),
   };
 
-  const javaFiles = await collectJavaFiles(rootDir);
+  const javaFiles = (await collectWorkspaceSourceFiles(rootDir)).filter((file) => file.endsWith('.java'));
 
   for (const file of javaFiles) {
     const source = await readFile(file, 'utf8');
@@ -68,23 +69,6 @@ export async function buildProjectIndex(rootDir: string): Promise<ProjectIndex> 
   }
 
   return index;
-}
-
-async function collectJavaFiles(dir: string): Promise<string[]> {
-  const files: string[] = [];
-  const entries = await readdir(dir, { withFileTypes: true });
-
-  for (const entry of entries) {
-    const fullPath = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
-      files.push(...(await collectJavaFiles(fullPath)));
-    } else if (entry.isFile() && extname(fullPath).toLowerCase() === '.java') {
-      files.push(fullPath);
-    }
-  }
-
-  return files;
 }
 
 function indexFile(file: string, rootNode: any, index: ProjectIndex): void {
@@ -129,6 +113,7 @@ function indexFile(file: string, rootNode: any, index: ProjectIndex): void {
           fullName: packageName ? `${packageName}.${className}` : className,
           kind: node.type === 'interface_declaration' ? 'interface' : 'class',
           implements: extractImplementedTypes(node),
+          extends: extractExtendedTypes(node),
           line: node.startPosition.row + 1,
           column: node.startPosition.column,
         });
@@ -137,9 +122,7 @@ function indexFile(file: string, rootNode: any, index: ProjectIndex): void {
       }
     }
 
-    for (const child of node.children) {
-      visit(child);
-    }
+    for (const child of node.children) visit(child);
   }
 
   visit(rootNode);
@@ -202,44 +185,37 @@ function indexClassMembers(
     }
 
     if (node.type === 'class_declaration' || node.type === 'interface_declaration') return;
-
-    for (const child of node.children) {
-      visit(child);
-    }
+    for (const child of node.children) visit(child);
   }
 
   visit(body);
 }
 
 function extractQualifiedName(node: any): string {
-  const namedChild = node.children.find(
-    (child: any) => child.isNamed && child.type !== 'asterisk'
-  );
+  const namedChild = node.children.find((child: any) => child.isNamed && child.type !== 'asterisk');
   return namedChild?.text ?? '';
 }
 
 function extractImplementedTypes(classNode: any): string[] {
-  const interfacesNode = classNode.childForFieldName('interfaces');
-  if (!interfacesNode) return [];
+  return extractTypeList(classNode.childForFieldName('interfaces'));
+}
 
+function extractExtendedTypes(classNode: any): string[] {
+  return extractTypeList(classNode.childForFieldName('superclass'));
+}
+
+function extractTypeList(rootNode: any): string[] {
+  if (!rootNode) return [];
   const result: string[] = [];
-
   function visit(node: any) {
     if (!node?.isNamed) return;
-    if (
-      node.type === 'type_identifier' ||
-      node.type === 'generic_type' ||
-      node.type === 'scoped_type_identifier'
-    ) {
+    if (node.type === 'type_identifier' || node.type === 'generic_type' || node.type === 'scoped_type_identifier') {
       result.push(normalizeTypeName(node.text));
       return;
     }
-    for (const child of node.children) {
-      visit(child);
-    }
+    for (const child of node.children) visit(child);
   }
-
-  visit(interfacesNode);
+  visit(rootNode);
   return [...new Set(result.filter(Boolean))];
 }
 

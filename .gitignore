@@ -49,3 +49,4 @@ openspec/
 .pi/skill-registry.md
 .pi/api.json
 bin
+.pi/workspace-code-graph/

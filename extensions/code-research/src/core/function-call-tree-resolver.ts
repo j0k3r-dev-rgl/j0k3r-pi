@@ -1,6 +1,9 @@
 import type { FunctionCallTreeInput, FunctionCallTreeResult } from '../types.js';
 import { executeJavaFunctionCallTree } from '../languages/java/function-call-tree.js';
 import { executeTypeScriptFunctionCallTree } from '../languages/typescript/function-call-tree.js';
+import { loadCodeResearchConfig } from '../config.js';
+import { readWorkspaceGraphManifest, readWorkspaceGraphState } from './graph-persistence.js';
+import { queryFunctionCallTreeFromGraph } from './graph-queries.js';
 
 export type FunctionCallTreeExecutionResult =
   | {
@@ -23,6 +26,9 @@ export async function executeFunctionCallTree(
   cwd: string,
   input: FunctionCallTreeInput
 ): Promise<FunctionCallTreeExecutionResult> {
+  const graphResult = await tryGraphBackedFunctionCallTree(cwd, input);
+  if (graphResult) return { status: 'ok', ...graphResult };
+
   const language = input.language ?? 'java';
 
   switch (language) {
@@ -36,4 +42,23 @@ export async function executeFunctionCallTree(
     default:
       throw new Error(`Unsupported language: ${language}`);
   }
+}
+
+async function tryGraphBackedFunctionCallTree(cwd: string, input: FunctionCallTreeInput) {
+  const config = await loadCodeResearchConfig(cwd);
+  if (!config.graph.enable) return undefined;
+
+  const state = await readWorkspaceGraphState(cwd);
+  if (state.status !== 'ok') return undefined;
+
+  const manifest = await readWorkspaceGraphManifest(cwd);
+  if (manifest.status !== 'ok') return undefined;
+
+  return queryFunctionCallTreeFromGraph({
+    cwd,
+    input,
+    state: state.data,
+    manifest: manifest.data,
+    policy: { allowStale: false },
+  });
 }

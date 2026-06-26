@@ -28,7 +28,7 @@ interface CallbackInfo {
   calls: MethodCall[];
 }
 
-interface MethodCall {
+export interface MethodCall {
   methodName: string;
   object?: string;
   objectNodeType?: string;
@@ -38,13 +38,19 @@ interface MethodCall {
   callbacks?: CallbackInfo[];
 }
 
-interface ResolvedCall {
+export interface ResolvedCall {
   className: string;
   isExternal: boolean;
   source: CallSource;
   ownerKind: OwnerKind;
   receiverType?: string;
   reason?: string;
+}
+
+export interface ResolvedJavaGraphCall {
+  call: MethodCall;
+  resolved?: ResolvedCall;
+  targetMethod?: IndexedMethod;
 }
 
 interface ObjectTypeResolution {
@@ -235,8 +241,7 @@ function buildChildrenFromCalls(
 ): CallTreeNode[] {
   const children: CallTreeNode[] = [];
 
-  for (const call of calls) {
-    const resolved = resolveCall(currentMethod, call, index);
+  for (const { call, resolved, targetMethod } of resolveJavaCallsForGraph(currentMethod, index, calls)) {
     if (!resolved) {
       if (includeExternal) {
         children.push(createExternalNode(currentMethod, call, 'unknown', undefined, undefined, index, maxDepth, includeExternal, depth, visited));
@@ -251,7 +256,6 @@ function buildChildrenFromCalls(
       continue;
     }
 
-    const targetMethod = findMethodInIndex(resolved.className, call.methodName, index);
     if (targetMethod) {
       children.push(buildNode(targetMethod, index, maxDepth, includeExternal, depth + 1, visited, { call, resolved }));
     } else if (includeExternal) {
@@ -361,6 +365,18 @@ function extractMethodCallsFromNode(rootNode: any): MethodCall[] {
 
   visit(rootNode);
   return calls;
+}
+
+export function resolveJavaCallsForGraph(
+  currentMethod: IndexedMethod,
+  index: ProjectIndex,
+  calls: MethodCall[] = extractMethodCalls(currentMethod.node)
+): ResolvedJavaGraphCall[] {
+  return calls.map((call) => {
+    const resolved = resolveCall(currentMethod, call, index);
+    const targetMethod = resolved && !resolved.isExternal ? findMethodInIndex(resolved.className, call.methodName, index) : undefined;
+    return { call, resolved, targetMethod };
+  });
 }
 
 function resolveCall(currentMethod: IndexedMethod, call: MethodCall, index: ProjectIndex): ResolvedCall | undefined {

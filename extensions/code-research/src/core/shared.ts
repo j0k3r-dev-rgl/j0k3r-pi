@@ -1,11 +1,7 @@
-import { readdir, stat } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { stat } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { minimatch } from 'minimatch';
-import {
-  detectLanguage as detectTypeScriptLanguage,
-  isSupportedFile as isSupportedTypeScriptFile,
-} from '../languages/typescript/shared.js';
-import { isSupportedFile as isSupportedJavaFile } from '../languages/java/shared.js';
+import { detectGraphLanguage, isSupportedGraphSourceFile, walkWorkspaceSourceFiles } from './source-policy.js';
 import type { SupportedLanguage } from '../types.js';
 
 export interface ResolvedTargetFiles {
@@ -42,29 +38,19 @@ export async function resolveTargetFiles(
 }
 
 export function isSupportedFile(filePath: string): boolean {
-  return isSupportedTypeScriptFile(filePath) || isSupportedJavaFile(filePath);
+  return isSupportedGraphSourceFile(filePath);
 }
 
 export function detectLanguage(filePath: string, explicit: SupportedLanguage): Exclude<SupportedLanguage, 'auto'> {
   if (explicit !== 'auto') return explicit;
-  if (isSupportedJavaFile(filePath)) return 'java';
-  return detectTypeScriptLanguage(filePath, explicit);
+  return detectGraphLanguage(filePath) ?? 'ts';
 }
 
 async function collectSupportedFiles(dir: string, glob?: string): Promise<string[]> {
   const files: string[] = [];
-  const entries = await readdir(dir, { withFileTypes: true });
-
-  for (const entry of entries) {
-    const fullPath = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
-      files.push(...(await collectSupportedFiles(fullPath, glob)));
-    } else if (entry.isFile() && isSupportedFile(fullPath)) {
-      if (glob && !minimatch(fullPath, glob) && !minimatch(entry.name, glob)) continue;
-      files.push(fullPath);
-    }
-  }
-
+  await walkWorkspaceSourceFiles(dir, async (fullPath) => {
+    if (glob && !minimatch(fullPath, glob) && !minimatch(fullPath.split('/').pop() ?? fullPath, glob)) return;
+    files.push(fullPath);
+  });
   return files;
 }

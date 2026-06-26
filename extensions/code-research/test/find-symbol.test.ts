@@ -3,6 +3,7 @@ import { mkdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { findSymbol } from '../src/core/find-symbol-resolver.js';
+import { buildWorkspaceGraph } from '../src/core/workspace-graph.js';
 import type { FindSymbolInput, SymbolLocation } from '../src/types.js';
 
 describe('findSymbol', () => {
@@ -353,6 +354,30 @@ describe('findSymbol', () => {
     expect(results[0].kind).toBe('function');
     expect(results[0].is_definition).toBe(true);
     expect(results[0].is_implementation).toBe(true);
+  });
+
+  it('uses the graph for typescript symbol lookup and extracts code from file ranges', async () => {
+    const projectDir = join(tmpDir, `graph-ts-${Date.now()}`);
+    await mkdir(join(projectDir, '.pi'), { recursive: true });
+    await writeFile(join(projectDir, '.pi', 'code-research.json'), '{"graph":{"enable":true}}\n', 'utf8');
+    const file = join(projectDir, 'src', 'service.ts');
+    await mkdir(join(file, '..'), { recursive: true });
+    await writeFile(file, `export function runService(): void {\n  helper();\n}\n\nfunction helper(): void {}\n`, 'utf8');
+    await buildWorkspaceGraph(projectDir);
+
+    const results = await findSymbol(projectDir, {
+      path: file,
+      symbol: 'runService',
+      language: 'ts',
+      include_signature: true,
+      include_code: true,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].file).toBe(file);
+    expect(results[0].symbol).toBe('runService');
+    expect(results[0].signature).toContain('function runService');
+    expect(results[0].code).toContain('helper();');
   });
 
   it('finds destructured exported function bindings in typescript files', async () => {

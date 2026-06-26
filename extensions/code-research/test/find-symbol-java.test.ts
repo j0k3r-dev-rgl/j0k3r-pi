@@ -3,6 +3,7 @@ import { mkdir, writeFile, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { findSymbol } from '../src/core/find-symbol-resolver.js';
+import { buildWorkspaceGraph } from '../src/core/workspace-graph.js';
 import type { SymbolLocation } from '../src/types.js';
 
 describe('findSymbol Java', () => {
@@ -104,6 +105,33 @@ describe('findSymbol Java', () => {
 
     expect(results).toHaveLength(1);
     expect(results[0].kind).toBe('interface');
+    expect(results[0].implementation_locations?.some((location) => location.symbol === 'LocalService')).toBe(true);
+  });
+
+  it('uses the graph for Java interface lookup and returns implementation locations', async () => {
+    const slug = `graph-java-${Date.now()}`;
+    const projectRoot = join(tmpDir, slug);
+    await mkdir(join(projectRoot, '.pi'), { recursive: true });
+    await writeFile(join(projectRoot, '.pi', 'code-research.json'), '{"graph":{"enable":true}}\n', 'utf8');
+    await writeTestFile(
+      `${slug}/ports/Service.java`,
+      `package ports;\npublic interface Service {\n  String run();\n}\n`
+    );
+    await writeTestFile(
+      `${slug}/impl/LocalService.java`,
+      `package impl;\n\nimport ports.Service;\n\npublic class LocalService implements Service {\n  public String run() {\n    return "local";\n  }\n}\n`
+    );
+
+    await buildWorkspaceGraph(projectRoot);
+
+    const results = await findSymbol(projectRoot, {
+      path: projectRoot,
+      symbol: 'Service',
+      language: 'java',
+      kind: 'interface',
+    });
+
+    expect(results).toHaveLength(1);
     expect(results[0].implementation_locations?.some((location) => location.symbol === 'LocalService')).toBe(true);
   });
 
