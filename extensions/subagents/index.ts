@@ -1,6 +1,6 @@
 import { SubagentManager } from './src/manager.js';
 import { readSubagentsConfig } from './src/config.js';
-import { registerSubagentTools } from './src/tools.js';
+import { registerSubagentTools, triggerClaudeBackgroundHandoff } from './src/tools.js';
 import { runSubagentModelsCommand } from './src/model-profiles-ui.js';
 import { SubagentsHistoryPanel } from './src/ui.js';
 import type { SubagentTask } from './src/types.js';
@@ -389,6 +389,16 @@ export default function subagentsExtension(pi: any): void {
       const cwd = ctx?.cwd ?? process.cwd();
       if (readSubagentsConfig(cwd).mode === 'claude') return;
       await showSubagentsPanel(ctx);
+    },
+  });
+
+  const backgroundHandoffShortcut = readSubagentsConfig(process.cwd()).background_handoff_shortcut ?? 'ctrl+h';
+  pi.registerShortcut?.(backgroundHandoffShortcut, {
+    description: 'Send running claude subagent task to background',
+    handler: async (ctx: any) => {
+      const cwd = ctx?.cwd ?? process.cwd();
+      if (readSubagentsConfig(cwd).mode !== 'claude') return;
+      triggerClaudeBackgroundHandoff();
     },
   });
 

@@ -7,6 +7,7 @@ const DEFAULT_TOOLS = ['read', 'memory_context', 'memory_search', 'memory_recall
 const DEFAULT_MAX_CONCURRENCY = 5;
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_STALL_TIMEOUT_MS = 2 * 60 * 1000;
+const DEFAULT_BACKGROUND_HANDOFF_SHORTCUT = 'ctrl+h';
 const BLOCKED_SUBAGENT_TOOLS = new Set([
   'subagent_run',
   'subagent_list_agents',
@@ -114,6 +115,11 @@ function parseMode(value: any): SubagentUiMode {
   return mode === 'claude' ? 'claude' : 'opencode';
 }
 
+function parseBackgroundHandoffShortcut(value: any): string {
+  const shortcut = String(value ?? DEFAULT_BACKGROUND_HANDOFF_SHORTCUT).trim().toLowerCase();
+  return /^ctrl\+[a-z]$/.test(shortcut) ? shortcut : DEFAULT_BACKGROUND_HANDOFF_SHORTCUT;
+}
+
 function parseModelProfile(value: unknown): SubagentModelProfile | undefined {
   if (!isPlainObject(value)) return undefined;
   const profile: SubagentModelProfile = {};
@@ -171,6 +177,7 @@ export function readSubagentsConfig(cwd: string): SubagentsConfig {
     default_tools: sanitizeTools(Array.isArray(raw.default_tools) ? raw.default_tools.map(String) : DEFAULT_TOOLS),
     session_resources: parseSessionResources(raw.session_resources ?? raw.sessionResources),
     mode: parseMode(raw.mode),
+    background_handoff_shortcut: parseBackgroundHandoffShortcut(raw.background_handoff_shortcut ?? raw.backgroundHandoffShortcut),
   };
 }
 

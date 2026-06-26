@@ -11,6 +11,7 @@ Pi extension for delegating work to markdown-defined subagents. It registers too
 - Subagent markdown used as system prompt, with delegated task/context as the user prompt.
 - Project-scoped task history in a global SQLite data/cache location.
 - TUI history panel via `/subagents` or `ctrl+,`.
+- Claude-mode background handoff via `ctrl+h` by default, configurable in `subagents.json`.
 - TUI execution rendering can expand/collapse tool and rendered component output with `ctrl+o`.
 - Model profile UI via `/subagent-models`.
 - Per-agent/default model and thinking-effort configuration.
@@ -111,6 +112,7 @@ Example:
   "stall_timeout_ms": 120000,
   "max_concurrency": 5,
   "session_resources": "lean",
+  "background_handoff_shortcut": "ctrl+h",
   "default_tools": [
     "read",
     "memory_context",
@@ -142,6 +144,7 @@ Example:
 | `stall_timeout_ms` | `120000` | Inactivity timeout for a subagent session. |
 | `max_concurrency` | `5` | Max concurrent subagent tasks per cwd/config pair. |
 | `session_resources` | `lean` | SDK resource loading mode. `lean` uses the subagent markdown body as the nested session system prompt, skips skills, prompt templates, themes, and context files, and loads extensions in tools-only/safety-hook mode so allowlisted extension tools remain available without startup context injection. Use explicit `full` only when a subagent intentionally needs the full Pi resource set. Also accepts camelCase `sessionResources`. |
+| `background_handoff_shortcut` | `ctrl+h` | Claude-mode shortcut used to send a running task to the background. Accepts `ctrl+<letter>` and also accepts camelCase `backgroundHandoffShortcut`. |
 | `default_tools` | see below | Fallback tool allowlist used by the runner when an agent definition has an empty tool list. Omitted frontmatter `tools` uses the built-in default list. |
 
 Default tools:
@@ -250,6 +253,7 @@ Behavior:
 | `/subagents` | Open the session-focused TUI subagent history panel. |
 | `/subagent-models` | Configure global subagent and SDD phase model profiles. |
 | `ctrl+,` | Open the TUI subagent history panel. |
+| `ctrl+h` | Send the running Claude-mode subagent task to the background by default. Configurable via `background_handoff_shortcut` in `subagents.json`. |
 
 `/subagent-models` writes global profile changes to:
 

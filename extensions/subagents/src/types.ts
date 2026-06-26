@@ -50,6 +50,7 @@ export type SubagentsConfig = {
   default_tools: string[];
   session_resources?: SubagentSessionResources;
   mode?: SubagentUiMode;
+  background_handoff_shortcut?: string;
 };
 
 export type SubagentRunInput = {

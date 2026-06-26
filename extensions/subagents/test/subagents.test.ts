@@ -1138,7 +1138,7 @@ describe('subagents extension', () => {
     expect(tools).toContain('subagent_status');
     expect(tools).toContain('subagent_result');
     expect(commands).toEqual(['subagents', 'subagent-models']);
-    expect(shortcuts).toEqual(['ctrl+,']);
+    expect(shortcuts).toEqual(['ctrl+,', 'ctrl+h']);
   });
 
   it('subagents history panel can start focused on a selected task id', () => {
@@ -1163,6 +1163,23 @@ describe('subagents extension', () => {
     const rendered = panel.render(120).join('\n');
     expect(rendered).toContain('2/2');
     expect(rendered).toContain('agent: second');
+  });
+
+  it('registers the configured claude background handoff shortcut at extension startup', () => {
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ background_handoff_shortcut: 'ctrl+b' }));
+    const previousCwd = process.cwd();
+    process.chdir(tmp);
+    try {
+      const shortcuts: string[] = [];
+      extension({
+        registerTool: () => undefined,
+        registerCommand: () => undefined,
+        registerShortcut: (key: string) => shortcuts.push(key),
+      });
+      expect(shortcuts).toEqual(['ctrl+,', 'ctrl+b']);
+    } finally {
+      process.chdir(previousCwd);
+    }
   });
 
   it('registers terminal input routing in claude mode and cleans it up on shutdown', async () => {
@@ -1351,6 +1368,19 @@ describe('subagents extension', () => {
 
     fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ mode: 'invalid' }));
     expect(readSubagentsConfig(tmp).mode).toBe('opencode');
+  });
+
+  it('supports configurable claude background handoff shortcuts with ctrl+h fallback', () => {
+    expect(readSubagentsConfig(tmp).background_handoff_shortcut).toBe('ctrl+h');
+
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ background_handoff_shortcut: 'ctrl+b' }));
+    expect(readSubagentsConfig(tmp).background_handoff_shortcut).toBe('ctrl+b');
+
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ backgroundHandoffShortcut: 'CTRL+X' }));
+    expect(readSubagentsConfig(tmp).background_handoff_shortcut).toBe('ctrl+x');
+
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ background_handoff_shortcut: 'alt+b' }));
+    expect(readSubagentsConfig(tmp).background_handoff_shortcut).toBe('ctrl+h');
   });
 
   it('deep-merges model_profiles with project field precedence while scalar config precedence is unchanged', () => {
@@ -2507,28 +2537,43 @@ describe('subagents extension', () => {
     expect(rendered).toContain('effort: high');
   });
 
-  it('returns a background handoff result when ctrl+b is pressed in claude task mode', async () => {
+  it('returns a background handoff result when ctrl+h shortcut is triggered in claude task mode', async () => {
     writeAgent('analyst');
     fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ mode: 'claude' }));
     const manager = new SubagentManager(mockRunner(50));
     let runTool: any;
-    let terminalHandler: ((data: string) => any) | undefined;
+    let shortcutHandler: ((ctx: any) => any) | undefined;
+    const notifications: string[] = [];
     registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
+    extension({
+      registerTool: () => undefined,
+      registerCommand: () => undefined,
+      registerShortcut: (key: string, shortcut: any) => {
+        if (key === 'ctrl+h') shortcutHandler = shortcut.handler;
+      },
+    });
 
     const resultPromise = runTool.execute(
       '1',
       { agent: 'analyst', task: 'render clearly', mode: 'task' },
       undefined,
       undefined,
-      { cwd: tmp, ui: { onTerminalInput: (handler: (data: string) => any) => { terminalHandler = handler; return () => { terminalHandler = undefined; }; } } },
+      {
+        cwd: tmp,
+        ui: {
+          onTerminalInput: () => () => undefined,
+          notify: (message: string) => { notifications.push(message); },
+        },
+      },
     );
 
     await new Promise((resolve) => setTimeout(resolve, 5));
-    expect(terminalHandler?.('\u0002')).toEqual({ consume: true });
+    await shortcutHandler?.({ cwd: tmp, ui: { notify: (message: string) => { notifications.push(message); } } });
 
     const result = await resultPromise;
     const text = result.content[0].text;
     expect(result.isError).not.toBe(true);
+    expect(notifications.some((message) => message.includes('Sent subagent to background:'))).toBe(true);
     expect(text).toContain('Sent 1 subagent task(s) to background');
     const taskId = text.trim().split('\n').at(-1)!;
     expect(manager.getTask(taskId, tmp)?.mode).toBe('background');
@@ -2585,14 +2630,14 @@ describe('subagents extension', () => {
     expect(plain).not.toContain('�');
   });
 
-  it('renders a ctrl+b background hint in partial claude task-mode results', () => {
+  it('renders a ctrl+h background hint in partial claude task-mode results', () => {
     const manager = new SubagentManager(mockRunner());
     let runTool: any;
     registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
 
     const rendered = runTool.renderResult({ details: { frame: 0, backgroundable: true, tasks: [{ agent: 'analyst', status: 'running', effort: 'high', model: 'mock/model', last_activity: 'working' }] } }, { isPartial: true }, { fg: (_name: string, text: string) => text }).render(200).join('\n');
 
-    expect(rendered).toContain('ctrl+b to send to background');
+    expect(rendered).toContain('ctrl+h to send to background');
   });
 
   it('keeps subagent_run command results compact when tasks include large thread snapshots', async () => {

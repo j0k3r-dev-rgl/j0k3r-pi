@@ -1,6 +1,6 @@
 ---
 name: subagents-configuration
-description: "configure Pi Subagents Extension, including markdown subagent definitions, .pi/subagents.json, global model profiles, tool allowlists, history storage, and permission handoff."
+description: "configure Pi Subagents Extension, including markdown subagent definitions, .pi/subagents.json, model profiles, tool allowlists, background handoff shortcuts, history storage, and permission handoff."
 license: Apache-2.0
 metadata:
   author: j0k3r
@@ -16,7 +16,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
 ```json
 {
   "category": "workflow",
-  "domains": ["subagents-configuration", "subagent-config", "model-profile-config", "tool-allowlist-config", "subagent-history-config"],
+  "domains": ["subagents-configuration", "subagent-config", "model-profile-config", "tool-allowlist-config", "subagent-history-config", "subagent-shortcut-config"],
   "triggers": {
     "paths": [
       ".pi/subagents/**/*.md",
@@ -54,6 +54,8 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "model profiles configuration",
       "tool allowlist configuration",
       "subagent history configuration",
+      "background handoff shortcut",
+      "background_handoff_shortcut",
       "permission handoff configuration"
     ]
   },
@@ -77,7 +79,7 @@ Field conventions:
 
 ## Activation Contract
 
-Use this skill only when the user asks how to configure Pi Subagents or when editing/reviewing subagent configuration files: markdown subagent definitions and project/global `subagents.json`. Cover model profiles, allowed tools, history settings, background task config, lean resources, and permission handoff as configuration topics only.
+Use this skill only when the user asks how to configure Pi Subagents or when editing/reviewing subagent configuration files: markdown subagent definitions and project/global `subagents.json`. Cover model profiles, allowed tools, history settings, background task config, background handoff shortcuts, lean resources, and permission handoff as configuration topics only.
 
 Do not load this skill for ordinary subagent delegation/use (`subagent_run`, task status/result polling), extension implementation work, task history browsing, or editing this skill file; those are not configuration questions.
 
@@ -104,6 +106,7 @@ Recommended `subagents.json` starter:
   "stall_timeout_ms": 120000,
   "max_concurrency": 5,
   "session_resources": "lean",
+  "background_handoff_shortcut": "ctrl+h",
   "default_tools": [
     "read",
     "memory_context",
@@ -148,8 +151,9 @@ Instructions...
 4. Set minimal tool allowlists; remove any `subagent_*` entries.
 5. Configure `model_profiles`, `default_model`, and `default_effort` only when the user wants explicit routing.
 6. Validate JSON syntax for `subagents.json` and frontmatter/body structure for markdown agents.
-7. Tell the user to `/reload` or restart Pi.
-8. If validating configuration after reload, use `subagent_list_agents` only when the user asks for runtime verification; do not run delegated tasks just to validate configuration.
+7. When configuring Claude-mode background handoff, prefer `background_handoff_shortcut` with `ctrl+<letter>` values and document any built-in shortcut conflicts.
+8. Tell the user to `/reload` or restart Pi.
+9. If validating configuration after reload, use `subagent_list_agents` only when the user asks for runtime verification; do not run delegated tasks just to validate configuration.
 
 ## Output Contract
 
@@ -165,7 +169,7 @@ Return:
 
 ## References
 
-- `extensions/subagents/README.md` — Subagents configuration, history settings, and model profiles.
+- `extensions/subagents/README.md` — Subagents configuration, shortcuts, history settings, and model profiles.
 - `extensions/subagents/src/config.ts` — subagent/config loading and tool filtering.
 - `extensions/subagents/src/history.ts` — global history storage behavior.
 - `~/.pi/agent/skills/permission-guard-configuration/SKILL.md` or project-local equivalent selected by the skill registry — permission handoff configuration.

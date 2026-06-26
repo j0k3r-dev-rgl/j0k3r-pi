@@ -46,7 +46,7 @@ function formatTask(task: SubagentTask): string {
   return lines.join('\n');
 }
 
-function progressText(tasks: SubagentTask[], frame = 0, options: { backgroundable?: boolean } = {}): string {
+function progressText(tasks: SubagentTask[], frame = 0, options: { backgroundable?: boolean; backgroundShortcut?: string } = {}): string {
   const spinner = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'][frame % 10];
   const active = tasks.find((task) => task.status === 'running') ?? tasks[0];
   if (!active) return `${spinner} Starting subagent…`;
@@ -55,7 +55,7 @@ function progressText(tasks: SubagentTask[], frame = 0, options: { backgroundabl
     `${spinner} agent: ${active.agent} · status: ${active.status} · effort: ${active.effort ?? 'default/current'}`,
     `↳ model: ${active.model ?? 'starting'}${usage ? ` · usage: ${usage}` : ''}`,
     `↳ ${clip(active.last_activity ?? active.task ?? active.id, 160)}`,
-    options.backgroundable ? '↳ ctrl+b to send to background' : undefined,
+    options.backgroundable ? `↳ ${options.backgroundShortcut ?? 'ctrl+h'} to send to background` : undefined,
   ].filter(Boolean).join('\n');
 }
 
@@ -80,24 +80,56 @@ function installDoubleEscapeCancel(ctx: any, manager: SubagentManager, onCancel:
   return typeof unsubscribe === 'function' ? unsubscribe : () => {};
 }
 
-function installCtrlBBackground(
+const activeClaudeBackgroundHandoffs = new Set<() => SubagentTask[]>();
+
+function sendTasksToBackground(
+  ctx: any,
+  manager: SubagentManager,
+  getTaskIds: () => string[],
+  onBackground: (tasks: SubagentTask[]) => void,
+): SubagentTask[] {
+  const backgrounded = manager.sendToBackground(getTaskIds());
+  if (!backgrounded.length) return [];
+  ctx?.ui?.notify?.(
+    backgrounded.length === 1 ? `Sent subagent to background: ${backgrounded[0]!.id}` : `Sent ${backgrounded.length} subagent task(s) to background.`,
+    'info',
+  );
+  onBackground(backgrounded);
+  return backgrounded;
+}
+
+export function triggerClaudeBackgroundHandoff(): boolean {
+  for (const handoff of [...activeClaudeBackgroundHandoffs]) {
+    if (handoff().length) return true;
+  }
+  return false;
+}
+
+function ctrlShortcutToTerminalInput(shortcut: string): string | undefined {
+  const match = shortcut.trim().toLowerCase().match(/^ctrl\+([a-z])$/);
+  if (!match) return undefined;
+  const code = match[1]!.charCodeAt(0) - 96;
+  return code >= 1 && code <= 26 ? String.fromCharCode(code) : undefined;
+}
+
+function installBackgroundHandoffShortcut(
   ctx: any,
   manager: SubagentManager,
   getTaskIds: () => string[],
   onBackground: (tasks: SubagentTask[]) => void,
 ): () => void {
-  const unsubscribe = ctx?.ui?.onTerminalInput?.((data: string) => {
-    if (data !== '\u0002') return undefined;
-    const backgrounded = manager.sendToBackground(getTaskIds());
-    if (!backgrounded.length) return undefined;
-    ctx?.ui?.notify?.(
-      backgrounded.length === 1 ? `Sent subagent to background: ${backgrounded[0]!.id}` : `Sent ${backgrounded.length} subagent task(s) to background.`,
-      'info',
-    );
-    onBackground(backgrounded);
-    return { consume: true };
-  });
-  return typeof unsubscribe === 'function' ? unsubscribe : () => {};
+  const shortcut = readSubagentsConfig(ctx?.cwd ?? process.cwd()).background_handoff_shortcut ?? 'ctrl+h';
+  const terminalInput = ctrlShortcutToTerminalInput(shortcut);
+  const handoff = () => sendTasksToBackground(ctx, manager, getTaskIds, onBackground);
+  activeClaudeBackgroundHandoffs.add(handoff);
+  const unsubscribe = terminalInput ? ctx?.ui?.onTerminalInput?.((data: string) => {
+    if (data !== terminalInput) return undefined;
+    return handoff().length ? { consume: true } : undefined;
+  }) : undefined;
+  return () => {
+    activeClaudeBackgroundHandoffs.delete(handoff);
+    if (typeof unsubscribe === 'function') unsubscribe();
+  };
 }
 
 const TERMINAL_ESCAPE_RE = /\u001b\][^\u001b\u0007]*(?:\u001b\\|\u0007)|\u001b\[[0-?]*[ -/]*[@-~]/g;
@@ -194,7 +226,9 @@ export function registerSubagentTools(pi: any, manager: SubagentManager): void {
       let active = true;
       let latestTasks: SubagentTask[] = [];
       const isBackground = params.mode === 'background';
-      const canBackgroundInClaude = !isBackground && readSubagentsConfig(ctx?.cwd ?? process.cwd()).mode === 'claude';
+      const subagentsConfig = readSubagentsConfig(ctx?.cwd ?? process.cwd());
+      const canBackgroundInClaude = !isBackground && subagentsConfig.mode === 'claude';
+      const backgroundShortcut = subagentsConfig.background_handoff_shortcut ?? 'ctrl+h';
       let resolveBackground: ((value: { mode: 'background'; task_ids: string[] }) => void) | undefined;
       const backgroundPromise = canBackgroundInClaude
         ? new Promise<{ mode: 'background'; task_ids: string[] }>((resolve) => { resolveBackground = resolve; })
@@ -203,8 +237,8 @@ export function registerSubagentTools(pi: any, manager: SubagentManager): void {
         if (!active || isBackground) return;
         try {
           onUpdate?.({
-            content: [{ type: 'text', text: progressText(latestTasks, frame, { backgroundable: canBackgroundInClaude }) }],
-            details: { tasks: latestTasks.map(compactTaskForToolResult), frame: frame++, backgroundable: canBackgroundInClaude },
+            content: [{ type: 'text', text: progressText(latestTasks, frame, { backgroundable: canBackgroundInClaude, backgroundShortcut }) }],
+            details: { tasks: latestTasks.map(compactTaskForToolResult), frame: frame++, backgroundable: canBackgroundInClaude, backgroundShortcut },
           });
         } catch {
           active = false;
@@ -213,7 +247,7 @@ export function registerSubagentTools(pi: any, manager: SubagentManager): void {
       const interval = isBackground ? undefined : setInterval(emit, 500);
       const uninstallCancel = isBackground ? () => {} : installDoubleEscapeCancel(ctx, manager, () => { cancelledByDoubleEscape = true; });
       const uninstallBackground = canBackgroundInClaude
-        ? installCtrlBBackground(ctx, manager, () => latestTasks.map((task) => task.id), (tasks) => {
+        ? installBackgroundHandoffShortcut(ctx, manager, () => latestTasks.map((task) => task.id), (tasks) => {
           active = false;
           resolveBackground?.({ mode: 'background', task_ids: tasks.map((task) => task.id) });
         })
@@ -254,8 +288,8 @@ export function registerSubagentTools(pi: any, manager: SubagentManager): void {
       if (isPartial) {
         const frame = result?.details?.frame ?? 0;
         const raw = task
-          ? progressText([task], frame, { backgroundable: Boolean(result?.details?.backgroundable) })
-          : progressText([], frame, { backgroundable: Boolean(result?.details?.backgroundable) });
+          ? progressText([task], frame, { backgroundable: Boolean(result?.details?.backgroundable), backgroundShortcut: result?.details?.backgroundShortcut })
+          : progressText([], frame, { backgroundable: Boolean(result?.details?.backgroundable), backgroundShortcut: result?.details?.backgroundShortcut });
         const lines = raw.split('\n');
         const styled = lines.map((line: string, index: number) => (
           index === 0

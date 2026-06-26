@@ -158,16 +158,20 @@ Picker-specific bindings are not reserved by Pi's extension conflict check. For 
 | `sidebar` | `ctrl+.` | Toggle Pi Sidebar overlay | Active |
 | `subagents` | `/subagents` | Open the subagent history panel | Active command |
 | `subagents` | `ctrl+,` | Open the subagent history panel | Active |
+| `subagents` | `ctrl+h` | Send the running Claude-mode subagent task to background | Active default; configurable via `subagents.json` |
 | `subagents` | `ctrl+o` | Expand/collapse rendered tool output inside the subagent history panel | Panel-local; uses Pi `app.tools.expand` binding |
 
 ## Control-key candidates for subagents
 
 For a global extension shortcut, avoid reserved shortcuts above. Also avoid terminal-sensitive keys such as `ctrl+s`/`ctrl+q` when possible because they can interact with terminal flow control.
 
-Chosen shortcut:
+Chosen shortcuts:
 
 | Candidate | Reason |
 |---|---|
 | `ctrl+,` | Not used by Pi built-ins, not reserved by Pi's extension conflict check, and not used by current project extensions. |
+| `ctrl+h` | Default Claude-mode background handoff shortcut for `subagents`; configurable via `background_handoff_shortcut` in `subagents.json`. |
+
+The earlier shortcut-probe output showed `ctrl+j` is already occupied by Pi `tui.input.newLine`, so it should not be treated as free for a global extension shortcut.
 
 Other non-reserved control keys exist but overlap with normal editor editing/navigation behavior (`ctrl+a`, `ctrl+b`, `ctrl+e`, `ctrl+f`, `ctrl+n`, `ctrl+r`, `ctrl+u`, `ctrl+w`, `ctrl+x`, `ctrl+y`, etc.), so they are less appropriate for a global extension shortcut.
