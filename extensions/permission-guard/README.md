@@ -8,6 +8,7 @@
 - Policy checks for user `!` and `!!` bash commands via `user_bash` events.
 - Workspace and outside-workspace path policy.
 - Default read-only passthrough for valid Pi skill files in recognized global and project skill locations.
+- Default read-only passthrough for Pi's installed README, docs, and examples documentation.
 - Optional `bypassWorkspace` mode for provably workspace-contained operations only.
 - Secret path and secret-like command denial by default.
 - Conservative safe-subset bash analysis for simple commands, quoted literals, environment assignments, `&&`, `||`, `;`, newlines, safe `cd`, basic redirections, and narrowly recognized read-only pipelines.
@@ -48,6 +49,8 @@ MVP enforcement covers supported built-in tools and user bash events that pass t
 
 Skill loading passthrough covers read-only access to loadable skill markdown files in recognized Pi skill roots only. It does not allow writes, bash execution, arbitrary skill scripts, malformed skill files, or symlink escapes outside the skill root.
 
+Pi documentation passthrough covers read-only access to the installed `@earendil-works/pi-coding-agent` package `README.md`, `docs/**`, and `examples/**` paths under a package root whose `package.json` declares that package name. It does not allow package internals, lookalike folders without the matching package identity, writes, bash execution, or symlink escapes outside the package root.
+
 ## Runtime hooks
 
 This extension does not register LLM tools or slash commands. It registers Pi event handlers:
@@ -70,6 +73,7 @@ Built-in defaults are conservative. Project or global config can override them, 
 - Workspace `.git/**` and `node_modules/**` default to `ask`.
 - Non-secret outside-workspace reads, lists, searches, writes, and creates default to `ask`.
 - Valid skill file reads from recognized global and project skill roots are allowed by default without project configuration.
+- Pi's installed README, docs, and examples documentation reads are allowed by default without project configuration.
 - Non-interactive ask decisions fail closed by default.
 - Secrets are denied by default.
 - Default protected paths include `.env`, `.env.*`, key/certificate files, and common SSH/AWS/GPG credential locations.

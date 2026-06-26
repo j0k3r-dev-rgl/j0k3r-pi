@@ -265,6 +265,59 @@ describe('pure permission policy engine', () => {
     });
   });
 
+  it('allows Pi package README and docs to load without outside-workspace approval', async () => {
+    const cwd = await tempWorkspace('permission-guard-policy-trusted-pi-docs-');
+    const packageRoot = join(await mkdtemp(join(tmpdir(), 'permission-guard-policy-pi-install-')), 'lib', 'node_modules', '@earendil-works', 'pi-coding-agent');
+    const readme = join(packageRoot, 'README.md');
+    const docsFile = join(packageRoot, 'docs', 'extensions.md');
+    const exampleFile = join(packageRoot, 'examples', 'extensions', 'permission-gate.ts');
+    await mkdir(join(packageRoot, 'docs'), { recursive: true });
+    await mkdir(join(packageRoot, 'examples', 'extensions'), { recursive: true });
+    await writeFile(join(packageRoot, 'package.json'), JSON.stringify({ name: '@earendil-works/pi-coding-agent' }), 'utf8');
+    await writeFile(readme, '# Pi docs\n', 'utf8');
+    await writeFile(docsFile, '# Extension docs\n', 'utf8');
+    await writeFile(exampleFile, 'export default function example() {}\n', 'utf8');
+
+    for (const path of [readme, docsFile, exampleFile]) {
+      const request = await pathRequest(path, cwd, 'read');
+
+      expect(evaluatePermission(policy({ workspace: { root: cwd } }), request)).toMatchObject({
+        decision: 'allow',
+        finalDecision: 'allow',
+        reasonCode: 'trusted_pi_documentation_read_allowed',
+        details: { matchedLayer: 'trustedDocumentation' },
+      });
+    }
+  });
+
+  it('does not auto-allow Pi package lookalikes, package internals, or documentation symlink escapes', async () => {
+    const cwd = await tempWorkspace('permission-guard-policy-trusted-pi-docs-safety-');
+    const packageRoot = join(await mkdtemp(join(tmpdir(), 'permission-guard-policy-pi-install-')), 'lib', 'node_modules', '@earendil-works', 'pi-coding-agent');
+    const lookalikeRoot = join(await mkdtemp(join(tmpdir(), 'permission-guard-policy-lookalike-')), '@earendil-works', 'pi-coding-agent');
+    const outside = await mkdtemp(join(tmpdir(), 'permission-guard-policy-docs-outside-'));
+    const packageSource = join(packageRoot, 'dist', 'core', 'skills.js');
+    const lookalikeDoc = join(lookalikeRoot, 'docs', 'README.md');
+    const symlinkedDoc = join(packageRoot, 'docs', 'linked.md');
+    await mkdir(join(packageRoot, 'dist', 'core'), { recursive: true });
+    await mkdir(join(packageRoot, 'docs'), { recursive: true });
+    await mkdir(join(lookalikeRoot, 'docs'), { recursive: true });
+    await writeFile(join(packageRoot, 'package.json'), JSON.stringify({ name: '@earendil-works/pi-coding-agent' }), 'utf8');
+    await writeFile(packageSource, 'export const internal = true;\n', 'utf8');
+    await writeFile(lookalikeDoc, '# Lookalike docs\n', 'utf8');
+    await writeFile(join(outside, 'linked.md'), '# Escaped docs\n', 'utf8');
+    await symlink(join(outside, 'linked.md'), symlinkedDoc);
+
+    for (const path of [packageSource, lookalikeDoc, symlinkedDoc]) {
+      const request = await pathRequest(path, cwd, 'read');
+
+      expect(evaluatePermission(policy({ workspace: { root: cwd } }), request)).toMatchObject({
+        decision: 'ask',
+        finalDecision: 'requires_approval',
+        reasonCode: 'outside_workspace_read_requires_approval',
+      });
+    }
+  });
+
   it('auto-allows workspace-confined non-bash requests when workspace policy already allows', async () => {
     const cwd = await tempWorkspace('permission-guard-policy-bypass-workspace-');
     await writeFile(join(cwd, 'src', 'index.ts'), 'inside', 'utf8');

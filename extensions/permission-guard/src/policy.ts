@@ -3,6 +3,7 @@ import { classifyBashCommand } from './bash-policy.js';
 import { isPathContainedByRoot, isRequestPathCoveredByApproval, matchesWorkspaceGlob } from './path-policy.js';
 import type { ProjectPathApproval, ScopedBashApproval } from './types.js';
 import { evaluateSecretDeny } from './secrets.js';
+import { isTrustedPiDocumentationReadRequest } from './trusted-pi-documentation.js';
 import { isTrustedSkillReadRequest } from './trusted-skill.js';
 import type { Action, PermissionDecisionResult, PermissionPolicyConfig, PermissionRequest, PolicyDecision, RiskLevel, ToolMode } from './types.js';
 
@@ -227,6 +228,27 @@ function trustedSkillReadDecision(
   });
 }
 
+function trustedPiDocumentationReadDecision(
+  config: PermissionPolicyConfig,
+  request: PermissionRequest,
+  baseResult: PermissionDecisionResult,
+): PermissionDecisionResult | undefined {
+  if (baseResult.decision !== 'ask') return undefined;
+  if (!request.target || !isTrustedPiDocumentationReadRequest(request)) return undefined;
+
+  return decisionResult({
+    config,
+    request,
+    decision: 'allow',
+    reason: 'Read access to Pi documentation in the installed Pi package is allowed by default.',
+    reasonCode: 'trusted_pi_documentation_read_allowed',
+    riskLevel: 'low',
+    matchedLayer: 'trustedDocumentation',
+    matchedRule: 'trusted-pi-documentation-read',
+    target: request.target,
+  });
+}
+
 function rootContains(approvedRoot: string, requestedRoot: string): boolean {
   if (approvedRoot === requestedRoot) return true;
   const rel = relative(approvedRoot, requestedRoot);
@@ -408,6 +430,11 @@ export function evaluatePermission(
     ? trustedSkillReadDecision(config, request, baseResult)
     : undefined;
   if (trustedSkillRead) return trustedSkillRead;
+
+  const trustedPiDocumentationRead = request.action !== 'bash'
+    ? trustedPiDocumentationReadDecision(config, request, baseResult)
+    : undefined;
+  if (trustedPiDocumentationRead) return trustedPiDocumentationRead;
 
   const projectPathApproval = request.action !== 'bash'
     ? applyProjectPathApproval(config, request, baseResult)
