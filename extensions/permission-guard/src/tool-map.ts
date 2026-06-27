@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { classifyPathTarget, resolveWorkspaceRoot } from './path-policy.js';
 import type { Action, PermissionPolicyConfig, PermissionRequest, PermissionSource, RequestOrigin } from './types.js';
 
@@ -59,9 +60,9 @@ function sourceForTool(tool: BuiltinPermissionTool): PermissionSource {
   return tool === 'user_bash' ? 'user_bash' : 'tool_call';
 }
 
-function stableId(tool: BuiltinPermissionTool, timestamp: string): string {
-  const safeTimestamp = timestamp.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || 'request';
-  return `permission-${tool}-${safeTimestamp}`;
+function stableId(tool: BuiltinPermissionTool, basis: string): string {
+  const digest = createHash('sha256').update(`${tool}:${basis}`).digest('hex').slice(0, 24);
+  return `permission-${tool}-${digest}`;
 }
 
 function safeCommandSummary(command: string, maxLength: number): string {
@@ -82,7 +83,7 @@ export async function mapBuiltinToolInput(options: MapBuiltinToolInputOptions): 
   if (command !== undefined) {
     const summary = safeCommandSummary(command, options.config.bash.maxCommandPreviewChars);
     return {
-      id: stableId(options.tool, timestamp),
+      id: stableId(options.tool, `${options.cwd}:${command}`),
       source: sourceForTool(options.tool),
       origin: options.origin ?? 'main',
       requester: options.requester,
@@ -129,7 +130,7 @@ export async function mapBuiltinToolInput(options: MapBuiltinToolInputOptions): 
   const action: Action = options.tool === 'write' ? (target.exists ? 'write' : 'create') : preliminaryAction;
 
   return {
-    id: stableId(options.tool, timestamp),
+    id: stableId(options.tool, `${options.cwd}:${rawPath}:${action}`),
     source: sourceForTool(options.tool),
     origin: options.origin ?? 'main',
     requester: options.requester,

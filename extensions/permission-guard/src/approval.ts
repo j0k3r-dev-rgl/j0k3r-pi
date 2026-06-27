@@ -33,6 +33,7 @@ export interface ResolveApprovalOptions {
   sessionCache?: SessionApprovalCache;
   projectApproval?: (approval: unknown) => Promise<void> | void;
   requestPermissionApproval?: (payload: PermissionRequiredPayload) => Promise<ApprovalChoice | undefined> | ApprovalChoice | undefined;
+  interactionChoice?: ApprovalChoice;
 }
 
 export interface ApprovalResolution {
@@ -126,7 +127,7 @@ export function buildPermissionRequiredPayload(
   const bashApproval = buildScopedBashApproval(request, decision);
   const pathApprovalOptions = pathProjectApprovalOptions(request);
   return {
-    type: 'permission_required',
+    type: 'interaction_required',
     requestId: request.id,
     tool: request.tool,
     action: request.action,
@@ -155,22 +156,22 @@ export async function resolveApproval(
     return { result: decision };
   }
 
-  if (request.origin === 'subagent') {
+  if (request.origin === 'subagent' && !options.interactionChoice) {
     const payload = buildPermissionRequiredPayload(request, decision);
     return {
       result: {
         ...decision,
         decision: 'ask',
         finalDecision: 'requires_approval',
-        reason: 'Permission approval must be collected by the main thread.',
-        reasonCode: 'permission_required',
+        reason: 'Human interaction must be collected by the main thread.',
+        reasonCode: 'interaction_required',
         audit: false,
       },
       permissionRequired: payload,
     };
   }
 
-  if (!request.hasUI) {
+  if (!request.hasUI && !options.interactionChoice) {
     return { result: nonInteractiveFallback(config, decision) };
   }
 
@@ -185,7 +186,7 @@ export async function resolveApproval(
     return options.prompt(approvalPrompt(request, decision));
   };
 
-  const choice = await resolveChoice();
+  const choice = options.interactionChoice ?? await resolveChoice();
   if (!choice) {
     return { result: nonInteractiveFallback(config, decision) };
   }

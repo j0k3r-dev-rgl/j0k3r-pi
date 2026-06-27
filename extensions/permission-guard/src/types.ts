@@ -246,7 +246,7 @@ export interface PermissionDecisionResult {
 }
 
 export interface PermissionRequiredPayload {
-  type: 'permission_required';
+  type: 'interaction_required';
   requestId: string;
   tool: string;
   action: Action;
@@ -286,7 +286,7 @@ export interface AuditEvent {
   requestId: string;
   origin: RequestOrigin;
   requester?: PermissionRequest['requester'];
-  decision: 'allow' | 'deny' | 'ask' | 'approval_allow_once' | 'approval_allow_session' | 'approval_deny' | 'permission_required';
+  decision: 'allow' | 'deny' | 'ask' | 'approval_allow_once' | 'approval_allow_session' | 'approval_deny' | 'interaction_required';
   tool: string;
   action: Action;
   reasonCode: string;

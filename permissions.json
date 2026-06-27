@@ -1,5 +1,4 @@
 {
-	"bypassAll": true,
 	"outsideWorkspace": {
 		"read": "ask",
 		"list": "ask",
@@ -7,9 +6,6 @@
 		"write": "ask",
 		"create": "ask",
 		"rememberApprovals": "session"
-	},
-	"secrets": {
-		"mode": "deny"
 	},
 	"bash": {
 		"outsideWorkspaceFilesystem": "ask",

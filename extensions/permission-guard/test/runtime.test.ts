@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 import permissionGuardExtension from '../index.js';
-import { consumePermissionRequest, resolvePermissionRequest } from '../src/permission-channel.js';
+import { resolveInteractionRequest } from '../src/interaction-channel.js';
 import { registerPermissionGuardRuntime } from '../src/runtime.js';
 import type { ApprovalChoice } from '../src/types.js';
 
@@ -139,7 +139,7 @@ describe('permission guard runtime wiring', () => {
 
     expect(requestPermissionApproval).toHaveBeenCalledTimes(1);
     expect(requestPermissionApproval).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'permission_required',
+      type: 'interaction_required',
       tool: 'read',
       action: 'read',
       prompt: expect.objectContaining({
@@ -203,21 +203,11 @@ describe('permission guard runtime wiring', () => {
     expect(ctx.ui.select).not.toHaveBeenCalled();
   });
 
-  it('honors a main-thread allow-once approval registry entry for a retried subagent request and consumes it', async () => {
-    const cwd = await tempWorkspace('permission-guard-runtime-subagent-approval-');
-    const registryKey = Symbol.for('pi.permissionGuard.mainThreadApprovals');
+  it('consumes a generic interaction response on retried subagent requests', async () => {
+    const cwd = await tempWorkspace('permission-guard-runtime-subagent-response-');
+    const responseKey = Symbol.for('pi.subagents.interactionResponses');
     const holder = globalThis as Record<symbol, unknown>;
-    const previousRegistry = holder[registryKey];
-    const registry = new Map<string, unknown>();
-    registry.set('external:once:target:test-policy:read:read:outside', {
-      cacheKey: 'external:once:target:test-policy:read:read:outside',
-      mode: 'once',
-      action: 'read',
-      tool: 'read',
-      targetPattern: join(cwd, '..', 'outside.txt'),
-      policyIdentity: 'permission-guard:built-in-defaults',
-    });
-    holder[registryKey] = registry;
+    const previousResponses = holder[responseKey];
     const pi = createMockPi();
     registerPermissionGuardRuntime(pi);
     const handler = pi.handlers.tool_call![0] as ToolCallHandler;
@@ -229,19 +219,20 @@ describe('permission guard runtime wiring', () => {
     });
 
     try {
-      await expect(handler({ toolName: 'read', toolCallId: 'tc-subagent-approved', input: { path: '../outside.txt' } }, ctx)).resolves.toBeUndefined();
-      expect(registry.size).toBe(0);
-      const second = await handler({ toolName: 'read', toolCallId: 'tc-subagent-approved-again', input: { path: '../outside.txt' } }, ctx);
-      expect(second).toEqual(expect.objectContaining({ block: true }));
-      expect((second as any).details?.permissionRequest?.handle).toEqual(expect.any(String));
-      expect((second as any).details?.permission_request).toEqual(expect.objectContaining({ type: 'permission_required', tool: 'read' }));
+      const first = await handler({ toolName: 'read', toolCallId: 'tc-subagent-response-first', input: { path: '../outside.txt' } }, ctx);
+      const requestId = (first as any).details?.interaction_request?.requestId;
+      const responses = new Map<string, unknown>([[requestId, { choice: 'Allow once' }]]);
+      holder[responseKey] = responses;
+
+      await expect(handler({ toolName: 'read', toolCallId: 'tc-subagent-response-retry', input: { path: '../outside.txt' } }, ctx)).resolves.toBeUndefined();
+      expect(responses.size).toBe(0);
     } finally {
-      if (previousRegistry === undefined) delete holder[registryKey];
-      else holder[registryKey] = previousRegistry;
+      if (previousResponses === undefined) delete holder[responseKey];
+      else holder[responseKey] = previousResponses;
     }
   });
 
-  it('surfaces subagent-originated asks through a structured permission handle from the guard side', async () => {
+  it('surfaces subagent-originated asks through generic interaction_required channel data', async () => {
     const cwd = await tempWorkspace('permission-guard-runtime-subagent-');
     const pi = createMockPi();
     registerPermissionGuardRuntime(pi);
@@ -257,25 +248,41 @@ describe('permission guard runtime wiring', () => {
     }, ctx);
 
     expect(ctx.ui.select).not.toHaveBeenCalled();
-    expect(result).toEqual(expect.objectContaining({ block: true, reason: expect.not.stringMatching(/^permission_required:/) }));
-    const published = (result as any).details?.permissionRequest;
+    expect(result).toEqual(expect.objectContaining({ block: true, reason: expect.not.stringMatching(/^interaction_required:/) }));
+    const published = (result as any).details?.interactionRequest;
     expect(published).toEqual(expect.objectContaining({ handle: expect.any(String), payload: expect.any(Object) }));
-    expect((result as any).details?.permission_request).toEqual(expect.objectContaining({ type: 'permission_required', tool: 'read', origin: 'subagent' }));
-    expect(resolvePermissionRequest(published.handle)).toEqual(expect.objectContaining({
-      type: 'permission_required',
-      tool: 'read',
-      action: 'read',
+    expect((result as any).details?.interaction_request).toEqual(expect.objectContaining({ type: 'interaction_required', kind: 'permission:read:read', origin: 'subagent' }));
+    expect(resolveInteractionRequest(published.handle)).toEqual(expect.objectContaining({
+      type: 'interaction_required',
+      kind: 'permission:read:read',
       origin: 'subagent',
       requester: { subagentId: 'sg-1', subagentName: 'sdd-apply', taskId: '2.10' },
       prompt: expect.objectContaining({
         choices: ['Allow once', 'Allow for session', 'Allow this file for project', 'Allow this folder for project', 'Deny'],
         safeTarget: expect.stringContaining('outside.txt'),
       }),
+      payload: expect.objectContaining({
+        permission: expect.objectContaining({ tool: 'read', action: 'read', reasonCode: 'outside_workspace_read_requires_approval' }),
+      }),
+      response: { expected: 'choice' },
     }));
-    expect(consumePermissionRequest(published.handle)).toEqual(expect.objectContaining({ requestId: expect.any(String) }));
   });
 
-  it('surfaces subagent-originated asks without direct UI through structured permission data instead of non-interactive denial', async () => {
+  it('fails closed without generic interaction data when no-ui request is not from a subagent session', async () => {
+    const cwd = await tempWorkspace('permission-guard-runtime-no-subagent-fallback-');
+    const pi = createMockPi();
+    registerPermissionGuardRuntime(pi);
+    const handler = pi.handlers.tool_call![0] as ToolCallHandler;
+    const ctx = createCtx(cwd, [], { mode: 'json', hasUI: false });
+
+    const result = await handler({ toolName: 'read', toolCallId: 'tc-no-subagent', input: { path: '../outside.txt' } }, ctx);
+
+    expect(result).toEqual(expect.objectContaining({ block: true }));
+    expect((result as any).reason).toContain('non_interactive_ask_denied');
+    expect((result as any).details?.interactionRequest).toBeUndefined();
+  });
+
+  it('surfaces subagent-originated asks without direct UI through structured interaction data instead of non-interactive denial', async () => {
     const cwd = await tempWorkspace('permission-guard-runtime-subagent-no-ui-');
     const pi = createMockPi();
     registerPermissionGuardRuntime(pi);
@@ -296,12 +303,11 @@ describe('permission guard runtime wiring', () => {
     expect(ctx.ui.select).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({ block: true }));
     expect((result as any).reason).not.toContain('non_interactive_ask_denied');
-    const published = (result as any).details?.permissionRequest;
-    expect((result as any).details?.permission_request).toEqual(expect.objectContaining({ type: 'permission_required', tool: 'read', origin: 'subagent' }));
-    expect(resolvePermissionRequest(published.handle)).toEqual(expect.objectContaining({
-      type: 'permission_required',
-      tool: 'read',
-      action: 'read',
+    const published = (result as any).details?.interactionRequest;
+    expect((result as any).details?.interaction_request).toEqual(expect.objectContaining({ type: 'interaction_required', kind: 'permission:read:read', origin: 'subagent' }));
+    expect(resolveInteractionRequest(published.handle)).toEqual(expect.objectContaining({
+      type: 'interaction_required',
+      kind: 'permission:read:read',
       origin: 'subagent',
       requester: { subagentId: 'sg-no-ui', subagentName: 'sdd-verify', taskId: '3.6' },
       prompt: expect.objectContaining({
@@ -311,17 +317,40 @@ describe('permission guard runtime wiring', () => {
     }));
   });
 
+  it('does not leak secret-like command values or long raw commands in interaction requests', async () => {
+    const cwd = await tempWorkspace('permission-guard-runtime-interaction-redaction-');
+    await writeProjectPolicy(cwd, { bash: { network: 'ask', maxCommandPreviewChars: 80 } });
+    const pi = createMockPi();
+    registerPermissionGuardRuntime(pi);
+    const handler = pi.handlers.tool_call![0] as ToolCallHandler;
+    const secret = 'sentinel-super-secret-token-value';
+    const command = `curl 'https://example.com/data?token=${secret}&q=${'x'.repeat(300)}'`;
+    const ctx = createCtx(cwd, [], {
+      mode: 'print',
+      hasUI: false,
+      origin: 'subagent',
+      requester: { subagentName: 'sdd-verify' },
+    });
+
+    const result = await handler({ toolName: 'bash', toolCallId: 'tc-redaction', input: { command } }, ctx);
+    const serialized = JSON.stringify((result as any).details?.interaction_request);
+
+    expect(serialized).toContain('interaction_required');
+    expect(serialized).not.toContain(secret);
+    expect(serialized).not.toContain('x'.repeat(120));
+    expect(serialized).not.toContain(command);
+  });
+
   it('uses subagent session metadata to surface no-direct-UI asks when tool events lack origin fields', async () => {
     const cwd = await tempWorkspace('permission-guard-runtime-subagent-registry-');
     const pi = createMockPi();
     registerPermissionGuardRuntime(pi);
     const handler = pi.handlers.tool_call![0] as ToolCallHandler;
     const sessionId = 'subagent-session-registry';
-    const registryKey = Symbol.for('pi.permissionGuard.subagentSessions');
+    const registryKey = Symbol.for('pi.subagents.interactionSessions');
     const previousRegistry = (globalThis as Record<symbol, unknown>)[registryKey];
     const registry = new Map<string, unknown>();
     registry.set(sessionId, {
-      origin: 'subagent',
       requester: { subagentName: 'sdd-verify', description: 'manual validation' },
     });
     (globalThis as Record<symbol, unknown>)[registryKey] = registry;
@@ -344,12 +373,11 @@ describe('permission guard runtime wiring', () => {
       expect(ctx.ui.select).not.toHaveBeenCalled();
       expect(result).toEqual(expect.objectContaining({ block: true }));
       expect((result as any).reason).not.toContain('non_interactive_ask_denied');
-      const published = (result as any).details?.permissionRequest;
-      expect((result as any).details?.permission_request).toEqual(expect.objectContaining({ type: 'permission_required', tool: 'read', origin: 'subagent' }));
-      expect(resolvePermissionRequest(published.handle)).toEqual(expect.objectContaining({
-        type: 'permission_required',
-        tool: 'read',
-        action: 'read',
+      const published = (result as any).details?.interactionRequest;
+      expect((result as any).details?.interaction_request).toEqual(expect.objectContaining({ type: 'interaction_required', kind: 'permission:read:read', origin: 'subagent' }));
+      expect(resolveInteractionRequest(published.handle)).toEqual(expect.objectContaining({
+        type: 'interaction_required',
+        kind: 'permission:read:read',
         origin: 'subagent',
         requester: { subagentName: 'sdd-verify', description: 'manual validation' },
       }));
@@ -426,13 +454,17 @@ describe('permission guard runtime wiring', () => {
 
     const result = await handler({ toolName: 'read', toolCallId: 'tc-subagent-path-options', input: { path: approvedFile } }, ctx);
 
-    expect((result as any).details?.permission_request).toEqual(expect.objectContaining({
-      type: 'permission_required',
-      tool: 'read',
-      projectScope: expect.objectContaining({
-        pathApprovalOptions: expect.objectContaining({
-          file: expect.objectContaining({ scope: 'file', normalizedAbsolute: approvedFile }),
-          folder: expect.objectContaining({ scope: 'folder', normalizedAbsolute: outsideRoot }),
+    expect((result as any).details?.interaction_request).toEqual(expect.objectContaining({
+      type: 'interaction_required',
+      kind: 'permission:read:read',
+      payload: expect.objectContaining({
+        permission: expect.objectContaining({
+          projectScope: expect.objectContaining({
+            pathApprovalOptions: expect.objectContaining({
+              file: expect.objectContaining({ scope: 'file', normalizedAbsolute: approvedFile }),
+              folder: expect.objectContaining({ scope: 'folder', normalizedAbsolute: outsideRoot }),
+            }),
+          }),
         }),
       }),
     }));

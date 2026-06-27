@@ -85,7 +85,7 @@ export function redactAuditCommandSummary(command: string, config: PermissionPol
 function shouldAudit(config: PermissionPolicyConfig, decision: AuditEvent['decision']): boolean {
   if (!config.audit.enabled) return false;
   if (decision === 'deny') return config.audit.logDenied;
-  if (decision === 'approval_allow_once' || decision === 'approval_allow_session' || decision === 'approval_deny' || decision === 'permission_required') return config.audit.logApprovals;
+  if (decision === 'approval_allow_once' || decision === 'approval_allow_session' || decision === 'approval_deny' || decision === 'interaction_required') return config.audit.logApprovals;
   if (decision === 'allow') return config.audit.logAllowed;
   return false;
 }
@@ -188,7 +188,7 @@ export async function recordPermissionRequiredAudit(
   result: PermissionDecisionResult,
   options: RecordAuditOptions = {},
 ): Promise<RecordAuditResult> {
-  return recordAuditDecision(config, request, result, { ...options, auditDecision: 'permission_required' });
+  return recordAuditDecision(config, request, result, { ...options, auditDecision: 'interaction_required' });
 }
 
 export async function recordAuditDecision(

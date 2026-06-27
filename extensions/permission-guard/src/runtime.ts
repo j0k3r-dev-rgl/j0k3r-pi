@@ -10,8 +10,8 @@ import {
   snapshotMainThreadApprovals,
   type SessionApprovalCache,
 } from './session-cache.js';
+import { buildInteractionRequest, consumeInteractionResponse, publishInteractionRequest } from './interaction-channel.js';
 import { mapBuiltinToolInput, type BuiltinPermissionTool } from './tool-map.js';
-import { publishPermissionRequest } from './permission-channel.js';
 import type { ApprovalChoice, PermissionDecisionResult, PermissionRequest, PermissionRequiredPayload, RequestOrigin } from './types.js';
 
 export interface RuntimePiLike {
@@ -60,8 +60,8 @@ interface SubagentSessionMetadata {
 }
 
 const supportedToolCallTools = new Set<BuiltinPermissionTool>(['read', 'write', 'edit', 'grep', 'find', 'ls', 'bash']);
-const permissionRequiredMarker = 'permission_required:';
-const subagentSessionRegistryKey = Symbol.for('pi.permissionGuard.subagentSessions');
+const interactionRequiredMarker = 'interaction_required:';
+const subagentSessionRegistryKey = Symbol.for('pi.subagents.interactionSessions');
 
 function isSupportedTool(toolName: string | undefined): toolName is Exclude<BuiltinPermissionTool, 'user_bash'> {
   return supportedToolCallTools.has(toolName as BuiltinPermissionTool);
@@ -101,14 +101,12 @@ function subagentSessionMetadata(ctx: RuntimeContextLike): SubagentSessionMetada
 
 function originFor(event: ToolCallEventLike | UserBashEventLike, ctx: RuntimeContextLike): RequestOrigin {
   const sessionMetadata = subagentSessionMetadata(ctx);
-  if (isSubagentLike(event.origin) || isSubagentLike(ctx.origin) || isSubagentLike(sessionMetadata?.origin)) return 'subagent';
+  if (isSubagentLike(event.origin) || isSubagentLike(ctx.origin) || sessionMetadata) return 'subagent';
   if (
     event.requester?.subagentId ||
     event.requester?.subagentName ||
     ctx.requester?.subagentId ||
-    ctx.requester?.subagentName ||
-    sessionMetadata?.requester?.subagentId ||
-    sessionMetadata?.requester?.subagentName
+    ctx.requester?.subagentName
   ) return 'subagent';
   if (event.origin === 'main' || ctx.origin === 'main') return 'main';
   return 'main';
@@ -138,17 +136,18 @@ function blockReason(result: PermissionDecisionResult, auditError?: string): str
   return parts.join('\n');
 }
 
-function permissionRequiredReason(payload: PermissionRequiredPayload): string {
-  return `${permissionRequiredMarker}${JSON.stringify(payload)}`;
+function interactionRequiredReason(payload: ReturnType<typeof buildInteractionRequest>): string {
+  return `${interactionRequiredMarker}${JSON.stringify(payload)}`;
 }
 
-function publishPermissionDetails(payload: PermissionRequiredPayload): {
-  permissionRequest: ReturnType<typeof publishPermissionRequest>;
-  permission_request: PermissionRequiredPayload;
+function publishInteractionDetails(payload: PermissionRequiredPayload): {
+  interactionRequest: ReturnType<typeof publishInteractionRequest>;
+  interaction_request: ReturnType<typeof buildInteractionRequest>;
 } {
+  const interaction = buildInteractionRequest(payload);
   return {
-    permissionRequest: publishPermissionRequest(payload),
-    permission_request: payload,
+    interactionRequest: publishInteractionRequest(interaction),
+    interaction_request: interaction,
   };
 }
 
@@ -176,6 +175,7 @@ async function resolveRuntimeDecision(
   const config = loadResult.config;
   const sessionCache = sessionCacheFor(state, ctx);
   const initial = evaluatePermission(config, request, mergeApprovalSnapshots(sessionCache.snapshot(), snapshotMainThreadApprovals()));
+  const interactionChoice = request.origin === 'subagent' ? consumeInteractionResponse(request.id) : undefined;
   const approval = await resolveApproval(config, request, initial, {
     sessionCache,
     prompt: hasUIFor(ctx) && ctx.ui?.select
@@ -187,6 +187,7 @@ async function resolveRuntimeDecision(
     requestPermissionApproval: hasUIFor(ctx) && ctx.ui?.requestPermissionApproval
       ? async (payload) => ctx.ui!.requestPermissionApproval!(payload)
       : undefined,
+    interactionChoice,
     projectApproval: async (approval) => {
       if (typeof approval === 'string') {
         return;
@@ -251,15 +252,15 @@ export function registerPermissionGuardRuntime(pi: RuntimePiLike): void {
 
     const resolved = await resolveRuntimeDecision(loadResult, request, ctx, state);
     if (resolved.permissionRequired) {
-      const permissionDetails = publishPermissionDetails(resolved.permissionRequired);
+      const interactionDetails = publishInteractionDetails(resolved.permissionRequired);
       const audit = await recordPermissionRequiredAudit(loadResult.config, request, resolved.result);
       return {
         block: true,
-        reason: 'Permission approval must be collected by the main thread.',
+        reason: 'Human interaction must be collected by the main thread.',
         details: {
-          ...permissionDetails,
-          permission_transport: {
-            handlePublished: Boolean(permissionDetails.permissionRequest.handle),
+          ...interactionDetails,
+          interaction_transport: {
+            handlePublished: Boolean(interactionDetails.interactionRequest.handle),
             directPayloadAttached: true,
             auditSkipped: audit.skipped,
             auditError: audit.auditError,
@@ -284,7 +285,16 @@ export function registerPermissionGuardRuntime(pi: RuntimePiLike): void {
 
     const resolved = await resolveRuntimeDecision(loadResult, request, ctx, state);
     if (resolved.permissionRequired) {
-      return { result: { output: permissionRequiredReason(resolved.permissionRequired), exitCode: 1, cancelled: false, truncated: false } };
+      const interactionDetails = publishInteractionDetails(resolved.permissionRequired);
+      return {
+        result: {
+          output: interactionRequiredReason(interactionDetails.interaction_request),
+          exitCode: 1,
+          cancelled: false,
+          truncated: false,
+        },
+        details: interactionDetails,
+      };
     }
     if (resolved.result.finalDecision === 'deny') {
       return userBashBlockResult(resolved.result, resolved.auditError);

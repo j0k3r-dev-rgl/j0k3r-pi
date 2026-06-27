@@ -91,7 +91,7 @@ describe('interactive approval and session cache', () => {
     });
 
     expect(hook).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'permission_required',
+      type: 'interaction_required',
       requestId: request.id,
       prompt: expect.objectContaining({
         choices: ['Allow once', 'Allow for session', 'Allow this file for project', 'Allow this folder for project', 'Deny'],
@@ -257,7 +257,7 @@ describe('interactive approval and session cache', () => {
     expect(cache.snapshot().entries).toEqual([]);
   });
 
-  it('surfaces subagent-originated asks as permission_required payloads with requester identity instead of prompting locally', async () => {
+  it('surfaces subagent-originated asks for generic interaction handoff with requester identity instead of prompting locally', async () => {
     const cwd = await tempWorkspace('permission-guard-approval-subagent-');
     const config = policy({ workspace: { root: cwd } });
     const request = await outsideReadRequest(cwd, '../outside.txt', {
@@ -274,9 +274,9 @@ describe('interactive approval and session cache', () => {
     });
 
     expect(prompt).not.toHaveBeenCalled();
-    expect(resolved.result).toMatchObject({ decision: 'ask', finalDecision: 'requires_approval', reasonCode: 'permission_required' });
+    expect(resolved.result).toMatchObject({ decision: 'ask', finalDecision: 'requires_approval', reasonCode: 'interaction_required' });
     expect(resolved.permissionRequired).toEqual(expect.objectContaining({
-      type: 'permission_required',
+      type: 'interaction_required',
       requestId: 'subagent-request',
       tool: 'read',
       action: 'read',
@@ -296,7 +296,7 @@ describe('interactive approval and session cache', () => {
     }));
   });
 
-  it('builds a permission_required payload with prompt-safe command details', () => {
+  it('builds an interaction_required payload with prompt-safe command details', () => {
     const request: PermissionRequest = {
       id: 'bash-ask',
       source: 'tool_call',
@@ -314,7 +314,7 @@ describe('interactive approval and session cache', () => {
     const decision = evaluatePermission(policy(), request);
 
     expect(buildPermissionRequiredPayload(request, decision)).toEqual(expect.objectContaining({
-      type: 'permission_required',
+      type: 'interaction_required',
       requestId: 'bash-ask',
       prompt: expect.objectContaining({
         choices: ['Allow once', 'Allow for session', 'Allow for project', 'Deny'],
