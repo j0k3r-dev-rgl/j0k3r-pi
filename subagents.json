@@ -53,6 +53,10 @@
     "sdd-verify": {
       "model": "openai-codex/gpt-5.5",
       "effort": "medium"
+    },
+    "tool-smoke": {
+      "model": "openai-codex/gpt-5.4-mini",
+      "effort": "low"
     }
   }
 }

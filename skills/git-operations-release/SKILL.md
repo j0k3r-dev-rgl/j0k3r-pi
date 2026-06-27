@@ -80,6 +80,9 @@ Use `git-memory-release` only as an optional companion after verifying `.pi/memo
 - Do not include secrets, tokens, private keys, or sensitive logs in commit messages, changelogs, release notes, or command output summaries.
 - Commit messages should be concise and conventional when possible, for example `feat(scope): summary`, `fix(scope): summary`, `docs(scope): summary`, `chore(scope): summary`.
 - Tags/releases should be explicit: confirm the tag name/version when it is not obvious.
+- Release tags that represent deployable/stable app points must be reachable from `main` before they are pushed. Verify with `git merge-base --is-ancestor <tag-or-target> main` when tagging an existing commit/tag, or ensure the tag is created from current `main` after `main` contains the release commits.
+- For the normal release flow, update and push `main` before pushing the release tag so other environments can recover the release with `git pull` on `main`; tags are checkpoints, not substitutes for branch integration.
+- If an existing release tag points to commits that are not in `main`, stop and ask whether to merge the tag/commit into `main`, recreate/move the tag, or intentionally keep it as an off-main checkpoint.
 - The agent writes changelog/release note content using inspected code, git history, validation results, and optional memory context. Git tools do not generate changelog content automatically.
 - Do not require Memory for normal Git operations. Memory is an enhancement, not a prerequisite.
 
@@ -90,6 +93,7 @@ Use `git-memory-release` only as an optional companion after verifying `.pi/memo
 - If a changelog update is requested but target version/section is unclear, ask a concise question.
 - Before using Memory git tools, inspect `.pi/memory.json` or use current context to verify `git.enabled=true`. If disabled, mention that Memory provenance is skipped unless the user wants to enable it.
 - If a release/tag should include only selected commits, inspect `git log` or use `memory_release_candidates_search` only when Memory git is enabled.
+- If the user expects to keep developing elsewhere by pulling `main`, treat any release tag that is not contained in `main` as a blocking risk and ask for an explicit off-main release decision before pushing the tag.
 
 ## Execution Steps
 
@@ -100,7 +104,12 @@ Use `git-memory-release` only as an optional companion after verifying `.pi/memo
 5. For commits, stage exactly the approved scope and create a concise message.
 6. For changelog/release notes, draft or edit the file directly using inspected changes and validation context; do not rely on a tool to auto-generate final text.
 7. For tags/releases, confirm tag/version and selected commits before creating the tag.
-8. Optional Memory integration:
+8. For release tags intended as stable app checkpoints on `main`, verify branch containment before publishing:
+   - ensure the release commits are on `main`;
+   - if the tag already exists, run `git merge-base --is-ancestor <tag> main`;
+   - if the tag is being created now, create it from `main` after `main` contains the release commit;
+   - push `main` before `git push origin <tag>` unless the user explicitly chooses an off-main tag.
+9. Optional Memory integration:
    - If `.pi/memory.json` has `git.enabled=true`, load/apply `git-memory-release`.
    - After a commit, optionally record the current HEAD with `memory_record_current_commit` using rich context for future release notes.
    - Use `memory_commit_record_add` only when recording an explicit non-HEAD commit or when all commit metadata is already supplied.
@@ -108,7 +117,7 @@ Use `git-memory-release` only as an optional companion after verifying `.pi/memo
    - The agent still drafts/edits changelog content manually; Memory preview is context only.
    - After an approved tag/release grouping, optionally record it with `memory_release_record_add`.
    - If git memory is disabled, skip these steps and state that Memory provenance was not recorded.
-9. Report actions taken, commit/tag hashes or names, validation, skipped Memory integration, and remaining manual steps.
+10. Report actions taken, commit/tag hashes or names, release tag containment status, validation, skipped Memory integration, and remaining manual steps.
 
 ## Output Contract
 
@@ -119,6 +128,7 @@ Return:
 - Git status/diff/log evidence inspected.
 - Commit message, commit hash, tag name, or changelog path updated when applicable.
 - Validation commands/results used.
+- For release tags, whether the tag target is contained in `main`, whether `main` was pushed before the tag, or why an off-main tag was explicitly accepted.
 - Whether `git-memory-release` was applied, skipped because `git.enabled` is false, or not needed.
 - Risks, unrelated dirty changes, or open decisions.
 
