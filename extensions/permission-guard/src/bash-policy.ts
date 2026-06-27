@@ -1,4 +1,5 @@
 import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { classifyResolvedPathTargetSync } from './path-policy.js';
 import { analyzeShellCommand } from './shell-analyzer.js';
 import { extractShellPathEffectsSync } from './shell-path-effects.js';
 import type { PermissionDecisionResult, PermissionPolicyConfig, PermissionRequest, PolicyDecision, RiskLevel, ShellAnalysisResult } from './types.js';
@@ -268,6 +269,24 @@ function isWorkspaceBypassCandidate(analysis: ShellAnalysisResult): boolean {
   );
 }
 
+function isWorkspaceLocalNoEffectBypassCandidate(
+  analysis: ShellAnalysisResult,
+  config: PermissionPolicyConfig,
+  request: PermissionRequest,
+  options: BashPolicyOptions,
+): boolean {
+  if (!options.bypassWorkspace) return false;
+  if (analysis.pathEffects.length > 0) return false;
+  if (analysis.segments.length === 0) return false;
+  if (!analysis.effectsComplete || analysis.unsupported.length > 0) return false;
+
+  const workspaceRoot = workspaceRootFor(config, request, options);
+  return analysis.segments.every((segment) => {
+    const target = classifyResolvedPathTargetSync(segment.effectiveCwd, { cwd: workspaceRoot, config });
+    return target.insideWorkspace && target.symlinkEscapesWorkspace !== true;
+  });
+}
+
 function pathContextBypassBlock(analysis: ShellAnalysisResult, options: BashPolicyOptions): BashMatch | undefined {
   if (!options.bypassWorkspace) return undefined;
   const hasPathContextEffect = analysis.pathEffects.some((effect) => effect.intent === 'cwd');
@@ -335,9 +354,6 @@ function analysisMatch(config: PermissionPolicyConfig, request: PermissionReques
     config,
   });
 
-  const pathContextBlock = pathContextBypassBlock(analysis, options);
-  if (pathContextBlock) return pathContextBlock;
-
   const workspaceReadOnly = workspaceReadOnlyMatch(config, analysis);
   if (workspaceReadOnly) {
     const canBypassWorkspace = options.bypassWorkspace && isWorkspaceBypassCandidate(analysis) && !hasDisallowedBypassReason(workspaceReadOnly);
@@ -385,6 +401,9 @@ function analysisMatch(config: PermissionPolicyConfig, request: PermissionReques
     };
     return match;
   }
+
+  const pathContextBlock = pathContextBypassBlock(analysis, options);
+  if (pathContextBlock) return pathContextBlock;
 
   const compoundRisk = compoundRiskMatch(analysis, config);
   if (compoundRisk) return compoundRisk;
@@ -492,10 +511,15 @@ function analysisMatch(config: PermissionPolicyConfig, request: PermissionReques
     matchedRule: 'bash.default',
     analysis,
   } as BashMatch;
-  if (options.bypassWorkspace && isWorkspaceBypassCandidate(analysis) && !hasDisallowedBypassReason(fallback) && simpleAllow) {
+  const canBypassWorkspaceDefault = options.bypassWorkspace
+    && simpleAllow
+    && !hasDisallowedBypassReason(fallback)
+    && (isWorkspaceBypassCandidate(analysis) || isWorkspaceLocalNoEffectBypassCandidate(analysis, config, request, options));
+
+  if (canBypassWorkspaceDefault) {
     return {
       decision: 'allow',
-      reason: 'Workspace-local filesystem effects are fully classified and bypassWorkspace is enabled.',
+      reason: 'Workspace-local command effects are fully classified and bypassWorkspace is enabled.',
       reasonCode: 'bash_workspace_bypass_allowed',
       riskLevel: 'low',
       matchedRule: 'bypassWorkspace',

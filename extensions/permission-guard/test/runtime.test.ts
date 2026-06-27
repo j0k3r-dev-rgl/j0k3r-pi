@@ -189,6 +189,20 @@ describe('permission guard runtime wiring', () => {
     });
   });
 
+  it('does not prompt for simple workspace-local bash commands or safe cd compounds when bypassWorkspace is true', async () => {
+    const cwd = await tempWorkspace('permission-guard-runtime-bypass-workspace-simple-');
+    await writeProjectPolicy(cwd, { bypassWorkspace: true });
+    const pi = createMockPi();
+    registerPermissionGuardRuntime(pi);
+    const handler = pi.handlers.tool_call![0] as ToolCallHandler;
+    const ctx = createCtx(cwd);
+
+    await expect(handler({ toolName: 'bash', toolCallId: 'tc-bypass-workspace-simple', input: { command: 'git status --short' } }, ctx)).resolves.toBeUndefined();
+    await expect(handler({ toolName: 'bash', toolCallId: 'tc-bypass-workspace-cd', input: { command: 'cd src && npm test' } }, ctx)).resolves.toBeUndefined();
+
+    expect(ctx.ui.select).not.toHaveBeenCalled();
+  });
+
   it('honors a main-thread allow-once approval registry entry for a retried subagent request and consumes it', async () => {
     const cwd = await tempWorkspace('permission-guard-runtime-subagent-approval-');
     const registryKey = Symbol.for('pi.permissionGuard.mainThreadApprovals');

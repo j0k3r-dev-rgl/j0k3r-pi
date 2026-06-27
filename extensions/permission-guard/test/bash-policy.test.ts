@@ -58,6 +58,17 @@ describe('bash permission policy', () => {
     });
   });
 
+  it('auto-allows simple workspace-local commands without explicit path effects when bypassWorkspace is enabled', () => {
+    const config = policy({}, '/workspace');
+
+    expect(classifyBashCommand({ ...config, bypassWorkspace: true }, bashRequest('git status --short'))).toMatchObject({
+      decision: 'allow',
+      finalDecision: 'allow',
+      reasonCode: 'bash_workspace_bypass_allowed',
+      details: { matchedLayer: 'bash', matchedRule: 'bypassWorkspace' },
+    });
+  });
+
   it('does not bypass destructive bash operations when bypassWorkspace is enabled', () => {
     const config = policy({}, '/workspace');
 
@@ -373,16 +384,16 @@ describe('bash permission policy', () => {
     }
   });
 
-  it('requires approval for path-context changes when bypassWorkspace is enabled even if legacy safe compound would allow', () => {
+  it('allows safe workspace-local cd compounds when bypassWorkspace is enabled', () => {
     const config = {
       ...policy({ safeCommands: ['npm test', 'npm run typecheck'] }, '/workspace'),
       bypassWorkspace: true,
     };
 
     expect(classifyBashCommand(config, bashRequest('cd packages/app && npm test && npm run typecheck'))).toMatchObject({
-      decision: 'ask',
-      finalDecision: 'requires_approval',
-      reasonCode: 'bash_path_context_requires_approval',
+      decision: 'allow',
+      finalDecision: 'allow',
+      reasonCode: 'bash_safe_compound_command_allowed',
     });
   });
 
