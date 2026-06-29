@@ -28,7 +28,7 @@ Expected outputs:
 
 - `prd-review.md` or memory equivalent
 - readiness verdict (`ready_for_sdd: yes/no/with warnings`)
-- recommended PRD status (`approved`, `blocked`, `needs-revision`, or `ready-with-warnings`)
+- PRD review approval (`approved-by-prd-review`, `blocked`, `needs-revision`, or `ready-with-warnings`); `ready-with-warnings` still requires explicit user instruction to continue as-is
 - acceptance criteria and testability matrix
 - critical debts, warnings, contradictions, and open questions
 - recommended next step

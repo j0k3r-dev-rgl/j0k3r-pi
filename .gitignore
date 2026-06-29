@@ -50,3 +50,4 @@ openspec/
 .pi/api.json
 bin
 .pi/workspace-code-graph/
+.pi/subagents-debug.log

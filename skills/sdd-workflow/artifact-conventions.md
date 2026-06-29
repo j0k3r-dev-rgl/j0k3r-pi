@@ -4,12 +4,13 @@ Load this companion when the flow needs OpenSpec persistence, artifact-store dec
 
 ## Artifact Store Policy
 
-Default for named SDD features: `hybrid`.
+Default for named formal SDD features: `hybrid`.
+Default for mini-SDD and minimal delegated apply: `openspec`.
 
 - `hybrid`: OpenSpec files are source of truth; memory stores compact state and handoff.
 - `openspec`: OpenSpec files are source of truth; memory may store a minimal pointer/index.
 - `memory`: no files; active SDD memory must include enough detail for continuation.
-- `none`: only for read-only discovery or explicitly non-persistent planning; not for formal SDD phases unless the user explicitly requests no persistence and the phase can safely return all needed context in conversation.
+- `none`: only for read-only discovery or explicitly non-persistent planning. Formal SDD, mini-SDD, and minimal delegated apply must block on `artifact_store: none` unless the user explicitly requested no persistence and the phase can safely return all needed context in conversation.
 
 Canonical OpenSpec artifact names:
 
@@ -20,6 +21,7 @@ Canonical OpenSpec artifact names:
 - Active change spec: `openspec/changes/<change>/spec.md`
 - Implementation map: `openspec/changes/<change>/implementation-map.md`
 - Active verification report: `openspec/changes/<change>/verify-report.md`
+- Mini-SDD task packet: `openspec/changes/<change>/mini-task-packet.md`
 - Archive may sync source-of-truth capability specs under `openspec/specs/<capability>/spec.md` when applicable.
 
 Ask one concise question when artifact persistence materially affects the workflow.

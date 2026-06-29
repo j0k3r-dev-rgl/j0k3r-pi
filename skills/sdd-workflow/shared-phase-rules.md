@@ -8,7 +8,7 @@ Load this companion when a formal SDD route needs cross-phase execution rules, s
 - `sdd-verify` reports issues and does not fix them unless the orchestrator starts a new apply task.
 - `sdd-archive` runs only after verification passes and the user wants closure.
 - When metadata exists, every phase must read it and report alignment or conflicts.
-- When an approved PRD is in scope, downstream phases must preserve it as product context.
+- When a PRD approved by `prd-review` or explicitly continued as-is by the user is in scope, downstream phases must preserve it as product context.
 - `implementation-map.md` is operational context, not a normative contract.
 - Use `implementation-map.md` as the primary context-compression handoff for OpenSpec/hybrid flows: read it before broad source searches, update it with newly discovered files/symbols/validation commands, and explain any deliberate re-read of already mapped files.
 - Skill Registry selection is an orchestrator responsibility before subagent launch. The orchestrator must pass exact selected skill paths and applicability notes; subagents use registry fallback only when this context is missing or stale.
@@ -28,7 +28,7 @@ Load this companion when a formal SDD route needs cross-phase execution rules, s
 ### sdd-verify
 
 - run relevant tests or validation; source inspection alone is not enough for a full PASS when executable validation is available
-- compare implementation to metadata, approved PRD context, spec, design, tasks, implementation-map expectations, and security requirements when they exist
+- compare implementation to metadata, PRD context approved by `prd-review` or explicitly continued as-is by the user, spec, design, tasks, implementation-map expectations, and security requirements when they exist
 - each testable requirement/scenario and security requirement must have implementation evidence plus runtime/build/typecheck/test evidence, or the report must downgrade/block the verdict
 - identify residual risks
 

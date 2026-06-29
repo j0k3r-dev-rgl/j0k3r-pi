@@ -27,12 +27,14 @@ Rules:
 
 ## Workflow selection
 
-For any code edit or implementation, and for any non-trivial docs/config change, **the orchestrator must choose and state the workflow first** by consulting `workflow-triage`.
+For any code edit or implementation, and for any non-trivial docs/config change, **the orchestrator must choose and state the workflow first** by loading and consulting `workflow-triage`. This is a hard gate, not optional: load `workflow-triage` before any non-trivial edit, **including edits the user explicitly ordered** (fixes, corrections, refactors), unless the change is truly trivial (single file, no behavior/policy risk).
 
 Rules:
 - `AGENTS.md` defines global guardrails, not workflow routes.
-- `workflow-triage` owns route selection and follow-on skill loading.
+- `workflow-triage` owns route selection and follow-on skill loading; it is the mandatory routing gate.
+- Before non-trivial edits, consult `skill_registry_resolve` (with `stale_check=true`) when routing is ambiguous or when the request involves fixing/correcting/refactoring — not only during the formal SDD preflight. Regenerate with `skill_registry_generate` if the resolver reports stale/missing cache.
 - When triage selects PRD/SDD/OpenSpec work, load `sdd-workflow` core plus only the companion modules required by that route.
+- A user-ordered fix does not bypass route selection: still state the chosen route, and offer `mini-sdd` or proposal-first when the change is multi-file or policy-sensitive.
 
 ### Dirty worktree overlap rule
 
@@ -83,7 +85,7 @@ For any non-trivial code change:
 5. Refactor only after tests pass.
 6. Run validation again when refactoring changes behavior or structure.
 
-If no test framework exists, do not silently skip TDD. Explain the limitation and propose the best available validation strategy before changing code.
+If no test framework exists, do not silently skip TDD. Stop before changing code and ask the user which validation strategy to use. If the user does not know, present concrete options with pros, cons, and recommended trade-off, then wait for the user's choice.
 
 ## Post-change review and verification gate
 
@@ -114,7 +116,7 @@ Use memory as the agent's persistent brain, not as a transcript dump or a mechan
 - Save confirmed decisions, workflow rules, architectural decisions, validated commands, meaningful progress, open todos, unresolved risks, and reusable learnings as durable memories when they affect future work.
 - After every meaningful discussion or substantial task, perform a decision checkpoint before the final response: identify durable decisions, progress, validations, todos, risks, and learnings; save the useful non-sensitive items with `memory_add`, update the project profile when appropriate, and explicitly say what was saved or why nothing was saved.
 - Prefer a small number of atomic memories over large noisy summaries; for normal work, save 1-3 durable memories unless the user asks for a richer record.
-- In full SDD, phase subagents may create/update only the active SDD flow memory (`type: sdd_feature_project_state`) and only as a compact index/state/handoff.
+- In full SDD, phase subagents may create/update only the active SDD flow memory and only as a compact index/state/handoff; identify it with `metadata_json.type = "sdd_feature_project_state"` plus tags `sdd`, `active-flow`, and the change slug.
 - When the selected SDD route uses `openspec` or `hybrid`, keep long-form SDD artifacts in OpenSpec and keep memory compact.
 - Non-SDD durable project memories, global preferences, architectural decisions outside the active SDD flow, and cleanup/consolidation remain orchestrator responsibilities unless explicitly delegated.
 

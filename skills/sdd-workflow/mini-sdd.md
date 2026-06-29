@@ -16,25 +16,40 @@ Minimal delegated apply is the tracker-backed or mechanical variant of mini-SDD.
 - No new product behavior, external contract, persistence model, security policy, or architecture decision is being invented.
 - For minimal delegated apply specifically, a tracker/checklist exists in the repo or conversation and is cited by path or embedded in the prompt.
 
+### OpenSpec Persistence
+
+Mini-SDD and minimal delegated apply are OpenSpec-backed by default, without requiring the full formal proposal/spec/design/task sequence.
+
+Use `artifact_store: openspec` unless the user explicitly requests `hybrid`. Do not use `artifact_store: none` for mini-SDD. Create or update a lightweight change folder:
+
+- `openspec/changes/<change>/metadata.yaml` — slice metadata, approval state, allowed/forbidden surfaces, validation expectations, and PRD/SDD mode notes.
+- `openspec/changes/<change>/mini-task-packet.md` — orchestrator-authored task packet and acceptance criteria.
+- `openspec/changes/<change>/implementation-map.md` — operational handoff for touched files/symbols/validation commands when useful.
+- `openspec/changes/<change>/apply-progress.md` — apply output and validations.
+- `openspec/changes/<change>/verify-report.md` — lighter mini-SDD verification report.
+
 ### Task Packet Required from the Orchestrator
 
 - `mini_sdd: true` or `minimal_apply: true`
-- change or slice name
+- `artifact_store: openspec` or explicitly approved `hybrid`
+- change or slice name and OpenSpec change slug
+- metadata path and mini-task-packet path
 - tracker/checklist path or embedded checklist when applicable
 - allowed files or surfaces and forbidden files or surfaces
 - exact task slice or range
 - acceptance criteria
 - security/privacy/auth/data applicability and any forbidden security-sensitive surfaces
-- strict TDD expectations or a reason tests are not needed for docs-only or mechanical edits
+- strict TDD expectations, or the user-selected validation strategy when no test framework exists
 - validation commands
 - selected skills and applicability notes
 - expected return envelope
 
 ### Rules
 
-- Do not create OpenSpec artifacts solely for mini-SDD or minimal delegated apply.
-- Use `artifact_store: none` unless the task packet explicitly asks for a lightweight progress file.
+- Do not run the full formal SDD sequence solely because mini-SDD uses OpenSpec persistence.
+- Do create/update the lightweight OpenSpec artifacts listed above for mini-SDD and minimal delegated apply.
+- If no test framework exists for code changes, stop before implementation and ask the user which validation strategy to use; if the user does not know, present options with pros and cons and wait for a choice.
 - If the subagent discovers an unresolved design, product, security, privacy, or API decision, it must stop and return `blocked`.
 - After `sdd-apply` returns `success` or `partial`, the default next phase is `sdd-verify`.
-- The orchestrator may skip verification only when the user explicitly waives it or the task packet is docs-only and the orchestrator performs an explicit review checklist.
+- Mini-SDD verification is mandatory unless the user explicitly waives it; it is lighter than full SDD verification and checks the task packet, changed files, security applicability, and validation evidence.
 - The orchestrator remains responsible for the final review, memory checkpoint, and any commit decision.

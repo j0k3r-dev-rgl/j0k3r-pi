@@ -35,12 +35,12 @@ You are the SDD proposal executor. You are not the orchestrator.
 ## Required inputs
 
 - `change`: kebab-case feature/change slug.
-- `artifact_store`: `memory`, `openspec`, `hybrid`, or `none`.
+- `artifact_store`: `memory`, `openspec`, or `hybrid`. Use `none` only with explicit user approval for no persistence and enough context embedded in the prompt.
 - User request and/or `sdd-explore` output.
 
 ## SDD memory protocol
 
-Search for `type: sdd_feature_project_state` and the change slug. Update the existing active SDD flow memory, or create `current sdd feature project` if missing. For `openspec` or `hybrid`, keep it compact: current phase, status, artifact paths, summary, open questions, and next phase. For `memory`, include enough proposal detail in the single flow memory for downstream spec/design/task phases.
+Search for active SDD flow memory using `metadata_json.type = "sdd_feature_project_state"` and the change slug; fallback to tags `sdd`, `active-flow`, and the slug if metadata search is unavailable. Update the existing active SDD flow memory, or create `current sdd feature project` with `metadata_json.type = "sdd_feature_project_state"` if missing. For `openspec` or `hybrid`, keep it compact: current phase, status, artifact paths, summary, open questions, and next phase. For `memory`, include enough proposal detail in the single flow memory for downstream spec/design/task phases.
 
 ## Change metadata and PRD awareness
 

@@ -40,7 +40,7 @@ You are the SDD exploration executor. You are not the orchestrator.
 ## Inputs expected from orchestrator
 
 - `change`: kebab-case feature/change slug.
-- `artifact_store`: `memory`, `openspec`, `hybrid`, or `none`.
+- `artifact_store`: `memory`, `openspec`, or `hybrid`. Use `none` only with explicit user approval for no persistence and enough context embedded in the prompt.
 - User request/topic.
 - Optional prior SDD flow state.
 
@@ -49,12 +49,13 @@ You are the SDD exploration executor. You are not the orchestrator.
 Use project memory as a compact index/state for one active SDD flow.
 
 1. Search for existing active SDD flow memory before writing:
-   - query: `type: sdd_feature_project_state` plus the change slug if known.
+   - query: `metadata_json.type = "sdd_feature_project_state"` plus the change slug when available; fallback to tags `sdd`, `active-flow`, and the slug if metadata search is unavailable.
 2. If found, update that memory with `memory_update`.
 3. If not found, create it with `memory_add`:
    - scope: `project`
    - kind: `progress`
    - title: `current sdd feature project`
+   - metadata_json: `{ "type": "sdd_feature_project_state", "change": "<change>" }`
    - tags: `sdd`, `active-flow`, and the change slug.
 4. For `openspec` or `hybrid`, keep memory compact: current phase, status, artifact paths, phase summaries, open questions, next phase, handoff.
 5. For `memory`, include enough exploration artifact detail in the single active SDD flow memory for downstream phases to continue without files.

@@ -4,7 +4,7 @@ description: Operate the project's PRD/SDD/OpenSpec workflow as a thin orchestra
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.1"
+  version: "1.2"
 ---
 
 # SDD Workflow
@@ -55,7 +55,7 @@ metadata:
     ]
   },
   "sdd_phases": ["explore", "proposal", "spec", "design", "task", "apply", "verify", "archive"],
-  "related_skills": ["workflow-triage", "persistent-memory", "skill-authoring", "subagents-configuration"],
+  "related_skills": ["workflow-triage", "persistent-memory", "skill-authoring"],
   "priority": 100
 }
 ```
@@ -108,6 +108,7 @@ Do not load this skill for greetings, tiny inline answers, obvious one-line fixe
 - Treat security as cross-phase SDD context, not a verify-only concern. Each phase must preserve or refine security/privacy/auth/trust-boundary implications relevant to its responsibility and report `security_alignment` in its return envelope.
 - For OpenSpec/hybrid flows, `implementation-map.md` is the primary context-compression handoff. Subagents should read it before broad code searches, update it when they learn concrete files/symbols/validations, and avoid rediscovering already mapped context unless evidence is stale or incomplete.
 - For mini-SDD and minimal delegated apply, do not invent missing design or product decisions; stop and return `blocked` when they appear.
+- Formal SDD, mini-SDD, and minimal delegated apply must not use `artifact_store: none` unless the user explicitly requested no persistence and the prompt carries enough context to continue safely.
 
 ## Decision Gates
 
@@ -167,22 +168,22 @@ Before creating PRD/OpenSpec artifacts or launching any PRD/SDD subagent:
    - if the resolver reports stale, missing, or invalid cache, use `skill_registry_generate` with `write=true`;
    - read each selected `SKILL.md` before relying on it;
    - pass selected skill names, paths, match reasons, and applicability notes into delegated SDD subagent context.
-4. Resolve the SDD execution mode.
-5. Resolve the change slug and artifact store if needed.
+4. Resolve the change slug and artifact store if needed.
+5. Resolve the SDD execution mode for formal PRD/SDD/OpenSpec flows. Mini-SDD and minimal delegated apply do not require formal execution-mode selection; they require an OpenSpec-backed task packet and explicit implementation approval.
 6. Confirm implementation approval separately from planning approval.
 
 The git gate does not apply to tiny inline answers or low-risk inspections that do not create artifacts or change code.
 
 ## Execution Steps
 
-1. If the route is unclear, load `workflow-triage` first.
+1. Assume `workflow-triage` already ran (it is the mandatory gate before any non-trivial edit, including user-ordered fixes). If it did not run, load `workflow-triage` first and state the chosen route before proceeding.
 2. Run the required PRD/SDD preflight before creating artifacts or launching SDD subagents.
 3. Resolve execution mode, change slug, artifact store, and approval scope.
 4. Load only the companion markdown files required by the current route.
 5. If the route uses OpenSpec persistence, apply `artifact-conventions.md` before writing or updating artifacts.
 6. If the route is PRD-first or depends on an existing PRD, apply `prd-and-discovery.md` before planning downstream phases.
-7. If the route is mini-SDD or minimal delegated apply, apply `mini-sdd.md` before preparing the task packet.
-8. If the route will launch `prd-review` or any `sdd-*` subagent, apply `phase-contracts.md` and `shared-phase-rules.md` before delegation.
+7. If the route is mini-SDD or minimal delegated apply, apply `mini-sdd.md` before preparing the OpenSpec-backed task packet.
+8. If the route will launch `prd-review` or any formal `sdd-*` subagent, apply `phase-contracts.md` and `shared-phase-rules.md` before delegation; for mini-SDD, use the mini-SDD packet plus the apply/verify return-envelope requirements that are relevant to the slice.
 9. Stop before implementation unless the user explicitly approved apply for the selected scope.
 10. After meaningful work, update active SDD state or memory as needed and report validation, risks, and the next recommended step.
 
@@ -262,7 +263,7 @@ When this skill affects the answer, return a concise SDD workflow decision or ph
 - Change slug and artifact store.
 - Execution mode and approval state.
 - Companion modules loaded.
-- PRD status: absent, present/read, review absent/read, review needed, waived, or blocking conflict.
+- PRD status: absent, present/read, review absent/read, review needed, approved-by-prd-review, explicit user continue-as-is, or blocking conflict.
 - Selected phase or next phase and why.
 - Selected skills injected into subagents, or why no skill matched.
 - Subagents launched or explicitly not needed.
@@ -280,13 +281,13 @@ When this skill affects the answer, return a concise SDD workflow decision or ph
 - `skills/sdd-workflow/phase-contracts.md` — phase sequencing and high-level phase responsibilities.
 - `skills/sdd-workflow/shared-phase-rules.md` — cross-phase rules, delegation checklist, and return envelope.
 - `skills/skill-authoring/SKILL.md` — canonical skill format and registry contract conventions.
-- `skills/subagents-configuration/SKILL.md` — subagent definition and configuration policy.
 
 ## Memory Rules for SDD
 
 - Subagents may update only the active SDD flow memory and only as compact index, state, or handoff.
-- Long-form artifacts belong in OpenSpec when artifact store is `openspec` or `hybrid`.
-- Formal SDD operational handoff belongs in `implementation-map.md`, not in `metadata.yaml`.
+- Standardize active SDD flow memory with `metadata_json.type = "sdd_feature_project_state"` plus tags `sdd`, `active-flow`, and the change slug; do not rely on free-text type markers alone.
+- Long-form artifacts belong in OpenSpec when artifact store is `openspec`, `hybrid`, or mini-SDD OpenSpec mode.
+- Formal SDD and mini-SDD operational handoff belongs in `implementation-map.md`, not in `metadata.yaml`.
 - The orchestrator owns durable non-SDD memories, project profile updates, and consolidation.
 - Save only durable, non-sensitive decisions, constraints, commands, learnings, todos, and progress.
 

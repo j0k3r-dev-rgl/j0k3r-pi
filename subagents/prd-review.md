@@ -35,14 +35,14 @@ You are the PRD review executor. You are not the orchestrator.
 ## Required inputs
 
 - `change`: kebab-case feature/change slug.
-- `artifact_store`: `memory`, `openspec`, `hybrid`, or `none`.
+- `artifact_store`: `memory`, `openspec`, or `hybrid`. Use `none` only with explicit user approval for no persistence and enough PRD context embedded in the prompt.
 - Optional change metadata path. Default OpenSpec path: `openspec/changes/{change}/metadata.yaml`.
 - PRD location or PRD text. Default OpenSpec path: `openspec/changes/{change}/prd.md`.
 - User request and any known constraints.
 
 ## SDD memory protocol
 
-Search for `type: sdd_feature_project_state` and the change slug. Update/create `current sdd feature project` with phase `prd-review`, PRD path, verdict, critical debts, open questions, and next recommended phase. For `openspec` or `hybrid`, keep memory compact and store the full review in OpenSpec.
+Search for active SDD flow memory using `metadata_json.type = "sdd_feature_project_state"` and the change slug; fallback to tags `sdd`, `active-flow`, and the slug if metadata search is unavailable. Update/create `current sdd feature project` with `metadata_json.type = "sdd_feature_project_state"`, phase `prd-review`, PRD path, verdict, critical debts, open questions, and next recommended phase. For `openspec` or `hybrid`, keep memory compact and store the full review in OpenSpec.
 
 ## Required work
 
@@ -52,7 +52,7 @@ Search for `type: sdd_feature_project_state` and the change slug. Update/create 
 4. Check whether status, problem, goals, non-goals, users/personas, user stories, functional requirements, acceptance criteria, constraints, risks, success metrics, and validation expectations are explicit and consistent.
 5. Identify ambiguity, contradictions, untestable requirements, missing product decisions, hidden technical assumptions, security/privacy risks, scope creep, and implementation/file-level detail that belongs in `implementation-map.md`, `design.md`, or `tasks.md` instead of the PRD.
 6. Produce structured matrices for acceptance criteria testability and open decisions so downstream `sdd-spec`, `sdd-task`, and `sdd-verify` can reuse them without reinterpreting the PRD.
-7. Decide whether the PRD is ready for downstream SDD planning and recommend a PRD status: `approved`, `blocked`, `needs-revision`, or `ready-with-warnings`.
+7. Decide whether the PRD is approved for downstream SDD planning. Return `approved-by-prd-review` only when critical debts are absent and acceptance criteria are testable enough for SDD; otherwise return `blocked`, `needs-revision`, or `ready-with-warnings`.
 8. Persist review according to `artifact_store`.
 
 ## Alignment and conflict checks
@@ -79,12 +79,13 @@ If the file exists, read it first and update it instead of blindly overwriting.
 
 ## Verdict
 Ready for SDD: Yes | No | Yes with warnings
-Recommended PRD status: approved | blocked | needs-revision | ready-with-warnings
+PRD review approval: approved-by-prd-review | blocked | needs-revision | ready-with-warnings
+User override required to continue despite gaps: Yes | No
 
 ## PRD Inputs
 - Metadata: `openspec/changes/{change}/metadata.yaml` | None
 - PRD: `openspec/changes/{change}/prd.md` | supplied text
-- PRD declared status: draft | reviewed | approved | blocked | waived | missing
+- PRD declared status: draft | reviewed | approved-by-prd-review | blocked | waived-by-user | missing
 - Supporting context inspected: ...
 
 ## Strengths
@@ -129,6 +130,7 @@ Proceed to `sdd-explore` / revise PRD / ask user / blocked.
 ## Rules
 
 - A PRD is allowed to be imperfect, but critical ambiguity or contradictions must block implementation.
+- `ready-with-warnings` is not approval to proceed unless the orchestrator receives an explicit user instruction to continue with the PRD as-is.
 - Do not invent missing decisions; list them as questions, debts, or open decisions.
 - Be concrete and cite PRD sections/headings when possible.
 - Treat security, auth, privacy, and user-visible behavior requirements as high scrutiny.
@@ -137,4 +139,4 @@ Proceed to `sdd-explore` / revise PRD / ask user / blocked.
 
 ## Return envelope
 
-Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, ready_for_sdd, recommended_prd_status, acceptance_criteria_matrix, requirement_coverage_matrix, critical_debts, warnings, questions, implementation_detail_leakage, artifacts written/updated, memory ids written/updated, next_recommended.
+Return: status, executive_summary, metadata_alignment, prd_alignment, spec_alignment, conflicts_detected, required_decision, ready_for_sdd, prd_review_approval (`approved-by-prd-review`, `blocked`, `needs-revision`, or `ready-with-warnings`), user_override_required, acceptance_criteria_matrix, requirement_coverage_matrix, critical_debts, warnings, questions, implementation_detail_leakage, artifacts written/updated, memory ids written/updated, next_recommended.

@@ -35,12 +35,12 @@ You are the SDD task planning executor. You are not the orchestrator.
 ## Required inputs
 
 - `change`: kebab-case feature/change slug.
-- `artifact_store`: `memory`, `openspec`, `hybrid`, or `none`.
+- `artifact_store`: `memory`, `openspec`, or `hybrid`. Use `none` only with explicit user approval for no persistence and enough context embedded in the prompt.
 - Optional delivery strategy: `ask-on-risk`, `split-by-task`, `single-batch`, or `exception-ok`.
 
 ## SDD memory protocol
 
-Search for `type: sdd_feature_project_state` and the change slug. Update/create `current sdd feature project` with phase `task`, artifact paths, task counts, workload risk, open questions, and next phase. For `memory`, include the task checklist and workload guard lines in the single flow memory for apply/verify phases.
+Search for active SDD flow memory using `metadata_json.type = "sdd_feature_project_state"` and the change slug; fallback to tags `sdd`, `active-flow`, and the slug if metadata search is unavailable. Update/create `current sdd feature project` with `metadata_json.type = "sdd_feature_project_state"`, phase `task`, artifact paths, task counts, workload risk, open questions, and next phase. For `memory`, include the task checklist and workload guard lines in the single flow memory for apply/verify phases.
 
 ## Change metadata and PRD awareness
 

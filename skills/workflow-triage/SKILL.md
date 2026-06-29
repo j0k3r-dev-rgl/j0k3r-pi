@@ -1,10 +1,10 @@
 ---
 name: workflow-triage
-description: "Determine the safest, lightest workflow for ambiguous or policy-sensitive requests, including when to ask clarifying questions, stay inline, use simple TDD, delegate read-only discovery, or start formal SDD."
+description: "Mandatory routing gate before any non-trivial edit (including user-ordered fixes, corrections, and refactors). Determines whether to ask clarifying questions, stay inline, use simple TDD, delegate read-only discovery, or start mini-sdd or formal SDD."
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.1"
+  version: "1.2"
 ---
 
 # Workflow Triage
@@ -54,15 +54,25 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "sdd",
       "openspec",
       "which workflow",
-      "best workflow"
+      "best workflow",
+      "fix",
+      "fix it",
+      "corrige",
+      "arregla",
+      "refactor",
+      "cambia",
+      "modify",
+      "update code",
+      "bug fix",
+      "patch",
+      "correct"
     ]
   },
   "sdd_phases": ["explore", "proposal", "spec", "design", "task", "apply", "verify", "archive"],
   "related_skills": [
     "sdd-workflow",
     "persistent-memory",
-    "skill-authoring",
-    "subagents-configuration"
+    "skill-authoring"
   ],
   "priority": 95
 }
@@ -80,7 +90,7 @@ Field conventions:
 
 ## Activation Contract
 
-Use this skill as the mandatory routing gate when the next workflow is unclear or when the work is non-trivial enough that choosing the wrong route could waste time or change behavior incorrectly.
+Use this skill as the **mandatory routing gate before any non-trivial edit**, including user-ordered fixes, corrections, and refactors. Load it whenever the next workflow could plausibly be anything other than a truly trivial single-file change, and whenever the work is non-trivial enough that choosing the wrong route could waste time or change behavior incorrectly.
 
 Typical triggers:
 
@@ -89,7 +99,7 @@ Typical triggers:
 - the work touches agent behavior, skills, subagents, permissions, memory/config, workflow extensions, or future-agent behavior;
 - the assistant is about to delegate or create artifacts mainly because of uncertainty.
 
-Do not load this skill for greetings, obvious direct answers, or already-approved concrete implementation steps where the route is already clear.
+Do not load this skill only for greetings or obvious direct answers. A user-ordered fix or correction does NOT count as "route already clear": load this skill and state the chosen route before editing, even when implementation was explicitly requested.
 
 ## Hard Rules
 
@@ -102,7 +112,8 @@ Do not load this skill for greetings, obvious direct answers, or already-approve
 - Use `discovery` only for bounded read-only evidence that materially improves the workflow decision.
 - Use formal SDD only when the change is genuinely cross-cutting, high-risk, contract-changing, architecture-bearing, or needs durable artifacts.
 - PRDs are optional. Use PRD-first only when the user asks for a PRD or when product requirements genuinely need clarification before downstream SDD.
-- For small localized implementation that is not already explicitly ordered, ask: *"¿Prefieres que arregle esto directamente o hacemos una revisión y propuesta primero?"*
+- For small localized implementation, always offer the route choice: *"¿Prefieres que arregle esto directamente (simple-tdd) o hacemos una revisión/propuesta primero (mini-sdd o investigación)?"* — unless the change is truly trivial (single file, no risk). A user order to "fix it" does not waive this offer.
+- When the change touches multiple files or policy-sensitive surfaces, offer `mini-sdd` or proposal-first even if the user ordered a direct fix; do not default to `simple-tdd` for multi-file or behavior-bearing work.
 - For user-requested commits, follow the Git commit policy in `AGENTS.md`; triage is not commit permission.
 
 ## Policy-Sensitive Gate
@@ -129,8 +140,8 @@ Choose and state one route before editing non-trivial scope:
 1. `inline-answer` — direct explanation or opinion.
 2. `inline-readonly` — tiny inspection with no edits.
 3. `inline-docs-only` — small approved wording/config/doc edit with low behavior risk.
-4. `simple-tdd` — localized code change with clear behavior and cheap validation.
-5. `simple-tdd-with-review` — localized but policy-sensitive or risk-bearing change implemented by the main agent with a mandatory final review checklist.
+4. `simple-tdd` — localized code change with clear behavior and cheap validation; must end with focused tests/validation plus a lightweight self-review of changed files, scope, and risks.
+5. `simple-tdd-with-review` — localized but policy-sensitive or risk-bearing change implemented by the main agent with focused validation plus a mandatory final review checklist.
 6. `mini-sdd` — medium taskable multi-file work where the orchestrator writes a compact task packet and `sdd-apply` plus `sdd-verify` do the execution/validation.
 7. `minimal-delegated-apply` — tracker-backed mechanical multi-file migration with clear acceptance checks and no new design decisions.
 8. `discovery` — bounded read-only delegated research when evidence is missing.
@@ -147,7 +158,7 @@ Choose and state one route before editing non-trivial scope:
 | simple question, explanation, opinion | `inline-answer` | no tools unless investigation is requested |
 | tiny inspection of one obvious file/path | `inline-readonly` | inspect minimally |
 | user asks to investigate, compare, diagnose, analyze | read-only investigation or `discovery` | report findings and wait for next decision |
-| small localized implementation with clear behavior | `simple-tdd` | ask before direct fix unless explicitly ordered |
+| small localized implementation with clear behavior | `simple-tdd` | ask route first unless truly trivial (single file, no risk); a user order does not skip the route offer |
 | medium taskable multi-file change with low artifact value | `mini-sdd` | `sdd-apply` then `sdd-verify` by default |
 | tracker-backed mechanical migration | `minimal-delegated-apply` | bounded scope, no new design decisions |
 | policy-sensitive but still localized edit | `simple-tdd-with-review` or `inline-docs-only` | only if scope is explicit and low-risk |
@@ -160,6 +171,7 @@ Interpretation rules:
 
 - “investigate/analyze/review” is not implementation approval;
 - do not upshift a clear localized fix to formal SDD just because it is non-trivial;
+- however, always offer `mini-sdd` or proposal-first as an option when the user did not explicitly choose a route, even for localized fixes; "do not upshift" does not mean "default to `simple-tdd` silently";
 - do not downshift a cross-cutting or future-agent-behavior change to inline work just because it looks like docs/config.
 
 ## Decision Gates
@@ -182,7 +194,6 @@ After choosing the route:
 - load `sdd-workflow` core when formal SDD/OpenSpec work is likely or requested, when `mini-sdd` / `minimal-delegated-apply` will use `sdd-apply` / `sdd-verify`, or when continuing an SDD phase;
 - use `discovery` only when bounded read-only evidence is still missing;
 - consider `skill-authoring` when creating or changing skills;
-- consider `subagents-configuration` when changing subagent definitions/config;
 - consider `persistent-memory` when durable decisions, profile updates, consolidation, migration, or session-end memory policy matters.
 
 ## Execution Steps
@@ -193,8 +204,9 @@ After choosing the route:
 4. Decide whether a clarifying question is required before any edit, delegation, or artifact creation.
 5. Choose the lightest safe route from the route catalog.
 6. State the chosen workflow before editing policy-sensitive files.
-7. Load only the follow-on skills required by that route.
-8. After meaningful work, perform the normal memory decision checkpoint from `AGENTS.md`.
+7. Before non-trivial edits, consult `skill_registry_resolve` (`stale_check=true`) when routing is ambiguous or the request involves fixing/refactoring; regenerate with `skill_registry_generate` if stale.
+8. Load only the follow-on skills required by that route.
+9. After meaningful work, perform the normal memory decision checkpoint from `AGENTS.md`.
 
 ## Output Contract
 
@@ -207,7 +219,7 @@ When this skill affects the answer, return a concise workflow decision:
 - Whether discovery is needed; if yes, the exact evidence needed.
 - Clarifying question or approval needed from the user, if any.
 - Follow-on skills considered or loaded.
-- Validation, memory, and commit implications when relevant.
+- Validation, memory, and commit implications when relevant, including the lightweight review/verify path for `simple-tdd`.
 
 ## References
 
@@ -215,4 +227,3 @@ When this skill affects the answer, return a concise workflow decision:
 - `skills/sdd-workflow/SKILL.md` — formal SDD/OpenSpec core routing and companion-module loading policy.
 - `subagents/discovery.md` — bounded read-only research executor.
 - `skills/skill-authoring/SKILL.md` — canonical skill format and registry contract conventions.
-- `skills/subagents-configuration/SKILL.md` — subagent configuration and tool allowlist policy.
