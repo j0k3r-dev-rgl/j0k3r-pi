@@ -7,12 +7,12 @@ export function registerFindReferencesTool(pi: any) {
     name: 'find_references',
     label: 'Find References',
     description:
-      'Use this tool when you need to know where a symbol is used in code. It finds application references such as call sites and graph-detectable relationships like implements or extends when available, returning structured file and location data useful for refactoring and impact analysis.',
-    promptSnippet: 'Locate where a symbol is used across application code.',
+      'Use this tool when you need to know where a symbol is used in code. It finds application references such as call sites, imports, instantiation, inheritance, variable access, callbacks, method references, and graph-detectable relationships when available, returning structured file and location data useful for refactoring and impact analysis.',
+    promptSnippet: 'Locate where a symbol is used across application code, including semantic usages like calls, imports, inheritance, variables, and callbacks.',
     promptGuidelines: [
-      'Use find_references when the task is to find where a symbol is called or otherwise referenced.',
+      'Use find_references when the task is to find where a symbol is called, passed, imported, instantiated, inherited, or otherwise referenced.',
       'Prefer this tool for refactoring and impact analysis when definition lookup alone is not enough.',
-      'Use find_symbol to locate the declaration itself; use find_references to locate usages.',
+      'Use find_symbol to locate the declaration itself; use find_references to locate usages and semantic reference sites.',
     ],
     parameters: Type.Object({
       path: Type.String({ description: 'File or directory to search. Relative paths resolve against the current working directory.' }),

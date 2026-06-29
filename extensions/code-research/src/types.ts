@@ -98,7 +98,17 @@ export interface FunctionCallTreeResult {
   };
 }
 
-export type ReferenceKind = 'call' | 'import' | 'implements' | 'extends';
+export type ReferenceKind =
+  | 'call'
+  | 'import'
+  | 'instantiate'
+  | 'implements'
+  | 'extends'
+  | 'read'
+  | 'write'
+  | 'type_reference'
+  | 'callback'
+  | 'method_reference';
 
 export interface ReferenceLocation {
   file: string;

@@ -41,7 +41,8 @@ export async function queryReferencesFromGraph(options: {
 
   for (const edge of allEdges) {
     if (!['calls', 'implements', 'extends'].includes(edge.kind)) continue;
-    if (edge.to !== target.id) continue;
+    const matchesTarget = edge.to === target.id || ((edge.kind === 'implements' || edge.kind === 'extends') && edge.to === `external:java:${target.name}`);
+    if (!matchesTarget) continue;
     const fromNode = nodeById.get(edge.from);
     if (!fromNode || fromNode.kind !== 'symbol') continue;
 
