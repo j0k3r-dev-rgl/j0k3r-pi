@@ -1,4 +1,5 @@
 import { registerFindSymbolTool } from './src/tools/find-symbol.js';
+import { registerFindReferencesTool } from './src/tools/find-references.js';
 import { registerFunctionCallTreeTool } from './src/tools/function-call-tree.js';
 import { registerReverseFunctionCallTreeTool } from './src/tools/reverse-function-call-tree.js';
 import { registerWorkspaceGraphStatusTool } from './src/tools/workspace-graph.js';
@@ -10,6 +11,7 @@ export type { FindSymbolInput, SymbolLocation } from './src/types.js';
 
 export default function codeResearchExtension(pi: any) {
   registerFindSymbolTool(pi);
+  registerFindReferencesTool(pi);
   registerFunctionCallTreeTool(pi);
   registerReverseFunctionCallTreeTool(pi);
   registerWorkspaceGraphStatusTool(pi);

@@ -58,6 +58,39 @@ describe('code-research extension entry integration', () => {
     expect(result.details.results[0].implementation_locations?.[0].symbol).toBe('LocalService');
   });
 
+  it('registers and executes find_references through the extension entrypoint', async () => {
+    const tools: RegisteredTool[] = [];
+    codeResearchExtension({
+      registerTool(tool: RegisteredTool) {
+        tools.push(tool);
+      },
+    });
+
+    const findReferencesTool = tools.find((tool) => tool.name === 'find_references');
+    expect(findReferencesTool).toBeDefined();
+
+    const rootDir = await createJavaProject({
+      'src/main/java/app/AppService.java': `package app;\n\npublic class AppService {\n  public void run() {\n    helper();\n  }\n\n  public void warmup() {\n    helper();\n  }\n\n  private void helper() {}\n}\n`,
+    });
+
+    const result = await findReferencesTool!.execute(
+      'test-call-references',
+      {
+        path: 'src/main/java/app/AppService.java',
+        symbol: 'helper',
+        language: 'java',
+        kind: 'method',
+      },
+      undefined,
+      undefined,
+      { cwd: rootDir }
+    );
+
+    expect(result.details.found).toBe(2);
+    expect(result.details.results.map((item: any) => item.context_symbol).sort()).toEqual(['run', 'warmup']);
+    expect(result.details.results.every((item: any) => item.reference_kind === 'call')).toBe(true);
+  });
+
   it('registers and executes function_call_tree through the extension entrypoint', async () => {
     const tools: RegisteredTool[] = [];
     codeResearchExtension({

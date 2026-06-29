@@ -33,6 +33,15 @@ export interface FindSymbolInput {
   search_mode?: SearchMode;
 }
 
+export interface FindReferencesInput {
+  path: string;
+  symbol: string;
+  language?: SupportedLanguage;
+  kind?: SymbolKind;
+  scope?: SearchScope;
+  glob?: string;
+}
+
 export type SearchMode = 'exact' | 'prefix' | 'contains';
 
 export interface FunctionCallTreeInput {
@@ -87,6 +96,29 @@ export interface FunctionCallTreeResult {
     external_nodes: number;
     max_depth_reached: number;
   };
+}
+
+export type ReferenceKind = 'call' | 'import' | 'implements' | 'extends';
+
+export interface ReferenceLocation {
+  file: string;
+  line: number;
+  column: number;
+  end_line?: number;
+  end_column?: number;
+  symbol: string;
+  kind: SymbolKind;
+  context_symbol?: string;
+  context_kind?: SymbolKind;
+  context_class?: string;
+  owner_kind?: OwnerKind;
+  reference_kind: ReferenceKind;
+  called_as?: string;
+  receiver_name?: string;
+  receiver_type?: string;
+  is_application: boolean;
+  source: CallSource;
+  reason?: string;
 }
 
 export interface SubprojectSnapshotEntry {
