@@ -94,9 +94,12 @@ export function registerWorkspaceGraphStatusTool(pi: any) {
   pi.registerTool({
     name: 'workspace_graph_status',
     label: 'Workspace Graph Status',
-    description: 'Inspect persisted workspace code graph status for the current project.',
-    promptSnippet: 'Check whether the workspace code graph is fresh, stale, partial, missing, or errored.',
-    promptGuidelines: ['Use this tool to inspect code-graph status without rebuilding it or interrupting chat.'],
+    description: 'Use this tool when you need to know whether persisted workspace graph data is available and trustworthy before relying on graph-backed code inspection. It reports whether the current project graph is fresh, stale, partial, missing, disabled, or errored, and whether it is usable for graph-backed queries.',
+    promptSnippet: 'Check whether persisted workspace graph data exists and is ready for graph-backed inspection.',
+    promptGuidelines: [
+      'Use workspace_graph_status before graph-backed analysis when the agent needs to know whether persisted graph data is available, fresh enough, and usable.',
+      'Use this tool for graph health, coverage, and readiness checks rather than symbol lookup or call-flow inspection.',
+    ],
     parameters: Type.Object({}),
     async execute(_toolCallId: any, _params: any, _signal: any, _onUpdate: any, ctx: any) {
       const config = await loadCodeResearchConfig(ctx.cwd);

@@ -7,11 +7,13 @@ export function registerFindSymbolTool(pi: any) {
     name: 'find_symbol',
     label: 'Find Symbol',
     description:
-      'Find the definition and/or implementation of a TypeScript/JavaScript/Java symbol in a file or directory. Returns structured location data (file, line, column, kind). Set include_signature=true to return the symbol signature. Set include_code=true (only for functions/methods) to also return the symbol source code.',
-    promptSnippet: 'Find definitions and implementations of TS/JS/Java symbols across files.',
+      'Use this tool when you need to locate where a symbol is defined or implemented in code. It searches TypeScript, JavaScript, and Java files and returns structured match data such as file, line, column, and symbol kind. Set include_signature=true when only the declaration shape is needed, and include_code=true when the implementation body is needed for a function or method.',
+    promptSnippet: 'Locate where a symbol is defined or implemented across TS/JS/Java code.',
     promptGuidelines: [
-      'Use find_symbol when the user asks where a function, class, interface, or method is defined or implemented.',
-      'Use include_code=true when the user also wants to see the body of the symbol.',
+      'Use find_symbol when the task is to locate a definition, implementation, declaration, or matching symbol by name.',
+      'Prefer this tool over broad text search when the agent needs symbol-aware results with file and line metadata.',
+      'Use include_signature=true when the signature is enough without reading the full body.',
+      'Use include_code=true when the agent needs to inspect the implementation body of a function or method.',
     ],
     parameters: Type.Object({
       path: Type.String({

@@ -9,12 +9,13 @@ export function registerFunctionCallTreeTool(pi: any) {
     name: 'function_call_tree',
     label: 'Function Call Tree',
     description:
-      'Build a recursive call tree for a Java, TypeScript, or JavaScript function/method, expanding only application-internal calls. Framework and language calls appear as external leaf nodes.',
-    promptSnippet: 'Trace the call tree of a Java, TypeScript, or JavaScript method/function to understand its application-internal dependencies.',
+      'Use this tool when you need to understand how a function or method flows through application code. It builds a recursive call tree for Java, TypeScript, or JavaScript entry points, expanding application-internal calls and optionally showing framework or language calls as external leaf nodes.',
+    promptSnippet: 'Trace how a function or method calls into the rest of the application.',
     promptGuidelines: [
-      'Use function_call_tree when you need to understand what a Java, TypeScript, or JavaScript method/function does and which application methods it calls.',
-      'Set max_depth to control recursion depth (default 10).',
-      'Set include_external=true to see framework and language calls as leaf nodes.',
+      'Use function_call_tree when the task is to understand behavior by following what a function or method calls next.',
+      'Prefer this tool over find_symbol when the agent needs call flow, dependencies, or execution shape rather than just definition lookup.',
+      'Set max_depth to limit recursion depth and keep the result focused.',
+      'Set include_external=true when framework, library, or language calls are also relevant to the analysis.',
     ],
     parameters: Type.Object({
       path: Type.String({ description: 'Java file containing the root method, or directory to scan for the application index.' }),
