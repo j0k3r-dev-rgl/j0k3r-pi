@@ -76,6 +76,7 @@ export interface CallTreeNode {
   source: CallSource;
   reason?: string;
   children?: CallTreeNode[];
+  callers?: CallTreeNode[];
 }
 
 export interface FunctionCallTreeResult {

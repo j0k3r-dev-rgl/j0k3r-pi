@@ -95,6 +95,42 @@ describe('code-research extension entry integration', () => {
     expect(result.details.root.children?.[0].children?.[0].symbol).toBe('helper');
   });
 
+  it('registers and executes reverse_function_call_tree through the extension entrypoint', async () => {
+    const tools: RegisteredTool[] = [];
+    codeResearchExtension({
+      registerTool(tool: RegisteredTool) {
+        tools.push(tool);
+      },
+    });
+
+    const reverseFunctionCallTreeTool = tools.find((tool) => tool.name === 'reverse_function_call_tree');
+    expect(reverseFunctionCallTreeTool).toBeDefined();
+
+    const rootDir = await createJavaProject({
+      'src/main/java/ports/Service.java': `package ports;\npublic interface Service {\n  void run();\n}\n`,
+      'src/main/java/app/AppService.java': `package app;\n\nimport ports.Service;\n\npublic class AppService implements Service {\n  public void run() {\n    helper();\n  }\n\n  private void helper() {}\n}\n`,
+      'src/main/java/web/Controller.java': `package web;\n\nimport ports.Service;\n\npublic class Controller {\n  private final Service service;\n\n  public Controller(Service service) {\n    this.service = service;\n  }\n\n  public void handle() {\n    service.run();\n  }\n}\n`,
+    });
+
+    const result = await reverseFunctionCallTreeTool!.execute(
+      'test-call-reverse',
+      {
+        path: 'src/main/java/app/AppService.java',
+        symbol: 'helper',
+        language: 'java',
+        max_depth: 5,
+        include_external: true,
+      },
+      undefined,
+      undefined,
+      { cwd: rootDir }
+    );
+
+    expect(result.details.root.symbol).toBe('helper');
+    expect(result.details.root.callers?.[0].symbol).toBe('run');
+    expect(result.details.root.callers?.[0].callers?.[0].symbol).toBe('handle');
+  });
+
   it('reports workspace graph as disabled by default until explicitly enabled', async () => {
     const tools: RegisteredTool[] = [];
     codeResearchExtension({

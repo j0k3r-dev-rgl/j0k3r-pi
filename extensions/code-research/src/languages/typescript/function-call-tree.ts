@@ -69,7 +69,7 @@ export interface TypeScriptProjectIndex {
   files: Map<string, IndexedFile>;
 }
 
-interface ExtractedCall {
+export interface ExtractedCall {
   symbol: string;
   receiver?: string;
   receiverNodeType?: string;
@@ -78,7 +78,7 @@ interface ExtractedCall {
   column: number;
 }
 
-interface ResolvedTarget {
+export interface ResolvedTarget {
   callable?: IndexedCallable;
   className?: string;
   ownerKind?: OwnerKind;
@@ -557,7 +557,7 @@ function buildNode(options: BuildNodeOptions): CallTreeNode {
   return node;
 }
 
-function extractCalls(callableNode: any): ExtractedCall[] {
+export function extractCalls(callableNode: any): ExtractedCall[] {
   const body = callableNode.childForFieldName('body') ?? callableNode.childForFieldName('value');
   if (!body) return [];
 
@@ -615,7 +615,7 @@ function extractCall(node: any): ExtractedCall | undefined {
   return undefined;
 }
 
-function resolveCall(index: TypeScriptProjectIndex, current: IndexedCallable, call: ExtractedCall): ResolvedTarget {
+export function resolveCall(index: TypeScriptProjectIndex, current: IndexedCallable, call: ExtractedCall): ResolvedTarget {
   const currentFile = index.files.get(current.file);
   if (!currentFile) {
     return { source: 'unknown', reason: 'current file is not indexed' };
