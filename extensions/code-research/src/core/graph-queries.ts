@@ -19,7 +19,7 @@ export async function queryFunctionCallTreeFromGraph(options: {
   policy: GraphLookupPolicy;
 }): Promise<{ rootClassName: string; result: FunctionCallTreeResult } | undefined> {
   const { cwd, input, state, manifest, policy } = options;
-  if (state.status === 'partial' || state.status === 'missing' || state.status === 'incompatible' || state.status === 'errored') {
+  if (state.status === 'partial' || state.status === 'missing' || state.status === 'incompatible' || state.status === 'errored' || state.status === 'refreshing') {
     return undefined;
   }
   if (state.status === 'stale' && !policy.allowStale) return undefined;

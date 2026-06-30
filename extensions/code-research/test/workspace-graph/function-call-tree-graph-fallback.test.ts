@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildWorkspaceGraph } from '../../src/core/workspace-graph.js';
 import { executeFunctionCallTree } from '../../src/core/function-call-tree-resolver.js';
-import { writeWorkspaceGraphState } from '../../src/core/workspace-state.js';
+import { loadWorkspaceGraphState, writeWorkspaceGraphState } from '../../src/core/workspace-state.js';
 
 async function createProject(files: Record<string, string>) {
   const rootDir = join(tmpdir(), `pi-graph-fallback-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -58,6 +58,34 @@ describe('graph-backed function_call_tree fallback', () => {
     expect(execution.status).toBe('ok');
     if (execution.status !== 'ok') return;
     expect(execution.result.root.children?.[0].symbol).toBe('runService');
+  });
+
+  it('falls back to direct parsing when graph state is stale', async () => {
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/service.ts': `export function oldRunService(): void { oldHelper(); }\nfunction oldHelper(): void {}\n`,
+      'src/controller.ts': `import { oldRunService } from './service';\nexport function handle(): void { oldRunService(); }\n`,
+    });
+    await buildWorkspaceGraph(rootDir);
+    await writeFile(join(rootDir, 'src/service.ts'), `export function runService(): void { helper(); }\nfunction helper(): void {}\n`, 'utf8');
+    await writeFile(join(rootDir, 'src/controller.ts'), `import { runService } from './service';\nexport function handle(): void { runService(); }\n`, 'utf8');
+    const state = await loadWorkspaceGraphState(rootDir);
+    expect(state.status).toBe('ok');
+    if (state.status !== 'ok') return;
+    await writeWorkspaceGraphState(rootDir, { ...state.data, status: 'stale' });
+
+    const execution = await executeFunctionCallTree(rootDir, {
+      path: 'src/controller.ts',
+      symbol: 'handle',
+      language: 'ts',
+      max_depth: 5,
+      include_external: true,
+    });
+
+    expect(execution.status).toBe('ok');
+    if (execution.status !== 'ok') return;
+    expect(execution.result.root.children?.[0].symbol).toBe('runService');
+    expect(execution.result.root.children?.[0].children?.[0].symbol).toBe('helper');
   });
 
   it('uses a fresh graph for ts projects that import local source through .js specifiers', async () => {

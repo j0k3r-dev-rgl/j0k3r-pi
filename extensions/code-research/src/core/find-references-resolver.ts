@@ -1,6 +1,7 @@
 import { loadCodeResearchConfig } from '../config.js';
 import { queryReferencesFromGraph } from './reference-graph-queries.js';
 import { readWorkspaceGraphManifest, readWorkspaceGraphState } from './graph-persistence.js';
+import { evaluateGraphUsability, getFindReferencesGraphCoverage } from './graph-policy.js';
 import { findTypeScriptReferences } from '../languages/typescript/find-references.js';
 import { findJavaReferences } from '../languages/java/find-references.js';
 import type { FindReferencesInput, ReferenceLocation } from '../types.js';
@@ -25,11 +26,19 @@ export async function findReferences(cwd: string, input: FindReferencesInput): P
 
 async function findReferencesFromGraph(cwd: string, input: FindReferencesInput): Promise<ReferenceLocation[] | undefined> {
   const state = await readWorkspaceGraphState(cwd);
-  if (state.status !== 'ok') return undefined;
-  if (state.data.status === 'partial' || state.data.status === 'errored' || state.data.status === 'incompatible' || state.data.status === 'refreshing') return undefined;
-
   const manifest = await readWorkspaceGraphManifest(cwd);
-  if (manifest.status !== 'ok') return undefined;
+  const coverage = getFindReferencesGraphCoverage(input);
+  const decision = evaluateGraphUsability({
+    graphEnabled: true,
+    query: 'find_references',
+    stateReadStatus: state.status,
+    manifestReadStatus: manifest.status,
+    stateStatus: state.status === 'ok' ? state.data.status : undefined,
+    language: input.language,
+    targetPath: input.path,
+    requiredReferenceKinds: coverage.requiredReferenceKinds,
+  });
+  if (!decision.usable || state.status !== 'ok' || manifest.status !== 'ok') return undefined;
 
   return queryReferencesFromGraph({
     cwd,

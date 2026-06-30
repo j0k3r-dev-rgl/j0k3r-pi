@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { loadCodeResearchConfig } from '../config.js';
 import { readWorkspaceGraphManifest, readWorkspaceGraphState, readSubprojectGraphShard } from './graph-persistence.js';
+import { evaluateGraphUsability } from './graph-policy.js';
 import { getParser, parseSource } from './parser.js';
 import { detectLanguage, resolveTargetFiles } from './shared.js';
 import {
@@ -175,11 +176,17 @@ async function findSymbolDirect(
 
 async function findSymbolFromGraph(cwd: string, input: FindSymbolInput): Promise<SymbolLocation[] | undefined> {
   const state = await readWorkspaceGraphState(cwd);
-  if (state.status !== 'ok') return undefined;
-  if (state.data.status === 'partial' || state.data.status === 'errored' || state.data.status === 'incompatible' || state.data.status === 'refreshing') return undefined;
-
   const manifest = await readWorkspaceGraphManifest(cwd);
-  if (manifest.status !== 'ok') return undefined;
+  const decision = evaluateGraphUsability({
+    graphEnabled: true,
+    query: 'find_symbol',
+    stateReadStatus: state.status,
+    manifestReadStatus: manifest.status,
+    stateStatus: state.status === 'ok' ? state.data.status : undefined,
+    language: input.language,
+    targetPath: input.path,
+  });
+  if (!decision.usable || state.status !== 'ok' || manifest.status !== 'ok') return undefined;
 
   const includeSignature = input.include_signature ?? false;
   const searchMode = input.search_mode ?? 'exact';

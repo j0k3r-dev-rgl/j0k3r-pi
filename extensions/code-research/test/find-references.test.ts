@@ -303,7 +303,7 @@ describe('find_references', () => {
     );
   });
 
-  it('prefers graph-backed references when graph is enabled and available', async () => {
+  it('falls back to complete direct references when graph coverage is incomplete for public calls', async () => {
     const rootDir = await createProject('pi-find-references-graph', {
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'src/main/java/ports/Service.java': `package ports;\n\npublic interface Service {}\n`,
@@ -320,6 +320,6 @@ describe('find_references', () => {
       kind: 'interface',
     });
 
-    expect(new Set(results.map((item) => item.reference_kind))).toEqual(new Set(['implements']));
+    expect(new Set(results.map((item) => item.reference_kind))).toEqual(new Set(['extends', 'implements', 'import']));
   });
 });

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import codeResearchExtension from '../index.js';
 import { buildWorkspaceGraph } from '../src/core/workspace-graph.js';
+import { loadWorkspaceGraphState, writeWorkspaceGraphState } from '../src/core/workspace-state.js';
 
 interface RegisteredTool {
   name: string;
@@ -24,6 +25,55 @@ async function createJavaProject(files: Record<string, string>): Promise<string>
 }
 
 describe('code-research extension entry integration', () => {
+  it('keeps public tool language schemas free of python and fallback metadata', async () => {
+    const tools: RegisteredTool[] = [];
+    codeResearchExtension({
+      registerTool(tool: RegisteredTool) {
+        tools.push(tool);
+      },
+    });
+
+    const findSymbolTool: any = tools.find((tool) => tool.name === 'find_symbol');
+    const findReferencesTool: any = tools.find((tool) => tool.name === 'find_references');
+    const functionCallTreeTool: any = tools.find((tool) => tool.name === 'function_call_tree');
+    const reverseFunctionCallTreeTool: any = tools.find((tool) => tool.name === 'reverse_function_call_tree');
+
+    expect(JSON.stringify(findSymbolTool.parameters)).not.toContain('py');
+    expect(JSON.stringify(findReferencesTool.parameters)).not.toContain('py');
+    expect(JSON.stringify(functionCallTreeTool.parameters)).not.toContain('py');
+    expect(JSON.stringify(reverseFunctionCallTreeTool.parameters)).not.toContain('py');
+
+    const rootDir = await createJavaProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/main/java/app/AppService.java': `package app;\n\npublic class AppService {\n  public void run() {\n    helper();\n  }\n\n  private void helper() {}\n}\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+    const state = await loadWorkspaceGraphState(rootDir);
+    expect(state.status).toBe('ok');
+    if (state.status !== 'ok') return;
+    await writeWorkspaceGraphState(rootDir, { ...state.data, status: 'stale' });
+
+    const result = await tools.find((tool) => tool.name === 'find_references')!.execute(
+      'test-call-no-fallback-metadata',
+      {
+        path: 'src/main/java/app/AppService.java',
+        symbol: 'helper',
+        language: 'java',
+        kind: 'method',
+      },
+      undefined,
+      undefined,
+      { cwd: rootDir }
+    );
+
+    expect(result.details.found).toBe(1);
+    expect(result.details).not.toHaveProperty('graph');
+    expect(result.details).not.toHaveProperty('fallback');
+    expect(result.details.results[0]).not.toHaveProperty('graph');
+    expect(result.details.results[0]).not.toHaveProperty('fallback_reason');
+  });
+
   it('registers and executes find_symbol through the extension entrypoint', async () => {
     const tools: RegisteredTool[] = [];
     codeResearchExtension({
@@ -162,6 +212,37 @@ describe('code-research extension entry integration', () => {
     expect(result.details.root.symbol).toBe('helper');
     expect(result.details.root.callers?.[0].symbol).toBe('run');
     expect(result.details.root.callers?.[0].callers?.[0].symbol).toBe('handle');
+  });
+
+  it('keeps graph.enable as the query and scheduler gate in this slice', async () => {
+    const tools: RegisteredTool[] = [];
+    codeResearchExtension({
+      registerTool(tool: RegisteredTool) {
+        tools.push(tool);
+      },
+    });
+
+    const findSymbolTool = tools.find((tool) => tool.name === 'find_symbol');
+    expect(findSymbolTool).toBeDefined();
+
+    const rootDir = await createJavaProject({
+      'src/main/java/app/App.java': `package app;\npublic class App { public void run() {} }\n`,
+    });
+
+    const result = await findSymbolTool!.execute(
+      'test-call-graph-disabled-gate',
+      {
+        path: 'src/main/java/app/App.java',
+        symbol: 'run',
+        language: 'java',
+        kind: 'method',
+      },
+      undefined,
+      undefined,
+      { cwd: rootDir }
+    );
+
+    expect(result.details.found).toBe(1);
   });
 
   it('reports workspace graph as disabled by default until explicitly enabled', async () => {

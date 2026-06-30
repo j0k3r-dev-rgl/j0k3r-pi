@@ -3,6 +3,7 @@ import { executeJavaReverseFunctionCallTree } from '../languages/java/reverse-fu
 import { executeTypeScriptReverseFunctionCallTree } from '../languages/typescript/reverse-function-call-tree.js';
 import { loadCodeResearchConfig } from '../config.js';
 import { readWorkspaceGraphManifest, readWorkspaceGraphState } from './graph-persistence.js';
+import { evaluateGraphUsability } from './graph-policy.js';
 import { queryReverseFunctionCallTreeFromGraph } from './reverse-graph-queries.js';
 
 export type ReverseFunctionCallTreeExecutionResult =
@@ -49,10 +50,17 @@ async function tryGraphBackedReverseFunctionCallTree(cwd: string, input: Functio
   if (!config.graph.enable) return undefined;
 
   const state = await readWorkspaceGraphState(cwd);
-  if (state.status !== 'ok') return undefined;
-
   const manifest = await readWorkspaceGraphManifest(cwd);
-  if (manifest.status !== 'ok') return undefined;
+  const decision = evaluateGraphUsability({
+    graphEnabled: true,
+    query: 'reverse_function_call_tree',
+    stateReadStatus: state.status,
+    manifestReadStatus: manifest.status,
+    stateStatus: state.status === 'ok' ? state.data.status : undefined,
+    language: input.language,
+    targetPath: input.path,
+  });
+  if (!decision.usable || state.status !== 'ok' || manifest.status !== 'ok') return undefined;
 
   return queryReverseFunctionCallTreeFromGraph({
     cwd,

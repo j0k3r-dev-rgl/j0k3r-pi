@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import type { FindReferencesInput, GraphLookupPolicy, GraphManifest, GraphNode, ReferenceLocation, WorkspaceGraphState } from '../types.js';
 import { readSubprojectGraphShard } from './graph-persistence.js';
+import { GRAPH_REFERENCE_KINDS } from './graph-policy.js';
 
 export async function queryReferencesFromGraph(options: {
   cwd: string;
@@ -10,7 +11,7 @@ export async function queryReferencesFromGraph(options: {
   policy: GraphLookupPolicy;
 }): Promise<ReferenceLocation[] | undefined> {
   const { cwd, input, state, manifest, policy } = options;
-  if (state.status === 'partial' || state.status === 'missing' || state.status === 'incompatible' || state.status === 'errored') return undefined;
+  if (state.status === 'partial' || state.status === 'missing' || state.status === 'incompatible' || state.status === 'errored' || state.status === 'refreshing') return undefined;
   if (state.status === 'stale' && !policy.allowStale) return undefined;
 
   const shards = await Promise.all(
@@ -40,7 +41,7 @@ export async function queryReferencesFromGraph(options: {
   const references: ReferenceLocation[] = [];
 
   for (const edge of allEdges) {
-    if (!['calls', 'implements', 'extends'].includes(edge.kind)) continue;
+    if (!(edge.kind === 'calls' || edge.kind === 'implements' || edge.kind === 'extends')) continue;
     const matchesTarget = edge.to === target.id || ((edge.kind === 'implements' || edge.kind === 'extends') && edge.to === `external:java:${target.name}`);
     if (!matchesTarget) continue;
     const fromNode = nodeById.get(edge.from);
