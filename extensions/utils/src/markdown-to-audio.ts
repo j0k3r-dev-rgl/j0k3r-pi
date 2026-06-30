@@ -7,6 +7,7 @@ import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path
 export type MarkdownToAudioEngine = 'auto' | 'piper' | 'espeak-ng';
 export type EffectiveMarkdownToAudioEngine = Exclude<MarkdownToAudioEngine, 'auto'>;
 export type MarkdownToAudioFormat = 'wav' | 'mp3';
+export type MarkdownToAudioVoiceQuality = 'auto' | 'high' | 'medium' | 'low';
 
 export interface CommandResult {
   stdout: string;
@@ -16,7 +17,7 @@ export interface CommandResult {
 
 export type CommandRunner = (command: string, args: string[], options: { input?: string; signal?: AbortSignal }) => Promise<CommandResult>;
 export type CommandFinder = (command: string) => Promise<string | null>;
-export type VoiceModelFinder = (language: string) => Promise<string | null>;
+export type VoiceModelFinder = (language: string, voiceQuality?: MarkdownToAudioVoiceQuality) => Promise<string | null>;
 
 export interface MarkdownToAudioInput {
   path: string;
@@ -25,7 +26,11 @@ export interface MarkdownToAudioInput {
   engine?: MarkdownToAudioEngine;
   language?: string;
   voiceModel?: string;
+  voiceQuality?: MarkdownToAudioVoiceQuality;
   speed?: number;
+  sentenceSilence?: number;
+  noiseScale?: number;
+  noiseW?: number;
   signal?: AbortSignal;
   findCommand?: CommandFinder;
   findVoiceModel?: VoiceModelFinder;
@@ -50,25 +55,57 @@ const PIPER_CANDIDATES = ['piper-tts', 'piper'];
 const VOICE_ROOT = '/usr/share/piper-voices';
 
 export function markdownToPlainText(markdown: string): string {
-  return markdown
+  const cleaned = markdown
     .replace(/^---\s*[\r\n][\s\S]*?[\r\n]---\s*/u, '')
     .replace(/<!--([\s\S]*?)-->/gu, ' ')
     .replace(/```[\w-]*[\r\n][\s\S]*?```/gu, ' ')
     .replace(/~~~[\w-]*[\r\n][\s\S]*?~~~/gu, ' ')
-    .replace(/^#{1,6}\s+/gmu, '')
-    .replace(/^\s{0,3}>\s?/gmu, '')
-    .replace(/^\s{0,3}[-*+]\s+/gmu, '')
-    .replace(/^\s{0,3}\d+[.)]\s+/gmu, '')
     .replace(/!\[([^\]]*)\]\([^)]*\)/gu, '$1')
     .replace(/\[([^\]]+)\]\([^)]*\)/gu, '$1')
     .replace(/`([^`]+)`/gu, '$1')
     .replace(/[*_~]{1,3}([^*_~]+)[*_~]{1,3}/gu, '$1')
-    .replace(/^\s*[-*_]{3,}\s*$/gmu, ' ')
     .replace(/<[^>]+>/gu, ' ')
-    .replace(/\r/g, '\n')
+    .replace(/\bhttps?:\/\/\S+/gu, ' ')
+    .replace(/\r/g, '\n');
+
+  const lines = cleaned.split('\n').map((line) => normalizeMarkdownLineForSpeech(line));
+  return lines.join('\n')
     .replace(/[ \t]+/gu, ' ')
+    .replace(/\n[ \t]+/gu, '\n')
     .replace(/\n{3,}/gu, '\n\n')
     .trim();
+}
+
+function normalizeMarkdownLineForSpeech(line: string): string {
+  const trimmed = line.trim();
+  if (!trimmed) return '';
+  if (/^\s*[-*_]{3,}\s*$/u.test(trimmed)) return '';
+  if (/^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/u.test(trimmed)) return '';
+
+  const heading = trimmed.match(/^#{1,6}\s+(.+)$/u);
+  if (heading) return ensureSpeechPunctuation(heading[1]);
+
+  const blockquote = trimmed.match(/^>\s?(.+)$/u);
+  if (blockquote) return ensureSpeechPunctuation(blockquote[1]);
+
+  const unordered = trimmed.match(/^[-*+]\s+(.+)$/u);
+  if (unordered) return ensureSpeechPunctuation(unordered[1]);
+
+  const ordered = trimmed.match(/^\d+[.)]\s+(.+)$/u);
+  if (ordered) return ensureSpeechPunctuation(ordered[1]);
+
+  if (trimmed.includes('|')) {
+    const cells = trimmed.split('|').map((cell) => cell.trim()).filter(Boolean);
+    if (cells.length > 1) return ensureSpeechPunctuation(cells.join(', '));
+  }
+
+  return trimmed;
+}
+
+function ensureSpeechPunctuation(text: string): string {
+  const cleaned = text.trim();
+  if (!cleaned) return '';
+  return /[.!?…:]$/u.test(cleaned) ? cleaned : `${cleaned}.`;
 }
 
 export async function convertMarkdownToAudio(input: MarkdownToAudioInput): Promise<MarkdownToAudioResult> {
@@ -98,7 +135,7 @@ export async function convertMarkdownToAudio(input: MarkdownToAudioInput): Promi
     if (selected.engine === 'piper') {
       const voiceModel = input.voiceModel
         ? resolveInputPath(cwd, input.voiceModel)
-        : await (input.findVoiceModel ?? findPiperVoiceModel)(language);
+        : await (input.findVoiceModel ?? findPiperVoiceModel)(language, input.voiceQuality);
       if (!voiceModel) {
         if (requestedEngine === 'piper') {
           throw new Error('piper selected but no voice model was provided or found under /usr/share/piper-voices');
@@ -110,7 +147,12 @@ export async function convertMarkdownToAudio(input: MarkdownToAudioInput): Promi
         await convertIfNeeded(format, synthOutputPath, outputPath, findCommand, runCommand, input.signal);
         return await buildResult(inputPath, outputPath, 'espeak-ng', format, language, undefined, text.length, warnings);
       }
-      await synthesizeWithPiper(selected.command, text, synthOutputPath, voiceModel, input.speed, runCommand, input.signal);
+      await synthesizeWithPiper(selected.command, text, synthOutputPath, voiceModel, {
+        speed: input.speed,
+        sentenceSilence: input.sentenceSilence,
+        noiseScale: input.noiseScale,
+        noiseW: input.noiseW,
+      }, runCommand, input.signal);
       await convertIfNeeded(format, synthOutputPath, outputPath, findCommand, runCommand, input.signal);
       return await buildResult(inputPath, outputPath, 'piper', format, language, voiceModel, text.length, warnings);
     }
@@ -161,14 +203,23 @@ async function synthesizeWithPiper(
   text: string,
   outputPath: string,
   voiceModel: string,
-  speed: number | undefined,
+  options: { speed?: number; sentenceSilence?: number; noiseScale?: number; noiseW?: number },
   runCommand: CommandRunner,
   signal?: AbortSignal,
 ): Promise<void> {
-  const args = ['-q', '-m', voiceModel, '-f', outputPath];
-  if (speed !== undefined) {
-    const lengthScale = clampNumber(1 / speed, 'speed', 0.25, 4).toFixed(2);
+  const args = ['-m', voiceModel, '-f', outputPath];
+  if (options.speed !== undefined) {
+    const lengthScale = clampNumber(1 / options.speed, 'speed', 0.25, 4).toFixed(2);
     args.push('--length-scale', lengthScale);
+  }
+  if (options.sentenceSilence !== undefined) {
+    args.push('--sentence-silence', clampNumber(options.sentenceSilence, 'sentenceSilence', 0, 5).toFixed(2));
+  }
+  if (options.noiseScale !== undefined) {
+    args.push('--noise-scale', clampNumber(options.noiseScale, 'noiseScale', 0, 2).toFixed(2));
+  }
+  if (options.noiseW !== undefined) {
+    args.push('--noise-w', clampNumber(options.noiseW, 'noiseW', 0, 2).toFixed(2));
   }
   const result = await runCommand(command, args, { input: text, signal });
   assertCommandSucceeded('piper', result);
@@ -267,6 +318,12 @@ function normalizeLanguage(language: string): string {
   return language.trim().replace('-', '_') || DEFAULT_LANGUAGE;
 }
 
+function normalizeVoiceQuality(voiceQuality: MarkdownToAudioVoiceQuality | undefined): MarkdownToAudioVoiceQuality {
+  if (!voiceQuality) return 'auto';
+  if (['auto', 'high', 'medium', 'low'].includes(voiceQuality)) return voiceQuality;
+  throw new Error('voiceQuality must be auto, high, medium, or low');
+}
+
 function normalizeEspeakSpeed(speed: number | undefined): number {
   if (speed === undefined) return DEFAULT_ESPEAK_SPEED;
   if (!Number.isFinite(speed)) throw new Error('speed must be a finite number');
@@ -294,7 +351,7 @@ async function findCommandOnPath(command: string): Promise<string | null> {
   return null;
 }
 
-export async function findPiperVoiceModel(language: string): Promise<string | null> {
+export async function findPiperVoiceModel(language: string, voiceQuality: MarkdownToAudioVoiceQuality = 'auto'): Promise<string | null> {
   try {
     await access(VOICE_ROOT, constants.R_OK);
   } catch {
@@ -308,7 +365,8 @@ export async function findPiperVoiceModel(language: string): Promise<string | nu
   const languageParts = normalizedLanguage.split('_');
   const preferred = voices.filter((voice) => voice.toLowerCase().includes(`/${languageParts[0]}/`));
   const exact = preferred.filter((voice) => voice.toLowerCase().includes(`/${normalizedLanguage}/`));
-  return pickBestVoice(exact) ?? pickBestVoice(preferred) ?? pickBestVoice(voices);
+  const quality = normalizeVoiceQuality(voiceQuality);
+  return pickBestVoice(exact, quality) ?? pickBestVoice(preferred, quality) ?? pickBestVoice(voices, quality);
 }
 
 async function listOnnxFiles(root: string, maxDepth: number): Promise<string[]> {
@@ -326,12 +384,16 @@ async function listOnnxFiles(root: string, maxDepth: number): Promise<string[]> 
   return results.sort();
 }
 
-function pickBestVoice(voices: string[]): string | null {
+function pickBestVoice(voices: string[], voiceQuality: MarkdownToAudioVoiceQuality): string | null {
   if (voices.length === 0) return null;
-  return voices.find((voice) => /\/high\//u.test(voice))
-    ?? voices.find((voice) => /\/medium\//u.test(voice))
-    ?? voices.find((voice) => /\/low\//u.test(voice))
-    ?? voices[0];
+  const preferredOrder = voiceQuality === 'auto'
+    ? ['medium', 'low', 'high']
+    : [voiceQuality, ...['medium', 'low', 'high'].filter((quality) => quality !== voiceQuality)];
+  for (const quality of preferredOrder) {
+    const match = voices.find((voice) => new RegExp(`/${quality}/`, 'u').test(voice));
+    if (match) return match;
+  }
+  return voices[0];
 }
 
 async function runCommandWithSpawn(command: string, args: string[], options: { input?: string; signal?: AbortSignal }): Promise<CommandResult> {

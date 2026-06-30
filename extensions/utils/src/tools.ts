@@ -1,5 +1,5 @@
 import { Type } from 'typebox';
-import { convertMarkdownToAudio, type MarkdownToAudioEngine, type MarkdownToAudioResult } from './markdown-to-audio.js';
+import { convertMarkdownToAudio, type MarkdownToAudioEngine, type MarkdownToAudioResult, type MarkdownToAudioVoiceQuality } from './markdown-to-audio.js';
 
 type ToolResponse<T> =
   | { status: 'success'; data: T; warnings?: string[] }
@@ -17,7 +17,11 @@ export interface MarkdownToAudioParams {
   engine?: MarkdownToAudioEngine;
   language?: string;
   voiceModel?: string;
+  voiceQuality?: MarkdownToAudioVoiceQuality;
   speed?: number;
+  sentenceSilence?: number;
+  noiseScale?: number;
+  noiseW?: number;
 }
 
 const markdownToAudioParameters = Type.Object({
@@ -26,7 +30,11 @@ const markdownToAudioParameters = Type.Object({
   engine: Type.Optional(Type.String({ description: 'TTS engine to use. auto prefers Piper and falls back to espeak-ng.', enum: ['auto', 'piper', 'espeak-ng'] } as any)),
   language: Type.Optional(Type.String({ description: 'Language or voice code, such as es, es_ES, es_MX, or en_US. Defaults to es.' })),
   voiceModel: Type.Optional(Type.String({ description: 'Piper .onnx voice model path. If omitted, the tool searches /usr/share/piper-voices.' })),
-  speed: Type.Optional(Type.Number({ minimum: 0.25, maximum: 450, description: 'Speech speed. Values from 0.25 to 4 are relative speed multipliers where 1 is normal. For espeak-ng, values above 4 are treated as words per minute. For Piper, speed maps to length-scale as 1/speed.' })),
+  voiceQuality: Type.Optional(Type.String({ description: 'Preferred Piper voice quality when auto-selecting a model. auto balances speed and quality by preferring medium, then low, then high.', enum: ['auto', 'high', 'medium', 'low'] } as any)),
+  speed: Type.Optional(Type.Number({ minimum: 0.25, maximum: 450, description: 'Speech speed. Values from 0.25 to 4 are relative multipliers where 1 is normal. For espeak-ng, values above 4 are treated as words per minute. For Piper, speed maps to length-scale as 1/speed.' })),
+  sentenceSilence: Type.Optional(Type.Number({ minimum: 0, maximum: 5, description: 'Piper-only seconds of silence after each sentence. Useful for more natural narration pacing.' })),
+  noiseScale: Type.Optional(Type.Number({ minimum: 0, maximum: 2, description: 'Piper-only generator noise scale. Piper default is usually 0.667; adjust carefully for voice variation.' })),
+  noiseW: Type.Optional(Type.Number({ minimum: 0, maximum: 2, description: 'Piper-only phoneme width variation. Piper default is usually 0.8; adjust carefully for prosody variation.' })),
 });
 
 export function registerUtilsTools(pi: any): void {
@@ -38,6 +46,7 @@ export function registerUtilsTools(pi: any): void {
     promptGuidelines: [
       'Use markdown_to_audio when the user asks to listen to a Markdown document or convert Markdown into speech audio.',
       'For markdown_to_audio, pass voiceModel when the user wants a specific Piper voice; otherwise the tool searches installed Piper voices.',
+      'For more natural Piper narration, tune speed, sentenceSilence, noiseScale, and noiseW instead of rewriting the source Markdown.',
     ],
     parameters: markdownToAudioParameters,
     async execute(_id: string, params: MarkdownToAudioParams, signal?: AbortSignal, _onUpdate?: unknown, ctx?: { cwd?: string }) {

@@ -34,14 +34,29 @@ describe('markdownToPlainText', () => {
   it('turns common markdown syntax into readable speech text', () => {
     const text = markdownToPlainText(`---\ntitle: Demo\n---\n# Título\n\n![alt voz](img.png)\n\nHola **mundo** y [Pi](https://pi.test).\n\n- uno\n- dos\n\n\`inline\`\n\n\`\`\`ts\nconst secret = true;\n\`\`\``);
 
-    expect(text).toContain('Título');
+    expect(text).toContain('Título.');
     expect(text).toContain('alt voz');
     expect(text).toContain('Hola mundo y Pi.');
-    expect(text).toContain('uno');
+    expect(text).toContain('uno.');
+    expect(text).toContain('dos.');
     expect(text).toContain('inline');
     expect(text).not.toContain('title: Demo');
     expect(text).not.toContain('https://pi.test');
     expect(text).not.toContain('const secret');
+  });
+
+  it('uses markdown structure to create more narration-friendly plain text without editing the source', () => {
+    const source = `# Informe de IA\n\n## Chips y mercado\n\n- Nvidia acelera nuevos procesadores\n- OpenAI presenta novedades: más contexto\n\nMás detalles en https://example.test/noticia.\n\n| Actor | Impacto |\n| --- | --- |\n| AMD | Competencia |`;
+
+    const text = markdownToPlainText(source);
+
+    expect(text).toContain('Informe de IA.');
+    expect(text).toContain('Chips y mercado.');
+    expect(text).toContain('Nvidia acelera nuevos procesadores.');
+    expect(text).toContain('OpenAI presenta novedades: más contexto.');
+    expect(text).not.toContain('https://example.test/noticia');
+    expect(text).not.toContain('| --- |');
+    expect(source).toContain('- Nvidia acelera nuevos procesadores');
   });
 });
 
@@ -50,7 +65,7 @@ describe('convertMarkdownToAudio', () => {
     const file = await tempMarkdown('brief.md', '# Hola\n\nContenido para escuchar.');
     const runCommand: CommandRunner = vi.fn(async (command, args, options) => {
       expect(command).toBe('/usr/bin/piper-tts');
-      expect(args).toEqual(['-q', '-m', '/voices/es.onnx', '-f', join(file.dir, 'brief.wav')]);
+      expect(args).toEqual(['-m', '/voices/es.onnx', '-f', join(file.dir, 'brief.wav')]);
       expect(options.input).toContain('Hola');
       await writeFile(join(file.dir, 'brief.wav'), 'wav bytes');
       return { stdout: '', stderr: '', code: 0 };
@@ -71,6 +86,38 @@ describe('convertMarkdownToAudio', () => {
     expect(result.voiceModel).toBe('/voices/es.onnx');
     expect(result.textCharCount).toBeGreaterThan(0);
     expect((await stat(result.outputPath)).size).toBeGreaterThan(0);
+  });
+
+  it('passes narration tuning controls to Piper', async () => {
+    const file = await tempMarkdown('brief.md', '# Hola\n\nContenido para escuchar.');
+    const outputPath = join(file.dir, 'brief.wav');
+    const runCommand: CommandRunner = vi.fn(async (command, args) => {
+      expect(command).toBe('/usr/bin/piper-tts');
+      expect(args).toEqual([
+        '-m', '/voices/es.onnx',
+        '-f', outputPath,
+        '--length-scale', '0.80',
+        '--sentence-silence', '0.35',
+        '--noise-scale', '0.55',
+        '--noise-w', '0.65',
+      ]);
+      await writeFile(outputPath, 'wav bytes');
+      return { stdout: '', stderr: '', code: 0 };
+    });
+
+    await convertMarkdownToAudio({
+      path: file.path,
+      cwd: file.dir,
+      outputPath,
+      engine: 'piper',
+      speed: 1.25,
+      sentenceSilence: 0.35,
+      noiseScale: 0.55,
+      noiseW: 0.65,
+      findCommand: async (name) => (name === 'piper-tts' ? '/usr/bin/piper-tts' : null),
+      findVoiceModel: async () => '/voices/es.onnx',
+      runCommand,
+    });
   });
 
   it('falls back to espeak-ng when Piper is unavailable', async () => {
@@ -148,5 +195,9 @@ describe('utils extension tool', () => {
     const tool = pi.tools.find((entry) => entry.name === 'markdown_to_audio');
     expect(tool?.description).toMatch(/markdown/i);
     expect(tool?.parameters.type).toBe('object');
+    expect(JSON.stringify(tool?.parameters)).toContain('sentenceSilence');
+    expect(JSON.stringify(tool?.parameters)).toContain('noiseScale');
+    expect(JSON.stringify(tool?.parameters)).toContain('noiseW');
+    expect(JSON.stringify(tool?.parameters)).toContain('voiceQuality');
   });
 });
