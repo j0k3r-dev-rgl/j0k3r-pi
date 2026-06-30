@@ -4,6 +4,8 @@ Load this companion when planning a formal SDD sequence or when you need high-le
 
 For subagent task-packet requirements, return envelopes, and cross-phase apply/verify/archive rules, also load `skills/sdd-workflow/shared-phase-rules.md`.
 
+Local workspace source-code inspection in any phase must follow the code-research-first rule from shared phase rules: use code-research tools for symbols, references, impact, and call flow before any `bash` search, and state any source-code fallback reason.
+
 ## Default SDD Planning Sequence
 
 For a new named feature where planning is approved but implementation is not:

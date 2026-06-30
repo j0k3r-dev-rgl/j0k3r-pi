@@ -6,6 +6,7 @@ Load this companion when the active route needs PRD-first planning, existing-PRD
 
 Use `discovery` when research is standalone or pre-SDD and the orchestrator needs read-only evidence:
 
+- local workspace source-code inspection must still use code-research tools first for symbols, references, impact, and call flow; `bash` search is only for non-code surfaces, file inventory, validation, or an explicit fallback reason;
 - no OpenSpec artifacts;
 - no active SDD flow memory updates;
 - no source code edits;

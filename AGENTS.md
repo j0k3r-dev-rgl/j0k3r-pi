@@ -75,6 +75,20 @@ Rules:
 - Manual validation and user acceptance are separate from automated tests. Passing tests is not approval to commit.
 - When the user does ask for a commit, run `git status --short` first unless already done immediately beforehand.
 
+## Local workspace code inspection
+
+Code-research tools are mandatory for local workspace code inspection when they can express the lookup.
+
+Rules:
+- When locating, searching, or understanding source code inside the current workspace, use `workspace_graph_status`, `find_symbol`, `find_references`, `function_call_tree`, or `reverse_function_call_tree` first, as appropriate.
+- Do not use `bash`/`rg`/`grep`/`find` as the primary mechanism for source-code symbol lookup, reference lookup, impact analysis, or call-flow analysis.
+- Use `find_symbol` for definitions, implementations, declarations, classes, methods, functions, interfaces, and variables.
+- Use `find_references` for usages, imports, instantiations, reads/writes, callbacks, inheritance, and impact evidence.
+- Use `function_call_tree` for outbound behavior and `reverse_function_call_tree` for callers/upstream impact.
+- Use `workspace_graph_status` when graph freshness, coverage, or reliability matters before relying on graph-backed code inspection.
+- Use `read` only after a known file is identified by code-research, the user, an artifact, or prior context.
+- Use `bash` for non-code files, file inventory, git status, validation commands, tests/build/lint, or a justified fallback when code-research cannot express the lookup or lacks public language coverage. If falling back to `bash` for source code, state the reason.
+
 ## Strict TDD
 
 Strict TDD is non-negotiable for code changes.

@@ -42,6 +42,7 @@ Use `artifact_store: openspec` unless the user explicitly requests `hybrid`. Do 
 - strict TDD expectations, or the user-selected validation strategy when no test framework exists
 - validation commands
 - selected skills and applicability notes
+- local code inspection instructions requiring code-research tools first for source-code symbols, references, impact, and call flow, with any allowed fallback reason explicitly stated
 - expected return envelope
 
 ### Rules
@@ -49,6 +50,7 @@ Use `artifact_store: openspec` unless the user explicitly requests `hybrid`. Do 
 - Do not run the full formal SDD sequence solely because mini-SDD uses OpenSpec persistence.
 - Do create/update the lightweight OpenSpec artifacts listed above for mini-SDD and minimal delegated apply.
 - If no test framework exists for code changes, stop before implementation and ask the user which validation strategy to use; if the user does not know, present options with pros and cons and wait for a choice.
+- Local workspace source-code lookup must use code-research tools first; `bash` search is allowed only for non-code surfaces, validation/file inventory, or an explicit fallback reason.
 - If the subagent discovers an unresolved design, product, security, privacy, or API decision, it must stop and return `blocked`.
 - After `sdd-apply` returns `success` or `partial`, the default next phase is `sdd-verify`.
 - Mini-SDD verification is mandatory unless the user explicitly waives it; it is lighter than full SDD verification and checks the task packet, changed files, security applicability, and validation evidence.

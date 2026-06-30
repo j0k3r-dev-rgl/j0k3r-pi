@@ -10,7 +10,9 @@ Load this companion when a formal SDD route needs cross-phase execution rules, s
 - When metadata exists, every phase must read it and report alignment or conflicts.
 - When a PRD approved by `prd-review` or explicitly continued as-is by the user is in scope, downstream phases must preserve it as product context.
 - `implementation-map.md` is operational context, not a normative contract.
-- Use `implementation-map.md` as the primary context-compression handoff for OpenSpec/hybrid flows: read it before broad source searches, update it with newly discovered files/symbols/validation commands, and explain any deliberate re-read of already mapped files.
+- Use `implementation-map.md` as the primary context-compression handoff for OpenSpec/hybrid flows: read it before broader source inspection, update it with newly discovered files/symbols/validation commands, and explain any deliberate re-read of already mapped files.
+- Local workspace source-code inspection must use code-research tools first. Do not use `bash`/`rg`/`grep`/`find` as the primary mechanism for source-code symbol lookup, reference lookup, impact analysis, or call-flow analysis when `find_symbol`, `find_references`, `function_call_tree`, `reverse_function_call_tree`, or `workspace_graph_status` can answer the question.
+- Use `bash` search only for non-code surfaces, file inventory, validation commands, or a stated fallback when code-research cannot express the lookup or lacks public language coverage; reports must include the fallback reason when source code was searched outside code-research.
 - Skill Registry selection is an orchestrator responsibility before subagent launch. The orchestrator must pass exact selected skill paths and applicability notes; subagents use registry fallback only when this context is missing or stale.
 - Security is a cross-phase concern. Each phase must preserve or refine applicable authn/authz, secrets, data exposure, privacy, input validation, dependency, rollback, and abuse-case implications instead of deferring security to final verification.
 - Any blocking conflict must be reported explicitly before continuing.
@@ -52,6 +54,7 @@ Before launching a subagent, prepare a focused task with:
 - OpenSpec config path, relevant metadata path or summary, and implementation-map path or summary when present
 - relevant skills selected via `skill_registry_resolve`, including name, `SKILL.md` path, match reasons, and any related skills deliberately loaded or discarded
 - implementation-map path or summary, plus instructions to update it instead of rediscovering known context
+- local code inspection instructions requiring code-research tools first for source-code symbols, references, impact, and call flow, with any allowed fallback reason explicitly stated
 - allowed and forbidden actions
 - expected return envelope
 - validation expectations when relevant

@@ -108,6 +108,8 @@ Do not load this skill only for greetings or obvious direct answers. A user-orde
 - Never invent hidden requirements. Ask a concise clarifying question when intent, success criteria, scope, constraints, or approval are unclear.
 - Investigation and diagnosis are read-only by default.
 - Implementation approval is separate from investigation, planning, verification, and commit approval.
+- For local workspace source-code inspection, use code-research tools first. Do not use `bash`/`rg`/`grep`/`find` as the primary code search mechanism for symbols, references, impact, or call flow when `find_symbol`, `find_references`, `function_call_tree`, `reverse_function_call_tree`, or `workspace_graph_status` can answer the question.
+- Reserve `bash` search for non-code surfaces, file inventory, validation commands, or a stated fallback when code-research cannot express the lookup or lacks public language coverage.
 - Do not call `discovery` before applying triage when routing is unclear.
 - Use `discovery` only for bounded read-only evidence that materially improves the workflow decision.
 - Use formal SDD only when the change is genuinely cross-cutting, high-risk, contract-changing, architecture-bearing, or needs durable artifacts; formal SDD phases are delegated to `sdd-*` subagents by default.
@@ -202,12 +204,13 @@ After choosing the route:
 1. Restate the request in one sentence.
 2. Classify the user intent.
 3. Identify risk factors: policy-sensitive surfaces, cross-cutting impact, contract/API/persistence/security changes, dirty worktree overlap, missing validation, external-doc uncertainty.
-4. Decide whether a clarifying question is required before any edit, delegation, or artifact creation.
-5. Choose the lightest safe route from the route catalog.
-6. State the chosen workflow before editing policy-sensitive files.
-7. Before non-trivial edits, consult `skill_registry_resolve` (`stale_check=true`) when routing is ambiguous or the request involves fixing/refactoring; regenerate with `skill_registry_generate` if stale.
-8. Load only the follow-on skills required by that route.
-9. After meaningful work, perform the normal memory decision checkpoint from `AGENTS.md`.
+4. If local workspace code evidence is needed, choose the appropriate code-research tool before considering `bash` search; record any fallback reason.
+5. Decide whether a clarifying question is required before any edit, delegation, or artifact creation.
+6. Choose the lightest safe route from the route catalog.
+7. State the chosen workflow before editing policy-sensitive files.
+8. Before non-trivial edits, consult `skill_registry_resolve` (`stale_check=true`) when routing is ambiguous or the request involves fixing/refactoring; regenerate with `skill_registry_generate` if stale.
+9. Load only the follow-on skills required by that route.
+10. After meaningful work, perform the normal memory decision checkpoint from `AGENTS.md`.
 
 ## Output Contract
 

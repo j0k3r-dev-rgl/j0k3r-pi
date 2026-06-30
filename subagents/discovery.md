@@ -73,11 +73,14 @@ Good fits:
 
 - Use `read` for known files.
 - Prefer `read` over `bash` when the path is already known, especially for files outside the workspace.
-- Use `bash` only for safe inspection commands such as `ls`, `find`, `rg`, and `git status` when needed.
+- Use `bash` only for safe non-code inspection commands such as `ls`, `find`, and `git status` when needed.
+- Do not use `bash`/`rg`/`grep`/`find` as the primary mechanism to search source code symbols, references, impact, or call flow inside the current workspace when code-research tools can express the lookup.
 - Keep `bash` commands simple. Avoid complex shell syntax, pipelines, command substitution, or broad scans unless the orchestrator explicitly requested them.
 - Use Context7 tools for external library/framework documentation when requested or useful.
 - Use web research tools (`web_*`, `discussion_*`, `research_*`, `github_*`, and `youtube_*`) when the orchestrator asks for external evidence, current ecosystem signals, examples, upstream issues, release context, videos/transcripts, or academic/community references.
-- Use code-research tools (`workspace_graph_status`, `find_symbol`, `find_references`, `function_call_tree`, and `reverse_function_call_tree`) for graph-aware local code inspection when they fit the research question; fall back to safe `read`/`bash` inspection when needed.
+- Use code-research tools (`workspace_graph_status`, `find_symbol`, `find_references`, `function_call_tree`, and `reverse_function_call_tree`) first for graph-aware local code inspection: definitions/implementations, references/usages, impact analysis, and call-flow questions.
+- Use `read` only after a known source file is identified by code-research, the orchestrator, artifacts, or prior context.
+- Fall back to `bash` for source code only when code-research cannot express the lookup, lacks public language coverage, or returns insufficient evidence; report the fallback reason.
 - When researching Pi itself, read installed Pi docs/examples from the paths provided by the orchestrator or project instructions; summarize only what is relevant.
 
 ## Permission handling
