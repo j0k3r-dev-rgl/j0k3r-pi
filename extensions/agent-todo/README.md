@@ -1,8 +1,12 @@
 # Pi Agent Todo Extension
 
+[English](#english) | [Español](#español)
+
+## English
+
 Pi extension that gives the agent a single active task checklist for the current conversation branch. In this agent-dir checkout it lives at `extensions/agent-todo`; when copied into a project-local Pi setup the equivalent path is `.pi/extensions/agent-todo`.
 
-## What it provides
+### What it provides
 
 - LLM-callable `agent_todo` tool for creating, showing, completing, reopening, and clearing the active todo.
 - A compact above-chat widget that shows the active todo and progress, collapsed by default.
@@ -11,13 +15,13 @@ Pi extension that gives the agent a single active task checklist for the current
 - Branch-aware reconstruction from prior `agent_todo` tool results on session start/tree navigation.
 - Low-noise tool rendering: mutation results show compact summaries instead of the full checklist every time.
 
-## Tool
+### Tool
 
 | Tool | Purpose |
 |---|---|
 | `agent_todo` | Manage a single active todo for substantial multi-step work. |
 
-### Usage policy
+#### Usage policy
 
 Use `agent_todo` only when a checklist adds coordination value, such as:
 
@@ -29,7 +33,7 @@ Use `agent_todo` only when a checklist adds coordination value, such as:
 
 Do not use `agent_todo` for direct answers, tiny inspections, small approved edits, simple commit/push operations, or obvious short tasks where a conversational plan is enough.
 
-### Supported actions
+#### Supported actions
 
 Every call requires an `action` field.
 
@@ -49,7 +53,7 @@ Validation notes:
 - Optional `body`, when provided, must be non-empty.
 - `steps`, when provided, must contain non-empty strings and is capped at 20 steps.
 
-### Examples
+#### Examples
 
 ```json
 {"action":"create","title":"implement feature","steps":["write failing test","implement","validate"]}
@@ -67,7 +71,7 @@ Validation notes:
 {"action":"complete_range","start_step_id":"2","end_step_id":"4"}
 ```
 
-## Widget and shortcut
+### Widget and shortcut
 
 The extension renders the active todo above the chat/editor with `ctx.ui.setWidget('agent-todo', ...)`.
 
@@ -88,7 +92,7 @@ ctrl+space
 
 The shortcut only toggles the above-chat widget. It does not collapse or modify Sidebar extension rendering because the sidebar reads provider data independently.
 
-## Provider contract
+### Provider contract
 
 The provider name is `agent-todo.activeTodo`. At runtime the compatible provider is exposed through `pi.agentTodo`, `ctx.agentTodo`, and `globalThis.__PI_AGENT_TODO_PROVIDER__` rather than through a generic provider registry.
 
@@ -112,7 +116,7 @@ Provider payload shape:
 
 When there is no active todo, `active_todo` is `null`.
 
-## Runtime behavior
+### Runtime behavior
 
 - One active todo is allowed at a time.
 - Completing the final open step closes the active todo.
@@ -122,7 +126,7 @@ When there is no active todo, `active_todo` is `null`.
 - On session start or tree navigation, state is reconstructed from the current branch's prior successful version-1 `agent_todo` tool results.
 - On shutdown, the above-chat widget and provider are cleaned up.
 
-## Development
+### Development
 
 Install dependencies once:
 
@@ -146,3 +150,25 @@ After changing extension code during an interactive Pi session, run:
 ```text
 /reload
 ```
+
+## Español
+
+Extensión de Pi que proporciona al agente una única checklist activa para la rama de conversación actual.
+
+### Resumen
+
+Agent Todo sirve para trabajos multi-paso donde conviene mantener estado visible: investigación larga, implementación por fases, validaciones o coordinación con otros cambios. Expone una herramienta principal, `agent_todo`, y además integra un widget/atajo para mostrar el estado en la TUI.
+
+### Herramientas y capacidades
+
+- `agent_todo`: crea, muestra, completa, reabre o limpia la checklist activa.
+- Widget de estado para ver el plan actual sin pedirlo de nuevo.
+- Contrato de provider para que otras extensiones consulten el estado.
+
+### Uso recomendado
+
+Úsalo solo cuando una checklist aporte valor real. Para preguntas simples o cambios pequeños, responde directamente sin crear todo.
+
+### Ver más
+
+La sección en inglés contiene el detalle completo de acciones, ejemplos, widget, contrato de provider y validación.

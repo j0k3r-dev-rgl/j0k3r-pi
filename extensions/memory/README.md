@@ -1,8 +1,12 @@
 # Pi Memory Extension
 
+[English](#english) | [Español](#español)
+
+## English
+
 Local-first persistent memory for Pi agents. This extension gives the agent a project-aware memory brain backed by SQLite + FTS5, exposes memory tools to the LLM, adds slash commands for humans, captures session prompts for audit, and summarizes sessions at shutdown.
 
-## What it provides
+### What it provides
 
 - Project/general/global memory records with kinds such as `decision`, `command`, `workflow`, `todo`, `learning`, and `project_profile`.
 - Local SQLite storage with FTS5 search, WAL, foreign keys, and `busy_timeout`.
@@ -16,7 +20,7 @@ Local-first persistent memory for Pi agents. This extension gives the agent a pr
 - Interactive `/memory-browser`.
 - Cloud-sync-ready metadata and status fields; no real cloud push/pull backend yet.
 
-## Extension location
+### Extension location
 
 In this agent-dir checkout the extension lives at:
 
@@ -32,7 +36,7 @@ When copied into a project-local Pi setup, the equivalent path is:
 
 Pi auto-discovers project-local extensions from `.pi/extensions/*/index.ts` once the project is trusted. Use `/reload` after changing extension code during an interactive session.
 
-## Configuration
+### Configuration
 
 Project configuration lives in `.pi/memory.json` at the project root or an ancestor directory.
 
@@ -105,7 +109,7 @@ Full supported shape:
 }
 ```
 
-### Config fields
+#### Config fields
 
 | Field | Default | Description |
 |---|---:|---|
@@ -129,7 +133,7 @@ Full supported shape:
 
 Never store cloud tokens directly in `.pi/memory.json`.
 
-### Setup checklist for a new project
+#### Setup checklist for a new project
 
 1. Create `.pi/memory.json` with the recommended config above and set `project_name` to the canonical project name.
 2. Keep `backups.path` relative to the project working directory. Absolute paths and `..` escapes are rejected/ignored.
@@ -141,7 +145,7 @@ Never store cloud tokens directly in `.pi/memory.json`.
 
 A dedicated agent skill for this is available as `memory-configuration`.
 
-## Storage
+### Storage
 
 Default DB path:
 
@@ -168,7 +172,7 @@ SQLite settings:
 - `PRAGMA journal_mode = WAL`
 - `PRAGMA busy_timeout = 5000`
 
-## Context resolution
+### Context resolution
 
 The extension resolves the active memory context in this order:
 
@@ -180,7 +184,7 @@ The extension resolves the active memory context in this order:
 
 Use `/memory-context` or the `memory_context` tool to inspect the resolved context.
 
-## Session lifecycle
+### Session lifecycle
 
 Registered lifecycle events:
 
@@ -203,7 +207,7 @@ Shutdown behavior:
 - Default: fast heuristic local summary. A heuristic project-profile update is attempted only when useful durable signals are present.
 - With `session_end.semantic=true`: tries semantic summary and semantic project-profile update with the active model, then falls back to heuristic behavior on error or missing auth.
 
-## Tools exposed to the agent
+### Tools exposed to the agent
 
 | Tool | Purpose |
 |---|---|
@@ -225,7 +229,7 @@ Shutdown behavior:
 | `memory_export` | Export memory to JSONL. |
 | `memory_import` | Import memory from JSONL. Dry-run by default. |
 
-## Slash commands
+### Slash commands
 
 | Command | Description |
 |---|---|
@@ -241,7 +245,7 @@ Shutdown behavior:
 | `/memory-import [merge|dry_run] [keep_local|keep_imported|mark_conflict]` | Import memory backup (defaults to configured import mode; often `dry_run`). |
 | `/memory-browser` | Open the interactive memory browser. |
 
-## Memory browser
+### Memory browser
 
 `/memory-browser` opens an interactive browser with nvim-style navigation. It lists only the current project's memories, sessions, and captured prompts. Session details include the prompts linked to that session for audit/debugging. Subagent sessions/prompts are linked to their parent user session and hidden by default; user session details show linked subagent sessions, and `origin=subagent` or `origin=all` can inspect them directly within the current project. It supports filter commands such as:
 
@@ -252,11 +256,11 @@ Shutdown behavior:
 :clear
 ```
 
-## Export and import
+### Export and import
 
 `memory_export`/`memory_import` tools and `/memory-export`/`/memory-import` commands use an automatic configured backup path; no `path` argument is required.
 
-### User command usage
+#### User command usage
 
 - Export: `/memory-export`
   - `jsonl` (default)
@@ -330,7 +334,7 @@ Notes:
 - Explicit `memory_import` mode/conflict parameters always override `.pi/memory.json` defaults.
 - `merge` mode can keep local records, keep imported records, or mark conflicts.
 
-## Security and privacy
+### Security and privacy
 
 - Do not store secrets, tokens, passwords, private keys, or raw logs.
 - Memory add, prompt capture, and session finish flows reject obvious secret-like content before storage.
@@ -339,7 +343,7 @@ Notes:
 - The extension writes the local DB outside the repository by default to avoid accidental commits.
 - Cloud sync is not implemented yet; cloud config currently affects status/readiness and initial sync metadata.
 
-## Development
+### Development
 
 Install dependencies once:
 
@@ -372,9 +376,34 @@ Current expected validation:
 typecheck passes
 ```
 
-## Related project docs
+### Related project docs
 
 - `skills/persistent-memory/SKILL.md` — agent operating policy for using memory.
 - `skills/memory-configuration/SKILL.md` — `.pi/memory.json`, backup, import, and restore configuration policy.
 - `extensions/memory/src/config.ts` — config parsing and defaults.
 - `extensions/memory/src/export-import.ts` — backup format and import behavior.
+
+## Español
+
+Extensión de memoria persistente local-first para agentes Pi.
+
+### Resumen
+
+Memory proporciona un cerebro persistente consciente del proyecto, respaldado por SQLite y FTS5. Permite guardar decisiones, preferencias, perfiles de proyecto, sesiones, resúmenes y contexto reutilizable, evitando usar el historial de chat como única memoria.
+
+### Herramientas y capacidades
+
+- Herramientas `memory_*` para crear, buscar, leer, actualizar, archivar y consolidar memorias.
+- Perfil de proyecto (`memory_project_profile`).
+- Sesiones, prompts auditados y resúmenes de cierre.
+- Import/export local.
+- Browser y comandos slash.
+- Provenance opcional de commits/changelog/releases cuando está habilitado.
+
+### Activación
+
+La extensión es opt-in por proyecto mediante `.pi/memory.json` con `enabled: true`.
+
+### Ver más
+
+La sección en inglés documenta configuración completa, ciclo de vida de sesiones, storage, herramientas, comandos, seguridad y desarrollo.

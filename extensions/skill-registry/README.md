@@ -1,8 +1,12 @@
 # Pi Skill Registry Extension
 
+[English](#english) | [Español](#español)
+
+## English
+
 Agent-dir development version of a future Pi skill registry extension. It generates a routing index for global/user and project-local skills so agents can select and load the right `SKILL.md` without assuming a fixed path.
 
-## What it provides
+### What it provides
 
 - Generates a stack-agnostic registry from global and project skills.
 - Reads Pi skill locations:
@@ -20,7 +24,7 @@ Agent-dir development version of a future Pi skill registry extension. It genera
 - Adds generated registry files to an existing `.gitignore` when missing; it does not create `.gitignore` if none exists.
 - Exposes an LLM-callable tool and human slash command.
 
-### Enable gate
+#### Enable gate
 
 The extension only registers when `.pi/skill-registry.config.json` exists with `{"enabled": true}` in project scope. Missing or invalid config defaults to disabled.
 
@@ -36,14 +40,14 @@ The registry is an index for routing. The source of truth remains each `SKILL.md
 
 A dedicated agent skill for configuring this extension is available as `skill-registry-configuration`.
 
-## Tool
+### Tool
 
 | Tool | Purpose |
 |---|---|
 | `skill_registry_generate` | Generate the registry and optionally write output files. Defaults to write. |
 | `skill_registry_resolve` | Resolve candidate skills from the live registry using intent/path/sdd-phase with optional stale-check semantics and one-hop related expansion. Read-only. |
 
-### `skill_registry_generate`
+#### `skill_registry_generate`
 
 Parameters:
 
@@ -55,7 +59,7 @@ Parameters:
 
 Use `write: false` for validation or dry-run routing checks.
 
-### `skill_registry_resolve`
+#### `skill_registry_resolve`
 
 Parameters:
 
@@ -133,12 +137,12 @@ Response shape includes:
 }
 ```
 
-### Command parity note
+#### Command parity note
 
 The `/skill-registry` command set remains unchanged in this MVP (`generate`, `refresh`, `write`, `status`, `list` only). There is **no** `/skill-registry resolve` command parity yet.
 
 
-## Command
+### Command
 
 ```text
 /skill-registry generate
@@ -155,14 +159,14 @@ Command behavior:
 - `status` reads the existing `.pi/skill-registry.json` and does not regenerate;
 - `list` reads the existing registry when present, otherwise generates in memory without writing.
 
-## Registry behavior
+### Registry behavior
 
 - Registry output is ordered by priority descending, then skill name ascending.
 - Missing or invalid registry contracts do not exclude a skill; the skill remains present with empty routing metadata and a warning.
 - Duplicate skill names produce a warning; later duplicates are ignored.
 - The registry contract heading must be exactly `## Registry Contract` followed by a fenced `json` block.
 
-## Registry Contract convention
+### Registry Contract convention
 
 Skills should include a valid JSON block:
 
@@ -186,10 +190,32 @@ Skills should include a valid JSON block:
 
 Use `templates/skill-template.md` from this extension while this is agent-dir local. Later this extension and its templates may move to global Pi agent configuration or a package.
 
-## Development
+### Development
 
 ```bash
 cd extensions/skill-registry
 npm test
 npm run typecheck
 ```
+
+## Español
+
+Extensión que genera y consulta el índice de routing de skills.
+
+### Resumen
+
+Skill Registry permite que los agentes descubran skills globales y de proyecto sin asumir rutas fijas. Genera `.pi/skill-registry.json` y `.pi/skill-registry.md` a partir de los bloques `Registry Contract` de cada `SKILL.md`.
+
+### Herramientas y capacidades
+
+- `skill_registry_generate`: genera el registry vivo y opcionalmente escribe los artefactos.
+- `skill_registry_resolve`: resuelve skills candidatas por intención, rutas y fase SDD.
+- Comando `/skill-registry generate`.
+
+### Activación
+
+Es opt-in por proyecto mediante `.pi/skill-registry.config.json` con `enabled: true`.
+
+### Ver más
+
+La sección en inglés cubre enable gate, herramientas, comportamiento del registry, convención `Registry Contract` y validación.

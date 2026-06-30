@@ -1,14 +1,42 @@
 # pi-code-research-extension
 
+[English](#english) | [Español](#español)
+
+## English
+
+Global Pi extension for TypeScript, JavaScript, and Java code navigation using native Tree-sitter parsers.
+
+### Summary
+
+Code Research helps agents inspect code structurally instead of relying only on text search. It can locate symbols, find references, and build forward or reverse call trees for application code.
+
+### Tools and capabilities
+
+- `find_symbol`: locates definitions and implementations.
+- `find_references`: finds semantic usages and references.
+- `function_call_tree`: traces outgoing application calls.
+- `reverse_function_call_tree`: traces incoming callers.
+- `workspace_graph_status`: reports persisted graph readiness when graph-backed inspection is available.
+
+### Recommended use
+
+Use it for refactors, impact analysis, onboarding, and understanding execution flow before editing code.
+
+### Read more
+
+The Spanish section contains the detailed parameter reference, result shapes, installation notes, structure, and caveats.
+
+## Español
+
 Extensión global de Pi para navegar símbolos TypeScript/JavaScript/Java con Tree-sitter nativo y construir call trees de funciones/métodos.
 
-## Tool registrada
+### Tool registrada
 
-### `find_symbol`
+#### `find_symbol`
 
 Busca la definición y/o implementación de un símbolo TS/JS/Java en un archivo o directorio.
 
-#### Parámetros
+##### Parámetros
 
 - `path` *(string, requerido)*: archivo o directorio a escanear.
 - `symbol` *(string, requerido)*: nombre del símbolo.
@@ -20,7 +48,7 @@ Busca la definición y/o implementación de un símbolo TS/JS/Java en un archivo
 - `glob` *(string, opcional)*: patrón glob para filtrar archivos al escanear un directorio.
 - `search_mode` *(string, opcional)*: `exact`, `prefix` o `contains`. Por defecto: `exact`.
 
-#### Resultado
+##### Resultado
 
 Array de ubicaciones con:
 
@@ -32,11 +60,11 @@ Array de ubicaciones con:
 - `signature` (si `include_signature=true`)
 - `code` (si `include_code=true`)
 
-### `function_call_tree`
+#### `function_call_tree`
 
 Construye un árbol recursivo de llamadas para una función o método de Java, TypeScript o JavaScript, expandiendo llamadas internas de la aplicación.
 
-#### Parámetros
+##### Parámetros
 
 - `path` *(string, requerido)*: archivo raíz o directorio a escanear.
 - `symbol` *(string, requerido)*: nombre de la función o método raíz.
@@ -46,7 +74,7 @@ Construye un árbol recursivo de llamadas para una función o método de Java, T
 - `include_external` *(boolean, opcional)*: si es `true`, incluye llamadas externas como hojas.
 - `compacted` *(boolean, opcional)*: compresión opcional de nodos triviales donde el lenguaje lo soporte.
 
-#### Resultado
+##### Resultado
 
 Objeto con:
 
@@ -56,7 +84,7 @@ Objeto con:
 - `stats.external_nodes`
 - `stats.max_depth_reached`
 
-## Instalación
+### Instalación
 
 La extensión está en `~/.pi/agent/extensions/code-research/`. Pi la auto-descubre al arrancar.
 
@@ -66,7 +94,7 @@ npm test
 npm run typecheck
 ```
 
-## Estructura
+### Estructura
 
 ```
 code-research/
@@ -92,7 +120,7 @@ code-research/
     └── javascript/
 ```
 
-## Notas
+### Notas
 
 - Usa `tree-sitter` nativo con parsers fijos y versiones exactas.
 - La detección de implementaciones es sintáctica (basada en `implements Nombre` en TS/Java).

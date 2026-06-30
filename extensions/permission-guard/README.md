@@ -1,8 +1,12 @@
 # Pi Permission Guard Extension
 
+[English](#english) | [Español](#español)
+
+## English
+
 `permission-guard` is a project-local Pi extension that adds a JSON configurable, in-process permission guard for supported built-in tools and user bash commands. It makes risky actions visible, asks for user consent when policy says `ask`, denies known secret access by default, and writes a local redacted audit trail.
 
-## What it provides
+### What it provides
 
 - Policy checks for supported built-in tool calls.
 - Policy checks for user `!` and `!!` bash commands via `user_bash` events.
@@ -21,7 +25,7 @@
 - Subagent permission routing back to the main user thread.
 - Redacted local audit logs with rotation.
 
-## Extension location
+### Extension location
 
 In this agent-dir checkout the extension lives at:
 
@@ -37,7 +41,7 @@ When copied into a project-local Pi setup, the equivalent path is:
 
 Pi auto-discovers project-local extensions from `.pi/extensions/*/index.ts` once the project is trusted. Use `/reload` after changing extension code or permission config during an interactive session.
 
-## Security scope and limitations
+### Security scope and limitations
 
 This extension is an in-process guard, not a hard sandbox. It does not provide OS-level containment, syscall isolation, guaranteed network isolation, or guaranteed prevention of arbitrary host-process behavior.
 
@@ -51,7 +55,7 @@ Skill loading passthrough covers read-only access to loadable skill markdown fil
 
 Pi documentation passthrough covers read-only access to the installed `@earendil-works/pi-coding-agent` package `README.md`, `docs/**`, and `examples/**` paths under a package root whose `package.json` declares that package name. It does not allow package internals, lookalike folders without the matching package identity, writes, bash execution, or symlink escapes outside the package root.
 
-## Runtime hooks
+### Runtime hooks
 
 This extension does not register LLM tools or slash commands. It registers Pi event handlers:
 
@@ -62,7 +66,7 @@ This extension does not register LLM tools or slash commands. It registers Pi ev
 
 If policy denies a request, the extension blocks it. If policy requires approval, it prompts the main user when UI is available or fails closed according to non-interactive policy.
 
-## Defaults
+### Defaults
 
 Built-in defaults are conservative. Project or global config can override them, including emergency `bypassAll`; inspect the active config when validating enforcement:
 
@@ -81,7 +85,7 @@ Built-in defaults are conservative. Project or global config can override them, 
 - Analyzed read-only bash commands and narrow read-only pipelines inside the workspace default to `allow` through `bash.workspaceReadOnly`.
 - No project `.pi/permissions.json` file is created automatically.
 
-## Configuration files
+### Configuration files
 
 Effective config is loaded in this order:
 
@@ -108,7 +112,7 @@ Project relative paths are resolved against the active workspace, not the extens
 
 Unknown keys are ignored with warnings. Secret-like config keys such as `apiKey`, `token`, `secret`, `password`, and `credential` are also ignored with warnings.
 
-## Example project policy
+### Example project policy
 
 ```json
 {
@@ -141,9 +145,9 @@ Unknown keys are ignored with warnings. Secret-like config keys such as `apiKey`
 }
 ```
 
-## Config reference
+### Config reference
 
-### Top-level
+#### Top-level
 
 | Field | Values | Default | Description |
 |---|---|---:|---|
@@ -151,7 +155,7 @@ Unknown keys are ignored with warnings. Secret-like config keys such as `apiKey`
 | `bypassAll` | boolean | `false` | Emergency all-access bypass. Allows every supported permission check immediately. |
 | `bypassWorkspace` | boolean | `false` | Auto-allows supported operations only when every classified effect is proven inside the active workspace and no stricter deny/secret/destructive/ask rule applies. Outside-workspace, path-context-changing, ambiguous, or unsupported effects still ask/deny. |
 
-### `workspace`
+#### `workspace`
 
 | Field | Values | Default | Description |
 |---|---|---:|---|
@@ -165,7 +169,7 @@ Unknown keys are ignored with warnings. Secret-like config keys such as `apiKey`
 | `ask` | string[] | `[".git/**", "node_modules/**"]` | Workspace globs that require approval. |
 | `deny` | string[] | `[]` | Workspace globs that are denied. |
 
-### `outsideWorkspace`
+#### `outsideWorkspace`
 
 | Field | Values | Default | Description |
 |---|---|---:|---|
@@ -176,7 +180,7 @@ Unknown keys are ignored with warnings. Secret-like config keys such as `apiKey`
 | `create` | `allow`/`ask`/`deny` | `ask` | Outside-workspace create decision. |
 | `rememberApprovals` | `none`/`session` | `session` | Reserved mode for outside-workspace approvals. |
 
-### `secrets`
+#### `secrets`
 
 | Field | Values | Default | Description |
 |---|---|---:|---|
@@ -185,7 +189,7 @@ Unknown keys are ignored with warnings. Secret-like config keys such as `apiKey`
 | `denyKeyPatterns` | string[] | token/secret/password/etc. | Secret-like key patterns. |
 | `maxPreviewBytesForPrompt` | `0` | `0` | Secret previews are disabled. |
 
-### `tools`
+#### `tools`
 
 Each supported tool can be set to `policy`, `allow`, or `deny`:
 
@@ -205,7 +209,7 @@ Each supported tool can be set to `policy`, `allow`, or `deny`:
 
 `policy` means normal path/bash policy applies. `allow` or `deny` bypasses normal policy for that tool mode. Be careful with `allow`: it bypasses the normal path policy, including secret-path denial for that tool.
 
-### `bash`
+#### `bash`
 
 | Field | Values | Default | Description |
 |---|---|---:|---|
@@ -284,21 +288,21 @@ find ~ -maxdepth 1 -mindepth 1 -print | sort
 
 In other words, directory inheritance is scoped by both the approved root and the analyzed command/effect shape. Approving a directory is not equivalent to adding it to `safeCommands`, and it is not a blanket outside-workspace allowlist.
 
-### `nonInteractive`
+#### `nonInteractive`
 
 | Field | Values | Default | Description |
 |---|---|---:|---|
 | `onAsk` | `deny`/`allow` | `deny` | Fallback when approval cannot be collected. |
 | `allowSessionApprovals` | boolean | `false` | Whether non-interactive flows can use session approvals. |
 
-### `approvals`
+#### `approvals`
 
 | Field | Values | Default | Description |
 |---|---|---:|---|
 | `sessionCache` | boolean | `true` | Enable scoped in-memory session approval cache. |
 | `allowForSession` | boolean | `true` | Allow the `Allow for session` approval option to cache matching requests. |
 
-### `audit`
+#### `audit`
 
 | Field | Values | Default | Description |
 |---|---|---:|---|
@@ -311,7 +315,7 @@ In other words, directory inheritance is scoped by both the approved root and th
 | `maxBytes` | number | `5242880` | Rotation threshold. |
 | `maxFiles` | number | `5` | Number of rotated files to retain. |
 
-## Approval flow
+### Approval flow
 
 Interactive approval choices are English and intentionally stable:
 
@@ -341,13 +345,13 @@ Scoped approval reuse stays limited to the approved command/effect signature and
 
 `Deny` blocks the current request.
 
-## Subagent approvals
+### Subagent approvals
 
 Subagent approvals route to the main thread. If a subagent-originated request needs approval, the subagent cannot approve itself. The guard surfaces a `permission_required` payload for the orchestrator/user thread so the main user can decide. For supported external path tools, the payload carries explicit file/folder project approval options so the main thread can persist the same `pathApprovals.scopedApprovals` entry that a direct request would save.
 
 Background subagent tasks cannot complete interactive approval by themselves; rerun in task mode when approval is needed.
 
-## Audit
+### Audit
 
 Audit is local and redacted. Denials, explicit approval decisions, and subagent `permission_required` handoff events are written to an extension-owned NDJSON audit file when audit is enabled.
 
@@ -374,7 +378,7 @@ Audit safety rules:
 - audit files use mode `0600`; directories use mode `0700`;
 - audit rotation is checked before appending a new event when the existing file is already over `audit.maxBytes`; a single write can exceed the threshold until the next audit event.
 
-## Workspace bypass
+### Workspace bypass
 
 Workspace-only bypass:
 
@@ -396,7 +400,7 @@ Still asks or denies:
 - path-context-changing commands such as `cd`, `pushd`, `popd`, `git -C`, and `npm --prefix`;
 - unsupported or ambiguous shell syntax.
 
-## Emergency bypass
+### Emergency bypass
 
 Emergency/all-access bypass:
 
@@ -408,7 +412,7 @@ Emergency/all-access bypass:
 
 When `bypassAll` is `true`, every supported permission check is allowed immediately without prompts, including outside-workspace reads/writes and risky bash commands. Keep it `false` by default and enable it only when you intentionally trust the current session and environment.
 
-## Enforcement validation
+### Enforcement validation
 
 For enforcement tests and manual validation, make sure any local permission config used for validation sets `bypassAll: false`. A temporary `bypassAll: true` setting will hide real policy behavior. To validate `bypassWorkspace`, set it explicitly to `true` in a temporary project config and verify outside-workspace and path-context-changing commands still ask.
 
@@ -426,7 +430,7 @@ Suggested manual checks:
 - verify unsafe or outside-workspace pipes such as `cat extensions/permission-guard/package.json | sh` or `find ~/sias/app -maxdepth 1 -mindepth 1 -print | sort` still ask;
 - verify subagent-origin permission prompts remain marker-free on user-visible surfaces.
 
-## Development
+### Development
 
 Install dependencies once:
 
@@ -449,8 +453,33 @@ cd extensions/permission-guard
 npm run typecheck
 ```
 
-## Related project docs
+### Related project docs
 
 - `extensions/subagents/README.md` — subagent permission handoff integration.
 - `skills/permission-guard-configuration/SKILL.md` — agent-facing permission configuration policy.
 - Pi extension docs: session/tool/user bash events and in-process extension limitations.
+
+## Español
+
+Extensión de seguridad in-process para permisos de tools y comandos bash.
+
+### Resumen
+
+Permission Guard hace visibles las acciones riesgosas, solicita aprobación cuando la política lo indica, bloquea accesos peligrosos por defecto y escribe auditoría local redactada. No es un sandbox del sistema operativo, sino una capa de control dentro de Pi.
+
+### Herramientas y capacidades
+
+- Hooks runtime para tools soportadas y bash del usuario.
+- Políticas de workspace y rutas fuera del workspace.
+- Detección de secretos y protección de rutas sensibles.
+- Reglas para comandos bash, aprobaciones por proyecto y modo no interactivo.
+- Auditoría local redactada.
+- Integración con subagentes y handoff de aprobaciones.
+
+### Uso recomendado
+
+Úsalo para reducir riesgos operativos y hacer explícitas las acciones sensibles, especialmente en repositorios con secretos, infraestructura o comandos destructivos.
+
+### Ver más
+
+La sección en inglés contiene referencia completa de configuración, defaults, flujo de aprobación, auditoría, límites y validación.

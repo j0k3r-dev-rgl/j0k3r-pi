@@ -1,8 +1,12 @@
 # Telegram Pi Control Extension
 
+[English](#english) | [Español](#español)
+
+## English
+
 Gateway for controlling Pi sessions over Telegram with strict, authorization-first defaults.
 
-## Scope (current implementation)
+### Scope (current implementation)
 
 - Parse and authorize Telegram updates.
 - Validate Telegram user allowlists and exact Pi trust roots.
@@ -14,7 +18,7 @@ Gateway for controlling Pi sessions over Telegram with strict, authorization-fir
 - Persist Telegram update offsets between restarts.
 - Provide `/close`, remote permission approval commands, clean shutdown, and emergency disable behavior.
 
-## Configuration
+### Configuration
 
 Normal `gateway:start` usage supports only two environment variables:
 
@@ -43,14 +47,14 @@ Example:
 
 `/workspaces` displays both selector and path so the operator can choose the intended root.
 
-### No-secrets policy
+#### No-secrets policy
 
 - Bot token is loaded **only** from environment variable `PI_TELEGRAM_CONTROL_BOT_TOKEN` or the optional local env file.
 - The local env file must contain only `PI_TELEGRAM_CONTROL_BOT_TOKEN` and `PI_TELEGRAM_CONTROL_USER_ID`.
 - Real env files, `node_modules/`, `dist/`, audit logs, runtime state, and `trust.json` are ignored by Git.
 - Audit/output/state files are kept under user state directory only; nothing is written to committed config for runtime secrets.
 
-## Commands (MVP behavior)
+### Commands (MVP behavior)
 
 The gateway registers these commands with Telegram Bot API `setMyCommands` during startup so they appear in the bot command menu.
 
@@ -73,13 +77,13 @@ The gateway registers these commands with Telegram Bot API `setMyCommands` durin
 | `/approve <id> [once\|session\|project\|file\|folder]` | approve a pending request for the active chat/workspace/session |
 | `/deny <id>` | deny a pending request for the active chat/workspace/session |
 
-## Shutdown and emergency behavior
+### Shutdown and emergency behavior
 
 - `runTelegramControlGateway` wires shutdown handlers for `SIGINT`, `SIGTERM`, `SIGQUIT`.
 - Emergency stop path clears armed bindings and stops managed SDK runtime handles.
 - Update offsets are saved after each processed update and restored on startup.
 
-## Running with npm
+### Running with npm
 
 For normal use, export the two required variables in your shell/session/profile and start with one command:
 
@@ -121,7 +125,7 @@ Then use Telegram commands: `/workspaces`, `/sessions agent`, `/new agent smoke`
 
 When creating or opening a session, the SDK runtime is forced to the selected workspace cwd. Existing session files with stale headers are opened with a cwd override so Telegram control stays in the workspace selected by the operator.
 
-## Permission Guard approval flow
+### Permission Guard approval flow
 
 When Permission Guard requires approval inside an SDK-backed Telegram session, the gateway sends a formatted prompt only to the Telegram chat bound to that workspace/session. Raw internal `permission_required:` markers are filtered from normal assistant output.
 
@@ -140,7 +144,7 @@ Only choices offered by Permission Guard for that request are accepted. Requests
 
 `bypassWorkspace` is configured in Permission Guard, not in the Telegram gateway. It can reduce prompts for provably workspace-contained operations, but it is still an in-process policy guard, not an OS sandbox.
 
-## Validation steps
+### Validation steps
 
 ```bash
 cd extensions/telegram-pi-control
@@ -149,12 +153,12 @@ npm run typecheck
 npm run build
 ```
 
-## Deployment and operational notes
+### Deployment and operational notes
 
 - Runtime is currently designed for long polling only; webhooks and dedicated helper admin extensions are out of this slice.
 - A dedicated service-manager launch (systemd/pm2/manual process management) is intentionally left to operator docs outside this extension.
 
-## Do not commit
+### Do not commit
 
 Do not commit:
 
@@ -164,3 +168,26 @@ Do not commit:
 - `dist/`;
 - runtime logs/audit files;
 - `trust.json` or other local Pi state.
+
+## Español
+
+Gateway de Telegram para controlar sesiones Pi de forma autorizada.
+
+### Resumen
+
+Telegram Pi Control permite interactuar con Pi desde Telegram bajo defaults estrictos de autorización. Está pensado para control remoto explícito, no para exponer sesiones sin restricciones.
+
+### Capacidades
+
+- Validación de bot token y usuario autorizado.
+- Comandos MVP para iniciar, enviar prompts y controlar sesiones.
+- Comportamiento de shutdown/emergencia.
+- Integración con Permission Guard para aprobaciones.
+
+### Requisitos
+
+Requiere variables de entorno de bot y usuario de Telegram. No se deben commitear tokens ni archivos runtime con secretos.
+
+### Ver más
+
+La sección en inglés detalla configuración, comandos, ejecución, validación y notas operativas.

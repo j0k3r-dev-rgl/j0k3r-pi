@@ -1,8 +1,12 @@
 # Pi Context7 Extension
 
+[English](#english) | [Español](#español)
+
+## English
+
 Native Pi extension for fetching up-to-date library and framework documentation from Context7 using `@upstash/context7-sdk`. It exposes safe, bounded Context7 tools to the agent without requiring MCP.
 
-## What it provides
+### What it provides
 
 - Context7 readiness/status tool that never exposes API keys.
 - Library search by human package/framework name and focused query.
@@ -13,7 +17,7 @@ Native Pi extension for fetching up-to-date library and framework documentation 
 - Output truncation with explicit metadata to protect LLM context.
 - Offline unit-testable client/tool design using injectable clients.
 
-## Extension location
+### Extension location
 
 In this agent-dir checkout the extension lives at:
 
@@ -29,7 +33,7 @@ When copied into a project-local Pi setup, the equivalent path is:
 
 Pi auto-discovers project-local extensions from `.pi/extensions/*/index.ts` once the project is trusted. Use `/reload` after changing extension code during an interactive session.
 
-## Required environment
+### Required environment
 
 Live Context7 calls require:
 
@@ -43,7 +47,7 @@ Rules:
 - Do not store `CONTEXT7_API_KEY` in `.pi/context7.json` or any repository file.
 - `context7_status` reports only whether the key is present, never its value.
 
-## Project configuration
+### Project configuration
 
 Optional project config lives in `.pi/context7.json` at the project root or an ancestor directory.
 
@@ -62,7 +66,7 @@ Example:
 }
 ```
 
-### Config fields
+#### Config fields
 
 | Field | Default | Range | Description |
 |---|---:|---:|---|
@@ -73,11 +77,11 @@ Example:
 
 Invalid numeric values produce warnings and fall back to defaults.
 
-### Secret-like keys
+#### Secret-like keys
 
 Any config key that looks like `apiKey`, `token`, `secret`, or `password` is ignored and reported as a warning. Use environment variables for secrets.
 
-## Cache behavior
+### Cache behavior
 
 Cache is disabled by default.
 
@@ -100,7 +104,7 @@ Safety rules:
 - Cache files use mode `0600`; directories use mode `0700`.
 - Cache entries expire according to `cache.ttl_seconds`.
 
-## Tools exposed to the agent
+### Tools exposed to the agent
 
 | Tool | Purpose |
 |---|---|
@@ -111,9 +115,9 @@ Safety rules:
 
 This extension does not register slash commands.
 
-## Tool details
+### Tool details
 
-### `context7_status`
+#### `context7_status`
 
 Parameters: none.
 
@@ -127,7 +131,7 @@ Returns:
 - effective defaults;
 - non-secret warnings.
 
-### `context7_search_library`
+#### `context7_search_library`
 
 Parameters:
 
@@ -151,7 +155,7 @@ Returns compact candidates with fields such as:
 - `benchmarkScore`;
 - `versions`.
 
-### `context7_get_context`
+#### `context7_get_context`
 
 Parameters:
 
@@ -171,7 +175,7 @@ Output:
 - `json`: formatted snippets with title/source/content; snippet content is bounded per snippet, so total JSON output can exceed `max_chars` when multiple snippets are returned.
 - `txt`: text output with a Context7 header, truncated to the effective total max char limit.
 
-### `context7_resolve_and_get_context`
+#### `context7_resolve_and_get_context`
 
 Parameters:
 
@@ -193,7 +197,7 @@ Behavior:
 
 Use this tool for convenience only when ambiguity is acceptable to handle in the result. For high-risk implementation decisions, prefer explicit `context7_search_library` followed by `context7_get_context` after confirming the selected ID.
 
-## Output safety
+### Output safety
 
 All tool outputs are designed to be safe for LLM context:
 
@@ -205,7 +209,7 @@ All tool outputs are designed to be safe for LLM context:
 - errors are formatted with actionable messages;
 - upstream `401`, `403`, `404`, `429`, and `5xx` failures get user-actionable wording.
 
-## Recommended workflow
+### Recommended workflow
 
 1. Run `context7_status` if readiness is uncertain.
 2. Run `context7_search_library` for the dependency and focused topic.
@@ -221,7 +225,7 @@ libraryName: next.js
 query: app router route handlers cookies api
 ```
 
-## SDD usage policy
+### SDD usage policy
 
 Use Context7 during SDD only when current external dependency documentation materially affects a requirement, design decision, implementation detail, or verification judgment.
 
@@ -233,7 +237,7 @@ When Context7 influences an SDD artifact, record concise source metadata, not fu
 - retrieval date;
 - relevance summary.
 
-## Development
+### Development
 
 Install dependencies once:
 
@@ -258,10 +262,33 @@ npm run typecheck
 
 The test suite is designed to run without live Context7 network access or a real API key by using mocked clients/fixtures.
 
-## Related project docs
+### Related project docs
 
 - `skills/context7-configuration/SKILL.md` — agent-facing Context7 configuration and usage policy.
 - `extensions/context7/src/config.ts` — config parsing and defaults.
 - `extensions/context7/src/tools.ts` — tool schemas and output shaping.
 - `extensions/context7/src/cache.ts` — cache location and safety behavior.
 - `extensions/context7/src/security.ts` — redaction and safe output helpers.
+
+## Español
+
+Extensión nativa de Pi para consultar documentación actualizada de librerías y frameworks mediante Context7.
+
+### Resumen
+
+Context7 permite buscar, resolver y obtener documentación enfocada sin depender de MCP. La extensión está diseñada para respuestas acotadas, caché opcional, configuración segura y manejo cuidadoso de claves.
+
+### Herramientas y capacidades
+
+- `context7_status`: reporta disponibilidad/configuración sin exponer secretos.
+- `context7_search_library`: busca librerías candidatas.
+- `context7_get_context`: obtiene documentación enfocada para un library ID conocido.
+- `context7_resolve_and_get_context`: resuelve y obtiene documentación cuando la coincidencia es clara.
+
+### Requisitos
+
+Las llamadas live requieren `CONTEXT7_API_KEY` en el entorno del proceso Pi. No guardes claves en el repositorio.
+
+### Ver más
+
+La sección en inglés cubre configuración, caché, detalles de tools, límites de salida, workflow recomendado y uso con SDD.

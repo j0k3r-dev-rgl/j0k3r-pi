@@ -1,8 +1,12 @@
 # Example Fixtures for `code-research`
 
+[English](#english) | [Español](#español)
+
+## English
+
 These files exist only for testing the `find_symbol`, `find_references`, `function_call_tree`, and `reverse_function_call_tree` tools. They are never executed.
 
-## TypeScript fixtures (`typescript/`)
+### TypeScript fixtures (`typescript/`)
 
 - `shapes.ts` — interfaces (`Shape`, `Drawable`) and implementing classes (`Circle`, `Rectangle`)
 - `utils.ts` — functions, arrow-function variables, and object methods (`add`, `subtract`, `fetchUserData`, `fetchPostData`, `mathUtils`)
@@ -11,19 +15,19 @@ These files exist only for testing the `find_symbol`, `find_references`, `functi
 - `advanced.ts` — abstract classes, generics, getters, setters, constructors, static methods
 - `index.ts` — re-exports
 
-## JavaScript fixtures (`javascript/`)
+### JavaScript fixtures (`javascript/`)
 
 - `vehicles.js` — class inheritance (`Vehicle`, `Car`, `Motorcycle`)
 - `math.js` — functions, arrow functions, object methods
 - `edge-cases.js` — destructured exported function bindings and callback arguments (`helper`, `useLater`, `run`)
 - `index.js` — re-exports
 
-## Java fixtures (`java/`)
+### Java fixtures (`java/`)
 
 - `Greeter.java` — interface (`Greeter`) and implementing class (`ConsoleGreeter`)
 - `CallbackExamples.java` — lambda callback and method-reference usages for manual `find_references` checks (`helper`, `run`)
 
-## Suggested test queries
+### Suggested test queries
 
 ```
 find_symbol path:examples/typescript/shapes.ts symbol:Shape kind:interface
@@ -41,3 +45,26 @@ find_references path:examples/java/CallbackExamples.java symbol:helper language:
 reverse_function_call_tree path:examples/javascript/reverse-callers.js symbol:helper language:js kind:function
 reverse_function_call_tree path:examples/java/reversecallers/AppService.java symbol:helper language:java kind:method
 ```
+
+## Español
+
+Fixtures de ejemplo para probar la extensión `code-research`.
+
+### Resumen
+
+Estos archivos existen solo para validar herramientas de análisis de código. No son parte de una aplicación real y no deben ejecutarse como runtime.
+
+### Contenido
+
+- Fixtures TypeScript.
+- Fixtures JavaScript.
+- Fixtures Java.
+- Consultas sugeridas para probar símbolos, referencias y árboles de llamadas.
+
+### Uso recomendado
+
+Úsalos para pruebas automatizadas o manuales de `find_symbol`, `find_references`, `function_call_tree` y `reverse_function_call_tree`.
+
+### Ver más
+
+La sección en inglés lista los directorios de fixtures y consultas de prueba concretas.

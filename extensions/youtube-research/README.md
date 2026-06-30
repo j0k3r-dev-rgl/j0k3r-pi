@@ -1,12 +1,16 @@
 # YouTube Research Extension
 
+[English](#english) | [Español](#español)
+
+## English
+
 A standalone Pi extension that adds five focused YouTube research tools.
 
-## Required runtime dependency
+### Required runtime dependency
 - `yt-dlp` must be installed and available on `PATH` before using any tool.
 - If missing, tools return a `yt_dlp_missing` error with installation guidance.
 
-## Public tools (exactly five)
+### Public tools (exactly five)
 1. `youtube_search`
    - Search YouTube for videos, channels, and playlists.
    - Defaults to `type: mixed` when omitted.
@@ -37,17 +41,41 @@ A standalone Pi extension that adds five focused YouTube research tools.
    - Returns compact entries by default (`id`, `title`, `url`, `duration`).
    - Supports opt-in enriched entries with `enrichEntries` and `descriptionPreviewChars`; enrichment adds per-video description previews, views, likes, comments, published date, chapters count, and compact tags when `yt-dlp` provides them.
 
-## Input behavior
+### Input behavior
 - Video/playlist inputs follow **exactly-one** rules for URL vs ID.
 - Wrong-entity URLs are rejected (for example, channel URL for video tool).
 - Errors are stable and structured (`code`, `message`, `recoverable`, optional `install_hint`).
 
-## Non-goals
+### Non-goals
 - No caching layer.
 - No summarization of transcript/video content.
 - No official YouTube API usage.
 
-## Validation
+### Validation
 Run from `extensions/youtube-research`:
 - `npm test`
 - `npm run typecheck`
+
+## Español
+
+Extensión standalone para investigación en YouTube.
+
+### Resumen
+
+YouTube Research agrega herramientas enfocadas para buscar videos, obtener metadata, leer transcripciones, inspeccionar canales y playlists.
+
+### Herramientas y capacidades
+
+- Búsqueda de videos, canales y playlists.
+- Metadata detallada de videos.
+- Transcripciones con modos de fuente y fallback.
+- Inspección de canales con videos/playlists recientes.
+- Lectura de playlists con paginación.
+
+### Requisitos
+
+Requiere `yt-dlp` disponible en `PATH`.
+
+### Ver más
+
+La sección en inglés documenta dependencia runtime, tools públicas, comportamiento de input, non-goals y validación.

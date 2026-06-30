@@ -1,19 +1,23 @@
 # websearch extension
 
+[English](#english) | [Español](#español)
+
+## English
+
 Read-only Pi extension for bounded web, community, GitHub, and research search.
 
 The extension intentionally exposes a small public tool surface. Provider/source-specific implementations remain internal and testable, while agents interact through parent search tools and grouped detail routers.
 
-## Public tool surface
+### Public tool surface
 
-### Web
+#### Web
 
 | Tool | Purpose |
 | --- | --- |
 | `web_search` | General web search via hosted providers: Exa primary with Parallel fallback. |
 | `web_fetch` | Safe HTTPS page reader for one selected page. |
 
-### Community discussions
+#### Community discussions
 
 | Tool | Purpose |
 | --- | --- |
@@ -22,7 +26,7 @@ The extension intentionally exposes a small public tool surface. Provider/source
 | `discussion_answers_get` | Fetch bounded Stack Exchange answers for a selected question. |
 | `discussion_comments_get` | Fetch bounded comments/replies/review comments where supported. |
 
-### Research
+#### Research
 
 | Tool | Purpose |
 | --- | --- |
@@ -30,23 +34,23 @@ The extension intentionally exposes a small public tool surface. Provider/source
 | `research_get` | Open one selected paper/work/article. |
 | `research_graph_get` | Fetch citations or references where provider support is verified. |
 
-### GitHub non-discussion
+#### GitHub non-discussion
 
 | Tool | Purpose |
 | --- | --- |
 | `github_code_search` | Search GitHub code; returns `github_get` file follow-up refs. |
 | `github_get` | Fetch repository metadata, one file, one release, or recent releases. |
 
-## Common workflows
+### Common workflows
 
-### Search the web and fetch a page
+#### Search the web and fetch a page
 
 ```json
 { "tool": "web_search", "args": { "query": "sqlite vector search", "limit": 5 } }
 { "tool": "web_fetch", "args": { "url": "https://example.com/article" } }
 ```
 
-### Search discussions and open a result
+#### Search discussions and open a result
 
 `discussion_search` results include `followup_tool` and `followup_ref` when a result can be opened.
 
@@ -69,7 +73,7 @@ For GitHub and Hacker News comment reads, `discussion_comments_get` returns a co
 { "tool": "discussion_comments_get", "args": { "source": "hacker_news", "ref": 12345, "commentsLimit": 5 } }
 ```
 
-### Search research, open a work, and inspect graph data
+#### Search research, open a work, and inspect graph data
 
 `research_search` and `research_graph_get` results point back to `research_get` for selected item detail reads.
 
@@ -79,7 +83,7 @@ For GitHub and Hacker News comment reads, `discussion_comments_get` returns a co
 { "tool": "research_graph_get", "args": { "source": "openalex", "graph": "references", "work": "W2741809807", "limit": 5 } }
 ```
 
-### Search GitHub code and fetch a file
+#### Search GitHub code and fetch a file
 
 `github_code_search` returns file refs in `owner/repo:path` form. Pass that value to `github_get` with `kind: "file"`.
 
@@ -94,7 +98,7 @@ When fetching a file by explicit `repo` + `path`, use `git_ref` for branch/tag/c
 { "tool": "github_get", "args": { "kind": "file", "repo": "octocat/Hello-World", "path": "README", "git_ref": "master" } }
 ```
 
-### Fetch GitHub repo and release metadata
+#### Fetch GitHub repo and release metadata
 
 ```json
 { "tool": "github_get", "args": { "kind": "repo", "repo": "cli/cli", "includeReadme": false } }
@@ -102,9 +106,9 @@ When fetching a file by explicit `repo` + `path`, use `git_ref` for branch/tag/c
 { "tool": "github_get", "args": { "kind": "release", "repo": "cli/cli", "tag": "v2.0.0" } }
 ```
 
-## Tool details
+### Tool details
 
-### `web_search`
+#### `web_search`
 
 - Uses Exa MCP (`https://mcp.exa.ai/mcp`) as primary provider.
 - Uses Parallel MCP (`https://search.parallel.ai/mcp`) as fallback when Exa fails or returns no usable results.
@@ -113,7 +117,7 @@ When fetching a file by explicit `repo` + `path`, use `git_ref` for branch/tag/c
 - Exa receives supported filters natively when possible; Parallel receives equivalent query/objective hints when native filters are unavailable.
 - Successful results include derived domains, provider metadata, and structured source/provider errors when fallback or partial failure occurs.
 
-### `web_fetch`
+#### `web_fetch`
 
 - Fetches one HTTPS URL without JavaScript, browser automation, or subresources.
 - Allows text-like content only: HTML/XHTML, plain text/markdown, and JSON.
@@ -121,7 +125,7 @@ When fetching a file by explicit `repo` + `path`, use `git_ref` for branch/tag/c
 - Revalidates redirects and follows at most 3 safe redirects.
 - Reads 2 MB by default; `maxBytes` is capped at 5 MB.
 
-### `discussion_search`
+#### `discussion_search`
 
 Supported `source` values:
 
@@ -146,7 +150,7 @@ Behavior notes:
 - Dev.to currently uses a tag-first search strategy; multi-word queries derive a usable first tag.
 - Follow-ups point to grouped public tools, not source-specific internal tools.
 
-### `discussion_get`
+#### `discussion_get`
 
 Opens one selected entity. Supported sources:
 
@@ -163,7 +167,7 @@ Examples:
 { "source": "hacker_news", "story_id": 12345, "commentsLimit": 10 }
 ```
 
-### `discussion_answers_get`
+#### `discussion_answers_get`
 
 Fetches bounded Stack Exchange answers only. Supported sources:
 
@@ -179,7 +183,7 @@ Example:
 { "source": "unix_linux", "question": "unix:535083", "limit": 3 }
 ```
 
-### `discussion_comments_get`
+#### `discussion_comments_get`
 
 Fetches bounded comments/replies/review comments where supported.
 
@@ -194,7 +198,7 @@ Supported sources:
 
 For GitHub and Hacker News sources, output is intentionally comment-focused: it includes comment metadata and pagination fields while omitting full issue/PR/story bodies.
 
-### `research_search`
+#### `research_search`
 
 Supported `source` values:
 
@@ -211,7 +215,7 @@ Behavior notes:
 - Semantic Scholar uses `SEMANTIC_SCHOLAR_API_KEY` when present and otherwise attempts free quota.
 - Search results include `followup_tool: "research_get"` and a source-specific `followup_ref`.
 
-### `research_get`
+#### `research_get`
 
 Opens one selected research item:
 
@@ -223,7 +227,7 @@ Opens one selected research item:
 { "source": "semantic_scholar", "paper": "DOI:10.5555/s2" }
 ```
 
-### `research_graph_get`
+#### `research_graph_get`
 
 Fetches bounded citation/reference graph data where a provider has verified support.
 
@@ -234,15 +238,15 @@ Fetches bounded citation/reference graph data where a provider has verified supp
 | `europe_pmc` | `citations`, `references` | `page` |
 | `semantic_scholar` | `citations`, `references` | `offset` |
 
-arXiv graph tools and Crossref inbound citation tools are intentionally not exposed because the investigated APIs did not provide verified graph endpoints for those capabilities. Research graph decisions and provider evidence are documented in [`docs/research-graph-tools.md`](docs/research-graph-tools.md).
+arXiv graph tools and Crossref inbound citation tools are intentionally not exposed because the investigated APIs did not provide verified graph endpoints for those capabilities. Research graph decisions should stay tied to provider evidence before exposing additional graph tools.
 
-### `github_code_search`
+#### `github_code_search`
 
 - Searches public GitHub code with bounded read-only results.
 - Accepts `query`, optional `repo`, optional `owner`, optional `language`, optional `path`, and `limit`.
 - Returns `followup_tool: "github_get"` and `followup_ref: "owner/repo:path"` for file inspection.
 
-### `github_get`
+#### `github_get`
 
 Supported `kind` values:
 
@@ -259,7 +263,7 @@ Important parameter semantics:
 - For `kind: "file"` with explicit `repo` and `path`, use `git_ref` for branch/tag/commit selection.
 - For `kind: "release"`, use `tag`; `ref` is not a release-tag alias.
 
-## Configuration
+### Configuration
 
 Basic use requires no configuration.
 
@@ -295,7 +299,7 @@ Config fields:
 
 Project-level websearch config is not supported; do not create `.pi/websearch.json`. Credentials never belong in `websearch.json`.
 
-## Environment
+### Environment
 
 - `STACK_EXCHANGE_KEY` optional for higher Stack Exchange quota across Stack Overflow, Server Fault, Unix & Linux, Super User, and DBA.
 - `GITHUB_TOKEN` optional, env-only, public-read GitHub quota helper used by GitHub issue/PR/discussion/release/repo/file/code functionality.
@@ -307,7 +311,7 @@ Project-level websearch config is not supported; do not create `.pi/websearch.js
 
 Credentials stay in environment variables only. Tools never accept secrets as inputs and redact secret-like values from returned surfaces.
 
-## Provider notes
+### Provider notes
 
 - Stack Exchange sources use the public Stack Exchange API via native `fetch`, with `site=stackoverflow`, `serverfault`, `unix`, `superuser`, or `dba`.
 - GitHub uses the official `octokit` SDK by default for read-only public issue, pull request, release, repository, file, code search, and Discussions functionality.
@@ -324,7 +328,7 @@ Credentials stay in environment variables only. Tools never accept secrets as in
 - Europe PMC uses the public REST search API via native `fetch`.
 - Semantic Scholar uses the Graph API via native `fetch`, with optional `SEMANTIC_SCHOLAR_API_KEY`.
 
-## Source layout
+### Source layout
 
 - `src/{providers,schemas,summaries,tools,types}/common/` contains cross-family primitives only: HTTP/text helpers, limits, formatting, tool runtime/registry/result helpers, provider/error/runtime/tool types.
 - `src/{providers,schemas,summaries,tools,types}/web/` contains general web modules and barrels for Exa/Parallel provider chaining plus safe `web_fetch`.
@@ -336,7 +340,7 @@ Credentials stay in environment variables only. Tools never accept secrets as in
 - `src/tools/index.ts`, `src/tools.ts`, `src/types.ts`, and `src/client.ts` remain entry/facade files; provider-specific implementation should not be added there.
 - Shared/common types belong under `src/types/common/`; family/source types belong under their family folders.
 
-## Safety and bounds
+### Safety and bounds
 
 - Read-only only; no posting, editing, voting, moderation, or other mutation.
 - Search tools return bounded result counts with concise snippets.
@@ -348,7 +352,7 @@ Credentials stay in environment variables only. Tools never accept secrets as in
 - Provider errors are returned as structured recoverable failures when possible.
 - Community content is untrusted display content only.
 
-## Validation
+### Validation
 
 ```sh
 cd extensions/websearch
@@ -363,3 +367,27 @@ Useful focused checks:
 cd extensions/websearch
 npm test -- registration.test.ts tool-consolidation.test.ts
 ```
+
+## Español
+
+Extensión read-only para búsquedas web, comunidades, GitHub e investigación.
+
+### Resumen
+
+Websearch expone una superficie pública acotada para búsqueda y lectura segura. Los proveedores específicos quedan internos; el agente usa routers agrupados para web, discusiones, investigación, GitHub y detalle de resultados.
+
+### Herramientas y capacidades
+
+- `web_search` y `web_fetch`.
+- Búsqueda y lectura de discusiones: Stack Exchange, GitHub issues/PRs/discussions, Hacker News y otros.
+- Búsqueda académica/investigación: OpenAlex, arXiv, Crossref, Europe PMC y Semantic Scholar.
+- Búsqueda de código y metadata de GitHub.
+- Routers de detalle y grafos de referencias/citas cuando el proveedor lo soporta.
+
+### Requisitos
+
+Las credenciales se configuran por variables de entorno. No se deben guardar tokens en el repositorio.
+
+### Ver más
+
+La sección en inglés documenta superficie pública, workflows, parámetros, configuración, seguridad y validación.

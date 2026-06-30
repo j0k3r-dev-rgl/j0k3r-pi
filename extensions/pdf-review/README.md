@@ -1,10 +1,14 @@
 # PDF Review Extension
 
+[English](#english) | [Español](#español)
+
+## English
+
 Pi extension for reading local PDF files as agent context.
 
-## Tools
+### Tools
 
-### `pdf_extract`
+#### `pdf_extract`
 
 Extracts text, file metadata, a SHA-256 hash, warnings, and optional rendered page metadata from a local PDF.
 
@@ -21,11 +25,11 @@ Parameters:
 
 The implementation follows the verified SIAS approach: read PDF bytes, compute SHA-256, create `PDFParse`, call `getText()`, optionally call `getScreenshot()`, and always destroy the parser. If `ocrMode: "auto"` is enabled and `getText()` returns no text, the tool shells out to OCRmyPDF with `--sidecar` to obtain OCR text.
 
-## OCR dependency
+### OCR dependency
 
 OCR is optional. To use `ocrMode: "auto"` with `ocrProvider: "ocrmypdf"`, install OCRmyPDF and its system dependencies (`tesseract`, Ghostscript, language packs such as Spanish if needed). If OCRmyPDF is unavailable or fails, `pdf_extract` returns empty text plus an `OCR_UNAVAILABLE` warning instead of failing the whole extraction.
 
-## Validation
+### Validation
 
 Run from `extensions/pdf-review`:
 
@@ -33,3 +37,24 @@ Run from `extensions/pdf-review`:
 npm test
 npm run typecheck
 ```
+
+## Español
+
+Extensión de Pi para extraer contenido de PDFs locales.
+
+### Resumen
+
+PDF Review permite leer texto, metadata y hash de archivos PDF para usarlo como contexto del agente. Puede renderizar páginas para detección visual y usar OCR opcional cuando el PDF no tiene capa de texto.
+
+### Herramientas y capacidades
+
+- `pdf_extract`: extrae texto, metadata, SHA-256, warnings y metadata de páginas renderizadas.
+- OCR opcional con OCRmyPDF/Tesseract cuando `ocrMode` lo requiere.
+
+### Requisitos
+
+OCRmyPDF y Tesseract solo son necesarios si se usa OCR. La extracción normal de texto no requiere OCR.
+
+### Ver más
+
+La sección en inglés incluye parámetros, dependencias OCR y comandos de validación.

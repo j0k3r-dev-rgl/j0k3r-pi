@@ -1,8 +1,12 @@
 # Pi API Tools Extension
 
+[English](#english) | [Español](#español)
+
+## English
+
 Project-local Pi extension for bounded REST and GraphQL API tools. It is disabled by default and only activates when the current project contains `<ctx.cwd>/.pi/api.json` with `"enabled": true`.
 
-## What it provides
+### What it provides
 
 - `api_status` for safe config and Git-exposure diagnostics.
 - `api_auth_status` for local auth metadata checks such as JWT `exp`.
@@ -15,7 +19,7 @@ Project-local Pi extension for bounded REST and GraphQL API tools. It is disable
 - Output truncation metadata for large responses.
 - Timeout and `AbortSignal` cancellation support.
 
-## Extension location
+### Extension location
 
 In this agent-dir checkout the extension lives at:
 
@@ -31,7 +35,7 @@ When copied into a project-local Pi setup, the equivalent path is:
 
 Use `/reload` after changing extension code during an interactive Pi session.
 
-## Enablement and exact config lookup
+### Enablement and exact config lookup
 
 This extension reads configuration from exactly one path:
 
@@ -47,7 +51,7 @@ Rules:
 - If that exact file is missing, the extension registers no tools.
 - If `enabled` is absent or not exactly JSON boolean `true`, the extension registers no tools.
 
-## Example `.pi/api.json`
+### Example `.pi/api.json`
 
 Use placeholders only. Do not store real secrets in docs, tests, or examples.
 
@@ -106,7 +110,7 @@ Supported auth variants:
 - `headers`
 - `login`
 
-## Tools exposed to the agent
+### Tools exposed to the agent
 
 The extension exposes tools only when the exact local config exists and `enabled === true`.
 
@@ -122,13 +126,13 @@ The extension exposes tools only when the exact local config exists and `enabled
 
 If the config is missing or disabled, none of the API tools are registered.
 
-## Mutation model
+### Mutation model
 
 REST mutating methods (`POST`, `PUT`, `PATCH`, `DELETE`) and GraphQL mutations do **not** add extension-specific confirmation prompts.
 
 They rely on Pi's normal tool and permission behavior.
 
-## Git ignore expectations
+### Git ignore expectations
 
 `.pi/api.json` may contain credentials and must be Git-ignored.
 
@@ -146,7 +150,7 @@ Recommended ignore rule:
 
 In other words, `api_status` is expected to warn if `.pi/api.json` is not ignored, is already tracked, or Git evidence is unavailable.
 
-## Output limits and truncation
+### Output limits and truncation
 
 Default response limits are:
 
@@ -166,20 +170,20 @@ REST and GraphQL results include truncation metadata with the effective limits a
 - `returned_lines`
 - `reason`
 
-## Cancellation and timeouts
+### Cancellation and timeouts
 
 - Requests respect the configured `timeout_ms`.
 - Requests propagate `AbortSignal` cancellation.
 - Timed out or cancelled requests return safe errors without exposing secrets.
 
-## Output safety
+### Output safety
 
 - Secret values from config are redacted from tool content, details, and errors.
 - Secret-like values in responses are also redacted before model-visible output.
 - `api_status` reports auth type and endpoint presence, not raw credential values.
 - `api_auth_status` never exposes raw tokens or decoded sensitive claims; when JWT `exp` is available, it reports only expiry time and seconds remaining.
 
-## Recommended workflow
+### Recommended workflow
 
 1. Create `<ctx.cwd>/.pi/api.json` with `"enabled": true`.
 2. Add `.pi/api.json` to `.gitignore` before storing credentials.
@@ -189,10 +193,34 @@ REST and GraphQL results include truncation metadata with the effective limits a
 6. Use `api_rest_request` or `api_graphql_query` for bounded API access. Pass `use_token: true` for authenticated endpoints and `use_token: false` for public endpoints.
 7. Use `api_graphql_schema_queries` to discover available GraphQL Query methods, then `api_graphql_schema_query` with a single query name to inspect its arguments and return shape.
 
-## Validation
+### Validation
 
 ```bash
 cd extensions/api-tools
 npm test
 npm run typecheck
 ```
+
+## Español
+
+Extensión de Pi para exponer herramientas REST y GraphQL acotadas por proyecto.
+
+### Resumen
+
+API Tools se activa solo cuando el proyecto actual contiene `<ctx.cwd>/.pi/api.json` con `enabled: true`. Permite llamadas API locales o remotas con configuración explícita, login/token, límites de salida y diagnósticos seguros.
+
+### Herramientas y capacidades
+
+- Herramientas REST configuradas por proyecto.
+- Herramientas GraphQL configuradas por proyecto.
+- Login y persistencia de access token cuando la configuración lo permite.
+- Control por request para usar o no usar token.
+- Límites de salida, timeouts, cancelación y protección contra filtrado de secretos.
+
+### Uso recomendado
+
+Úsalo cuando el agente necesite consultar APIs del proyecto sin hardcodear endpoints ni credenciales en prompts o código.
+
+### Ver más
+
+La sección en inglés documenta el formato completo de `.pi/api.json`, modelo de mutaciones, límites, seguridad y validación.
