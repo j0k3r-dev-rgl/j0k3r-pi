@@ -104,14 +104,15 @@ See [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 |---|---|---|
 | Agent Todo | [`extensions/agent-todo/README.md`](extensions/agent-todo/README.md) | Single active task checklist for the current conversation branch, plus widget/provider integration. |
 | API Tools | [`extensions/api-tools/README.md`](extensions/api-tools/README.md) | Project-local REST and GraphQL tools gated by exact `<ctx.cwd>/.pi/api.json`, with login/access-token persistence, per-request token use, bounded output, and secret-safe diagnostics. |
+| Code Research | [`extensions/code-research/README.md`](extensions/code-research/README.md) | Tree-sitter-backed TypeScript, JavaScript, and Java symbol lookup, references, function call trees, and reverse call trees. |
 | Context7 | [`extensions/context7/README.md`](extensions/context7/README.md) | Safe, bounded Context7 library documentation tools without MCP. |
 | Memory | [`extensions/memory/README.md`](extensions/memory/README.md) | Local-first project-aware persistent memory backed by SQLite/FTS5. Opt-in via `.pi/memory.json` with `enabled: true`. |
 | PDF Review | [`extensions/pdf-review/README.md`](extensions/pdf-review/README.md) | Local PDF extraction with optional OCR via OCRmyPDF/Tesseract. |
 | Permission Guard | [`extensions/permission-guard/README.md`](extensions/permission-guard/README.md) | In-process permission policy for supported tools and user bash commands. |
 | Sidebar | [`extensions/sidebar/README.md`](extensions/sidebar/README.md) | HUD-style sidebar with chat, subagents, todo, and git status. |
 | Skill Registry | [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md) | Routing index generator for global and project skills. Opt-in via `.pi/skill-registry.config.json` with `enabled: true`; no dedicated environment variables. |
-| Subagents | [`extensions/subagents/README.md`](extensions/subagents/README.md) | Markdown-defined subagent delegation, history, TUI panel, model profiles, and permission handoff. |
 | Telegram Pi Control | [`extensions/telegram-pi-control/README.md`](extensions/telegram-pi-control/README.md) | Telegram gateway for authorized remote Pi session control. Requires Telegram bot/user environment variables. |
+| Utils | [`extensions/utils/README.md`](extensions/utils/README.md) | General utility tools, currently Markdown-to-audio conversion using local Piper/eSpeak engines with Piper voice-model and MP3 support requirements documented in the extension README. |
 | Websearch | [`extensions/websearch/README.md`](extensions/websearch/README.md) | Bounded web, community, GitHub, and research search with grouped public tool routers. Optional global config: `~/.pi/agent/websearch.json`; credentials are env-only. |
 | YouTube Research | [`extensions/youtube-research/README.md`](extensions/youtube-research/README.md) | YouTube search, metadata, transcript, channel, and playlist research tools using `yt-dlp`. |
 
@@ -138,7 +139,7 @@ npm run typecheck
 ```
 
 ```bash
-cd extensions/subagents
+cd extensions/utils
 npm test
 npm run typecheck
 ```
@@ -149,7 +150,7 @@ npm test
 npm run typecheck
 ```
 
-The Memory extension requires a Node version with built-in `node:sqlite` support. YouTube Research requires `yt-dlp` on `PATH` at runtime; PDF Review OCR mode requires OCRmyPDF/Tesseract only when OCR is requested.
+The Memory extension requires a Node version with built-in `node:sqlite` support. Code Research uses Tree-sitter parser dependencies installed with the extension. YouTube Research requires `yt-dlp` on `PATH` at runtime; PDF Review OCR mode requires OCRmyPDF/Tesseract only when OCR is requested. Utils Markdown-to-audio requires a local TTS engine (`piper-tts`/`piper` with at least one Piper `.onnx` voice model, or `espeak-ng` fallback); `ffmpeg` is required only for MP3 output.
 
 ## Security notes
 
@@ -163,6 +164,8 @@ The Memory extension requires a Node version with built-in `node:sqlite` support
 - Emergency `bypassAll` settings disable normal guard behavior; inspect active config before enforcement validation.
 
 ## Subagents
+
+The Subagents extension is maintained as an independent package at [`j0k3r-dev-rgl/pi-subagents-j0k3r`](https://github.com/j0k3r-dev-rgl/pi-subagents-j0k3r). This repository keeps only the global/user markdown subagent definitions and related configuration.
 
 Current global/user subagents are under [`subagents/*.md`](subagents/):
 
