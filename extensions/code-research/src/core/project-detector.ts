@@ -3,7 +3,23 @@ import { join } from 'node:path';
 import { createSubprojectId } from './graph-schema.js';
 import { isExcludedPath, isPathWithinRoot, toProjectRelativePath } from './source-policy.js';
 
-export const SUBPROJECT_MARKERS = ['package.json', 'tsconfig.json', 'jsconfig.json', 'pom.xml', 'build.gradle', 'settings.gradle'] as const;
+export const SUBPROJECT_MARKERS = [
+  'package.json',
+  'tsconfig.json',
+  'jsconfig.json',
+  'pom.xml',
+  'build.gradle',
+  'settings.gradle',
+  'pyproject.toml',
+  'uv.lock',
+  'setup.py',
+  'setup.cfg',
+  'requirements.txt',
+  'requirements-dev.txt',
+  'requirements-test.txt',
+  'Pipfile',
+  'poetry.lock',
+] as const;
 
 export interface DetectedSubproject {
   id: string;

@@ -79,6 +79,126 @@ describe('workspace graph shard content', () => {
     });
   });
 
+  it('stores python file and symbol nodes without enabling python tool queries yet', async () => {
+    const rootDir = await createProject({
+      'pyproject.toml': `[project]\nname = "python-fixture"\n`,
+      'src/app.py': `class Greeter:\n    def greet(self, name: str) -> str:\n        return format_name(name)\n\n\ndef format_name(name: str) -> str:\n    return name.title()\n`,
+    });
+
+    const built = await buildWorkspaceGraph(rootDir);
+    const subprojectId = built.state.subprojects[0]?.id;
+    expect(subprojectId).toBeTruthy();
+    if (!subprojectId) return;
+
+    expect(built.state.subprojects[0]?.languageHints).toContain('py');
+
+    const shardResult = await readSubprojectGraphShard(rootDir, subprojectId);
+    expect(shardResult.status).toBe('ok');
+    if (shardResult.status !== 'ok') return;
+
+    const shard = shardResult.data;
+    const fileNode = shard.nodes.find(
+      (node) => node.kind === 'file' && node.path === 'src/app.py'
+    );
+    const greeter = shard.nodes.find(
+      (node) =>
+        node.kind === 'symbol' &&
+        node.file === 'src/app.py' &&
+        node.name === 'Greeter'
+    );
+    const greet = shard.nodes.find(
+      (node) =>
+        node.kind === 'symbol' &&
+        node.file === 'src/app.py' &&
+        node.name === 'greet'
+    );
+    const formatName = shard.nodes.find(
+      (node) =>
+        node.kind === 'symbol' &&
+        node.file === 'src/app.py' &&
+        node.name === 'format_name'
+    );
+
+    expect(fileNode).toMatchObject({ kind: 'file', language: 'py', path: 'src/app.py' });
+    expect(greeter).toMatchObject({
+      kind: 'symbol',
+      language: 'py',
+      symbolKind: 'class',
+      file: 'src/app.py',
+      range: { startLine: 1, startColumn: 0, endLine: 3, endColumn: 32 },
+      ownerKind: 'unknown',
+      exported: true,
+    });
+    expect(greet).toMatchObject({
+      kind: 'symbol',
+      language: 'py',
+      symbolKind: 'method',
+      file: 'src/app.py',
+      owner: 'Greeter',
+      ownerKind: 'class',
+      range: { startLine: 2, startColumn: 4, endLine: 3, endColumn: 32 },
+    });
+    expect(formatName).toMatchObject({
+      kind: 'symbol',
+      language: 'py',
+      symbolKind: 'function',
+      file: 'src/app.py',
+      ownerKind: 'unknown',
+      range: { startLine: 6, startColumn: 0, endLine: 7, endColumn: 23 },
+    });
+  });
+
+  it('detects python entrypoints and ignores common environment/cache directories', async () => {
+    const rootDir = await createProject({
+      'pyproject.toml': `[project]\nname = "python-entrypoint"\n`,
+      'src/app.py': `import curses\n\ndef validate_environment() -> None:\n    pass\n\ndef main(stdscr: curses.window) -> None:\n    app = InstalledApp(stdscr)\n    app.run()\n\nif __name__ == "__main__":\n    validate_environment()\n    curses.wrapper(main)\n`,
+      'src/__main__.py': `from .app import main\n\nmain(None)\n`,
+      'venv/lib/python/site-packages/ignored.py': `def should_not_index():\n    pass\n`,
+      'env/lib/python/site-packages/ignored.py': `def should_not_index_either():\n    pass\n`,
+      '__pycache__/ignored.py': `def cached():\n    pass\n`,
+    });
+
+    const built = await buildWorkspaceGraph(rootDir);
+    const subprojectId = built.state.subprojects[0]?.id;
+    expect(subprojectId).toBeTruthy();
+    if (!subprojectId) return;
+
+    expect(built.state.coverage.indexedFiles).toBe(2);
+
+    const shardResult = await readSubprojectGraphShard(rootDir, subprojectId);
+    expect(shardResult.status).toBe('ok');
+    if (shardResult.status !== 'ok') return;
+
+    const shard = shardResult.data;
+    expect(shard.nodes.some((node) => node.kind === 'symbol' && node.name === 'should_not_index')).toBe(false);
+    expect(shard.nodes.some((node) => node.kind === 'symbol' && node.name === 'should_not_index_either')).toBe(false);
+    expect(shard.nodes.some((node) => node.kind === 'symbol' && node.name === 'cached')).toBe(false);
+
+    const appFile = shard.nodes.find((node) => node.kind === 'file' && node.path === 'src/app.py');
+    const mainFile = shard.nodes.find((node) => node.kind === 'file' && node.path === 'src/__main__.py');
+    const validateEnvironment = shard.nodes.find((node) => node.kind === 'symbol' && node.file === 'src/app.py' && node.name === 'validate_environment');
+    const main = shard.nodes.find((node) => node.kind === 'symbol' && node.file === 'src/app.py' && node.name === 'main');
+
+    expect(appFile).toMatchObject({ kind: 'file', language: 'py' });
+    expect(mainFile).toMatchObject({ kind: 'file', language: 'py', entrypoint: true });
+    expect(main).toMatchObject({ kind: 'symbol', language: 'py', name: 'main', entrypoint: true });
+    expect(validateEnvironment).toMatchObject({ kind: 'symbol', language: 'py', name: 'validate_environment', entrypoint: true });
+
+    const directEntryEdge = shard.edges.find((edge) => edge.kind === 'entrypoint' && edge.from === appFile?.id && edge.to === validateEnvironment?.id);
+    expect(directEntryEdge).toMatchObject({
+      kind: 'entrypoint',
+      callsite: { line: 11, column: 4, text: 'validate_environment()' },
+      reason: 'python __main__ guard direct call',
+    });
+
+    const wrapperEntryEdge = shard.edges.find((edge) => edge.kind === 'entrypoint' && edge.from === appFile?.id && edge.to === main?.id);
+    expect(wrapperEntryEdge).toMatchObject({
+      kind: 'entrypoint',
+      callsite: { line: 12, column: 4, text: 'curses.wrapper(main)' },
+      reason: 'python __main__ guard wrapper argument',
+    });
+  });
+
   it('stores internal java call edges for dependency-injected fields with a unique application implementation', async () => {
     const rootDir = await createProject({
       'pom.xml': `<project />\n`,

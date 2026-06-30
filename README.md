@@ -108,7 +108,7 @@ See [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 |---|---|---|
 | Agent Todo | [`extensions/agent-todo/README.md`](extensions/agent-todo/README.md) | Single active task checklist for the current conversation branch, plus widget/provider integration. |
 | API Tools | [`extensions/api-tools/README.md`](extensions/api-tools/README.md) | Project-local REST and GraphQL tools gated by exact `<ctx.cwd>/.pi/api.json`, with login/access-token persistence, per-request token use, bounded output, and secret-safe diagnostics. |
-| Code Research | [`extensions/code-research/README.md`](extensions/code-research/README.md) | Tree-sitter-backed TypeScript, JavaScript, and Java symbol lookup, references, function call trees, and reverse call trees. |
+| Code Research | [`extensions/code-research/README.md`](extensions/code-research/README.md) | Tree-sitter-backed TypeScript, JavaScript, and Java symbol lookup, references, function call trees, and reverse call trees, plus Python workspace graph indexing. |
 | Context7 | [`extensions/context7/README.md`](extensions/context7/README.md) | Safe, bounded Context7 library documentation tools without MCP. |
 | Memory | [`extensions/memory/README.md`](extensions/memory/README.md) | Local-first project-aware persistent memory backed by SQLite/FTS5. Opt-in via `.pi/memory.json` with `enabled: true`. |
 | PDF Review | [`extensions/pdf-review/README.md`](extensions/pdf-review/README.md) | Local PDF extraction with optional OCR via OCRmyPDF/Tesseract. |
@@ -126,7 +126,7 @@ See [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 |---|---|---|---|
 | Agent Todo | `agent_todo` | Maintains one active checklist for the current conversation branch, useful for multi-step implementation or validation work. | [Read more](extensions/agent-todo/README.md) |
 | API Tools | Project REST/GraphQL tools | Exposes project-local API calls from `.pi/api.json`, including login/token handling and bounded, secret-safe responses. | [Read more](extensions/api-tools/README.md) |
-| Code Research | `find_symbol`, `find_references`, `function_call_tree`, `reverse_function_call_tree`, `workspace_graph_status` | Provides code intelligence for TypeScript, JavaScript, and Java using parser-backed symbol, reference, and call-flow inspection. | [Read more](extensions/code-research/README.md) |
+| Code Research | `find_symbol`, `find_references`, `function_call_tree`, `reverse_function_call_tree`, `workspace_graph_status` | Provides code intelligence for TypeScript, JavaScript, and Java, with Python file/symbol indexing in the workspace graph. | [Read more](extensions/code-research/README.md) |
 | Context7 | `context7_search_library`, `context7_get_context`, `context7_resolve_and_get_context` | Fetches focused library documentation through Context7 with bounded output and safe configuration. | [Read more](extensions/context7/README.md) |
 | Memory | `memory_*` tools | Provides local-first persistent project memory, project profiles, session summaries, recall, import/export, and optional release provenance. | [Read more](extensions/memory/README.md) |
 | PDF Review | `pdf_extract` | Extracts text and metadata from local PDFs, with optional OCR through OCRmyPDF/Tesseract. | [Read more](extensions/pdf-review/README.md) |
@@ -322,7 +322,7 @@ Ver [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 |---|---|---|
 | Agent Todo | [`extensions/agent-todo/README.md`](extensions/agent-todo/README.md) | Checklist de una sola tarea activa para la rama de conversación actual, más integración de widget/provider. |
 | API Tools | [`extensions/api-tools/README.md`](extensions/api-tools/README.md) | Herramientas REST y GraphQL por proyecto, activadas por `<ctx.cwd>/.pi/api.json`, con login/token, uso de token por request, salida acotada y diagnósticos seguros. |
-| Code Research | [`extensions/code-research/README.md`](extensions/code-research/README.md) | Búsqueda de símbolos, referencias, call trees y reverse call trees para TypeScript, JavaScript y Java usando Tree-sitter. |
+| Code Research | [`extensions/code-research/README.md`](extensions/code-research/README.md) | Búsqueda de símbolos, referencias, call trees y reverse call trees para TypeScript, JavaScript y Java usando Tree-sitter, más indexado Python en el workspace graph. |
 | Context7 | [`extensions/context7/README.md`](extensions/context7/README.md) | Herramientas seguras y acotadas para documentación de librerías con Context7, sin MCP. |
 | Memory | [`extensions/memory/README.md`](extensions/memory/README.md) | Memoria persistente local-first, consciente del proyecto, basada en SQLite/FTS5. Opt-in vía `.pi/memory.json` con `enabled: true`. |
 | PDF Review | [`extensions/pdf-review/README.md`](extensions/pdf-review/README.md) | Extracción local de PDF con OCR opcional vía OCRmyPDF/Tesseract. |
@@ -340,7 +340,7 @@ Ver [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 |---|---|---|---|
 | Agent Todo | `agent_todo` | Mantiene una checklist activa para la rama de conversación actual; útil en trabajos de implementación o validación con varios pasos. | [Ver más](extensions/agent-todo/README.md) |
 | API Tools | Herramientas REST/GraphQL del proyecto | Expone llamadas API locales definidas en `.pi/api.json`, con login/token, respuestas acotadas y diagnósticos seguros. | [Ver más](extensions/api-tools/README.md) |
-| Code Research | `find_symbol`, `find_references`, `function_call_tree`, `reverse_function_call_tree`, `workspace_graph_status` | Aporta inteligencia de código para TypeScript, JavaScript y Java mediante inspección de símbolos, referencias y flujos de llamadas. | [Ver más](extensions/code-research/README.md) |
+| Code Research | `find_symbol`, `find_references`, `function_call_tree`, `reverse_function_call_tree`, `workspace_graph_status` | Aporta inteligencia de código para TypeScript, JavaScript y Java, con indexado de archivos/símbolos Python en el workspace graph. | [Ver más](extensions/code-research/README.md) |
 | Context7 | `context7_search_library`, `context7_get_context`, `context7_resolve_and_get_context` | Obtiene documentación enfocada de librerías con Context7, salida acotada y configuración segura. | [Ver más](extensions/context7/README.md) |
 | Memory | Herramientas `memory_*` | Provee memoria persistente local-first, perfiles de proyecto, resúmenes de sesión, recall, import/export y provenance opcional de releases. | [Ver más](extensions/memory/README.md) |
 | PDF Review | `pdf_extract` | Extrae texto y metadata de PDFs locales, con OCR opcional mediante OCRmyPDF/Tesseract. | [Ver más](extensions/pdf-review/README.md) |

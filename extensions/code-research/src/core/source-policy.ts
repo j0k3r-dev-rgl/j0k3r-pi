@@ -3,7 +3,7 @@ import { extname, join, relative, resolve, sep } from 'node:path';
 
 export const WORKSPACE_GRAPH_DIR = '.pi/workspace-code-graph';
 export const MAX_GRAPH_SOURCE_BYTES = 100 * 1024;
-export const SUPPORTED_GRAPH_SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.java']);
+export const SUPPORTED_GRAPH_SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.java', '.py']);
 export const EXCLUDED_DIRECTORY_NAMES = new Set([
   'node_modules',
   'build',
@@ -18,6 +18,15 @@ export const EXCLUDED_DIRECTORY_NAMES = new Set([
   '.cache',
   'out',
   'vendor',
+  'venv',
+  'env',
+  'virtualenv',
+  '__pycache__',
+  '.pytest_cache',
+  '.mypy_cache',
+  '.ruff_cache',
+  '.tox',
+  '.nox',
 ]);
 
 export function isPathWithinRoot(projectRoot: string, candidatePath: string): boolean {
@@ -36,9 +45,10 @@ export function toProjectRelativePath(projectRoot: string, candidatePath: string
   return rel === '' ? '.' : rel.split(sep).join('/');
 }
 
-export function detectGraphLanguage(filePath: string): 'ts' | 'js' | 'java' | undefined {
+export function detectGraphLanguage(filePath: string): 'ts' | 'js' | 'java' | 'py' | undefined {
   const ext = extname(filePath).toLowerCase();
   if (ext === '.java') return 'java';
+  if (ext === '.py') return 'py';
   if (ext === '.js' || ext === '.jsx' || ext === '.mjs' || ext === '.cjs') return 'js';
   if (ext === '.ts' || ext === '.tsx') return 'ts';
   return undefined;

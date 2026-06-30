@@ -1,9 +1,9 @@
-export type SupportedLanguage = 'ts' | 'js' | 'java' | 'auto';
+export type SupportedLanguage = 'ts' | 'js' | 'java' | 'py' | 'auto';
 export type SymbolKind = 'function' | 'class' | 'method' | 'interface' | 'variable' | 'unknown';
 export type SearchScope = 'file' | 'directory';
 export type WorkspaceGraphStatusKind = 'missing' | 'fresh' | 'stale' | 'refreshing' | 'partial' | 'errored' | 'incompatible';
 export type GraphNodeKind = 'workspace' | 'subproject' | 'file' | 'symbol';
-export type GraphEdgeKind = 'contains' | 'imports' | 'calls' | 'implements' | 'extends';
+export type GraphEdgeKind = 'contains' | 'imports' | 'calls' | 'implements' | 'extends' | 'entrypoint';
 
 export interface SymbolLocation {
   file: string;
@@ -143,7 +143,7 @@ export interface SubprojectGraphState {
   id: string;
   root: string;
   status: WorkspaceGraphStatusKind;
-  languageHints: Array<'java' | 'ts' | 'js'>;
+  languageHints: Array<'java' | 'ts' | 'js' | 'py'>;
   shardPath: string;
   snapshot: SubprojectSnapshot;
   generation: number;
@@ -181,11 +181,11 @@ export interface GraphManifest {
 export type GraphNode =
   | { id: string; kind: 'workspace'; name: string; root: string }
   | { id: string; kind: 'subproject'; name: string; root: string; markers: string[]; languages: string[] }
-  | { id: string; kind: 'file'; path: string; language: 'java' | 'ts' | 'js'; size: number }
+  | { id: string; kind: 'file'; path: string; language: 'java' | 'ts' | 'js' | 'py'; size: number; entrypoint?: boolean }
   | {
       id: string;
       kind: 'symbol';
-      language: 'java' | 'ts' | 'js';
+      language: 'java' | 'ts' | 'js' | 'py';
       symbolKind: SymbolKind;
       name: string;
       file: string;
@@ -194,6 +194,7 @@ export type GraphNode =
       ownerKind?: OwnerKind;
       exported: boolean;
       signature?: string;
+      entrypoint?: boolean;
     };
 
 export interface GraphEdge {

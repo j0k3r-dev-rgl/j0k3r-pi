@@ -32,6 +32,7 @@ import {
 import { extractSignature as extractTypeScriptSignature, resolveTypeScriptImportCandidates } from '../languages/typescript/shared.js';
 import { extractSignature as extractJavaSignature } from '../languages/java/shared.js';
 import { resolveJavaCallsForGraph } from '../languages/java/function-call-tree.js';
+import { buildPythonProjectIndex, type PythonProjectIndex } from '../languages/python/workspace-graph.js';
 
 export async function ensureWorkspaceGraphFreshness(projectRoot: string): Promise<{ state: WorkspaceGraphState; manifest?: GraphManifest; changed: boolean }> {
   await ensureWorkspaceGraphGitignore(projectRoot);
@@ -184,6 +185,13 @@ async function buildSubprojectShard(
       if (language) languages.add(language);
     }
     buildTypeScriptGraph(projectRoot, subprojectId, tsIndex, nodes, edges);
+  }
+
+  const pythonFiles = files.filter((file) => detectGraphLanguage(file) === 'py');
+  if (pythonFiles.length > 0) {
+    languages.add('py');
+    const pythonIndex = await buildPythonProjectIndex(subprojectRoot);
+    buildPythonGraph(projectRoot, subprojectId, pythonIndex, nodes, edges);
   }
 
   const subprojectNode = nodes.find((node) => node.id === subprojectNodeId && node.kind === 'subproject');
@@ -370,6 +378,59 @@ function buildTypeScriptGraph(projectRoot: string, subprojectId: string, index: 
   }
 }
 
+function buildPythonGraph(projectRoot: string, subprojectId: string, index: PythonProjectIndex, nodes: GraphNode[], edges: GraphEdge[]) {
+  const fileNodeIds = new Map<string, string>();
+  const symbolIds = new Map<string, string>();
+  const subprojectNodeId = createSubprojectNodeId(subprojectId);
+
+  for (const file of index.files) {
+    const relFile = toProjectRelativePath(projectRoot, file);
+    ensureFileNode(nodes, edges, fileNodeIds, subprojectNodeId, subprojectId, relFile, 'py', file, index.entrypointFiles.has(file));
+  }
+
+  for (const symbol of index.symbols) {
+    const relFile = toProjectRelativePath(projectRoot, symbol.file);
+    const fileNodeId = ensureFileNode(nodes, edges, fileNodeIds, subprojectNodeId, subprojectId, relFile, 'py', symbol.file, index.entrypointFiles.has(symbol.file));
+    const symbolId = createSymbolNodeId(subprojectId, relFile, symbol.ownerName, symbol.symbol, symbol.line, symbol.column);
+    symbolIds.set(`${symbol.file}:${symbol.symbol}`, symbolId);
+    nodes.push({
+      id: symbolId,
+      kind: 'symbol',
+      language: 'py',
+      symbolKind: symbol.kind,
+      name: symbol.symbol,
+      file: relFile,
+      range: {
+        startLine: symbol.line,
+        startColumn: symbol.column,
+        endLine: symbol.node.endPosition.row + 1,
+        endColumn: symbol.node.endPosition.column,
+      },
+      owner: symbol.ownerName,
+      ownerKind: symbol.ownerKind,
+      exported: symbol.exported,
+      signature: symbol.signature,
+      entrypoint: symbol.entrypoint,
+    });
+    edges.push({ id: createEdgeId('contains', fileNodeId, symbolId), kind: 'contains', from: fileNodeId, to: symbolId });
+  }
+
+  for (const entrypoint of index.entrypoints) {
+    const relFile = toProjectRelativePath(projectRoot, entrypoint.file);
+    const fileNodeId = ensureFileNode(nodes, edges, fileNodeIds, subprojectNodeId, subprojectId, relFile, 'py', entrypoint.file, true);
+    const targetId = symbolIds.get(`${entrypoint.file}:${entrypoint.symbol}`);
+    if (!targetId) continue;
+    edges.push({
+      id: createEdgeId('entrypoint', fileNodeId, targetId, `${entrypoint.line}:${entrypoint.column}:${entrypoint.symbol}`),
+      kind: 'entrypoint',
+      from: fileNodeId,
+      to: targetId,
+      callsite: { line: entrypoint.line, column: entrypoint.column, text: entrypoint.text },
+      reason: entrypoint.reason,
+    });
+  }
+}
+
 function ensureFileNode(
   nodes: GraphNode[],
   edges: GraphEdge[],
@@ -377,14 +438,21 @@ function ensureFileNode(
   subprojectNodeId: string,
   subprojectId: string,
   relativeFile: string,
-  language: 'ts' | 'js' | 'java',
-  absoluteFile: string
+  language: 'ts' | 'js' | 'java' | 'py',
+  absoluteFile: string,
+  entrypoint = false
 ): string {
   const existing = fileNodeIds.get(relativeFile);
-  if (existing) return existing;
+  if (existing) {
+    if (entrypoint) {
+      const node = nodes.find((candidate) => candidate.id === existing && candidate.kind === 'file');
+      if (node?.kind === 'file') node.entrypoint = true;
+    }
+    return existing;
+  }
   const fileNodeId = createFileNodeId(subprojectId, relativeFile);
   fileNodeIds.set(relativeFile, fileNodeId);
-  nodes.push({ id: fileNodeId, kind: 'file', path: relativeFile, language, size: 0 });
+  nodes.push({ id: fileNodeId, kind: 'file', path: relativeFile, language, size: 0, entrypoint: entrypoint || undefined });
   edges.push({ id: createEdgeId('contains', subprojectNodeId, fileNodeId), kind: 'contains', from: subprojectNodeId, to: fileNodeId });
   void stat(absoluteFile).then((s) => {
     const node = nodes.find((candidate) => candidate.id === fileNodeId && candidate.kind === 'file');

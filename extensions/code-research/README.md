@@ -4,7 +4,7 @@
 
 ## English
 
-Global Pi extension for navigating TypeScript, JavaScript, and Java symbols with native Tree-sitter and building function/method call trees.
+Global Pi extension for navigating TypeScript, JavaScript, and Java symbols with native Tree-sitter and building function/method call trees. The workspace graph also indexes Python files and symbols as a foundation for Python-specific tools.
 
 ### Registered tool
 
@@ -99,12 +99,14 @@ code-research/
 ### Notes
 
 - Uses native `tree-sitter` with pinned parsers and exact versions.
+- Workspace graph indexing supports TypeScript, JavaScript, Java, and Python file/symbol nodes.
+- Python graph support currently indexes `.py` files, classes, functions, methods, and top-level assignments; detects common Python project markers and ignores environment/cache directories; marks obvious entrypoints such as `__main__.py` and `if __name__ == "__main__"` direct or wrapper calls. Python-specific query/call-tree tools will be added separately.
 - Implementation detection is syntactic (based on `implements Name` in TS/Java).
 - TS/JS `function_call_tree` support prioritizes local/imported calls and methods on locally constructed instances.
 
 ## Español
 
-Extensión global de Pi para navegar símbolos TypeScript/JavaScript/Java con Tree-sitter nativo y construir call trees de funciones/métodos.
+Extensión global de Pi para navegar símbolos TypeScript/JavaScript/Java con Tree-sitter nativo y construir call trees de funciones/métodos. El workspace graph también indexa archivos y símbolos Python como base para tools específicas de Python.
 
 ### Tool registrada
 
@@ -199,5 +201,7 @@ code-research/
 ### Notas
 
 - Usa `tree-sitter` nativo con parsers fijos y versiones exactas.
+- El indexado de workspace graph soporta nodos de archivo/símbolo para TypeScript, JavaScript, Java y Python.
+- El soporte Python del graph actualmente indexa archivos `.py`, clases, funciones, métodos y asignaciones top-level; detecta markers comunes de proyectos Python e ignora directorios de entornos/cache; marca entrypoints obvios como `__main__.py` e invocaciones directas o con wrappers dentro de `if __name__ == "__main__"`. Las tools de consulta/call-tree específicas de Python se agregarán por separado.
 - La detección de implementaciones es sintáctica (basada en `implements Nombre` en TS/Java).
 - El soporte TS/JS de `function_call_tree` prioriza llamadas locales/importadas y métodos de instancias construidas localmente.

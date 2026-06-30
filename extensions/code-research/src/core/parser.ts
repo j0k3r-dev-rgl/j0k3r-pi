@@ -2,11 +2,13 @@ import Parser from 'tree-sitter';
 import tsModule from 'tree-sitter-typescript';
 import jsModule from 'tree-sitter-javascript';
 import javaModule from 'tree-sitter-java';
+import pythonModule from 'tree-sitter-python';
 import type { SupportedLanguage } from '../types.js';
 
 const { typescript, tsx } = tsModule;
 const JavaScript = jsModule;
 const Java = javaModule;
+const Python = pythonModule;
 
 const DEFAULT_PARSE_BUFFER_SIZE = 1024 * 1024;
 
@@ -14,6 +16,7 @@ let tsParser: Parser | undefined;
 let tsxParser: Parser | undefined;
 let jsParser: Parser | undefined;
 let javaParser: Parser | undefined;
+let pythonParser: Parser | undefined;
 
 export function getParser(language: Exclude<SupportedLanguage, 'auto'>): Parser {
   if (language === 'ts') {
@@ -30,6 +33,14 @@ export function getParser(language: Exclude<SupportedLanguage, 'auto'>): Parser 
       javaParser.setLanguage(Java);
     }
     return javaParser;
+  }
+
+  if (language === 'py') {
+    if (!pythonParser) {
+      pythonParser = new Parser();
+      pythonParser.setLanguage(Python);
+    }
+    return pythonParser;
   }
 
   if (!jsParser) {

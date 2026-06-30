@@ -9,7 +9,7 @@ function summarizeWorkspaceGraphState(
   manifestStatus: 'ok' | 'missing' | 'incompatible' | 'errored',
   manifest?: GraphManifest
 ) {
-  const languages = { java: 0, ts: 0, js: 0 };
+  const languages = { java: 0, ts: 0, js: 0, py: 0 };
   const now = Date.now();
   const updatedAtMs = Date.parse(state.updatedAt);
   const ageSeconds = Number.isFinite(updatedAtMs) ? Math.max(0, Math.floor((now - updatedAtMs) / 1000)) : undefined;

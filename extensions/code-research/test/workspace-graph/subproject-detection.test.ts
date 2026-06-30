@@ -37,6 +37,23 @@ describe('workspace subproject detection', () => {
     expect(subprojects.map((item) => item.root).sort()).toEqual(['apps/web', 'packages/shared', 'services/api']);
   });
 
+  it('detects python project markers', async () => {
+    const rootDir = await createProject({
+      'services/jobs/pyproject.toml': '[project]\nname = "jobs"\n',
+      'services/jobs/src/app.py': 'def run():\n    return True\n',
+      'services/worker/uv.lock': '# uv lock\n',
+      'services/worker/worker.py': 'def run():\n    return True\n',
+      'tools/cli/Pipfile': '[packages]\n',
+      'tools/cli/cli.py': 'def main():\n    return None\n',
+    });
+
+    const subprojects = await detectWorkspaceSubprojects(rootDir);
+    expect(subprojects.map((item) => item.root).sort()).toEqual(['services/jobs', 'services/worker', 'tools/cli']);
+    expect(subprojects.find((item) => item.root === 'services/jobs')?.markers).toContain('pyproject.toml');
+    expect(subprojects.find((item) => item.root === 'services/worker')?.markers).toContain('uv.lock');
+    expect(subprojects.find((item) => item.root === 'tools/cli')?.markers).toContain('Pipfile');
+  });
+
   it('falls back to an implicit workspace root when no markers exist', async () => {
     const rootDir = await createProject({ 'src/app.ts': 'export const ok = true;\n' });
     const subprojects = await detectWorkspaceSubprojects(rootDir);
