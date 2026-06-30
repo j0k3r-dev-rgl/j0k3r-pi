@@ -1,4 +1,5 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -82,6 +83,8 @@ describe('convertMarkdownToAudio', () => {
     });
 
     expect(result.engine).toBe('piper');
+    expect(result.engineRole).toBe('primary');
+    expect(result.ttsProgram).toBe('/usr/bin/piper-tts');
     expect(result.outputPath).toBe(join(file.dir, 'brief.wav'));
     expect(result.voiceModel).toBe('/voices/es.onnx');
     expect(result.textCharCount).toBeGreaterThan(0);
@@ -142,6 +145,8 @@ describe('convertMarkdownToAudio', () => {
     });
 
     expect(result.engine).toBe('espeak-ng');
+    expect(result.engineRole).toBe('fallback');
+    expect(result.ttsProgram).toBe('/usr/bin/espeak-ng');
     expect(result.outputPath).toBe(outputPath);
   });
 
@@ -174,6 +179,35 @@ describe('convertMarkdownToAudio', () => {
     expect(commands).toEqual(['/usr/bin/espeak-ng', '/usr/bin/ffmpeg']);
     expect(result.format).toBe('mp3');
     expect(await readFile(outputPath, 'utf8')).toBe('mp3 bytes');
+  });
+
+  it('emits concise elapsed-time progress updates during synthesis', async () => {
+    const file = await tempMarkdown('brief.md', '# Hola\n\nContenido para escuchar.');
+    const outputPath = join(file.dir, 'brief.wav');
+    const progress: Array<{ stage: string; message: string; elapsedSeconds: number }> = [];
+    const runCommand: CommandRunner = vi.fn(async (_command, args) => {
+      await delay(25);
+      await writeFile(String(args[1]), 'wav bytes');
+      return { stdout: '', stderr: '', code: 0 };
+    });
+
+    await convertMarkdownToAudio({
+      path: file.path,
+      cwd: file.dir,
+      outputPath,
+      engine: 'espeak-ng',
+      findCommand: async (name) => (name === 'espeak-ng' ? '/usr/bin/espeak-ng' : null),
+      runCommand,
+      onProgress: (event) => progress.push(event),
+      progressIntervalMs: 10,
+    });
+
+    expect(progress[0]).toMatchObject({ stage: 'preparing', elapsedSeconds: 0 });
+    expect(progress.some((event) => event.stage === 'synthesizing')).toBe(true);
+    expect(progress.some((event) => event.message.includes('program espeak-ng'))).toBe(true);
+    expect(progress.some((event) => event.message.includes('requested'))).toBe(true);
+    expect(progress.at(-1)).toMatchObject({ stage: 'done' });
+    expect(progress.every((event) => event.message.length < 180)).toBe(true);
   });
 
   it('uses a custom mp3 bitrate when provided', async () => {
@@ -215,6 +249,33 @@ describe('convertMarkdownToAudio', () => {
 });
 
 describe('utils extension tool', () => {
+  it('forwards concise progress events through tool onUpdate', async () => {
+    const pi = createMockPi();
+    utilsExtension(pi as any);
+    const tool = pi.tools.find((entry) => entry.name === 'markdown_to_audio');
+    const file = await tempMarkdown('tool-progress.md', '# Hola\n\nTexto corto.');
+    const updates: unknown[] = [];
+    const statuses: Array<string | undefined> = [];
+
+    const result = await tool?.execute('tool-call-1', {
+      path: file.path,
+      outputPath: join(file.dir, 'tool-progress.wav'),
+      engine: 'espeak-ng',
+      language: 'es',
+    }, undefined, (update: unknown) => updates.push(update), {
+      cwd: file.dir,
+      ui: { setStatus: (_key: string, text?: string) => statuses.push(text) },
+    });
+
+    expect(result).toMatchObject({ details: { status: 'success' } });
+    expect(JSON.stringify(updates)).toContain('markdown_to_audio');
+    expect(JSON.stringify(updates)).toContain('elapsed');
+    expect(JSON.stringify(updates)).toContain('program espeak-ng');
+    expect(statuses.some((status) => status?.startsWith('TTS ·'))).toBe(true);
+    expect(statuses.some((status) => status?.includes('program espeak-ng'))).toBe(true);
+    expect(statuses.at(-1)).toBeUndefined();
+  });
+
   it('registers markdown_to_audio', () => {
     const pi = createMockPi();
     utilsExtension(pi as any);

@@ -15,7 +15,8 @@ The tool:
 - uses local text-to-speech engines only;
 - prefers Piper for better voice quality;
 - falls back to eSpeak NG when Piper is unavailable;
-- writes `.wav` by default next to the Markdown file and can write `.mp3` when `ffmpeg` is installed.
+- writes `.wav` by default next to the Markdown file and can write `.mp3` when `ffmpeg` is installed;
+- emits concise progress updates with elapsed time, selected TTS program, and whether the engine is primary, fallback, or explicitly requested while synthesis or MP3 conversion is running.
 
 Parameters:
 
@@ -111,6 +112,21 @@ For news or long-form narration, start with normal speed and tune only after lis
 If only a high-quality Piper voice is installed, `voiceQuality: "auto"` will still use that high-quality voice. Install a `medium` or `low` voice if faster generation is more important than maximum quality.
 
 For smaller files, set `outputPath` to `.mp3`. The default MP3 bitrate is `64k`, which is intended for narration. Use `48` for smaller voice files, `96` for higher quality, or `128` for broad compatibility.
+
+## Progress updates
+
+During long conversions, the live Pi tool emits short status updates instead of verbose logs. When the TUI context is available, it also sets a compact footer/status-bar entry and clears it when the tool finishes or fails.
+
+Updates are intentionally compact and truthful about what is known. Piper does not expose a reliable percentage, so progress is shown as `progress n/a` instead of inventing a percentage.
+
+Examples:
+
+```text
+markdown_to_audio: piper synthesis · primary · program piper-tts · speed 1x · 16.8k chars · progress n/a · 0:30 elapsed
+markdown_to_audio: mp3 conversion · 64k · progress n/a · 0:02 elapsed
+```
+
+The default pulse interval is 1 second, so long reports show that work is still progressing without flooding the chat or TUI with full logs. The final result also reports the effective engine and TTS program so users can tell whether Piper was used as the primary engine or eSpeak NG was used as fallback.
 
 ## Playback troubleshooting
 

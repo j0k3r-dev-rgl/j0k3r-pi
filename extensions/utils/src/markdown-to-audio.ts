@@ -8,6 +8,14 @@ export type MarkdownToAudioEngine = 'auto' | 'piper' | 'espeak-ng';
 export type EffectiveMarkdownToAudioEngine = Exclude<MarkdownToAudioEngine, 'auto'>;
 export type MarkdownToAudioFormat = 'wav' | 'mp3';
 export type MarkdownToAudioVoiceQuality = 'auto' | 'high' | 'medium' | 'low';
+export type MarkdownToAudioEngineRole = 'primary' | 'fallback' | 'requested';
+export type MarkdownToAudioProgressStage = 'preparing' | 'synthesizing' | 'converting' | 'done';
+
+export interface MarkdownToAudioProgressEvent {
+  stage: MarkdownToAudioProgressStage;
+  message: string;
+  elapsedSeconds: number;
+}
 
 export interface CommandResult {
   stdout: string;
@@ -33,6 +41,8 @@ export interface MarkdownToAudioInput {
   noiseW?: number;
   mp3BitrateKbps?: number;
   signal?: AbortSignal;
+  onProgress?: (event: MarkdownToAudioProgressEvent) => void;
+  progressIntervalMs?: number;
   findCommand?: CommandFinder;
   findVoiceModel?: VoiceModelFinder;
   runCommand?: CommandRunner;
@@ -42,6 +52,8 @@ export interface MarkdownToAudioResult {
   inputPath: string;
   outputPath: string;
   engine: EffectiveMarkdownToAudioEngine;
+  engineRole: MarkdownToAudioEngineRole;
+  ttsProgram: string;
   format: MarkdownToAudioFormat;
   language: string;
   voiceModel?: string;
@@ -53,6 +65,7 @@ export interface MarkdownToAudioResult {
 const DEFAULT_LANGUAGE = 'es';
 const DEFAULT_ESPEAK_SPEED = 175;
 const DEFAULT_MP3_BITRATE_KBPS = 64;
+const DEFAULT_PROGRESS_INTERVAL_MS = 1_000;
 const PIPER_CANDIDATES = ['piper-tts', 'piper'];
 const VOICE_ROOT = '/usr/share/piper-voices';
 
@@ -129,7 +142,9 @@ export async function convertMarkdownToAudio(input: MarkdownToAudioInput): Promi
   const findCommand = input.findCommand ?? findCommandOnPath;
   const runCommand = input.runCommand ?? runCommandWithSpawn;
   const warnings: string[] = [];
+  const progress = createProgressReporter(input.onProgress, input.progressIntervalMs);
 
+  progress.emit('preparing', 'preparing markdown audio');
   await mkdir(dirname(outputPath), { recursive: true });
 
   try {
@@ -145,27 +160,102 @@ export async function convertMarkdownToAudio(input: MarkdownToAudioInput): Promi
         warnings.push('piper is installed but no voice model was found; falling back to espeak-ng');
         const espeakCommand = await findCommand('espeak-ng');
         if (!espeakCommand) throw installError();
-        await synthesizeWithEspeak(espeakCommand, text, synthOutputPath, language, input.speed, runCommand, input.signal);
-        await convertIfNeeded(format, synthOutputPath, outputPath, input.mp3BitrateKbps, findCommand, runCommand, input.signal);
-        return await buildResult(inputPath, outputPath, 'espeak-ng', format, language, undefined, text.length, warnings);
+        const engineRole: MarkdownToAudioEngineRole = 'fallback';
+        await withProgressPulse(progress, 'synthesizing', buildSynthesisProgressMessage('espeak-ng', engineRole, espeakCommand, input.speed, text.length), async () => {
+          await synthesizeWithEspeak(espeakCommand, text, synthOutputPath, language, input.speed, runCommand, input.signal);
+        });
+        await convertIfNeededWithProgress(progress, format, synthOutputPath, outputPath, input.mp3BitrateKbps, findCommand, runCommand, input.signal);
+        const result = await buildResult(inputPath, outputPath, 'espeak-ng', engineRole, espeakCommand, format, language, undefined, text.length, warnings);
+        progress.emit('done', `done · ${format} · ${basename(outputPath)}`);
+        return result;
       }
-      await synthesizeWithPiper(selected.command, text, synthOutputPath, voiceModel, {
-        speed: input.speed,
-        sentenceSilence: input.sentenceSilence,
-        noiseScale: input.noiseScale,
-        noiseW: input.noiseW,
-      }, runCommand, input.signal);
-      await convertIfNeeded(format, synthOutputPath, outputPath, input.mp3BitrateKbps, findCommand, runCommand, input.signal);
-      return await buildResult(inputPath, outputPath, 'piper', format, language, voiceModel, text.length, warnings);
+      const engineRole = getEngineRole(requestedEngine, 'piper');
+      await withProgressPulse(progress, 'synthesizing', buildSynthesisProgressMessage('piper', engineRole, selected.command, input.speed, text.length), async () => {
+        await synthesizeWithPiper(selected.command, text, synthOutputPath, voiceModel, {
+          speed: input.speed,
+          sentenceSilence: input.sentenceSilence,
+          noiseScale: input.noiseScale,
+          noiseW: input.noiseW,
+        }, runCommand, input.signal);
+      });
+      await convertIfNeededWithProgress(progress, format, synthOutputPath, outputPath, input.mp3BitrateKbps, findCommand, runCommand, input.signal);
+      const result = await buildResult(inputPath, outputPath, 'piper', engineRole, selected.command, format, language, voiceModel, text.length, warnings);
+      progress.emit('done', `done · ${format} · ${basename(outputPath)}`);
+      return result;
     }
 
-    await synthesizeWithEspeak(selected.command, text, synthOutputPath, language, input.speed, runCommand, input.signal);
-    await convertIfNeeded(format, synthOutputPath, outputPath, input.mp3BitrateKbps, findCommand, runCommand, input.signal);
-    return await buildResult(inputPath, outputPath, 'espeak-ng', format, language, undefined, text.length, warnings);
+    const engineRole = getEngineRole(requestedEngine, 'espeak-ng');
+    await withProgressPulse(progress, 'synthesizing', buildSynthesisProgressMessage('espeak-ng', engineRole, selected.command, input.speed, text.length), async () => {
+      await synthesizeWithEspeak(selected.command, text, synthOutputPath, language, input.speed, runCommand, input.signal);
+    });
+    await convertIfNeededWithProgress(progress, format, synthOutputPath, outputPath, input.mp3BitrateKbps, findCommand, runCommand, input.signal);
+    const result = await buildResult(inputPath, outputPath, 'espeak-ng', engineRole, selected.command, format, language, undefined, text.length, warnings);
+    progress.emit('done', `done · ${format} · ${basename(outputPath)}`);
+    return result;
   } finally {
     if (format === 'mp3') {
       await rm(synthOutputPath, { force: true }).catch(() => undefined);
     }
+  }
+}
+
+interface ProgressReporter {
+  intervalMs: number;
+  emit(stage: MarkdownToAudioProgressStage, description: string): void;
+}
+
+function createProgressReporter(onProgress: ((event: MarkdownToAudioProgressEvent) => void) | undefined, intervalMs: number | undefined): ProgressReporter {
+  const startedAt = Date.now();
+  return {
+    intervalMs: Math.max(250, Math.round(intervalMs ?? DEFAULT_PROGRESS_INTERVAL_MS)),
+    emit(stage, description) {
+      if (!onProgress) return;
+      const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+      onProgress({
+        stage,
+        elapsedSeconds,
+        message: `markdown_to_audio: ${description} · ${formatElapsed(elapsedSeconds)} elapsed`,
+      });
+    },
+  };
+}
+
+function getEngineRole(requestedEngine: MarkdownToAudioEngine, engine: EffectiveMarkdownToAudioEngine): MarkdownToAudioEngineRole {
+  if (requestedEngine !== 'auto') return 'requested';
+  return engine === 'piper' ? 'primary' : 'fallback';
+}
+
+function buildSynthesisProgressMessage(engine: EffectiveMarkdownToAudioEngine, engineRole: MarkdownToAudioEngineRole, ttsProgram: string, speed: number | undefined, textCharCount: number): string {
+  return `${engine} synthesis · ${engineRole} · program ${basename(ttsProgram)} · speed ${formatSpeed(speed)} · ${formatCompactCount(textCharCount)} chars · progress n/a`;
+}
+
+function buildConversionProgressMessage(mp3BitrateKbps: number | undefined): string {
+  return `mp3 conversion · ${normalizeMp3BitrateKbps(mp3BitrateKbps)}k · progress n/a`;
+}
+
+function formatSpeed(speed: number | undefined): string {
+  return `${speed ?? 1}x`;
+}
+
+function formatCompactCount(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return String(value);
+}
+
+function formatElapsed(elapsedSeconds: number): string {
+  const minutes = Math.floor(elapsedSeconds / 60);
+  const seconds = elapsedSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+async function withProgressPulse<T>(progress: ProgressReporter, stage: MarkdownToAudioProgressStage, description: string, task: () => Promise<T>): Promise<T> {
+  progress.emit(stage, description);
+  const timer = setInterval(() => progress.emit(stage, description), progress.intervalMs);
+  try {
+    return await task();
+  } finally {
+    clearInterval(timer);
   }
 }
 
@@ -242,6 +332,22 @@ async function synthesizeWithEspeak(
   assertCommandSucceeded('espeak-ng', result);
 }
 
+async function convertIfNeededWithProgress(
+  progress: ProgressReporter,
+  format: MarkdownToAudioFormat,
+  synthOutputPath: string,
+  outputPath: string,
+  mp3BitrateKbps: number | undefined,
+  findCommand: CommandFinder,
+  runCommand: CommandRunner,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (format !== 'mp3') return;
+  await withProgressPulse(progress, 'converting', buildConversionProgressMessage(mp3BitrateKbps), async () => {
+    await convertIfNeeded(format, synthOutputPath, outputPath, mp3BitrateKbps, findCommand, runCommand, signal);
+  });
+}
+
 async function convertIfNeeded(
   format: MarkdownToAudioFormat,
   synthOutputPath: string,
@@ -263,6 +369,8 @@ async function buildResult(
   inputPath: string,
   outputPath: string,
   engine: EffectiveMarkdownToAudioEngine,
+  engineRole: MarkdownToAudioEngineRole,
+  ttsProgram: string,
   format: MarkdownToAudioFormat,
   language: string,
   voiceModel: string | undefined,
@@ -274,6 +382,8 @@ async function buildResult(
     inputPath,
     outputPath,
     engine,
+    engineRole,
+    ttsProgram,
     format,
     language,
     voiceModel,

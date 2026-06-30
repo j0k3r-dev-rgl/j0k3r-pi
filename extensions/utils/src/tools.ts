@@ -1,5 +1,5 @@
 import { Type } from 'typebox';
-import { convertMarkdownToAudio, type MarkdownToAudioEngine, type MarkdownToAudioResult, type MarkdownToAudioVoiceQuality } from './markdown-to-audio.js';
+import { convertMarkdownToAudio, type MarkdownToAudioEngine, type MarkdownToAudioProgressEvent, type MarkdownToAudioResult, type MarkdownToAudioVoiceQuality } from './markdown-to-audio.js';
 
 type ToolResponse<T> =
   | { status: 'success'; data: T; warnings?: string[] }
@@ -10,6 +10,9 @@ export interface PiToolResult<T = unknown> {
   details?: ToolResponse<T>;
   isError?: boolean;
 }
+
+type ToolUpdateCallback = (partial: PiToolResult | { content: Array<{ type: 'text'; text: string }>; details?: unknown }) => void;
+type ToolExecutionContext = { cwd?: string; ui?: { setStatus?: (key: string, text?: string) => void } };
 
 export interface MarkdownToAudioParams {
   path: string;
@@ -51,19 +54,35 @@ export function registerUtilsTools(pi: any): void {
       'For more natural Piper narration, tune speed, sentenceSilence, noiseScale, and noiseW instead of rewriting the source Markdown.',
     ],
     parameters: markdownToAudioParameters,
-    async execute(_id: string, params: MarkdownToAudioParams, signal?: AbortSignal, _onUpdate?: unknown, ctx?: { cwd?: string }) {
+    async execute(_id: string, params: MarkdownToAudioParams, signal?: AbortSignal, onUpdate?: ToolUpdateCallback, ctx?: ToolExecutionContext) {
       try {
         const data = await convertMarkdownToAudio({
           ...params,
           cwd: ctx?.cwd ?? process.cwd(),
           signal,
+          onProgress: (event) => emitProgressUpdate(onUpdate, ctx, event),
         });
         return buildSuccess(summarizeMarkdownToAudio(data), data);
       } catch (error) {
         return buildFailure(classifyError(error), error instanceof Error ? error.message : 'markdown_to_audio failed');
+      } finally {
+        ctx?.ui?.setStatus?.('markdown_to_audio', undefined);
       }
     },
   });
+}
+
+function emitProgressUpdate(onUpdate: ToolUpdateCallback | undefined, ctx: ToolExecutionContext | undefined, event: MarkdownToAudioProgressEvent): void {
+  ctx?.ui?.setStatus?.('markdown_to_audio', buildStatusText(event));
+  if (!onUpdate) return;
+  onUpdate({
+    content: [{ type: 'text', text: event.message }],
+    details: { status: 'progress', data: event },
+  });
+}
+
+function buildStatusText(event: MarkdownToAudioProgressEvent): string {
+  return event.message.replace(/^markdown_to_audio:\s*/u, 'TTS · ');
 }
 
 function buildSuccess<T extends { warnings?: string[] }>(text: string, data: T): PiToolResult<T> {
@@ -92,7 +111,7 @@ function summarizeMarkdownToAudio(result: MarkdownToAudioResult): string {
   const lines = [
     `markdown_to_audio: ${result.inputPath}`,
     `output: ${result.outputPath}`,
-    `engine: ${result.engine}${result.voiceModel ? ` | voice: ${result.voiceModel}` : ''}`,
+    `engine: ${result.engine} (${result.engineRole}) | program: ${result.ttsProgram}${result.voiceModel ? ` | voice: ${result.voiceModel}` : ''}`,
     `language: ${result.language} | format: ${result.format}`,
     `text: ${result.textCharCount.toLocaleString('en-US')} chars`,
     `audio size: ${result.outputSizeBytes.toLocaleString('en-US')} bytes`,
