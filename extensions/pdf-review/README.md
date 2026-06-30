@@ -40,21 +40,36 @@ npm run typecheck
 
 ## Español
 
-Extensión de Pi para extraer contenido de PDFs locales.
+Extensión de Pi para leer archivos PDF locales como contexto del agente.
 
-### Resumen
+### Herramientas
 
-PDF Review permite leer texto, metadata y hash de archivos PDF para usarlo como contexto del agente. Puede renderizar páginas para detección visual y usar OCR opcional cuando el PDF no tiene capa de texto.
+#### `pdf_extract`
 
-### Herramientas y capacidades
+Extrae texto, metadata del archivo, hash SHA-256, advertencias y metadata opcional de páginas renderizadas desde un PDF local.
 
-- `pdf_extract`: extrae texto, metadata, SHA-256, warnings y metadata de páginas renderizadas.
-- OCR opcional con OCRmyPDF/Tesseract cuando `ocrMode` lo requiere.
+Parámetros:
 
-### Requisitos
+- `path` — ruta local del PDF, relativa al workspace actual o absoluta.
+- `textCharsLimit` — cantidad máxima de caracteres de texto extraído que se devuelven; por defecto `50000`.
+- `renderPages` — cuando es `true`, usa el flujo probado de screenshots de `pdf-parse` para renderizar metadata acotada de páginas. No se devuelven payloads de imagen en base64 para evitar saturar el contexto de la herramienta.
+- `pagesLimit` — máximo de páginas renderizadas cuando `renderPages` está habilitado; por defecto `5`.
+- `renderWidth` — ancho de render deseado; por defecto `1280`.
+- `ocrMode` — `none` o `auto`. En `auto`, OCR se ejecuta solo cuando la capa de texto del PDF está vacía.
+- `ocrProvider` — actualmente `ocrmypdf`.
+- `ocrLanguage` — idioma OCR para OCRmyPDF/Tesseract, por ejemplo `eng`, `spa` o `spa+eng`; por defecto `eng`.
 
-OCRmyPDF y Tesseract solo son necesarios si se usa OCR. La extracción normal de texto no requiere OCR.
+La implementación sigue el enfoque SIAS verificado: lee los bytes del PDF, calcula SHA-256, crea `PDFParse`, llama a `getText()`, opcionalmente llama a `getScreenshot()` y siempre destruye el parser. Si `ocrMode: "auto"` está habilitado y `getText()` no devuelve texto, la herramienta ejecuta OCRmyPDF con `--sidecar` para obtener texto OCR.
 
-### Ver más
+### Dependencia OCR
 
-La sección en inglés incluye parámetros, dependencias OCR y comandos de validación.
+OCR es opcional. Para usar `ocrMode: "auto"` con `ocrProvider: "ocrmypdf"`, instala OCRmyPDF y sus dependencias del sistema (`tesseract`, Ghostscript y paquetes de idioma como español si hacen falta). Si OCRmyPDF no está disponible o falla, `pdf_extract` devuelve texto vacío junto con una advertencia `OCR_UNAVAILABLE` en vez de fallar toda la extracción.
+
+### Validación
+
+Ejecutar desde `extensions/pdf-review`:
+
+```bash
+npm test
+npm run typecheck
+```

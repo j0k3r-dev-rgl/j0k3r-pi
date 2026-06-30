@@ -461,25 +461,453 @@ npm run typecheck
 
 ## Español
 
-Extensión de seguridad in-process para permisos de tools y comandos bash.
+`permission-guard` es una extensión local de proyecto para Pi que agrega un guard de permisos in-process, configurable por JSON, para tools built-in soportadas y comandos bash del usuario. Hace visibles las acciones riesgosas, solicita consentimiento del usuario cuando la política dice `ask`, deniega por defecto acceso a secretos conocidos y escribe una auditoría local redactada.
 
-### Resumen
+### Qué proporciona
 
-Permission Guard hace visibles las acciones riesgosas, solicita aprobación cuando la política lo indica, bloquea accesos peligrosos por defecto y escribe auditoría local redactada. No es un sandbox del sistema operativo, sino una capa de control dentro de Pi.
+- Checks de política para llamadas a tools built-in soportadas.
+- Checks de política para comandos bash del usuario con `!` y `!!` mediante eventos `user_bash`.
+- Política de rutas dentro y fuera del workspace.
+- Passthrough read-only por defecto para archivos válidos de skills Pi en ubicaciones globales y de proyecto reconocidas.
+- Passthrough read-only por defecto para README, docs y examples instalados de Pi.
+- Modo opcional `bypassWorkspace` solo para operaciones demostrablemente contenidas en el workspace.
+- Denegación por defecto de rutas secretas y comandos con apariencia de secreto.
+- Análisis conservador de subconjunto seguro de bash para comandos simples, literales quoted, asignaciones de entorno, `&&`, `||`, `;`, newlines, `cd` seguro, redirecciones básicas y pipelines read-only estrechamente reconocidos.
+- Extracción y clasificación estructurada de efectos de path en bash usando la misma política workspace/path que las tools de archivo.
+- Política configurable para bash read-only en workspace mediante `bash.workspaceReadOnly`.
+- Opciones interactivas de aprobación: `Allow once`, `Allow for session`, `Allow for project` solo para bash, `Allow this file for project`, `Allow this folder for project`, `Deny`.
+- Caché de aprobaciones de sesión para requests repetidos compatibles.
+- Aprobaciones project-scoped de paths externos para `read`, `ls`, `find` y `grep` mediante `pathApprovals.scopedApprovals`.
+- Persistencia project-scoped de aprobaciones bash para formas explícitamente aprobadas fuera del workspace o riesgosas.
+- Routing de permisos de subagentes de vuelta al hilo principal de usuario.
+- Logs de auditoría locales redactados con rotación.
 
-### Herramientas y capacidades
+### Ubicación de la extensión
 
-- Hooks runtime para tools soportadas y bash del usuario.
-- Políticas de workspace y rutas fuera del workspace.
-- Detección de secretos y protección de rutas sensibles.
-- Reglas para comandos bash, aprobaciones por proyecto y modo no interactivo.
-- Auditoría local redactada.
-- Integración con subagentes y handoff de aprobaciones.
+En este checkout de agent-dir la extensión vive en:
 
-### Uso recomendado
+```txt
+extensions/permission-guard/index.ts
+```
 
-Úsalo para reducir riesgos operativos y hacer explícitas las acciones sensibles, especialmente en repositorios con secretos, infraestructura o comandos destructivos.
+Cuando se copia a una configuración Pi local de proyecto, la ruta equivalente es:
 
-### Ver más
+```txt
+.pi/extensions/permission-guard/index.ts
+```
 
-La sección en inglés contiene referencia completa de configuración, defaults, flujo de aprobación, auditoría, límites y validación.
+Pi autodetecta extensiones locales de proyecto desde `.pi/extensions/*/index.ts` una vez que el proyecto es confiable. Usa `/reload` después de cambiar código de extensión o configuración de permisos durante una sesión interactiva.
+
+### Alcance y limitaciones de seguridad
+
+Esta extensión es un guard in-process, no un sandbox fuerte. No provee contención a nivel sistema operativo, aislamiento de syscalls, aislamiento garantizado de red ni prevención garantizada de comportamiento arbitrario del proceso host.
+
+Aislamiento fuerte requiere un contenedor, un entorno estilo Docker/OpenShell, Gondolin u otra micro-VM, o un runtime sandbox como `@anthropic-ai/sandbox-runtime`.
+
+La política bash es un subconjunto seguro conservador, no un parser completo de shell ni un sandbox. Soporta formas comunes de validación como comandos simples, literales quoted, asignaciones de entorno, `&&`, `||`, `;`, newlines, `cd` seguro, redirecciones básicas y pipelines read-only estrechamente reconocidos. Con defaults conservadores, sintaxis no soportada como background jobs, command/process substitution, expansión glob/env, scripts sourced, quotes malformadas o pipelines no reconocidos falla cerrado a aprobación salvo que aplique antes una denegación fuerte; configuración permisiva como `bash.outsideWorkspaceFilesystem="allow"` o fallback allow no interactivo puede ampliar intencionalmente el comportamiento. `~` y `~/...` se expanden para clasificación de efectos de path bash antes de tomar decisiones workspace/fuera-workspace.
+
+La aplicación MVP cubre tools built-in soportadas y eventos bash de usuario que pasan por hooks runtime de Pi. Tools custom o third-party quedan fuera del scope MVP salvo que integren explícitamente con el guard.
+
+El passthrough de skills cubre acceso read-only a archivos Markdown de skills cargables en raíces reconocidas de skills Pi. No permite escrituras, ejecución bash, scripts arbitrarios de skills, archivos de skill malformados ni escapes por symlink fuera de la raíz de skills.
+
+El passthrough de documentación Pi cubre acceso read-only al `README.md`, `docs/**` y `examples/**` del paquete instalado `@earendil-works/pi-coding-agent` bajo una raíz de paquete cuyo `package.json` declara ese nombre. No permite internals del paquete, carpetas lookalike sin identidad de paquete coincidente, escrituras, ejecución bash ni escapes symlink fuera de la raíz de paquete.
+
+### Hooks runtime
+
+Esta extensión no registra tools LLM ni comandos slash. Registra handlers de eventos Pi:
+
+| Evento | Qué se protege |
+|---|---|
+| `tool_call` | Llamadas a tools built-in soportadas: `read`, `write`, `edit`, `grep`, `find`, `ls`, `bash`. |
+| `user_bash` | Comandos shell del usuario ingresados mediante `!` o `!!`. |
+
+Si la política deniega un request, la extensión lo bloquea. Si la política requiere aprobación, pregunta al usuario principal cuando hay UI disponible o falla cerrado según la política no interactiva.
+
+### Defaults
+
+Los defaults integrados son conservadores. Config de proyecto o global puede sobreescribirlos, incluido el bypass de emergencia `bypassAll`; inspeccionar config activa al validar enforcement:
+
+- Permission guard está habilitado.
+- `bypassAll` es false.
+- `bypassWorkspace` es false.
+- Lecturas/escrituras/creates/lists/searches dentro del workspace se permiten salvo match con globs ask/deny.
+- Workspace `.git/**` y `node_modules/**` default a `ask`.
+- Lecturas, lists, searches, writes y creates no-secret fuera del workspace default a `ask`.
+- Lecturas de archivos válidos de skills desde raíces globales/de proyecto reconocidas se permiten por defecto sin config de proyecto.
+- Lecturas de README/docs/examples instalados de Pi se permiten por defecto sin config de proyecto.
+- Decisiones `ask` en modo no interactivo fallan cerrado por defecto.
+- Secretos se deniegan por defecto.
+- Rutas protegidas por defecto incluyen `.env`, `.env.*`, archivos key/certificate y ubicaciones comunes de credenciales SSH/AWS/GPG.
+- Bash default a `ask` salvo que el comando matchee una regla safe, ask, deny, scoped approval o workspace read-only.
+- Comandos bash read-only analizados y pipelines read-only estrechos dentro del workspace default a `allow` mediante `bash.workspaceReadOnly`.
+- No se crea automáticamente ningún archivo `.pi/permissions.json` de proyecto.
+
+### Archivos de configuración
+
+La configuración efectiva se carga en este orden:
+
+1. Defaults seguros integrados.
+2. Config global de usuario:
+
+   ```txt
+   $PI_CODING_AGENT_DIR/extensions/permission-guard.json
+   ```
+
+   Agent dir global default:
+
+   ```txt
+   ~/.pi/agent/extensions/permission-guard.json
+   ```
+
+3. Config de proyecto más cercana encontrada desde el current working directory hacia arriba:
+
+   ```txt
+   .pi/permissions.json
+   ```
+
+Las rutas relativas de proyecto se resuelven contra el workspace activo, no contra el directorio de instalación de la extensión.
+
+Keys desconocidas se ignoran con warnings. Keys con apariencia de secreto como `apiKey`, `token`, `secret`, `password` y `credential` también se ignoran con warnings.
+
+### Ejemplo de política de proyecto
+
+```json
+{
+  "outsideWorkspace": {
+    "read": "ask",
+    "list": "ask",
+    "search": "ask",
+    "write": "ask",
+    "create": "ask"
+  },
+  "workspace": {
+    "ask": [".git/**", "node_modules/**"],
+    "deny": []
+  },
+  "bash": {
+    "network": "ask",
+    "workspaceReadOnly": "allow",
+    "outsideWorkspaceFilesystem": "ask",
+    "safeCommands": [],
+    "scopedApprovals": [],
+    "askCommands": ["rm *", "mv *", "cp *", "git clean *", "git reset *", "npm install *"],
+    "denyCommands": ["sudo *", "su *", "chmod 777 *", "chown *", "rm -rf /", "rm -rf ~"]
+  },
+  "pathApprovals": {
+    "scopedApprovals": []
+  },
+  "audit": {
+    "enabled": true
+  }
+}
+```
+
+### Referencia de configuración
+
+#### Top-level
+
+| Campo | Valores | Default | Descripción |
+|---|---|---:|---|
+| `enabled` | boolean | `true` | Deshabilita/habilita enforcement de política. Deshabilitado significa que requests soportados se permiten. |
+| `bypassAll` | boolean | `false` | Bypass all-access de emergencia. Permite inmediatamente cada check de permisos soportado. |
+| `bypassWorkspace` | boolean | `false` | Auto-permite operaciones soportadas solo cuando cada efecto clasificado está probado dentro del workspace activo y no aplica regla más estricta deny/secret/destructive/ask. Efectos fuera-workspace, con cambio de contexto de ruta, ambiguos o no soportados siguen preguntando/denegando. |
+
+#### `workspace`
+
+| Campo | Valores | Default | Descripción |
+|---|---|---:|---|
+| `root` | path | `ctx.cwd` actual | Override opcional de raíz de workspace. Rutas relativas resuelven contra cwd. |
+| `allowRead` | `allow`/`ask`/`deny` | `allow` | Decisión default de lectura dentro del workspace. |
+| `allowWrite` | `allow`/`ask`/`deny` | `allow` | Decisión default de write/edit dentro del workspace. |
+| `allowCreate` | `allow`/`ask`/`deny` | `allow` | Decisión default de create dentro del workspace. |
+| `list` | `allow`/`ask`/`deny` | `allow` | Decisión default de list con `ls`/`find` dentro del workspace. |
+| `search` | `allow`/`ask`/`deny` | `allow` | Decisión default de search con `grep` dentro del workspace. |
+| `followSymlinks` | `realpath`/`lexical` | `realpath` | Si la resolución de symlinks afecta containment de workspace. |
+| `ask` | string[] | `[".git/**", "node_modules/**"]` | Globs de workspace que requieren aprobación. |
+| `deny` | string[] | `[]` | Globs de workspace denegados. |
+
+#### `outsideWorkspace`
+
+| Campo | Valores | Default | Descripción |
+|---|---|---:|---|
+| `read` | `allow`/`ask`/`deny` | `ask` | Decisión de lectura fuera del workspace. |
+| `list` | `allow`/`ask`/`deny` | `ask` | Decisión de list fuera del workspace. |
+| `search` | `allow`/`ask`/`deny` | `ask` | Decisión de búsqueda fuera del workspace. |
+| `write` | `allow`/`ask`/`deny` | `ask` | Decisión de write/edit fuera del workspace. |
+| `create` | `allow`/`ask`/`deny` | `ask` | Decisión de create fuera del workspace. |
+| `rememberApprovals` | `none`/`session` | `session` | Modo reservado para aprobaciones fuera del workspace. |
+
+#### `secrets`
+
+| Campo | Valores | Default | Descripción |
+|---|---|---:|---|
+| `mode` | `deny` | `deny` | Modo de manejo de secretos. Solo deny está soportado. |
+| `denyPaths` | string[] | ver defaults | Globs para rutas de secretos/credenciales. |
+| `denyKeyPatterns` | string[] | token/secret/password/etc. | Patrones de keys con apariencia de secreto. |
+| `maxPreviewBytesForPrompt` | `0` | `0` | Previews de secretos deshabilitados. |
+
+#### `tools`
+
+Cada tool soportada puede configurarse como `policy`, `allow` o `deny`:
+
+```json
+{
+  "tools": {
+    "read": "policy",
+    "write": "policy",
+    "edit": "policy",
+    "grep": "policy",
+    "find": "policy",
+    "ls": "policy",
+    "bash": "policy"
+  }
+}
+```
+
+`policy` significa que se aplica la política normal de path/bash. `allow` o `deny` saltean la política normal para ese modo de tool. Cuidado con `allow`: saltea la política normal de rutas, incluida denegación de rutas secretas para esa tool.
+
+#### `bash`
+
+| Campo | Valores | Default | Descripción |
+|---|---|---:|---|
+| `default` | `allow`/`ask`/`deny` | `ask` | Fallback para comandos que no matchean regla específica. |
+| `safeCommands` | string[] | `git status`, `git diff`, `npm test`, `npm run typecheck` | Candidatos legacy de allow para comandos que igualmente pasan análisis estructurado de shell y scope. Preferir reglas estructuradas como `workspaceReadOnly`. |
+| `scopedApprovals` | object[] | `[]` | Aprobaciones reutilizables project-scoped para approvals bash fuera-workspace o root-scoped escritas por `Allow for project`. Approvals workspace-only se persisten en `safeCommands`. |
+| `denyCommands` | string[] | defaults privilege/destructive | Comandos denegados después de denegaciones críticas hard-coded. |
+| `askCommands` | string[] | defaults state-changing | Comandos que requieren aprobación. |
+| `network` | `allow`/`ask`/`deny` | `ask` | Política de comandos de red. |
+| `workspaceReadOnly` | `allow`/`ask`/`deny` | `allow` | Política para comandos bash read-only analizados cuyos efectos de path clasificados permanecen dentro del workspace. |
+| `outsideWorkspaceFilesystem` | `allow`/`ask`/`deny` | `ask` | Efectos de path bash fuera del workspace. |
+| `envSecretExposure` | `deny`/`ask` | `deny` | Exposición de secretos de entorno. Exposición obvia hard-coded se deniega; `ask` se acepta por compatibilidad pero queda reservado para casos futuros menos obvios. |
+| `maxCommandPreviewChars` | number | `240` | Largo máximo del preview de comando en prompts/audit. |
+
+`bash.safeCommands`, `bash.askCommands` y `bash.denyCommands` soportan comandos exactos, wildcards `*` y entradas `regex:<pattern>`.
+
+Los comandos safe configurados son candidatos a allow solo después de que el análisis estructurado confirme sintaxis soportada, extracción completa de efectos de path y paths dentro del scope. Las denegaciones fuertes ganan primero, incluyendo privilege escalation, lecturas obvias de secretos, comandos deny configurados y borrados destructivos de root/home.
+
+`bash.workspaceReadOnly` controla comandos bash que el analizador prueba como read-only y limitados a rutas del workspace. Esto evita necesitar patrones amplios como `find *` o `cat *` en `safeCommands`.
+
+Ejemplos permitidos por `"workspaceReadOnly": "allow"` cuando sus paths están dentro del workspace:
+
+```bash
+find extensions/permission-guard/src -maxdepth 1 -mindepth 1 -print | sort
+grep -R -n "workspaceReadOnly" extensions/permission-guard/src | head
+rg "workspaceReadOnly" extensions/permission-guard/src | head -n 5
+find extensions/permission-guard/src -type f | head
+grep -R -n "workspaceReadOnly" extensions/permission-guard/src | wc -l
+cat extensions/permission-guard/package.json
+```
+
+Comandos simples read-only reconocidos incluyen `find`, `ls`, `cat`, `grep`, `head`, `tail`, `less` y `more`. `rg` se reconoce como source en pipelines read-only de dos etapas estrechamente soportados, no como comando simple standalone workspace-read-only. Fuentes reconocidas de pipeline read-only de dos etapas incluyen `find`, `grep`, `rg`, `ls`, `cat`, `head` y `tail`; sinks reconocidos incluyen `sort`, `head`, `tail`, `wc` y `uniq`. La regla de allow de pipeline es intencionalmente estrecha y exige que todos los efectos de path clasificados sean read-only y dentro del workspace.
+
+Ejemplos no permitidos por `workspaceReadOnly` y que deben preguntar o denegarse por otra política:
+
+```bash
+find ~/sias/app -maxdepth 1 -mindepth 1 -print | sort
+cat extensions/permission-guard/package.json | sh
+find extensions/permission-guard/src -type f | xargs rm
+```
+
+Un compound seguro estructurado como `cd <workspace-relative-dir> && npm test` puede permitirse cuando cada segmento está probado como seguro y cada efecto de path clasificado permanece dentro de raíces aprobadas.
+
+`Allow for project` persiste approvals bash workspace-only en `bash.safeCommands` usando patrones reutilizables por segmento en vez del comando compuesto completo. Segmentos `cd` seguros dentro del workspace se omiten porque los cambios de directorio dentro del workspace ya están cubiertos por la política. Por ejemplo, aprobar `cd extensions/subagents && npm run typecheck && npm test` puede agregar patrones reutilizables para `npm run typecheck` y `npm test`, no el string completo `cd ... && ...`.
+
+Las entradas `bash.scopedApprovals` guardan una firma normalizada de comando/efecto más raíces permitidas de workspace o directorios para approvals que necesitan scope por raíz, especialmente comandos fuera-workspace. Son aditivas y compatibles con `bash.safeCommands` legacy, pero no otorgan acceso arbitrario de comando a un directorio. La reutilización requiere forma compatible de comando/efecto y raíces que contengan todos los efectos de path clasificados.
+
+Las aprobaciones por carpeta funcionan también para paths fuera-workspace. Por ejemplo, si el usuario aprueba este comando para el proyecto:
+
+```bash
+find ~/sias/app -maxdepth 1 -mindepth 1 -print | sort
+```
+
+la raíz persistida de approval es el directorio expandido:
+
+```txt
+/home/<user>/sias/app
+```
+
+Un comando posterior con la misma forma de comando/efecto puede reutilizar esa approval para un directorio hijo:
+
+```bash
+find ~/sias/app/back -maxdepth 1 -mindepth 1 -print | sort
+```
+
+Sin embargo, la approval de carpeta no autoriza comandos no relacionados en ese mismo directorio. Estos siguen requiriendo su propia decisión de política o aprobación:
+
+```bash
+cat ~/sias/app/REACT_ROUTER_MIGRATION_NOTES.md
+find ~ -maxdepth 1 -mindepth 1 -print | sort
+```
+
+En otras palabras, la herencia de directorio está scoped por la raíz aprobada y por la forma analizada de comando/efecto. Aprobar un directorio no equivale a agregarlo a `safeCommands` ni a una allowlist general fuera-workspace.
+
+#### `nonInteractive`
+
+| Campo | Valores | Default | Descripción |
+|---|---|---:|---|
+| `onAsk` | `deny`/`allow` | `deny` | Fallback cuando no se puede recolectar aprobación. |
+| `allowSessionApprovals` | boolean | `false` | Si los flujos no interactivos pueden usar approvals de sesión. |
+
+#### `approvals`
+
+| Campo | Valores | Default | Descripción |
+|---|---|---:|---|
+| `sessionCache` | boolean | `true` | Habilita caché scoped en memoria para approvals de sesión. |
+| `allowForSession` | boolean | `true` | Permite que la opción `Allow for session` cachee requests compatibles. |
+
+#### `audit`
+
+| Campo | Valores | Default | Descripción |
+|---|---|---:|---|
+| `enabled` | boolean | `true` | Habilita auditoría local redactada. |
+| `logAllowed` | boolean | `false` | Loguea requests permitidos. |
+| `logDenied` | boolean | `true` | Loguea requests denegados. |
+| `logApprovals` | boolean | `true` | Loguea decisiones explícitas de aprobación. |
+| `redactPaths` | boolean | `true` | Redacta paths en eventos de audit. |
+| `path` | path | user state dir | Ruta opcional del archivo audit. |
+| `maxBytes` | number | `5242880` | Umbral de rotación. |
+| `maxFiles` | number | `5` | Cantidad de archivos rotados a retener. |
+
+### Flujo de aprobación
+
+Las opciones interactivas de aprobación están en inglés y son intencionalmente estables:
+
+- `Allow once`
+- `Allow for session`
+- `Allow for project` para approvals bash
+- `Allow this file for project`
+- `Allow this folder for project`
+- `Deny`
+
+`Allow once` aplica solo al request actual.
+
+`Allow for session` crea una aprobación scoped en memoria para la firma de comando/efecto compatible dentro de las raíces aprobadas de workspace o directorio.
+
+`Allow for project` persiste una approval reutilizable de nivel proyecto en `.pi/permissions.json` bajo el current working directory. La carga de config puede descubrir el `.pi/permissions.json` más cercano hacia arriba, así que hay que considerar el cwd usado al persistir approvals:
+
+- approvals bash workspace-only se escriben en `bash.safeCommands` como strings de comandos por segmento reutilizables o patrones regex conservadores;
+- approvals bash fuera-workspace o root-scoped se escriben en `bash.scopedApprovals`.
+
+Para tools de path externo soportadas (`read`, `ls`, `find`, `grep`), prompts con opciones seguras explícitas de aprobación de path omiten la opción genérica `Allow for project`. Las opciones explícitas project persisten approvals project-scoped de paths externos en `pathApprovals.scopedApprovals`:
+
+- `Allow this file for project` guarda una ruta de archivo exacta normalizada;
+- `Allow this folder for project` guarda una raíz de carpeta normalizada y aplica recursivamente a descendientes existentes y futuros en el proyecto actual;
+- approvals de path no aplican a tools no soportadas como `write`, `edit`, `bash` o custom tools.
+
+La reutilización de approvals scoped permanece limitada a la firma de comando/efecto aprobada y sus raíces; paths fuera de scope vuelven a preguntar.
+
+`Deny` bloquea el request actual.
+
+### Aprobaciones de subagentes
+
+Las aprobaciones de subagentes se enrutan al hilo principal. Si un request originado en subagente requiere aprobación, el subagente no puede aprobarse a sí mismo. El guard expone un payload `permission_required` para el hilo orquestador/usuario, de modo que el usuario principal decida. Para tools de path externo soportadas, el payload lleva opciones explícitas de aprobación project de archivo/carpeta para que el hilo principal persista la misma entrada `pathApprovals.scopedApprovals` que guardaría un request directo.
+
+Tareas de subagente en background no pueden completar aprobación interactiva por sí mismas; volver a ejecutar en modo task cuando se requiere aprobación.
+
+### Auditoría
+
+La auditoría es local y redactada. Denegaciones, decisiones explícitas de aprobación y eventos handoff `permission_required` de subagentes se escriben en un archivo audit NDJSON propio de la extensión cuando audit está habilitado.
+
+Ruta audit default:
+
+```txt
+$XDG_STATE_HOME/pi/permission-guard/audit.ndjson
+```
+
+Fallback:
+
+```txt
+~/.local/state/pi/permission-guard/audit.ndjson
+```
+
+Reglas de seguridad de audit:
+
+- eventos de handoff de permisos de tool-call de subagente usan decisión `permission_required` e incluyen metadata normal redactada de target/comando cuando está disponible;
+- paths y comandos se redactan por defecto;
+- rutas secretas se hashean/redactan;
+- valores de entorno se redactan;
+- texto de reemplazo de edit no se escribe;
+- tokens, passwords y private keys no deben escribirse en audit logs;
+- archivos audit usan modo `0600`; directorios usan `0700`;
+- la rotación audit se chequea antes de appendear un nuevo evento cuando el archivo existente ya supera `audit.maxBytes`; una sola escritura puede superar el umbral hasta el próximo evento audit.
+
+### Bypass de workspace
+
+Bypass solo-workspace:
+
+```json
+{
+  "bypassWorkspace": true
+}
+```
+
+Cuando `bypassWorkspace` es `true`, Permission Guard puede auto-permitir operaciones de archivo y comandos bash soportados solo cuando todos los efectos están completamente clasificados y contenidos dentro del workspace activo. Esto no es `bypassAll` ni un sandbox.
+
+Sigue preguntando o denegando:
+
+- paths fuera-workspace;
+- escapes por parent/sibling/symlink/traversal;
+- rutas secretas o de credenciales;
+- reglas deny explícitas;
+- comandos destructivos o de privilege escalation;
+- comandos que cambian contexto de path como `cd`, `pushd`, `popd`, `git -C` y `npm --prefix`;
+- sintaxis shell no soportada o ambigua.
+
+### Bypass de emergencia
+
+Bypass de emergencia/all-access:
+
+```json
+{
+  "bypassAll": true
+}
+```
+
+Cuando `bypassAll` es `true`, cada check de permisos soportado se permite inmediatamente sin prompts, incluyendo lecturas/escrituras fuera-workspace y comandos bash riesgosos. Mantenerlo `false` por defecto y habilitarlo solo cuando se confía intencionalmente en la sesión y el entorno actuales.
+
+### Validación de enforcement
+
+Para tests de enforcement y validación manual, asegurate de que cualquier config local de permisos usada para validar tenga `bypassAll: false`. Un `bypassAll: true` temporal ocultará el comportamiento real de política. Para validar `bypassWorkspace`, setearlo explícitamente a `true` en una config temporal de proyecto y verificar que comandos fuera-workspace y que cambian contexto de path sigan preguntando.
+
+Las entradas persistidas `pathApprovals.scopedApprovals` revelan rutas locales de filesystem en config de proyecto. Remover una entrada manualmente de `.pi/permissions.json` para revocarla. Para rollback completo de la feature, remover la colección `pathApprovals.scopedApprovals` y revertir cambios de extensión/subagentes.
+
+Checks manuales sugeridos:
+
+- ejecutar un compound dentro del workspace como `cd extensions/permission-guard && npm test`;
+- probar un path fuera-workspace como `cat /tmp/outside.txt` y confirmar que requiere aprobación;
+- elegir `Allow this file for project` y confirmar que luego solo se reutiliza ese archivo exacto en el mismo proyecto;
+- elegir `Allow this folder for project` y confirmar que `read`, `ls`, `find` y `grep` reutilizan la approval para descendientes y futuros child paths, pero no para siblings por prefijo como `/tmp/outside-private`;
+- verificar que rutas secretas o symlink-escape bajo una carpeta aprobada no salteen política más estricta;
+- aprobar un request bash para sesión o proyecto y confirmar que la reutilización funciona solo dentro de raíces aprobadas;
+- verificar que pipelines read-only de workspace reconocidos como `grep -R -n "workspaceReadOnly" extensions/permission-guard/src | head` pasen cuando `bash.workspaceReadOnly` es `allow`;
+- verificar que pipes inseguros o fuera-workspace como `cat extensions/permission-guard/package.json | sh` o `find ~/sias/app -maxdepth 1 -mindepth 1 -print | sort` sigan preguntando;
+- verificar que prompts de permisos originados en subagentes permanezcan sin markers crudos en superficies visibles al usuario.
+
+### Desarrollo
+
+Instalar dependencias una vez:
+
+```bash
+cd extensions/permission-guard
+npm install
+```
+
+Ejecutar tests:
+
+```bash
+cd extensions/permission-guard
+npm test
+```
+
+Ejecutar typecheck:
+
+```bash
+cd extensions/permission-guard
+npm run typecheck
+```
+
+### Docs relacionadas del proyecto
+
+- `extensions/subagents/README.md` — integración de handoff de permisos de subagentes.
+- `skills/permission-guard-configuration/SKILL.md` — política agent-facing de configuración de permisos.
+- Docs de extensiones Pi: eventos session/tool/user bash y limitaciones de extensiones in-process.

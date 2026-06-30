@@ -385,25 +385,381 @@ typecheck passes
 
 ## Español
 
-Extensión de memoria persistente local-first para agentes Pi.
+Memoria persistente local-first para agentes Pi. Esta extensión le da al agente un cerebro de memoria consciente del proyecto respaldado por SQLite + FTS5, expone tools de memoria al LLM, agrega comandos slash para humanos, captura prompts de sesión para auditoría y resume sesiones al apagar.
 
-### Resumen
+### Qué proporciona
 
-Memory proporciona un cerebro persistente consciente del proyecto, respaldado por SQLite y FTS5. Permite guardar decisiones, preferencias, perfiles de proyecto, sesiones, resúmenes y contexto reutilizable, evitando usar el historial de chat como única memoria.
+- Registros de memoria `project`/`general`/`global` con kinds como `decision`, `command`, `workflow`, `todo`, `learning` y `project_profile`.
+- Almacenamiento SQLite local con búsqueda FTS5, WAL, foreign keys y `busy_timeout`.
+- Resolución automática de contexto de proyecto desde `.pi/memory.json`, remote/root git, nombre de carpeta o home.
+- Inyección de contexto de memoria al inicio una vez por sesión.
+- Registros de auditoría de prompts/sesiones.
+- Resúmenes locales rápidos de sesión al shutdown por defecto.
+- Resumen semántico opcional de sesión y actualización semántica opcional del perfil de proyecto.
+- Export/import a JSONL.
+- Soporte para consolidación de memorias duplicadas.
+- `/memory-browser` interactivo.
+- Metadata y campos de estado preparados para cloud sync; todavía no hay backend real cloud push/pull.
 
-### Herramientas y capacidades
+### Ubicación de la extensión
 
-- Herramientas `memory_*` para crear, buscar, leer, actualizar, archivar y consolidar memorias.
-- Perfil de proyecto (`memory_project_profile`).
-- Sesiones, prompts auditados y resúmenes de cierre.
-- Import/export local.
-- Browser y comandos slash.
-- Provenance opcional de commits/changelog/releases cuando está habilitado.
+En este checkout de agent-dir la extensión vive en:
 
-### Activación
+```txt
+extensions/memory/index.ts
+```
 
-La extensión es opt-in por proyecto mediante `.pi/memory.json` con `enabled: true`.
+Cuando se copia a una configuración Pi local de proyecto, la ruta equivalente es:
 
-### Ver más
+```txt
+.pi/extensions/memory/index.ts
+```
 
-La sección en inglés documenta configuración completa, ciclo de vida de sesiones, storage, herramientas, comandos, seguridad y desarrollo.
+Pi autodetecta extensiones locales de proyecto desde `.pi/extensions/*/index.ts` una vez que el proyecto es confiable. Usa `/reload` después de cambiar código de extensión durante una sesión interactiva.
+
+### Configuración
+
+La configuración de proyecto vive en `.pi/memory.json` en la raíz del proyecto o un directorio ancestro.
+
+Config mínima:
+
+```json
+{
+  "enabled": true,
+  "project_name": "j0k3r-pi"
+}
+```
+
+Config recomendada de proyecto para backups project-scoped automáticos y restores seguros. Este ejemplo sobreescribe intencionalmente la ruta legacy default integrada (`.pi/mempry-backups/...`) con la ruta más clara `.pi/memory-backups/...`:
+
+```json
+{
+  "project_name": "j0k3r-pi",
+  "aliases": [],
+  "default_scope": "project",
+  "debug": false,
+  "session_end": {
+    "semantic": false
+  },
+  "import": {
+    "mode": "merge",
+    "on_conflict": "keep_local"
+  },
+  "enabled": true,
+  "backups": {
+    "path": ".pi/memory-backups/memory-backup.jsonl",
+    "mode": "mirror",
+    "include_sessions": true
+  },
+  "cloud": {
+    "enabled": false
+  }
+}
+```
+
+Usa `backups.include_sessions=true` solo cuando el proyecto quiera intencionalmente export/import de sesiones y prompts de sesión. Las filas de prompts siempre se almacenan localmente para auditoría como parte de las sesiones.
+
+Forma completa soportada:
+
+```json
+{
+  "project_name": "j0k3r-pi",
+  "aliases": ["pi-agent-workflow"],
+  "default_scope": "project",
+  "debug": false,
+  "session_end": {
+    "semantic": false
+  },
+  "import": {
+    "mode": "merge",
+    "on_conflict": "keep_local"
+  },
+  "backups": {
+    "path": ".pi/mempry-backups/memory-backup.jsonl",
+    "mode": "mirror",
+    "include_sessions": false
+  },
+  "cloud": {
+    "enabled": false,
+    "organization_id": "org_abc123",
+    "actor_id": "actor_j0k3r",
+    "remote_project_id": "proj_j0k3r_pi",
+    "url_env": "PI_MEMORY_CLOUD_URL",
+    "token_env": "PI_MEMORY_CLOUD_TOKEN"
+  }
+}
+```
+
+#### Campos de configuración
+
+| Campo | Default | Descripción |
+|---|---:|---|
+| `project_name` | inferido | Nombre canónico del proyecto. Si está presente, gana sobre inferencia por git/carpeta. |
+| `aliases` | `[]` | Aliases opcionales de nombres legacy de proyecto mantenidos por compatibilidad. |
+| `default_scope` | solo parseado | Campo reservado para `general`, `project` o `global`; actualmente se parsea por compatibilidad pero no se usa para resolución de contexto. |
+| `debug` | `false` | Habilita logging local de lifecycle a `memory-session-debug.log` en el cwd actual. Loguea IDs/files de sesión y eventos lifecycle, nunca texto de prompts. Mantener deshabilitado salvo auditoría. |
+| `session_end.semantic` | `false` | Habilita resumen de shutdown respaldado por modelo y update de perfil. Off por defecto para salida rápida. |
+| `import.mode` | `dry_run` | Modo default de `memory_import` cuando la tool omite `mode`. Valores: `dry_run`, `merge`. Valores inválidos se ignoran con warning. |
+| `import.on_conflict` | `mark_conflict` | Política default de conflicto de `memory_import` cuando se omite. Valores: `keep_local`, `keep_imported`, `mark_conflict`. Valores inválidos se ignoran con warning. |
+| `backups.path` | `.pi/mempry-backups/memory-backup.jsonl` | Ruta relativa, resuelta desde el cwd actual, para backups automáticos import/export. Rutas absolutas y escapes fuera del workdir se rechazan con warning. |
+| `backups.mode` | `mirror` | Modo de escritura export. `mirror` reescribe el archivo desde el estado DB scoped actual. `merge` preserva filas existentes del backup y actualiza/agrega filas actuales. Valores inválidos se ignoran con warning. |
+| `backups.include_sessions` | `false` | Cuando es `true`, `memory_export` automático incluye `memory_sessions` y `memory_session_prompts` linkeados para el proyecto actual. Los prompts de sesión son datos de auditoría, por eso es opt-in. |
+| `enabled` | `false` | Habilita registro de la extensión memory para este proyecto cuando es true. |
+| `cloud.enabled` | `false` | Marca filas de proyecto como pendientes de cloud-sync y habilita checks de readiness cloud. |
+| `cloud.organization_id` | `null` | Requerido solo cuando cloud está habilitado. |
+| `cloud.actor_id` | `null` | Requerido solo cuando cloud está habilitado. |
+| `cloud.remote_project_id` | `null` | Requerido solo cuando cloud está habilitado. |
+| `cloud.url_env` | `PI_MEMORY_CLOUD_URL` | Nombre de variable de entorno para URL cloud. |
+| `cloud.token_env` | `PI_MEMORY_CLOUD_TOKEN` | Nombre de variable de entorno para token cloud. |
+
+Nunca guardes tokens cloud directamente en `.pi/memory.json`.
+
+#### Checklist de setup para un proyecto nuevo
+
+1. Crear `.pi/memory.json` con la config recomendada arriba y setear `project_name` al nombre canónico del proyecto.
+2. Mantener `backups.path` relativo al working directory del proyecto. Rutas absolutas y escapes `..` se rechazan/ignoran.
+3. Ejecutar `/reload` o reiniciar Pi después de cambiar `.pi/memory.json` o código de extensión.
+4. Usar `memory_context` para verificar la identidad de proyecto resuelta.
+5. Ejecutar `memory_export` (tool) o `/memory-export` (comando) desde el cwd del proyecto. El agente o usuario no necesita pasar una ruta.
+6. Para restaurar desde ese backup, ejecutar `memory_import` (default respeta defaults configurados) o `/memory-import dry_run` para dry-run explícito, luego usar `memory_import` con modo merge o `/memory-import merge` cuando quieras aplicar cambios.
+7. Inspeccionar la metadata del backup si hace falta: `format` debe ser `pi-memory-backup`, `version` debe ser `2`, `mode` debe coincidir con `backups.mode`, `mirror` debe ser `true` para modo mirror y `false` para merge, y `includes_sessions` debe coincidir con `backups.include_sessions`.
+
+Hay una skill dedicada para esto: `memory-configuration`.
+
+### Almacenamiento
+
+Ruta DB por defecto:
+
+```txt
+$XDG_DATA_HOME/pi/memory/memory.sqlite
+```
+
+Fallback:
+
+```txt
+~/.local/share/pi/memory/memory.sqlite
+```
+
+Overrides de entorno:
+
+```bash
+PI_MEMORY_DB_PATH=/absolute/path/to/memory.sqlite
+PI_MEMORY_HOME=/absolute/path/to/memory-home
+```
+
+Settings SQLite:
+
+- `PRAGMA foreign_keys = ON`
+- `PRAGMA journal_mode = WAL`
+- `PRAGMA busy_timeout = 5000`
+
+### Resolución de contexto
+
+La extensión resuelve el contexto de memoria activo en este orden:
+
+1. Si `cwd` es el home del usuario, scope `general`.
+2. Si `.pi/memory.json` contiene `project_name`, scope `project` con `project:<slug(project_name)>`.
+3. Si está dentro de un repo git con `remote.origin.url` parseable, scope `project` con `git:<host>/<owner>/<repo>`.
+4. Si está dentro de un repo git sin remote parseable, scope `project` desde el nombre de carpeta de la raíz git.
+5. Si no, scope `project` desde el nombre de la carpeta actual.
+
+Usa `/memory-context` o la tool `memory_context` para inspeccionar el contexto resuelto.
+
+### Lifecycle de sesión
+
+Eventos lifecycle registrados:
+
+- `session_start`: crea o resume una sesión memory y setea estado de footer.
+- `before_agent_start`: captura el prompt del usuario e inyecta startup brain context una vez.
+- `session_shutdown`: cierra la sesión memory salvo que la razón de shutdown sea `reload`.
+
+Las sesiones Memory se linkean a sesiones Pi usando esta prioridad conservadora:
+
+1. `ctx.sessionManager.getSessionId()` guardado como `metadata_json.pi_session_id`.
+2. `ctx.sessionManager.getSessionFile()` guardado como `metadata_json.pi_session_file`.
+3. Una entrada custom de sesión Pi persistida con `pi.appendEntry("memory-session", { memory_session_id })`.
+4. Una sesión reciente activa auto-started no ambigua para el mismo proyecto y cwd.
+5. Crear una nueva sesión memory.
+
+Cuando una sesión memory completada se resume mediante `session_start` con la misma identidad Pi, se reactiva con `status='active'` y `ended_at=NULL`. Una sesión cerrada no captura prompts adicionales hasta que ocurre esa reapertura, y su resumen previo se preserva hasta que el próximo finish lo reescribe.
+
+Comportamiento de shutdown:
+
+- Default: resumen local heurístico rápido. Se intenta actualizar heurísticamente el perfil de proyecto solo cuando hay señales durables útiles.
+- Con `session_end.semantic=true`: intenta resumen semántico y update semántico del perfil con el modelo activo, luego cae a comportamiento heurístico si hay error o falta auth.
+
+### Tools expuestas al agente
+
+| Tool | Propósito |
+|---|---|
+| `memory_context` | Resuelve scope/identidad de proyecto de memoria actual. |
+| `memory_add` | Guarda memorias durables. |
+| `memory_search` | Busca memorias/resúmenes compactos locales. |
+| `memory_get` | Lee una memoria completa por id. |
+| `memory_list` | Lista memorias compactas por filtros. |
+| `memory_update` | Actualiza contenido/tags/status/confidence/importance. |
+| `memory_archive` | Archiva una memoria sin borrarla. |
+| `memory_session_start` | Crea/registra una sesión memory. |
+| `memory_session_prompt_add` | Guarda un prompt relevante de sesión para auditoría. |
+| `memory_session_finish` | Finaliza una sesión memory y opcionalmente extrae memorias durables. |
+| `memory_start_chat` | Inicia una sesión memory y devuelve contexto startup compacto. |
+| `memory_recall` | Recupera contexto compacto de momento de workflow. Aliases: `task`, `edit`, `test`, `commit`, `end`. |
+| `memory_project_profile` | Obtiene/asegura/actualiza el perfil del proyecto actual. |
+| `memory_consolidate` | Encuentra o aplica consolidación de memorias duplicadas. Dry-run por defecto. |
+| `memory_sync_status` | Muestra conteos locales conscientes de sync status. |
+| `memory_export` | Exporta memoria a JSONL. |
+| `memory_import` | Importa memoria desde JSONL. Dry-run por defecto. |
+
+### Comandos slash
+
+| Comando | Descripción |
+|---|---|
+| `/memory-status` | Muestra ruta DB, contexto actual y readiness cloud. |
+| `/memory-context` | Muestra JSON del contexto memory resuelto. |
+| `/memory-search <query>` | Busca memoria local. |
+| `/memory-list` | Lista memorias recientes. |
+| `/memory-doctor` | Diagnostica DB, FTS5, contexto y config cloud. |
+| `/memory-sync-status` | Muestra conteos por sync status. |
+| `/memory-consolidate [kind]` | Dry-run de detección de duplicados. |
+| `/memory-project-profile` | Asegura y muestra el perfil del proyecto actual. |
+| `/memory-export [jsonl|sqlite] [mirror|merge] [sessions] [active-only]` | Exporta backup scoped de memoria. |
+| `/memory-import [merge|dry_run] [keep_local|keep_imported|mark_conflict]` | Importa backup de memoria (por defecto usa modo configurado; normalmente `dry_run`). |
+| `/memory-browser` | Abre el browser interactivo de memoria. |
+
+### Memory browser
+
+`/memory-browser` abre un browser interactivo con navegación estilo nvim. Lista solo memorias, sesiones y prompts capturados del proyecto actual. Los detalles de sesión incluyen los prompts linkeados a esa sesión para auditoría/debug. Sesiones/prompts de subagentes se linkean a su sesión de usuario padre y se ocultan por defecto; los detalles de sesión de usuario muestran sesiones de subagente linkeadas, y `origin=subagent` u `origin=all` permiten inspeccionarlas directamente dentro del proyecto actual. Soporta comandos de filtro como:
+
+```txt
+:query=npm kind=command scope=project status=active project=app
+:origin=subagent
+:origin=all
+:clear
+```
+
+### Export e import
+
+Las tools `memory_export`/`memory_import` y comandos `/memory-export`/`/memory-import` usan una ruta automática de backup configurada; no se requiere argumento `path`.
+
+#### Uso de comandos de usuario
+
+- Export: `/memory-export`
+  - `jsonl` (default)
+  - `mirror|merge` para sobreescribir `backups.mode` en este export
+  - `sessions` para incluir sesiones y prompts (o `sessions=false` / `include_sessions=false`)
+  - `active-only` para exportar solo memorias activas
+  - `active` equivale a `active-only` (`include_archived=false`)
+  - `help` para mostrar uso
+
+  Ejemplos:
+
+  - `/memory-export`
+  - `/memory-export merge`
+  - `/memory-export sessions`
+  - `/memory-export jsonl active-only`
+
+- Import: `/memory-import`
+  - `dry_run` (default o default configurado por proyecto)
+  - `merge` para aplicar cambios
+  - `keep_local|keep_imported|mark_conflict` para manejo de conflictos
+  - `help` para mostrar uso
+
+  Flujo recomendado:
+  1. `/memory-import dry_run`
+  2. Revisar salida de insertados/conflictos.
+  3. `/memory-import merge` para aplicar.
+
+`memory_export` y `memory_import` usan una ruta automática de backup configurada. El agente no necesita pasar parámetro `path`.
+
+Archivo backup default:
+
+```txt
+<workdir>/.pi/mempry-backups/memory-backup.jsonl
+```
+
+Override de proyecto:
+
+```json
+{
+  "backups": {
+    "path": "relative/path/to/memory-backup.jsonl",
+    "mode": "mirror",
+    "include_sessions": true
+  }
+}
+```
+
+Notas:
+
+- `backups.path` debe ser relativo al working directory actual. Rutas absolutas y escapes `..` se ignoran con warnings.
+- `memory_export` escribe un backup JSONL con un registro `meta`, `manifest` y registros de filas hasheados.
+- Export se limita al contexto/proyecto memory actual para filas leídas de la DB: backups de proyecto contienen memorias, sesiones, prompts (cuando se incluyen sesiones) y entidades/links relacionados de ese proyecto.
+- `backups.mode="mirror"` reescribe el archivo desde el estado DB scoped actual, así que filas scoped removidas localmente también se remueven del backup.
+- `backups.mode="merge"` preserva filas existentes del backup y actualiza/agrega filas actuales. Usar cuando el backup deba acumular filas restauradas/antiguas en vez de podarse por la DB actual. Usar `mirror` cuando se quiere reflejar intencionalmente borrados o limpieza de privacidad en el backup.
+- `memory_export` default a JSONL e incluye memorias archivadas salvo que se pase `include_archived=false`.
+- Export SQLite queda reservado para implementación futura.
+- Las filas de prompts de sesión se incluyen solo cuando `backups.include_sessions=true` o la llamada a tool pasa explícitamente `include_sessions=true`.
+- Soporte legacy: si solo existe `backups.include_prompts`, se usa como fallback con warning de deprecación.
+- Import default a `dry_run` y valida formato/schema version del backup.
+- Los proyectos pueden sobreescribir defaults de import omitidos en `.pi/memory.json`, por ejemplo:
+
+  ```json
+  {
+    "import": {
+      "mode": "merge",
+      "on_conflict": "keep_local"
+    }
+  }
+  ```
+
+- Parámetros explícitos de modo/conflicto en `memory_import` siempre sobreescriben defaults de `.pi/memory.json`.
+- El modo `merge` puede mantener registros locales, mantener importados o marcar conflictos.
+
+### Seguridad y privacidad
+
+- No guardar secretos, tokens, passwords, private keys o logs crudos.
+- Los flujos memory add, captura de prompts y session finish rechazan contenido obvio con apariencia de secreto antes de almacenar.
+- `.pi/memory.json` no debe contener tokens cloud.
+- Los prompts de sesión son registros de auditoría; incluir exports de sesiones solo intencionalmente.
+- La extensión escribe la DB local fuera del repositorio por defecto para evitar commits accidentales.
+- Cloud sync todavía no está implementado; la config cloud actualmente afecta status/readiness y metadata inicial de sync.
+
+### Desarrollo
+
+Instalar dependencias una vez:
+
+```bash
+cd extensions/memory
+npm install
+```
+
+Ejecutar tests:
+
+```bash
+cd extensions/memory
+npm test
+```
+
+Ejecutar typecheck:
+
+```bash
+cd extensions/memory
+npm run typecheck
+```
+
+La extensión usa el módulo integrado `node:sqlite` de Node, así que debe correr con una versión de Node que provea esa API.
+
+Validación esperada actual:
+
+```txt
+2 test files pass
+59 tests pass
+typecheck passes
+```
+
+### Docs relacionadas del proyecto
+
+- `skills/persistent-memory/SKILL.md` — política operativa del agente para usar memoria.
+- `skills/memory-configuration/SKILL.md` — política de configuración `.pi/memory.json`, backup, import y restore.
+- `extensions/memory/src/config.ts` — parsing de config y defaults.
+- `extensions/memory/src/export-import.ts` — formato de backup y comportamiento import.

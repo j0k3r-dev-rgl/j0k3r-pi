@@ -48,23 +48,44 @@ reverse_function_call_tree path:examples/java/reversecallers/AppService.java sym
 
 ## Español
 
-Fixtures de ejemplo para probar la extensión `code-research`.
+Estos archivos existen solo para probar las herramientas `find_symbol`, `find_references`, `function_call_tree` y `reverse_function_call_tree`. Nunca se ejecutan.
 
-### Resumen
+### Fixtures TypeScript (`typescript/`)
 
-Estos archivos existen solo para validar herramientas de análisis de código. No son parte de una aplicación real y no deben ejecutarse como runtime.
+- `shapes.ts` — interfaces (`Shape`, `Drawable`) y clases que las implementan (`Circle`, `Rectangle`).
+- `utils.ts` — funciones, variables con arrow functions y métodos de objeto (`add`, `subtract`, `fetchUserData`, `fetchPostData`, `mathUtils`).
+- `vault.ts` — miembros privados (`private getSecret`, `#getHash`, `unlock`).
+- `edge-cases.ts` — type aliases, funciones anidadas, alias de arrow functions y argumentos callback (`UserID`, `outer`, `inner`, `helper`, `register`).
+- `advanced.ts` — clases abstractas, genéricos, getters, setters, constructores y métodos estáticos.
+- `index.ts` — re-exports.
 
-### Contenido
+### Fixtures JavaScript (`javascript/`)
 
-- Fixtures TypeScript.
-- Fixtures JavaScript.
-- Fixtures Java.
-- Consultas sugeridas para probar símbolos, referencias y árboles de llamadas.
+- `vehicles.js` — herencia de clases (`Vehicle`, `Car`, `Motorcycle`).
+- `math.js` — funciones, arrow functions y métodos de objeto.
+- `edge-cases.js` — bindings de funciones exportadas con destructuring y argumentos callback (`helper`, `useLater`, `run`).
+- `index.js` — re-exports.
 
-### Uso recomendado
+### Fixtures Java (`java/`)
 
-Úsalos para pruebas automatizadas o manuales de `find_symbol`, `find_references`, `function_call_tree` y `reverse_function_call_tree`.
+- `Greeter.java` — interface (`Greeter`) y clase que la implementa (`ConsoleGreeter`).
+- `CallbackExamples.java` — callback lambda y usos de method reference para checks manuales de `find_references` (`helper`, `run`).
 
-### Ver más
+### Consultas de prueba sugeridas
 
-La sección en inglés lista los directorios de fixtures y consultas de prueba concretas.
+```
+find_symbol path:examples/typescript/shapes.ts symbol:Shape kind:interface
+find_symbol path:examples/typescript/utils.ts symbol:fetchUserData include_signature:true
+find_symbol path:examples/typescript/vault.ts symbol:getHash kind:method include_code:true
+find_symbol path:examples/typescript symbol:fetch search_mode:prefix
+find_symbol path:examples/javascript/vehicles.js symbol:Car kind:class
+find_symbol path:examples/typescript/edge-cases.ts symbol:UserID
+find_symbol path:examples/typescript/edge-cases.ts symbol:inner include_code:true
+find_symbol path:examples/java/Greeter.java symbol:Greeter language:java kind:interface
+find_symbol path:examples/java/Greeter.java symbol:greet language:java kind:method include_code:true
+find_references path:examples/typescript/edge-cases.ts symbol:helper language:ts kind:function
+find_references path:examples/javascript/edge-cases.js symbol:helper language:js kind:function
+find_references path:examples/java/CallbackExamples.java symbol:helper language:java kind:method
+reverse_function_call_tree path:examples/javascript/reverse-callers.js symbol:helper language:js kind:function
+reverse_function_call_tree path:examples/java/reversecallers/AppService.java symbol:helper language:java kind:method
+```

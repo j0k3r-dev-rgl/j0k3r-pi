@@ -171,23 +171,167 @@ Do not commit:
 
 ## Español
 
-Gateway de Telegram para controlar sesiones Pi de forma autorizada.
+Gateway para controlar sesiones Pi sobre Telegram con defaults estrictos y authorization-first.
 
-### Resumen
+### Alcance (implementación actual)
 
-Telegram Pi Control permite interactuar con Pi desde Telegram bajo defaults estrictos de autorización. Está pensado para control remoto explícito, no para exponer sesiones sin restricciones.
+- Parsear y autorizar updates de Telegram.
+- Validar allowlists de usuarios Telegram y raíces exactas de confianza Pi.
+- Derivar workspaces seleccionables exclusivamente desde entradas exactas `true` en `~/.pi/agent/trust.json`.
+- Resolver y exponer workspaces confiables con sus rutas de filesystem.
+- Ejecutar Pi mediante el SDK de Pi, no mediante `pi --mode rpc` ni un binario `pi` desde `PATH`.
+- Mantener binding por chat y gating de comandos sensible a arm mediante `CommandRouter`.
+- Iniciar/adjuntar long polling de Telegram desde el entrypoint CLI.
+- Persistir offsets de updates de Telegram entre reinicios.
+- Proveer `/close`, comandos remotos de aprobación de permisos, shutdown limpio y comportamiento de emergency disable.
 
-### Capacidades
+### Configuración
 
-- Validación de bot token y usuario autorizado.
-- Comandos MVP para iniciar, enviar prompts y controlar sesiones.
-- Comportamiento de shutdown/emergencia.
-- Integración con Permission Guard para aprobaciones.
+El uso normal de `gateway:start` soporta solo dos variables de entorno:
 
-### Requisitos
+- `PI_TELEGRAM_CONTROL_BOT_TOKEN` — token requerido del bot Telegram.
+- `PI_TELEGRAM_CONTROL_USER_ID` — id(s) requeridos de usuarios Telegram permitidos, separados por coma o espacio.
 
-Requiere variables de entorno de bot y usuario de Telegram. No se deben commitear tokens ni archivos runtime con secretos.
+Todas las demás variables de entorno de workspace/config/path se ignoran en `gateway:start`. El control de workspaces está centralizado intencionalmente en el estado de confianza de Pi.
 
-### Ver más
+Los workspaces se cargan solo desde raíces exactas `true` en:
 
-La sección en inglés detalla configuración, comandos, ejecución, validación y notas operativas.
+```text
+~/.pi/agent/trust.json
+```
+
+La confianza de un padre no autoriza directorios anidados/no listados para control por Telegram; cada workspace seleccionable debe estar presente como su propia key `true` en `trust.json`.
+
+Ejemplo:
+
+```json
+{
+  "/home/j0k3r": true,
+  "/home/j0k3r/.pi/agent": true,
+  "/home/j0k3r/j0k3r-pi": true
+}
+```
+
+`/workspaces` muestra selector y ruta para que el operador elija la raíz correcta.
+
+#### Política sin secretos
+
+- El bot token se carga **solo** desde la variable de entorno `PI_TELEGRAM_CONTROL_BOT_TOKEN` o el archivo env local opcional.
+- El archivo env local debe contener solo `PI_TELEGRAM_CONTROL_BOT_TOKEN` y `PI_TELEGRAM_CONTROL_USER_ID`.
+- Archivos env reales, `node_modules/`, `dist/`, audit logs, estado runtime y `trust.json` están ignorados por Git.
+- Archivos de audit/output/state se mantienen solo bajo el directorio de estado de usuario; no se escribe nada con secretos runtime en configuración commiteada.
+
+### Comandos (comportamiento MVP)
+
+El gateway registra estos comandos con la Telegram Bot API `setMyCommands` durante startup para que aparezcan en el menú de comandos del bot.
+
+| Comando | Comportamiento |
+| --- | --- |
+| `/start` | muestra texto básico de readiness |
+| `/status` | muestra estado del binding actual |
+| `/workspaces` | lista workspaces exactos confiables con sus rutas de filesystem |
+| `/open <workspace-id> [session-id]` | abre un workspace y opcionalmente cambia a una sesión |
+| `/sessions [workspace-id]` | lista sesiones para un workspace |
+| `/new [workspace-id] [name]` | crea una sesión para un workspace |
+| `/arm [seconds]` | arma una ventana de control completo |
+| `/disarm` | limpia el estado armado |
+| `/close` | cierra el binding activo de sesión SDK para el chat |
+| `/prompt` (o texto plano) | envía prompt cuando está armado |
+| `/steer <text>` | mensaje de steering cuando está armado |
+| `/followup <text>` | mensaje follow-up cuando está armado |
+| `/abort` | aborta el run activo cuando está armado |
+| `/permissions` | lista requests pendientes de aprobación de Permission Guard para el binding activo |
+| `/approve <id> [once\|session\|project\|file\|folder]` | aprueba un request pendiente para el chat/workspace/session activo |
+| `/deny <id>` | deniega un request pendiente para el chat/workspace/session activo |
+
+### Shutdown y comportamiento de emergencia
+
+- `runTelegramControlGateway` conecta handlers de shutdown para `SIGINT`, `SIGTERM`, `SIGQUIT`.
+- La ruta de emergency stop limpia bindings armados y detiene handles runtime SDK gestionados.
+- Los offsets de updates se guardan después de cada update procesado y se restauran al iniciar.
+
+### Ejecutar con npm
+
+Para uso normal, exporta las dos variables requeridas en tu shell/sesión/profile e inicia con un comando:
+
+```bash
+export PI_TELEGRAM_CONTROL_BOT_TOKEN='123456:replace-with-your-bot-token'
+export PI_TELEGRAM_CONTROL_USER_ID='6744546050'
+
+cd /home/j0k3r/.pi/agent/extensions/telegram-pi-control
+npm install
+npm run gateway:start
+```
+
+`npm run gateway:start` lee primero el entorno del proceso actual, construye el entrypoint TypeScript e inicia long polling. Un archivo en `/home/j0k3r/.pi/agent/telegram-pi-control.env` es solo fallback opcional para usuarios que no quieran exportar variables en el shell; los valores de shell/system environment siempre tienen prioridad sobre los del archivo. El gateway usa directamente el SDK de Pi, por lo que no depende del binario `pi` en `PATH`.
+
+Variables de entorno soportadas:
+
+- `PI_TELEGRAM_CONTROL_BOT_TOKEN`
+- `PI_TELEGRAM_CONTROL_USER_ID`
+
+Otras variables de entorno de workspace/config/path se ignoran en `gateway:start`; editar `~/.pi/agent/trust.json` para cambiar workspaces seleccionables.
+
+Formato opcional del archivo env local:
+
+```env
+PI_TELEGRAM_CONTROL_BOT_TOKEN=123456:replace-with-your-bot-token
+PI_TELEGRAM_CONTROL_USER_ID=6744546050
+```
+
+No commitees un archivo env real.
+
+Para mantenerlo corriendo manualmente en background:
+
+```bash
+mkdir -p "$HOME/.local/state/pi/telegram-pi-control"
+nohup npm run gateway:start > "$HOME/.local/state/pi/telegram-pi-control/gateway.log" 2>&1 &
+```
+
+Luego usa comandos de Telegram: `/workspaces`, `/sessions agent`, `/new agent smoke`, `/open agent <session-id>`, `/arm 300`, prompts en texto plano, `/disarm`, `/close`, `/abort`, `/permissions`, `/approve <id>` y `/deny <id>`.
+
+Al crear o abrir una sesión, el runtime SDK fuerza el cwd al workspace seleccionado. Archivos de sesión existentes con headers stale se abren con override de cwd para que el control por Telegram permanezca en el workspace elegido por el operador.
+
+### Flujo de aprobación Permission Guard
+
+Cuando Permission Guard requiere aprobación dentro de una sesión respaldada por SDK desde Telegram, el gateway envía un prompt formateado solo al chat Telegram ligado a ese workspace/sesión. Los marcadores internos crudos `permission_required:` se filtran de la salida normal del assistant.
+
+Responder con:
+
+```text
+/approve <request-id> once
+/approve <request-id> session
+/approve <request-id> project
+/approve <request-id> file
+/approve <request-id> folder
+/deny <request-id>
+```
+
+Solo se aceptan choices ofrecidas por Permission Guard para ese request. Los requests están scoped al binding activo de chat, workspace y sesión; respuestas stale, expiradas, de chat incorrecto o binding incorrecto se rechazan.
+
+`bypassWorkspace` se configura en Permission Guard, no en el gateway Telegram. Puede reducir prompts para operaciones probadamente contenidas en el workspace, pero sigue siendo un guard in-process, no un sandbox del sistema operativo.
+
+### Pasos de validación
+
+```bash
+cd extensions/telegram-pi-control
+npm run test
+npm run typecheck
+npm run build
+```
+
+### Notas de deployment y operación
+
+- El runtime actualmente está diseñado solo para long polling; webhooks y extensiones admin helper dedicadas quedan fuera de este slice.
+- Un launch dedicado con service-manager (systemd/pm2/gestión manual de procesos) queda intencionalmente para documentación de operador fuera de esta extensión.
+
+### No commitear
+
+No commitear:
+
+- tokens reales de bot Telegram;
+- archivos locales `telegram-pi-control.env`;
+- `node_modules/`;
+- `dist/`;
+- logs runtime/audit;
+- `trust.json` u otro estado local de Pi.

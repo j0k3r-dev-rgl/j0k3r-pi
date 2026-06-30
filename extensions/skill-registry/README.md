@@ -200,22 +200,195 @@ npm run typecheck
 
 ## Español
 
-Extensión que genera y consulta el índice de routing de skills.
+Versión de desarrollo en agent-dir de una futura extensión de skill registry para Pi. Genera un índice de routing para skills globales/de usuario y locales de proyecto, para que los agentes puedan seleccionar y cargar el `SKILL.md` correcto sin asumir una ruta fija.
 
-### Resumen
+### Qué proporciona
 
-Skill Registry permite que los agentes descubran skills globales y de proyecto sin asumir rutas fijas. Genera `.pi/skill-registry.json` y `.pi/skill-registry.md` a partir de los bloques `Registry Contract` de cada `SKILL.md`.
+- Genera un registry stack-agnostic desde skills globales y de proyecto.
+- Lee ubicaciones de skills de Pi:
+  - `.pi/skills`
+  - `.agents/skills`
+  - `~/.pi/agent/skills`
+  - `~/.agents/skills`
+- Respeta reglas de descubrimiento de Pi:
+  - archivos `.md` raíz se permiten solo en `.pi/skills` y `~/.pi/agent/skills`;
+  - skills anidadas se descubren como `SKILL.md`;
+  - markdown raíz bajo `.agents/skills` se ignora.
+- Escribe índices de routing generados:
+  - `.pi/skill-registry.json`
+  - `.pi/skill-registry.md`
+- Agrega archivos de registry generados a un `.gitignore` existente cuando faltan; no crea `.gitignore` si no existe.
+- Expone una tool invocable por LLM y un comando slash humano.
 
-### Herramientas y capacidades
+#### Gate de activación
 
-- `skill_registry_generate`: genera el registry vivo y opcionalmente escribe los artefactos.
-- `skill_registry_resolve`: resuelve skills candidatas por intención, rutas y fase SDD.
-- Comando `/skill-registry generate`.
+La extensión solo se registra cuando `.pi/skill-registry.config.json` existe con `{"enabled": true}` en scope de proyecto. Config faltante o inválida queda deshabilitada por defecto.
 
-### Activación
+Ejemplo de config:
 
-Es opt-in por proyecto mediante `.pi/skill-registry.config.json` con `enabled: true`.
+```json
+{
+  "enabled": true
+}
+```
 
-### Ver más
+El registry es un índice para routing. La fuente de verdad sigue siendo cada `SKILL.md`.
 
-La sección en inglés cubre enable gate, herramientas, comportamiento del registry, convención `Registry Contract` y validación.
+Hay una skill dedicada para configurar esta extensión: `skill-registry-configuration`.
+
+### Tool
+
+| Tool | Propósito |
+|---|---|
+| `skill_registry_generate` | Genera el registry y opcionalmente escribe archivos de salida. Escribe por defecto. |
+| `skill_registry_resolve` | Resuelve skills candidatas desde el registry vivo usando intención/ruta/fase SDD, con semántica opcional de stale-check y expansión de relacionados a un salto. Read-only. |
+
+#### `skill_registry_generate`
+
+Parámetros:
+
+```ts
+{
+  write?: boolean; // default: true
+}
+```
+
+Usa `write: false` para validación o checks dry-run de routing.
+
+#### `skill_registry_resolve`
+
+Parámetros:
+
+```ts
+{
+  intent?: string;
+  paths?: string[]; // rutas de proyecto; acepta '\\' o '/' y normaliza slashes duplicados
+  sdd_phase?: 'explore' | 'proposal' | 'spec' | 'design' | 'task' | 'apply' | 'verify' | 'archive';
+  include_related?: boolean; // default: true
+  stale_check?: boolean; // default: true
+  max_results?: number; // 1..50, default: 10
+}
+```
+
+Comportamiento:
+
+- Resuelve contra un **registry vivo en memoria** generado para la llamada (sin escrituras).
+- Si `stale_check` está habilitado:
+  - compara `content_hash` vivo contra `.pi/skill-registry.json`,
+  - reporta estado de caché `fresh`, `stale`, `missing` o `invalid`,
+  - no escribe ni refresca archivos de caché.
+- El ranking es determinístico: score desc, luego priority desc, luego name asc.
+- Devuelve matches directos y matches relacionados a un salto (separados).
+- La salida es solo guía de routing:
+  - no incluye contenido de `SKILL.md`,
+  - la respuesta siempre recomienda leer cada `SKILL.md` devuelto antes de actuar.
+- El render TUI interactivo es compacto por defecto: el resultado detallado queda en content/details de la tool para el agente, pero la fila visible muestra solo un resumen hasta que el usuario expande el output con el keybinding nativo de Pi (default `ctrl+o`).
+
+La forma de respuesta incluye:
+
+```ts
+{
+  query: {
+    intent?: string,
+    paths: string[],
+    sdd_phase?: string,
+    include_related: boolean,
+    stale_check: boolean,
+    max_results: number,
+  },
+  registry_status: {
+    source: 'live',
+    cache: 'fresh' | 'stale' | 'missing' | 'invalid' | 'not_checked',
+    live_hash: string,
+    cached_hash?: string,
+    cache_path: string,
+  },
+  matches: Array<{
+    name: string,
+    path: string,
+    scope: 'project' | 'global',
+    priority: number,
+    score: number,
+    reasons: Array<{ signal: string; detail: string; weight: number }>;
+    routing: {
+      category: string | null,
+      domains: string[],
+      triggers: Record<string, unknown>,
+      sdd_phases: string[],
+      related_skills: string[],
+    },
+    read_before_acting: string,
+  }>,
+  related_matches: Array<{
+    name: string,
+    path: string,
+    scope: 'project' | 'global',
+    routing: Record<string, unknown>,
+    read_before_acting: string,
+    related_from: string[],
+    relation_reasons: string[],
+  }>,
+  warnings: string[],
+  guidance: string[],
+}
+```
+
+#### Nota de paridad de comandos
+
+El set de comandos `/skill-registry` permanece sin cambios en este MVP (`generate`, `refresh`, `write`, `status`, `list`). Todavía **no** hay paridad de comando `/skill-registry resolve`.
+
+### Comando
+
+```text
+/skill-registry generate
+/skill-registry refresh
+/skill-registry write
+/skill-registry status
+/skill-registry list
+```
+
+Comportamiento del comando:
+
+- sin args, default a `generate`;
+- `generate`, `refresh` y `write` regeneran y escriben el registry;
+- `status` lee `.pi/skill-registry.json` existente y no regenera;
+- `list` lee el registry existente cuando existe; si no, genera en memoria sin escribir.
+
+### Comportamiento del registry
+
+- La salida del registry se ordena por priority descendente y luego nombre de skill ascendente.
+- Contratos de registry faltantes o inválidos no excluyen una skill; la skill sigue presente con metadata de routing vacía y un warning.
+- Nombres de skill duplicados producen un warning; duplicados posteriores se ignoran.
+- El heading del contrato de registry debe ser exactamente `## Registry Contract` seguido por un fenced block `json`.
+
+### Convención Registry Contract
+
+Las skills deben incluir un bloque JSON válido:
+
+````md
+## Registry Contract
+
+```json
+{
+  "category": "base",
+  "domains": ["frontend", "forms"],
+  "triggers": {
+    "paths": ["front/app/routes/**/*.tsx"],
+    "keywords": ["useFetcher", "fetcher.Form"]
+  },
+  "sdd_phases": ["explore", "design", "task", "apply", "verify"],
+  "related_skills": ["project-testing"],
+  "priority": 50
+}
+```
+````
+
+Usa `templates/skill-template.md` desde esta extensión mientras sea local al agent-dir. Más adelante esta extensión y sus templates pueden moverse a la configuración global del agente Pi o a un paquete.
+
+### Desarrollo
+
+```bash
+cd extensions/skill-registry
+npm test
+npm run typecheck
+```

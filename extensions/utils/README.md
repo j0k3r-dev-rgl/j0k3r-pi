@@ -177,24 +177,173 @@ npm run typecheck
 
 ## Español
 
-Extensión de utilidades generales para Pi.
+Herramientas utilitarias generales para Pi.
 
-### Resumen
+### Herramientas
 
-Utils contiene herramientas prácticas no ligadas a un proveedor externo. Actualmente su herramienta principal convierte Markdown local a audio usando motores TTS locales.
+#### `markdown_to_audio`
 
-### Herramientas y capacidades
+Convierte un archivo Markdown local en un archivo de audio para que el usuario pueda escucharlo.
 
-- `markdown_to_audio`: convierte `.md`, `.markdown` o `.mdown` a WAV o MP3.
-- Usa Piper como motor principal cuando hay voces `.onnx` disponibles.
-- Usa eSpeak NG como fallback.
-- Soporta bitrate MP3, velocidad, pausas de oración, parámetros Piper y calidad de voz.
-- Muestra progreso compacto en status bar durante conversiones largas.
+La herramienta:
 
-### Requisitos
+- lee un archivo Markdown desde el workspace actual o una ruta absoluta;
+- convierte sintaxis Markdown común en texto plano amigable para narración sin modificar el Markdown fuente;
+- usa solo motores locales de text-to-speech;
+- prefiere Piper por mejor calidad de voz;
+- usa eSpeak NG como fallback cuando Piper no está disponible;
+- escribe `.wav` por defecto junto al archivo Markdown y puede escribir `.mp3` cuando `ffmpeg` está instalado;
+- emite actualizaciones de progreso concisas con tiempo transcurrido, programa TTS seleccionado y si el motor es primario, fallback o solicitado explícitamente mientras corre la síntesis o conversión MP3.
 
-Para mejor calidad instala `piper-tts` y una voz Piper `.onnx`. Para MP3 hace falta `ffmpeg`. Para fallback instala `espeak-ng`.
+Parámetros:
 
-### Ver más
+- `path` — ruta local Markdown (`.md`, `.markdown` o `.mdown`), relativa al workspace actual o absoluta.
+- `outputPath` — ruta opcional de salida de audio. Por defecto genera un `.wav` junto al archivo Markdown. Soporta `.wav` y `.mp3`.
+- `engine` — motor TTS opcional: `auto`, `piper` o `espeak-ng`. Por defecto `auto`.
+- `language` — código opcional de idioma/voz, como `es`, `es_ES`, `es_MX` o `en_US`. Por defecto `es`.
+- `voiceModel` — ruta opcional a modelo Piper `.onnx`. Si se omite, la herramienta busca en `/usr/share/piper-voices`.
+- `voiceQuality` — preferencia opcional de calidad de voz Piper: `auto`, `high`, `medium` o `low`. `auto` prefiere `medium`, luego `low`, luego `high` para balancear calidad y tiempo de generación.
+- `speed` — velocidad opcional de habla. Valores de `0.25` a `4` son multiplicadores relativos donde `1` es normal. Para `espeak-ng`, valores mayores a `4` se tratan como palabras por minuto. Para Piper, esto mapea a `--length-scale` como `1 / speed`.
+- `sentenceSilence` — segundos de silencio después de cada oración, solo Piper. Útil para pacing de narración más natural.
+- `noiseScale` — escala de ruido del generador, solo Piper. El default de Piper suele ser `0.667`.
+- `noiseW` — variación de ancho de fonemas, solo Piper. El default de Piper suele ser `0.8`.
+- `mp3BitrateKbps` — bitrate MP3 opcional en kbps cuando `outputPath` termina en `.mp3`. Por defecto `64`, compacto y normalmente suficiente para audio hablado.
 
-La sección en inglés contiene parámetros, defaults de narración, troubleshooting de audio, reload y validación.
+### Requisitos runtime
+
+Requisitos mínimos:
+
+- Runtime Node.js a través de Pi.
+- Un motor TTS local:
+  - preferido: Piper (`piper-tts` o `piper`) más al menos un modelo de voz `.onnx`;
+  - fallback: `espeak-ng`.
+- `ffmpeg` solo cuando se escribe salida `.mp3`.
+- Una ruta de audio del sistema funcionando solo para reproducción. La generación de audio puede tener éxito incluso si el dispositivo de salida del OS está mal configurado.
+
+### Dependencias Arch Linux
+
+Instalación recomendada para Arch Linux x86_64:
+
+```bash
+sudo pacman -S git-lfs espeak-ng ffmpeg
+yay -S piper-tts piper-voices-es-ar
+```
+
+Puede haber otros paquetes de voces en español:
+
+```bash
+yay -Ss piper-voices-es
+```
+
+Ejemplos incluyen `piper-voices-es-ar`, `piper-voices-es-es` y `piper-voices-es-mx`. Si un paquete AUR de voz falla durante setup de Git LFS, ejecutar:
+
+```bash
+unset GIT_CONFIG_GLOBAL
+git lfs install --force
+```
+
+Verificar que Piper y un modelo de voz usable estén instalados:
+
+```bash
+command -v piper-tts
+find /usr/share/piper-voices -type f -name '*.onnx' | sort | head
+```
+
+Si `find` no devuelve nada, solo están instalados los archivos comunes de Piper; instala un paquete de voz como `piper-voices-es-ar`, `piper-voices-es-es` o `piper-voices-es-mx`, o pasa `voiceModel` explícitamente.
+
+Notas:
+
+- Piper da la mejor calidad MVP para narración Markdown local/offline.
+- eSpeak NG sirve como fallback confiable, pero suena más robótico.
+- `ffmpeg` se requiere solo para salida `.mp3`.
+- Si `engine` es `auto`, la herramienta intenta `piper-tts`, luego `piper`, luego `espeak-ng`.
+- Si Piper está instalado pero no se encuentra modelo de voz, pasa `voiceModel` explícitamente, por ejemplo:
+
+```json
+{
+  "path": "notes/brief.md",
+  "outputPath": "notes/brief.wav",
+  "engine": "piper",
+  "language": "es_ES",
+  "voiceModel": "/usr/share/piper-voices/es/es_ES/sharvard/medium/es_ES-sharvard-medium.onnx"
+}
+```
+
+### Defaults recomendados de narración
+
+Para noticias o narración larga, empezar con velocidad normal y ajustar solo después de escuchar:
+
+```json
+{
+  "engine": "piper",
+  "language": "es_AR",
+  "speed": 1,
+  "sentenceSilence": 0.3,
+  "noiseScale": 0.667,
+  "noiseW": 0.8,
+  "voiceQuality": "auto",
+  "mp3BitrateKbps": 64
+}
+```
+
+Si solo hay instalada una voz Piper high-quality, `voiceQuality: "auto"` igual usará esa voz high-quality. Instala una voz `medium` o `low` si es más importante generar rápido que máxima calidad.
+
+Para archivos más pequeños, define `outputPath` con `.mp3`. El bitrate MP3 por defecto es `64k`, pensado para narración. Usa `48` para archivos de voz más chicos, `96` para más calidad o `128` para compatibilidad amplia.
+
+### Actualizaciones de progreso
+
+Durante conversiones largas, la tool live de Pi emite actualizaciones cortas de estado en vez de logs verbosos. Cuando hay contexto TUI disponible, también setea una entrada compacta en footer/status-bar y la limpia cuando la tool termina o falla.
+
+Las actualizaciones son intencionalmente compactas y honestas sobre lo que se sabe. Piper no expone un porcentaje confiable, así que el progreso se muestra como `progress n/a` en vez de inventar un porcentaje.
+
+Ejemplos:
+
+```text
+markdown_to_audio: piper synthesis · primary · program piper-tts · speed 1x · 16.8k chars · progress n/a · 0:30 elapsed
+markdown_to_audio: mp3 conversion · 64k · progress n/a · 0:02 elapsed
+```
+
+El intervalo de pulso por defecto es 1 segundo, así que los reportes largos muestran que el trabajo sigue avanzando sin inundar el chat o la TUI con logs completos. El resultado final también reporta el motor efectivo y el programa TTS para que los usuarios puedan saber si se usó Piper como motor principal o eSpeak NG como fallback.
+
+### Troubleshooting de reproducción
+
+La herramienta crea un archivo de audio; no elige la salida de audio de tu escritorio. Si el archivo generado existe pero no se escucha, verificar el sink de audio del OS.
+
+Con PipeWire/WirePlumber:
+
+```bash
+wpctl status
+wpctl get-volume @DEFAULT_AUDIO_SINK@
+```
+
+Definir un sink específico como default cuando haga falta:
+
+```bash
+wpctl set-default <sink-id>
+wpctl set-volume @DEFAULT_AUDIO_SINK@ 1.0
+wpctl set-mute @DEFAULT_AUDIO_SINK@ 0
+```
+
+Reproducir directamente un archivo generado:
+
+```bash
+pw-play path/to/file.wav
+mpv path/to/file.mp3
+```
+
+### Recargar Pi
+
+Después de cambiar código de esta extensión o schema de tool, recargar o reiniciar Pi antes de esperar que la tool live `markdown_to_audio` exponga parámetros nuevos:
+
+```text
+/reload
+```
+
+### Validación
+
+Ejecutar desde `extensions/utils`:
+
+```bash
+npm test
+npm run typecheck
+```

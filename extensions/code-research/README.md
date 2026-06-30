@@ -4,27 +4,103 @@
 
 ## English
 
-Global Pi extension for TypeScript, JavaScript, and Java code navigation using native Tree-sitter parsers.
+Global Pi extension for navigating TypeScript, JavaScript, and Java symbols with native Tree-sitter and building function/method call trees.
 
-### Summary
+### Registered tool
 
-Code Research helps agents inspect code structurally instead of relying only on text search. It can locate symbols, find references, and build forward or reverse call trees for application code.
+#### `find_symbol`
 
-### Tools and capabilities
+Finds the definition and/or implementation of a TypeScript, JavaScript, or Java symbol in a file or directory.
 
-- `find_symbol`: locates definitions and implementations.
-- `find_references`: finds semantic usages and references.
-- `function_call_tree`: traces outgoing application calls.
-- `reverse_function_call_tree`: traces incoming callers.
-- `workspace_graph_status`: reports persisted graph readiness when graph-backed inspection is available.
+##### Parameters
 
-### Recommended use
+- `path` *(string, required)*: file or directory to scan.
+- `symbol` *(string, required)*: symbol name.
+- `language` *(string, optional)*: `ts`, `js`, `java`, or `auto` (default).
+- `kind` *(string, optional)*: filters by `function`, `class`, `method`, `interface`, or `variable`.
+- `include_signature` *(boolean, optional)*: when `true`, includes the symbol signature without the body.
+- `include_code` *(boolean, optional)*: when `true` and `kind` is `function` or `method`, includes the symbol source text.
+- `scope` *(string, optional)*: `file` or `directory`. When omitted, it is inferred from `path`.
+- `glob` *(string, optional)*: glob pattern for filtering files while scanning a directory.
+- `search_mode` *(string, optional)*: `exact`, `prefix`, or `contains`. Default: `exact`.
 
-Use it for refactors, impact analysis, onboarding, and understanding execution flow before editing code.
+##### Result
 
-### Read more
+Array of locations with:
 
-The Spanish section contains the detailed parameter reference, result shapes, installation notes, structure, and caveats.
+- `file`, `symbol`, `kind`
+- `start_line`, `start_column`, `end_line`, `end_column`
+- `is_definition`, `is_implementation`
+- `definition_location` when applicable
+- `implementation_locations` for interfaces
+- `signature` when `include_signature=true`
+- `code` when `include_code=true`
+
+#### `function_call_tree`
+
+Builds a recursive call tree for a Java, TypeScript, or JavaScript function/method, expanding application-internal calls.
+
+##### Parameters
+
+- `path` *(string, required)*: root file or directory to scan.
+- `symbol` *(string, required)*: root function or method name.
+- `language` *(string, optional)*: `java`, `ts`, or `js`. Default: `java`.
+- `kind` *(string, optional)*: `function`, `method`, or `class`.
+- `max_depth` *(number, optional)*: maximum recursive depth. Default: `10`.
+- `include_external` *(boolean, optional)*: when `true`, includes external calls as leaves.
+- `compacted` *(boolean, optional)*: optional compaction of trivial nodes where the language supports it.
+
+##### Result
+
+Object with:
+
+- `root`: root tree node
+- `stats.total_nodes`
+- `stats.application_nodes`
+- `stats.external_nodes`
+- `stats.max_depth_reached`
+
+### Installation
+
+The extension lives at `~/.pi/agent/extensions/code-research/`. Pi auto-discovers it at startup.
+
+```bash
+cd ~/.pi/agent/extensions/code-research
+npm test
+npm run typecheck
+```
+
+### Structure
+
+```
+code-research/
+├── index.ts              # entry point: registers the tool
+├── src/
+│   ├── types.ts          # shared types
+│   ├── core/
+│   │   ├── parser.ts     # Tree-sitter parser cache
+│   │   ├── find-symbol-resolver.ts
+│   │   └── function-call-tree-resolver.ts
+│   ├── languages/
+│   │   ├── typescript/   # TS/JS symbol and call-tree extraction
+│   │   └── java/         # Java symbol and call-tree extraction
+│   └── tools/
+│       └── ...           # future additional tools
+├── test/
+│   ├── find-symbol.test.ts
+│   └── find-symbol-java.test.ts
+├── scripts/
+│   └── manual-*.ts       # manual verification scripts
+└── examples/             # fixtures for testing the tool
+    ├── typescript/
+    └── javascript/
+```
+
+### Notes
+
+- Uses native `tree-sitter` with pinned parsers and exact versions.
+- Implementation detection is syntactic (based on `implements Name` in TS/Java).
+- TS/JS `function_call_tree` support prioritizes local/imported calls and methods on locally constructed instances.
 
 ## Español
 

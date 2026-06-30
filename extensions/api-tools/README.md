@@ -203,24 +203,199 @@ npm run typecheck
 
 ## Español
 
-Extensión de Pi para exponer herramientas REST y GraphQL acotadas por proyecto.
+Extensión local de proyecto para herramientas API REST y GraphQL acotadas. Está deshabilitada por defecto y solo se activa cuando el proyecto actual contiene `<ctx.cwd>/.pi/api.json` con `"enabled": true`.
 
-### Resumen
+### Qué proporciona
 
-API Tools se activa solo cuando el proyecto actual contiene `<ctx.cwd>/.pi/api.json` con `enabled: true`. Permite llamadas API locales o remotas con configuración explícita, login/token, límites de salida y diagnósticos seguros.
+- `api_status` para diagnósticos seguros de configuración y exposición en Git.
+- `api_auth_status` para checks locales de metadata auth, como `exp` de JWT.
+- `api_login` para login configurado y persistencia local de `access_token`.
+- `api_rest_request` para requests REST acotados.
+- `api_graphql_query` para queries y mutations GraphQL acotadas.
+- `api_graphql_schema_queries` para listar métodos GraphQL Query con resumen de argumentos/retorno.
+- `api_graphql_schema_query` para inspeccionar un método Query y renderizar su schema de retorno anidado acotado como texto tipo GraphQL.
+- Redacción de secretos en contenido, detalles y errores.
+- Metadata de truncamiento para respuestas grandes.
+- Soporte de timeout y cancelación con `AbortSignal`.
 
-### Herramientas y capacidades
+### Ubicación de la extensión
 
-- Herramientas REST configuradas por proyecto.
-- Herramientas GraphQL configuradas por proyecto.
-- Login y persistencia de access token cuando la configuración lo permite.
-- Control por request para usar o no usar token.
-- Límites de salida, timeouts, cancelación y protección contra filtrado de secretos.
+En este checkout de agent-dir la extensión vive en:
 
-### Uso recomendado
+```txt
+extensions/api-tools/index.ts
+```
 
-Úsalo cuando el agente necesite consultar APIs del proyecto sin hardcodear endpoints ni credenciales en prompts o código.
+Cuando se copia a una configuración Pi local de proyecto, la ruta equivalente es:
 
-### Ver más
+```txt
+.pi/extensions/api-tools/index.ts
+```
 
-La sección en inglés documenta el formato completo de `.pi/api.json`, modelo de mutaciones, límites, seguridad y validación.
+Usa `/reload` después de cambiar código de la extensión durante una sesión interactiva de Pi.
+
+### Activación y lookup exacto de configuración
+
+Esta extensión lee configuración desde exactamente una ruta:
+
+```txt
+<ctx.cwd>/.pi/api.json
+```
+
+Reglas:
+
+- Sin búsqueda en directorios padre.
+- Sin búsqueda en home ni configuración global.
+- Sin descubrimiento de configuración por entorno.
+- Si ese archivo exacto falta, la extensión no registra tools.
+- Si `enabled` falta o no es exactamente el boolean JSON `true`, la extensión no registra tools.
+
+### Ejemplo `.pi/api.json`
+
+Usa solo placeholders. No guardes secretos reales en docs, tests o ejemplos.
+
+```json
+{
+  "enabled": true,
+  "url": "https://api.example.com",
+  "port": 443,
+  "graphql_url": "https://api.example.com/graphql",
+  "timeout_ms": 30000,
+  "limits": {
+    "max_response_bytes": 50000,
+    "max_response_lines": 2000
+  },
+  "headers": {
+    "x-project-client": "pi"
+  },
+  "auth": {
+    "type": "login",
+    "login_path": "/login",
+    "username": "example-user",
+    "password": "<password>",
+    "access_token": ""
+  }
+}
+```
+
+Otros ejemplos de auth solo con placeholders:
+
+```json
+{ "type": "none" }
+```
+
+```json
+{ "type": "basic", "username": "example-user", "password": "<password>" }
+```
+
+```json
+{ "type": "api_key", "header": "x-api-key", "value": "REDACTED" }
+```
+
+```json
+{ "type": "headers", "headers": { "authorization": "Bearer <token>", "x-extra-auth": "example" } }
+```
+
+```json
+{ "type": "login", "login_path": "/login", "username": "example-user", "password": "<password>", "access_token": "" }
+```
+
+Variantes auth soportadas:
+
+- `none`
+- `bearer`
+- `basic`
+- `api_key`
+- `headers`
+- `login`
+
+### Tools expuestas al agente
+
+La extensión expone tools solo cuando la configuración local exacta existe y `enabled === true`.
+
+| Tool | Propósito |
+|---|---|
+| `api_status` | Reporta si existe configuración, si está habilitada, endpoints configurados, tipo de auth, timeout efectivo, límites efectivos, warnings y estado de exposición en Git sin exponer secretos. |
+| `api_auth_status` | Inspecciona metadata auth local sin llamadas al backend. Tokens bearer JWT y `access_token` de login reportan `valid`/`expired`, `expires_at` y `seconds_remaining` desde `exp` cuando es posible; metadata no soportada o no-JWT devuelve `unknown`. |
+| `api_login` | Ejecuta el login configurado, lee `access_token` desde la respuesta JSON y lo persiste en `.pi/api.json` sin exponerlo. |
+| `api_rest_request` | Ejecuta `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD` y `OPTIONS` contra la URL base REST configurada con salida segura y acotada. Usa `use_token: false` para endpoints públicos. |
+| `api_graphql_query` | Ejecuta queries y mutations GraphQL contra `graphql_url` con salida segura y acotada. Usa `use_token: false` para operaciones públicas. |
+| `api_graphql_schema_queries` | Lista métodos GraphQL `Query` con resumen de argumentos y tipos de retorno usando introspección acotada. |
+| `api_graphql_schema_query` | Inspecciona un método `Query` por nombre, incluyendo argumentos y schema de retorno anidado acotado renderizado como texto tipo GraphQL. Acepta `max_depth` y `use_token`. |
+
+Si la configuración falta o está deshabilitada, no se registra ninguna tool API.
+
+### Modelo de mutaciones
+
+Los métodos REST mutantes (`POST`, `PUT`, `PATCH`, `DELETE`) y las mutations GraphQL **no** agregan prompts de confirmación específicos de la extensión.
+
+Dependen del comportamiento normal de tools y permisos de Pi.
+
+### Expectativas de Git ignore
+
+`.pi/api.json` puede contener credenciales y debe estar ignorado por Git.
+
+Regla recomendada:
+
+```gitignore
+.pi/api.json
+```
+
+`api_status` revisa el estado de exposición Git del archivo y advierte cuando parece:
+
+- no ignorado y untracked;
+- trackeado por Git; o
+- desconocido porque el estado Git no pudo determinarse de forma segura.
+
+En otras palabras, se espera que `api_status` advierta si `.pi/api.json` no está ignorado, ya está trackeado o no hay evidencia Git disponible.
+
+### Límites de salida y truncamiento
+
+Los límites por defecto de respuesta son:
+
+- `max_response_bytes`: `50000`
+- `max_response_lines`: `2000`
+
+Puedes sobreescribirlos en `.pi/api.json` con `limits.max_response_bytes` y `limits.max_response_lines`.
+
+Los resultados REST y GraphQL incluyen metadata de truncamiento con los límites efectivos y si la salida fue truncada. Los resultados truncados reportan un resumen con campos como:
+
+- `truncated`
+- `limit_bytes`
+- `limit_lines`
+- `original_bytes_known`
+- `original_lines_known`
+- `returned_bytes`
+- `returned_lines`
+- `reason`
+
+### Cancelación y timeouts
+
+- Los requests respetan el `timeout_ms` configurado.
+- Los requests propagan cancelación con `AbortSignal`.
+- Requests con timeout o cancelados devuelven errores seguros sin exponer secretos.
+
+### Seguridad de salida
+
+- Los valores secretos de configuración se redactan en contenido, detalles y errores de tools.
+- Los valores con apariencia de secreto en respuestas también se redactan antes de la salida visible para el modelo.
+- `api_status` reporta tipo de auth y presencia de endpoints, no valores crudos de credenciales.
+- `api_auth_status` nunca expone tokens crudos ni claims sensibles decodificados; cuando existe `exp` JWT, solo reporta vencimiento y segundos restantes.
+
+### Workflow recomendado
+
+1. Crear `<ctx.cwd>/.pi/api.json` con `"enabled": true`.
+2. Agregar `.pi/api.json` a `.gitignore` antes de guardar credenciales.
+3. Ejecutar `api_status` para confirmar estado habilitado, límites efectivos, endpoints y warnings Git.
+4. Ejecutar `api_login` cuando se use `auth.type: "login"`; espera una respuesta JSON con `access_token` y lo persiste en `.pi/api.json`.
+5. Ejecutar `api_auth_status` si necesitas un check local de metadata del token.
+6. Usar `api_rest_request` o `api_graphql_query` para acceso API acotado. Pasar `use_token: true` para endpoints autenticados y `use_token: false` para endpoints públicos.
+7. Usar `api_graphql_schema_queries` para descubrir métodos GraphQL Query disponibles, luego `api_graphql_schema_query` con un solo nombre de query para inspeccionar argumentos y forma de retorno.
+
+### Validación
+
+```bash
+cd extensions/api-tools
+npm test
+npm run typecheck
+```
