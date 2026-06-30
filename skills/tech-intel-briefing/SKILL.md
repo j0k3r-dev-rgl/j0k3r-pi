@@ -1,6 +1,6 @@
 ---
 name: tech-intel-briefing
-description: "Create high-context technology news briefings and personal newsroom-style reports by gathering from web, YouTube, discussions, and research, then synthesizing with context, actors, impact, confidence, and editorial analysis."
+description: "Create high-context technology news briefings and personal newsroom-style reports, including narration-ready Markdown scripts for later text-to-audio conversion, by gathering from web, YouTube, discussions, and research, then synthesizing context, actors, impact, confidence, and editorial analysis."
 license: Apache-2.0
 metadata:
   author: j0k3r
@@ -16,7 +16,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
 ```json
 {
   "category": "base",
-  "domains": ["news", "technology", "hardware", "ai", "analysis", "briefing", "editorial"],
+  "domains": ["news", "technology", "hardware", "ai", "analysis", "briefing", "editorial", "audio", "narration"],
   "triggers": {
     "paths": [
       "~/.pi/agent/skills/tech-intel-briefing/SKILL.md",
@@ -40,6 +40,12 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "boletín tecnológico",
       "personal tech news",
       "industry briefing",
+      "audio-ready news",
+      "narration-ready briefing",
+      "guion de noticias",
+      "guion narrado",
+      "noticias para audio",
+      "convertir a audio",
       "qué está pasando en tech",
       "que esta pasando en tech",
       "qué hay de nuevo en hardware",
@@ -76,7 +82,7 @@ Typical triggers:
 - the user asks for a daily briefing, weekly roundup, trend watch, dossier, or personal news anchor style response;
 - the user wants context, impact, background, confidence levels, industry framing, or “why this matters” analysis;
 - the user wants multiple sources compared instead of a single article summary;
-- the user wants a reading-ready or audio-ready narrative briefing.
+- the user wants a reading-ready briefing, an audio-ready narrative briefing, or a Markdown script intended to be converted to audio later.
 
 Do not load this skill for:
 
@@ -113,6 +119,12 @@ Prefer this skill over a generic search-only response when the user wants explan
 - Avoid sensational language unless the sourced evidence genuinely supports it.
 - When source quality is weak, say the evidence is weak.
 - For broad requests, group stories into coherent themes instead of mixing everything together.
+- When the output is intended for audio, write as a spoken news script, not as a visual report: use narrative paragraphs, natural transitions, and complete sentences.
+- In `audio-ready` mode, avoid bullets, numbered lists, tables, dense parentheticals, raw URLs, markdown link syntax, and visual-only scaffolding because they degrade text-to-audio output.
+- In `audio-ready` mode, preserve sourcing and uncertainty through spoken phrases such as “according to company announcements,” “reporting from…,” or “the evidence is still weak,” rather than footnote-style links.
+- In `audio-ready` mode, keep `markdown_to_audio` speed at normal pace (`speed: 1`) unless the user explicitly asks for faster or slower narration.
+- When the user asks for an audio file, first create or save the narration-ready Markdown script, then convert that same Markdown file with `markdown_to_audio`; do not rewrite or summarize the script during audio generation.
+- Use these default `markdown_to_audio` parameters for audio-ready news unless the user asks to tune them: `speed: 1`, `sentenceSilence: 0.3`, `noiseScale: 0.667`, `noiseW: 0.8`, and `voiceQuality: "auto"`.
 - Write reusable skill content in English, but answer the user in the user’s language.
 
 ## Decision Gates
@@ -120,7 +132,9 @@ Prefer this skill over a generic search-only response when the user wants explan
 - If the user wants only headlines or a very short digest, compress the structure but still retain source quality and confidence cues.
 - If the user asks for a specific vertical such as hardware, AI, semiconductors, Apple, gaming, or enterprise software, narrow the source search and organize by that sector.
 - If the user asks for a source-limited view such as “only Hacker News” or “only YouTube,” honor that constraint and call out the resulting blind spots.
-- If the user wants audio later, prefer an audio-ready narrative format with smoother transitions and fewer dense bullets.
+- If the user wants audio later, select `audio-ready` mode and produce a narration script by default, not a bullet-heavy briefing.
+- If the user asks for an audio file, treat Markdown creation and audio conversion as one workflow: produce the narration-ready `.md`, then run `markdown_to_audio` on that `.md` using the default audio-ready parameters unless the user provided overrides.
+- If the user asks for both a readable report and audio, ask whether they want one audio-first script or two outputs: a visual briefing plus a separate narration script.
 - If the user asks for a recurring format, keep section names and ordering stable across future answers when practical.
 
 ## Execution Steps
@@ -139,7 +153,7 @@ Prefer this skill over a generic search-only response when the user wants explan
    - `briefing` for the default richer editorial answer;
    - `deep-dive` for one or a few major stories with substantial context;
    - `weekly-roundup` for trend-oriented recaps;
-   - `audio-ready` for narration-friendly continuous prose.
+   - `audio-ready` for narration-friendly Markdown meant to become spoken audio.
 3. Gather from multiple relevant sources when available:
    - web/news for confirmation;
    - YouTube for current topic detection and expert explanation;
@@ -150,7 +164,16 @@ Prefer this skill over a generic search-only response when the user wants explan
 6. For each important story, synthesize using the strongest evidence first.
 7. Explicitly separate confirmed facts from interpretation and rumor.
 8. Add context on the actors, background, and why the development matters.
-9. End with a concise executive recap or “what to watch next” section.
+9. For `audio-ready` mode, transform the findings into a spoken script:
+   - open with a short anchor-style introduction;
+   - use paragraphs of one to three sentences;
+   - use section headings sparingly as chapter markers, not as visual outlines;
+   - connect stories with transitions such as “Now, the second story…” or “The broader context is…”;
+   - explain acronyms and company/product names the first time they matter;
+   - convert source attribution into natural spoken language;
+   - avoid visual lists, tables, raw URLs, footnotes, and link dumps.
+10. If the user asked for an audio file, write the narration script to a `.md` file when a file path is available or requested, then call `markdown_to_audio` on that file with defaults: `speed: 1`, `sentenceSilence: 0.3`, `noiseScale: 0.667`, `noiseW: 0.8`, `voiceQuality: "auto"`. Preserve the Markdown as the source of truth.
+11. End with a concise executive recap, closing thought, or “what to watch next” section.
 
 ## Output Contract
 
@@ -174,12 +197,20 @@ For broader multi-story answers, add:
 - Grouping by theme.
 - Short executive summary at the end.
 
-For `audio-ready` mode:
+For `audio-ready` mode, return a Markdown narration script suitable for direct `markdown_to_audio` conversion:
 
-- prefer smoother narrative transitions;
-- reduce rigid bullet density;
-- use complete spoken-style sentences;
-- keep the text pleasant to listen to without losing analytical content.
+- Use mostly continuous prose, not lists.
+- Do not use tables.
+- Do not use raw URLs or Markdown links in the spoken script.
+- Avoid bullet points and numbered lists unless the user explicitly asks for a checklist; if a sequence is needed, write it as prose.
+- Use complete spoken-style sentences with natural punctuation.
+- Use short paragraphs to create breathing room for TTS.
+- Use simple section headings only as audio chapter markers.
+- Include source quality and uncertainty as spoken context, not citation clutter.
+- Keep the text pleasant to listen to without losing analytical content.
+- If the user requested the audio file, generate it after the `.md` exists by calling `markdown_to_audio` on the same file.
+- Use default audio generation parameters first: `speed: 1`, `sentenceSilence: 0.3`, `noiseScale: 0.667`, `noiseW: 0.8`, and `voiceQuality: "auto"`.
+- Tune `sentenceSilence`, `noiseScale`, `noiseW`, voice choice, or speed only after the user reviews the result or explicitly asks for a different style.
 
 Always include:
 
