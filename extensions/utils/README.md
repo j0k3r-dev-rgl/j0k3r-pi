@@ -29,6 +29,7 @@ Parameters:
 - `sentenceSilence` — Piper-only seconds of silence after each sentence. Useful for more natural narration pacing.
 - `noiseScale` — Piper-only generator noise scale. Piper default is usually `0.667`.
 - `noiseW` — Piper-only phoneme-width variation. Piper default is usually `0.8`.
+- `mp3BitrateKbps` — optional MP3 bitrate in kbps when `outputPath` ends in `.mp3`. Defaults to `64`, which is compact and usually enough for spoken-word audio.
 
 ## Runtime requirements
 
@@ -102,11 +103,14 @@ For news or long-form narration, start with normal speed and tune only after lis
   "sentenceSilence": 0.3,
   "noiseScale": 0.667,
   "noiseW": 0.8,
-  "voiceQuality": "auto"
+  "voiceQuality": "auto",
+  "mp3BitrateKbps": 64
 }
 ```
 
 If only a high-quality Piper voice is installed, `voiceQuality: "auto"` will still use that high-quality voice. Install a `medium` or `low` voice if faster generation is more important than maximum quality.
+
+For smaller files, set `outputPath` to `.mp3`. The default MP3 bitrate is `64k`, which is intended for narration. Use `48` for smaller voice files, `96` for higher quality, or `128` for broad compatibility.
 
 ## Playback troubleshooting
 

@@ -145,7 +145,7 @@ describe('convertMarkdownToAudio', () => {
     expect(result.outputPath).toBe(outputPath);
   });
 
-  it('converts wav to mp3 with ffmpeg when outputPath ends in mp3', async () => {
+  it('converts wav to mp3 with ffmpeg at the default speech bitrate when outputPath ends in mp3', async () => {
     const file = await tempMarkdown();
     const outputPath = join(file.dir, 'speech.mp3');
     const commands: string[] = [];
@@ -157,7 +157,7 @@ describe('convertMarkdownToAudio', () => {
         return { stdout: '', stderr: '', code: 0 };
       }
       expect(command).toBe('/usr/bin/ffmpeg');
-      expect(args).toEqual(['-y', '-i', expect.stringMatching(/\.wav$/), outputPath]);
+      expect(args).toEqual(['-y', '-i', expect.stringMatching(/\.wav$/), '-b:a', '64k', outputPath]);
       await writeFile(outputPath, 'mp3 bytes');
       return { stdout: '', stderr: '', code: 0 };
     });
@@ -174,6 +174,33 @@ describe('convertMarkdownToAudio', () => {
     expect(commands).toEqual(['/usr/bin/espeak-ng', '/usr/bin/ffmpeg']);
     expect(result.format).toBe('mp3');
     expect(await readFile(outputPath, 'utf8')).toBe('mp3 bytes');
+  });
+
+  it('uses a custom mp3 bitrate when provided', async () => {
+    const file = await tempMarkdown();
+    const outputPath = join(file.dir, 'speech.mp3');
+    const runCommand: CommandRunner = vi.fn(async (command, args) => {
+      if (command === '/usr/bin/espeak-ng') {
+        await writeFile(String(args[1]), 'wav bytes');
+        return { stdout: '', stderr: '', code: 0 };
+      }
+      expect(command).toBe('/usr/bin/ffmpeg');
+      expect(args).toEqual(['-y', '-i', expect.stringMatching(/\.wav$/), '-b:a', '48k', outputPath]);
+      await writeFile(outputPath, 'mp3 bytes');
+      return { stdout: '', stderr: '', code: 0 };
+    });
+
+    const result = await convertMarkdownToAudio({
+      path: file.path,
+      cwd: file.dir,
+      outputPath,
+      engine: 'espeak-ng',
+      mp3BitrateKbps: 48,
+      findCommand: async (name) => ({ 'espeak-ng': '/usr/bin/espeak-ng', ffmpeg: '/usr/bin/ffmpeg' })[name] ?? null,
+      runCommand,
+    });
+
+    expect(result.format).toBe('mp3');
   });
 
   it('throws a helpful error when no supported engine is installed', async () => {
@@ -199,5 +226,6 @@ describe('utils extension tool', () => {
     expect(JSON.stringify(tool?.parameters)).toContain('noiseScale');
     expect(JSON.stringify(tool?.parameters)).toContain('noiseW');
     expect(JSON.stringify(tool?.parameters)).toContain('voiceQuality');
+    expect(JSON.stringify(tool?.parameters)).toContain('mp3BitrateKbps');
   });
 });

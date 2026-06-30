@@ -31,6 +31,7 @@ export interface MarkdownToAudioInput {
   sentenceSilence?: number;
   noiseScale?: number;
   noiseW?: number;
+  mp3BitrateKbps?: number;
   signal?: AbortSignal;
   findCommand?: CommandFinder;
   findVoiceModel?: VoiceModelFinder;
@@ -51,6 +52,7 @@ export interface MarkdownToAudioResult {
 
 const DEFAULT_LANGUAGE = 'es';
 const DEFAULT_ESPEAK_SPEED = 175;
+const DEFAULT_MP3_BITRATE_KBPS = 64;
 const PIPER_CANDIDATES = ['piper-tts', 'piper'];
 const VOICE_ROOT = '/usr/share/piper-voices';
 
@@ -144,7 +146,7 @@ export async function convertMarkdownToAudio(input: MarkdownToAudioInput): Promi
         const espeakCommand = await findCommand('espeak-ng');
         if (!espeakCommand) throw installError();
         await synthesizeWithEspeak(espeakCommand, text, synthOutputPath, language, input.speed, runCommand, input.signal);
-        await convertIfNeeded(format, synthOutputPath, outputPath, findCommand, runCommand, input.signal);
+        await convertIfNeeded(format, synthOutputPath, outputPath, input.mp3BitrateKbps, findCommand, runCommand, input.signal);
         return await buildResult(inputPath, outputPath, 'espeak-ng', format, language, undefined, text.length, warnings);
       }
       await synthesizeWithPiper(selected.command, text, synthOutputPath, voiceModel, {
@@ -153,12 +155,12 @@ export async function convertMarkdownToAudio(input: MarkdownToAudioInput): Promi
         noiseScale: input.noiseScale,
         noiseW: input.noiseW,
       }, runCommand, input.signal);
-      await convertIfNeeded(format, synthOutputPath, outputPath, findCommand, runCommand, input.signal);
+      await convertIfNeeded(format, synthOutputPath, outputPath, input.mp3BitrateKbps, findCommand, runCommand, input.signal);
       return await buildResult(inputPath, outputPath, 'piper', format, language, voiceModel, text.length, warnings);
     }
 
     await synthesizeWithEspeak(selected.command, text, synthOutputPath, language, input.speed, runCommand, input.signal);
-    await convertIfNeeded(format, synthOutputPath, outputPath, findCommand, runCommand, input.signal);
+    await convertIfNeeded(format, synthOutputPath, outputPath, input.mp3BitrateKbps, findCommand, runCommand, input.signal);
     return await buildResult(inputPath, outputPath, 'espeak-ng', format, language, undefined, text.length, warnings);
   } finally {
     if (format === 'mp3') {
@@ -244,6 +246,7 @@ async function convertIfNeeded(
   format: MarkdownToAudioFormat,
   synthOutputPath: string,
   outputPath: string,
+  mp3BitrateKbps: number | undefined,
   findCommand: CommandFinder,
   runCommand: CommandRunner,
   signal?: AbortSignal,
@@ -251,7 +254,8 @@ async function convertIfNeeded(
   if (format !== 'mp3') return;
   const ffmpeg = await findCommand('ffmpeg');
   if (!ffmpeg) throw new Error('mp3 output requires ffmpeg, but ffmpeg was not found on PATH');
-  const result = await runCommand(ffmpeg, ['-y', '-i', synthOutputPath, outputPath], { signal });
+  const bitrate = normalizeMp3BitrateKbps(mp3BitrateKbps);
+  const result = await runCommand(ffmpeg, ['-y', '-i', synthOutputPath, '-b:a', `${bitrate}k`, outputPath], { signal });
   assertCommandSucceeded('ffmpeg', result);
 }
 
@@ -322,6 +326,12 @@ function normalizeVoiceQuality(voiceQuality: MarkdownToAudioVoiceQuality | undef
   if (!voiceQuality) return 'auto';
   if (['auto', 'high', 'medium', 'low'].includes(voiceQuality)) return voiceQuality;
   throw new Error('voiceQuality must be auto, high, medium, or low');
+}
+
+function normalizeMp3BitrateKbps(mp3BitrateKbps: number | undefined): number {
+  if (mp3BitrateKbps === undefined) return DEFAULT_MP3_BITRATE_KBPS;
+  if (!Number.isFinite(mp3BitrateKbps)) throw new Error('mp3BitrateKbps must be a finite number');
+  return Math.round(clampNumber(mp3BitrateKbps, 'mp3BitrateKbps', 16, 320));
 }
 
 function normalizeEspeakSpeed(speed: number | undefined): number {

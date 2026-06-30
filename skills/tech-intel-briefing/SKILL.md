@@ -124,7 +124,8 @@ Prefer this skill over a generic search-only response when the user wants explan
 - In `audio-ready` mode, preserve sourcing and uncertainty through spoken phrases such as “according to company announcements,” “reporting from…,” or “the evidence is still weak,” rather than footnote-style links.
 - In `audio-ready` mode, keep `markdown_to_audio` speed at normal pace (`speed: 1`) unless the user explicitly asks for faster or slower narration.
 - When the user asks for an audio file, first create or save the narration-ready Markdown script, then convert that same Markdown file with `markdown_to_audio`; do not rewrite or summarize the script during audio generation.
-- Use these default `markdown_to_audio` parameters for audio-ready news unless the user asks to tune them: `speed: 1`, `sentenceSilence: 0.3`, `noiseScale: 0.667`, `noiseW: 0.8`, and `voiceQuality: "auto"`.
+- Use these default `markdown_to_audio` parameters for audio-ready news unless the user asks to tune them: `speed: 1`, `sentenceSilence: 0.3`, `noiseScale: 0.667`, `noiseW: 0.8`, `voiceQuality: "auto"`, and `mp3BitrateKbps: 64`.
+- For long-form news audio, prefer an `.mp3` `outputPath` by default to avoid very large `.wav` files; use `.wav` only when the user explicitly wants uncompressed audio.
 - Write reusable skill content in English, but answer the user in the user’s language.
 
 ## Decision Gates
@@ -172,7 +173,7 @@ Prefer this skill over a generic search-only response when the user wants explan
    - explain acronyms and company/product names the first time they matter;
    - convert source attribution into natural spoken language;
    - avoid visual lists, tables, raw URLs, footnotes, and link dumps.
-10. If the user asked for an audio file, write the narration script to a `.md` file when a file path is available or requested, then call `markdown_to_audio` on that file with defaults: `speed: 1`, `sentenceSilence: 0.3`, `noiseScale: 0.667`, `noiseW: 0.8`, `voiceQuality: "auto"`. Preserve the Markdown as the source of truth.
+10. If the user asked for an audio file, write the narration script to a `.md` file when a file path is available or requested, then call `markdown_to_audio` on that file. Prefer an `.mp3` `outputPath` and use defaults: `speed: 1`, `sentenceSilence: 0.3`, `noiseScale: 0.667`, `noiseW: 0.8`, `voiceQuality: "auto"`, `mp3BitrateKbps: 64`. Preserve the Markdown as the source of truth.
 11. End with a concise executive recap, closing thought, or “what to watch next” section.
 
 ## Output Contract
@@ -209,7 +210,8 @@ For `audio-ready` mode, return a Markdown narration script suitable for direct `
 - Include source quality and uncertainty as spoken context, not citation clutter.
 - Keep the text pleasant to listen to without losing analytical content.
 - If the user requested the audio file, generate it after the `.md` exists by calling `markdown_to_audio` on the same file.
-- Use default audio generation parameters first: `speed: 1`, `sentenceSilence: 0.3`, `noiseScale: 0.667`, `noiseW: 0.8`, and `voiceQuality: "auto"`.
+- Prefer `.mp3` output for long-form news audio to keep files small.
+- Use default audio generation parameters first: `speed: 1`, `sentenceSilence: 0.3`, `noiseScale: 0.667`, `noiseW: 0.8`, `voiceQuality: "auto"`, and `mp3BitrateKbps: 64`.
 - Tune `sentenceSilence`, `noiseScale`, `noiseW`, voice choice, or speed only after the user reviews the result or explicitly asks for a different style.
 
 Always include:

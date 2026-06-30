@@ -22,6 +22,7 @@ export interface MarkdownToAudioParams {
   sentenceSilence?: number;
   noiseScale?: number;
   noiseW?: number;
+  mp3BitrateKbps?: number;
 }
 
 const markdownToAudioParameters = Type.Object({
@@ -35,6 +36,7 @@ const markdownToAudioParameters = Type.Object({
   sentenceSilence: Type.Optional(Type.Number({ minimum: 0, maximum: 5, description: 'Piper-only seconds of silence after each sentence. Useful for more natural narration pacing.' })),
   noiseScale: Type.Optional(Type.Number({ minimum: 0, maximum: 2, description: 'Piper-only generator noise scale. Piper default is usually 0.667; adjust carefully for voice variation.' })),
   noiseW: Type.Optional(Type.Number({ minimum: 0, maximum: 2, description: 'Piper-only phoneme width variation. Piper default is usually 0.8; adjust carefully for prosody variation.' })),
+  mp3BitrateKbps: Type.Optional(Type.Number({ minimum: 16, maximum: 320, description: 'MP3 audio bitrate in kbps when outputPath ends in .mp3. Defaults to 64 for compact spoken-word audio.' })),
 });
 
 export function registerUtilsTools(pi: any): void {
