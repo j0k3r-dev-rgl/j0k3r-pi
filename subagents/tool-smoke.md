@@ -3,14 +3,53 @@ name: tool-smoke
 description: validates subagent tool allowlists and isolation with explicit, bounded tool calls
 tools:
   - read
-  - write
-  - edit
   - bash
+  - edit
+  - write
+  - agent_todo
   - find_symbol
+  - find_references
   - function_call_tree
-  - skill_registry_resolve
+  - reverse_function_call_tree
+  - workspace_graph_status
   - context7_status
+  - context7_search_library
   - context7_get_context
+  - context7_resolve_and_get_context
+  - memory_context
+  - memory_add
+  - memory_search
+  - memory_get
+  - memory_list
+  - memory_update
+  - memory_archive
+  - memory_start_chat
+  - memory_recall
+  - memory_project_profile
+  - memory_consolidate
+  - memory_sync_status
+  - memory_export
+  - memory_import
+  - pdf_extract
+  - skill_registry_generate
+  - skill_registry_resolve
+  - markdown_to_audio
+  - web_search
+  - web_fetch
+  - discussion_search
+  - discussion_get
+  - discussion_answers_get
+  - discussion_comments_get
+  - research_search
+  - research_get
+  - research_graph_get
+  - github_code_search
+  - github_get
+  - youtube_search
+  - youtube_video_get
+  - youtube_transcript_get
+  - youtube_channel_search
+  - youtube_playlist_get
 ---
 
 # Tool Smoke Subagent

@@ -99,7 +99,9 @@ Do not load this skill for greetings, tiny inline answers, obvious one-line fixe
 - Do not create SDD/OpenSpec artifacts or launch SDD subagents for a new flow until the mode gate is resolved.
 - Use `workflow-triage` before discovery or SDD when the route is unclear.
 - Treat investigation and discovery as read-only diagnosis, not permission to solve or implement.
-- Use SDD subagents as phase executors only; the main agent remains the orchestrator.
+- Use SDD subagents as the default phase executors for formal SDD phases; the main agent remains the orchestrator.
+- The orchestrator may execute a small phase or direct correction itself only when it already has enough context, the change is bounded to at most four files, the edits are minimal, and delegation would add more overhead than value; state this exception explicitly in the phase report.
+- When the orchestrator lacks enough context or suspects the scope is too broad for direct handling, delegate bounded read-only `discovery` first and ask it to summarize affected scope, risks, and whether direct orchestrator handling is reasonable.
 - Strict TDD still applies to implementation work.
 - Prefer `hybrid` artifact storage for named SDD features unless the user requests otherwise.
 - PRDs are optional, not mandatory for every SDD.
@@ -183,9 +185,10 @@ The git gate does not apply to tiny inline answers or low-risk inspections that 
 5. If the route uses OpenSpec persistence, apply `artifact-conventions.md` before writing or updating artifacts.
 6. If the route is PRD-first or depends on an existing PRD, apply `prd-and-discovery.md` before planning downstream phases.
 7. If the route is mini-SDD or minimal delegated apply, apply `mini-sdd.md` before preparing the OpenSpec-backed task packet.
-8. If the route will launch `prd-review` or any formal `sdd-*` subagent, apply `phase-contracts.md` and `shared-phase-rules.md` before delegation; for mini-SDD, use the mini-SDD packet plus the apply/verify return-envelope requirements that are relevant to the slice.
-9. Stop before implementation unless the user explicitly approved apply for the selected scope.
-10. After meaningful work, update active SDD state or memory as needed and report validation, risks, and the next recommended step.
+8. For formal SDD phases, delegate to the matching `sdd-*` subagent by default after applying `phase-contracts.md` and `shared-phase-rules.md`; do not perform phase work directly unless the small-orchestrator exception applies and is reported.
+9. If context is insufficient to decide whether the small-orchestrator exception applies, delegate bounded read-only `discovery` first and use its scope/risk summary before choosing direct execution versus phase subagent delegation.
+10. Stop before implementation unless the user explicitly approved apply for the selected scope.
+11. After meaningful work, update active SDD state or memory as needed and report validation, risks, and the next recommended step.
 
 ## Execution Modes
 
@@ -212,7 +215,7 @@ Use the lightest safe route that fits the request:
 | medium taskable multi-file work with low artifact value | `mini-sdd` |
 | tracker-backed mechanical migration | `minimal delegated apply` |
 | complex work that needs product requirements first | `prd-first` |
-| named planning flow with proposal/spec/design/tasks value | formal SDD planning |
+| named planning flow with proposal/spec/design/tasks value | formal SDD planning delegated to `sdd-*` phase subagents by default |
 | implementation of approved existing SDD tasks | `sdd-apply` |
 | validation of completed implementation | `sdd-verify` |
 | closure after successful verification | `sdd-archive` |
@@ -266,7 +269,7 @@ When this skill affects the answer, return a concise SDD workflow decision or ph
 - PRD status: absent, present/read, review absent/read, review needed, approved-by-prd-review, explicit user continue-as-is, or blocking conflict.
 - Selected phase or next phase and why.
 - Selected skills injected into subagents, or why no skill matched.
-- Subagents launched or explicitly not needed.
+- Subagents launched, or explicit small-orchestrator exception/discovery-first rationale when no phase subagent was used.
 - Artifacts or memory updated.
 - Security alignment and implementation-map continuity notes when relevant.
 - Validation, risks, blockers, and next recommended step.

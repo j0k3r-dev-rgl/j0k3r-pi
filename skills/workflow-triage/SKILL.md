@@ -110,7 +110,8 @@ Do not load this skill only for greetings or obvious direct answers. A user-orde
 - Implementation approval is separate from investigation, planning, verification, and commit approval.
 - Do not call `discovery` before applying triage when routing is unclear.
 - Use `discovery` only for bounded read-only evidence that materially improves the workflow decision.
-- Use formal SDD only when the change is genuinely cross-cutting, high-risk, contract-changing, architecture-bearing, or needs durable artifacts.
+- Use formal SDD only when the change is genuinely cross-cutting, high-risk, contract-changing, architecture-bearing, or needs durable artifacts; formal SDD phases are delegated to `sdd-*` subagents by default.
+- Let the orchestrator handle small direct work only when it already has enough context, the change is bounded to at most four files, and edits are minimal; otherwise use delegated discovery or SDD phase agents.
 - PRDs are optional. Use PRD-first only when the user asks for a PRD or when product requirements genuinely need clarification before downstream SDD.
 - For small localized implementation, always offer the route choice: *"¿Prefieres que arregle esto directamente (simple-tdd) o hacemos una revisión/propuesta primero (mini-sdd o investigación)?"* — unless the change is truly trivial (single file, no risk). A user order to "fix it" does not waive this offer.
 - When the change touches multiple files or policy-sensitive surfaces, offer `mini-sdd` or proposal-first even if the user ordered a direct fix; do not default to `simple-tdd` for multi-file or behavior-bearing work.
@@ -147,8 +148,8 @@ Choose and state one route before editing non-trivial scope:
 8. `discovery` — bounded read-only delegated research when evidence is missing.
 9. `prd-first-sdd` — product requirements need clarification before formal SDD artifacts.
 10. `use-existing-prd-sdd` — an existing PRD already exists and must be approved, revised, reviewed, or waived before downstream SDD.
-11. `formal-sdd` — substantial or cross-cutting work needing proposal/spec/design/tasks.
-12. `sdd-apply`, `sdd-verify`, `sdd-archive` — continue an already-approved SDD phase.
+11. `formal-sdd` — substantial or cross-cutting work needing proposal/spec/design/tasks, delegated to SDD phase subagents by default.
+12. `sdd-apply`, `sdd-verify`, `sdd-archive` — continue an already-approved SDD phase, delegated by default unless the small-orchestrator exception applies.
 13. `blocked-ask-user` — a required decision is missing.
 
 ## Routing Table
@@ -164,8 +165,8 @@ Choose and state one route before editing non-trivial scope:
 | policy-sensitive but still localized edit | `simple-tdd-with-review` or `inline-docs-only` | only if scope is explicit and low-risk |
 | product requirements unclear or PRD requested | `prd-first-sdd` | orchestrator drafts PRD with the user |
 | existing PRD in scope | `use-existing-prd-sdd` | resolve approval/review state first |
-| cross-cutting, new API/contract, durable handoff value | `formal-sdd` | load `sdd-workflow` core plus needed companions |
-| existing approved SDD phase to continue | `sdd-apply` / `sdd-verify` / `sdd-archive` | use current artifacts/state |
+| cross-cutting, new API/contract, durable handoff value | `formal-sdd` | load `sdd-workflow` core plus needed companions; delegate phases by default |
+| existing approved SDD phase to continue | `sdd-apply` / `sdd-verify` / `sdd-archive` | use current artifacts/state; delegate by default unless the small-orchestrator exception applies |
 
 Interpretation rules:
 
@@ -192,7 +193,7 @@ Ask one concise question when any of these materially affect the route:
 After choosing the route:
 
 - load `sdd-workflow` core when formal SDD/OpenSpec work is likely or requested, when `mini-sdd` / `minimal-delegated-apply` will use `sdd-apply` / `sdd-verify`, or when continuing an SDD phase;
-- use `discovery` only when bounded read-only evidence is still missing;
+- use `discovery` only when bounded read-only evidence is still missing, including when the orchestrator needs a scope/risk summary before deciding whether direct handling is reasonable;
 - consider `skill-authoring` when creating or changing skills;
 - consider `persistent-memory` when durable decisions, profile updates, consolidation, migration, or session-end memory policy matters.
 

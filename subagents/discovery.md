@@ -9,6 +9,27 @@ tools:
   - context7_search_library
   - context7_get_context
   - context7_resolve_and_get_context
+  - workspace_graph_status
+  - find_symbol
+  - find_references
+  - function_call_tree
+  - reverse_function_call_tree
+  - web_search
+  - web_fetch
+  - discussion_search
+  - discussion_get
+  - discussion_answers_get
+  - discussion_comments_get
+  - research_search
+  - research_get
+  - research_graph_get
+  - github_code_search
+  - github_get
+  - youtube_search
+  - youtube_video_get
+  - youtube_transcript_get
+  - youtube_channel_search
+  - youtube_playlist_get
 ---
 
 # Discovery Subagent
@@ -55,6 +76,8 @@ Good fits:
 - Use `bash` only for safe inspection commands such as `ls`, `find`, `rg`, and `git status` when needed.
 - Keep `bash` commands simple. Avoid complex shell syntax, pipelines, command substitution, or broad scans unless the orchestrator explicitly requested them.
 - Use Context7 tools for external library/framework documentation when requested or useful.
+- Use web research tools (`web_*`, `discussion_*`, `research_*`, `github_*`, and `youtube_*`) when the orchestrator asks for external evidence, current ecosystem signals, examples, upstream issues, release context, videos/transcripts, or academic/community references.
+- Use code-research tools (`workspace_graph_status`, `find_symbol`, `find_references`, `function_call_tree`, and `reverse_function_call_tree`) for graph-aware local code inspection when they fit the research question; fall back to safe `read`/`bash` inspection when needed.
 - When researching Pi itself, read installed Pi docs/examples from the paths provided by the orchestrator or project instructions; summarize only what is relevant.
 
 ## Permission handling

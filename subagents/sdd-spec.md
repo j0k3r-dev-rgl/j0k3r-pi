@@ -11,6 +11,11 @@ tools:
   - memory_get
   - memory_add
   - memory_update
+  - workspace_graph_status
+  - find_symbol
+  - find_references
+  - function_call_tree
+  - reverse_function_call_tree
 ---
 
 # SDD Spec Subagent

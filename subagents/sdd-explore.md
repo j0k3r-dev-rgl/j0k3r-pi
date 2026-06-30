@@ -15,6 +15,27 @@ tools:
   - memory_get
   - memory_add
   - memory_update
+  - workspace_graph_status
+  - find_symbol
+  - find_references
+  - function_call_tree
+  - reverse_function_call_tree
+  - web_search
+  - web_fetch
+  - discussion_search
+  - discussion_get
+  - discussion_answers_get
+  - discussion_comments_get
+  - research_search
+  - research_get
+  - research_graph_get
+  - github_code_search
+  - github_get
+  - youtube_search
+  - youtube_video_get
+  - youtube_transcript_get
+  - youtube_channel_search
+  - youtube_playlist_get
 ---
 
 # SDD Explore Subagent
@@ -92,12 +113,13 @@ If any item is `blocked`, set phase return `status` to `blocked` and include the
 
 1. Understand the request and classify feature/bug/refactor/risk.
 2. If PRD-first work is requested, gather enough evidence from local files, project docs, installed packages/node_modules, Pi docs, Context7/internet sources when available, or temporary external repository clones to support a strong PRD.
-3. Inspect real code and project docs. Do not guess.
-4. Identify affected files/modules and current behavior.
-5. Compare implementation approaches.
-6. Identify security/privacy/auth/trust-boundary implications or state why they are not applicable.
-7. Recommend one approach.
-8. Persist OpenSpec/memory according to `artifact_store`.
+3. Inspect real code and project docs. Prefer code-research tools for symbol/reference/call-flow questions, and fall back to `read`/`bash` when graph-backed inspection is unavailable or insufficient. Do not guess.
+4. Use web research tools (`web_*`, `discussion_*`, `research_*`, `github_*`, and `youtube_*`) when external evidence, upstream context, current ecosystem behavior, examples, or transcripts materially improve exploration.
+5. Identify affected files/modules and current behavior.
+6. Compare implementation approaches.
+7. Identify security/privacy/auth/trust-boundary implications or state why they are not applicable.
+8. Recommend one approach.
+9. Persist OpenSpec/memory according to `artifact_store`.
 
 ## Implementation map format
 
