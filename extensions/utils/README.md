@@ -8,6 +8,54 @@ General-purpose Pi utility tools.
 
 ### Tools
 
+#### `screenshot`
+
+Captures the current Linux desktop, saves it as a PNG, and returns the image inline in the same tool result so the agent can inspect it immediately without asking the user to attach or read the file manually.
+
+The tool:
+
+- supports Linux only;
+- requires an active graphical session (`DISPLAY` for X11 or `WAYLAND_DISPLAY` for Wayland);
+- refuses pure shell, TTY, SSH, container, or headless sessions that do not expose a graphical display;
+- prefers screenshot utilities appropriate for the active session: `grim` for Wayland/wlroots, `gnome-screenshot`, `spectacle`, `maim`, `scrot`, or ImageMagick `import`;
+- writes `.png` output to a temporary file by default or to `outputPath` when provided;
+- attaches the PNG inline when the active model supports image input and the file is below `maxInlineBytes`;
+- returns actionable install guidance when no supported screenshot utility is installed, including hints for common distro families.
+
+Parameters:
+
+- `outputPath` — optional PNG output path, relative to the workspace or absolute. Defaults to a temporary `.png` file.
+- `maxInlineBytes` — optional maximum PNG size to attach inline. Defaults to 5 MiB.
+
+Runtime requirements:
+
+- Linux desktop session with `DISPLAY` or `WAYLAND_DISPLAY` set.
+- One supported local screenshot utility installed.
+- A vision-capable active model if the agent must inspect the image inline. If the active model does not accept images, the tool still saves the PNG and reports the path.
+
+Install examples:
+
+```bash
+# Arch / Manjaro / EndeavourOS
+sudo pacman -S grim gnome-screenshot spectacle maim scrot imagemagick
+
+# Debian / Ubuntu / Mint / Pop!_OS
+sudo apt update && sudo apt install grim gnome-screenshot spectacle maim scrot imagemagick
+
+# Fedora / RHEL family
+sudo dnf install grim gnome-screenshot spectacle maim scrot ImageMagick
+
+# openSUSE
+sudo zypper install grim gnome-screenshot spectacle maim scrot ImageMagick
+```
+
+Notes:
+
+- On Wayland, compositor security rules can block screenshots unless the utility matches the compositor/desktop portal support.
+- In headless shells there is no desktop surface to capture; start Pi from the graphical session or expose a display first.
+- For quick inspections, omit `outputPath` so screenshots go to the system temporary directory. Pass `outputPath` only when keeping a workspace artifact is intentional.
+- The image is returned inline in the same tool call, so a follow-up `read` call is not needed for normal use.
+
 #### `markdown_to_audio`
 
 Converts a local Markdown file into an audio file so the user can listen to it.
@@ -180,6 +228,54 @@ npm run typecheck
 Herramientas utilitarias generales para Pi.
 
 ### Herramientas
+
+#### `screenshot`
+
+Captura el escritorio Linux actual, guarda la imagen como PNG y devuelve la imagen inline en el mismo resultado de la tool para que el agente pueda inspeccionarla inmediatamente sin pedirle al usuario que la adjunte o la lea manualmente.
+
+La herramienta:
+
+- soporta solo Linux;
+- requiere una sesión gráfica activa (`DISPLAY` para X11 o `WAYLAND_DISPLAY` para Wayland);
+- rechaza sesiones de shell puro, TTY, SSH, contenedor o headless que no exponen un display gráfico;
+- prefiere utilidades adecuadas para la sesión activa: `grim` para Wayland/wlroots, `gnome-screenshot`, `spectacle`, `maim`, `scrot` o `import` de ImageMagick;
+- escribe salida `.png` en un archivo temporal por defecto o en `outputPath` si se pasa;
+- adjunta el PNG inline cuando el modelo activo soporta imágenes y el archivo está debajo de `maxInlineBytes`;
+- devuelve guía accionable de instalación cuando no hay una utilidad de screenshot soportada, incluyendo hints para familias de distribuciones comunes.
+
+Parámetros:
+
+- `outputPath` — ruta opcional de salida PNG, relativa al workspace o absoluta. Por defecto usa un `.png` temporal.
+- `maxInlineBytes` — tamaño máximo opcional del PNG para adjuntar inline. Por defecto 5 MiB.
+
+Requisitos runtime:
+
+- Sesión de escritorio Linux con `DISPLAY` o `WAYLAND_DISPLAY` seteado.
+- Una utilidad local de screenshot soportada instalada.
+- Un modelo activo con soporte de visión si el agente debe inspeccionar la imagen inline. Si el modelo activo no acepta imágenes, la tool igual guarda el PNG y reporta la ruta.
+
+Ejemplos de instalación:
+
+```bash
+# Arch / Manjaro / EndeavourOS
+sudo pacman -S grim gnome-screenshot spectacle maim scrot imagemagick
+
+# Debian / Ubuntu / Mint / Pop!_OS
+sudo apt update && sudo apt install grim gnome-screenshot spectacle maim scrot imagemagick
+
+# Fedora / familia RHEL
+sudo dnf install grim gnome-screenshot spectacle maim scrot ImageMagick
+
+# openSUSE
+sudo zypper install grim gnome-screenshot spectacle maim scrot ImageMagick
+```
+
+Notas:
+
+- En Wayland, las reglas de seguridad del compositor pueden bloquear screenshots si la utilidad no coincide con el compositor o soporte de portales del desktop.
+- En shells headless no hay superficie de escritorio para capturar; inicia Pi desde la sesión gráfica o expón un display primero.
+- Para inspecciones rápidas, omitir `outputPath` para que las capturas vayan al directorio temporal del sistema. Pasar `outputPath` solo cuando conservar un artefacto en el workspace sea intencional.
+- La imagen vuelve inline en el mismo tool call, así que normalmente no hace falta un `read` posterior.
 
 #### `markdown_to_audio`
 
