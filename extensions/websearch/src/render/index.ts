@@ -15,16 +15,20 @@ function segmentText(text: string): string[] {
   return [...graphemeSegmenter.segment(text)].map((entry) => entry.segment);
 }
 
+function appendTextSegments(tokens: string[], text: string): void {
+  for (const segment of segmentText(text)) tokens.push(segment);
+}
+
 function tokenize(text: string): string[] {
   const tokens: string[] = [];
   let lastIndex = 0;
   for (const match of text.matchAll(ANSI_TOKEN_RE)) {
     const index = match.index ?? 0;
-    if (index > lastIndex) tokens.push(...segmentText(text.slice(lastIndex, index)));
+    if (index > lastIndex) appendTextSegments(tokens, text.slice(lastIndex, index));
     tokens.push(match[0]);
     lastIndex = index + match[0].length;
   }
-  if (lastIndex < text.length) tokens.push(...segmentText(text.slice(lastIndex)));
+  if (lastIndex < text.length) appendTextSegments(tokens, text.slice(lastIndex));
   return tokens;
 }
 

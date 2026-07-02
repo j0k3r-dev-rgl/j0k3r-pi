@@ -59,6 +59,24 @@ describe('websearch TUI rendering', () => {
     for (const line of lines) expect(visibleTestWidth(line)).toBeLessThanOrEqual(126);
   });
 
+  it('does not overflow the call stack when compact rendering very large detail text', () => {
+    const pi = createMockPi();
+    registerWebsearchTools(pi, { env: {}, fetch: vi.fn<typeof fetch>() });
+    const tool = pi.tools.find((entry) => entry.name === 'discussion_get')!;
+    const result = {
+      details: {
+        status: 'success',
+        data: {
+          title: 'Huge discussion detail',
+          text: 'a'.repeat(200_000),
+        },
+      },
+      content: [{ type: 'text', text: 'a'.repeat(200_000) }],
+    };
+
+    expect(() => renderLines(tool, result, false)).not.toThrow();
+  });
+
   it('keeps full detail content for the agent while rendering compact by default and full on expand', async () => {
     const clients = {
       stackExchange: { searchQuestions: vi.fn(), getQuestion: vi.fn(), getAnswers: vi.fn(), getQuestionComments: vi.fn() },
