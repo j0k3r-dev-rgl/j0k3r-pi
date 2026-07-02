@@ -135,6 +135,31 @@ async function lifecycleHarness(memoryConfig: Record<string, unknown> = {}) {
 }
 
 describe('advanced lifecycle behavior', () => {
+  it('creates the lifecycle memory session lazily on the first real user prompt', async () => {
+    const h = await lifecycleHarness();
+    const d = openMemoryDb(h.dbPath);
+
+    const afterSessionStart = d.prepare('SELECT COUNT(*) AS count FROM memory_sessions').get() as any;
+    expect(afterSessionStart.count).toBe(0);
+
+    const empty = await h.handlers.get('before_agent_start')?.({ prompt: '   ' }, h.ctx);
+    expect(empty).toBeUndefined();
+    const afterEmptyPrompt = d.prepare('SELECT COUNT(*) AS count FROM memory_sessions').get() as any;
+    expect(afterEmptyPrompt.count).toBe(0);
+
+    const first = await h.handlers.get('before_agent_start')?.({ prompt: 'first real turn' }, h.ctx);
+    expect(first?.message?.customType).toBe('memory-context');
+    expect(String(first?.message?.content ?? '')).toContain('Memory session: session_');
+
+    const rows = d.prepare('SELECT id, status, ended_at FROM memory_sessions').all() as any[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe('active');
+    expect(rows[0].ended_at).toBeNull();
+
+    const prompt = d.prepare('SELECT role, prompt, prompt_index FROM memory_session_prompts WHERE session_id=?').get(rows[0].id) as any;
+    expect(prompt).toMatchObject({ role: 'user', prompt: 'first real turn', prompt_index: 1 });
+  });
+
   it('does not close memory session on reload shutdown', async () => {
     const h = await lifecycleHarness();
     await h.handlers.get('before_agent_start')?.({ prompt: 'first turn' }, h.ctx);
@@ -179,10 +204,18 @@ describe('advanced lifecycle behavior', () => {
     };
     await handlers.get('session_start')?.({ reason: 'resume' }, ctx);
 
+    const beforePrompt = d.prepare('SELECT status, ended_at FROM memory_sessions WHERE id=?').get(existing.id) as any;
+    expect(beforePrompt.status).toBe('completed');
+    expect(beforePrompt.ended_at).not.toBeNull();
+
+    await handlers.get('before_agent_start')?.({ prompt: 'resumed turn' }, ctx);
+
     const row = d.prepare('SELECT status, ended_at, metadata_json FROM memory_sessions WHERE id=?').get(existing.id) as any;
     expect(row.status).toBe('active');
     expect(row.ended_at).toBeNull();
     expect(JSON.parse(row.metadata_json).pi_session_id).toBe('pi-session-123');
+    const prompt = d.prepare('SELECT prompt, prompt_index FROM memory_session_prompts WHERE session_id=?').get(existing.id) as any;
+    expect(prompt).toMatchObject({ prompt: 'resumed turn', prompt_index: 1 });
   });
 
   it('reuses a memory session by pi session id when pi session file is unavailable', async () => {
@@ -216,11 +249,14 @@ describe('advanced lifecycle behavior', () => {
       },
     };
     await handlers.get('session_start')?.({ reason: 'reload' }, ctx);
+    await handlers.get('before_agent_start')?.({ prompt: 'reused by pi id' }, ctx);
 
     const rows = d.prepare('SELECT id, status FROM memory_sessions ORDER BY started_at ASC').all() as any[];
     expect(rows).toHaveLength(1);
     expect(rows[0].id).toBe(existing.id);
     expect(rows[0].status).toBe('active');
+    const prompt = d.prepare('SELECT session_id, prompt FROM memory_session_prompts LIMIT 1').get() as any;
+    expect(prompt).toMatchObject({ session_id: existing.id, prompt: 'reused by pi id' });
   });
 
   it('persists the memory session id into the pi session for future fallback', async () => {
@@ -239,6 +275,9 @@ describe('advanced lifecycle behavior', () => {
     if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
 
     await h.handlers.get('session_start')?.({ reason: 'startup' }, ctx);
+    expect(appended).toHaveLength(0);
+
+    await h.handlers.get('before_agent_start')?.({ prompt: 'persist session entry lazily' }, ctx);
 
     expect(appended).toHaveLength(1);
     expect(appended[0].customType).toBe('memory-session');
@@ -273,6 +312,7 @@ describe('advanced lifecycle behavior', () => {
       },
     };
     await handlers.get('session_start')?.({ reason: 'reload' }, ctx);
+    await handlers.get('before_agent_start')?.({ prompt: 'reused by custom entry' }, ctx);
 
     const rows = d.prepare('SELECT id, status FROM memory_sessions ORDER BY started_at ASC').all() as any[];
     expect(rows).toHaveLength(1);
@@ -302,6 +342,7 @@ describe('advanced lifecycle behavior', () => {
       sessionManager: { getSessionId: () => null, getSessionFile: () => null, getEntries: () => [], getLeafId: () => null },
     };
     await handlers.get('session_start')?.({ reason: 'reload' }, ctx);
+    await handlers.get('before_agent_start')?.({ prompt: 'reused recent active session' }, ctx);
 
     const rows = d.prepare('SELECT id, status FROM memory_sessions ORDER BY started_at ASC').all() as any[];
     expect(rows).toHaveLength(1);
@@ -331,6 +372,10 @@ describe('advanced lifecycle behavior', () => {
       sessionManager: { getSessionId: () => null, getSessionFile: () => null, getEntries: () => [], getLeafId: () => null },
     };
     await handlers.get('session_start')?.({ reason: 'reload' }, ctx);
+    const rowsAfterSessionStart = d.prepare('SELECT id FROM memory_sessions').all() as any[];
+    expect(rowsAfterSessionStart).toHaveLength(2);
+
+    await handlers.get('before_agent_start')?.({ prompt: 'ambiguous fallback creates a new session lazily' }, ctx);
 
     const rows = d.prepare('SELECT id FROM memory_sessions').all() as any[];
     expect(rows).toHaveLength(3);
@@ -359,7 +404,7 @@ describe('advanced lifecycle behavior', () => {
     expect(second).toBeUndefined();
   });
 
-  it('does not store prompts into a closed memory session until session_start reopens it', async () => {
+  it('reopens a closed memory session lazily on the first real prompt after resume', async () => {
     const h = await lifecycleHarness();
     await h.handlers.get('before_agent_start')?.({ prompt: 'first turn before close' }, h.ctx);
     await h.handlers.get('session_shutdown')?.({ reason: 'quit' }, h.ctx);
@@ -370,20 +415,17 @@ describe('advanced lifecycle behavior', () => {
     expect(closed.ended_at).not.toBeNull();
     expect(closed.summary).toContain('captured 1 prompt(s)');
 
-    await h.handlers.get('before_agent_start')?.({ prompt: 'ignored turn while closed' }, h.ctx);
+    await h.handlers.get('session_start')?.({ reason: 'resume' }, h.ctx);
     const stillClosed = d.prepare('SELECT status, ended_at, summary FROM memory_sessions WHERE id=?').get(closed.id) as any;
     expect(stillClosed.status).toBe('completed');
     expect(stillClosed.ended_at).not.toBeNull();
-    const promptCountBeforeReopen = d.prepare('SELECT COUNT(*) AS count FROM memory_session_prompts WHERE session_id=?').get(closed.id) as any;
-    expect(promptCountBeforeReopen.count).toBe(1);
+    expect(stillClosed.summary).toBe(closed.summary);
 
-    await h.handlers.get('session_start')?.({ reason: 'resume' }, h.ctx);
+    await h.handlers.get('before_agent_start')?.({ prompt: 'stored turn after lazy reopen' }, h.ctx);
     const reopened = d.prepare('SELECT status, ended_at, summary FROM memory_sessions WHERE id=?').get(closed.id) as any;
     expect(reopened.status).toBe('active');
     expect(reopened.ended_at).toBeNull();
     expect(reopened.summary).toBe(closed.summary);
-
-    await h.handlers.get('before_agent_start')?.({ prompt: 'stored turn after reopen' }, h.ctx);
     const promptCountAfterReopen = d.prepare('SELECT COUNT(*) AS count FROM memory_session_prompts WHERE session_id=?').get(closed.id) as any;
     expect(promptCountAfterReopen.count).toBe(2);
 

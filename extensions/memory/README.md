@@ -188,8 +188,8 @@ Use `/memory-context` or the `memory_context` tool to inspect the resolved conte
 
 Registered lifecycle events:
 
-- `session_start`: creates or resumes a memory session and sets footer status.
-- `before_agent_start`: captures the user prompt and injects startup brain context once.
+- `session_start`: resolves memory context and sets footer status without creating or reopening a memory session.
+- `before_agent_start`: lazily creates, resumes, or reopens the memory session on the first non-empty user prompt, captures that prompt, and injects startup brain context once.
 - `session_shutdown`: closes the memory session unless shutdown reason is `reload`.
 
 Memory sessions are linked to Pi sessions using this conservative priority:
@@ -200,7 +200,7 @@ Memory sessions are linked to Pi sessions using this conservative priority:
 4. One unambiguous recent active auto-started session for the same project and cwd.
 5. Create a new memory session.
 
-When a completed memory session is resumed through `session_start` with the same Pi identity, it is reactivated with `status='active'` and `ended_at=NULL`. A closed session does not capture additional prompts until that reopen happens, and its previous summary is preserved until the next finish rewrites it.
+When a completed memory session is resumed with the same Pi identity, `session_start` leaves it closed and the first non-empty `before_agent_start` prompt reactivates it with `status='active'` and `ended_at=NULL`. Empty startup prompts do not create or reopen sessions. The previous summary is preserved until the next finish rewrites it.
 
 Shutdown behavior:
 
@@ -569,8 +569,8 @@ Usa `/memory-context` o la tool `memory_context` para inspeccionar el contexto r
 
 Eventos lifecycle registrados:
 
-- `session_start`: crea o resume una sesión memory y setea estado de footer.
-- `before_agent_start`: captura el prompt del usuario e inyecta startup brain context una vez.
+- `session_start`: resuelve el contexto de memoria y setea estado de footer sin crear ni reabrir una sesión memory.
+- `before_agent_start`: crea, resume o reabre la sesión memory de forma lazy con el primer prompt no vacío del usuario, captura ese prompt e inyecta startup brain context una vez.
 - `session_shutdown`: cierra la sesión memory salvo que la razón de shutdown sea `reload`.
 
 Las sesiones Memory se linkean a sesiones Pi usando esta prioridad conservadora:
@@ -581,7 +581,7 @@ Las sesiones Memory se linkean a sesiones Pi usando esta prioridad conservadora:
 4. Una sesión reciente activa auto-started no ambigua para el mismo proyecto y cwd.
 5. Crear una nueva sesión memory.
 
-Cuando una sesión memory completada se resume mediante `session_start` con la misma identidad Pi, se reactiva con `status='active'` y `ended_at=NULL`. Una sesión cerrada no captura prompts adicionales hasta que ocurre esa reapertura, y su resumen previo se preserva hasta que el próximo finish lo reescribe.
+Cuando una sesión memory completada se resume con la misma identidad Pi, `session_start` la deja cerrada y el primer prompt no vacío en `before_agent_start` la reactiva con `status='active'` y `ended_at=NULL`. Los prompts vacíos de startup no crean ni reabren sesiones. El resumen previo se preserva hasta que el próximo finish lo reescribe.
 
 Comportamiento de shutdown:
 

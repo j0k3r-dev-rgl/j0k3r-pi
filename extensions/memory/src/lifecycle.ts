@@ -329,8 +329,8 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
       active_memory_session_id_before: activeMemorySessionId ?? null,
       session_closed: sessionClosed,
     });
-    const { context } = ensureMemorySession(ctx, { reopenClosed: true });
-    memoryDebugLog(ctx, 'session_start:ensured', {
+    const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
+    memoryDebugLog(ctx, 'session_start:ready', {
       reason: event?.reason ?? null,
       active_memory_session_id_after: activeMemorySessionId ?? null,
       memory_scope: context.scope,
@@ -341,15 +341,18 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
 
   pi.on?.('before_agent_start', async (event: any, ctx: any) => {
     const prompt = String(event.prompt ?? '');
+    const hasPrompt = prompt.trim().length > 0;
     memoryDebugLog(ctx, 'before_agent_start', {
-      has_prompt: prompt.trim().length > 0,
+      has_prompt: hasPrompt,
       active_memory_session_id_before: activeMemorySessionId ?? null,
       startup_context_injected: startupContextInjected,
       session_closed: sessionClosed,
     });
-    const { id: sessionId, context: c, closed } = ensureMemorySession(ctx, { reopenClosed: false });
+    if (!hasPrompt) return undefined;
 
-    if (prompt.trim() && !closed) {
+    const { id: sessionId, context: c, closed } = ensureMemorySession(ctx, { reopenClosed: true });
+
+    if (!closed) {
       try {
         addSessionPrompt(db, {
           session_id: sessionId,
