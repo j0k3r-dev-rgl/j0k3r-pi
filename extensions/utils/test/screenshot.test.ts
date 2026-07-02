@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import utilsExtension from '../index.js';
-import { captureScreenshot, type ScreenshotCommandRunner } from '../src/screenshot.js';
+import { captureScreenshot, listScreenshotWindows, type ScreenshotCommandRunner } from '../src/screenshot.js';
 
 type Tool = {
   name: string;
@@ -113,6 +113,116 @@ describe('captureScreenshot', () => {
     expect((await stat(file.outputPath)).size).toBeGreaterThan(0);
   });
 
+  it('lists Hyprland windows through hyprctl clients JSON', async () => {
+    const file = await tempOutput('list.png');
+    const runCommand: ScreenshotCommandRunner = vi.fn(async (command, args) => {
+      expect(command).toBe('/usr/bin/hyprctl');
+      expect(args).toEqual(['clients', '-j']);
+      return {
+        stdout: JSON.stringify([
+          {
+            address: '0xabc',
+            title: 'Pi - terminal',
+            class: 'kitty',
+            focusHistoryID: 0,
+            at: [10, 20],
+            size: [800, 600],
+            workspace: { id: 1, name: '1' },
+            monitor: 0,
+            pid: 1234,
+          },
+        ]),
+        stderr: '',
+        code: 0,
+      };
+    });
+
+    const result = await listScreenshotWindows({
+      cwd: file.dir,
+      platform: 'linux',
+      env: { WAYLAND_DISPLAY: 'wayland-1', HYPRLAND_INSTANCE_SIGNATURE: 'abc', XDG_CURRENT_DESKTOP: 'Hyprland' },
+      findCommand: async (name) => (name === 'hyprctl' ? '/usr/bin/hyprctl' : null),
+      runCommand,
+    });
+
+    expect(result.backend).toBe('hyprland');
+    expect(result.windows).toHaveLength(1);
+    expect(result.windows[0]).toMatchObject({
+      id: '0xabc',
+      title: 'Pi - terminal',
+      app: 'kitty',
+      focused: true,
+      bounds: { x: 10, y: 20, width: 800, height: 600 },
+      workspace: '1',
+      output: '0',
+      pid: 1234,
+    });
+  });
+
+  it('captures a Hyprland window by id using grim toplevel capture', async () => {
+    const file = await tempOutput('hypr-window.png');
+    const runCommand: ScreenshotCommandRunner = vi.fn(async (command, args) => {
+      if (command === '/usr/bin/hyprctl') {
+        expect(args).toEqual(['clients', '-j']);
+        return {
+          stdout: JSON.stringify([
+            {
+              address: '0xbeef',
+              title: 'Browser dashboard',
+              class: 'firefox',
+              focusHistoryID: 2,
+              at: [100, 200],
+              size: [640, 480],
+              workspace: { id: 2, name: 'web' },
+              monitor: 1,
+              pid: 4321,
+            },
+          ]),
+          stderr: '',
+          code: 0,
+        };
+      }
+
+      if (command === '/usr/bin/bash') {
+        expect(args[0]).toBe('-lc');
+        expect(String(args[1])).toContain('ext_foreign_toplevel_list_v1');
+        return { stdout: 'identifier=1800001a app_id=firefox title=Browser dashboard\n', stderr: '', code: 0 };
+      }
+
+      expect(command).toBe('/usr/bin/grim');
+      expect(args).toEqual(['-T', '1800001a', file.outputPath]);
+      await writeTinyPng(file.outputPath);
+      return { stdout: '', stderr: '', code: 0 };
+    });
+
+    const result = await captureScreenshot({
+      cwd: file.dir,
+      outputPath: file.outputPath,
+      platform: 'linux',
+      env: { WAYLAND_DISPLAY: 'wayland-1', HYPRLAND_INSTANCE_SIGNATURE: 'abc', XDG_CURRENT_DESKTOP: 'Hyprland' },
+      target: 'window',
+      windowId: '0xbeef',
+      findCommand: async (name) => ({ hyprctl: '/usr/bin/hyprctl', bash: '/usr/bin/bash', grim: '/usr/bin/grim' })[name] ?? null,
+      runCommand,
+    });
+
+    expect(result.target).toBe('window');
+    expect(result.window).toMatchObject({ id: '0xbeef', title: 'Browser dashboard', bounds: { x: 100, y: 200, width: 640, height: 480 } });
+    expect(result.screenshotProgram).toBe('grim');
+    expect((await stat(file.outputPath)).size).toBeGreaterThan(0);
+  });
+
+  it('rejects Wayland window listing outside Hyprland sessions', async () => {
+    const file = await tempOutput('unsupported-wayland-list.png');
+
+    await expect(listScreenshotWindows({
+      cwd: file.dir,
+      platform: 'linux',
+      env: { WAYLAND_DISPLAY: 'wayland-0', XDG_CURRENT_DESKTOP: 'GNOME' },
+      findCommand: async () => null,
+    })).rejects.toMatchObject({ code: 'unsupported_display_server' });
+  });
+
   it('uses an X11-capable utility when DISPLAY is present', async () => {
     const file = await tempOutput('x11.png');
     const runCommand: ScreenshotCommandRunner = vi.fn(async (command, args) => {
@@ -189,6 +299,9 @@ describe('screenshot tool registration', () => {
     expect(tool?.description).toMatch(/linux/i);
     expect(tool?.parameters.type).toBe('object');
     expect(JSON.stringify(tool?.parameters)).toContain('outputPath');
+    expect(JSON.stringify(tool?.parameters)).toContain('list-windows');
+    expect(JSON.stringify(tool?.parameters)).toContain('windowId');
+    expect(JSON.stringify(tool?.parameters)).toContain('active-window');
     expect(tool?.promptGuidelines?.join('\n')).toMatch(/DISPLAY|WAYLAND_DISPLAY/);
     expect(tool?.promptGuidelines?.join('\n')).toMatch(/install/i);
     expect(tool?.promptGuidelines?.join('\n')).toMatch(/default temporary output path/i);
@@ -218,6 +331,31 @@ describe('screenshot tool registration', () => {
       expect.objectContaining({ type: 'text', text: expect.stringContaining('screenshot:') }),
       expect.objectContaining({ type: 'image', mimeType: 'image/png', data: TINY_PNG.toString('base64') }),
     ]));
+  });
+
+  it('lists Wayland windows through the screenshot action without returning image content', async () => {
+    const pi = createMockPi();
+    utilsExtension(pi as any);
+    const tool = pi.tools.find((entry) => entry.name === 'screenshot');
+    const file = await tempOutput('tool-list.png');
+
+    const result: any = await tool?.execute('tool-call-1', {
+      action: 'list-windows',
+      findCommand: async (name: string) => (name === 'hyprctl' ? '/usr/bin/hyprctl' : null),
+      runCommand: async (_command: string, _args: string[]) => ({
+        stdout: JSON.stringify([{ address: '0xabc', title: 'Pi', class: 'kitty', focusHistoryID: 0, at: [1, 2], size: [3, 4] }]),
+        stderr: '',
+        code: 0,
+      }),
+    }, undefined, undefined, {
+      cwd: file.dir,
+      env: { WAYLAND_DISPLAY: 'wayland-1', HYPRLAND_INSTANCE_SIGNATURE: 'abc' },
+    });
+
+    expect(result).toMatchObject({ details: { status: 'success', data: { action: 'list-windows', backend: 'hyprland' } } });
+    expect(result?.content).toEqual([
+      expect.objectContaining({ type: 'text', text: expect.stringContaining('available windows: 1') }),
+    ]);
   });
 
   it('returns actionable missing dependency failures from the tool wrapper', async () => {

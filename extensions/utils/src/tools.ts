@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { Type } from 'typebox';
 import { convertMarkdownToAudio, type MarkdownToAudioEngine, type MarkdownToAudioProgressEvent, type MarkdownToAudioResult, type MarkdownToAudioVoiceQuality } from './markdown-to-audio.js';
-import { captureScreenshot, ScreenshotError, summarizeScreenshotResult, type OsReleaseReader, type ScreenshotCommandFinder, type ScreenshotCommandRunner, type ScreenshotResult } from './screenshot.js';
+import { executeScreenshotAction, ScreenshotError, summarizeScreenshotResult, summarizeWindowListResult, type OsReleaseReader, type ScreenshotAction, type ScreenshotCaptureTarget, type ScreenshotCommandFinder, type ScreenshotCommandRunner, type ScreenshotResult, type ScreenshotToolResult, type ScreenshotWindowMatchMode } from './screenshot.js';
 
 type ToolContent = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
 
@@ -33,6 +33,11 @@ export interface MarkdownToAudioParams {
 }
 
 export interface ScreenshotParams {
+  action?: ScreenshotAction;
+  target?: ScreenshotCaptureTarget;
+  windowId?: string;
+  windowTitle?: string;
+  match?: ScreenshotWindowMatchMode;
   outputPath?: string;
   maxInlineBytes?: number;
 }
@@ -61,29 +66,42 @@ const markdownToAudioParameters = Type.Object({
 });
 
 const screenshotParameters = Type.Object({
-  outputPath: Type.Optional(Type.String({ description: 'PNG output path for the screenshot. Defaults to a temporary .png file. Supports relative or absolute paths.' })),
-  maxInlineBytes: Type.Optional(Type.Number({ minimum: 1024, maximum: 50 * 1024 * 1024, description: 'Maximum PNG size to attach inline for immediate visual inspection. Defaults to 5 MiB.' })),
+  action: Type.Optional(Type.String({ description: 'Screenshot action. capture saves an image; list-windows lists Wayland windows available for targeted capture. Defaults to capture.', enum: ['capture', 'list-windows'] } as any)),
+  target: Type.Optional(Type.String({ description: 'Capture target for action=capture. screen captures the full display; active-window and window are Wayland-only and require grim plus compositor window IPC. Defaults to screen.', enum: ['screen', 'active-window', 'window'] } as any)),
+  windowId: Type.Optional(Type.String({ description: 'Wayland window id/address to capture when target=window. Use action=list-windows first for reliable ids.' })),
+  windowTitle: Type.Optional(Type.String({ description: 'Window title to match when target=window and windowId is not provided.' })),
+  match: Type.Optional(Type.String({ description: 'How windowTitle is matched when target=window. Defaults to contains.', enum: ['exact', 'contains', 'regex'] } as any)),
+  outputPath: Type.Optional(Type.String({ description: 'PNG output path for the screenshot. Defaults to a temporary .png file. Supports relative or absolute paths. Ignored for action=list-windows.' })),
+  maxInlineBytes: Type.Optional(Type.Number({ minimum: 1024, maximum: 50 * 1024 * 1024, description: 'Maximum PNG size to attach inline for immediate visual inspection. Defaults to 5 MiB. Ignored for action=list-windows.' })),
 });
 
 export function registerUtilsTools(pi: any): void {
   pi.registerTool({
     name: 'screenshot',
     label: 'Screenshot',
-    description: 'Capture a Linux desktop screenshot, save it as PNG, and attach the image inline in the same tool result for immediate visual inspection. Requires an active X11 or Wayland graphical session and a supported local screenshot utility.',
-    promptSnippet: 'Capture and immediately inspect a Linux desktop screenshot as an inline PNG image.',
+    description: 'Capture a Linux desktop screenshot or list/capture Hyprland windows. Saves PNG captures and attaches the image inline when possible. Requires an active graphical session and supported local utilities; targeted window capture is Hyprland-only via hyprctl plus grim -T.',
+    promptSnippet: 'Capture and immediately inspect a Linux desktop screenshot, or list Wayland windows for targeted capture.',
     promptGuidelines: [
-      'Use screenshot when the user asks to see the screen, inspect the desktop, or capture a screenshot in the current Linux session.',
+      'Use screenshot when the user asks to see the screen, inspect the desktop, capture a screenshot, list visible windows, or capture a specific window in the current Linux session.',
+      'Use screenshot with action=list-windows before target=window when you need to discover available Wayland windows and their ids/titles.',
+      'Use screenshot with target=active-window to capture the focused Wayland window, or target=window plus windowId from list-windows for an unambiguous specific-window capture.',
       'screenshot is Linux-only and requires DISPLAY or WAYLAND_DISPLAY; if neither is present, tell the user Pi is running headless or in a pure shell/TTY and cannot capture a desktop screenshot from that session.',
-      'If screenshot reports missing dependencies, tell the user to install one supported screenshot utility for their distribution/session: grim for wlroots Wayland, gnome-screenshot for GNOME, spectacle for KDE, maim/scrot/ImageMagick import for X11.',
+      'screenshot targeted window capture is Hyprland-only and needs hyprctl plus grim -T. It resolves foreign toplevel identifiers without changing focus.',
+      'If screenshot reports missing dependencies, tell the user to install one supported screenshot utility for their distribution/session: grim for wlroots Wayland, gnome-screenshot for GNOME, spectacle for KDE, maim/scrot/ImageMagick import for X11; for Hyprland list-windows/capture install hyprctl, grim, bash, gcc, pkg-config, wayland-scanner, and Wayland development files.',
       'Let screenshot choose its default temporary output path for quick inspections; pass outputPath only when the user asks to keep the PNG or when a workspace artifact is intentionally useful.',
-      'screenshot saves a PNG and returns the image inline in the same tool call when the active model supports images, so do not ask the user to manually attach or read the file afterward.',
+      'screenshot captures return a PNG inline in the same tool call when the active model supports images; action=list-windows returns text/details only.',
     ],
     parameters: screenshotParameters,
     async execute(_id: string, params: ScreenshotParams, signal?: AbortSignal, _onUpdate?: ToolUpdateCallback, ctx?: ToolExecutionContext) {
       try {
         const executionParams = params as ScreenshotParams & ScreenshotExecutionOverrides;
-        const data = await captureScreenshot({
+        const data = await executeScreenshotAction({
           cwd: ctx?.cwd ?? process.cwd(),
+          action: executionParams.action,
+          target: executionParams.target,
+          windowId: executionParams.windowId,
+          windowTitle: executionParams.windowTitle,
+          match: executionParams.match,
           outputPath: executionParams.outputPath,
           platform: executionParams.platform,
           env: ctx?.env ?? process.env,
@@ -92,7 +110,7 @@ export function registerUtilsTools(pi: any): void {
           runCommand: executionParams.runCommand,
           readOsRelease: executionParams.readOsRelease,
         });
-        const content = await buildScreenshotContent(data, params, ctx);
+        const content = await buildScreenshotActionContent(data, params, ctx);
         return buildSuccessWithContent(content, data);
       } catch (error) {
         if (error instanceof ScreenshotError) {
@@ -143,6 +161,11 @@ function emitProgressUpdate(onUpdate: ToolUpdateCallback | undefined, ctx: ToolE
 
 function buildStatusText(event: MarkdownToAudioProgressEvent): string {
   return event.message.replace(/^markdown_to_audio:\s*/u, 'TTS · ');
+}
+
+async function buildScreenshotActionContent(result: ScreenshotToolResult, params: ScreenshotParams, ctx: ToolExecutionContext | undefined): Promise<ToolContent[]> {
+  if (result.action === 'list-windows') return [{ type: 'text', text: summarizeWindowListResult(result) }];
+  return await buildScreenshotContent(result, params, ctx);
 }
 
 async function buildScreenshotContent(result: ScreenshotResult, params: ScreenshotParams, ctx: ToolExecutionContext | undefined): Promise<ToolContent[]> {

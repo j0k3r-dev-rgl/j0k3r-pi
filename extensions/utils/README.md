@@ -10,7 +10,7 @@ General-purpose Pi utility tools.
 
 #### `screenshot`
 
-Captures the current Linux desktop, saves it as a PNG, and returns the image inline in the same tool result so the agent can inspect it immediately without asking the user to attach or read the file manually.
+Captures the current Linux desktop or a specific Wayland window, saves captures as PNG, and returns captured images inline in the same tool result so the agent can inspect them immediately without asking the user to attach or read the file manually. It can also list Wayland windows for a follow-up targeted capture.
 
 The tool:
 
@@ -18,19 +18,28 @@ The tool:
 - requires an active graphical session (`DISPLAY` for X11 or `WAYLAND_DISPLAY` for Wayland);
 - refuses pure shell, TTY, SSH, container, or headless sessions that do not expose a graphical display;
 - prefers screenshot utilities appropriate for the active session: `grim` for Wayland/wlroots, `gnome-screenshot`, `spectacle`, `maim`, `scrot`, or ImageMagick `import`;
+- can list Hyprland windows with `action: "list-windows"` through `hyprctl clients -j`;
+- can capture the focused Hyprland window with `target: "active-window"`, or a specific Hyprland window with `target: "window"` plus `windowId` or `windowTitle`, using `grim -T` and a resolved `ext_foreign_toplevel_list_v1` identifier so inactive windows can be captured without changing focus;
 - writes `.png` output to a temporary file by default or to `outputPath` when provided;
-- attaches the PNG inline when the active model supports image input and the file is below `maxInlineBytes`;
-- returns actionable install guidance when no supported screenshot utility is installed, including hints for common distro families.
+- attaches capture PNGs inline when the active model supports image input and the file is below `maxInlineBytes`;
+- returns actionable install guidance when no supported screenshot/window utility is installed, including hints for common distro families.
 
 Parameters:
 
-- `outputPath` — optional PNG output path, relative to the workspace or absolute. Defaults to a temporary `.png` file.
-- `maxInlineBytes` — optional maximum PNG size to attach inline. Defaults to 5 MiB.
+- `action` — optional action: `capture` or `list-windows`. Defaults to `capture`.
+- `target` — optional capture target: `screen`, `active-window`, or `window`. Defaults to `screen`. Window targets are Wayland-only.
+- `windowId` — optional Wayland window id/address to capture when `target` is `window`. Prefer ids returned by `action: "list-windows"`.
+- `windowTitle` — optional title to match when `target` is `window` and `windowId` is not provided.
+- `match` — optional `windowTitle` match mode: `exact`, `contains`, or `regex`. Defaults to `contains`.
+- `outputPath` — optional PNG output path, relative to the workspace or absolute. Defaults to a temporary `.png` file. Ignored for `action: "list-windows"`.
+- `maxInlineBytes` — optional maximum PNG size to attach inline. Defaults to 5 MiB. Ignored for `action: "list-windows"`.
 
 Runtime requirements:
 
 - Linux desktop session with `DISPLAY` or `WAYLAND_DISPLAY` set.
 - One supported local screenshot utility installed.
+- For Hyprland window listing/capture: `hyprctl`, `grim`, `bash`, `gcc`, `pkg-config`, `wayland-scanner`, and Wayland protocol/development files.
+- For Hyprland targeted window capture: compositor support for `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, and `grim -T`.
 - A vision-capable active model if the agent must inspect the image inline. If the active model does not accept images, the tool still saves the PNG and reports the path.
 
 Install examples:
@@ -52,9 +61,10 @@ sudo zypper install grim gnome-screenshot spectacle maim scrot ImageMagick
 Notes:
 
 - On Wayland, compositor security rules can block screenshots unless the utility matches the compositor/desktop portal support.
+- Wayland has no universal non-interactive window-listing API. Targeted window listing/capture is intentionally Hyprland-only in this tool and uses `hyprctl` plus `grim -T` to capture the real toplevel buffer instead of cropping the visible screen region.
 - In headless shells there is no desktop surface to capture; start Pi from the graphical session or expose a display first.
 - For quick inspections, omit `outputPath` so screenshots go to the system temporary directory. Pass `outputPath` only when keeping a workspace artifact is intentional.
-- The image is returned inline in the same tool call, so a follow-up `read` call is not needed for normal use.
+- Capture images are returned inline in the same tool call, so a follow-up `read` call is not needed for normal use. `action: "list-windows"` returns text/details only.
 
 #### `markdown_to_audio`
 
@@ -231,7 +241,7 @@ Herramientas utilitarias generales para Pi.
 
 #### `screenshot`
 
-Captura el escritorio Linux actual, guarda la imagen como PNG y devuelve la imagen inline en el mismo resultado de la tool para que el agente pueda inspeccionarla inmediatamente sin pedirle al usuario que la adjunte o la lea manualmente.
+Captura el escritorio Linux actual o una ventana Wayland específica, guarda las capturas como PNG y devuelve las imágenes inline en el mismo resultado de la tool para que el agente pueda inspeccionarlas inmediatamente sin pedirle al usuario que las adjunte o las lea manualmente. También puede listar ventanas Wayland para una captura dirigida posterior.
 
 La herramienta:
 
@@ -239,19 +249,28 @@ La herramienta:
 - requiere una sesión gráfica activa (`DISPLAY` para X11 o `WAYLAND_DISPLAY` para Wayland);
 - rechaza sesiones de shell puro, TTY, SSH, contenedor o headless que no exponen un display gráfico;
 - prefiere utilidades adecuadas para la sesión activa: `grim` para Wayland/wlroots, `gnome-screenshot`, `spectacle`, `maim`, `scrot` o `import` de ImageMagick;
+- puede listar ventanas Hyprland con `action: "list-windows"` usando `hyprctl clients -j`;
+- puede capturar la ventana Hyprland enfocada con `target: "active-window"`, o una ventana Hyprland específica con `target: "window"` más `windowId` o `windowTitle`, usando `grim -T` y un identifier resuelto de `ext_foreign_toplevel_list_v1` para capturar ventanas inactivas sin cambiar el foco;
 - escribe salida `.png` en un archivo temporal por defecto o en `outputPath` si se pasa;
-- adjunta el PNG inline cuando el modelo activo soporta imágenes y el archivo está debajo de `maxInlineBytes`;
-- devuelve guía accionable de instalación cuando no hay una utilidad de screenshot soportada, incluyendo hints para familias de distribuciones comunes.
+- adjunta los PNG de captura inline cuando el modelo activo soporta imágenes y el archivo está debajo de `maxInlineBytes`;
+- devuelve guía accionable de instalación cuando no hay una utilidad de screenshot/ventanas soportada, incluyendo hints para familias de distribuciones comunes.
 
 Parámetros:
 
-- `outputPath` — ruta opcional de salida PNG, relativa al workspace o absoluta. Por defecto usa un `.png` temporal.
-- `maxInlineBytes` — tamaño máximo opcional del PNG para adjuntar inline. Por defecto 5 MiB.
+- `action` — acción opcional: `capture` o `list-windows`. Por defecto es `capture`.
+- `target` — objetivo opcional de captura: `screen`, `active-window` o `window`. Por defecto es `screen`. Los objetivos de ventana son solo Wayland.
+- `windowId` — id/dirección Wayland opcional para capturar cuando `target` es `window`. Preferir ids devueltos por `action: "list-windows"`.
+- `windowTitle` — título opcional para hacer match cuando `target` es `window` y no se pasa `windowId`.
+- `match` — modo opcional de match para `windowTitle`: `exact`, `contains` o `regex`. Por defecto es `contains`.
+- `outputPath` — ruta opcional de salida PNG, relativa al workspace o absoluta. Por defecto usa un `.png` temporal. Se ignora con `action: "list-windows"`.
+- `maxInlineBytes` — tamaño máximo opcional del PNG para adjuntar inline. Por defecto 5 MiB. Se ignora con `action: "list-windows"`.
 
 Requisitos runtime:
 
 - Sesión de escritorio Linux con `DISPLAY` o `WAYLAND_DISPLAY` seteado.
 - Una utilidad local de screenshot soportada instalada.
+- Para listar/capturar ventanas Hyprland: `hyprctl`, `grim`, `bash`, `gcc`, `pkg-config`, `wayland-scanner` y archivos de protocolos/desarrollo Wayland.
+- Para captura dirigida de ventanas Hyprland: soporte del compositor para `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1` y `grim -T`.
 - Un modelo activo con soporte de visión si el agente debe inspeccionar la imagen inline. Si el modelo activo no acepta imágenes, la tool igual guarda el PNG y reporta la ruta.
 
 Ejemplos de instalación:
@@ -273,9 +292,10 @@ sudo zypper install grim gnome-screenshot spectacle maim scrot ImageMagick
 Notas:
 
 - En Wayland, las reglas de seguridad del compositor pueden bloquear screenshots si la utilidad no coincide con el compositor o soporte de portales del desktop.
+- Wayland no tiene una API universal no interactiva para listar ventanas. La captura/lista dirigida de ventanas es intencionalmente solo Hyprland en esta tool y usa `hyprctl` más `grim -T` para capturar el buffer real del toplevel en vez de recortar la región visible de pantalla.
 - En shells headless no hay superficie de escritorio para capturar; inicia Pi desde la sesión gráfica o expón un display primero.
 - Para inspecciones rápidas, omitir `outputPath` para que las capturas vayan al directorio temporal del sistema. Pasar `outputPath` solo cuando conservar un artefacto en el workspace sea intencional.
-- La imagen vuelve inline en el mismo tool call, así que normalmente no hace falta un `read` posterior.
+- Las imágenes de captura vuelven inline en el mismo tool call, así que normalmente no hace falta un `read` posterior. `action: "list-windows"` devuelve solo texto/details.
 
 #### `markdown_to_audio`
 
