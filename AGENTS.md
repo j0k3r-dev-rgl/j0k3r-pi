@@ -98,6 +98,9 @@ Rules:
 - Use `find_references` for usages, imports, instantiations, reads/writes, callbacks, inheritance, and impact evidence.
 - Use `function_call_tree` for outbound behavior and `reverse_function_call_tree` for callers/upstream impact.
 - Use `workspace_graph_status` when graph freshness, coverage, or reliability matters before relying on graph-backed code inspection.
+- When code context is needed before choosing a route, convert code-research results into a concise orchestrator evidence packet: relevant files/symbols, definitions, references/call paths, likely impact, test surfaces, unknowns, and confidence.
+- If code-research provides enough context for a safe workflow decision, do not delegate discovery just to duplicate the same code lookup.
+- If code-research is stale/insufficient, the touched surface is unclear, non-code evidence is needed, or uncertainty remains material, delegate bounded read-only discovery with the evidence packet and open questions.
 - Use `read` only after a known file is identified by code-research, the user, an artifact, or prior context.
 - Use `bash` for non-code files, file inventory, git status, validation commands, tests/build/lint, or a justified fallback when code-research cannot express the lookup or lacks public language coverage. If falling back to `bash` for source code, state the reason.
 
@@ -128,7 +131,11 @@ Rules:
 
 - The main agent is the orchestrator.
 - Only the orchestrator delegates work to subagents.
-- Project subagents are SDD-focused, with `discovery` as the explicit read-only research exception used when the orchestrator needs evidence before choosing a workflow.
+- Do not hoard non-trivial work in the orchestrator. Use subagents when they add missing evidence, independent review, focused execution, parallelism, or safer handoff.
+- `discovery` is the default read-only subagent when the orchestrator lacks context and investigation is needed. First use code-research tools for source-code evidence when they can answer the lookup; skip `discovery` when that evidence is already sufficient.
+- For non-trivial implementation or validation, prefer focused SDD subagents over doing everything inline unless the selected route is `simple-tdd` / `simple-tdd-with-review` and the scope remains localized, low-risk, and sufficiently evidenced. Use `sdd-apply` for approved task packets, `sdd-verify` for independent review/verification, and formal SDD phase subagents by default when formal SDD is selected.
+- The orchestrator may work inline only when it has enough context and the work is trivial, localized, low-risk, or the user explicitly chooses direct execution.
+- Every delegated task must include a compact task packet: scope, relevant evidence, constraints, open questions, acceptance checks, and explicit limits on what the subagent may change or decide.
 - Subagents must not delegate to other subagents or communicate with each other directly.
 - Detailed subagent and SDD phase behavior lives in `workflow-triage` plus the selected `sdd-workflow` core/companion modules.
 
