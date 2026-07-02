@@ -40,6 +40,7 @@ export interface FindReferencesInput {
   kind?: SymbolKind;
   scope?: SearchScope;
   glob?: string;
+  reference_kinds?: ReferenceKind[];
 }
 
 export type SearchMode = 'exact' | 'prefix' | 'contains';
@@ -124,6 +125,7 @@ export interface ReferenceLocation {
   owner_kind?: OwnerKind;
   reference_kind: ReferenceKind;
   called_as?: string;
+  source_line?: string;
   receiver_name?: string;
   receiver_type?: string;
   is_application: boolean;

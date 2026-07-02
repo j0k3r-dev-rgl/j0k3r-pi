@@ -78,6 +78,10 @@ export interface ExtractedCall {
   column: number;
 }
 
+export interface ExtractCallsOptions {
+  includeNestedCallableBodies?: boolean;
+}
+
 export interface ResolvedTarget {
   callable?: IndexedCallable;
   className?: string;
@@ -557,23 +561,24 @@ function buildNode(options: BuildNodeOptions): CallTreeNode {
   return node;
 }
 
-export function extractCalls(callableNode: any): ExtractedCall[] {
+export function extractCalls(callableNode: any, options: ExtractCallsOptions = {}): ExtractedCall[] {
   const body = callableNode.childForFieldName('body') ?? callableNode.childForFieldName('value');
   if (!body) return [];
 
   const calls: ExtractedCall[] = [];
+  const includeNestedCallableBodies = options.includeNestedCallableBodies === true;
 
   function visit(node: any, nestedCallable = false): void {
     if (!node?.isNamed) return;
 
-    if (nestedCallable && isNestedCallableBoundary(node)) {
+    if (!includeNestedCallableBodies && nestedCallable && isNestedCallableBoundary(node)) {
       return;
     }
 
     if (node.type === 'call_expression') {
       const extracted = extractCall(node);
       if (extracted) calls.push(extracted);
-      return;
+      if (!includeNestedCallableBodies) return;
     }
 
     for (const child of node.children) {

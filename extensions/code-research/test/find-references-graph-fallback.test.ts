@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { findReferences } from '../src/core/find-references-resolver.js';
@@ -20,6 +20,58 @@ async function createProject(files: Record<string, string>): Promise<string> {
 }
 
 describe('findReferences graph fallback', () => {
+  it('uses graph-backed direct call references when requested explicitly', async () => {
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/service.ts': `export function runService(): void {}\n`,
+      'src/controller.ts': `import { runService } from './service.js';\n\nexport function handle(): void {\n  runService();\n}\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+    await rm(join(rootDir, 'src/service.ts'));
+
+    const results = await findReferences(rootDir, {
+      path: 'src/service.ts',
+      symbol: 'runService',
+      language: 'ts',
+      kind: 'function',
+      reference_kinds: ['call'],
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      file: join(rootDir, 'src/controller.ts'),
+      line: 4,
+      column: 2,
+      context_symbol: 'handle',
+      reference_kind: 'call',
+      called_as: 'runService()',
+    });
+  });
+
+  it('uses graph-backed direct call references for directory-scoped targets', async () => {
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/service.ts': `export function runService(): void {}\n`,
+      'src/controller.ts': `import { runService } from './service.js';\n\nexport function handle(): void {\n  runService();\n}\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+    await rm(join(rootDir, 'src/service.ts'));
+
+    const results = await findReferences(rootDir, {
+      path: 'src',
+      symbol: 'runService',
+      language: 'ts',
+      kind: 'function',
+      reference_kinds: ['call'],
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].called_as).toBe('runService()');
+    expect(results[0].context_symbol).toBe('handle');
+  });
+
   it('falls back to direct lookup when the graph is stale', async () => {
     const rootDir = await createProject({
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,

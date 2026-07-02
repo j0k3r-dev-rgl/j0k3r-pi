@@ -61,7 +61,14 @@ export function normalizeGraphLanguage(input: {
   return undefined;
 }
 
-export function getFindReferencesGraphCoverage(_input: FindReferencesInput): FindReferencesGraphCoverage {
+export function getFindReferencesGraphCoverage(input: FindReferencesInput): FindReferencesGraphCoverage {
+  if (Array.isArray(input.reference_kinds) && input.reference_kinds.length > 0) {
+    return {
+      requiredReferenceKinds: input.reference_kinds,
+      graphCoverageMode: input.reference_kinds.every((kind) => GRAPH_REFERENCE_KINDS.has(kind)) ? 'supported-subset' : 'conservative-fallback',
+    };
+  }
+
   return {
     requiredReferenceKinds: undefined,
     graphCoverageMode: 'conservative-fallback',

@@ -51,7 +51,7 @@ async function findCallableReferences(
     if (!matchesRequestedLanguage(caller.language, input.language)) continue;
     const aliasNames = collectCallableAliases(caller, target.symbol);
 
-    for (const call of extractCalls(caller.node)) {
+    for (const call of extractCalls(caller.node, { includeNestedCallableBodies: true })) {
       const resolved = resolveCall(index, caller, call);
       if (resolved.callable && sameCallable(resolved.callable, target)) {
         results.push(createCallableReference(caller, target, call.line, call.column, 'call', call.text, resolved.receiverType, call.receiver));

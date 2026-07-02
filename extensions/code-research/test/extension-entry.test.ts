@@ -139,6 +139,8 @@ describe('code-research extension entry integration', () => {
     expect(result.details.found).toBe(2);
     expect(result.details.results.map((item: any) => item.context_symbol).sort()).toEqual(['run', 'warmup']);
     expect(result.details.results.every((item: any) => item.reference_kind === 'call')).toBe(true);
+    expect(result.content[0].text).toContain('src/main/java/app/AppService.java:5:4: helper();');
+    expect(result.details.results[0].source_line).toBe('helper();');
   });
 
   it('registers and executes function_call_tree through the extension entrypoint', async () => {

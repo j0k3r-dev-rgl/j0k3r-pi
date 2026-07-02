@@ -38,6 +38,26 @@ describe('find_references', () => {
     expect(results.every((item) => item.called_as === 'helper()')).toBe(true);
   });
 
+  it('finds TypeScript call references inside nested function bodies', async () => {
+    const rootDir = await createProject('pi-find-references-ts-nested', {
+      'src/runtime-state.ts': `export function setCurrentMemorySessionId(id: string | undefined): void {\n  void id;\n}\n`,
+      'src/lifecycle.ts': `import { setCurrentMemorySessionId } from './runtime-state.js';\n\nexport function registerMemoryLifecycle(): void {\n  function ensureMemorySession(activeMemorySessionId: string): void {\n    setCurrentMemorySessionId(activeMemorySessionId);\n  }\n\n  const closeActiveMemorySession = async (): Promise<void> => {\n    setCurrentMemorySessionId(undefined);\n  };\n\n  ensureMemorySession('session_1');\n  void closeActiveMemorySession;\n}\n`,
+    });
+
+    const results = await findReferences(rootDir, {
+      path: 'src/runtime-state.ts',
+      symbol: 'setCurrentMemorySessionId',
+      language: 'ts',
+      kind: 'function',
+    });
+
+    expect(results.map((item) => item.called_as).sort()).toEqual([
+      'setCurrentMemorySessionId(activeMemorySessionId)',
+      'setCurrentMemorySessionId(undefined)',
+    ]);
+    expect(results.every((item) => item.reference_kind === 'call')).toBe(true);
+  });
+
   it('finds JavaScript call references for a function across multiple files', async () => {
     const rootDir = await createProject('pi-find-references-js', {
       'src/service.js': `export function helper() {}\n\nexport function runService() {\n  helper();\n}\n\nexport function warmupService() {\n  helper();\n}\n`,
@@ -206,6 +226,24 @@ describe('find_references', () => {
     expect(new Set(results.map((item) => item.reference_kind))).toEqual(new Set(['call', 'callback']));
     expect(results.filter((item) => item.reference_kind === 'call').map((item) => item.context_symbol)).toContain('run');
     expect(results.filter((item) => item.reference_kind === 'callback').map((item) => item.context_symbol)).toContain('run');
+  });
+
+  it('filters fallback references by requested reference kinds', async () => {
+    const rootDir = await createProject('pi-find-references-filter-kinds', {
+      'src/helpers.ts': `export const helper = () => {};\n\nexport function register(cb: () => void): void {\n  cb();\n}\n\nexport function run(): void {\n  helper();\n  register(helper);\n}\n`,
+    });
+
+    const results = await findReferences(rootDir, {
+      path: 'src/helpers.ts',
+      symbol: 'helper',
+      language: 'ts',
+      kind: 'function',
+      reference_kinds: ['call'],
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].reference_kind).toBe('call');
+    expect(results[0].called_as).toBe('helper()');
   });
 
   it('finds JavaScript destructured export, direct call, and callback references', async () => {

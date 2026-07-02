@@ -9,19 +9,25 @@ import type { FindReferencesInput, ReferenceLocation } from '../types.js';
 export async function findReferences(cwd: string, input: FindReferencesInput): Promise<ReferenceLocation[]> {
   const config = await loadCodeResearchConfig(cwd);
   const graphResults = config.graph.enable ? await findReferencesFromGraph(cwd, input) : undefined;
-  if (graphResults) return graphResults;
+  if (graphResults !== undefined) return filterReferenceKinds(graphResults, input);
 
   switch (input.language ?? 'java') {
     case 'java':
-      return findJavaReferences(cwd, input);
+      return filterReferenceKinds(await findJavaReferences(cwd, input), input);
     case 'ts':
     case 'js':
-      return findTypeScriptReferences(cwd, input);
+      return filterReferenceKinds(await findTypeScriptReferences(cwd, input), input);
     case 'auto':
       throw new Error('find_references does not support auto language detection yet');
     default:
       throw new Error(`Unsupported language: ${input.language}`);
   }
+}
+
+function filterReferenceKinds(results: ReferenceLocation[], input: FindReferencesInput): ReferenceLocation[] {
+  if (!Array.isArray(input.reference_kinds) || input.reference_kinds.length === 0) return results;
+  const requestedKinds = new Set(input.reference_kinds);
+  return results.filter((result) => requestedKinds.has(result.reference_kind));
 }
 
 async function findReferencesFromGraph(cwd: string, input: FindReferencesInput): Promise<ReferenceLocation[] | undefined> {

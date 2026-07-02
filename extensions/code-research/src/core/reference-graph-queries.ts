@@ -1,3 +1,4 @@
+import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { FindReferencesInput, GraphLookupPolicy, GraphManifest, GraphNode, ReferenceLocation, WorkspaceGraphState } from '../types.js';
 import { readSubprojectGraphShard } from './graph-persistence.js';
@@ -25,7 +26,9 @@ export async function queryReferencesFromGraph(options: {
   if (allShards.length === 0) return undefined;
 
   const targetPath = resolve(cwd, input.path);
-  const relativeTarget = targetPath.startsWith(cwd) ? targetPath.slice(cwd.length + 1).replace(/\\/g, '/') : input.path.replace(/\\/g, '/');
+  const targetStat = await stat(targetPath).catch(() => undefined);
+  const targetIsDirectory = input.scope === 'directory' || targetStat?.isDirectory() === true;
+  const relativeTarget = (targetPath.startsWith(cwd) ? targetPath.slice(cwd.length + 1).replace(/\\/g, '/') : input.path.replace(/\\/g, '/')).replace(/\/$/, '');
   const allNodes = allShards.flatMap((shard) => shard!.nodes);
   const allEdges = allShards.flatMap((shard) => shard!.edges);
   const symbolNodes = allNodes.filter((node): node is Extract<(typeof allNodes)[number], { kind: 'symbol' }> => node.kind === 'symbol');
@@ -33,15 +36,18 @@ export async function queryReferencesFromGraph(options: {
   const target = symbolNodes.find((node) => {
     if (node.name !== input.symbol) return false;
     if (input.kind && node.symbolKind !== input.kind) return false;
-    return node.file === relativeTarget || node.file.endsWith(`/${relativeTarget}`) || relativeTarget.endsWith(node.file);
+    return matchesTargetFile(node.file, relativeTarget, targetIsDirectory);
   });
   if (!target) return undefined;
 
   const nodeById = new Map<string, GraphNode>(allNodes.map((node) => [node.id, node]));
   const references: ReferenceLocation[] = [];
 
+  const requestedKinds = new Set(input.reference_kinds ?? []);
   for (const edge of allEdges) {
     if (!(edge.kind === 'calls' || edge.kind === 'implements' || edge.kind === 'extends')) continue;
+    const referenceKind = edge.kind === 'calls' ? 'call' : edge.kind === 'implements' ? 'implements' : 'extends';
+    if (requestedKinds.size > 0 && !requestedKinds.has(referenceKind)) continue;
     const matchesTarget = edge.to === target.id || ((edge.kind === 'implements' || edge.kind === 'extends') && edge.to === `external:java:${target.name}`);
     if (!matchesTarget) continue;
     const fromNode = nodeById.get(edge.from);
@@ -59,7 +65,7 @@ export async function queryReferencesFromGraph(options: {
       context_kind: fromNode.symbolKind,
       context_class: fromNode.owner,
       owner_kind: fromNode.ownerKind ?? 'unknown',
-      reference_kind: edge.kind === 'calls' ? 'call' : edge.kind === 'implements' ? 'implements' : 'extends',
+      reference_kind: referenceKind,
       called_as: edge.callsite?.text,
       receiver_name: edge.callsite?.receiverName,
       receiver_type: edge.callsite?.receiverType,
@@ -70,4 +76,13 @@ export async function queryReferencesFromGraph(options: {
   }
 
   return references;
+}
+
+function matchesTargetFile(nodeFile: string, relativeTarget: string, targetIsDirectory: boolean): boolean {
+  const normalizedNodeFile = nodeFile.replace(/\\/g, '/');
+  const normalizedTarget = relativeTarget.replace(/\\/g, '/').replace(/\/$/, '');
+  if (targetIsDirectory) {
+    return normalizedNodeFile === normalizedTarget || normalizedNodeFile.startsWith(`${normalizedTarget}/`);
+  }
+  return normalizedNodeFile === normalizedTarget || normalizedNodeFile.endsWith(`/${normalizedTarget}`) || normalizedTarget.endsWith(normalizedNodeFile);
 }
