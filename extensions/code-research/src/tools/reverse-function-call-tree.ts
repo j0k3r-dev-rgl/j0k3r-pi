@@ -2,6 +2,7 @@ import { Type } from 'typebox';
 import { loadCodeResearchConfig } from '../config.js';
 import { executeReverseFunctionCallTree } from '../core/reverse-function-call-tree-resolver.js';
 import { ensureWorkspaceGraphFreshness } from '../core/workspace-graph.js';
+import { renderCodeResearchToolResult } from '../render.js';
 import type { FunctionCallTreeInput } from '../types.js';
 
 export function registerReverseFunctionCallTreeTool(pi: any) {
@@ -26,6 +27,10 @@ export function registerReverseFunctionCallTreeTool(pi: any) {
       include_external: Type.Optional(Type.Boolean({ description: 'Reserved for API parity with function_call_tree. Reverse caller expansion returns application callers only. Default: false.' })),
       compacted: Type.Optional(Type.Boolean({ description: 'Reserved for API parity with function_call_tree.' })),
     }),
+
+    renderResult(result: any, options: any, theme: any) {
+      return renderCodeResearchToolResult('reverse_function_call_tree', result, options, theme);
+    },
 
     async execute(_toolCallId: any, params: any, _signal: any, _onUpdate: any, ctx: any) {
       const input: FunctionCallTreeInput = {

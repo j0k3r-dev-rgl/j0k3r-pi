@@ -2,6 +2,7 @@ import { Type } from 'typebox';
 import { loadCodeResearchConfig } from '../config.js';
 import { executeFunctionCallTree } from '../core/function-call-tree-resolver.js';
 import { ensureWorkspaceGraphFreshness } from '../core/workspace-graph.js';
+import { renderCodeResearchToolResult } from '../render.js';
 import type { FunctionCallTreeInput } from '../types.js';
 
 export function registerFunctionCallTreeTool(pi: any) {
@@ -26,6 +27,10 @@ export function registerFunctionCallTreeTool(pi: any) {
       include_external: Type.Optional(Type.Boolean({ description: 'If true, include framework/language calls as external leaf nodes. Default: false.' })),
       compacted: Type.Optional(Type.Boolean({ description: 'If true, compact trivial data-access sibling nodes while preserving the call tree structure.' })),
     }),
+
+    renderResult(result: any, options: any, theme: any) {
+      return renderCodeResearchToolResult('function_call_tree', result, options, theme);
+    },
 
     async execute(_toolCallId: any, params: any, _signal: any, _onUpdate: any, ctx: any) {
       const input: FunctionCallTreeInput = {

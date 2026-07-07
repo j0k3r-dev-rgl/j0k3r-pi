@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { loadCodeResearchConfig } from '../config.js';
 import { readWorkspaceGraphManifest, readWorkspaceGraphState, readSubprojectGraphShard } from './graph-persistence.js';
 import { evaluateGraphUsability } from './graph-policy.js';
-import { getParser, parseSource } from './parser.js';
+import { getParserForFile, parseSource } from './parser.js';
 import { detectLanguage, resolveTargetFiles } from './shared.js';
 import {
   buildSymbolLocation as buildTypeScriptSymbolLocation,
@@ -107,7 +107,7 @@ async function findSymbolDirect(
     if (!parsed) {
       const language = detectLanguage(filePath, explicitLanguage);
       const source = await readFile(filePath, 'utf8');
-      const parser = getParser(language);
+      const parser = getParserForFile(filePath, language);
 
       let tree: any;
       try {
@@ -132,12 +132,13 @@ async function findSymbolDirect(
     const symbols = adapter.extractSymbols(file.rootNode);
     for (const sym of symbols) {
       if (!matchesSymbol(sym.name, input.symbol, searchMode)) continue;
-      if (input.kind && sym.kind !== input.kind) continue;
+      const matchedKind = input.kind === 'function' && sym.kind === 'variable' && sym.isImplementation ? 'function' : sym.kind;
+      if (input.kind && matchedKind !== input.kind) continue;
 
       const location = adapter.buildSymbolLocation(
         file.path,
         sym.name,
-        sym.kind,
+        matchedKind,
         sym.node,
         sym.isDefinition,
         sym.isImplementation,

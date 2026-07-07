@@ -3,7 +3,7 @@ export type SymbolKind = 'function' | 'class' | 'method' | 'interface' | 'variab
 export type SearchScope = 'file' | 'directory';
 export type WorkspaceGraphStatusKind = 'missing' | 'fresh' | 'stale' | 'refreshing' | 'partial' | 'errored' | 'incompatible';
 export type GraphNodeKind = 'workspace' | 'subproject' | 'file' | 'symbol';
-export type GraphEdgeKind = 'contains' | 'imports' | 'calls' | 'implements' | 'extends' | 'entrypoint';
+export type GraphEdgeKind = 'contains' | 'imports' | 'calls' | 'reads' | 'implements' | 'extends' | 'entrypoint';
 
 export interface SymbolLocation {
   file: string;

@@ -45,8 +45,8 @@ export async function queryReferencesFromGraph(options: {
 
   const requestedKinds = new Set(input.reference_kinds ?? []);
   for (const edge of allEdges) {
-    if (!(edge.kind === 'calls' || edge.kind === 'implements' || edge.kind === 'extends')) continue;
-    const referenceKind = edge.kind === 'calls' ? 'call' : edge.kind === 'implements' ? 'implements' : 'extends';
+    if (!(edge.kind === 'calls' || edge.kind === 'reads' || edge.kind === 'implements' || edge.kind === 'extends')) continue;
+    const referenceKind = edge.kind === 'calls' ? 'call' : edge.kind === 'reads' ? 'read' : edge.kind === 'implements' ? 'implements' : 'extends';
     if (requestedKinds.size > 0 && !requestedKinds.has(referenceKind)) continue;
     const matchesTarget = edge.to === target.id || ((edge.kind === 'implements' || edge.kind === 'extends') && edge.to === `external:java:${target.name}`);
     if (!matchesTarget) continue;

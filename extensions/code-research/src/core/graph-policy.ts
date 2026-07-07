@@ -39,7 +39,7 @@ export interface FindReferencesGraphCoverage {
 }
 
 export const GRAPH_POLICY_SUPPORTED_LANGUAGES = new Set(['ts', 'js', 'java'] as const);
-export const GRAPH_REFERENCE_KINDS = new Set<ReferenceKind>(['call', 'implements', 'extends']);
+export const GRAPH_REFERENCE_KINDS = new Set<ReferenceKind>(['call', 'read', 'implements', 'extends']);
 const UNUSABLE_GRAPH_STATUSES = new Set<WorkspaceGraphStatusKind>([
   'missing',
   'partial',

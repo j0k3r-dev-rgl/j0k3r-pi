@@ -1,5 +1,6 @@
 import { Type } from 'typebox';
 import { findSymbol } from '../core/find-symbol-resolver.js';
+import { renderCodeResearchToolResult } from '../render.js';
 import type { FindSymbolInput } from '../types.js';
 
 export function registerFindSymbolTool(pi: any) {
@@ -68,6 +69,10 @@ export function registerFindSymbolTool(pi: any) {
         )
       ),
     }),
+
+    renderResult(result: any, options: any, theme: any) {
+      return renderCodeResearchToolResult('find_symbol', result, options, theme);
+    },
 
     async execute(_toolCallId: any, params: any, _signal: any, _onUpdate: any, ctx: any) {
       const input: FindSymbolInput = {

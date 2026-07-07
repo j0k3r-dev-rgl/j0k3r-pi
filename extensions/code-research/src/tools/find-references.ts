@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { relative } from 'node:path';
 import { Type } from 'typebox';
 import { findReferences } from '../core/find-references-resolver.js';
+import { renderCodeResearchToolResult } from '../render.js';
 import type { FindReferencesInput, ReferenceLocation } from '../types.js';
 
 export function registerFindReferencesTool(pi: any) {
@@ -26,10 +27,15 @@ export function registerFindReferencesTool(pi: any) {
       glob: Type.Optional(Type.String({ description: 'Optional glob pattern to filter files when scanning a directory.' })),
       reference_kinds: Type.Optional(Type.Array(Type.Union([
         Type.Literal('call'),
+        Type.Literal('read'),
         Type.Literal('implements'),
         Type.Literal('extends'),
       ]), { description: 'Optional fast-path filter for graph-backed references. When set to supported kinds such as call, find_references may use the persisted workspace graph and return only those reference kinds.' })),
     }),
+    renderResult(result: any, options: any, theme: any) {
+      return renderCodeResearchToolResult('find_references', result, options, theme);
+    },
+
     async execute(_toolCallId: any, params: any, _signal: any, _onUpdate: any, ctx: any) {
       const input: FindReferencesInput = {
         path: params.path,

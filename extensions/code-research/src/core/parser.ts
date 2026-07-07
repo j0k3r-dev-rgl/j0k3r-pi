@@ -3,6 +3,7 @@ import tsModule from 'tree-sitter-typescript';
 import jsModule from 'tree-sitter-javascript';
 import javaModule from 'tree-sitter-java';
 import pythonModule from 'tree-sitter-python';
+import { extname } from 'node:path';
 import type { SupportedLanguage } from '../types.js';
 
 const { typescript, tsx } = tsModule;
@@ -19,13 +20,7 @@ let javaParser: Parser | undefined;
 let pythonParser: Parser | undefined;
 
 export function getParser(language: Exclude<SupportedLanguage, 'auto'>): Parser {
-  if (language === 'ts') {
-    if (!tsParser) {
-      tsParser = new Parser();
-      tsParser.setLanguage(typescript);
-    }
-    return tsParser;
-  }
+  if (language === 'ts') return getTypeScriptParser();
 
   if (language === 'java') {
     if (!javaParser) {
@@ -48,6 +43,26 @@ export function getParser(language: Exclude<SupportedLanguage, 'auto'>): Parser 
     jsParser.setLanguage(JavaScript);
   }
   return jsParser;
+}
+
+export function getParserForFile(filePath: string, language: Exclude<SupportedLanguage, 'auto'>): Parser {
+  if (language === 'ts' && extname(filePath).toLowerCase() === '.tsx') {
+    if (!tsxParser) {
+      tsxParser = new Parser();
+      tsxParser.setLanguage(tsx);
+    }
+    return tsxParser;
+  }
+
+  return getParser(language);
+}
+
+function getTypeScriptParser(): Parser {
+  if (!tsParser) {
+    tsParser = new Parser();
+    tsParser.setLanguage(typescript);
+  }
+  return tsParser;
 }
 
 export function parseSource(

@@ -5,6 +5,7 @@ import {
   buildTypeScriptProjectIndex,
   extractCalls,
   resolveCall,
+  resolveExportedCallable,
   type IndexedCallable,
   type IndexedClass,
   type TypeScriptProjectIndex,
@@ -47,6 +48,34 @@ async function findCallableReferences(
   if (!target) return [];
 
   const results: ReferenceLocation[] = [];
+  if (isJsxLikeFile(target.file)) {
+    for (const file of index.files.values()) {
+      if (!matchesRequestedLanguage(file.language, input.language)) continue;
+      const localNames = new Set<string>();
+      if (file.file === target.file) localNames.add(target.symbol);
+
+      for (const binding of file.imports.values()) {
+        const targetImport = resolveTypeScriptImportCandidates(file.file, binding.source, index.projectConfig).find((candidate) => index.files.has(candidate));
+        if (!targetImport) continue;
+        const exported = binding.importedName === 'default'
+          ? resolveExportedCallable(index, targetImport, 'default')
+          : resolveExportedCallable(index, targetImport, binding.importedName) ?? resolveExportedCallable(index, targetImport, target.symbol);
+        if (!exported || !sameCallable(exported, target)) continue;
+
+        localNames.add(binding.localName);
+        const match = findRegexPosition(file.source, new RegExp(`\\b${escapeRegExp(binding.localName)}\\b`));
+        if (match) results.push(createRef(file.file, input, 'import', match.line, match.column, file.source, index));
+      }
+
+      for (const localName of localNames) {
+        const jsxTagPattern = new RegExp(`<\\s*${escapeRegExp(localName)}(?:\\s|/|>)`, 'g');
+        for (const match of findAllRegexPositions(file.source, jsxTagPattern)) {
+          results.push(createRef(file.file, input, 'read', match.line, match.column, file.source, index));
+        }
+      }
+    }
+  }
+
   for (const caller of index.callables) {
     if (!matchesRequestedLanguage(caller.language, input.language)) continue;
     const aliasNames = collectCallableAliases(caller, target.symbol);
@@ -135,6 +164,10 @@ async function findTypeLikeReferences(
   }
 
   return dedupeReferences(references);
+}
+
+function isJsxLikeFile(filePath: string): boolean {
+  return /\.[jt]sx$/i.test(filePath);
 }
 
 function createRef(

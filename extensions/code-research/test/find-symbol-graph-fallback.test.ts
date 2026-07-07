@@ -67,4 +67,88 @@ describe('findSymbol graph fallback', () => {
     expect(results[0].signature).toContain('runService');
     expect(results[0].code).toContain('helper();');
   });
+
+  it('indexes exported TSX arrow function components in the fresh graph', async () => {
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/ImageUploader.tsx': `export const ImageUploader = ({ label }: { label: string }) => {\n  return <section><span>{label}</span></section>;\n};\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+
+    const results = await findSymbol(rootDir, {
+      path: 'src/ImageUploader.tsx',
+      symbol: 'ImageUploader',
+      language: 'ts',
+      kind: 'function',
+      include_signature: true,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].symbol).toBe('ImageUploader');
+    expect(results[0].file).toBe(join(rootDir, 'src/ImageUploader.tsx'));
+    expect(results[0].signature).toContain('ImageUploader');
+  });
+
+  it('indexes TSX components with separate default identifier exports in the fresh graph', async () => {
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/ImageUploader.tsx': `const ImageUploader = ({ label }: { label: string }) => {\n  return <section><span>{label}</span></section>;\n};\n\nexport default ImageUploader;\n`,
+      'src/documentacion.tsx': `import Uploader from './ImageUploader';\n\nexport function Documentation() {\n  return <Uploader name="file" label="Documento" />;\n}\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+
+    const results = await findSymbol(rootDir, {
+      path: 'src/ImageUploader.tsx',
+      symbol: 'ImageUploader',
+      language: 'ts',
+      kind: 'function',
+      include_signature: true,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].symbol).toBe('ImageUploader');
+    expect(results[0].signature).toContain('ImageUploader');
+  });
+
+  it('indexes TSX components wrapped by arbitrary library helpers in the fresh graph', async () => {
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/ImageUploader.tsx': `declare function withWidgetBehavior<T>(value: T): T;\n\nexport const ImageUploader = withWidgetBehavior(({ label }: { label: string }) => {\n  return <section><span>{label}</span></section>;\n});\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+
+    const results = await findSymbol(rootDir, {
+      path: 'src/ImageUploader.tsx',
+      symbol: 'ImageUploader',
+      language: 'ts',
+      kind: 'function',
+      include_signature: true,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].symbol).toBe('ImageUploader');
+    expect(results[0].signature).toContain('ImageUploader');
+  });
+
+  it('finds TSX arrow function components with direct fallback when no graph exists', async () => {
+    const rootDir = await createProject({
+      'src/ImageUploader.tsx': `export const ImageUploader = ({ label }: { label: string }) => {\n  return <section><span>{label}</span></section>;\n};\n`,
+    });
+
+    const results = await findSymbol(rootDir, {
+      path: 'src/ImageUploader.tsx',
+      symbol: 'ImageUploader',
+      language: 'ts',
+      kind: 'function',
+      include_signature: true,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].symbol).toBe('ImageUploader');
+    expect(results[0].file).toBe(join(rootDir, 'src/ImageUploader.tsx'));
+    expect(results[0].signature).toContain('ImageUploader');
+  });
 });

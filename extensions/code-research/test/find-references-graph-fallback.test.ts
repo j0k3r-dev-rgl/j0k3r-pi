@@ -20,6 +20,87 @@ async function createProject(files: Record<string, string>): Promise<string> {
 }
 
 describe('findReferences graph fallback', () => {
+  it('uses graph-backed TSX JSX read references when requested explicitly', async () => {
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/ImageUploader.tsx': `export const ImageUploader = ({ label }: { label: string }) => {\n  return <section><span>{label}</span></section>;\n};\n`,
+      'src/documentacion.tsx': `import { ImageUploader } from './ImageUploader';\n\nexport function Documentation() {\n  return <ImageUploader name="file" label="Documento" />;\n}\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+    await rm(join(rootDir, 'src/documentacion.tsx'));
+
+    const results = await findReferences(rootDir, {
+      path: 'src/ImageUploader.tsx',
+      symbol: 'ImageUploader',
+      language: 'ts',
+      kind: 'function',
+      reference_kinds: ['read'],
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      file: join(rootDir, 'src/documentacion.tsx'),
+      symbol: 'ImageUploader',
+      context_symbol: 'Documentation',
+      reference_kind: 'read',
+    });
+  });
+
+  it('finds TSX component JSX usage with direct fallback when no graph exists', async () => {
+    const rootDir = await createProject({
+      'src/ImageUploader.tsx': `export const ImageUploader = ({ label }: { label: string }) => {\n  return <section><span>{label}</span></section>;\n};\n`,
+      'src/documentacion.tsx': `import { ImageUploader } from './ImageUploader';\n\nexport function Documentation() {\n  return <ImageUploader name="file" label="Documento" />;\n}\n`,
+    });
+
+    const results = await findReferences(rootDir, {
+      path: 'src/ImageUploader.tsx',
+      symbol: 'ImageUploader',
+      language: 'ts',
+      kind: 'function',
+    });
+
+    expect(results.some((result) => result.file === join(rootDir, 'src/documentacion.tsx'))).toBe(true);
+    expect(new Set(results.map((result) => result.reference_kind))).toContain('import');
+    expect(new Set(results.map((result) => result.reference_kind))).toContain('read');
+  });
+
+  it('resolves TSX component references through barrel reexports and tsconfig aliases', async () => {
+    const rootDir = await createProject({
+      'tsconfig.json': `{"compilerOptions":{"baseUrl":".","paths":{"@/*":["src/*"]}}}\n`,
+      'src/components/ImageUploader.tsx': `export const ImageUploader = ({ label }: { label: string }) => {\n  return <section><span>{label}</span></section>;\n};\n`,
+      'src/components/index.ts': `export { ImageUploader } from './ImageUploader';\n`,
+      'src/documentacion.tsx': `import { ImageUploader } from '@/components';\n\nexport function Documentation() {\n  return <ImageUploader name="file" label="Documento" />;\n}\n`,
+    });
+
+    const results = await findReferences(rootDir, {
+      path: 'src/components/ImageUploader.tsx',
+      symbol: 'ImageUploader',
+      language: 'ts',
+      kind: 'function',
+    });
+
+    expect(results.some((result) => result.file === join(rootDir, 'src/documentacion.tsx') && result.reference_kind === 'read')).toBe(true);
+    expect(results.some((result) => result.file === join(rootDir, 'src/documentacion.tsx') && result.reference_kind === 'import')).toBe(true);
+  });
+
+  it('resolves default-exported TSX components imported with local names', async () => {
+    const rootDir = await createProject({
+      'src/ImageUploader.tsx': `const ImageUploader = ({ label }: { label: string }) => {\n  return <section><span>{label}</span></section>;\n};\n\nexport default ImageUploader;\n`,
+      'src/documentacion.tsx': `import Uploader from './ImageUploader';\n\nexport function Documentation() {\n  return <Uploader name="file" label="Documento" />;\n}\n`,
+    });
+
+    const results = await findReferences(rootDir, {
+      path: 'src/ImageUploader.tsx',
+      symbol: 'ImageUploader',
+      language: 'ts',
+      kind: 'function',
+    });
+
+    expect(results.some((result) => result.file === join(rootDir, 'src/documentacion.tsx') && result.reference_kind === 'read')).toBe(true);
+    expect(results.some((result) => result.file === join(rootDir, 'src/documentacion.tsx') && result.reference_kind === 'import')).toBe(true);
+  });
+
   it('uses graph-backed direct call references when requested explicitly', async () => {
     const rootDir = await createProject({
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,

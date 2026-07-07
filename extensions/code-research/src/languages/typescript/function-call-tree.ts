@@ -1,6 +1,6 @@
 import { readFile, stat } from 'node:fs/promises';
 import { basename, extname, resolve } from 'node:path';
-import { getParser, parseSource } from '../../core/parser.js';
+import { getParserForFile, parseSource } from '../../core/parser.js';
 import type {
   CallSource,
   CallTreeNode,
@@ -53,12 +53,20 @@ export interface ImportBinding {
   kind: 'named' | 'default' | 'namespace';
 }
 
+export interface ReExportBinding {
+  exportedName: string;
+  importedName: string;
+  source: string;
+  kind: 'named' | 'default' | 'namespace';
+}
+
 export interface IndexedFile {
   file: string;
   language: Exclude<SupportedLanguage, 'auto'>;
   rootNode: any;
   source: string;
   imports: Map<string, ImportBinding>;
+  reExports: ReExportBinding[];
 }
 
 export interface TypeScriptProjectIndex {
@@ -226,7 +234,7 @@ export async function buildTypeScriptProjectIndex(rootDir: string): Promise<Type
   for (const file of files) {
     const source = await readFile(file, 'utf8');
     const language = detectLanguage(file, 'auto');
-    const parser = getParser(language);
+    const parser = getParserForFile(file, language);
 
     let tree: any;
     try {
@@ -241,9 +249,11 @@ export async function buildTypeScriptProjectIndex(rootDir: string): Promise<Type
       rootNode: tree.rootNode,
       source,
       imports: new Map(),
+      reExports: [],
     };
 
     indexImports(indexedFile);
+    indexReExports(indexedFile);
     indexTopLevelDeclarations(indexedFile, index);
     index.files.set(file, indexedFile);
   }
@@ -304,6 +314,36 @@ function indexImports(file: IndexedFile): void {
         });
       }
     }
+  }
+}
+
+function indexReExports(file: IndexedFile): void {
+  const namedExportPattern = /export\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"]/g;
+  let namedMatch: RegExpExecArray | null;
+  while ((namedMatch = namedExportPattern.exec(file.source)) !== null) {
+    const specifiers = namedMatch[1] ?? '';
+    const source = namedMatch[2] ?? '';
+    for (const rawSpecifier of specifiers.split(',')) {
+      const specifier = rawSpecifier.trim();
+      if (!specifier) continue;
+      const parts = specifier.split(/\s+as\s+/);
+      const importedName = parts[0]?.trim();
+      const exportedName = parts[1]?.trim() ?? importedName;
+      if (!importedName || !exportedName) continue;
+      file.reExports.push({
+        importedName,
+        exportedName,
+        source,
+        kind: importedName === 'default' ? 'default' : 'named',
+      });
+    }
+  }
+
+  const namespaceExportPattern = /export\s*\*\s*from\s*['"]([^'"]+)['"]/g;
+  let namespaceMatch: RegExpExecArray | null;
+  while ((namespaceMatch = namespaceExportPattern.exec(file.source)) !== null) {
+    const source = namespaceMatch[1];
+    if (source) file.reExports.push({ importedName: '*', exportedName: '*', source, kind: 'namespace' });
   }
 }
 
@@ -385,6 +425,20 @@ function indexTopLevelDeclarations(file: IndexedFile, index: TypeScriptProjectIn
       });
       indexClassMembers(file, index, node, className);
     }
+  }
+
+  indexDefaultIdentifierExports(file, index);
+}
+
+function indexDefaultIdentifierExports(file: IndexedFile, index: TypeScriptProjectIndex): void {
+  const defaultExportPattern = /export\s+default\s+([A-Za-z_$][\w$]*)\s*;?/g;
+  let match: RegExpExecArray | null;
+  while ((match = defaultExportPattern.exec(file.source)) !== null) {
+    const symbol = match[1];
+    const callable = index.callables.find((item) => item.file === file.file && item.symbol === symbol && !item.ownerName);
+    if (callable) callable.exportedName = 'default';
+    const klass = index.classes.find((item) => item.file === file.file && item.className === symbol);
+    if (klass) klass.exportedName = 'default';
   }
 }
 
@@ -849,15 +903,38 @@ function resolveImportedCallable(
   currentFile: string,
   binding: ImportBinding
 ): IndexedCallable | undefined {
+  if (binding.kind === 'namespace') return undefined;
   const targetFile = resolveModuleFile(index, currentFile, binding.source);
   if (!targetFile) return undefined;
+  return resolveExportedCallable(index, targetFile, binding.importedName);
+}
 
-  if (binding.kind === 'namespace') return undefined;
+export function resolveExportedCallable(
+  index: TypeScriptProjectIndex,
+  filePath: string,
+  exportedName: string,
+  visited = new Set<string>()
+): IndexedCallable | undefined {
+  const visitKey = `${filePath}:${exportedName}`;
+  if (visited.has(visitKey)) return undefined;
+  visited.add(visitKey);
 
-  return findCallable(index, {
-    file: targetFile,
-    exportedName: binding.importedName,
-  });
+  const direct = findCallable(index, { file: filePath, exportedName });
+  if (direct) return direct;
+
+  const file = index.files.get(filePath);
+  if (!file) return undefined;
+
+  for (const reExport of file.reExports) {
+    if (reExport.kind !== 'namespace' && reExport.exportedName !== exportedName) continue;
+    const targetFile = resolveModuleFile(index, filePath, reExport.source);
+    if (!targetFile) continue;
+    const targetExportName = reExport.kind === 'namespace' ? exportedName : reExport.importedName;
+    const target = resolveExportedCallable(index, targetFile, targetExportName, visited);
+    if (target) return target;
+  }
+
+  return undefined;
 }
 
 function resolveImportedClass(
@@ -954,7 +1031,20 @@ function extractExportInfo(node: any): { node: any; exported: boolean; exportNam
 }
 
 function isCallableValueNode(node: any): boolean {
-  return node.type === 'arrow_function' || node.type === 'function_expression' || node.type === 'function_declaration';
+  if (!node) return false;
+  if (node.type === 'arrow_function' || node.type === 'function_expression' || node.type === 'function_declaration') return true;
+  if (node.type !== 'call_expression') return false;
+
+  return hasCallableDescendant(node);
+}
+
+function hasCallableDescendant(node: any): boolean {
+  for (const child of node.children ?? []) {
+    if (!child?.isNamed) continue;
+    if (child.type === 'arrow_function' || child.type === 'function_expression' || child.type === 'function_declaration') return true;
+    if (hasCallableDescendant(child)) return true;
+  }
+  return false;
 }
 
 function isNestedCallableBoundary(node: any): boolean {

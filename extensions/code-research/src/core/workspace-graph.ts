@@ -25,6 +25,7 @@ import { collectWorkspaceSourceFiles, detectGraphLanguage, toProjectRelativePath
 import { createWorkspaceGraphState, loadWorkspaceGraphState, writeWorkspaceGraphState } from './workspace-state.js';
 import {
   buildTypeScriptProjectIndex,
+  resolveExportedCallable,
   type IndexedCallable as TsIndexedCallable,
   type IndexedClass as TsIndexedClass,
   type TypeScriptProjectIndex,
@@ -375,6 +376,19 @@ function buildTypeScriptGraph(projectRoot: string, subprojectId: string, index: 
         reason: !toId ? resolved.reason : undefined,
       });
     }
+
+    for (const read of extractTypeScriptJsxReads(callable.node)) {
+      const resolved = resolveTypeScriptJsxRead(index, callable, read.symbol);
+      const toId = resolved.target ? symbolIds.get(`${resolved.target.file}:${resolved.target.kind}:${resolved.target.ownerName ?? '<module>'}:${resolved.target.symbol}`) : undefined;
+      if (!toId) continue;
+      edges.push({
+        id: createEdgeId('reads', fromId, toId, `${read.line}:${read.column}`),
+        kind: 'reads',
+        from: fromId,
+        to: toId,
+        callsite: { line: read.line, column: read.column, text: read.text },
+      });
+    }
   }
 }
 
@@ -486,6 +500,43 @@ function extractTypeScriptCalls(callableNode: any): Array<{ symbol: string; rece
   return calls;
 }
 
+function extractTypeScriptJsxReads(callableNode: any): Array<{ symbol: string; text: string; line: number; column: number }> {
+  const body = callableNode.childForFieldName('body') ?? callableNode.childForFieldName('value');
+  if (!body) return [];
+  const reads: Array<{ symbol: string; text: string; line: number; column: number }> = [];
+  function visit(node: any) {
+    if (!node?.isNamed) return;
+    if (node.type === 'jsx_opening_element' || node.type === 'jsx_self_closing_element') {
+      const nameNode = node.children.find((child: any) => child.isNamed && (child.type === 'identifier' || child.type === 'nested_identifier'));
+      const symbol = nameNode?.text?.split('.')?.[0];
+      if (symbol && /^[A-Z]/.test(symbol)) {
+        reads.push({ symbol, text: node.text, line: node.startPosition.row + 1, column: node.startPosition.column });
+      }
+    }
+    for (const child of node.children) visit(child);
+  }
+  visit(body);
+  return reads;
+}
+
+function resolveTypeScriptJsxRead(
+  index: TypeScriptProjectIndex,
+  current: TsIndexedCallable,
+  symbol: string
+): { target?: TsIndexedCallable; reason?: string } {
+  const local = index.callables.find((item) => item.file === current.file && item.symbol === symbol && item.kind === 'function');
+  if (local) return { target: local };
+
+  const imported = index.files.get(current.file)?.imports.get(symbol);
+  if (!imported || imported.kind === 'namespace') return { reason: 'jsx tag is not a local callable or import' };
+
+  const targetFile = resolveTypeScriptImportCandidates(current.file, imported.source, index.projectConfig).find((candidate) => index.files.has(candidate));
+  if (!targetFile) return { reason: 'jsx import does not resolve to an indexed file' };
+
+  const target = resolveExportedCallable(index, targetFile, imported.importedName);
+  return target ? { target } : { reason: 'jsx import does not resolve to an indexed callable' };
+}
+
 function resolveTypeScriptCall(
   index: TypeScriptProjectIndex,
   current: TsIndexedCallable,
@@ -503,7 +554,7 @@ function resolveTypeScriptCall(
     const imported = index.files.get(current.file)?.imports.get(call.symbol);
     if (imported) {
       const targetFile = resolveTypeScriptImportCandidates(current.file, imported.source, index.projectConfig).find((candidate) => index.files.has(candidate));
-      const target = targetFile ? index.callables.find((item) => item.file === targetFile && item.exportedName === imported.importedName) : undefined;
+      const target = targetFile ? resolveExportedCallable(index, targetFile, imported.importedName) : undefined;
       if (target) return { target, source: 'application', owner: target.ownerName, ownerKind: target.ownerKind };
       return { source: imported.source.startsWith('.') ? 'unknown' : 'library', reason: 'import does not resolve to indexed callable' };
     }

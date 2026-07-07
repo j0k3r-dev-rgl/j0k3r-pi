@@ -80,8 +80,8 @@ describe('graph policy', () => {
     expect(normalizeGraphLanguage({ language: 'auto', path: '/tmp/example.txt' })).toBeUndefined();
   });
 
-  it('limits graph reference coverage to call, implements, and extends', () => {
-    expect([...GRAPH_REFERENCE_KINDS].sort()).toEqual(['call', 'extends', 'implements']);
+  it('limits graph reference coverage to call, read, implements, and extends', () => {
+    expect([...GRAPH_REFERENCE_KINDS].sort()).toEqual(['call', 'extends', 'implements', 'read']);
 
     expect(getFindReferencesGraphCoverage({ path: 'src/a.ts', symbol: 'helper', language: 'ts', kind: 'function' })).toEqual({
       requiredReferenceKinds: undefined,

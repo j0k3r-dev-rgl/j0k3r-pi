@@ -265,11 +265,24 @@ function isVariableWithFunctionValue(node: any): boolean {
   if (!declarator) return false;
   const value = declarator.childForFieldName('value');
   if (!value) return false;
-  return (
-    value.type === 'arrow_function' ||
-    value.type === 'function_expression' ||
-    value.type === 'function_declaration'
-  );
+  return isCallableValueNode(value);
+}
+
+function isCallableValueNode(node: any): boolean {
+  if (!node) return false;
+  if (node.type === 'arrow_function' || node.type === 'function_expression' || node.type === 'function_declaration') return true;
+  if (node.type !== 'call_expression') return false;
+
+  return hasCallableDescendant(node);
+}
+
+function hasCallableDescendant(node: any): boolean {
+  for (const child of node.children ?? []) {
+    if (!child?.isNamed) continue;
+    if (child.type === 'arrow_function' || child.type === 'function_expression' || child.type === 'function_declaration') return true;
+    if (hasCallableDescendant(child)) return true;
+  }
+  return false;
 }
 
 function hasClassImplements(node: any): boolean {

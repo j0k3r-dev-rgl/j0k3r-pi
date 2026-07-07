@@ -9,6 +9,14 @@ import { loadWorkspaceGraphState, writeWorkspaceGraphState } from '../src/core/w
 interface RegisteredTool {
   name: string;
   execute: (toolCallId: any, params: any, signal: any, onUpdate: any, ctx: any) => Promise<any>;
+  renderResult?: (result: any, options: { expanded?: boolean; isPartial?: boolean }, theme: any) => { render(width: number): string[] };
+}
+
+const renderTheme = { fg: (_name: string, text: string) => text, bold: (text: string) => text };
+
+function renderToolResult(tool: RegisteredTool, result: any, expanded: boolean): string {
+  expect(tool.renderResult).toBeTypeOf('function');
+  return tool.renderResult!(result, { expanded, isPartial: false }, renderTheme).render(120).join('\n');
 }
 
 async function createJavaProject(files: Record<string, string>): Promise<string> {
@@ -214,6 +222,75 @@ describe('code-research extension entry integration', () => {
     expect(result.details.root.symbol).toBe('helper');
     expect(result.details.root.callers?.[0].symbol).toBe('run');
     expect(result.details.root.callers?.[0].callers?.[0].symbol).toBe('handle');
+  });
+
+  it('renders code-research results compactly by default while preserving full content for the agent', async () => {
+    const tools: RegisteredTool[] = [];
+    codeResearchExtension({
+      registerTool(tool: RegisteredTool) {
+        tools.push(tool);
+      },
+    });
+
+    const functionCallTreeTool = tools.find((tool) => tool.name === 'function_call_tree');
+    expect(functionCallTreeTool).toBeDefined();
+    expect(functionCallTreeTool!.renderResult).toBeTypeOf('function');
+
+    const rootDir = await createJavaProject({
+      'src/main/java/app/DeepService.java': `package app;\n\npublic class DeepService {\n  public void root() {\n    stepOne();\n  }\n\n  private void stepOne() {\n    stepTwo();\n  }\n\n  private void stepTwo() {\n    CODE_RESEARCH_RENDER_FULL_CONTENT_MARKER();\n  }\n\n  private void CODE_RESEARCH_RENDER_FULL_CONTENT_MARKER() {}\n}\n`,
+    });
+
+    const result = await functionCallTreeTool!.execute(
+      'test-call-render',
+      {
+        path: 'src/main/java/app/DeepService.java',
+        symbol: 'root',
+        language: 'java',
+        max_depth: 8,
+        include_external: true,
+      },
+      undefined,
+      undefined,
+      { cwd: rootDir }
+    );
+
+    expect(result.content[0].text).toContain('CODE_RESEARCH_RENDER_FULL_CONTENT_MARKER');
+
+    const compact = renderToolResult(functionCallTreeTool!, result, false);
+    const expanded = renderToolResult(functionCallTreeTool!, result, true);
+
+    expect(compact).toContain('function_call_tree');
+    expect(compact).toContain('root');
+    expect(compact).toContain('ctrl+o expand');
+    expect(compact).not.toContain('CODE_RESEARCH_RENDER_FULL_CONTENT_MARKER');
+    expect(expanded).toContain('function_call_tree');
+    expect(expanded).toContain('ctrl+o collapse');
+    expect(expanded).toContain('CODE_RESEARCH_RENDER_FULL_CONTENT_MARKER');
+  });
+
+  it('registers compact/expanded renderers for all code-research result tools', () => {
+    const tools: RegisteredTool[] = [];
+    codeResearchExtension({
+      registerTool(tool: RegisteredTool) {
+        tools.push(tool);
+      },
+    });
+
+    for (const name of ['find_symbol', 'find_references', 'function_call_tree', 'reverse_function_call_tree']) {
+      expect(tools.find((tool) => tool.name === name)?.renderResult, `${name} renderResult`).toBeTypeOf('function');
+    }
+  });
+
+  it('allows graph-backed read reference filters in the public schema', () => {
+    const tools: any[] = [];
+    codeResearchExtension({
+      registerTool(tool: any) {
+        tools.push(tool);
+      },
+    });
+
+    const findReferencesTool = tools.find((tool) => tool.name === 'find_references');
+    expect(JSON.stringify(findReferencesTool.parameters)).toContain('read');
   });
 
   it('keeps graph.enable as the query and scheduler gate in this slice', async () => {
