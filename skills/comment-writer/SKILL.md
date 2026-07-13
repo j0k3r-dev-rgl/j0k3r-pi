@@ -1,36 +1,79 @@
 ---
 name: comment-writer
-description: "Write warm, direct collaboration comments. Trigger: PR feedback, issue replies, reviews, Slack messages, or GitHub comments."
+description: "write or revise warm, direct PR feedback, issue replies, code-review comments, GitHub comments, and Slack or Discord collaboration messages."
 license: Apache-2.0
 metadata:
   author: gentleman-programming
-  version: "1.0"
+  version: "1.1"
 ---
 
-## When to Use
+# Comment Writer
 
-Load this skill whenever you write a comment that another human will read.
+## Registry Contract
 
-Use it for:
+Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
 
-- GitHub PR or issue comments.
-- Review feedback and requested changes.
-- Maintainer replies.
-- Slack, Discord, or async project updates.
+```json
+{
+  "category": "quality",
+  "domains": ["collaboration", "code-review", "comments", "technical-communication"],
+  "triggers": {
+    "paths": [
+      ".github/ISSUE_TEMPLATE/**/*.md",
+      ".github/pull_request_template*.md",
+      ".github/PULL_REQUEST_TEMPLATE/**/*.md"
+    ],
+    "keywords": [
+      "PR comment",
+      "pull request feedback",
+      "review comment",
+      "request changes",
+      "issue reply",
+      "GitHub comment",
+      "maintainer reply",
+      "Slack message",
+      "Discord message",
+      "collaboration comment",
+      "write a comment",
+      "reply to this thread"
+    ]
+  },
+  "sdd_phases": ["explore", "proposal", "spec", "design", "task", "apply", "verify"],
+  "related_skills": ["cognitive-doc-design"],
+  "priority": 60
+}
+```
 
-## Voice Rules
+Field conventions:
 
-| Rule | Requirement |
-|------|-------------|
-| Be useful fast | Start with the actionable point. Do not recap the whole PR before feedback. |
-| Be warm and direct | Sound like a thoughtful teammate, not a corporate bot. |
-| Keep it short | Prefer 1 to 3 short paragraphs or a tight bullet list. |
-| Explain why | Give the technical reason when asking for a change. |
-| Avoid pile-ons | Comment on the highest-value issue, not every tiny preference. |
-| Match target context language | Write in the target context language by default: Spanish issue/thread -> Spanish comment, English issue/thread -> English comment, mixed context -> target message language. If the user explicitly requests a language or tone, follow that request. For Spanish comments, use neutral/professional Spanish by default unless the user or target context clearly calls for regional tone. |
-| No em dashes | Use commas, periods, or parentheses instead. |
+- `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
+- `domains`: stable domain tags used for routing.
+- `triggers.paths`: glob-like project paths that should activate this skill.
+- `triggers.keywords`: user/request/code keywords that should activate this skill.
+- `sdd_phases`: phases where this skill is usually useful: `explore`, `proposal`, `spec`, `design`, `task`, `apply`, `verify`, `archive`.
+- `related_skills`: skills that should be considered when this skill is active.
+- `priority`: routing priority from 0 to 100. Higher means consider earlier when multiple skills match.
 
-## Comment Formula
+## Activation Contract
+
+Use this skill whenever the requested output is a short collaboration comment another person will read, including GitHub PR or issue comments, review feedback, requested changes, maintainer replies, and Slack, Discord, or asynchronous project updates.
+
+Use it after gathering enough technical evidence to make the comment accurate. Do not load it as a substitute for reviewing code, diagnosing an issue, or verifying a claim. For long-form guides, RFCs, architecture documents, or detailed PR descriptions, prefer `cognitive-doc-design`.
+
+## Hard Rules
+
+- Start with the actionable point instead of recapping the entire PR or discussion.
+- Sound like a thoughtful teammate: warm, direct, specific, and non-corporate.
+- Prefer one to three short paragraphs or a tight bullet list.
+- Explain the technical reason when requesting a change, but omit background that does not help the recipient act.
+- Focus on the highest-value issue instead of piling on minor preferences.
+- Give a concrete next action when the recipient needs to change or clarify something.
+- Match the target context language by default: Spanish thread to Spanish comment, English thread to English comment, and mixed context to the target message language.
+- Follow an explicitly requested language or tone. For Spanish, default to neutral professional language unless the context clearly calls for a regional tone.
+- Do not use em dashes. Use commas, periods, or parentheses instead.
+- Do not invent technical findings, consensus, approvals, or repository policy.
+
+Default formula:
 
 ```text
 <Direct observation or request>
@@ -40,9 +83,9 @@ Use it for:
 <Concrete next action>
 ```
 
-## Examples
+Examples:
 
-### Request change
+### Request a change
 
 ```markdown
 Good approach overall. I'd split this into a separate commit because it mixes validation logic with UI wiring.
@@ -58,7 +101,7 @@ Approved. The scope is clear and the change is well-contained.
 For the next PR, add links to the previous and following PRs so the chain stays navigable.
 ```
 
-### Ask for split
+### Ask for a split
 
 ```markdown
 This PR exceeds the 400-line budget, so we need to split it or justify `size:exception`.
@@ -66,9 +109,39 @@ This PR exceeds the 400-line budget, so we need to split it or justify `size:exc
 Suggested order: foundation + tests first, then integration, then docs. That gives each review a clear start and end.
 ```
 
-## Commands
+## Decision Gates
+
+- If the underlying technical facts are missing or uncertain, inspect the relevant evidence or ask for it before drafting the comment.
+- If the message announces approval, rejection, policy, or a team decision that the user has not confirmed, ask before asserting it.
+- If the output is long-form documentation rather than a short collaboration message, also consider or prefer `cognitive-doc-design`.
+- If the target language, audience, or desired tone cannot be inferred and materially affects the message, ask one concise question.
+
+## Execution Steps
+
+1. Identify the recipient, context, desired outcome, language, and tone.
+2. Extract the single highest-value observation, request, or update.
+3. State it directly and add the technical reason only when useful.
+4. Add a concrete next action when action is required.
+5. Remove unnecessary recap, generic praise, repetition, and low-value preferences.
+6. Check warmth, factual accuracy, brevity, language match, and the no-em-dash rule.
+
+Useful inspection command when applicable:
 
 ```bash
 # Inspect a PR before writing review feedback
 gh pr view <PR_NUMBER> --json title,body,additions,deletions,changedFiles
 ```
+
+## Output Contract
+
+Return:
+
+- Skill applied: `comment-writer` when a process note is useful.
+- The ready-to-send comment in the target context language.
+- Any factual assumption or missing evidence that prevents a confident message.
+- Alternative wording only when the user asks for options or tone variants.
+
+## References
+
+- `extensions/skill-registry/templates/skill-template.md` — canonical Pi skill structure and registry contract.
+- The target PR, issue, review, or conversation thread — source of truth for facts, language, and tone.
