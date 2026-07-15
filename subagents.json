@@ -1,61 +1,59 @@
 {
-  "default_model": null,
-  "timeout_ms": 2600000,
-  "stall_timeout_ms": 120000,
-  "max_concurrency": 5,
-  "debug": true,
-  "session_resources": "lean",
-  "mode": "claude",
-  "default_tools": [
-    "read",
-    "memory_context",
-    "memory_search",
-    "memory_recall",
-    "memory_get"
-  ],
-  "model_profiles": {
-    "discovery": {
-      "effort": "medium"
-    },
-    "prd-review": {
-      "model": "opencode-go/kimi-k2.7-code",
-      "effort": "off"
-    },
-    "sdd-apply": {
-      "model": "openai-codex/gpt-5.4",
-      "effort": "medium"
-    },
-    "sdd-archive": {
-      "model": "opencode-go/deepseek-v4-flash",
-      "effort": "off"
-    },
-    "sdd-design": {
-      "model": "openai-codex/gpt-5.6-sol",
-      "effort": "medium"
-    },
-    "sdd-explore": {
-      "model": "opencode-go/kimi-k2.7-code",
-      "effort": "off"
-    },
-    "sdd-proposal": {
-      "model": "openai-codex/gpt-5.6-sol",
-      "effort": "medium"
-    },
-    "sdd-spec": {
-      "model": "opencode-go/kimi-k2.7-code",
-      "effort": "off"
-    },
-    "sdd-task": {
-      "model": "openai-codex/gpt-5.4",
-      "effort": "medium"
-    },
-    "sdd-verify": {
-      "model": "openai-codex/gpt-5.5",
-      "effort": "medium"
-    },
-    "tool-smoke": {
-      "model": "openai-codex/gpt-5.4-mini",
-      "effort": "low"
-    }
-  }
+	"default_model": null,
+	"max_concurrency": 5,
+	"debug": true,
+	"session_resources": "lean",
+	"mode": "claude",
+	"default_tools": [
+		"read",
+		"memory_context",
+		"memory_search",
+		"memory_recall",
+		"memory_get"
+	],
+	"model_profiles": {
+		"discovery": {
+			"effort": "medium"
+		},
+		"prd-review": {
+			"model": "opencode-go/kimi-k2.7-code",
+			"effort": "off"
+		},
+		"sdd-apply": {
+			"model": "openai-codex/gpt-5.4",
+			"effort": "medium"
+		},
+		"sdd-archive": {
+			"model": "opencode-go/deepseek-v4-flash",
+			"effort": "off"
+		},
+		"sdd-design": {
+			"model": "openai-codex/gpt-5.6-sol",
+			"effort": "medium"
+		},
+		"sdd-explore": {
+			"model": "opencode-go/kimi-k2.7-code",
+			"effort": "off"
+		},
+		"sdd-proposal": {
+			"model": "openai-codex/gpt-5.6-sol",
+			"effort": "medium"
+		},
+		"sdd-spec": {
+			"model": "opencode-go/kimi-k2.7-code",
+			"effort": "off"
+		},
+		"sdd-task": {
+			"model": "openai-codex/gpt-5.4",
+			"effort": "medium"
+		},
+		"sdd-verify": {
+			"model": "openai-codex/gpt-5.5",
+			"effort": "medium"
+		},
+		"tool-smoke": {
+			"model": "openai-codex/gpt-5.4-mini",
+			"effort": "low"
+		}
+	}
 }
