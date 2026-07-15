@@ -1031,20 +1031,26 @@ function extractExportInfo(node: any): { node: any; exported: boolean; exportNam
 }
 
 function isCallableValueNode(node: any): boolean {
-  if (!node) return false;
-  if (node.type === 'arrow_function' || node.type === 'function_expression' || node.type === 'function_declaration') return true;
-  if (node.type !== 'call_expression') return false;
-
-  return hasCallableDescendant(node);
+  const current = unwrapTransparentCallableNode(node);
+  if (!current) return false;
+  if (current.type === 'arrow_function' || current.type === 'function_expression' || current.type === 'function_declaration') return true;
+  return false;
 }
 
-function hasCallableDescendant(node: any): boolean {
-  for (const child of node.children ?? []) {
-    if (!child?.isNamed) continue;
-    if (child.type === 'arrow_function' || child.type === 'function_expression' || child.type === 'function_declaration') return true;
-    if (hasCallableDescendant(child)) return true;
+function unwrapTransparentCallableNode(node: any): any {
+  let current = node;
+  while (current?.isNamed) {
+    if (current.type === 'parenthesized_expression') {
+      current = current.children?.find((child: any) => child.isNamed);
+      continue;
+    }
+    if (current.type === 'as_expression' || current.type === 'satisfies_expression' || current.type === 'type_assertion' || current.type === 'non_null_expression') {
+      current = current.childForFieldName('expression') ?? current.children?.find((child: any) => child.isNamed && child.type !== 'type_annotation' && child.type !== 'type_arguments' && child.type !== 'type');
+      continue;
+    }
+    break;
   }
-  return false;
+  return current;
 }
 
 function isNestedCallableBoundary(node: any): boolean {

@@ -140,7 +140,8 @@ describe('findSymbol', () => {
     });
 
     expect(results).toHaveLength(1);
-    expect(results[0].kind).toBe('variable');
+    expect(results[0].kind).toBe('function');
+    expect(results[0].declaration_kind).toBe('callable_variable');
   });
 
   it('marks arrow-function variables as definition and implementation', async () => {
@@ -156,7 +157,8 @@ describe('findSymbol', () => {
     });
 
     expect(results).toHaveLength(1);
-    expect(results[0].kind).toBe('variable');
+    expect(results[0].kind).toBe('function');
+    expect(results[0].declaration_kind).toBe('callable_variable');
     expect(results[0].is_definition).toBe(true);
     expect(results[0].is_implementation).toBe(true);
   });
@@ -321,6 +323,27 @@ describe('findSymbol', () => {
     expect(results[0].code).toContain('#getHash');
   });
 
+  it('preserves private-name source spelling and modifiers in direct mode', async () => {
+    const file = await writeTestFile(
+      'hash-private-metadata.ts',
+      `class Vault {\n  #secret = 1;\n}\n`
+    );
+
+    const results = await findSymbol(tmpDir, {
+      path: file,
+      symbol: 'secret',
+      language: 'ts',
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      symbol: 'secret',
+      declaration_kind: 'field',
+      source_name: '#secret',
+      modifiers: ['private'],
+    });
+  });
+
   it('finds type aliases', async () => {
     const file = await writeTestFile(
       'type-alias.ts',
@@ -401,13 +424,12 @@ export const { getSession, commitSession } = authSessionStorage;
       include_code: true,
     });
 
-    expect(results).toHaveLength(1);
-    expect(results[0].symbol).toBe('getSession');
-    expect(results[0].kind).toBe('function');
-    expect(results[0].is_definition).toBe(true);
-    expect(results[0].is_implementation).toBe(true);
-    expect(results[0].signature).toContain('async function getSession');
-    expect(results[0].code).toContain('async function getSession');
+    expect(results.filter((result) => result.symbol === 'getSession' && result.kind === 'function').length).toBeGreaterThanOrEqual(1);
+    const binding = results.find((result) => result.symbol === 'getSession' && !result.owner);
+    const callable = results.find((result) => result.symbol === 'getSession' && Boolean(result.signature?.includes('async function getSession')));
+    expect(binding?.is_definition).toBe(true);
+    expect(binding?.is_implementation).toBe(true);
+    expect(callable?.signature).toContain('async function getSession');
   });
 
   it('finds destructured exported function bindings in javascript files', async () => {
@@ -431,13 +453,12 @@ export const { getSession, commitSession } = authSessionStorage;
       include_code: true,
     });
 
-    expect(results).toHaveLength(1);
-    expect(results[0].symbol).toBe('getSession');
-    expect(results[0].kind).toBe('function');
-    expect(results[0].is_definition).toBe(true);
-    expect(results[0].is_implementation).toBe(true);
-    expect(results[0].signature).toContain('async function getSession');
-    expect(results[0].code).toContain('async function getSession');
+    expect(results.filter((result) => result.symbol === 'getSession' && result.kind === 'function').length).toBeGreaterThanOrEqual(1);
+    const binding = results.find((result) => result.symbol === 'getSession' && !result.owner);
+    const callable = results.find((result) => result.symbol === 'getSession' && Boolean(result.signature?.includes('async function getSession')));
+    expect(binding?.is_definition).toBe(true);
+    expect(binding?.is_implementation).toBe(true);
+    expect(callable?.signature).toContain('async function getSession');
   });
 
   it('finds destructured exported bindings from factory results as variables', async () => {

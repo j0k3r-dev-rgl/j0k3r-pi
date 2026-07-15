@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, readFile, truncate, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildWorkspaceGraph } from '../../src/core/workspace-graph.js';
-import { readSubprojectGraphShard } from '../../src/core/graph-persistence.js';
+import {
+  clearSubprojectGraphShardCache,
+  getSubprojectGraphShardCacheStats,
+  readSubprojectGraphShard,
+  writeSubprojectGraphShard,
+} from '../../src/core/graph-persistence.js';
 
 async function createProject(files: Record<string, string>) {
   const rootDir = join(tmpdir(), `pi-graph-shard-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -17,6 +22,138 @@ async function createProject(files: Record<string, string>) {
 }
 
 describe('workspace graph shard content', () => {
+  it('persists validated TypeScript symbol coverage proofs and canonical symbol metadata', async () => {
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/service.ts': `export class Vault {\n  #secret = 1;\n  get value() { return this.#secret; }\n}\n`,
+    });
+
+    const built = await buildWorkspaceGraph(rootDir);
+    const shardResult = await readSubprojectGraphShard(rootDir, built.state.subprojects[0].id);
+    expect(shardResult.status).toBe('ok');
+    if (shardResult.status !== 'ok') return;
+
+    const shard = shardResult.data;
+    expect(shard.typescriptSymbolCoverage).toMatchObject({
+      modelVersion: 1,
+      compilerModelVersion: 'typescript@6.0.3',
+      grammar: { typescript: '0.23.2', tsx: '0.23.2' },
+      generation: shard.generation,
+      completeFiles: ['src/service.ts'],
+    });
+    expect(shard.typescriptSymbolCoverage?.fileProofs['src/service.ts']?.sourceHash).toMatch(/^[a-f0-9]{64}$/);
+    const secret = shard.nodes.find((node): node is Extract<(typeof shard.nodes)[number], { kind: 'symbol' }> => node.kind === 'symbol' && node.file === 'src/service.ts' && node.name === 'secret');
+    expect(secret).toMatchObject({
+      kind: 'symbol',
+      declarationKind: 'field',
+      sourceName: '#secret',
+      modifiers: ['private'],
+      isDefinition: true,
+      isImplementation: true,
+      qualifiedName: 'Vault.secret',
+    });
+    expect(secret?.symbolId).toMatch(/^[a-f0-9]{64}$/);
+    expect(secret?.sourceHash).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('rejects malformed coverage, malformed nested nodes, incompatible schemas, and oversized shards', async () => {
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/service.ts': `export function runService(): void {}\n`,
+    });
+
+    const built = await buildWorkspaceGraph(rootDir);
+    const subprojectId = built.state.subprojects[0].id;
+    const shardPath = join(rootDir, '.pi/workspace-code-graph/graphs', `${subprojectId}.json`);
+    const shardResult = await readSubprojectGraphShard(rootDir, subprojectId);
+    expect(shardResult.status).toBe('ok');
+    if (shardResult.status !== 'ok') return;
+
+    const malformedCoverage = structuredClone(shardResult.data);
+    if (malformedCoverage.typescriptSymbolCoverage) malformedCoverage.typescriptSymbolCoverage.fileProofs['src/service.ts'].symbolCount += 1;
+    await writeFile(shardPath, `${JSON.stringify(malformedCoverage, null, 2)}\n`, 'utf8');
+    expect((await readSubprojectGraphShard(rootDir, subprojectId)).status).toBe('incompatible');
+
+    const malformedNode = structuredClone(shardResult.data);
+    const symbolNode = malformedNode.nodes.find((node: any) => node.kind === 'symbol');
+    expect(symbolNode).toBeTruthy();
+    if (!symbolNode || symbolNode.kind !== 'symbol') return;
+    symbolNode.range.startLine = '1' as any;
+    await writeFile(shardPath, `${JSON.stringify(malformedNode, null, 2)}\n`, 'utf8');
+    expect((await readSubprojectGraphShard(rootDir, subprojectId)).status).toBe('incompatible');
+
+    const malformedId = structuredClone(shardResult.data);
+    const malformedIdNode = malformedId.nodes.find((node: any) => node.kind === 'symbol' && (node.language === 'ts' || node.language === 'js'));
+    expect(malformedIdNode).toBeTruthy();
+    if (!malformedIdNode || malformedIdNode.kind !== 'symbol') return;
+    malformedIdNode.symbolId = 'not-a-sha256';
+    await writeFile(shardPath, `${JSON.stringify(malformedId, null, 2)}\n`, 'utf8');
+    expect((await readSubprojectGraphShard(rootDir, subprojectId)).status).toBe('incompatible');
+
+    const malformedEdge = structuredClone(shardResult.data);
+    const edge = malformedEdge.edges.find((candidate: any) => candidate.callsite);
+    if (edge?.callsite) edge.callsite.line = 99_999_999;
+    else malformedEdge.edges.push({ id: 'bad-edge', kind: 'calls', from: 'missing', to: 'missing', callsite: { line: 99_999_999, column: 0 } });
+    await writeFile(shardPath, `${JSON.stringify(malformedEdge, null, 2)}\n`, 'utf8');
+    expect((await readSubprojectGraphShard(rootDir, subprojectId)).status).toBe('incompatible');
+
+    await writeFile(shardPath, `${JSON.stringify(shardResult.data, null, 2)}\n`, 'utf8');
+    expect((await readSubprojectGraphShard(rootDir, subprojectId, { generation: shardResult.data.generation + 1 })).status).toBe('incompatible');
+
+    const legacySchema = { ...shardResult.data, schemaVersion: 1 };
+    await writeFile(shardPath, `${JSON.stringify(legacySchema, null, 2)}\n`, 'utf8');
+    expect((await readSubprojectGraphShard(rootDir, subprojectId)).status).toBe('incompatible');
+
+    const futureSchema = { ...shardResult.data, schemaVersion: 999 };
+    await writeFile(shardPath, `${JSON.stringify(futureSchema, null, 2)}\n`, 'utf8');
+    expect((await readSubprojectGraphShard(rootDir, subprojectId)).status).toBe('incompatible');
+
+    await writeFile(shardPath, '{}', 'utf8');
+    await truncate(shardPath, 256 * 1024 * 1024 + 1);
+    expect((await readSubprojectGraphShard(rootDir, subprojectId)).status).toBe('oversized');
+  });
+
+  it('invalidates cached shard reads after corrupt replacement and supports bounded eviction/clear behavior', async () => {
+    const rootDir = await createProject({ '.pi/code-research.json': `{"graph":{"enable":true}}\n` });
+
+    clearSubprojectGraphShardCache();
+    await writeSubprojectGraphShard(rootDir, 'cache-a', { schemaVersion: 3, createdBy: 'pi-code-research-extension', subprojectId: 'cache-a', generation: 1, nodes: [], edges: [] });
+    await writeSubprojectGraphShard(rootDir, 'cache-b', { schemaVersion: 3, createdBy: 'pi-code-research-extension', subprojectId: 'cache-b', generation: 1, nodes: [], edges: [] });
+    await writeSubprojectGraphShard(rootDir, 'cache-c', { schemaVersion: 3, createdBy: 'pi-code-research-extension', subprojectId: 'cache-c', generation: 1, nodes: [], edges: [] });
+    await writeSubprojectGraphShard(rootDir, 'cache-d', { schemaVersion: 3, createdBy: 'pi-code-research-extension', subprojectId: 'cache-d', generation: 1, nodes: [], edges: [] });
+    await writeSubprojectGraphShard(rootDir, 'cache-e', { schemaVersion: 3, createdBy: 'pi-code-research-extension', subprojectId: 'cache-e', generation: 1, nodes: [], edges: [] });
+    await writeSubprojectGraphShard(rootDir, 'cache-f', { schemaVersion: 3, createdBy: 'pi-code-research-extension', subprojectId: 'cache-f', generation: 1, nodes: [], edges: [] });
+    await writeSubprojectGraphShard(rootDir, 'cache-g', { schemaVersion: 3, createdBy: 'pi-code-research-extension', subprojectId: 'cache-g', generation: 1, nodes: [], edges: [] });
+    await writeSubprojectGraphShard(rootDir, 'cache-h', { schemaVersion: 3, createdBy: 'pi-code-research-extension', subprojectId: 'cache-h', generation: 1, nodes: [], edges: [] });
+    await writeSubprojectGraphShard(rootDir, 'cache-i', { schemaVersion: 3, createdBy: 'pi-code-research-extension', subprojectId: 'cache-i', generation: 1, nodes: [], edges: [] });
+
+    for (const subprojectId of ['cache-a', 'cache-b', 'cache-c', 'cache-d', 'cache-e', 'cache-f', 'cache-g', 'cache-h', 'cache-i']) {
+      const shard = await readSubprojectGraphShard(rootDir, subprojectId, { generation: 1 });
+      expect(shard.status).toBe('ok');
+    }
+
+    const afterEviction = getSubprojectGraphShardCacheStats();
+    expect(afterEviction.entryCount).toBeLessThanOrEqual(8);
+    expect(afterEviction.evictions).toBeGreaterThan(0);
+
+    await writeFile(join(rootDir, '.pi/workspace-code-graph/graphs/cache-i.json'), '{"schemaVersion":2,"createdBy":"pi-code-research-extension","subprojectId":"cache-i"', 'utf8');
+    const corruptRead = await readSubprojectGraphShard(rootDir, 'cache-i', { generation: 1 });
+    expect(corruptRead.status).toBe('corrupt');
+
+    clearSubprojectGraphShardCache();
+    const afterClear = getSubprojectGraphShardCacheStats();
+    expect(afterClear.entryCount).toBe(0);
+    expect(afterClear.totalBytes).toBe(0);
+  });
+
+  it('keeps ensureFileNode free of deferred stat updates that rescan the full node array', async () => {
+    const source = await readFile(join(dirname(new URL(import.meta.url).pathname), '../../src/core/workspace-graph.ts'), 'utf8');
+    const ensureFileNodeBlock = source.match(/function ensureFileNode\([\s\S]*?\n}\n\nfunction extractTypeScriptCalls/);
+    expect(ensureFileNodeBlock?.[0]).toBeTruthy();
+    expect(ensureFileNodeBlock?.[0]).not.toContain('void stat(');
+    expect(ensureFileNodeBlock?.[0]).not.toContain('nodes.find(');
+  });
+
   it('stores symbol ranges and internal import/call relationships for ts source referenced via .js specifiers', async () => {
     const rootDir = await createProject({
       'package.json': `{"name":"fixture","type":"module"}\n`,
@@ -51,13 +188,13 @@ describe('workspace graph shard content', () => {
       kind: 'symbol',
       symbolKind: 'function',
       file: 'src/controller.ts',
-      range: { startLine: 3, startColumn: 7, endLine: 5, endColumn: 1 },
+      range: { startLine: 3, startColumn: 16, endLine: 5, endColumn: 1 },
     });
     expect(runService).toMatchObject({
       kind: 'symbol',
       symbolKind: 'function',
       file: 'src/service.ts',
-      range: { startLine: 1, startColumn: 7, endLine: 3, endColumn: 1 },
+      range: { startLine: 1, startColumn: 16, endLine: 3, endColumn: 1 },
     });
 
     const importEdge = shard.edges.find(
@@ -234,13 +371,13 @@ describe('workspace graph shard content', () => {
       kind: 'symbol',
       symbolKind: 'method',
       file: 'src/main/java/web/Controller.java',
-      range: { startLine: 12, startColumn: 2, endLine: 14, endColumn: 3 },
+      range: { startLine: 12, startColumn: 14, endLine: 12, endColumn: 23 },
     });
     expect(run).toMatchObject({
       kind: 'symbol',
       symbolKind: 'method',
       file: 'src/main/java/app/AppService.java',
-      range: { startLine: 6, startColumn: 2, endLine: 8, endColumn: 3 },
+      range: { startLine: 6, startColumn: 14, endLine: 6, endColumn: 20 },
     });
 
     const callEdge = shard.edges.find(
@@ -251,5 +388,91 @@ describe('workspace graph shard content', () => {
       external: false,
       callsite: { line: 13, column: 4, text: 'service.run()', receiverName: 'service', receiverType: 'Service' },
     });
+  });
+
+  it('validates java coverage proofs deeply and persists canonical permits edges', async () => {
+    const rootDir = await createProject({
+      'pom.xml': `<project />\n`,
+      'src/main/java/app/Shape.java': `package app;\n\npublic sealed class Shape permits Circle, Square {}\n`,
+      'src/main/java/app/Circle.java': `package app;\n\npublic final class Circle extends Shape {}\n`,
+      'src/main/java/app/Square.java': `package app;\n\npublic final class Square extends Shape {}\n`,
+    });
+
+    const built = await buildWorkspaceGraph(rootDir);
+    const subprojectId = built.state.subprojects[0]?.id;
+    expect(subprojectId).toBeTruthy();
+    if (!subprojectId) return;
+
+    const shardResult = await readSubprojectGraphShard(rootDir, subprojectId);
+    expect(shardResult.status).toBe('ok');
+    if (shardResult.status !== 'ok') return;
+
+    const shard = shardResult.data;
+    const shape = shard.nodes.find((node) => node.kind === 'symbol' && node.file === 'src/main/java/app/Shape.java' && node.name === 'Shape');
+    const circle = shard.nodes.find((node) => node.kind === 'symbol' && node.file === 'src/main/java/app/Circle.java' && node.name === 'Circle');
+    const square = shard.nodes.find((node) => node.kind === 'symbol' && node.file === 'src/main/java/app/Square.java' && node.name === 'Square');
+    expect(shape).toBeTruthy();
+    expect(circle).toBeTruthy();
+    expect(square).toBeTruthy();
+    expect(shard.edges.some((edge) => edge.kind === 'permits' && edge.from === shape?.id && edge.to === circle?.id)).toBe(true);
+    expect(shard.edges.some((edge) => edge.kind === 'permits' && edge.from === shape?.id && edge.to === square?.id)).toBe(true);
+
+    const shardPath = join(rootDir, '.pi/workspace-code-graph/graphs', `${subprojectId}.json`);
+    const malformedCases = [
+      {
+        name: 'symbol count mismatch',
+        mutate(candidate: typeof shard) {
+          if (candidate.javaSymbolCoverage) candidate.javaSymbolCoverage.fileProofs['src/main/java/app/Shape.java'].symbolCount += 1;
+        },
+      },
+      {
+        name: 'unknown observed family',
+        mutate(candidate: typeof shard) {
+          if (candidate.javaSymbolCoverage) candidate.javaSymbolCoverage.fileProofs['src/main/java/app/Shape.java'].observedFamilies = ['not-a-java-family' as any];
+        },
+      },
+      {
+        name: 'symbol source hash does not match file proof',
+        mutate(candidate: typeof shard) {
+          const symbol = candidate.nodes.find((node) => node.kind === 'symbol' && node.file === 'src/main/java/app/Shape.java');
+          if (symbol?.kind === 'symbol') symbol.sourceHash = '0'.repeat(64);
+        },
+      },
+      {
+        name: 'snapshot id does not describe file proofs',
+        mutate(candidate: typeof shard) {
+          if (candidate.javaSymbolCoverage) candidate.javaSymbolCoverage.sourceSnapshotId = '0'.repeat(64);
+        },
+      },
+    ];
+
+    for (const malformedCase of malformedCases) {
+      const malformed = structuredClone(shard);
+      malformedCase.mutate(malformed);
+      await writeFile(shardPath, `${JSON.stringify(malformed, null, 2)}\n`, 'utf8');
+      expect((await readSubprojectGraphShard(rootDir, subprojectId)).status, malformedCase.name).toBe('incompatible');
+    }
+  });
+
+  it('accepts fresh schema-v3 java shards for mixed-case coverage file ordering', async () => {
+    const rootDir = await createProject({
+      'pom.xml': `<project />\n`,
+      'src/main/java/app/B.java': `package app;\n\npublic class B {}\n`,
+      'src/main/java/app/b.java': `package app;\n\npublic class b {}\n`,
+    });
+
+    const built = await buildWorkspaceGraph(rootDir);
+    const subprojectId = built.state.subprojects[0]?.id;
+    expect(subprojectId).toBeTruthy();
+    if (!subprojectId) return;
+
+    const shardResult = await readSubprojectGraphShard(rootDir, subprojectId);
+    expect(shardResult.status).toBe('ok');
+    if (shardResult.status !== 'ok') return;
+
+    expect(shardResult.data.javaSymbolCoverage?.completeFiles).toEqual([
+      'src/main/java/app/B.java',
+      'src/main/java/app/b.java',
+    ]);
   });
 });

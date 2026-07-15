@@ -45,6 +45,9 @@ export interface ResolvedCall {
   ownerKind: OwnerKind;
   receiverType?: string;
   reason?: string;
+  resolution?: 'exact' | 'source_heuristic' | 'overload_ambiguous';
+  targetRelationshipId?: string;
+  targetMethod?: IndexedMethod;
 }
 
 export interface ResolvedJavaGraphCall {
@@ -58,6 +61,12 @@ interface ObjectTypeResolution {
   fullTypeName?: string;
   genericTypeName?: string;
   genericFullTypeName?: string;
+}
+
+interface JavaArgumentInfo {
+  raw: string;
+  category: 'string' | 'char' | 'boolean' | 'numeric' | 'null' | 'object_creation' | 'identifier' | 'unknown';
+  objectType?: string;
 }
 
 export async function resolveJavaIndexRoot(filePath: string): Promise<string> {
@@ -180,7 +189,7 @@ function buildNode(
   visited: Set<string>,
   invocation?: { call: MethodCall; resolved: ResolvedCall }
 ): CallTreeNode {
-  const ownerClass = findClassByName(method.className, method.package, index);
+  const ownerClass = findClassByQualifiedName(method.qualifiedClassName, index);
   const node: CallTreeNode = {
     file: method.file,
     symbol: method.symbol,
@@ -188,7 +197,7 @@ function buildNode(
     node_type: 'application',
     class: method.className,
     package: method.package,
-    owner_kind: ownerClass?.kind ?? 'unknown',
+    owner_kind: ownerClass?.kind === 'interface' ? 'interface' : 'class',
     line: method.line,
     column: method.column,
     start_line: method.line,
@@ -209,7 +218,7 @@ function buildNode(
     node.call_column = invocation.call.column;
   }
 
-  const visitKey = `${method.file}:${method.className}:${method.symbol}`;
+  const visitKey = method.symbolId;
   if (visited.has(visitKey) || depth >= maxDepth) {
     return node;
   }
@@ -249,18 +258,14 @@ function buildChildrenFromCalls(
       continue;
     }
 
-    if (resolved.isExternal) {
+    if (resolved.isExternal || !targetMethod) {
       if (includeExternal) {
         children.push(createExternalNode(currentMethod, call, resolved.source, resolved.reason, resolved, index, maxDepth, includeExternal, depth, visited));
       }
       continue;
     }
 
-    if (targetMethod) {
-      children.push(buildNode(targetMethod, index, maxDepth, includeExternal, depth + 1, visited, { call, resolved }));
-    } else if (includeExternal) {
-      children.push(createExternalNode(currentMethod, call, resolved.source, resolved.reason, resolved, index, maxDepth, includeExternal, depth, visited));
-    }
+    children.push(buildNode(targetMethod, index, maxDepth, includeExternal, depth + 1, visited, { call, resolved }));
   }
 
   return children;
@@ -374,8 +379,7 @@ export function resolveJavaCallsForGraph(
 ): ResolvedJavaGraphCall[] {
   return calls.map((call) => {
     const resolved = resolveCall(currentMethod, call, index);
-    const targetMethod = resolved && !resolved.isExternal ? findMethodInIndex(resolved.className, call.methodName, index) : undefined;
-    return { call, resolved, targetMethod };
+    return { call, resolved, targetMethod: resolved?.targetMethod };
   });
 }
 
@@ -383,12 +387,31 @@ function resolveCall(currentMethod: IndexedMethod, call: MethodCall, index: Proj
   const fileImports = index.imports.get(currentMethod.file);
 
   if (!call.object || call.object === 'this') {
-    if (findMethodInIndex(currentMethod.className, call.methodName, index)) {
+    const selection = selectMethodCandidate(
+      index.methods.filter((method) => method.qualifiedClassName === currentMethod.qualifiedClassName && method.symbol === call.methodName),
+      call
+    );
+    if (selection.targetMethod) {
       return {
-        className: currentMethod.className,
+        className: selection.targetMethod.className,
         isExternal: false,
         source: 'application',
         ownerKind: 'class',
+        resolution: selection.resolution,
+        reason: selection.reason,
+        targetRelationshipId: selection.targetMethod.relationshipId,
+        targetMethod: selection.targetMethod,
+      };
+    }
+    if (selection.ambiguousRelationshipId) {
+      return {
+        className: currentMethod.className,
+        isExternal: true,
+        source: 'application',
+        ownerKind: 'class',
+        resolution: 'overload_ambiguous',
+        reason: selection.reason,
+        targetRelationshipId: selection.ambiguousRelationshipId,
       };
     }
     return {
@@ -411,7 +434,7 @@ function resolveCall(currentMethod: IndexedMethod, call: MethodCall, index: Proj
     };
   }
 
-  return resolveTypeToCallTarget(objectType, call.methodName, index, fileImports);
+  return resolveTypeToCallTarget(objectType, call, index, fileImports);
 }
 
 function resolveObjectType(
@@ -429,9 +452,9 @@ function resolveObjectType(
   }
 
   if (looksLikeStaticFieldAccess(objectName)) {
-    const ownerType = objectName.split('.')[0];
+    const ownerType = objectName.split('.').slice(0, -1).join('.');
     return {
-      typeName: ownerType,
+      typeName: simpleName(ownerType),
       fullTypeName: resolveTypeInFile(currentMethod.file, ownerType, index),
     };
   }
@@ -441,7 +464,7 @@ function resolveObjectType(
   const scopedType = resolveMethodScopedType(currentMethod, normalizedObject, index);
   if (scopedType) return scopedType;
 
-  const field = findFieldInIndex(currentMethod.className, normalizedObject, index);
+  const field = findFieldInIndex(currentMethod.qualifiedClassName, normalizedObject, index);
   if (field) {
     return {
       typeName: field.typeName,
@@ -450,15 +473,16 @@ function resolveObjectType(
   }
 
   const fileImports = index.imports.get(currentMethod.file);
-  const imported = fileImports?.imports.get(normalizedObject);
+  const imported = fileImports?.imports.get(normalizedObject.split('.')[0] ?? normalizedObject);
   if (imported) {
-    return { typeName: simpleName(imported), fullTypeName: imported };
+    const suffix = normalizedObject.includes('.') ? `.${normalizedObject.split('.').slice(1).join('.')}` : '';
+    return { typeName: simpleName(normalizedObject), fullTypeName: `${imported}${suffix}` };
   }
 
   if (normalizedObject[0] === normalizedObject[0]?.toUpperCase()) {
     return {
-      typeName: normalizedObject,
-      fullTypeName: fileImports?.imports.get(normalizedObject),
+      typeName: simpleName(normalizedObject),
+      fullTypeName: resolveTypeInFile(currentMethod.file, normalizedObject, index),
     };
   }
 
@@ -473,7 +497,7 @@ function resolveMethodScopedType(
   const parameterType = findParameterType(currentMethod.node, objectName);
   if (parameterType) {
     return {
-      typeName: parameterType,
+      typeName: simpleName(parameterType),
       fullTypeName: resolveTypeInFile(currentMethod.file, parameterType, index),
     };
   }
@@ -481,7 +505,7 @@ function resolveMethodScopedType(
   const localType = findLocalVariableType(currentMethod.node, objectName);
   if (localType) {
     return {
-      typeName: localType,
+      typeName: simpleName(localType),
       fullTypeName: resolveTypeInFile(currentMethod.file, localType, index),
     };
   }
@@ -495,11 +519,12 @@ function resolveObjectCreationType(
   index: ProjectIndex
 ): ObjectTypeResolution | undefined {
   const match = expression.match(/^new\s+([A-Za-z_$][\w$.]*)\s*</) ?? expression.match(/^new\s+([A-Za-z_$][\w$.]*)\s*\(/);
-  const typeName = normalizeTypeName(match?.[1]);
-  if (!typeName) return undefined;
+  const scopedType = normalizeScopedTypeName(match?.[1]);
+  if (!scopedType) return undefined;
+  const fullTypeName = resolveTypeInFile(file, scopedType, index);
   return {
-    typeName,
-    fullTypeName: resolveTypeInFile(file, typeName, index),
+    typeName: simpleName(scopedType),
+    fullTypeName,
   };
 }
 
@@ -514,7 +539,11 @@ function resolveInvocationExpressionType(
   const baseType = resolveObjectType(currentMethod, invocation.baseExpression, inferExpressionNodeType(invocation.baseExpression), index);
   if (!baseType) return undefined;
 
-  const applicationMethod = findMethodInIndex(baseType.typeName, invocation.methodName, index);
+  const applicationMethodSelection = selectMethodCandidate(findMethodsForType(baseType, invocation.methodName, index), {
+    methodName: invocation.methodName,
+    callText: expression,
+  });
+  const applicationMethod = applicationMethodSelection.targetMethod;
   if (applicationMethod?.returnType) {
     const genericTypeName = extractFirstGenericType(applicationMethod.node.childForFieldName('type')?.text);
     return {
@@ -542,7 +571,7 @@ function findParameterType(methodNode: any, parameterName: string): string | und
     const nameNode = child.childForFieldName('name');
     if (!nameNode || nameNode.text !== parameterName) continue;
     const typeNode = child.childForFieldName('type');
-    return normalizeTypeName(typeNode?.text);
+    return normalizeScopedTypeName(typeNode?.text);
   }
 
   return undefined;
@@ -559,7 +588,7 @@ function findLocalVariableType(methodNode: any, variableName: string): string | 
 
     if (node.type === 'local_variable_declaration') {
       const typeNode = node.childForFieldName('type');
-      const typeName = normalizeTypeName(typeNode?.text);
+      const typeName = normalizeScopedTypeName(typeNode?.text);
       for (const child of node.children) {
         if (child.type !== 'variable_declarator') continue;
         const nameNode = child.childForFieldName('name');
@@ -581,7 +610,7 @@ function findLocalVariableType(methodNode: any, variableName: string): string | 
 
 function resolveTypeToCallTarget(
   objectType: ObjectTypeResolution,
-  methodName: string,
+  call: MethodCall,
   index: ProjectIndex,
   fileImports?: FileImports
 ): ResolvedCall {
@@ -589,63 +618,120 @@ function resolveTypeToCallTarget(
   if (classRecord) {
     if (classRecord.kind === 'interface') {
       const implementations = findInterfaceImplementations(classRecord, index).filter((candidate) =>
-        Boolean(findMethodInIndex(candidate.className, methodName, index))
+        Boolean(selectMethodCandidate(index.methods.filter((method) => method.qualifiedClassName === candidate.fullName && method.symbol === call.methodName), call).targetMethod)
       );
 
       if (implementations.length === 1) {
-        return {
-          className: implementations[0].className,
-          isExternal: false,
-          source: 'application',
-          ownerKind: 'class',
-          receiverType: classRecord.className,
-          reason: `resolved via interface ${classRecord.className}`,
-        };
+        const selection = selectMethodCandidate(index.methods.filter((method) => method.qualifiedClassName === implementations[0].fullName && method.symbol === call.methodName), call);
+        if (selection.targetMethod) {
+          return {
+            className: selection.targetMethod.className,
+            isExternal: false,
+            source: 'application',
+            ownerKind: 'class',
+            receiverType: classRecord.className,
+            reason: selection.reason ?? `resolved via interface ${classRecord.className}`,
+            resolution: selection.resolution,
+            targetRelationshipId: selection.targetMethod.relationshipId,
+            targetMethod: selection.targetMethod,
+          };
+        }
       }
 
       if (implementations.length > 1) {
+        const candidates = implementations.flatMap((candidate) =>
+          index.methods.filter((method) => method.qualifiedClassName === candidate.fullName && method.symbol === call.methodName)
+        );
+        const selection = selectMethodCandidate(candidates, call);
+        if (selection.targetMethod) {
+          return {
+            className: selection.targetMethod.className,
+            isExternal: false,
+            source: 'application',
+            ownerKind: 'class',
+            receiverType: classRecord.className,
+            reason: selection.reason ?? `resolved via interface ${classRecord.className}`,
+            resolution: selection.resolution,
+            targetRelationshipId: selection.targetMethod.relationshipId,
+            targetMethod: selection.targetMethod,
+          };
+        }
         return {
           className: classRecord.className,
           isExternal: true,
           source: 'unknown',
           ownerKind: 'interface',
           receiverType: classRecord.className,
-          reason: `multiple application implementations found for interface ${classRecord.className}`,
+          reason: selection.reason ?? `multiple application implementations found for interface ${classRecord.className}`,
+          resolution: selection.resolution,
+          targetRelationshipId: selection.ambiguousRelationshipId,
         };
       }
     }
 
-    const directMethod = findMethodInIndex(classRecord.className, methodName, index);
-    if (directMethod) {
+    const selection = selectMethodCandidate(index.methods.filter((method) => method.qualifiedClassName === classRecord.fullName && method.symbol === call.methodName), call);
+    if (selection.targetMethod) {
       return {
-        className: directMethod.className,
+        className: selection.targetMethod.className,
         isExternal: false,
         source: 'application',
-        ownerKind: classRecord.kind,
+        ownerKind: classRecord.kind === 'interface' ? 'interface' : 'class',
         receiverType: classRecord.className,
+        reason: selection.reason,
+        resolution: selection.resolution,
+        targetRelationshipId: selection.targetMethod.relationshipId,
+        targetMethod: selection.targetMethod,
+      };
+    }
+    if (selection.ambiguousRelationshipId) {
+      return {
+        className: classRecord.className,
+        isExternal: true,
+        source: 'application',
+        ownerKind: classRecord.kind === 'interface' ? 'interface' : 'class',
+        receiverType: classRecord.className,
+        reason: selection.reason,
+        resolution: 'overload_ambiguous',
+        targetRelationshipId: selection.ambiguousRelationshipId,
       };
     }
 
-    if (classRecord.kind === 'class') {
+    if (classRecord.kind !== 'interface') {
       return {
         className: classRecord.className,
         isExternal: true,
         source: 'application',
         ownerKind: 'class',
         receiverType: classRecord.className,
-        reason: `application class ${classRecord.className} does not declare method ${methodName}`,
+        reason: `application class ${classRecord.className} does not declare method ${call.methodName}`,
       };
     }
   }
 
-  const directMethod = findMethodInIndex(objectType.typeName, methodName, index);
-  if (directMethod) {
+  const directSelection = selectMethodCandidate(findMethodsForType(objectType, call.methodName, index), call);
+  if (directSelection.targetMethod) {
     return {
-      className: directMethod.className,
+      className: directSelection.targetMethod.className,
       isExternal: false,
       source: 'application',
       ownerKind: 'class',
       receiverType: objectType.typeName,
+      reason: directSelection.reason,
+      resolution: directSelection.resolution,
+      targetRelationshipId: directSelection.targetMethod.relationshipId,
+      targetMethod: directSelection.targetMethod,
+    };
+  }
+  if (directSelection.ambiguousRelationshipId) {
+    return {
+      className: objectType.typeName,
+      isExternal: true,
+      source: 'application',
+      ownerKind: 'class',
+      receiverType: objectType.typeName,
+      reason: directSelection.reason,
+      resolution: 'overload_ambiguous',
+      targetRelationshipId: directSelection.ambiguousRelationshipId,
     };
   }
 
@@ -684,61 +770,216 @@ function resolveTypeToCallTarget(
 }
 
 function resolveTypeInFile(file: string, typeName: string, index: ProjectIndex): string | undefined {
+  const normalizedType = normalizeScopedTypeName(typeName);
+  if (!normalizedType) return undefined;
+
   const fileImports = index.imports.get(file);
-  const imported = fileImports?.imports.get(typeName);
-  if (imported) return imported;
+  const topLevel = normalizedType.split('.')[0] ?? normalizedType;
+  const imported = fileImports?.imports.get(topLevel);
+  if (imported) {
+    const suffix = normalizedType === topLevel ? '' : `.${normalizedType.slice(topLevel.length + 1)}`;
+    return `${imported}${suffix}`;
+  }
+
+  const sameFileType = index.classes.find((candidate) => candidate.file === file && (candidate.fullName === normalizedType || candidate.fullName.endsWith(`.${normalizedType}`)));
+  if (sameFileType) return sameFileType.fullName;
 
   const currentPackage = fileImports?.package;
-  const samePackageClass = index.classes.find((candidate) =>
-    candidate.className === typeName && candidate.package === currentPackage
-  );
+  const samePackageClass = index.classes.find((candidate) => {
+    if (candidate.package !== currentPackage) return false;
+    return candidate.fullName === `${currentPackage}.${normalizedType}` || candidate.fullName.endsWith(`.${normalizedType}`);
+  });
   if (samePackageClass) return samePackageClass.fullName;
 
-  return undefined;
+  const uniqueSuffixMatch = index.classes.filter((candidate) => candidate.fullName.endsWith(`.${normalizedType}`) || candidate.className === normalizedType);
+  if (uniqueSuffixMatch.length === 1) return uniqueSuffixMatch[0].fullName;
+
+  return currentPackage ? `${currentPackage}.${normalizedType}` : normalizedType;
 }
 
-function findFieldInIndex(className: string, fieldName: string, index: ProjectIndex): IndexedField | undefined {
-  return index.fields.find((field) => field.className === className && field.fieldName === fieldName);
+function findFieldInIndex(qualifiedClassName: string, fieldName: string, index: ProjectIndex): IndexedField | undefined {
+  return index.fields.find((field) => field.qualifiedClassName === qualifiedClassName && field.fieldName === fieldName);
 }
 
-function findClassByName(className: string, packageName: string | undefined, index: ProjectIndex): IndexedClass | undefined {
-  return index.classes.find((candidate) => candidate.className === className && (!packageName || candidate.package === packageName));
-}
-
-function findMethodInIndex(className: string, methodName: string, index: ProjectIndex): IndexedMethod | undefined {
-  return index.methods.find((method) => method.className === className && method.symbol === methodName);
+function findClassByQualifiedName(fullName: string, index: ProjectIndex): IndexedClass | undefined {
+  return index.classes.find((candidate) => candidate.fullName === fullName);
 }
 
 function findClassInIndex(objectType: ObjectTypeResolution, index: ProjectIndex): IndexedClass | undefined {
-  return index.classes.find((candidate) => {
-    if (candidate.className === objectType.typeName) return true;
+  const matches = index.classes.filter((candidate) => {
     if (objectType.fullTypeName && candidate.fullName === objectType.fullTypeName) return true;
-    return false;
+    if (candidate.className === objectType.typeName) return true;
+    return objectType.fullTypeName ? candidate.fullName.endsWith(`.${objectType.fullTypeName}`) : false;
+  });
+  return matches.length === 1 ? matches[0] : matches.find((candidate) => candidate.fullName === objectType.fullTypeName) ?? matches[0];
+}
+
+function findMethodsForType(objectType: ObjectTypeResolution, methodName: string, index: ProjectIndex): IndexedMethod[] {
+  return index.methods.filter((method) => {
+    if (method.symbol !== methodName) return false;
+    if (objectType.fullTypeName && method.qualifiedClassName === objectType.fullTypeName) return true;
+    return method.className === objectType.typeName;
   });
 }
 
 function findInterfaceImplementations(target: IndexedClass, index: ProjectIndex): IndexedClass[] {
   return index.classes.filter((candidate) => {
-    if (candidate.kind !== 'class') return false;
-    return candidate.implements.some((implemented) =>
-      implemented === target.className || implemented === target.fullName || simpleName(implemented) === target.className
-    );
+    if (candidate.kind !== 'class' && candidate.kind !== 'record' && candidate.kind !== 'enum') return false;
+    return candidate.implements.some((implemented) => implemented === target.fullName || simpleName(implemented) === target.className);
   });
+}
+
+function selectMethodCandidate(
+  candidates: IndexedMethod[],
+  call: Pick<MethodCall, 'callText' | 'methodName'>
+): {
+  targetMethod?: IndexedMethod;
+  resolution?: 'exact' | 'source_heuristic';
+  reason?: string;
+  ambiguousRelationshipId?: string;
+} {
+  if (candidates.length === 0) return {};
+  if (candidates.length === 1) return { targetMethod: candidates[0], resolution: 'exact' };
+
+  const argumentInfo = parseCallArguments(call.callText);
+  const arityMatches = candidates.filter((candidate) => methodAcceptsArity(candidate, argumentInfo.length));
+  if (arityMatches.length === 1) {
+    return { targetMethod: arityMatches[0], resolution: 'source_heuristic', reason: 'matched overload by argument count' };
+  }
+
+  const narrowedByArity = arityMatches.length > 0 ? arityMatches : candidates;
+  const categoryMatches = narrowedByArity.filter((candidate) => methodMatchesArgumentCategories(candidate, argumentInfo));
+  if (categoryMatches.length === 1) {
+    return { targetMethod: categoryMatches[0], resolution: 'source_heuristic', reason: 'matched overload by syntax-only argument categories' };
+  }
+
+  const ambiguousCandidates = categoryMatches.length > 0 ? categoryMatches : narrowedByArity;
+  const ambiguousRelationshipId = ambiguousCandidates[0]?.relationshipId;
+  return {
+    ambiguousRelationshipId,
+    reason: `overload_ambiguous:${call.methodName}`,
+  };
+}
+
+function parseCallArguments(callText: string): JavaArgumentInfo[] {
+  const start = callText.indexOf('(');
+  const end = callText.lastIndexOf(')');
+  if (start === -1 || end === -1 || end <= start + 1) return [];
+  const rawArgs = splitTopLevelArguments(callText.slice(start + 1, end));
+  return rawArgs
+    .map((raw) => raw.trim())
+    .filter(Boolean)
+    .map((raw) => {
+      const category = classifyArgument(raw);
+      const objectType = category === 'object_creation'
+        ? raw.match(/^new\s+([A-Za-z_$][\w$.]*)\s*(?:<|\()/)?.[1]?.split('.').pop()
+        : undefined;
+      return { raw, category, objectType };
+    });
+}
+
+function splitTopLevelArguments(value: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let depth = 0;
+  let inString: 'single' | 'double' | undefined;
+  let escaped = false;
+
+  for (const char of value) {
+    current += char;
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (inString) {
+      if ((inString === 'single' && char === '\'') || (inString === 'double' && char === '"')) inString = undefined;
+      continue;
+    }
+    if (char === '\'') {
+      inString = 'single';
+      continue;
+    }
+    if (char === '"') {
+      inString = 'double';
+      continue;
+    }
+    if (char === '(' || char === '[' || char === '{' || char === '<') {
+      depth++;
+      continue;
+    }
+    if (char === ')' || char === ']' || char === '}' || char === '>') {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (char === ',' && depth === 0) {
+      parts.push(current.slice(0, -1));
+      current = '';
+    }
+  }
+
+  if (current.trim()) parts.push(current);
+  return parts;
+}
+
+function classifyArgument(raw: string): JavaArgumentInfo['category'] {
+  if (/^"(?:\\.|[^"])*"$/s.test(raw)) return 'string';
+  if (/^'(?:\\.|[^'])+'$/s.test(raw)) return 'char';
+  if (/^(true|false)$/.test(raw)) return 'boolean';
+  if (/^null$/.test(raw)) return 'null';
+  if (/^new\s+[A-Za-z_$]/.test(raw)) return 'object_creation';
+  if (/^[+-]?(?:\d[\d_]*)(?:\.\d[\d_]*)?(?:[dDfFlL])?$/.test(raw)) return 'numeric';
+  if (/^[A-Za-z_$][\w$.]*$/.test(raw)) return 'identifier';
+  return 'unknown';
+}
+
+function methodAcceptsArity(candidate: IndexedMethod, argCount: number): boolean {
+  if (candidate.varargs) return argCount >= Math.max(0, candidate.arity - 1);
+  return candidate.arity === argCount;
+}
+
+function methodMatchesArgumentCategories(candidate: IndexedMethod, args: JavaArgumentInfo[]): boolean {
+  if (!methodAcceptsArity(candidate, args.length)) return false;
+  if (args.length === 0) return true;
+
+  for (let i = 0; i < args.length; i++) {
+    const parameterType = candidate.normalizedParameterTypes[Math.min(i, candidate.normalizedParameterTypes.length - 1)] ?? 'Object';
+    if (!argumentCategoryMatchesParameter(args[i], parameterType)) return false;
+  }
+  return true;
+}
+
+function argumentCategoryMatchesParameter(argument: JavaArgumentInfo, parameterType: string): boolean {
+  const normalizedType = parameterType.replace(/\[\]$/, '');
+  const { category } = argument;
+  if (category === 'unknown' || category === 'identifier') return true;
+  if (category === 'object_creation') return normalizedType === 'Object' || argument.objectType === normalizedType;
+  if (category === 'null') return !isPrimitiveType(normalizedType);
+  if (category === 'string') return ['String', 'CharSequence', 'Object'].includes(normalizedType);
+  if (category === 'char') return ['char', 'Character', 'Object'].includes(normalizedType);
+  if (category === 'boolean') return ['boolean', 'Boolean', 'Object'].includes(normalizedType);
+  if (category === 'numeric') return ['byte', 'short', 'int', 'long', 'float', 'double', 'Byte', 'Short', 'Integer', 'Long', 'Float', 'Double', 'Number', 'Object'].includes(normalizedType);
+  return true;
+}
+
+function isPrimitiveType(typeName: string): boolean {
+  return ['byte', 'short', 'int', 'long', 'float', 'double', 'boolean', 'char'].includes(typeName);
 }
 
 function normalizeObjectName(objectName: string): string {
   const trimmed = objectName.trim();
-  if (/^[A-Za-z_$][\w$]*$/.test(trimmed)) return trimmed;
+  if (/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(trimmed)) return trimmed;
 
-  const lastIdentifier = trimmed.match(/([A-Za-z_$][\w$]*)\s*$/);
+  const lastIdentifier = trimmed.match(/([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*$/);
   return lastIdentifier?.[1] ?? trimmed;
 }
 
-function normalizeTypeName(typeText?: string): string {
+function normalizeScopedTypeName(typeText?: string): string {
   if (!typeText) return '';
-  const withoutGenerics = typeText.replace(/<.*>/g, '');
-  const lastSegment = withoutGenerics.split('.').pop() ?? withoutGenerics;
-  return lastSegment.trim();
+  return typeText.replace(/<[^<>]*>/g, '').replace(/\[\]/g, '').replace(/\.\.\./g, '').trim();
 }
 
 function simpleName(fullName: string): string {
@@ -748,7 +989,7 @@ function simpleName(fullName: string): string {
 function extractFirstGenericType(typeText?: string): string | undefined {
   if (!typeText) return undefined;
   const match = typeText.match(/<\s*([A-Za-z_$][\w$.]*)/);
-  return match ? normalizeTypeName(match[1]) : undefined;
+  return match ? simpleName(normalizeScopedTypeName(match[1])) : undefined;
 }
 
 function looksLikeMethodInvocation(expression: string): boolean {
@@ -756,7 +997,7 @@ function looksLikeMethodInvocation(expression: string): boolean {
 }
 
 function looksLikeStaticFieldAccess(expression: string): boolean {
-  return /^[A-Z][A-Za-z0-9_$]*\.[A-Z0-9_$]+$/.test(expression.trim());
+  return /^[A-Z][A-Za-z0-9_$.]*\.[A-Z0-9_$]+$/.test(expression.trim());
 }
 
 function inferExpressionNodeType(expression: string): string | undefined {
@@ -846,7 +1087,7 @@ function detectCallbackKind(callText: string): 'lambda' | 'method_reference' | '
 
 function classifyExpressionSource(expression: string, fileImports?: FileImports): CallSource {
   const normalizedObject = normalizeObjectName(expression);
-  const imported = fileImports?.imports.get(normalizedObject);
+  const imported = fileImports?.imports.get(simpleName(normalizedObject));
   if (imported) {
     if (isFrameworkPackage(imported)) return 'framework';
     if (isLanguagePackage(imported)) return 'language';

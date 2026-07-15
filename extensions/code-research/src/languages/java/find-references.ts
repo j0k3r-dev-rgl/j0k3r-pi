@@ -190,7 +190,7 @@ function createRef(
   column: number,
   index: ProjectIndex,
   contextSymbol?: string,
-  contextKind?: 'class' | 'interface'
+  contextKind?: IndexedClass['kind']
 ): ReferenceLocation {
   const contextClass = contextSymbol ?? index.classes.find((klass) => klass.file === file && klass.line <= line)?.className;
   return {
@@ -200,7 +200,7 @@ function createRef(
     symbol: input.symbol,
     kind: input.kind ?? 'unknown',
     context_symbol: contextSymbol,
-    context_kind: contextKind,
+    context_kind: contextKind === 'interface' ? 'interface' : contextKind ? 'class' : undefined,
     context_class: contextClass,
     owner_kind: contextKind === 'interface' ? 'interface' : 'class',
     reference_kind: kind,

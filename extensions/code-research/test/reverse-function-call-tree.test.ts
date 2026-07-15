@@ -3,6 +3,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { executeReverseFunctionCallTree } from '../src/core/reverse-function-call-tree-resolver.js';
+import { buildProjectIndex } from '../src/core/project-index.js';
+import { buildReverseCallTree } from '../src/languages/java/reverse-function-call-tree.js';
 import { buildWorkspaceGraph } from '../src/core/workspace-graph.js';
 import { loadWorkspaceGraphState, writeWorkspaceGraphState } from '../src/core/workspace-state.js';
 
@@ -20,6 +22,35 @@ async function createProject(prefix: string, files: Record<string, string>): Pro
 }
 
 describe('reverse_function_call_tree', () => {
+  it('does not index callback-consuming call results as reverse-callable declarations', async () => {
+    const rootDir = await createProject('pi-reverse-call-tree-ts-non-callable', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/service.ts': `declare function consume<T>(value: T): { value: T };\nexport const Wrapped = (((() => 1) as () => number)!);\nexport function useWrapped(): void { Wrapped(); }\nexport const NotCallable = consume(() => 1);\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+
+    const notCallable = await executeReverseFunctionCallTree(rootDir, {
+      path: 'src/service.ts',
+      symbol: 'NotCallable',
+      language: 'ts',
+      kind: 'function',
+      max_depth: 4,
+    });
+    expect(notCallable.status).toBe('not_found');
+
+    const wrapped = await executeReverseFunctionCallTree(rootDir, {
+      path: 'src/service.ts',
+      symbol: 'Wrapped',
+      language: 'ts',
+      kind: 'function',
+      max_depth: 4,
+    });
+    expect(wrapped.status).toBe('ok');
+    if (wrapped.status !== 'ok') return;
+    expect(wrapped.result.root.callers?.[0].symbol).toBe('useWrapped');
+  });
+
   it('returns TypeScript callers recursively with callers arrays and multiple incoming branches across higher levels', async () => {
     const rootDir = await createProject('pi-reverse-call-tree-ts', {
       'src/service.ts': `export function helper(): void {}\n\nexport function runService(): void {\n  helper();\n}\n\nexport function warmupService(): void {\n  helper();\n}\n`,
@@ -194,5 +225,48 @@ describe('reverse_function_call_tree', () => {
     expect(warmup?.callers?.[0].callers?.[0].symbol).toBe('startWarmup');
     expect(warmup?.callers?.[0].callers?.[0].class).toBe('Bootstrap');
     expect(execution.result.stats.application_nodes).toBe(7);
+  });
+
+  it('uses conservative object-creation syntax to bind reverse edges to one Java overload', async () => {
+    const rootDir = await createProject('pi-reverse-call-tree-java-object-overloads', {
+      'src/main/java/app/Example.java': `package app;\n\npublic class Example {\n  public void runString() { process(new String("x")); }\n  private void process(String value) {}\n  private void process(Integer value) {}\n}\n`,
+    });
+
+    const index = await buildProjectIndex(rootDir);
+    const stringOverload = index.methods.find(
+      (method) => method.symbol === 'process' && method.normalizedParameterTypes.join(',') === 'String'
+    );
+    const integerOverload = index.methods.find(
+      (method) => method.symbol === 'process' && method.normalizedParameterTypes.join(',') === 'Integer'
+    );
+    expect(stringOverload).toBeDefined();
+    expect(integerOverload).toBeDefined();
+
+    expect(buildReverseCallTree({ index, rootMethod: stringOverload!, maxDepth: 5 }).root.callers?.map((node) => node.symbol)).toEqual(['runString']);
+    expect(buildReverseCallTree({ index, rootMethod: integerOverload!, maxDepth: 5 }).root.callers).toBeUndefined();
+  });
+
+  it('keeps reverse-call edges bound to the matching Java overload instead of the first declaration', async () => {
+    const rootDir = await createProject('pi-reverse-call-tree-java-overloads', {
+      'src/main/java/app/Example.java': `package app;\n\npublic class Example {\n  public void runInt() {\n    process(1);\n  }\n\n  public void runString() {\n    process("x");\n  }\n\n  private void process(int value) {}\n\n  private void process(String value) {}\n}\n`,
+    });
+
+    const index = await buildProjectIndex(rootDir);
+    const intOverload = index.methods.find(
+      (method) => method.className === 'Example' && method.symbol === 'process' && method.normalizedParameterTypes.join(',') === 'int'
+    );
+    const stringOverload = index.methods.find(
+      (method) => method.className === 'Example' && method.symbol === 'process' && method.normalizedParameterTypes.join(',') === 'String'
+    );
+    expect(intOverload).toBeDefined();
+    expect(stringOverload).toBeDefined();
+
+    const intResult = buildReverseCallTree({ index, rootMethod: intOverload!, maxDepth: 5 });
+    const stringResult = buildReverseCallTree({ index, rootMethod: stringOverload!, maxDepth: 5 });
+
+    expect(intResult.root.callers?.map((node) => node.symbol)).toEqual(['runInt']);
+    expect(intResult.root.callers?.[0].called_as).toBe('process(1)');
+    expect(stringResult.root.callers?.map((node) => node.symbol)).toEqual(['runString']);
+    expect(stringResult.root.callers?.[0].called_as).toBe('process("x")');
   });
 });

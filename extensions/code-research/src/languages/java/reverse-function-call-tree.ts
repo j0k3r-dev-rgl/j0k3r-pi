@@ -138,7 +138,7 @@ function buildReverseNode(options: {
     node_type: 'application',
     class: method.className,
     package: method.package,
-    owner_kind: 'class',
+    owner_kind: method.declarationKind === 'annotation_element' ? 'interface' : 'class',
     line: method.line,
     column: method.column,
     start_line: method.line,
@@ -187,5 +187,5 @@ function countNodes(node: CallTreeNode, depth: number, stats: FunctionCallTreeRe
 }
 
 function methodKey(method: IndexedMethod): string {
-  return `${method.file}:${method.className}:${method.symbol}`;
+  return method.symbolId;
 }

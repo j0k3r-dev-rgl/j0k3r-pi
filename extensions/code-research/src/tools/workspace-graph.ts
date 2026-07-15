@@ -6,7 +6,7 @@ import type { GraphManifest, WorkspaceGraphState } from '../types.js';
 
 function summarizeWorkspaceGraphState(
   state: WorkspaceGraphState,
-  manifestStatus: 'ok' | 'missing' | 'incompatible' | 'errored',
+  manifestStatus: 'ok' | 'missing' | 'incompatible' | 'corrupt' | 'oversized' | 'errored',
   manifest?: GraphManifest
 ) {
   const languages = { java: 0, ts: 0, js: 0, py: 0 };

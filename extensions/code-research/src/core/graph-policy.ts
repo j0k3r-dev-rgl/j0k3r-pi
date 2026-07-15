@@ -7,7 +7,7 @@ export type GraphQueryKind =
   | 'function_call_tree'
   | 'reverse_function_call_tree';
 
-export type GraphArtifactReadStatus = 'ok' | 'missing' | 'incompatible' | 'errored';
+export type GraphArtifactReadStatus = 'ok' | 'missing' | 'incompatible' | 'corrupt' | 'oversized' | 'errored';
 
 export type GraphUnusableReason =
   | 'graph_disabled'

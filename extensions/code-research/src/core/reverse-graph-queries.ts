@@ -26,7 +26,7 @@ export async function queryReverseFunctionCallTreeFromGraph(options: {
 
   const shards = await Promise.all(
     manifest.subprojects.map(async (subproject) => {
-      const shard = await readSubprojectGraphShard(cwd, subproject.id);
+      const shard = await readSubprojectGraphShard(cwd, subproject.id, { generation: subproject.generation });
       return shard.status === 'ok' ? shard.data : undefined;
     })
   );

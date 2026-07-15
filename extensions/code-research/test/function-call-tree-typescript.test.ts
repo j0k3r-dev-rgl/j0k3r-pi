@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { executeFunctionCallTree } from '../src/core/function-call-tree-resolver.js';
+import { buildWorkspaceGraph } from '../src/core/workspace-graph.js';
 
 async function createProject(files: Record<string, string>): Promise<string> {
   const rootDir = join(tmpdir(), `pi-function-call-tree-ts-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -18,6 +19,34 @@ async function createProject(files: Record<string, string>): Promise<string> {
 }
 
 describe('function_call_tree TypeScript', () => {
+  it('does not index callback-consuming call results as callable declarations', async () => {
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/service.ts': `declare function consume<T>(value: T): { value: T };\nexport const Wrapped = (((() => 1) as () => number)!);\nexport const Direct = () => Wrapped();\nexport const NotCallable = consume(() => 1);\nexport function run(): void {\n  Direct();\n  Wrapped();\n}\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+
+    const notCallable = await executeFunctionCallTree(rootDir, {
+      path: 'src/service.ts',
+      symbol: 'NotCallable',
+      language: 'ts',
+      kind: 'function',
+    });
+    expect(notCallable.status).toBe('not_found');
+
+    const direct = await executeFunctionCallTree(rootDir, {
+      path: 'src/service.ts',
+      symbol: 'run',
+      language: 'ts',
+      kind: 'function',
+      max_depth: 5,
+    });
+    expect(direct.status).toBe('ok');
+    if (direct.status !== 'ok') return;
+    expect(direct.result.root.children?.map((child) => child.symbol).sort()).toEqual(['Direct', 'Wrapped']);
+  });
+
   it('follows imported functions recursively across project files', async () => {
     const rootDir = await createProject({
       'src/service.ts': `export function runService(): void {\n  helper();\n}\n\nfunction helper(): void {}\n`,

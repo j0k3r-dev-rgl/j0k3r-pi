@@ -12,20 +12,45 @@ import { WORKSPACE_GRAPH_DIR } from './source-policy.js';
 
 export type GraphArtifactReadResult<T = any> =
   | { status: 'missing' }
+  | { status: 'corrupt'; error: Error }
+  | { status: 'oversized'; error: Error }
   | { status: 'incompatible'; data?: T }
   | { status: 'errored'; error: Error }
   | { status: 'ok'; data: T };
 
+const MAX_GRAPH_ARTIFACT_BYTES = 256 * 1024 * 1024;
+const MAX_SUBPROJECT_SHARD_CACHE_BYTES = 256 * 1024 * 1024;
+const MAX_SUBPROJECT_SHARD_CACHE_ENTRIES = 8;
+
+interface CachedSubprojectShardEntry {
+  cacheKey: string;
+  path: string;
+  generation: number;
+  size: number;
+  mtimeMs: number;
+  ctimeMs: number;
+  ino: number;
+  data: SubprojectGraphShard;
+}
+
+const subprojectShardCache = new Map<string, CachedSubprojectShardEntry>();
+let subprojectShardCacheBytes = 0;
+const subprojectShardCacheStats = { hits: 0, misses: 0, evictions: 0 };
+
 export async function writeGraphArtifactJson(path: string, value: unknown): Promise<string> {
   await mkdir(dirname(path), { recursive: true });
   const tempPath = `${path}.tmp-${process.pid}-${Date.now()}`;
-  await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  await writeFile(tempPath, `${JSON.stringify(value)}\n`, 'utf8');
   await rename(tempPath, path);
   return path;
 }
 
 export async function readGraphArtifactJson<T = any>(path: string): Promise<GraphArtifactReadResult<T>> {
   try {
+    const fileStat = await stat(path);
+    if (fileStat.size > MAX_GRAPH_ARTIFACT_BYTES) {
+      return { status: 'oversized', error: new Error('graph artifact exceeds size limit') };
+    }
     const raw = await readFile(path, 'utf8');
     const data = JSON.parse(raw) as T;
     if (data && typeof data === 'object' && 'schemaVersion' in (data as any) && !isCompatibleGraphArtifact(data)) {
@@ -34,7 +59,7 @@ export async function readGraphArtifactJson<T = any>(path: string): Promise<Grap
     return { status: 'ok', data };
   } catch (error: any) {
     if (error?.code === 'ENOENT') return { status: 'missing' };
-    return { status: 'errored', error: error instanceof Error ? error : new Error(String(error)) };
+    return { status: 'corrupt', error: error instanceof Error ? error : new Error(String(error)) };
   }
 }
 
@@ -95,7 +120,9 @@ export async function writeSubprojectGraphShard(
   shard: SubprojectGraphShard
 ): Promise<string> {
   await ensureWorkspaceGraphGitignore(projectRoot);
-  return writeGraphArtifactJson(getSubprojectShardPath(projectRoot, subprojectId), shard);
+  const path = getSubprojectShardPath(projectRoot, subprojectId);
+  invalidateSubprojectGraphShardCachePath(path);
+  return writeGraphArtifactJson(path, shard);
 }
 
 export async function readWorkspaceGraphState(projectRoot: string): Promise<GraphArtifactReadResult<WorkspaceGraphState>> {
@@ -110,8 +137,126 @@ export async function readWorkspaceGraphManifest(projectRoot: string): Promise<G
   return validateGraphManifest(result.data) ? result : { status: 'incompatible', data: result.data };
 }
 
-export async function readSubprojectGraphShard(projectRoot: string, subprojectId: string): Promise<GraphArtifactReadResult<SubprojectGraphShard>> {
-  const result = await readGraphArtifactJson<SubprojectGraphShard>(getSubprojectShardPath(projectRoot, subprojectId));
-  if (result.status !== 'ok') return result;
-  return validateSubprojectGraphShard(result.data) ? result : { status: 'incompatible', data: result.data };
+export function clearSubprojectGraphShardCache(): void {
+  subprojectShardCache.clear();
+  subprojectShardCacheBytes = 0;
+  subprojectShardCacheStats.hits = 0;
+  subprojectShardCacheStats.misses = 0;
+  subprojectShardCacheStats.evictions = 0;
+}
+
+export function getSubprojectGraphShardCacheStats(): { hits: number; misses: number; evictions: number; entryCount: number; totalBytes: number } {
+  return {
+    hits: subprojectShardCacheStats.hits,
+    misses: subprojectShardCacheStats.misses,
+    evictions: subprojectShardCacheStats.evictions,
+    entryCount: subprojectShardCache.size,
+    totalBytes: subprojectShardCacheBytes,
+  };
+}
+
+export async function readSubprojectGraphShard(
+  projectRoot: string,
+  subprojectId: string,
+  options?: { generation?: number }
+): Promise<GraphArtifactReadResult<SubprojectGraphShard>> {
+  const path = getSubprojectShardPath(projectRoot, subprojectId);
+  const fileStat = await stat(path).catch((error: any) => {
+    if (error?.code === 'ENOENT') return undefined;
+    throw error;
+  });
+  if (!fileStat) {
+    invalidateSubprojectGraphShardCachePath(path);
+    return { status: 'missing' };
+  }
+  if (fileStat.size > MAX_GRAPH_ARTIFACT_BYTES) {
+    invalidateSubprojectGraphShardCachePath(path);
+    return { status: 'oversized', error: new Error('graph artifact exceeds size limit') };
+  }
+
+  const statEvidence = { size: fileStat.size, mtimeMs: fileStat.mtimeMs, ctimeMs: fileStat.ctimeMs, ino: fileStat.ino };
+  invalidateSubprojectGraphShardCachePath(path, statEvidence);
+  const requestedGeneration = options?.generation ?? -1;
+  const cacheKey = `${path}:${requestedGeneration}:${fileStat.size}:${fileStat.mtimeMs}:${fileStat.ctimeMs}:${fileStat.ino}`;
+  const cached = subprojectShardCache.get(cacheKey);
+  if (cached) {
+    subprojectShardCacheStats.hits += 1;
+    touchSubprojectGraphShardCacheEntry(cacheKey, cached);
+    return { status: 'ok', data: cached.data };
+  }
+
+  subprojectShardCacheStats.misses += 1;
+  const result = await readGraphArtifactJson<SubprojectGraphShard>(path);
+  if (result.status !== 'ok') {
+    invalidateSubprojectGraphShardCachePath(path);
+    return result;
+  }
+  if (!validateSubprojectGraphShard(result.data)) {
+    invalidateSubprojectGraphShardCachePath(path);
+    return { status: 'incompatible', data: result.data };
+  }
+  if (options?.generation !== undefined && result.data.generation !== options.generation) {
+    invalidateSubprojectGraphShardCachePath(path);
+    return { status: 'incompatible', data: result.data };
+  }
+
+  cacheSubprojectGraphShard({
+    cacheKey,
+    path,
+    generation: result.data.generation,
+    size: fileStat.size,
+    mtimeMs: fileStat.mtimeMs,
+    ctimeMs: fileStat.ctimeMs,
+    ino: fileStat.ino,
+    data: result.data,
+  });
+  return result;
+}
+
+function touchSubprojectGraphShardCacheEntry(cacheKey: string, entry: CachedSubprojectShardEntry): void {
+  subprojectShardCache.delete(cacheKey);
+  subprojectShardCache.set(cacheKey, entry);
+}
+
+function cacheSubprojectGraphShard(entry: CachedSubprojectShardEntry): void {
+  if (entry.size > MAX_SUBPROJECT_SHARD_CACHE_BYTES) return;
+  const existing = subprojectShardCache.get(entry.cacheKey);
+  if (existing) {
+    subprojectShardCacheBytes -= existing.size;
+    subprojectShardCache.delete(entry.cacheKey);
+  }
+  while (
+    subprojectShardCache.size >= MAX_SUBPROJECT_SHARD_CACHE_ENTRIES ||
+    subprojectShardCacheBytes + entry.size > MAX_SUBPROJECT_SHARD_CACHE_BYTES
+  ) {
+    const oldestKey = subprojectShardCache.keys().next().value;
+    if (!oldestKey) break;
+    const oldest = subprojectShardCache.get(oldestKey);
+    subprojectShardCache.delete(oldestKey);
+    if (oldest) {
+      subprojectShardCacheBytes -= oldest.size;
+      subprojectShardCacheStats.evictions += 1;
+    }
+  }
+  subprojectShardCache.set(entry.cacheKey, entry);
+  subprojectShardCacheBytes += entry.size;
+}
+
+function invalidateSubprojectGraphShardCachePath(
+  path: string,
+  statEvidence?: { size: number; mtimeMs: number; ctimeMs: number; ino: number }
+): void {
+  for (const [cacheKey, entry] of subprojectShardCache.entries()) {
+    if (entry.path !== path) continue;
+    if (
+      statEvidence &&
+      entry.size === statEvidence.size &&
+      entry.mtimeMs === statEvidence.mtimeMs &&
+      entry.ctimeMs === statEvidence.ctimeMs &&
+      entry.ino === statEvidence.ino
+    ) continue;
+    subprojectShardCache.delete(cacheKey);
+    subprojectShardCacheBytes -= entry.size;
+    subprojectShardCacheStats.evictions += 1;
+  }
 }

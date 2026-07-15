@@ -34,7 +34,7 @@ The extension can persist a workspace graph under `.pi/workspace-code-graph` whe
 - Graph-backed tools use the persisted graph only when it is enabled, readable, schema-compatible, `fresh`, language-supported, and sufficient for the requested query.
 - Tools automatically fall back to direct source inspection when the graph is disabled, missing, stale, partial, errored, incompatible, refreshing, unreadable, language-unsupported, or insufficient for the query.
 - `find_references` has richer direct analyzers than the current graph edge model. The graph currently covers only `call`, `implements`, and `extends` relationships, while public `find_references` needs complete semantic references such as imports, instantiation, reads/writes, type references, callbacks, and method references. Public calls therefore fall back conservatively to avoid incomplete graph-only results.
-- Fallback decisions are internal; public tool response contracts do not expose graph/fallback metadata.
+- `find_symbol` exposes structured graph/direct/fallback diagnostics in tool `details`; other tools keep fallback decisions internal.
 - Python graph data is indexed for future use, but public query tools do not expose `py` parameters yet.
 
 ### Registered tools
@@ -48,9 +48,10 @@ Finds the definition and/or implementation of a TypeScript, JavaScript, or Java 
 - `path` *(string, required)*: file or directory to search. Relative paths resolve against the current working directory.
 - `symbol` *(string, required)*: symbol name.
 - `language` *(string, optional)*: `ts`, `js`, `java`, or `auto` (default).
-- `kind` *(string, optional)*: filters by `function`, `class`, `method`, `interface`, or `variable`.
+- `kind` *(string, optional)*: filters by compatibility kind `function`, `class`, `method`, `interface`, or `variable`.
+- `declaration_kind` *(string, optional)*: granular TypeScript/Java declaration filter; see the [TypeScript v1 symbol contract](docs/typescript-symbol-contract-v1.md) and [Java coverage v1](docs/java-symbol-coverage-v1.md).
 - `include_signature` *(boolean, optional)*: when `true`, includes the symbol signature without the body.
-- `include_code` *(boolean, optional)*: when `true` and `kind` is `function` or `method`, includes the symbol source text.
+- `include_code` *(boolean, optional)*: when `true`, includes source only for each actual executable declaration kind; it is never enabled by a broad query kind alone.
 - `scope` *(string, optional)*: `file` or `directory`. When omitted, it is inferred from `path`.
 - `glob` *(string, optional)*: glob pattern for filtering files while scanning a directory.
 - `search_mode` *(string, optional)*: `exact`, `prefix`, or `contains`. Default: `exact`. Non-exact searches disable `include_code`.
@@ -65,7 +66,11 @@ Array of locations with:
 - `definition_location` when applicable
 - `implementation_locations` for interfaces
 - `signature` when `include_signature=true`
-- `code` when `include_code=true`
+- `code` when `include_code=true` and the declaration is executable
+- additive canonical symbol metadata such as `declaration_kind`, `symbol_id`, `owner`, `qualified_name`, naming metadata, and `relationship_id`
+- structured `source_mode`, graph status, completeness, fallback, and count diagnostics in tool `details`, including empty results
+
+See [TypeScript symbol contract v1](docs/typescript-symbol-contract-v1.md), [TypeScript coverage v1](docs/typescript-symbol-coverage-v1.md), and [Java coverage v1](docs/java-symbol-coverage-v1.md). The Java document owns Java-specific declaration coverage, unsupported-form policy, graph authority diagnostics, and benchmark evidence requirements; generic graph/tool behavior stays in this README.
 
 #### `find_references`
 
@@ -161,6 +166,8 @@ The extension lives at `~/.pi/agent/extensions/code-research/`. Pi auto-discover
 cd ~/.pi/agent/extensions/code-research
 npm test
 npm run typecheck
+npm run benchmark:typescript-symbols -- --size medium
+npm run benchmark:java-symbols -- --size medium
 ```
 
 ### Structure
@@ -230,7 +237,7 @@ La extensión puede persistir un workspace graph en `.pi/workspace-code-graph` c
 - Las tools graph-backed usan el graph persistido solo cuando está habilitado, es legible, compatible con el schema, está `fresh`, soporta el lenguaje y tiene cobertura suficiente para la consulta.
 - Las tools hacen fallback automático a inspección directa de código cuando el graph está deshabilitado, ausente, stale, partial, errored, incompatible, refreshing, ilegible, no soporta el lenguaje o no tiene cobertura suficiente.
 - `find_references` tiene analizadores directos más ricos que el modelo actual de edges del graph. El graph cubre actualmente solo relaciones `call`, `implements` y `extends`, mientras que la tool pública necesita referencias semánticas completas como imports, instanciación, reads/writes, type references, callbacks y method references. Por eso las llamadas públicas hacen fallback conservador para evitar resultados incompletos solo desde el graph.
-- Las decisiones de fallback son internas; los contratos públicos de respuesta no exponen metadata de graph/fallback.
+- `find_symbol` expone diagnósticos estructurados de graph/direct/fallback en `details`; las demás tools mantienen internas las decisiones de fallback.
 - Los datos Python se indexan en el graph para uso futuro, pero las tools públicas todavía no exponen parámetros `py`.
 
 ### Tools registradas
@@ -244,9 +251,10 @@ Busca la definición y/o implementación de un símbolo TypeScript, JavaScript o
 - `path` *(string, requerido)*: archivo o directorio a buscar. Las rutas relativas se resuelven contra el working directory actual.
 - `symbol` *(string, requerido)*: nombre del símbolo.
 - `language` *(string, opcional)*: `ts`, `js`, `java` o `auto` (por defecto).
-- `kind` *(string, opcional)*: filtra por `function`, `class`, `method`, `interface` o `variable`.
+- `kind` *(string, opcional)*: filtra por el kind de compatibilidad `function`, `class`, `method`, `interface` o `variable`.
+- `declaration_kind` *(string, opcional)*: filtro granular de declaración TypeScript/Java; consulta el [contrato TypeScript v1](docs/typescript-symbol-contract-v1.md) y la [cobertura Java v1](docs/java-symbol-coverage-v1.md).
 - `include_signature` *(boolean, opcional)*: si es `true`, incluye la firma del símbolo sin el cuerpo.
-- `include_code` *(boolean, opcional)*: si es `true` y `kind` es `function` o `method`, incluye el texto fuente del símbolo.
+- `include_code` *(boolean, opcional)*: si es `true`, incluye fuente solo para cada declaración ejecutable real; un kind amplio no lo habilita por sí solo.
 - `scope` *(string, opcional)*: `file` o `directory`. Si se omite, se infiere desde `path`.
 - `glob` *(string, opcional)*: patrón glob para filtrar archivos al escanear un directorio.
 - `search_mode` *(string, opcional)*: `exact`, `prefix` o `contains`. Por defecto: `exact`. Las búsquedas no exactas deshabilitan `include_code`.
@@ -261,7 +269,11 @@ Array de ubicaciones con:
 - `definition_location` si aplica
 - `implementation_locations` para interfaces
 - `signature` si `include_signature=true`
-- `code` si `include_code=true`
+- `code` si `include_code=true` y la declaración es ejecutable
+- metadata canónica aditiva como `declaration_kind`, `symbol_id`, `owner`, `qualified_name`, metadata de nombres y `relationship_id`
+- diagnósticos estructurados de modo, estado del graph, completitud, fallback y contadores en `details`, incluso sin resultados
+
+Consulta [TypeScript symbol contract v1](docs/typescript-symbol-contract-v1.md), [TypeScript coverage v1](docs/typescript-symbol-coverage-v1.md) y [Java coverage v1](docs/java-symbol-coverage-v1.md) para migración, naming, sintaxis, seguridad y benchmarks.
 
 #### `find_references`
 

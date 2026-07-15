@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type {
@@ -18,10 +19,14 @@ import {
   createSubprojectNodeId,
   createSymbolNodeId,
   createWorkspaceNodeId,
+  TYPESCRIPT_COMPILER_MODEL_VERSION,
+  TYPESCRIPT_GRAMMAR_VERSION,
+  TYPESCRIPT_SYMBOL_COVERAGE_MODEL_VERSION,
 } from './graph-schema.js';
 import { ensureWorkspaceGraphGitignore, writeSubprojectGraphShard, writeWorkspaceGraphManifest } from './graph-persistence.js';
 import { detectWorkspaceSubprojects } from './project-detector.js';
 import { collectWorkspaceSourceFiles, detectGraphLanguage, toProjectRelativePath } from './source-policy.js';
+import { compareCanonicalPathStrings } from './shared.js';
 import { createWorkspaceGraphState, loadWorkspaceGraphState, writeWorkspaceGraphState } from './workspace-state.js';
 import {
   buildTypeScriptProjectIndex,
@@ -31,6 +36,7 @@ import {
   type TypeScriptProjectIndex,
 } from '../languages/typescript/function-call-tree.js';
 import { extractSignature as extractTypeScriptSignature, resolveTypeScriptImportCandidates } from '../languages/typescript/shared.js';
+import { extractTypeScriptSymbols } from '../languages/typescript/symbol-extractor.js';
 import { extractSignature as extractJavaSignature } from '../languages/java/shared.js';
 import { resolveJavaCallsForGraph } from '../languages/java/function-call-tree.js';
 import { buildPythonProjectIndex, type PythonProjectIndex } from '../languages/python/workspace-graph.js';
@@ -106,7 +112,7 @@ export async function buildWorkspaceGraph(projectRoot: string): Promise<{ state:
     const snapshot = await createSubprojectSnapshot(projectRoot, files);
     coverage.indexedFiles += files.length;
 
-    const shard = await buildSubprojectShard(projectRoot, subproject.absoluteRoot, subproject.id, subproject.root, subproject.markers);
+    const shard = await buildSubprojectShard(projectRoot, subproject.absoluteRoot, subproject.id, subproject.root, subproject.markers, generation);
     if (shard.nodes.length === 0) workspaceStatus = 'partial';
     const shardPath = `graphs/${subproject.id}.json`;
     await writeSubprojectGraphShard(projectRoot, subproject.id, shard);
@@ -154,10 +160,12 @@ async function buildSubprojectShard(
   subprojectRoot: string,
   subprojectId: string,
   subprojectRelativeRoot: string,
-  markers: string[]
+  markers: string[],
+  generation: number
 ): Promise<SubprojectGraphShard> {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
+  const pendingFileStats: Array<Promise<void>> = [];
   const workspaceNodeId = createWorkspaceNodeId(projectRoot);
   const subprojectNodeId = createSubprojectNodeId(subprojectId);
 
@@ -168,13 +176,15 @@ async function buildSubprojectShard(
   const files = await collectWorkspaceSourceFiles(subprojectRoot);
   const languages = new Set<string>();
 
+  let javaSymbolCoverage: SubprojectGraphShard['javaSymbolCoverage'];
   const javaFiles = files.filter((file) => detectGraphLanguage(file) === 'java');
   if (javaFiles.length > 0) {
     languages.add('java');
     const javaIndex = await buildProjectIndex(subprojectRoot);
-    buildJavaGraph(projectRoot, subprojectId, javaIndex, nodes, edges);
+    javaSymbolCoverage = buildJavaGraph(projectRoot, subprojectId, javaIndex, nodes, edges, pendingFileStats, generation);
   }
 
+  let typeScriptSymbolCoverage: SubprojectGraphShard['typescriptSymbolCoverage'];
   const tsFiles = files.filter((file) => {
     const language = detectGraphLanguage(file);
     return language === 'ts' || language === 'js';
@@ -185,98 +195,115 @@ async function buildSubprojectShard(
       const language = detectGraphLanguage(file);
       if (language) languages.add(language);
     }
-    buildTypeScriptGraph(projectRoot, subprojectId, tsIndex, nodes, edges);
+    typeScriptSymbolCoverage = buildTypeScriptGraph(projectRoot, subprojectId, tsIndex, nodes, edges, pendingFileStats, generation);
   }
 
   const pythonFiles = files.filter((file) => detectGraphLanguage(file) === 'py');
   if (pythonFiles.length > 0) {
     languages.add('py');
     const pythonIndex = await buildPythonProjectIndex(subprojectRoot);
-    buildPythonGraph(projectRoot, subprojectId, pythonIndex, nodes, edges);
+    buildPythonGraph(projectRoot, subprojectId, pythonIndex, nodes, edges, pendingFileStats);
   }
+
+  await Promise.all(pendingFileStats);
 
   const subprojectNode = nodes.find((node) => node.id === subprojectNodeId && node.kind === 'subproject');
   if (subprojectNode?.kind === 'subproject') subprojectNode.languages = [...languages];
 
   return createBaseArtifact({
     subprojectId,
-    generation: Date.now(),
+    generation,
     nodes,
     edges,
+    typescriptSymbolCoverage: typeScriptSymbolCoverage,
+    javaSymbolCoverage,
   });
 }
 
-function buildJavaGraph(projectRoot: string, subprojectId: string, index: Awaited<ReturnType<typeof buildProjectIndex>>, nodes: GraphNode[], edges: GraphEdge[]) {
+function buildJavaGraph(
+  projectRoot: string,
+  subprojectId: string,
+  index: Awaited<ReturnType<typeof buildProjectIndex>>,
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  pendingFileStats: Array<Promise<void>>,
+  generation: number
+): SubprojectGraphShard['javaSymbolCoverage'] {
   const fileNodeIds = new Map<string, string>();
+  const fileNodes = new Map<string, Extract<GraphNode, { kind: 'file' }>>();
   const symbolIds = new Map<string, string>();
   const subprojectNodeId = createSubprojectNodeId(subprojectId);
+  const completeFiles: string[] = [];
+  const skippedFiles: Array<{ file: string; reason: 'parse_error' | 'input_unreadable' | 'unsupported_source' }> = [];
+  const fileProofs: Record<string, { sourceHash: string; symbolCount: number; relationshipScopeCount: number; observedFamilies: any[]; unsupportedForms: any[] }> = {};
+
+  for (const file of index.files) {
+    const relFile = toProjectRelativePath(projectRoot, file.file);
+    const fileNodeId = ensureFileNode(nodes, edges, fileNodeIds, fileNodes, pendingFileStats, subprojectNodeId, subprojectId, relFile, 'java', file.file);
+    completeFiles.push(relFile);
+    fileProofs[relFile] = {
+      sourceHash: file.extraction.sourceHash,
+      symbolCount: file.extraction.records.length,
+      relationshipScopeCount: file.extraction.relationshipScopes.length,
+      observedFamilies: [...file.extraction.observedFamilies].sort(),
+      unsupportedForms: [...file.extraction.unsupportedForms].sort(),
+    };
+    for (const record of file.extraction.records) {
+      const symbolId = createSymbolNodeId(subprojectId, relFile, record.owner, record.name, record.declarationRange.startLine, record.declarationRange.startColumn);
+      symbolIds.set(record.symbolId, symbolId);
+      nodes.push({
+        id: symbolId,
+        kind: 'symbol',
+        language: 'java',
+        symbolKind: record.coarseKind,
+        name: record.name,
+        file: relFile,
+        range: record.declarationRange,
+        owner: record.owner,
+        ownerKind: record.owner ? 'class' : 'unknown',
+        exported: true,
+        signature: sanitizePersistedSignature(record.signature),
+        declarationKind: record.declarationKind,
+        symbolId: record.symbolId,
+        qualifiedName: record.qualifiedName,
+        relationshipId: record.relationshipId,
+        sourceName: record.sourceName,
+        anonymous: record.anonymous,
+        dynamicName: record.dynamicName,
+        modifiers: record.modifiers,
+        isDefinition: record.isDefinition,
+        isImplementation: record.isImplementation,
+        sourceHash: record.sourceHash,
+      });
+      edges.push({ id: createEdgeId('contains', fileNodeId, symbolId), kind: 'contains', from: fileNodeId, to: symbolId });
+    }
+  }
 
   for (const classRecord of index.classes) {
-    const relFile = toProjectRelativePath(projectRoot, classRecord.file);
-    const fileNodeId = ensureFileNode(nodes, edges, fileNodeIds, subprojectNodeId, subprojectId, relFile, 'java', classRecord.file);
-    const symbolId = createSymbolNodeId(subprojectId, relFile, undefined, classRecord.className, classRecord.line, classRecord.column);
-    symbolIds.set(`${classRecord.file}:class:${classRecord.className}`, symbolId);
-    nodes.push({
-      id: symbolId,
-      kind: 'symbol',
-      language: 'java',
-      symbolKind: classRecord.kind,
-      name: classRecord.className,
-      file: relFile,
-      range: { startLine: classRecord.line, startColumn: classRecord.column, endLine: classRecord.line, endColumn: classRecord.column },
-      owner: undefined,
-      ownerKind: 'unknown',
-      exported: true,
-    });
-    edges.push({ id: createEdgeId('contains', fileNodeId, symbolId), kind: 'contains', from: fileNodeId, to: symbolId });
-
+    const fromId = symbolIds.get(classRecord.symbolId);
+    if (!fromId) continue;
     for (const implemented of classRecord.implements ?? []) {
-      const target = index.classes.find((candidate) => candidate.className === implemented || candidate.fullName === implemented);
-      edges.push({
-        id: createEdgeId('implements', symbolId, target ? symbolIds.get(`${target.file}:class:${target.className}`) ?? `external:java:${implemented}` : `external:java:${implemented}`),
-        kind: 'implements',
-        from: symbolId,
-        to: target ? symbolIds.get(`${target.file}:class:${target.className}`) ?? `external:java:${implemented}` : `external:java:${implemented}`,
-      });
+      const target = index.classes.find((candidate) => candidate.fullName === implemented || candidate.className === implemented);
+      const to = target ? symbolIds.get(target.symbolId) ?? `external:java:${implemented}` : `external:java:${implemented}`;
+      edges.push({ id: createEdgeId('implements', fromId, to), kind: 'implements', from: fromId, to });
     }
-
     for (const extended of classRecord.extends ?? []) {
-      const target = index.classes.find((candidate) => candidate.className === extended || candidate.fullName === extended);
-      edges.push({
-        id: createEdgeId('extends', symbolId, target ? symbolIds.get(`${target.file}:class:${target.className}`) ?? `external:java:${extended}` : `external:java:${extended}`),
-        kind: 'extends',
-        from: symbolId,
-        to: target ? symbolIds.get(`${target.file}:class:${target.className}`) ?? `external:java:${extended}` : `external:java:${extended}`,
-      });
+      const target = index.classes.find((candidate) => candidate.fullName === extended || candidate.className === extended);
+      const to = target ? symbolIds.get(target.symbolId) ?? `external:java:${extended}` : `external:java:${extended}`;
+      edges.push({ id: createEdgeId('extends', fromId, to), kind: 'extends', from: fromId, to });
+    }
+    for (const permitted of classRecord.permits ?? []) {
+      const target = index.classes.find((candidate) => candidate.fullName === permitted || candidate.className === permitted);
+      const to = target ? symbolIds.get(target.symbolId) ?? `external:java:${permitted}` : `external:java:${permitted}`;
+      edges.push({ id: createEdgeId('permits', fromId, to), kind: 'permits', from: fromId, to });
     }
   }
 
   for (const method of index.methods) {
-    const relFile = toProjectRelativePath(projectRoot, method.file);
-    const fileNodeId = ensureFileNode(nodes, edges, fileNodeIds, subprojectNodeId, subprojectId, relFile, 'java', method.file);
-    const symbolId = createSymbolNodeId(subprojectId, relFile, method.className, method.symbol, method.line, method.column);
-    symbolIds.set(`${method.file}:method:${method.className}:${method.symbol}`, symbolId);
-    nodes.push({
-      id: symbolId,
-      kind: 'symbol',
-      language: 'java',
-      symbolKind: 'method',
-      name: method.symbol,
-      file: relFile,
-      range: { startLine: method.line, startColumn: method.column, endLine: method.node.endPosition.row + 1, endColumn: method.node.endPosition.column },
-      owner: method.className,
-      ownerKind: 'class',
-      exported: true,
-      signature: extractJavaSignature(method.node),
-    });
-    edges.push({ id: createEdgeId('contains', fileNodeId, symbolId), kind: 'contains', from: fileNodeId, to: symbolId });
-  }
-
-  for (const method of index.methods) {
-    const fromId = symbolIds.get(`${method.file}:method:${method.className}:${method.symbol}`);
+    const fromId = symbolIds.get(method.symbolId);
     if (!fromId) continue;
     for (const { call, resolved, targetMethod } of resolveJavaCallsForGraph(method, index)) {
-      const resolvedTargetId = targetMethod ? symbolIds.get(`${targetMethod.file}:method:${targetMethod.className}:${targetMethod.symbol}`) : undefined;
+      const resolvedTargetId = targetMethod ? symbolIds.get(targetMethod.symbolId) : undefined;
       const toId = resolvedTargetId ?? `external:java:${call.methodName}`;
       edges.push({
         id: createEdgeId('calls', fromId, toId, `${call.line}:${call.column}`),
@@ -290,77 +317,113 @@ function buildJavaGraph(projectRoot: string, subprojectId: string, index: Awaite
         externalSource: !resolvedTargetId ? resolved?.source ?? 'unknown' : undefined,
         externalOwner: !resolvedTargetId ? resolved?.className : undefined,
         externalOwnerKind: !resolvedTargetId ? resolved?.ownerKind : undefined,
-        reason: !resolvedTargetId ? resolved?.reason : undefined,
+        targetRelationshipId: !resolvedTargetId ? resolved?.targetRelationshipId : undefined,
+        reason: resolved?.reason,
       });
     }
   }
+
+  const sortedCompleteFiles = [...completeFiles].sort(compareCanonicalPathStrings);
+  const sourceSnapshotId = createHash('sha256')
+    .update(sortedCompleteFiles.map((file) => `${file}:${fileProofs[file].sourceHash}`).join('|'))
+    .digest('hex');
+  return {
+    modelVersion: 1,
+    grammar: { package: 'tree-sitter-java', version: '0.23.5' },
+    generation,
+    sourceSnapshotId,
+    completeFiles: sortedCompleteFiles,
+    skippedFiles,
+    fileProofs,
+  };
 }
 
-function buildTypeScriptGraph(projectRoot: string, subprojectId: string, index: TypeScriptProjectIndex, nodes: GraphNode[], edges: GraphEdge[]) {
+function buildTypeScriptGraph(
+  projectRoot: string,
+  subprojectId: string,
+  index: TypeScriptProjectIndex,
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  pendingFileStats: Array<Promise<void>>,
+  generation: number
+) {
   const fileNodeIds = new Map<string, string>();
-  const symbolIds = new Map<string, string>();
+  const fileNodes = new Map<string, Extract<GraphNode, { kind: 'file' }>>();
+  const callableSymbolIds = new Map<string, string>();
   const subprojectNodeId = createSubprojectNodeId(subprojectId);
-
-  for (const classRecord of index.classes) {
-    const relFile = toProjectRelativePath(projectRoot, classRecord.file);
-    const fileNodeId = ensureFileNode(nodes, edges, fileNodeIds, subprojectNodeId, subprojectId, relFile, classRecord.language, classRecord.file);
-    const symbolId = createSymbolNodeId(subprojectId, relFile, undefined, classRecord.className, classRecord.line, classRecord.column);
-    symbolIds.set(`${classRecord.file}:class:${classRecord.className}`, symbolId);
-    nodes.push({
-      id: symbolId,
-      kind: 'symbol',
-      language: classRecord.language,
-      symbolKind: 'class',
-      name: classRecord.className,
-      file: relFile,
-      range: { startLine: classRecord.line, startColumn: classRecord.column, endLine: classRecord.node.endPosition.row + 1, endColumn: classRecord.node.endPosition.column },
-      ownerKind: 'unknown',
-      exported: Boolean(classRecord.exportedName),
-      signature: extractTypeScriptSignature(classRecord.node),
-    });
-    edges.push({ id: createEdgeId('contains', fileNodeId, symbolId), kind: 'contains', from: fileNodeId, to: symbolId });
-  }
-
-  for (const callable of index.callables) {
-    const relFile = toProjectRelativePath(projectRoot, callable.file);
-    const fileNodeId = ensureFileNode(nodes, edges, fileNodeIds, subprojectNodeId, subprojectId, relFile, callable.language, callable.file);
-    const symbolId = createSymbolNodeId(subprojectId, relFile, callable.ownerName, callable.symbol, callable.line, callable.column);
-    symbolIds.set(`${callable.file}:${callable.kind}:${callable.ownerName ?? '<module>'}:${callable.symbol}`, symbolId);
-    nodes.push({
-      id: symbolId,
-      kind: 'symbol',
-      language: callable.language,
-      symbolKind: callable.kind,
-      name: callable.symbol,
-      file: relFile,
-      range: { startLine: callable.line, startColumn: callable.column, endLine: callable.node.endPosition.row + 1, endColumn: callable.node.endPosition.column },
-      owner: callable.ownerName,
-      ownerKind: callable.ownerKind,
-      exported: Boolean(callable.exportedName),
-      signature: extractTypeScriptSignature(callable.node),
-    });
-    edges.push({ id: createEdgeId('contains', fileNodeId, symbolId), kind: 'contains', from: fileNodeId, to: symbolId });
-  }
+  const completeFiles: string[] = [];
+  const skippedFiles: Array<{ file: string; reason: 'parse_error' | 'input_unreadable' | 'unsupported_language' | 'unsupported_source' }> = [];
+  const fileProofs: Record<string, { sourceHash: string; symbolCount: number }> = {};
 
   for (const file of index.files.values()) {
     const relFile = toProjectRelativePath(projectRoot, file.file);
-    const fileNodeId = ensureFileNode(nodes, edges, fileNodeIds, subprojectNodeId, subprojectId, relFile, file.language, file.file);
+    const fileNodeId = ensureFileNode(nodes, edges, fileNodeIds, fileNodes, pendingFileStats, subprojectNodeId, subprojectId, relFile, file.language, file.file);
+    let records;
+    try {
+      records = extractTypeScriptSymbols(relFile, file.source);
+    } catch {
+      skippedFiles.push({ file: relFile, reason: 'parse_error' });
+      continue;
+    }
+    completeFiles.push(relFile);
+    fileProofs[relFile] = {
+      sourceHash: records[0]?.sourceHash ?? createHash('sha256').update(file.source).digest('hex'),
+      symbolCount: records.length,
+    };
+
+    for (const record of records) {
+      const symbolId = createSymbolNodeId(subprojectId, relFile, record.owner, record.name, record.declarationRange.startLine, record.declarationRange.startColumn);
+      if (isCallableGraphDeclaration(record.declarationKind)) {
+        const callableKey = typeScriptCallableSymbolKey(file.file, record.owner, record.name);
+        if (!callableSymbolIds.has(callableKey) || record.isImplementation) callableSymbolIds.set(callableKey, symbolId);
+      }
+      nodes.push({
+        id: symbolId,
+        kind: 'symbol',
+        language: file.language,
+        symbolKind: record.coarseKind,
+        name: record.name,
+        file: relFile,
+        range: record.declarationRange,
+        owner: record.owner,
+        ownerKind: record.owner ? (record.declarationKind === 'namespace' || record.declarationKind === 'module' ? 'namespace' : 'class') : 'unknown',
+        exported: Boolean(record.exportedName),
+        signature: sanitizePersistedSignature(record.signature),
+        declarationKind: record.declarationKind,
+        symbolId: record.symbolId,
+        qualifiedName: record.qualifiedName,
+        relationshipId: record.relationshipId,
+        sourceName: record.sourceName,
+        exportedName: record.exportedName,
+        anonymous: record.anonymous,
+        dynamicName: record.dynamicName,
+        modifiers: record.modifiers,
+        isDefinition: record.isDefinition,
+        isImplementation: record.isImplementation,
+        sourceHash: record.sourceHash,
+      });
+      edges.push({ id: createEdgeId('contains', fileNodeId, symbolId), kind: 'contains', from: fileNodeId, to: symbolId });
+    }
+
     for (const binding of file.imports.values()) {
       const candidates = resolveTypeScriptImportCandidates(file.file, binding.source, index.projectConfig);
       const target = candidates.find((candidate) => index.files.has(candidate));
       if (!target) continue;
       const targetRel = toProjectRelativePath(projectRoot, target);
-      const targetFileNodeId = ensureFileNode(nodes, edges, fileNodeIds, subprojectNodeId, subprojectId, targetRel, detectGraphLanguage(target) ?? file.language, target);
+      const targetFileNodeId = ensureFileNode(nodes, edges, fileNodeIds, fileNodes, pendingFileStats, subprojectNodeId, subprojectId, targetRel, detectGraphLanguage(target) ?? file.language, target);
       edges.push({ id: createEdgeId('imports', fileNodeId, targetFileNodeId, binding.localName), kind: 'imports', from: fileNodeId, to: targetFileNodeId, importSource: binding.source });
     }
   }
 
   for (const callable of index.callables) {
-    const fromId = symbolIds.get(`${callable.file}:${callable.kind}:${callable.ownerName ?? '<module>'}:${callable.symbol}`);
+    const fromId = callableSymbolIds.get(typeScriptCallableSymbolKey(callable.file, callable.ownerName, callable.symbol));
     if (!fromId) continue;
     for (const call of extractTypeScriptCalls(callable.node)) {
       const resolved = resolveTypeScriptCall(index, callable, call);
-      const toId = resolved.target ? symbolIds.get(`${resolved.target.file}:${resolved.target.kind}:${resolved.target.ownerName ?? '<module>'}:${resolved.target.symbol}`) : undefined;
+      const target = resolved.target;
+      const toId = target
+        ? callableSymbolIds.get(typeScriptCallableSymbolKey(target.file, target.ownerName, target.symbol))
+        : undefined;
       edges.push({
         id: createEdgeId('calls', fromId, toId ?? `external:${callable.language}:${call.symbol}`, `${call.line}:${call.column}`),
         kind: 'calls',
@@ -379,7 +442,10 @@ function buildTypeScriptGraph(projectRoot: string, subprojectId: string, index: 
 
     for (const read of extractTypeScriptJsxReads(callable.node)) {
       const resolved = resolveTypeScriptJsxRead(index, callable, read.symbol);
-      const toId = resolved.target ? symbolIds.get(`${resolved.target.file}:${resolved.target.kind}:${resolved.target.ownerName ?? '<module>'}:${resolved.target.symbol}`) : undefined;
+      const target = resolved.target;
+      const toId = target
+        ? callableSymbolIds.get(typeScriptCallableSymbolKey(target.file, target.ownerName, target.symbol))
+        : undefined;
       if (!toId) continue;
       edges.push({
         id: createEdgeId('reads', fromId, toId, `${read.line}:${read.column}`),
@@ -390,21 +456,51 @@ function buildTypeScriptGraph(projectRoot: string, subprojectId: string, index: 
       });
     }
   }
+
+  return {
+    modelVersion: TYPESCRIPT_SYMBOL_COVERAGE_MODEL_VERSION,
+    compilerModelVersion: TYPESCRIPT_COMPILER_MODEL_VERSION,
+    grammar: { typescript: TYPESCRIPT_GRAMMAR_VERSION, tsx: TYPESCRIPT_GRAMMAR_VERSION },
+    generation,
+    completeFiles: completeFiles.sort(),
+    skippedFiles: skippedFiles.sort((a, b) => a.file.localeCompare(b.file) || a.reason.localeCompare(b.reason)),
+    fileProofs: Object.fromEntries(Object.entries(fileProofs).sort(([a], [b]) => a.localeCompare(b))),
+  };
 }
 
-function buildPythonGraph(projectRoot: string, subprojectId: string, index: PythonProjectIndex, nodes: GraphNode[], edges: GraphEdge[]) {
+function typeScriptCallableSymbolKey(file: string, owner: string | undefined, symbol: string): string {
+  return `${file}\u0000${owner ?? '<module>'}\u0000${symbol}`;
+}
+
+function isCallableGraphDeclaration(kind: string): boolean {
+  return kind === 'function' || kind === 'function_overload' || kind === 'callable_variable' || kind === 'constructor' || kind === 'method' || kind === 'getter' || kind === 'setter' || kind === 'object_method';
+}
+
+function sanitizePersistedSignature(signature: string | undefined): string | undefined {
+  return signature?.replace(/(['"`])(?:\\.|(?!\1).)*\1/g, '$1<redacted>$1');
+}
+
+function buildPythonGraph(
+  projectRoot: string,
+  subprojectId: string,
+  index: PythonProjectIndex,
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  pendingFileStats: Array<Promise<void>>
+) {
   const fileNodeIds = new Map<string, string>();
+  const fileNodes = new Map<string, Extract<GraphNode, { kind: 'file' }>>();
   const symbolIds = new Map<string, string>();
   const subprojectNodeId = createSubprojectNodeId(subprojectId);
 
   for (const file of index.files) {
     const relFile = toProjectRelativePath(projectRoot, file);
-    ensureFileNode(nodes, edges, fileNodeIds, subprojectNodeId, subprojectId, relFile, 'py', file, index.entrypointFiles.has(file));
+    ensureFileNode(nodes, edges, fileNodeIds, fileNodes, pendingFileStats, subprojectNodeId, subprojectId, relFile, 'py', file, index.entrypointFiles.has(file));
   }
 
   for (const symbol of index.symbols) {
     const relFile = toProjectRelativePath(projectRoot, symbol.file);
-    const fileNodeId = ensureFileNode(nodes, edges, fileNodeIds, subprojectNodeId, subprojectId, relFile, 'py', symbol.file, index.entrypointFiles.has(symbol.file));
+    const fileNodeId = ensureFileNode(nodes, edges, fileNodeIds, fileNodes, pendingFileStats, subprojectNodeId, subprojectId, relFile, 'py', symbol.file, index.entrypointFiles.has(symbol.file));
     const symbolId = createSymbolNodeId(subprojectId, relFile, symbol.ownerName, symbol.symbol, symbol.line, symbol.column);
     symbolIds.set(`${symbol.file}:${symbol.symbol}`, symbolId);
     nodes.push({
@@ -431,7 +527,7 @@ function buildPythonGraph(projectRoot: string, subprojectId: string, index: Pyth
 
   for (const entrypoint of index.entrypoints) {
     const relFile = toProjectRelativePath(projectRoot, entrypoint.file);
-    const fileNodeId = ensureFileNode(nodes, edges, fileNodeIds, subprojectNodeId, subprojectId, relFile, 'py', entrypoint.file, true);
+    const fileNodeId = ensureFileNode(nodes, edges, fileNodeIds, fileNodes, pendingFileStats, subprojectNodeId, subprojectId, relFile, 'py', entrypoint.file, true);
     const targetId = symbolIds.get(`${entrypoint.file}:${entrypoint.symbol}`);
     if (!targetId) continue;
     edges.push({
@@ -449,6 +545,8 @@ function ensureFileNode(
   nodes: GraphNode[],
   edges: GraphEdge[],
   fileNodeIds: Map<string, string>,
+  fileNodes: Map<string, Extract<GraphNode, { kind: 'file' }>>,
+  pendingFileStats: Array<Promise<void>>,
   subprojectNodeId: string,
   subprojectId: string,
   relativeFile: string,
@@ -459,19 +557,31 @@ function ensureFileNode(
   const existing = fileNodeIds.get(relativeFile);
   if (existing) {
     if (entrypoint) {
-      const node = nodes.find((candidate) => candidate.id === existing && candidate.kind === 'file');
-      if (node?.kind === 'file') node.entrypoint = true;
+      const node = fileNodes.get(relativeFile);
+      if (node) node.entrypoint = true;
     }
     return existing;
   }
   const fileNodeId = createFileNodeId(subprojectId, relativeFile);
+  const fileNode: Extract<GraphNode, { kind: 'file' }> = {
+    id: fileNodeId,
+    kind: 'file',
+    path: relativeFile,
+    language,
+    size: 0,
+    entrypoint: entrypoint || undefined,
+  };
   fileNodeIds.set(relativeFile, fileNodeId);
-  nodes.push({ id: fileNodeId, kind: 'file', path: relativeFile, language, size: 0, entrypoint: entrypoint || undefined });
+  fileNodes.set(relativeFile, fileNode);
+  nodes.push(fileNode);
   edges.push({ id: createEdgeId('contains', subprojectNodeId, fileNodeId), kind: 'contains', from: subprojectNodeId, to: fileNodeId });
-  void stat(absoluteFile).then((s) => {
-    const node = nodes.find((candidate) => candidate.id === fileNodeId && candidate.kind === 'file');
-    if (node?.kind === 'file') node.size = s.size;
-  });
+  pendingFileStats.push(
+    stat(absoluteFile)
+      .then((fileStat) => {
+        fileNode.size = fileStat.size;
+      })
+      .catch(() => undefined)
+  );
   return fileNodeId;
 }
 

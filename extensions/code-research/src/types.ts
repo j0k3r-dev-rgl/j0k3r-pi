@@ -1,9 +1,143 @@
 export type SupportedLanguage = 'ts' | 'js' | 'java' | 'py' | 'auto';
 export type SymbolKind = 'function' | 'class' | 'method' | 'interface' | 'variable' | 'unknown';
 export type SearchScope = 'file' | 'directory';
+export type SearchMode = 'exact' | 'prefix' | 'contains';
 export type WorkspaceGraphStatusKind = 'missing' | 'fresh' | 'stale' | 'refreshing' | 'partial' | 'errored' | 'incompatible';
 export type GraphNodeKind = 'workspace' | 'subproject' | 'file' | 'symbol';
-export type GraphEdgeKind = 'contains' | 'imports' | 'calls' | 'reads' | 'implements' | 'extends' | 'entrypoint';
+export type GraphEdgeKind = 'contains' | 'imports' | 'calls' | 'reads' | 'implements' | 'extends' | 'permits' | 'entrypoint';
+
+export type TypeScriptDeclarationKindValues =
+  | 'function'
+  | 'function_overload'
+  | 'callable_variable'
+  | 'variable'
+  | 'class'
+  | 'constructor'
+  | 'method'
+  | 'getter'
+  | 'setter'
+  | 'field'
+  | 'interface'
+  | 'interface_method'
+  | 'property'
+  | 'call_signature'
+  | 'construct_signature'
+  | 'index_signature'
+  | 'type_alias'
+  | 'enum'
+  | 'enum_member'
+  | 'namespace'
+  | 'module'
+  | 'import_alias'
+  | 'export_alias'
+  | 'object_method'
+  | 'object_property'
+  | 'assignment'
+  | 'commonjs_export';
+
+export type JavaDeclarationKind =
+  | 'package'
+  | 'module'
+  | 'class'
+  | 'interface'
+  | 'enum'
+  | 'enum_constant'
+  | 'record'
+  | 'record_component'
+  | 'annotation'
+  | 'annotation_element'
+  | 'constructor'
+  | 'compact_constructor'
+  | 'method'
+  | 'field'
+  | 'parameter'
+  | 'receiver_parameter'
+  | 'lambda_parameter'
+  | 'local_variable'
+  | 'enhanced_for_variable'
+  | 'catch_parameter'
+  | 'resource_variable'
+  | 'pattern_variable'
+  | 'type_parameter'
+  | 'unknown';
+
+export type DeclarationKind = TypeScriptDeclarationKindValues | JavaDeclarationKind | 'unknown';
+/** @deprecated Use DeclarationKind. */
+export type TypeScriptDeclarationKind = DeclarationKind;
+export type JavaDeclarationFamily = 'compilation_unit' | 'type' | 'callable' | 'member' | 'binding' | 'unknown';
+export type JavaUnsupportedFormCode = 'anonymous_class_relationship_only' | 'lambda_relationship_only' | 'initializer_block' | 'unnamed_pattern';
+export type SymbolQueryInclusion = 'default' | 'compilation_unit' | 'local_binding' | 'relationship_only';
+
+export type SymbolQuerySourceMode = 'graph' | 'direct' | 'hybrid';
+export type SymbolQueryGraphStatus = 'disabled' | 'fresh' | 'stale' | 'partial' | 'missing' | 'incompatible' | 'error';
+export type SymbolQueryCompleteness = 'complete' | 'partial' | 'fallback';
+export type SymbolQueryFallbackReason =
+  | 'graph_disabled'
+  | 'graph_missing'
+  | 'graph_stale'
+  | 'graph_partial'
+  | 'graph_incompatible'
+  | 'graph_read_error'
+  | 'shard_missing'
+  | 'shard_corrupt'
+  | 'shard_oversized'
+  | 'shard_unreadable'
+  | 'shard_incompatible'
+  | 'snapshot_mismatch'
+  | 'coverage_unproven'
+  | 'parse_error'
+  | 'input_unreadable';
+
+export interface SourceRange {
+  startLine: number;
+  startColumn: number;
+  endLine: number;
+  endColumn: number;
+}
+
+export interface CanonicalSymbolRecord {
+  name: string;
+  qualifiedName: string;
+  owner?: string;
+  ownerChain: string[];
+  declarationKind: DeclarationKind;
+  coarseKind: SymbolKind;
+  sourceName?: string;
+  exportedName?: string;
+  anonymous?: boolean;
+  dynamicName?: boolean;
+  modifiers: string[];
+  declarationRange: SourceRange;
+  codeRange?: SourceRange;
+  isDefinition: boolean;
+  isImplementation: boolean;
+  discriminator: string;
+  relationshipId?: string;
+  signature?: string;
+  symbolId: string;
+  sourceHash: string;
+  queryInclusion?: SymbolQueryInclusion;
+}
+
+export interface CanonicalJavaSymbolRecord extends CanonicalSymbolRecord {
+  declarationKind: JavaDeclarationKind;
+  javaFamily: JavaDeclarationFamily;
+}
+
+export interface JavaRelationshipScope {
+  id: string;
+  ownerChain: string[];
+  kind: 'anonymous_class' | 'lambda';
+  range: SourceRange;
+}
+
+export interface JavaExtractionResult {
+  sourceHash: string;
+  records: CanonicalJavaSymbolRecord[];
+  relationshipScopes: JavaRelationshipScope[];
+  observedFamilies: JavaDeclarationFamily[];
+  unsupportedForms: JavaUnsupportedFormCode[];
+}
 
 export interface SymbolLocation {
   file: string;
@@ -19,6 +153,16 @@ export interface SymbolLocation {
   implementation_locations?: SymbolLocation[];
   signature?: string;
   code?: string;
+  declaration_kind?: DeclarationKind;
+  symbol_id?: string;
+  owner?: string;
+  qualified_name?: string;
+  relationship_id?: string;
+  source_name?: string;
+  exported_name?: string;
+  anonymous?: boolean;
+  dynamic_name?: boolean;
+  modifiers?: string[];
 }
 
 export interface FindSymbolInput {
@@ -26,11 +170,28 @@ export interface FindSymbolInput {
   symbol: string;
   language?: SupportedLanguage;
   kind?: SymbolKind;
+  declaration_kind?: DeclarationKind;
   include_code?: boolean;
   include_signature?: boolean;
   scope?: SearchScope;
   glob?: string;
   search_mode?: SearchMode;
+}
+
+export interface SymbolQueryDiagnostics {
+  source_mode: SymbolQuerySourceMode;
+  graph_status: SymbolQueryGraphStatus;
+  completeness: SymbolQueryCompleteness;
+  fallback_reason: SymbolQueryFallbackReason | null;
+  scanned_files_count: number;
+  skipped_files_count: number;
+  unreadable_shards_count: number;
+  graph_generation?: number;
+}
+
+export interface FindSymbolResolution {
+  results: SymbolLocation[];
+  diagnostics: SymbolQueryDiagnostics;
 }
 
 export interface FindReferencesInput {
@@ -43,8 +204,6 @@ export interface FindReferencesInput {
   reference_kinds?: ReferenceKind[];
 }
 
-export type SearchMode = 'exact' | 'prefix' | 'contains';
-
 export interface FunctionCallTreeInput {
   path: string;
   symbol: string;
@@ -56,7 +215,7 @@ export interface FunctionCallTreeInput {
 }
 
 export type CallSource = 'application' | 'language' | 'framework' | 'library' | 'unknown';
-export type OwnerKind = 'class' | 'interface' | 'unknown';
+export type OwnerKind = 'class' | 'interface' | 'object' | 'namespace' | 'module' | 'unknown';
 export type CallNodeType = 'application' | 'external' | 'callback' | 'data_access' | 'fluent_chain' | 'framework';
 
 export interface CallTreeNode {
@@ -191,12 +350,24 @@ export type GraphNode =
       symbolKind: SymbolKind;
       name: string;
       file: string;
-      range: { startLine: number; startColumn: number; endLine: number; endColumn: number };
+      range: SourceRange;
       owner?: string;
       ownerKind?: OwnerKind;
       exported: boolean;
       signature?: string;
       entrypoint?: boolean;
+      declarationKind?: DeclarationKind;
+      symbolId?: string;
+      qualifiedName?: string;
+      relationshipId?: string;
+      sourceName?: string;
+      exportedName?: string;
+      anonymous?: boolean;
+      dynamicName?: boolean;
+      modifiers?: string[];
+      isDefinition?: boolean;
+      isImplementation?: boolean;
+      sourceHash?: string;
     };
 
 export interface GraphEdge {
@@ -212,7 +383,54 @@ export interface GraphEdge {
   externalOwner?: string;
   externalOwnerKind?: OwnerKind;
   externalSource?: CallSource;
+  targetRelationshipId?: string;
   reason?: string;
+}
+
+export interface TypeScriptSymbolCoverageFileProof {
+  sourceHash: string;
+  symbolCount: number;
+}
+
+export interface TypeScriptSymbolCoverageSkippedFile {
+  file: string;
+  reason: 'parse_error' | 'input_unreadable' | 'unsupported_language' | 'unsupported_source';
+}
+
+export interface TypeScriptSymbolCoverage {
+  modelVersion: 1;
+  compilerModelVersion: string;
+  grammar: {
+    typescript: string;
+    tsx: string;
+  };
+  generation: number;
+  completeFiles: string[];
+  skippedFiles: TypeScriptSymbolCoverageSkippedFile[];
+  fileProofs: Record<string, TypeScriptSymbolCoverageFileProof>;
+}
+
+export interface JavaSymbolCoverageFileProof {
+  sourceHash: string;
+  symbolCount: number;
+  relationshipScopeCount: number;
+  observedFamilies: JavaDeclarationFamily[];
+  unsupportedForms: JavaUnsupportedFormCode[];
+}
+
+export interface JavaSymbolCoverageSkippedFile {
+  file: string;
+  reason: 'parse_error' | 'input_unreadable' | 'unsupported_source';
+}
+
+export interface JavaSymbolCoverage {
+  modelVersion: 1;
+  grammar: { package: 'tree-sitter-java'; version: '0.23.5' };
+  generation: number;
+  sourceSnapshotId: string;
+  completeFiles: string[];
+  skippedFiles: JavaSymbolCoverageSkippedFile[];
+  fileProofs: Record<string, JavaSymbolCoverageFileProof>;
 }
 
 export interface SubprojectGraphShard {
@@ -222,6 +440,8 @@ export interface SubprojectGraphShard {
   generation: number;
   nodes: GraphNode[];
   edges: GraphEdge[];
+  typescriptSymbolCoverage?: TypeScriptSymbolCoverage;
+  javaSymbolCoverage?: JavaSymbolCoverage;
 }
 
 export interface GraphLookupPolicy {

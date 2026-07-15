@@ -1,111 +1,61 @@
 import { extractSignature } from './shared.js';
-import type { SymbolKind, SupportedLanguage, SymbolLocation } from '../../types.js';
+import { extractJavaSymbolRecords } from './symbol-extractor.js';
+import { allowsJavaCodePayload } from './symbol-model.js';
+import type { CanonicalJavaSymbolRecord, SymbolKind, SupportedLanguage, SymbolLocation } from '../../types.js';
+
+export interface ExtractedSymbol {
+  name: string;
+  kind: SymbolKind;
+  node: CanonicalJavaSymbolRecord;
+  isDefinition: boolean;
+  isImplementation: boolean;
+}
 
 export function nodeKindToSymbolKind(nodeType: string): SymbolKind {
   switch (nodeType) {
-    case 'method_declaration':
-    case 'constructor_declaration':
-      return 'method';
-    case 'class_declaration':
+    case 'class':
+    case 'record':
+    case 'enum':
+    case 'annotation':
       return 'class';
-    case 'interface_declaration':
+    case 'interface':
       return 'interface';
-    case 'field_declaration':
+    case 'method':
+    case 'constructor':
+    case 'compact_constructor':
+    case 'annotation_element':
+      return 'method';
+    case 'package':
+    case 'module':
+    case 'enum_constant':
+    case 'record_component':
+    case 'field':
+    case 'parameter':
+    case 'receiver_parameter':
+    case 'lambda_parameter':
+    case 'local_variable':
+    case 'enhanced_for_variable':
+    case 'catch_parameter':
+    case 'resource_variable':
+    case 'pattern_variable':
+    case 'type_parameter':
       return 'variable';
     default:
       return 'unknown';
   }
 }
 
-export interface ExtractedSymbol {
-  name: string;
-  kind: SymbolKind;
-  node: any;
-  isDefinition: boolean;
-  isImplementation: boolean;
-}
-
 export function extractSymbols(rootNode: any): ExtractedSymbol[] {
-  const symbols: ExtractedSymbol[] = [];
-
-  function visit(node: any) {
-    if (node.isNamed) {
-      const kind = nodeKindToSymbolKind(node.type);
-      if (kind !== 'unknown') {
-        const nameNode = getNameNode(node);
-        if (nameNode) {
-          symbols.push({
-            name: nameNode.text,
-            kind,
-            node,
-            isDefinition: isDefinitionNode(node),
-            isImplementation: isImplementationNode(node),
-          });
-        }
-      }
-    }
-
-    for (const child of node.children) {
-      visit(child);
-    }
-  }
-
-  visit(rootNode);
-  return symbols;
-}
-
-function getNameNode(node: any): any | undefined {
-  switch (node.type) {
-    case 'method_declaration':
-    case 'constructor_declaration':
-    case 'class_declaration':
-    case 'interface_declaration':
-      return node.childForFieldName('name');
-    case 'field_declaration': {
-      const declarator = node.children.find((c: any) => c.type === 'variable_declarator');
-      return declarator ? declarator.childForFieldName('name') : undefined;
-    }
-    default:
-      return undefined;
-  }
-}
-
-function isDefinitionNode(node: any): boolean {
-  const type = node.type;
-  return (
-    type === 'interface_declaration' ||
-    type === 'method_declaration' ||
-    type === 'constructor_declaration' ||
-    type === 'class_declaration' ||
-    type === 'field_declaration'
-  );
-}
-
-function isImplementationNode(node: any): boolean {
-  const type = node.type;
-  return (
-    type === 'method_declaration' ||
-    type === 'constructor_declaration' ||
-    type === 'class_declaration' ||
-    type === 'field_declaration'
-  );
-}
-
-function hasClassImplements(node: any): boolean {
-  const interfaces = node.childForFieldName('interfaces');
-  return interfaces != null;
-}
-
-function implementsInterface(classNode: any, interfaceName: string): boolean {
-  const interfaces = classNode.childForFieldName('interfaces');
-  if (!interfaces) return false;
-
-  const typeList = interfaces.children.find((c: any) => c.type === 'type_list');
-  if (!typeList) return false;
-
-  return typeList.children.some(
-    (c: any) => c.type === 'type_identifier' && c.text === interfaceName
-  );
+  const filePath = rootNode?.__filePath ?? rootNode?.filePath ?? 'unknown.java';
+  const source = rootNode?.__source ?? rootNode?.text ?? '';
+  const records = extractJavaSymbolRecords({ filePath, source, rootNode }).records;
+  return records.map((record) => ({
+    name: record.name,
+    kind: record.coarseKind,
+    node: record,
+    isDefinition: record.isDefinition,
+    isImplementation: record.isImplementation,
+  }));
 }
 
 export function findImplementationsOf(
@@ -113,26 +63,15 @@ export function findImplementationsOf(
   files: Array<{ path: string; rootNode: any; language: Exclude<SupportedLanguage, 'auto'> }>
 ): SymbolLocation[] {
   const locations: SymbolLocation[] = [];
-
   for (const file of files) {
-    function visit(node: any) {
-      if (node.isNamed && node.type === 'class_declaration') {
-        if (hasClassImplements(node) && implementsInterface(node, symbolName)) {
-          const nameNode = node.childForFieldName('name');
-          if (nameNode) {
-            locations.push(buildSymbolLocation(file.path, nameNode.text, 'class', node, true, true));
-          }
-        }
-      }
-
-      for (const child of node.children) {
-        visit(child);
-      }
+    const source = file.rootNode?.__source ?? file.rootNode?.text ?? '';
+    const records = extractJavaSymbolRecords({ filePath: file.path, source, rootNode: file.rootNode }).records;
+    for (const record of records) {
+      if (record.declarationKind !== 'class') continue;
+      if (!record.signature?.includes(`implements ${symbolName}`)) continue;
+      locations.push(buildSymbolLocation(file.path, record.name, record.coarseKind, record, true, true));
     }
-
-    visit(file.rootNode);
   }
-
   return locations;
 }
 
@@ -147,25 +86,42 @@ export function buildSymbolLocation(
   includeCode = false,
   source?: string
 ): SymbolLocation {
+  const record = node as CanonicalJavaSymbolRecord;
   const location: SymbolLocation = {
     file: filePath,
     symbol: symbolName,
     kind,
-    start_line: node.startPosition.row + 1,
-    start_column: node.startPosition.column,
-    end_line: node.endPosition.row + 1,
-    end_column: node.endPosition.column,
+    start_line: record.declarationRange.startLine,
+    start_column: record.declarationRange.startColumn,
+    end_line: record.declarationRange.endLine,
+    end_column: record.declarationRange.endColumn,
     is_definition: isDefinition,
     is_implementation: isImplementation,
+    declaration_kind: record.declarationKind,
+    symbol_id: record.symbolId,
+    owner: record.owner,
+    qualified_name: record.qualifiedName,
+    relationship_id: record.relationshipId,
+    source_name: record.sourceName,
+    anonymous: record.anonymous,
+    dynamic_name: record.dynamicName,
+    modifiers: record.modifiers,
   };
 
-  if (includeSignature) {
-    location.signature = extractSignature(node);
+  if (includeSignature && record.signature) location.signature = record.signature;
+  if (includeCode && source && record.codeRange && allowsJavaCodePayload(record.declarationKind, true)) {
+    location.code = extractCodeRange(source, record.codeRange.startLine, record.codeRange.startColumn, record.codeRange.endLine, record.codeRange.endColumn);
   }
-
-  if (includeCode && source) {
-    location.code = node.text;
-  }
-
   return location;
 }
+
+function extractCodeRange(source: string, startLine: number, startColumn: number, endLine: number, endColumn: number): string {
+  const lines = source.split('\n');
+  const slice = lines.slice(startLine - 1, endLine);
+  if (slice.length === 0) return '';
+  slice[0] = slice[0].slice(startColumn);
+  slice[slice.length - 1] = slice[slice.length - 1].slice(0, endColumn);
+  return slice.join('\n');
+}
+
+export { extractSignature };

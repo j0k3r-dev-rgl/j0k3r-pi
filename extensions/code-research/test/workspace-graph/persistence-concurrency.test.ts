@@ -25,7 +25,7 @@ describe('workspace graph persistence', () => {
     const corruptPath = join(graphDir, 'workspace-state.json');
     await writeFile(corruptPath, '{bad json', 'utf8');
     const corrupt = await readGraphArtifactJson(corruptPath);
-    expect(corrupt.status).toBe('errored');
+    expect(corrupt.status).toBe('corrupt');
   });
 
   it('writes manifest and shard artifacts atomically', async () => {
@@ -65,8 +65,7 @@ describe('workspace graph persistence', () => {
     await writeGraphArtifactJson(artifactPath, { schemaVersion: 1, createdBy: 'pi-code-research-extension', generation: 2, extra: true });
 
     const raw = await readFile(artifactPath, 'utf8');
-    expect(raw).toContain('"generation": 2');
-    expect(raw).toContain('"extra": true');
+    expect(raw).toBe('{"schemaVersion":1,"createdBy":"pi-code-research-extension","generation":2,"extra":true}\n');
   });
 
   it('adds workspace graph directory to gitignore when project root is a git repo', async () => {

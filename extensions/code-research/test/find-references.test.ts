@@ -19,6 +19,34 @@ async function createProject(prefix: string, files: Record<string, string>): Pro
 }
 
 describe('find_references', () => {
+  it('does not treat callback-consuming call results as callable reference targets', async () => {
+    const rootDir = await createProject('pi-find-references-ts-non-callable', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/service.ts': `declare function consume<T>(value: T): { value: T };\nexport const Wrapped = (((() => 1) as () => number)!);\nexport const NotCallable = consume(() => 1);\nexport function run(): void {\n  Wrapped();\n  NotCallable();\n}\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+
+    const wrapped = await findReferences(rootDir, {
+      path: 'src/service.ts',
+      symbol: 'Wrapped',
+      language: 'ts',
+      kind: 'function',
+      reference_kinds: ['call'],
+    });
+    expect(wrapped).toHaveLength(1);
+    expect(wrapped[0].context_symbol).toBe('run');
+
+    const notCallable = await findReferences(rootDir, {
+      path: 'src/service.ts',
+      symbol: 'NotCallable',
+      language: 'ts',
+      kind: 'function',
+      reference_kinds: ['call'],
+    });
+    expect(notCallable).toEqual([]);
+  });
+
   it('finds TypeScript call references for a function across multiple files', async () => {
     const rootDir = await createProject('pi-find-references-ts', {
       'src/service.ts': `export function helper(): void {}\n\nexport function runService(): void {\n  helper();\n}\n\nexport function warmupService(): void {\n  helper();\n}\n`,
@@ -308,6 +336,51 @@ describe('find_references', () => {
     expect(results.filter((item) => item.reference_kind === 'method_reference').map((item) => item.context_symbol)).toContain('run');
   });
 
+  it('keeps all uniquely resolved Java overload references instead of collapsing to the first declaration', async () => {
+    const files = {
+      'src/main/java/app/Example.java': `package app;\n\npublic class Example {\n  public void runInt() { process(1); }\n  public void runString() { process("x"); }\n  private void process(int value) {}\n  private void process(String value) {}\n}\n`,
+    };
+    const directRoot = await createProject('pi-find-references-java-overloads-direct', files);
+    const graphRoot = await createProject('pi-find-references-java-overloads-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      ...files,
+    });
+    await buildWorkspaceGraph(graphRoot);
+
+    const query = {
+      path: 'src/main/java/app/Example.java',
+      symbol: 'process',
+      language: 'java' as const,
+      kind: 'method' as const,
+      reference_kinds: ['call' as const],
+    };
+    const direct = await findReferences(directRoot, query);
+    const graph = await findReferences(graphRoot, query);
+    const normalize = (results: typeof direct) => results.map((item) => `${item.context_symbol}:${item.called_as}`).sort();
+
+    expect(normalize(direct)).toEqual(['runInt:process(1)', 'runString:process("x")']);
+    expect(normalize(graph)).toEqual(normalize(direct));
+  });
+
+  it('does not leak ambiguous overload-group graph edges across canonical Java owners', async () => {
+    const rootDir = await createProject('pi-find-references-java-overload-owner-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/main/java/a/Target.java': `package a;\npublic class Target {\n  void process(String value) {}\n  void process(Integer value) {}\n}\n`,
+      'src/main/java/b/Other.java': `package b;\npublic class Other {\n  void run(Object value) { process(value); }\n  void process(String value) {}\n  void process(Integer value) {}\n}\n`,
+    });
+    await buildWorkspaceGraph(rootDir);
+
+    const results = await findReferences(rootDir, {
+      path: 'src/main/java/a/Target.java',
+      symbol: 'process',
+      language: 'java',
+      kind: 'method',
+      reference_kinds: ['call'],
+    });
+
+    expect(results).toEqual([]);
+  });
+
   it('keeps graph-backed and fallback call references aligned where both can answer', async () => {
     const files = {
       'src/main/java/app/AppService.java': `package app;\n\npublic class AppService {\n  public void run() {\n    helper();\n  }\n\n  public void warmup() {\n    helper();\n  }\n\n  private void helper() {}\n}\n`,
@@ -359,5 +432,37 @@ describe('find_references', () => {
     });
 
     expect(new Set(results.map((item) => item.reference_kind))).toEqual(new Set(['extends', 'implements', 'import']));
+  });
+
+  it('keeps owner identity stable for same-named Java interfaces across packages in direct and graph modes', async () => {
+    const files = {
+      'src/main/java/ports/Service.java': `package ports;\n\npublic interface Service {}\n`,
+      'src/main/java/api/Service.java': `package api;\n\npublic interface Service {}\n`,
+      'src/main/java/app/AppService.java': `package app;\n\nimport api.Service;\n\npublic class AppService implements Service {}\n`,
+    };
+
+    const fallbackRoot = await createProject('pi-find-references-java-owner-fallback', files);
+    const graphRoot = await createProject('pi-find-references-java-owner-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      ...files,
+    });
+
+    await buildWorkspaceGraph(graphRoot);
+
+    const fallbackResults = await findReferences(fallbackRoot, {
+      path: 'src/main/java/ports/Service.java',
+      symbol: 'Service',
+      language: 'java',
+      kind: 'interface',
+    });
+    const graphResults = await findReferences(graphRoot, {
+      path: 'src/main/java/ports/Service.java',
+      symbol: 'Service',
+      language: 'java',
+      kind: 'interface',
+    });
+
+    expect(fallbackResults).toEqual([]);
+    expect(graphResults).toEqual([]);
   });
 });

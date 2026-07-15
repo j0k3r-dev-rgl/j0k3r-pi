@@ -205,20 +205,16 @@ describe('findSymbol Java', () => {
     expect(results[0].kind).toBe('variable');
   });
 
-  it('parses a specific large real-world java file when buffer size is increased', async () => {
+  it('rejects explicit file paths that escape the workspace', async () => {
     const realFile = '/home/j0k3r/sias/app/back/src/main/java/com/sistemasias/ar/modules/user/infrastructure/persistence/dao/UserQueryMongoSupport.java';
 
-    const results = await findSymbol(tmpDir, {
+    await expect(findSymbol(tmpDir, {
       path: realFile,
       symbol: 'UserQueryMongoSupport',
       language: 'java',
       kind: 'class',
       include_signature: true,
-    });
-
-    expect(results).toHaveLength(1);
-    expect(results[0].symbol).toBe('UserQueryMongoSupport');
-    expect(results[0].kind).toBe('class');
+    })).rejects.toThrow('Path escapes workspace');
   });
 
   it('finds symbols during real project directory scans including large java files', async () => {
@@ -231,5 +227,99 @@ describe('findSymbol Java', () => {
 
     expect(results.length).toBeGreaterThanOrEqual(1);
     expect(results.some((result) => result.symbol === 'NotificationCommandInputPort')).toBe(true);
+  });
+
+  it('covers java declaration kinds across examples and inline bindings', async () => {
+    const adapter = await findSymbol('/home/j0k3r/.pi/agent', {
+      path: 'examples/java',
+      symbol: 'Adapter',
+      language: 'java',
+      kind: 'class',
+    });
+    const draft = await findSymbol('/home/j0k3r/.pi/agent', {
+      path: 'examples/java',
+      symbol: 'UserDraft',
+      language: 'java',
+      kind: 'class',
+    });
+    const userKind = await findSymbol('/home/j0k3r/.pi/agent', {
+      path: 'examples/java',
+      symbol: 'UserKind',
+      language: 'java',
+      kind: 'class',
+    });
+
+    expect(adapter[0]).toMatchObject({ declaration_kind: 'annotation', kind: 'class', qualified_name: 'app.annotations.Adapter' });
+    expect(draft[0]).toMatchObject({ declaration_kind: 'record', kind: 'class', qualified_name: 'app.domain.UserDraft' });
+    expect(userKind[0]).toMatchObject({ declaration_kind: 'enum', kind: 'class', qualified_name: 'app.domain.UserKind' });
+  });
+
+  it('returns individual declarators, bindings, and package/module declarations with inclusion rules', async () => {
+    const projectRoot = join(tmpDir, `java-parity-${Date.now()}`);
+    await mkdir(projectRoot, { recursive: true });
+    await writeTestFile(
+      `${projectRoot.replace(`${tmpDir}/`, '')}/pkg/package-info.java`,
+      `package pkg.demo;\n`
+    );
+    await writeTestFile(
+      `${projectRoot.replace(`${tmpDir}/`, '')}/module-info.java`,
+      `module demo.module { }\n`
+    );
+    const file = await writeTestFile(
+      `${projectRoot.replace(`${tmpDir}/`, '')}/pkg/Example.java`,
+      `package pkg.demo;\npublic class Example<T> {\n  private int first = 1, second, third = 3;\n  public Example(String name) {\n    int localA = 1, localB = 2;\n    Runnable lambda = () -> { int lambdaValue = localA; };\n    for (String item : java.util.List.of(name)) {\n      System.out.println(item);\n    }\n    try (var reader = new java.io.StringReader(name)) {\n      System.out.println(reader);\n    } catch (Exception ex) {\n      System.out.println(ex.getMessage());\n    }\n  }\n}\n`
+    );
+
+    const fields = await findSymbol(projectRoot, { path: file, symbol: 'first', language: 'java' });
+    const second = await findSymbol(projectRoot, { path: file, symbol: 'second', language: 'java' });
+    const local = await findSymbol(projectRoot, { path: file, symbol: 'localB', language: 'java' });
+    const lambda = await findSymbol(projectRoot, { path: file, symbol: 'lambdaValue', language: 'java' });
+    const pkg = await findSymbol(projectRoot, { path: projectRoot, symbol: 'pkg.demo', language: 'java' });
+    const moduleDecl = await findSymbol(projectRoot, { path: projectRoot, symbol: 'demo.module', language: 'java', declaration_kind: 'module' });
+    const hiddenBindings = await findSymbol(projectRoot, { path: projectRoot, symbol: 'local', language: 'java', search_mode: 'contains' });
+    const visibleBindings = await findSymbol(projectRoot, { path: projectRoot, symbol: 'local', language: 'java', search_mode: 'contains', declaration_kind: 'local_variable' });
+
+    expect(fields[0]).toMatchObject({ declaration_kind: 'field', start_line: 3, kind: 'variable' });
+    expect(second[0]).toMatchObject({ declaration_kind: 'field', start_line: 3, kind: 'variable' });
+    expect(local[0]).toMatchObject({ declaration_kind: 'local_variable', kind: 'variable' });
+    expect(lambda[0]).toMatchObject({ declaration_kind: 'local_variable', kind: 'variable' });
+    expect(pkg[0]).toMatchObject({ declaration_kind: 'package', kind: 'variable' });
+    expect(moduleDecl[0]).toMatchObject({ declaration_kind: 'module', kind: 'variable' });
+    expect(hiddenBindings).toEqual([]);
+    expect(visibleBindings.some((result) => result.symbol === 'localA')).toBe(true);
+    expect(visibleBindings.some((result) => result.symbol === 'localB')).toBe(true);
+  });
+
+  it('applies java include_code allowlist per result', async () => {
+    const file = await writeTestFile(
+      'Payload.java',
+      `public class Payload {\n  private final String value = \"secret\";\n  public String value() {\n    return value;\n  }\n}\n`
+    );
+
+    const method = await findSymbol(tmpDir, { path: file, symbol: 'value', language: 'java', kind: 'method', include_code: true, include_signature: true });
+    const field = await findSymbol(tmpDir, { path: file, symbol: 'value', language: 'java', kind: 'variable', include_code: true, include_signature: true });
+    const clazz = await findSymbol(tmpDir, { path: file, symbol: 'Payload', language: 'java', kind: 'class', include_code: true, include_signature: true });
+
+    expect(method[0].code).toContain('return value;');
+    expect(method[0].signature).toContain('public String value()');
+    expect(field[0].code).toBeUndefined();
+    expect(clazz[0].code).toBeUndefined();
+  });
+
+  it('keeps directory-scoped binding queries gated even for adversarial local-binding counts', async () => {
+    const projectRoot = join(tmpDir, `java-adversarial-bindings-${Date.now()}`);
+    await mkdir(projectRoot, { recursive: true });
+    const localDeclarations = Array.from({ length: 250 }, (_, index) => `    String value${index} = input + ${index};`).join('\n');
+    const file = await writeTestFile(
+      `${projectRoot.replace(`${tmpDir}/`, '')}/Adversarial.java`,
+      `public class Adversarial {\n  public void run(String input) {\n${localDeclarations}\n  }\n}\n`
+    );
+
+    const hidden = await findSymbol(projectRoot, { path: projectRoot, symbol: 'value', language: 'java', search_mode: 'contains', scope: 'directory' });
+    const visible = await findSymbol(projectRoot, { path: file, symbol: 'value', language: 'java', search_mode: 'contains', declaration_kind: 'local_variable' });
+
+    expect(hidden).toEqual([]);
+    expect(visible.length).toBe(250);
+    expect(visible[0]).toMatchObject({ declaration_kind: 'local_variable', kind: 'variable' });
   });
 });

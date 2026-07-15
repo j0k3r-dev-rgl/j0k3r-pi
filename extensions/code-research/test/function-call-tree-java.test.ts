@@ -314,4 +314,78 @@ describe('function_call_tree Java', () => {
     expect(compactCallback?.children?.[0].called_as).toContain('item.trim()');
     expect(compactCallback?.children?.[0].called_as).toContain('item.isBlank()');
   });
+
+  it('resolves overloaded application methods by argument shape instead of picking the first declaration', async () => {
+    const rootDir = await createProject({
+      'Example.java': `public class Example {\n  public void run() {\n    process(1);\n    process("x");\n  }\n\n  private void process(int value) {}\n\n  private void process(String value) {}\n}\n`,
+    });
+
+    const index = await buildProjectIndex(rootDir);
+    const rootMethod = index.methods.find((m) => m.className === 'Example' && m.symbol === 'run');
+    expect(rootMethod).toBeDefined();
+
+    const result = buildCallTree({
+      rootFile: rootMethod!.file,
+      rootMethod: rootMethod!,
+      index,
+      maxDepth: 5,
+      includeExternal: true,
+    });
+
+    expect(result.root.children).toHaveLength(2);
+    expect(result.root.children?.map((child) => child.called_as)).toEqual(['process(1)', 'process("x")']);
+    expect(result.root.children?.map((child) => child.signature)).toEqual([
+      'private void process(int value) ...',
+      'private void process(String value) ...',
+    ]);
+  });
+
+  it('uses object-creation syntax only as a conservative overload discriminator', async () => {
+    const rootDir = await createProject({
+      'Example.java': `public class Example {\n  public void run() {\n    process(new String("x"));\n  }\n\n  private void process(String value) {}\n  private void process(Integer value) {}\n}\n`,
+    });
+
+    const index = await buildProjectIndex(rootDir);
+    const rootMethod = index.methods.find((method) => method.className === 'Example' && method.symbol === 'run');
+    expect(rootMethod).toBeDefined();
+
+    const result = buildCallTree({
+      rootFile: rootMethod!.file,
+      rootMethod: rootMethod!,
+      index,
+      maxDepth: 5,
+      includeExternal: true,
+    });
+
+    expect(result.root.children).toHaveLength(1);
+    expect(result.root.children?.[0]).toMatchObject({
+      symbol: 'process',
+      called_as: 'process(new String("x"))',
+      signature: 'private void process(String value) ...',
+      is_application: true,
+      is_external: false,
+    });
+  });
+
+  it('preserves nested owner identity when simple class names collide', async () => {
+    const rootDir = await createProject({
+      'Example.java': `public class Example {\n  static class OuterA {\n    static class Inner {\n      void run() {\n        helperA();\n      }\n\n      void helperA() {}\n    }\n  }\n\n  static class OuterB {\n    static class Inner {\n      void run() {\n        helperB();\n      }\n\n      void helperB() {}\n    }\n  }\n\n  public void start() {\n    new OuterB.Inner().run();\n  }\n}\n`,
+    });
+
+    const index = await buildProjectIndex(rootDir);
+    const rootMethod = index.methods.find((m) => m.className === 'Example' && m.symbol === 'start');
+    expect(rootMethod).toBeDefined();
+
+    const result = buildCallTree({
+      rootFile: rootMethod!.file,
+      rootMethod: rootMethod!,
+      index,
+      maxDepth: 5,
+      includeExternal: true,
+    });
+
+    expect(result.root.children?.[0].called_as).toBe('new OuterB.Inner().run()');
+    expect(result.root.children?.[0].children?.[0].symbol).toBe('helperB');
+    expect(result.root.children?.[0].children?.[0].signature).toBe('void helperB() ...');
+  });
 });

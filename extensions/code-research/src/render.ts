@@ -85,7 +85,7 @@ function relativeFile(file: string | undefined): string {
 function compactFindSymbol(result: any, theme: any): string[] {
   const found = Number(result?.details?.found ?? result?.details?.results?.length ?? 0);
   const rows = Array.isArray(result?.details?.results) ? result.details.results : [];
-  const lines = [`${titleFor('find_symbol', theme)} · ${found} match(es)`, dim('ctrl+o expand', theme)];
+  const lines = [`${titleFor('find_symbol', theme)} · ${found} match(es)`, `mode ${result?.details?.source_mode ?? 'direct'} · graph ${result?.details?.graph_status ?? 'disabled'} · ${result?.details?.completeness ?? 'fallback'}`, dim('ctrl+o expand', theme)];
   for (const row of rows.slice(0, 5)) {
     const loc = `${relativeFile(row.file)}:${row.start_line ?? '?'}:${row.start_column ?? '?'}`;
     lines.push(`- ${row.symbol ?? '<unknown>'} (${row.kind ?? 'unknown'}) ${loc}`);

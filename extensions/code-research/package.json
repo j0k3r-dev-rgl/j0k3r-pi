@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "benchmark:typescript-symbols": "node ./scripts/benchmark-typescript-symbols.js",
+    "benchmark:java-symbols": "node ./scripts/benchmark-typescript-symbols.js --language java"
   },
   "dependencies": {
     "minimatch": "10.2.5",

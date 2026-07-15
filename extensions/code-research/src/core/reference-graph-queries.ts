@@ -17,7 +17,7 @@ export async function queryReferencesFromGraph(options: {
 
   const shards = await Promise.all(
     manifest.subprojects.map(async (subproject) => {
-      const shard = await readSubprojectGraphShard(cwd, subproject.id);
+      const shard = await readSubprojectGraphShard(cwd, subproject.id, { generation: subproject.generation });
       return shard.status === 'ok' ? shard.data : undefined;
     })
   );
@@ -33,12 +33,15 @@ export async function queryReferencesFromGraph(options: {
   const allEdges = allShards.flatMap((shard) => shard!.edges);
   const symbolNodes = allNodes.filter((node): node is Extract<(typeof allNodes)[number], { kind: 'symbol' }> => node.kind === 'symbol');
 
-  const target = symbolNodes.find((node) => {
+  const targets = symbolNodes.filter((node) => {
     if (node.name !== input.symbol) return false;
     if (input.kind && node.symbolKind !== input.kind) return false;
     return matchesTargetFile(node.file, relativeTarget, targetIsDirectory);
   });
-  if (!target) return undefined;
+  if (targets.length === 0) return undefined;
+  const target = targets[0];
+  const targetIds = new Set(targets.map((node) => node.id));
+  const targetRelationshipIds = new Set(targets.map((node) => node.relationshipId).filter((value): value is string => Boolean(value)));
 
   const nodeById = new Map<string, GraphNode>(allNodes.map((node) => [node.id, node]));
   const references: ReferenceLocation[] = [];
@@ -48,7 +51,10 @@ export async function queryReferencesFromGraph(options: {
     if (!(edge.kind === 'calls' || edge.kind === 'reads' || edge.kind === 'implements' || edge.kind === 'extends')) continue;
     const referenceKind = edge.kind === 'calls' ? 'call' : edge.kind === 'reads' ? 'read' : edge.kind === 'implements' ? 'implements' : 'extends';
     if (requestedKinds.size > 0 && !requestedKinds.has(referenceKind)) continue;
-    const matchesTarget = edge.to === target.id || ((edge.kind === 'implements' || edge.kind === 'extends') && edge.to === `external:java:${target.name}`);
+    const matchesTarget =
+      targetIds.has(edge.to) ||
+      ((edge.kind === 'implements' || edge.kind === 'extends') && targets.some((candidate) => edge.to === `external:java:${candidate.name}` || edge.to === `external:java:${candidate.qualifiedName ?? candidate.name}`)) ||
+      (edge.kind === 'calls' && edge.targetRelationshipId !== undefined && targetRelationshipIds.has(edge.targetRelationshipId));
     if (!matchesTarget) continue;
     const fromNode = nodeById.get(edge.from);
     if (!fromNode || fromNode.kind !== 'symbol') continue;
