@@ -141,4 +141,32 @@ describe('TypeScript symbol syntax and graph parity', () => {
     expect(accessors).toHaveLength(2);
     expect(accessors[0].relationshipId).toBe(accessors[1].relationshipId);
   });
+
+  it('keeps direct and fresh graph symbol ids and accessor relationship ids identical', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pi-ts-symbol-identity-parity-'));
+    await mkdir(join(root, '.pi'), { recursive: true });
+    const file = join(root, 'src/identity.ts');
+    await mkdir(join(root, 'src'), { recursive: true });
+    await writeFile(file, `export class Example {\n  get value(): number { return 1; }\n  set value(next: number) { void next; }\n}\n`);
+
+    await writeFile(join(root, '.pi/code-research.json'), '{"graph":{"enable":false}}\n');
+    const direct = await findSymbol(root, { path: file, symbol: '', language: 'ts', search_mode: 'contains' });
+
+    await writeFile(join(root, '.pi/code-research.json'), '{"graph":{"enable":true}}\n');
+    await buildWorkspaceGraph(root);
+    const graph = await findSymbol(root, { path: file, symbol: '', language: 'ts', search_mode: 'contains' });
+
+    const pickIdentity = (results: typeof direct) => results.map((result) => ({
+      symbol: result.symbol,
+      declaration_kind: result.declaration_kind,
+      start_line: result.start_line,
+      start_column: result.start_column,
+      symbol_id: result.symbol_id,
+      relationship_id: result.relationship_id,
+    }));
+
+    expect(pickIdentity(graph)).toEqual(pickIdentity(direct));
+    const accessors = graph.filter((result) => result.symbol === 'value');
+    expect(new Set(accessors.map((result) => result.relationship_id))).toEqual(new Set([accessors[0]?.relationship_id]));
+  });
 });

@@ -269,4 +269,126 @@ describe('reverse_function_call_tree', () => {
     expect(stringResult.root.callers?.map((node) => node.symbol)).toEqual(['runString']);
     expect(stringResult.root.callers?.[0].called_as).toBe('process("x")');
   });
+
+  it('keeps graph-backed locally constructed instance reverse call trees aligned with direct mode', async () => {
+    const files = {
+      'src/service.ts': `export class Worker {\n  run(): void {\n    this.helper();\n  }\n\n  helper(): void {}\n}\n`,
+      'src/controller.ts': `import { Worker } from './service';\n\nexport function handle(): void {\n  const worker = new Worker();\n  worker.run();\n}\n`,
+      'src/root.ts': `import { handle } from './controller';\n\nexport function main(): void {\n  handle();\n}\n`,
+    };
+    const directRoot = await createProject('pi-reverse-call-tree-local-instance-direct', files);
+    const graphRoot = await createProject('pi-reverse-call-tree-local-instance-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      ...files,
+    });
+    await buildWorkspaceGraph(graphRoot);
+
+    const direct = await executeReverseFunctionCallTree(directRoot, { path: 'src/service.ts', symbol: 'helper', language: 'ts', kind: 'method', max_depth: 5 });
+    const graph = await executeReverseFunctionCallTree(graphRoot, { path: 'src/service.ts', symbol: 'helper', language: 'ts', kind: 'method', max_depth: 5 });
+
+    expect(direct.status).toBe('ok');
+    expect(graph.status).toBe('ok');
+    if (direct.status !== 'ok' || graph.status !== 'ok') return;
+
+    const flatten = (node: any): string[] => [node.symbol, ...(node.callers ?? []).flatMap(flatten)];
+    expect(flatten(graph.result.root)).toEqual(flatten(direct.result.root));
+  });
+
+  it('keeps graph-backed inline-import typed receiver reverse call trees aligned with direct mode', async () => {
+    const files = {
+      'src/service.ts': `export class A {\n  run(): void {\n    this.helper();\n  }\n\n  helper(): void {}\n}\n`,
+      'src/owner.ts': `export function ownerCalls(a: import('./service').A): void {\n  a.run();\n}\n`,
+      'src/root.ts': `import { ownerCalls } from './owner';\nimport { A } from './service';\n\nexport function main(): void {\n  ownerCalls(new A());\n}\n`,
+    };
+    const directRoot = await createProject('pi-reverse-call-tree-inline-import-direct', files);
+    const graphRoot = await createProject('pi-reverse-call-tree-inline-import-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      ...files,
+    });
+    await buildWorkspaceGraph(graphRoot);
+
+    const direct = await executeReverseFunctionCallTree(directRoot, { path: 'src/service.ts', symbol: 'helper', language: 'ts', kind: 'method', max_depth: 5 });
+    const graph = await executeReverseFunctionCallTree(graphRoot, { path: 'src/service.ts', symbol: 'helper', language: 'ts', kind: 'method', max_depth: 5 });
+
+    expect(direct.status).toBe('ok');
+    expect(graph.status).toBe('ok');
+    if (direct.status !== 'ok' || graph.status !== 'ok') return;
+
+    const flatten = (node: any): string[] => [`${node.class ?? '<module>'}.${node.symbol}`, ...(node.callers ?? []).flatMap(flatten)];
+    expect(flatten(graph.result.root)).toEqual(flatten(direct.result.root));
+    expect(graph.result.root.callers?.[0]?.callers?.[0]?.symbol).toBe('ownerCalls');
+  });
+
+  it('keeps graph-backed namespace-import reverse call trees aligned with direct mode', async () => {
+    const files = {
+      'src/forms.js': `export function declared(name) {\n  return name;\n}\n`,
+      'src/consumer.js': `import * as Forms from './forms.js';\n\nexport function middle() {\n  return Forms.declared('ns');\n}\n`,
+      'src/root.js': `import { middle } from './consumer.js';\n\nexport function main() {\n  return middle();\n}\n`,
+    };
+    const directRoot = await createProject('pi-reverse-call-tree-namespace-direct', files);
+    const graphRoot = await createProject('pi-reverse-call-tree-namespace-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      ...files,
+    });
+    await buildWorkspaceGraph(graphRoot);
+
+    const direct = await executeReverseFunctionCallTree(directRoot, { path: 'src/forms.js', symbol: 'declared', language: 'js', kind: 'function', max_depth: 5 });
+    const graph = await executeReverseFunctionCallTree(graphRoot, { path: 'src/forms.js', symbol: 'declared', language: 'js', kind: 'function', max_depth: 5 });
+
+    expect(direct.status).toBe('ok');
+    expect(graph.status).toBe('ok');
+    if (direct.status !== 'ok' || graph.status !== 'ok') return;
+
+    const flatten = (node: any): string[] => [node.symbol, ...(node.callers ?? []).flatMap(flatten)];
+    expect(flatten(graph.result.root)).toEqual(flatten(direct.result.root));
+  });
+
+  it('keeps expression-bodied arrow reverse call trees aligned in direct and graph modes', async () => {
+    const files = {
+      'src/forms.js': `export function declared(name) {\n  return name;\n}\n\nexport const arrow = name => declared(name);\n`,
+    };
+    const directRoot = await createProject('pi-reverse-call-tree-arrow-direct', files);
+    const graphRoot = await createProject('pi-reverse-call-tree-arrow-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      ...files,
+    });
+    await buildWorkspaceGraph(graphRoot);
+
+    const direct = await executeReverseFunctionCallTree(directRoot, { path: 'src/forms.js', symbol: 'declared', language: 'js', kind: 'function', max_depth: 4 });
+    const graph = await executeReverseFunctionCallTree(graphRoot, { path: 'src/forms.js', symbol: 'declared', language: 'js', kind: 'function', max_depth: 4 });
+
+    expect(direct.status).toBe('ok');
+    expect(graph.status).toBe('ok');
+    if (direct.status !== 'ok' || graph.status !== 'ok') return;
+
+    expect(direct.result.root.callers?.map((node: any) => node.symbol)).toContain('arrow');
+    expect(graph.result.root.callers?.map((node: any) => node.symbol)).toEqual(direct.result.root.callers?.map((node: any) => node.symbol));
+  });
+
+  it('keeps exact-file JavaScript method reverse graph queries attached to the method owner and callers', async () => {
+    const rootDir = await createProject('pi-reverse-call-tree-js-exact-method', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/forms.js': `export class Worker {\n  run() {\n    this.helper();\n  }\n\n  helper() {}\n}\n`,
+      'src/consumer.js': `import { Worker } from './forms.js';\n\nexport function top() {\n  const worker = new Worker();\n  worker.run();\n}\n`,
+      'src/root.js': `import { top } from './consumer.js';\n\nexport function main() {\n  top();\n}\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+
+    const execution = await executeReverseFunctionCallTree(rootDir, {
+      path: 'src/forms.js',
+      symbol: 'run',
+      language: 'js',
+      kind: 'method',
+      max_depth: 5,
+    });
+
+    expect(execution.status).toBe('ok');
+    if (execution.status !== 'ok') return;
+
+    expect(execution.rootClassName).toBe('Worker');
+    expect(execution.result.root.class).toBe('Worker');
+    expect(execution.result.root.callers?.[0]?.symbol).toBe('top');
+    expect(execution.result.root.callers?.[0]?.callers?.[0]?.symbol).toBe('main');
+  });
 });

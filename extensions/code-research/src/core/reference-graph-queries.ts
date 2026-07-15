@@ -1,4 +1,4 @@
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { FindReferencesInput, GraphLookupPolicy, GraphManifest, GraphNode, ReferenceLocation, WorkspaceGraphState } from '../types.js';
 import { readSubprojectGraphShard } from './graph-persistence.js';
@@ -38,13 +38,14 @@ export async function queryReferencesFromGraph(options: {
     if (input.kind && node.symbolKind !== input.kind) return false;
     return matchesTargetFile(node.file, relativeTarget, targetIsDirectory);
   });
-  if (targets.length === 0) return undefined;
+  if (targets.length === 0) return [];
   const target = targets[0];
   const targetIds = new Set(targets.map((node) => node.id));
   const targetRelationshipIds = new Set(targets.map((node) => node.relationshipId).filter((value): value is string => Boolean(value)));
 
   const nodeById = new Map<string, GraphNode>(allNodes.map((node) => [node.id, node]));
   const references: ReferenceLocation[] = [];
+  const sourceCache = new Map<string, string>();
 
   const requestedKinds = new Set(input.reference_kinds ?? []);
   for (const edge of allEdges) {
@@ -59,20 +60,25 @@ export async function queryReferencesFromGraph(options: {
     const fromNode = nodeById.get(edge.from);
     if (!fromNode || fromNode.kind !== 'symbol') continue;
 
+    const isTypeRelationship = referenceKind === 'extends' || referenceKind === 'implements';
+    const sourceFile = resolve(cwd, fromNode.file);
+    const relationshipMetadata = isTypeRelationship
+      ? await getJavaTypeRelationshipMetadata(sourceCache, sourceFile, fromNode.range.startLine, referenceKind, target.name)
+      : undefined;
     references.push({
-      file: resolve(cwd, fromNode.file),
-      line: edge.callsite?.line ?? fromNode.range.startLine,
-      column: edge.callsite?.column ?? fromNode.range.startColumn,
-      end_line: fromNode.range.endLine,
-      end_column: fromNode.range.endColumn,
+      file: sourceFile,
+      line: isTypeRelationship ? fromNode.range.startLine : edge.callsite?.line ?? fromNode.range.startLine,
+      column: isTypeRelationship ? 0 : edge.callsite?.column ?? fromNode.range.startColumn,
+      end_line: isTypeRelationship ? relationshipMetadata?.end_line : fromNode.range.endLine,
+      end_column: isTypeRelationship ? relationshipMetadata?.end_column : fromNode.range.endColumn,
       symbol: target.name,
       kind: target.symbolKind,
       context_symbol: fromNode.name,
       context_kind: fromNode.symbolKind,
-      context_class: fromNode.owner,
-      owner_kind: fromNode.ownerKind ?? 'unknown',
+      context_class: isTypeRelationship ? fromNode.name : fromNode.owner,
+      owner_kind: isTypeRelationship ? (fromNode.symbolKind === 'interface' ? 'interface' : 'class') : fromNode.ownerKind ?? 'unknown',
       reference_kind: referenceKind,
-      called_as: edge.callsite?.text,
+      called_as: isTypeRelationship ? relationshipMetadata?.called_as : edge.callsite?.text,
       receiver_name: edge.callsite?.receiverName,
       receiver_type: edge.callsite?.receiverType,
       is_application: true,
@@ -82,6 +88,29 @@ export async function queryReferencesFromGraph(options: {
   }
 
   return references;
+}
+
+async function getJavaTypeRelationshipMetadata(
+  sourceCache: Map<string, string>,
+  file: string,
+  line: number,
+  relationship: 'extends' | 'implements',
+  targetName: string
+): Promise<Pick<ReferenceLocation, 'end_line' | 'end_column' | 'called_as'> | undefined> {
+  if (!sourceCache.has(file)) sourceCache.set(file, await readFile(file, 'utf8'));
+  const lineText = sourceCache.get(file)?.split('\n')[line - 1];
+  if (!lineText) return undefined;
+  const match = lineText.match(new RegExp(`\\b${relationship}\\s+[^\\{]*?\\b${escapeRegExp(targetName)}(?:\\b|\\s*<)`));
+  if (!match || match.index === undefined) return undefined;
+  return {
+    end_line: line,
+    end_column: match.index + match[0].length,
+    called_as: match[0].trim().replace(/\s+</g, '<'),
+  };
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function matchesTargetFile(nodeFile: string, relativeTarget: string, targetIsDirectory: boolean): boolean {

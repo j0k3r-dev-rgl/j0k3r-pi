@@ -163,4 +163,26 @@ describe('function_call_tree JavaScript', () => {
     expect(execution.result.root.children?.[0].symbol).toBe('runService');
     expect(execution.result.root.children?.[0].children?.[0].symbol).toBe('helper');
   });
+
+  it('keeps graph-backed namespace-import call trees aligned with direct mode', async () => {
+    const files = {
+      'src/forms.js': `export function declared(name) {\n  return name;\n}\n`,
+      'src/consumer.js': `import * as Forms from './forms.js';\n\nexport function middle() {\n  return Forms.declared('ns');\n}\n`,
+    };
+    const directRoot = await createProject(files);
+    const graphRoot = await createProject({ '.pi/code-research.json': `{"graph":{"enable":true}}\n`, ...files });
+
+    const { buildWorkspaceGraph } = await import('../src/core/workspace-graph.js');
+    await buildWorkspaceGraph(graphRoot);
+
+    const direct = await executeFunctionCallTree(directRoot, { path: 'src/consumer.js', symbol: 'middle', language: 'js', kind: 'function', max_depth: 5 });
+    const graph = await executeFunctionCallTree(graphRoot, { path: 'src/consumer.js', symbol: 'middle', language: 'js', kind: 'function', max_depth: 5 });
+
+    expect(graph.status).toBe('ok');
+    expect(direct.status).toBe('ok');
+    if (graph.status !== 'ok' || direct.status !== 'ok') return;
+
+    const flatten = (node: any): string[] => [`${node.class ?? '<module>'}.${node.symbol}`, ...(node.children ?? []).flatMap(flatten)];
+    expect(flatten(graph.result.root)).toEqual(flatten(direct.result.root));
+  });
 });

@@ -204,6 +204,33 @@ export interface FindReferencesInput {
   reference_kinds?: ReferenceKind[];
 }
 
+export type ReferenceQuerySourceMode = 'graph' | 'direct' | 'hybrid';
+export type ReferenceQueryGraphStatus = 'disabled' | 'fresh' | 'stale' | 'partial' | 'missing' | 'incompatible' | 'error';
+export type ReferenceQueryCompleteness = 'complete' | 'fallback';
+export type ReferenceQueryFallbackReason =
+  | 'graph_disabled'
+  | 'graph_missing'
+  | 'graph_stale'
+  | 'graph_partial'
+  | 'graph_incompatible'
+  | 'graph_read_error'
+  | 'language_unsupported'
+  | 'coverage_insufficient'
+  | 'state_unreadable'
+  | 'manifest_unreadable';
+
+export interface ReferenceQueryDiagnostics {
+  source_mode: ReferenceQuerySourceMode;
+  graph_status: ReferenceQueryGraphStatus;
+  completeness: ReferenceQueryCompleteness;
+  fallback_reason: ReferenceQueryFallbackReason | null;
+}
+
+export interface FindReferencesResolution {
+  results: ReferenceLocation[];
+  diagnostics: ReferenceQueryDiagnostics;
+}
+
 export interface FunctionCallTreeInput {
   path: string;
   symbol: string;

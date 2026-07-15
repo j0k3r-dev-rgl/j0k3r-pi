@@ -217,4 +217,45 @@ describe('function_call_tree TypeScript', () => {
     expect(execution.result.root.children?.[0].children?.[0].symbol).toBe('helper');
     expect(execution.result.root.children?.[0].children?.[0].class).toBe('AppService');
   });
+
+  it('keeps graph-backed locally constructed instance call trees aligned with direct mode', async () => {
+    const files = {
+      'src/service.ts': `export class Worker {\n  run(): void {\n    this.helper();\n  }\n\n  helper(): void {}\n}\n`,
+      'src/controller.ts': `import { Worker } from './service';\n\nexport function handle(): void {\n  const worker = new Worker();\n  worker.run();\n}\n`,
+    };
+    const directRoot = await createProject(files);
+    const graphRoot = await createProject({ '.pi/code-research.json': `{"graph":{"enable":true}}\n`, ...files });
+    await buildWorkspaceGraph(graphRoot);
+
+    const direct = await executeFunctionCallTree(directRoot, { path: 'src/controller.ts', symbol: 'handle', language: 'ts', kind: 'function', max_depth: 5 });
+    const graph = await executeFunctionCallTree(graphRoot, { path: 'src/controller.ts', symbol: 'handle', language: 'ts', kind: 'function', max_depth: 5 });
+
+    expect(graph.status).toBe('ok');
+    expect(direct.status).toBe('ok');
+    if (graph.status !== 'ok' || direct.status !== 'ok') return;
+
+    const flatten = (node: any): string[] => [node.symbol, ...(node.children ?? []).flatMap(flatten)];
+    expect(flatten(graph.result.root)).toEqual(flatten(direct.result.root));
+  });
+
+  it('keeps graph-backed inline-import typed receiver call trees aligned with direct mode', async () => {
+    const files = {
+      'src/service.ts': `export class A {\n  run(): void {\n    this.helper();\n  }\n\n  helper(): void {}\n}\n`,
+      'src/owner.ts': `export function ownerCalls(a: import('./service').A): void {\n  a.run();\n}\n`,
+    };
+    const directRoot = await createProject(files);
+    const graphRoot = await createProject({ '.pi/code-research.json': `{"graph":{"enable":true}}\n`, ...files });
+    await buildWorkspaceGraph(graphRoot);
+
+    const direct = await executeFunctionCallTree(directRoot, { path: 'src/owner.ts', symbol: 'ownerCalls', language: 'ts', kind: 'function', max_depth: 5 });
+    const graph = await executeFunctionCallTree(graphRoot, { path: 'src/owner.ts', symbol: 'ownerCalls', language: 'ts', kind: 'function', max_depth: 5 });
+
+    expect(graph.status).toBe('ok');
+    expect(direct.status).toBe('ok');
+    if (graph.status !== 'ok' || direct.status !== 'ok') return;
+
+    const flatten = (node: any): string[] => [`${node.class ?? '<module>'}.${node.symbol}`, ...(node.children ?? []).flatMap(flatten)];
+    expect(flatten(graph.result.root)).toEqual(flatten(direct.result.root));
+    expect(graph.result.root.children?.[0]?.receiver_type).toBe('A');
+  });
 });

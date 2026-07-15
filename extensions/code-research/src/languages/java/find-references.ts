@@ -145,11 +145,12 @@ async function findTypeReferences(index: ProjectIndex, rootFile: string, isDirec
 
   for (const klass of index.classes) {
     if (klass.file === target.file && klass.className === target.className) continue;
+    const klassSource = await getSource(klass.file);
     if (klass.extends?.some((value) => value === target.className || value === target.fullName)) {
-      results.push(createRef(klass.file, input, 'extends', klass.line, klass.column, index, klass.className, klass.kind));
+      results.push(createRef(klass.file, input, 'extends', klass.line, klass.column, index, klass.className, klass.kind, buildJavaTypeRelationshipMetadata(klassSource, klass.line, 'extends', target.className)));
     }
     if (input.kind === 'interface' && klass.implements.some((value) => value === target.className || value === target.fullName)) {
-      results.push(createRef(klass.file, input, 'implements', klass.line, klass.column, index, klass.className, klass.kind));
+      results.push(createRef(klass.file, input, 'implements', klass.line, klass.column, index, klass.className, klass.kind, buildJavaTypeRelationshipMetadata(klassSource, klass.line, 'implements', target.className)));
     }
   }
 
@@ -158,7 +159,7 @@ async function findTypeReferences(index: ProjectIndex, rootFile: string, isDirec
       const source = await getSource(fileImports.file);
       for (const match of findAllRegexPositions(source, new RegExp(`interface\\s+\\w+\\s+extends\\s+${escapeRegExp(target.className)}\\b`, 'g'))) {
         const context = index.classes.find((klass) => klass.file === fileImports.file && klass.line <= match.line);
-        results.push(createRef(fileImports.file, input, 'extends', match.line, match.column, index, context?.className, context?.kind));
+        results.push(createRef(fileImports.file, input, 'extends', match.line, match.column, index, context?.className, context?.kind, buildJavaTypeRelationshipMetadata(source, match.line, 'extends', target.className)));
       }
     }
   }
@@ -173,7 +174,7 @@ async function findTypeReferences(index: ProjectIndex, rootFile: string, isDirec
   if (input.kind === 'class') {
     for (const fileImports of index.imports.values()) {
       const source = await getSource(fileImports.file);
-      for (const match of findAllRegexPositions(source, new RegExp(`new\\s+${escapeRegExp(target.className)}\\s*\\(`, 'g'))) {
+      for (const match of findAllRegexPositions(source, new RegExp(`new\\s+${escapeRegExp(target.className)}(?:\\s*<[^>]*>)?\\s*\\(`, 'g'))) {
         results.push(createRef(fileImports.file, input, 'instantiate', match.line, match.column, index));
       }
     }
@@ -190,7 +191,8 @@ function createRef(
   column: number,
   index: ProjectIndex,
   contextSymbol?: string,
-  contextKind?: IndexedClass['kind']
+  contextKind?: IndexedClass['kind'],
+  metadata?: Pick<ReferenceLocation, 'end_line' | 'end_column' | 'called_as'>
 ): ReferenceLocation {
   const contextClass = contextSymbol ?? index.classes.find((klass) => klass.file === file && klass.line <= line)?.className;
   return {
@@ -204,8 +206,29 @@ function createRef(
     context_class: contextClass,
     owner_kind: contextKind === 'interface' ? 'interface' : 'class',
     reference_kind: kind,
+    end_line: metadata?.end_line,
+    end_column: metadata?.end_column,
+    called_as: metadata?.called_as,
     is_application: true,
     source: 'application',
+  };
+}
+
+function buildJavaTypeRelationshipMetadata(
+  source: string,
+  line: number,
+  relationship: 'extends' | 'implements',
+  targetName: string
+): Pick<ReferenceLocation, 'end_line' | 'end_column' | 'called_as'> | undefined {
+  const lineText = source.split('\n')[line - 1];
+  if (!lineText) return undefined;
+  const match = lineText.match(new RegExp(`\\b${relationship}\\s+[^\\{]*?\\b${escapeRegExp(targetName)}(?:\\b|\\s*<)`));
+  if (!match || match.index === undefined) return undefined;
+  const calledAs = match[0].trim().replace(/\s+</g, '<');
+  return {
+    end_line: line,
+    end_column: match.index + match[0].length,
+    called_as: calledAs,
   };
 }
 
@@ -248,60 +271,82 @@ async function findVariableReferences(index: ProjectIndex, rootFile: string, isD
   const target = index.fields.find((field) => field.fieldName === input.symbol && (isDirectory || field.file === rootFile));
   if (!target) return [];
 
-  const source = await readFile(target.file, 'utf8');
-  const lines = source.split('\n');
+  const sourceCache = new Map<string, string>();
+  const getSource = async (file: string) => {
+    if (!sourceCache.has(file)) sourceCache.set(file, await readFile(file, 'utf8'));
+    return sourceCache.get(file)!;
+  };
+
   const references: ReferenceLocation[] = [];
+  for (const method of index.methods) {
+    const fieldOwner = resolveFieldOwnerForClass(index, method.qualifiedClassName, target.fieldName);
+    if (!fieldOwner || fieldOwner.qualifiedClassName !== target.qualifiedClassName) continue;
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!new RegExp(`(?:this\\.)?${escapeRegExp(input.symbol)}\\b`).test(line)) continue;
-    if (new RegExp(`\\b(?:private|protected|public)\\s+\\w+\\s+${escapeRegExp(input.symbol)}\\b`).test(line)) continue;
+    const source = await getSource(method.file);
+    const lines = source.split('\n').slice(method.line - 1, method.node.endPosition.row + 1);
+    for (let indexOffset = 0; indexOffset < lines.length; indexOffset++) {
+      const line = lines[indexOffset];
+      const lineNumber = method.line + indexOffset;
+      if (!new RegExp(`(?:this\\.)?${escapeRegExp(input.symbol)}\\b`).test(line)) continue;
+      if (new RegExp(`\\b(?:private|protected|public)\\s+\\w+\\s+${escapeRegExp(input.symbol)}\\b`).test(line)) continue;
 
-    const context = index.methods.find((method) => method.file === target.file && method.line <= i + 1 && method.node.endPosition.row + 1 >= i + 1);
-    if (!context) continue;
+      const writeMatch = line.match(new RegExp(`(?:this\\.)?${escapeRegExp(input.symbol)}\\b\\s*=`));
+      if (writeMatch) {
+        references.push({
+          file: method.file,
+          line: lineNumber,
+          column: writeMatch.index ?? 0,
+          end_line: method.node.endPosition.row + 1,
+          end_column: method.node.endPosition.column,
+          symbol: input.symbol,
+          kind: 'variable',
+          context_symbol: method.symbol,
+          context_kind: 'method',
+          context_class: method.className,
+          owner_kind: 'class',
+          reference_kind: 'write',
+          is_application: true,
+          source: 'application',
+        });
+      }
 
-    const writeMatch = line.match(new RegExp(`(?:this\\.)?${escapeRegExp(input.symbol)}\\b\\s*=`));
-    if (writeMatch) {
-      references.push({
-        file: target.file,
-        line: i + 1,
-        column: writeMatch.index ?? 0,
-        end_line: context.node.endPosition.row + 1,
-        end_column: context.node.endPosition.column,
-        symbol: input.symbol,
-        kind: 'variable',
-        context_symbol: context.symbol,
-        context_kind: 'method',
-        context_class: context.className,
-        owner_kind: 'class',
-        reference_kind: 'write',
-        is_application: true,
-        source: 'application',
-      });
-    }
-
-    const readMatch = line.match(new RegExp(`(?:return\\s+)?(?:this\\.)?${escapeRegExp(input.symbol)}\\b(?!\\s*=)`));
-    if (readMatch && !(writeMatch && readMatch.index === writeMatch.index)) {
-      references.push({
-        file: target.file,
-        line: i + 1,
-        column: readMatch.index ?? 0,
-        end_line: context.node.endPosition.row + 1,
-        end_column: context.node.endPosition.column,
-        symbol: input.symbol,
-        kind: 'variable',
-        context_symbol: context.symbol,
-        context_kind: 'method',
-        context_class: context.className,
-        owner_kind: 'class',
-        reference_kind: 'read',
-        is_application: true,
-        source: 'application',
-      });
+      const readMatch = line.match(new RegExp(`(?:return\\s+)?(?:this\\.)?${escapeRegExp(input.symbol)}\\b(?!\\s*=)`));
+      if (readMatch && !(writeMatch && readMatch.index === writeMatch.index)) {
+        references.push({
+          file: method.file,
+          line: lineNumber,
+          column: readMatch.index ?? 0,
+          end_line: method.node.endPosition.row + 1,
+          end_column: method.node.endPosition.column,
+          symbol: input.symbol,
+          kind: 'variable',
+          context_symbol: method.symbol,
+          context_kind: 'method',
+          context_class: method.className,
+          owner_kind: 'class',
+          reference_kind: 'read',
+          is_application: true,
+          source: 'application',
+        });
+      }
     }
   }
 
   return dedupeReferences(references);
+}
+
+function resolveFieldOwnerForClass(index: ProjectIndex, qualifiedClassName: string, fieldName: string) {
+  const visited = new Set<string>();
+  let current = qualifiedClassName;
+  while (current && !visited.has(current)) {
+    visited.add(current);
+    const localField = index.fields.find((field) => field.qualifiedClassName === current && field.fieldName === fieldName);
+    if (localField) return localField;
+    const klass = index.classes.find((candidate) => candidate.fullName === current);
+    const parent = klass?.extends[0];
+    current = parent ?? '';
+  }
+  return undefined;
 }
 
 function escapeRegExp(value: string): string {

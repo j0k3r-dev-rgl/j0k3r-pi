@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { relative } from 'node:path';
 import { Type } from 'typebox';
-import { findReferences } from '../core/find-references-resolver.js';
+import { resolveFindReferences } from '../core/find-references-resolver.js';
 import { renderCodeResearchToolResult } from '../render.js';
 import type { FindReferencesInput, ReferenceLocation } from '../types.js';
 
@@ -47,17 +47,18 @@ export function registerFindReferencesTool(pi: any) {
         reference_kinds: params.reference_kinds,
       };
 
-      const results = await addSourceLines(await findReferences(ctx.cwd, input));
+      const resolution = await resolveFindReferences(ctx.cwd, input);
+      const results = await addSourceLines(resolution.results);
       if (results.length === 0) {
         return {
           content: [{ type: 'text', text: `No references found for '${input.symbol}'.` }],
-          details: { found: 0, results: [] },
+          details: { found: 0, results: [], ...resolution.diagnostics },
         };
       }
 
       return {
         content: [{ type: 'text', text: formatReferenceResults(ctx.cwd, input.symbol, results) }],
-        details: { found: results.length, results },
+        details: { found: results.length, results, ...resolution.diagnostics },
       };
     },
   });

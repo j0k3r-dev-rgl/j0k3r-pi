@@ -10,7 +10,7 @@ export class SymbolQueryDiagnosticsBuilder {
   private sourceMode: SymbolQuerySourceMode = 'direct';
   private graphStatus: SymbolQueryGraphStatus = 'disabled';
   private completeness: SymbolQueryCompleteness = 'fallback';
-  private fallbackReason: SymbolQueryFallbackReason | null = 'graph_disabled';
+  private fallbackReason: SymbolQueryFallbackReason | null = null;
   private scannedFilesCount = 0;
   private skippedFilesCount = 0;
   private unreadableShardsCount = 0;

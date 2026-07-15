@@ -616,7 +616,7 @@ function buildNode(options: BuildNodeOptions): CallTreeNode {
 }
 
 export function extractCalls(callableNode: any, options: ExtractCallsOptions = {}): ExtractedCall[] {
-  const body = callableNode.childForFieldName('body') ?? callableNode.childForFieldName('value');
+  const body = getCallableSearchRoot(callableNode);
   if (!body) return [];
 
   const calls: ExtractedCall[] = [];
@@ -716,6 +716,16 @@ export function resolveCall(index: TypeScriptProjectIndex, current: IndexedCalla
       return {
         source: classifyImportSource(imported.source, index.projectConfig),
         reason: `import '${imported.source}' does not resolve to an indexed callable`,
+      };
+    }
+
+    const aliasedCallable = findLocalAliasedCallable(index, current, call.symbol);
+    if (aliasedCallable) {
+      return {
+        callable: aliasedCallable,
+        className: aliasedCallable.ownerName,
+        ownerKind: aliasedCallable.ownerKind,
+        source: 'application',
       };
     }
 
@@ -838,7 +848,7 @@ function findLocalVariableType(
   callableNode: any,
   name: string
 ): string | undefined {
-  const body = callableNode.childForFieldName('body') ?? callableNode.childForFieldName('value');
+  const body = getCallableSearchRoot(callableNode);
   if (!body) return undefined;
 
   let resolvedType: string | undefined;
@@ -1035,6 +1045,48 @@ function isCallableValueNode(node: any): boolean {
   if (!current) return false;
   if (current.type === 'arrow_function' || current.type === 'function_expression' || current.type === 'function_declaration') return true;
   return false;
+}
+
+function getCallableSearchRoot(node: any): any {
+  if (!node?.isNamed) return undefined;
+  const direct = node.childForFieldName?.('body');
+  if (direct) return direct;
+  const value = node.childForFieldName?.('value');
+  if (value) {
+    const unwrapped = unwrapTransparentCallableNode(value);
+    return unwrapped?.childForFieldName?.('body') ?? unwrapped ?? value;
+  }
+  const declarator = node.children?.find((child: any) => child.type === 'variable_declarator');
+  if (declarator) return getCallableSearchRoot(declarator);
+  return undefined;
+}
+
+function findLocalAliasedCallable(index: TypeScriptProjectIndex, current: IndexedCallable, alias: string): IndexedCallable | undefined {
+  const body = getCallableSearchRoot(current.node);
+  if (!body) return undefined;
+
+  let targetName: string | undefined;
+  function visit(node: any): void {
+    if (!node?.isNamed || targetName) return;
+    if (isNestedCallableBoundary(node)) return;
+    if (node.type !== 'variable_declarator') {
+      for (const child of node.children ?? []) visit(child);
+      return;
+    }
+
+    const nameNode = node.childForFieldName('name');
+    if (normalizeIdentifier(nameNode?.text ?? '') !== alias) {
+      for (const child of node.children ?? []) visit(child);
+      return;
+    }
+
+    const valueNode = unwrapTransparentCallableNode(node.childForFieldName('value'));
+    if (valueNode?.type === 'identifier') targetName = normalizeIdentifier(valueNode.text);
+  }
+
+  for (const child of body.children ?? []) visit(child);
+  if (!targetName || targetName === alias) return undefined;
+  return resolveCall(index, current, { symbol: targetName, text: targetName, line: current.line, column: current.column }).callable;
 }
 
 function unwrapTransparentCallableNode(node: any): any {

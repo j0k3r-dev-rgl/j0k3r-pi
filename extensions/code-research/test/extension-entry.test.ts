@@ -116,6 +116,58 @@ describe('code-research extension entry integration', () => {
     expect(result.details.results[0].implementation_locations?.[0].symbol).toBe('LocalService');
   });
 
+  it('surfaces find_references diagnostics in tool details including zero-result responses', async () => {
+    const tools: RegisteredTool[] = [];
+    codeResearchExtension({
+      registerTool(tool: RegisteredTool) {
+        tools.push(tool);
+      },
+    });
+
+    const findReferencesTool = tools.find((tool) => tool.name === 'find_references');
+    expect(findReferencesTool).toBeDefined();
+
+    const rootDir = await createJavaProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/main/java/app/AppService.java': `package app;\n\npublic class AppService {\n  public void run() {\n    helper();\n  }\n\n  private void helper() {}\n}\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+
+    const hit = await findReferencesTool!.execute(
+      'test-call-references-diagnostics',
+      {
+        path: 'src/main/java/app/AppService.java',
+        symbol: 'helper',
+        language: 'java',
+        kind: 'method',
+        reference_kinds: ['call'],
+      },
+      undefined,
+      undefined,
+      { cwd: rootDir }
+    );
+
+    expect(hit.details).toMatchObject({ found: 1, source_mode: 'graph', graph_status: 'fresh', completeness: 'complete', fallback_reason: null });
+
+    const miss = await findReferencesTool!.execute(
+      'test-call-references-zero-diagnostics',
+      {
+        path: 'src/main/java/app/AppService.java',
+        symbol: 'missingHelper',
+        language: 'java',
+        kind: 'method',
+        reference_kinds: ['call'],
+      },
+      undefined,
+      undefined,
+      { cwd: rootDir }
+    );
+
+    expect(miss.details).toMatchObject({ found: 0, source_mode: 'graph', graph_status: 'fresh' });
+    expect(miss.content[0].text).toContain("No references found for 'missingHelper'.");
+  });
+
   it('registers and executes find_references through the extension entrypoint', async () => {
     const tools: RegisteredTool[] = [];
     codeResearchExtension({

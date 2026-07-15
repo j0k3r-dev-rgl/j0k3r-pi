@@ -67,7 +67,7 @@ export function findImplementationsOf(
     const source = file.rootNode?.__source ?? file.rootNode?.text ?? '';
     const records = extractJavaSymbolRecords({ filePath: file.path, source, rootNode: file.rootNode }).records;
     for (const record of records) {
-      if (record.declarationKind !== 'class') continue;
+      if (record.declarationKind !== 'class' && record.declarationKind !== 'record') continue;
       if (!record.signature?.includes(`implements ${symbolName}`)) continue;
       locations.push(buildSymbolLocation(file.path, record.name, record.coarseKind, record, true, true));
     }

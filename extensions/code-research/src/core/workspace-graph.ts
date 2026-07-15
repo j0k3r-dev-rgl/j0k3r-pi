@@ -30,6 +30,7 @@ import { compareCanonicalPathStrings } from './shared.js';
 import { createWorkspaceGraphState, loadWorkspaceGraphState, writeWorkspaceGraphState } from './workspace-state.js';
 import {
   buildTypeScriptProjectIndex,
+  resolveCall as resolveTypeScriptDirectCall,
   resolveExportedCallable,
   type IndexedCallable as TsIndexedCallable,
   type IndexedClass as TsIndexedClass,
@@ -429,7 +430,7 @@ function buildTypeScriptGraph(
         kind: 'calls',
         from: fromId,
         to: toId ?? `external:${callable.language}:${call.symbol}`,
-        callsite: { line: call.line, column: call.column, text: call.text, receiverName: call.receiver },
+        callsite: { line: call.line, column: call.column, text: call.text, receiverName: call.receiver, receiverType: resolved.receiverType ?? (resolved.ownerKind === 'class' ? resolved.owner : undefined) },
         external: !toId,
         externalName: !toId ? call.symbol : undefined,
         externalKind: call.receiver ? 'method' : 'function',
@@ -586,7 +587,7 @@ function ensureFileNode(
 }
 
 function extractTypeScriptCalls(callableNode: any): Array<{ symbol: string; receiver?: string; text: string; line: number; column: number }> {
-  const body = callableNode.childForFieldName('body') ?? callableNode.childForFieldName('value');
+  const body = getTypeScriptCallableBodyNode(callableNode);
   if (!body) return [];
   const calls: Array<{ symbol: string; receiver?: string; text: string; line: number; column: number }> = [];
   function visit(node: any) {
@@ -611,7 +612,7 @@ function extractTypeScriptCalls(callableNode: any): Array<{ symbol: string; rece
 }
 
 function extractTypeScriptJsxReads(callableNode: any): Array<{ symbol: string; text: string; line: number; column: number }> {
-  const body = callableNode.childForFieldName('body') ?? callableNode.childForFieldName('value');
+  const body = getTypeScriptCallableBodyNode(callableNode);
   if (!body) return [];
   const reads: Array<{ symbol: string; text: string; line: number; column: number }> = [];
   function visit(node: any) {
@@ -650,40 +651,83 @@ function resolveTypeScriptJsxRead(
 function resolveTypeScriptCall(
   index: TypeScriptProjectIndex,
   current: TsIndexedCallable,
-  call: { symbol: string; receiver?: string }
-): { target?: TsIndexedCallable; source: CallSource; owner?: string; ownerKind?: OwnerKind; reason?: string } {
-  if (call.receiver === 'this' && current.ownerName) {
-    const target = index.callables.find((item) => item.file === current.file && item.ownerName === current.ownerName && item.kind === 'method' && item.symbol === call.symbol);
-    if (target) return { target, source: 'application', owner: current.ownerName, ownerKind: 'class' };
+  call: { symbol: string; receiver?: string; text: string; line: number; column: number }
+): { target?: TsIndexedCallable; source: CallSource; owner?: string; ownerKind?: OwnerKind; receiverType?: string; reason?: string } {
+  const resolved = resolveTypeScriptDirectCall(index, current, call);
+  return {
+    target: resolved.callable,
+    source: resolved.source,
+    owner: resolved.className ?? resolved.callable?.ownerName,
+    ownerKind: resolved.ownerKind,
+    receiverType: resolved.receiverType,
+    reason: resolved.reason,
+  };
+}
+
+function getTypeScriptCallableBodyNode(callableNode: any): any {
+  const body = callableNode.childForFieldName?.('body');
+  if (body) return body;
+  const value = findTypeScriptCallableValueNode(callableNode);
+  if (!value) return undefined;
+  const unwrapped = unwrapTransparentTypeScriptNode(value);
+  if (unwrapped?.type === 'arrow_function' || unwrapped?.type === 'function_expression' || unwrapped?.type === 'function_declaration') return unwrapped;
+  return unwrapped?.childForFieldName?.('body') ?? unwrapped?.childForFieldName?.('value') ?? value;
+}
+
+function findTypeScriptCallableValueNode(node: any): any {
+  if (!node?.isNamed) return undefined;
+  const direct = node.childForFieldName?.('value');
+  if (direct) return direct;
+  for (const child of node.children ?? []) {
+    const found = findTypeScriptCallableValueNode(child);
+    if (found) return found;
   }
+  return undefined;
+}
 
-  if (!call.receiver) {
-    const local = index.callables.find((item) => item.file === current.file && item.symbol === call.symbol && (item.kind === 'function' || item.ownerName === current.ownerName));
-    if (local) return { target: local, source: 'application', owner: local.ownerName, ownerKind: local.ownerKind };
-
-    const imported = index.files.get(current.file)?.imports.get(call.symbol);
-    if (imported) {
-      const targetFile = resolveTypeScriptImportCandidates(current.file, imported.source, index.projectConfig).find((candidate) => index.files.has(candidate));
-      const target = targetFile ? resolveExportedCallable(index, targetFile, imported.importedName) : undefined;
-      if (target) return { target, source: 'application', owner: target.ownerName, ownerKind: target.ownerKind };
-      return { source: imported.source.startsWith('.') ? 'unknown' : 'library', reason: 'import does not resolve to indexed callable' };
+function unwrapTransparentTypeScriptNode(node: any): any {
+  let current = node;
+  while (current?.isNamed) {
+    if (current.type === 'parenthesized_expression') {
+      current = current.children?.find((child: any) => child.isNamed);
+      continue;
     }
+    if (current.type === 'as_expression' || current.type === 'satisfies_expression' || current.type === 'type_assertion' || current.type === 'non_null_expression') {
+      current = current.childForFieldName('expression') ?? current.children?.find((child: any) => child.isNamed && child.type !== 'type_annotation' && child.type !== 'type_arguments' && child.type !== 'type');
+      continue;
+    }
+    break;
   }
+  return current;
+}
 
-  if (call.receiver) {
-    const importedClass = index.files.get(current.file)?.imports.get(call.receiver);
-    if (importedClass) {
-      const targetFile = resolveTypeScriptImportCandidates(current.file, importedClass.source, index.projectConfig).find((candidate) => index.files.has(candidate));
-      const classRecord = targetFile ? index.classes.find((item) => item.file === targetFile && item.exportedName === importedClass.importedName) : undefined;
-      const target = classRecord ? index.callables.find((item) => item.ownerName === classRecord.className && item.symbol === call.symbol) : undefined;
-      if (target) return { target, source: 'application', owner: classRecord?.className, ownerKind: 'class' };
+function findTypeScriptLocalConstructedInstanceClass(index: TypeScriptProjectIndex, current: TsIndexedCallable, receiver: string): string | undefined {
+  const body = getTypeScriptCallableBodyNode(current.node);
+  if (!body) return undefined;
+  let className: string | undefined;
+  function visit(node: any): void {
+    if (!node?.isNamed || className) return;
+    if (node.type === 'variable_declarator') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode?.text === receiver) {
+        const valueNode = unwrapTransparentTypeScriptNode(node.childForFieldName('value'));
+        if (valueNode?.type === 'new_expression') {
+          const constructorNode = valueNode.childForFieldName('constructor') ?? valueNode.children?.find((child: any) => child.isNamed);
+          const candidate = constructorNode?.text;
+          if (candidate) {
+            const imported = index.files.get(current.file)?.imports.get(candidate);
+            if (imported) {
+              const targetFile = resolveTypeScriptImportCandidates(current.file, imported.source, index.projectConfig).find((path) => index.files.has(path));
+              className = targetFile ? index.classes.find((item) => item.file === targetFile && item.exportedName === imported.importedName)?.className : undefined;
+            }
+            className ??= candidate;
+          }
+        }
+        return;
+      }
     }
-
-    if (current.ownerName) {
-      const target = index.callables.find((item) => item.file === current.file && item.ownerName === current.ownerName && item.symbol === call.symbol);
-      if (target) return { target, source: 'application', owner: current.ownerName, ownerKind: 'class' };
-    }
+    for (const child of node.children ?? []) visit(child);
   }
-
-  return { source: 'unknown', reason: 'call target not indexed' };
+  visit(body);
+  return className;
 }

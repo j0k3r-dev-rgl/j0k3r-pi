@@ -642,6 +642,26 @@ describe('findSymbol graph fallback', () => {
     expect(moduleQuery.results[0]).toMatchObject({ declaration_kind: 'module', kind: 'variable' });
   });
 
+  it('keeps fresh interface diagnostics truthful when direct canonical context is still required', async () => {
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/contracts/Service.ts': `export interface Service { run(): void; }\nexport class Impl implements Service { run(): void {} }\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+    const resolution = await resolveFindSymbol(rootDir, {
+      path: 'src/contracts/Service.ts',
+      symbol: 'Service',
+      language: 'ts',
+      kind: 'interface',
+    });
+
+    expect(resolution.results).toHaveLength(1);
+    expect(resolution.diagnostics.graph_status).toBe('fresh');
+    expect(resolution.diagnostics.source_mode).toBe('hybrid');
+    expect(resolution.diagnostics.fallback_reason).not.toBe('graph_disabled');
+  });
+
   it('uses fresh java graph authority for mixed-case file paths without fallback', async () => {
     const rootDir = await createProject({
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
@@ -733,5 +753,64 @@ describe('findSymbol graph fallback', () => {
     expect(graph[7].results[0]).toMatchObject({ declaration_kind: 'type_parameter', symbol: 'TTarget' });
     expect(direct[8].results[0]).toMatchObject({ declaration_kind: 'enhanced_for_variable', symbol: 'targetItem' });
     expect(graph[8].results[0]).toMatchObject({ declaration_kind: 'enhanced_for_variable', symbol: 'targetItem' });
+  });
+
+  it('keeps broad java interface implementation context truthful and duplicate-free in direct and graph modes', async () => {
+    const files = {
+      'src/main/java/app/Task.java': `package app;\n\npublic interface Task {}\n`,
+      'src/main/java/app/WorkerBase.java': `package app;\n\npublic class WorkerBase implements Task {}\n`,
+      'src/main/java/app/WorkerRecord.java': `package app;\n\npublic record WorkerRecord(String name) implements Task {}\n`,
+    };
+    const directRoot = await createProject(files);
+    const graphRoot = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      ...files,
+    });
+
+    await buildWorkspaceGraph(graphRoot);
+
+    const direct = await resolveFindSymbol(directRoot, {
+      path: 'src/main/java',
+      symbol: 'Task',
+      language: 'java',
+    });
+    const graph = await resolveFindSymbol(graphRoot, {
+      path: 'src/main/java',
+      symbol: 'Task',
+      language: 'java',
+    });
+    const exactInterface = await resolveFindSymbol(graphRoot, {
+      path: 'src/main/java',
+      symbol: 'Task',
+      language: 'java',
+      kind: 'interface',
+    });
+
+    const normalizeWithImplementations = (results: typeof direct.results) => results.map((result) => ({
+      ...normalizeSymbolResults([result])[0],
+      file: result.file.replace(/\\/g, '/').split('/src/main/java/')[1],
+      implementations: (result.implementation_locations ?? []).map((location) => ({
+        file: location.file.replace(/\\/g, '/').split('/src/main/java/')[1],
+        symbol: location.symbol,
+        declaration_kind: location.declaration_kind,
+      })).sort((a, b) => a.file.localeCompare(b.file) || a.symbol.localeCompare(b.symbol)),
+    }));
+    const implementationSymbols = (results: typeof direct.results) => new Set(
+      results.flatMap((result) => result.implementation_locations ?? []).map((location) => location.symbol)
+    );
+
+    expect(direct.results).toHaveLength(1);
+    expect(graph.results).toHaveLength(1);
+    expect(exactInterface.results).toHaveLength(1);
+    expect(implementationSymbols(direct.results)).toEqual(new Set(['WorkerBase', 'WorkerRecord']));
+    expect(implementationSymbols(graph.results)).toEqual(new Set(['WorkerBase', 'WorkerRecord']));
+    expect(implementationSymbols(exactInterface.results)).toEqual(new Set(['WorkerBase', 'WorkerRecord']));
+    expect(normalizeWithImplementations(graph.results)).toEqual(normalizeWithImplementations(direct.results));
+    expect(graph.results[0]?.implementation_locations?.map((location) => location.symbol)).toEqual(['WorkerBase', 'WorkerRecord']);
+    expect(exactInterface.results[0]?.implementation_locations?.map((location) => location.symbol)).toEqual(['WorkerBase', 'WorkerRecord']);
+    expect(new Set(graph.results[0]?.implementation_locations?.map((location) => `${location.file}:${location.symbol}`)).size).toBe(2);
+    if (graph.diagnostics.source_mode === 'graph') {
+      expect(graph.diagnostics).toMatchObject({ completeness: 'complete', fallback_reason: null });
+    }
   });
 });

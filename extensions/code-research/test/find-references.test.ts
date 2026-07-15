@@ -414,6 +414,191 @@ describe('find_references', () => {
     );
   });
 
+  it('keeps same-file TSX and JSX component reads aligned in direct and graph modes', async () => {
+    const files = {
+      'src/ts-view.tsx': `export const Shared = () => <section />;\nexport function Screen() {\n  return <Shared />;\n}\n`,
+      'src/js-view.jsx': `export const SharedJs = () => <section />;\nexport function ScreenJs() {\n  return <SharedJs />;\n}\n`,
+    };
+
+    const directRoot = await createProject('pi-find-references-jsx-direct', files);
+    const graphRoot = await createProject('pi-find-references-jsx-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      ...files,
+    });
+    await buildWorkspaceGraph(graphRoot);
+
+    const directTs = await findReferences(directRoot, { path: 'src/ts-view.tsx', symbol: 'Shared', language: 'ts', kind: 'function', reference_kinds: ['read'] });
+    const graphTs = await findReferences(graphRoot, { path: 'src/ts-view.tsx', symbol: 'Shared', language: 'ts', kind: 'function', reference_kinds: ['read'] });
+    const directJs = await findReferences(directRoot, { path: 'src/js-view.jsx', symbol: 'SharedJs', language: 'js', kind: 'function', reference_kinds: ['read'] });
+    const graphJs = await findReferences(graphRoot, { path: 'src/js-view.jsx', symbol: 'SharedJs', language: 'js', kind: 'function', reference_kinds: ['read'] });
+
+    const normalize = (results: typeof directTs) => results.map((item) => ({ file: item.file.split('/').slice(-2).join('/'), line: item.line, column: item.column, context_symbol: item.context_symbol, reference_kind: item.reference_kind }));
+    expect(normalize(graphTs)).toEqual(normalize(directTs));
+    expect(normalize(graphJs)).toEqual(normalize(directJs));
+  });
+
+  it('keeps wrapped TSX component reads aligned in direct and graph modes', async () => {
+    const files = {
+      'src/Shared.tsx': `export const Shared = () => <section />;\n`,
+      'src/Screen.tsx': `import { Shared } from './Shared';\nconst Wrapped = (((() => <Shared />) as () => JSX.Element))!;\nexport function Screen() {\n  return <Wrapped />;\n}\n`,
+    };
+
+    const directRoot = await createProject('pi-find-references-wrapped-jsx-direct', files);
+    const graphRoot = await createProject('pi-find-references-wrapped-jsx-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      ...files,
+    });
+    await buildWorkspaceGraph(graphRoot);
+
+    const direct = await findReferences(directRoot, { path: 'src/Shared.tsx', symbol: 'Shared', language: 'ts', kind: 'function', reference_kinds: ['read'] });
+    const graph = await findReferences(graphRoot, { path: 'src/Shared.tsx', symbol: 'Shared', language: 'ts', kind: 'function', reference_kinds: ['read'] });
+
+    expect(graph.map((item) => `${item.context_symbol}:${item.line}:${item.column}`)).toEqual(direct.map((item) => `${item.context_symbol}:${item.line}:${item.column}`));
+  });
+
+  it('keeps callback-body TSX reads without promoting callback results into callables', async () => {
+    const files = {
+      'src/Shared.tsx': `export const Shared = () => <section />;\n`,
+      'src/Screen.tsx': `declare function consume<T>(value: T): { value: T };\nimport { Shared } from './Shared';\nconst NotCallable = consume(() => <Shared />);\n`,
+    };
+
+    const directRoot = await createProject('pi-find-references-callback-jsx-direct', files);
+    const graphRoot = await createProject('pi-find-references-callback-jsx-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      ...files,
+    });
+    await buildWorkspaceGraph(graphRoot);
+
+    const directReads = await findReferences(directRoot, { path: 'src/Shared.tsx', symbol: 'Shared', language: 'ts', kind: 'function', reference_kinds: ['read'] });
+    const graphReads = await findReferences(graphRoot, { path: 'src/Shared.tsx', symbol: 'Shared', language: 'ts', kind: 'function', reference_kinds: ['read'] });
+    const graphCalls = await findReferences(graphRoot, { path: 'src/Screen.tsx', symbol: 'NotCallable', language: 'ts', kind: 'function', reference_kinds: ['call'] });
+
+    expect(directReads).toHaveLength(1);
+    expect(graphReads.map((item) => `${item.context_symbol}:${item.line}:${item.column}`)).toEqual(
+      directReads.map((item) => `${item.context_symbol}:${item.line}:${item.column}`)
+    );
+    expect(graphCalls).toEqual([]);
+  });
+
+  it('keeps locally constructed instance method call references aligned in direct and graph modes', async () => {
+    const files = {
+      'src/service.ts': `export class Worker {\n  run(): void {\n    this.helper();\n  }\n\n  helper(): void {}\n}\n`,
+      'src/controller.ts': `import { Worker } from './service';\n\nexport function handle(): void {\n  const worker = new Worker();\n  worker.run();\n}\n`,
+    };
+
+    const directRoot = await createProject('pi-find-references-local-instance-direct', files);
+    const graphRoot = await createProject('pi-find-references-local-instance-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      ...files,
+    });
+    await buildWorkspaceGraph(graphRoot);
+
+    const direct = await findReferences(directRoot, { path: 'src/service.ts', symbol: 'run', language: 'ts', kind: 'method', reference_kinds: ['call'] });
+    const graph = await findReferences(graphRoot, { path: 'src/service.ts', symbol: 'run', language: 'ts', kind: 'method', reference_kinds: ['call'] });
+
+    expect(graph.map((item) => `${item.context_symbol}:${item.called_as}:${item.receiver_name}:${item.receiver_type}`)).toEqual(
+      direct.map((item) => `${item.context_symbol}:${item.called_as}:${item.receiver_name}:${item.receiver_type}`)
+    );
+  });
+
+  it('keeps namespace-import function call references aligned in direct and graph modes', async () => {
+    const files = {
+      'src/forms.js': `export function declared(name) {\n  return name;\n}\n`,
+      'src/consumer.js': `import * as Forms from './forms.js';\n\nexport function middle() {\n  Forms.declared('ns');\n}\n`,
+    };
+
+    const directRoot = await createProject('pi-find-references-namespace-direct', files);
+    const graphRoot = await createProject('pi-find-references-namespace-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      ...files,
+    });
+    await buildWorkspaceGraph(graphRoot);
+
+    const direct = await findReferences(directRoot, { path: 'src/forms.js', symbol: 'declared', language: 'js', kind: 'function', reference_kinds: ['call'] });
+    const graph = await findReferences(graphRoot, { path: 'src/forms.js', symbol: 'declared', language: 'js', kind: 'function', reference_kinds: ['call'] });
+
+    expect(graph.map((item) => `${item.context_symbol}:${item.called_as}:${item.receiver_name}`)).toEqual(
+      direct.map((item) => `${item.context_symbol}:${item.called_as}:${item.receiver_name}`)
+    );
+  });
+
+  it('keeps expression-bodied arrow function call references aligned in direct and graph modes', async () => {
+    const files = {
+      'src/forms.js': `export function declared(name) {\n  return name;\n}\n\nexport const arrow = name => declared(name);\n`,
+    };
+
+    const directRoot = await createProject('pi-find-references-arrow-direct', files);
+    const graphRoot = await createProject('pi-find-references-arrow-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      ...files,
+    });
+    await buildWorkspaceGraph(graphRoot);
+
+    const direct = await findReferences(directRoot, { path: 'src/forms.js', symbol: 'declared', language: 'js', kind: 'function', reference_kinds: ['call'] });
+    const graph = await findReferences(graphRoot, { path: 'src/forms.js', symbol: 'declared', language: 'js', kind: 'function', reference_kinds: ['call'] });
+
+    expect(graph.map((item) => `${item.context_symbol}:${item.called_as}`)).toEqual(direct.map((item) => `${item.context_symbol}:${item.called_as}`));
+    expect(direct.map((item) => item.context_symbol)).toContain('arrow');
+  });
+
+  it('keeps provable local alias and transparent-wrapper calls aligned in direct and graph modes', async () => {
+    const files = {
+      'src/forms.js': `export const helper = () => 1;\nexport const Wrapped = (((() => helper())));\nexport function user() {\n  const alias = helper;\n  return alias();\n}\n`,
+    };
+
+    const directRoot = await createProject('pi-find-references-alias-direct', files);
+    const graphRoot = await createProject('pi-find-references-alias-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      ...files,
+    });
+    await buildWorkspaceGraph(graphRoot);
+
+    const direct = await findReferences(directRoot, { path: 'src/forms.js', symbol: 'helper', language: 'js', kind: 'function', reference_kinds: ['call'] });
+    const graph = await findReferences(graphRoot, { path: 'src/forms.js', symbol: 'helper', language: 'js', kind: 'function', reference_kinds: ['call'] });
+
+    expect(graph.map((item) => `${item.context_symbol}:${item.called_as}`)).toEqual(direct.map((item) => `${item.context_symbol}:${item.called_as}`));
+    expect(new Set(direct.map((item) => item.context_symbol))).toEqual(new Set(['Wrapped', 'user']));
+  });
+
+  it('keeps Java field reads truthful, includes record implementations, and falls back for diamond instantiation references', async () => {
+    const files = {
+      'src/main/java/app/Base.java': `package app;\n\npublic class Base {\n  protected int baseValue;\n}\n`,
+      'src/main/java/app/Worker.java': `package app;\n\npublic class Worker extends Base implements Service<String> {\n  private int first;\n\n  int readFirst() {\n    return first;\n  }\n\n  int readBase() {\n    return baseValue;\n  }\n}\n`,
+      'src/main/java/app/Job.java': `package app;\n\npublic record Job(String name) implements Service<String> {}\n`,
+      'src/main/java/app/Service.java': `package app;\n\npublic interface Service<T> {}\n`,
+      'src/main/java/app/UseWorker.java': `package app;\n\npublic class UseWorker {\n  Worker create() {\n    return new Worker<>();\n  }\n}\n`,
+    };
+
+    const directRoot = await createProject('pi-find-references-java-remediation-direct', files);
+    const graphRoot = await createProject('pi-find-references-java-remediation-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      ...files,
+    });
+    await buildWorkspaceGraph(graphRoot);
+
+    const directFirst = await findReferences(directRoot, { path: 'src/main/java/app/Worker.java', symbol: 'first', language: 'java', kind: 'variable', reference_kinds: ['read'] });
+    const graphFirst = await findReferences(graphRoot, { path: 'src/main/java/app/Worker.java', symbol: 'first', language: 'java', kind: 'variable', reference_kinds: ['read'] });
+    const directBase = await findReferences(directRoot, { path: 'src/main/java/app/Base.java', symbol: 'baseValue', language: 'java', kind: 'variable', reference_kinds: ['read'] });
+    const graphBase = await findReferences(graphRoot, { path: 'src/main/java/app/Base.java', symbol: 'baseValue', language: 'java', kind: 'variable', reference_kinds: ['read'] });
+    const directImplements = await findReferences(directRoot, { path: 'src/main/java/app/Service.java', symbol: 'Service', language: 'java', kind: 'interface', reference_kinds: ['implements'] });
+    const graphImplements = await findReferences(graphRoot, { path: 'src/main/java/app/Service.java', symbol: 'Service', language: 'java', kind: 'interface', reference_kinds: ['implements'] });
+    const directInstantiate = await findReferences(directRoot, { path: 'src/main/java/app/Worker.java', symbol: 'Worker', language: 'java', kind: 'class', reference_kinds: ['instantiate'] });
+    const graphInstantiate = await findReferences(graphRoot, { path: 'src/main/java/app/Worker.java', symbol: 'Worker', language: 'java', kind: 'class', reference_kinds: ['instantiate'] });
+
+    expect(graphFirst.map((item) => `${item.context_class}.${item.context_symbol}:${item.reference_kind}`)).toEqual(
+      directFirst.map((item) => `${item.context_class}.${item.context_symbol}:${item.reference_kind}`)
+    );
+    expect(graphBase.map((item) => `${item.context_class}.${item.context_symbol}:${item.reference_kind}`)).toEqual(
+      directBase.map((item) => `${item.context_class}.${item.context_symbol}:${item.reference_kind}`)
+    );
+    expect(new Set(directImplements.map((item) => item.context_class))).toEqual(new Set(['Job', 'Worker']));
+    expect(new Set(graphImplements.map((item) => item.context_class))).toEqual(new Set(['Job', 'Worker']));
+    expect(directInstantiate.map((item) => item.called_as ?? `${item.line}:${item.column}`)).toHaveLength(1);
+    expect(graphInstantiate.map((item) => item.called_as ?? `${item.line}:${item.column}`)).toEqual(
+      directInstantiate.map((item) => item.called_as ?? `${item.line}:${item.column}`)
+    );
+  });
+
   it('falls back to complete direct references when graph coverage is incomplete for public calls', async () => {
     const rootDir = await createProject('pi-find-references-graph', {
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
@@ -464,5 +649,101 @@ describe('find_references', () => {
 
     expect(fallbackResults).toEqual([]);
     expect(graphResults).toEqual([]);
+  });
+
+  it('keeps java extends reference metadata aligned in direct and graph modes', async () => {
+    const files = {
+      'src/main/java/app/WorkerBase.java': `package app;\n\npublic class WorkerBase {}\n`,
+      'src/main/java/app/Worker.java': `package app;\n\npublic class Worker extends WorkerBase {}\n`,
+      'src/main/java/app/Task.java': `package app;\n\npublic interface Task {}\n`,
+      'src/main/java/app/WorkerRecord.java': `package app;\n\npublic record WorkerRecord(String name) implements Task {}\n`,
+      'src/main/java/app/WorkerPermits.java': `package app;\n\npublic sealed class WorkerPermits permits WorkerPermitted {}\n`,
+      'src/main/java/app/WorkerPermitted.java': `package app;\n\npublic final class WorkerPermitted extends WorkerPermits {}\n`,
+    };
+
+    const directRoot = await createProject('pi-find-references-java-extends-direct', files);
+    const graphRoot = await createProject('pi-find-references-java-extends-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      ...files,
+    });
+    await buildWorkspaceGraph(graphRoot);
+
+    const query = {
+      path: 'src/main/java/app/WorkerBase.java',
+      symbol: 'WorkerBase',
+      language: 'java' as const,
+      kind: 'class' as const,
+      reference_kinds: ['extends' as const],
+    };
+    const direct = await findReferences(directRoot, query);
+    const graph = await findReferences(graphRoot, query);
+    const directImplements = await findReferences(directRoot, {
+      path: 'src/main/java/app/Task.java',
+      symbol: 'Task',
+      language: 'java',
+      kind: 'interface',
+      reference_kinds: ['implements'],
+    });
+    const graphImplements = await findReferences(graphRoot, {
+      path: 'src/main/java/app/Task.java',
+      symbol: 'Task',
+      language: 'java',
+      kind: 'interface',
+      reference_kinds: ['implements'],
+    });
+    const directPermits = await findReferences(directRoot, {
+      path: 'src/main/java/app/WorkerPermits.java',
+      symbol: 'WorkerPermits',
+      language: 'java',
+      kind: 'class',
+      reference_kinds: ['extends'],
+    });
+    const graphPermits = await findReferences(graphRoot, {
+      path: 'src/main/java/app/WorkerPermits.java',
+      symbol: 'WorkerPermits',
+      language: 'java',
+      kind: 'class',
+      reference_kinds: ['extends'],
+    });
+
+    const normalize = (results: typeof direct) => results.map((item) => ({
+      file: item.file.split('/').slice(-3).join('/'),
+      line: item.line,
+      column: item.column,
+      end_line: item.end_line,
+      end_column: item.end_column,
+      context_symbol: item.context_symbol,
+      context_kind: item.context_kind,
+      context_class: item.context_class,
+      owner_kind: item.owner_kind,
+      reference_kind: item.reference_kind,
+      called_as: item.called_as,
+    }));
+
+    expect(normalize(graph)).toEqual(normalize(direct));
+    expect(normalize(graphImplements)).toEqual(normalize(directImplements));
+    expect(normalize(graphPermits)).toEqual(normalize(directPermits));
+    expect(direct[0]).toMatchObject({
+      line: 3,
+      column: 0,
+      end_line: 3,
+      end_column: 38,
+      context_symbol: 'Worker',
+      context_class: 'Worker',
+      owner_kind: 'class',
+      reference_kind: 'extends',
+      called_as: 'extends WorkerBase',
+    });
+    expect(graph[0]).toMatchObject({
+      line: 3,
+      column: 0,
+      end_line: 3,
+      end_column: 38,
+      context_symbol: 'Worker',
+      context_class: 'Worker',
+      owner_kind: 'class',
+      reference_kind: 'extends',
+      called_as: 'extends WorkerBase',
+    });
   });
 });

@@ -123,7 +123,7 @@ export async function resolveFindSymbol(cwd: string, input: FindSymbolInput): Pr
 
   const requiresCanonicalDirectContext = input.kind === 'interface' || input.declaration_kind === 'interface';
   const directFiles = resolved.filesToScan.filter((file) => requiresCanonicalDirectContext || !graphCompleteFiles.has(file));
-  const parsedFiles = await parseFiles(directFiles, explicitLanguage, diagnostics);
+  const parsedFiles = await parseFiles(cwd, directFiles, explicitLanguage, diagnostics);
   const directResults = collectDirectMatches(parsedFiles, input, includeSignature, includeCode, searchMode, effectiveScope);
 
   const graphLocations: SymbolLocation[] = [];
@@ -138,6 +138,7 @@ export async function resolveFindSymbol(cwd: string, input: FindSymbolInput): Pr
   }
 
   const results = reconcileLocations([...directResults, ...graphLocations]);
+  hydrateInterfaceImplementationLocations(results, explicitLanguage, graphRecords, parsedFiles);
   const currentDiagnostics = diagnostics.build();
   if (graphCompleteFiles.size === resolved.filesToScan.length && directFiles.length === 0 && currentDiagnostics.graph_status === 'fresh') {
     diagnostics.setSourceMode('graph').setCompleteness('complete', null);
@@ -152,7 +153,7 @@ export async function findSymbol(cwd: string, input: FindSymbolInput): Promise<S
   return (await resolveFindSymbol(cwd, input)).results;
 }
 
-async function parseFiles(filesToScan: string[], explicitLanguage: SupportedLanguage, diagnostics: SymbolQueryDiagnosticsBuilder): Promise<ParsedFile[]> {
+async function parseFiles(cwd: string, filesToScan: string[], explicitLanguage: SupportedLanguage, diagnostics: SymbolQueryDiagnosticsBuilder): Promise<ParsedFile[]> {
   const parsedFiles: ParsedFile[] = [];
   for (const filePath of filesToScan) {
     const language = detectLanguage(filePath, explicitLanguage);
@@ -166,7 +167,8 @@ async function parseFiles(filesToScan: string[], explicitLanguage: SupportedLang
         parsedFiles.push({ path: filePath, language, rootNode: tree.rootNode, source });
       } else {
         const scriptKind = filePath.endsWith('.tsx') ? ts.ScriptKind.TSX : filePath.endsWith('.jsx') ? ts.ScriptKind.JSX : filePath.endsWith('.js') || filePath.endsWith('.mjs') || filePath.endsWith('.cjs') ? ts.ScriptKind.JS : ts.ScriptKind.TS;
-        const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true, scriptKind);
+        const canonicalFilePath = filePath.startsWith(`${cwd}/`) ? filePath.slice(cwd.length + 1).replace(/\\/g, '/') : filePath.replace(/\\/g, '/');
+        const sourceFile = ts.createSourceFile(canonicalFilePath, source, ts.ScriptTarget.Latest, true, scriptKind);
         parsedFiles.push({ path: filePath, language, rootNode: sourceFile, source });
       }
     } catch {
@@ -565,6 +567,57 @@ function reconcileLocations(results: SymbolLocation[]): SymbolLocation[] {
     (a.declaration_kind ?? a.kind).localeCompare(b.declaration_kind ?? b.kind) ||
     (a.qualified_name ?? a.symbol).localeCompare(b.qualified_name ?? b.symbol)
   );
+}
+
+function hydrateInterfaceImplementationLocations(
+  results: SymbolLocation[],
+  explicitLanguage: SupportedLanguage,
+  graphRecords: Map<string, CanonicalSymbolRecord[]>,
+  parsedFiles: ParsedFile[]
+): void {
+  for (const result of results) {
+    if (result.kind !== 'interface' || !result.is_definition || (result.implementation_locations?.length ?? 0) > 0) continue;
+    const language = detectLanguage(result.file, explicitLanguage);
+    if (language === 'java') {
+      result.implementation_locations = collectJavaImplementationLocationsFromGraph(result, graphRecords);
+      if ((result.implementation_locations?.length ?? 0) > 0) continue;
+    }
+    const adapter = getLanguageAdapter(language);
+    result.implementation_locations = dedupeImplementationLocations(adapter.findImplementationsOf(result.symbol, parsedFiles));
+  }
+}
+
+function collectJavaImplementationLocationsFromGraph(
+  target: SymbolLocation,
+  graphRecords: Map<string, CanonicalSymbolRecord[]>
+): SymbolLocation[] {
+  const matches: SymbolLocation[] = [];
+  const implementsPattern = new RegExp(`\\bimplements\\b[^\\n{]*\\b${escapeRegExp(target.symbol)}(?:\\b|\\s*<)`, 'u');
+  for (const [filePath, records] of graphRecords) {
+    for (const record of records) {
+      if (record.declarationKind !== 'class' && record.declarationKind !== 'record') continue;
+      if (!record.signature || !implementsPattern.test(record.signature)) continue;
+      matches.push(buildJavaSymbolLocation(filePath, record.name, record.coarseKind, record, true, true));
+    }
+  }
+  return dedupeImplementationLocations(matches);
+}
+
+function dedupeImplementationLocations(locations: SymbolLocation[]): SymbolLocation[] {
+  const deduped = new Map<string, SymbolLocation>();
+  for (const location of locations) {
+    deduped.set(`${location.file}:${location.symbol}:${location.start_line}:${location.start_column}`, location);
+  }
+  return [...deduped.values()].sort((a, b) =>
+    a.file.localeCompare(b.file) ||
+    a.start_line - b.start_line ||
+    a.start_column - b.start_column ||
+    a.symbol.localeCompare(b.symbol)
+  );
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function mapGraphStatus(stateStatus: string, manifestStatus: string, graphState?: string): SymbolQueryGraphStatus {

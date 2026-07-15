@@ -126,6 +126,9 @@ function visit(node: any, ctx: Context): void {
     case 'type_pattern':
       emitPatternVariable(node, ctx);
       break;
+    case 'instanceof_expression':
+      emitInstanceofPatternVariable(node, ctx);
+      break;
     case 'record_pattern':
       emitRecordPatternVariables(node, ctx);
       break;
@@ -403,6 +406,21 @@ function emitPatternVariable(node: any, ctx: Context): void {
   });
 }
 
+function emitInstanceofPatternVariable(node: any, ctx: Context): void {
+  const nameNode = node.childForFieldName?.('name');
+  if (!nameNode?.text || nameNode.text === '_') return;
+  emitRecord(ctx, {
+    name: nameNode.text,
+    declarationKind: 'pattern_variable',
+    node,
+    declarationRange: rangeFor(nameNode),
+    signature: sanitizeJavaSignature(node.text),
+    sourceName: nameNode.text,
+    queryInclusion: 'local_binding',
+    hasInitializer: true,
+  });
+}
+
 function emitRecordPatternVariables(node: any, ctx: Context): void {
   for (const child of node.children ?? []) {
     if (child.type === 'type_pattern') emitPatternVariable(child, ctx);
@@ -416,7 +434,11 @@ function emitLambdaParameters(node: any, ctx: Context): void {
   const previousOwner = ctx.ownerChain;
   ctx.ownerChain = [...ctx.ownerChain, `<lambda@${node.startPosition.row + 1}:${node.startPosition.column}>`];
   const parameters = node.childForFieldName?.('parameters');
-  const candidates = parameters ? parameters.children ?? [] : node.children ?? [];
+  const candidates = parameters
+    ? parameters.type === 'identifier' || parameters.type === 'formal_parameter' || parameters.type === 'spread_parameter' || parameters.type === 'inferred_parameters'
+      ? [parameters]
+      : parameters.children ?? []
+    : node.children ?? [];
   for (const child of candidates) {
     if (child.type === 'identifier') {
       emitRecord(ctx, {

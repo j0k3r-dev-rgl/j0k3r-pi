@@ -254,6 +254,74 @@ describe('findSymbol Java', () => {
     expect(userKind[0]).toMatchObject({ declaration_kind: 'enum', kind: 'class', qualified_name: 'app.domain.UserKind' });
   });
 
+  it('extracts instanceof pattern variables in direct and fresh graph modes', async () => {
+    const slug = `graph-java-pattern-${Date.now()}`;
+    const projectRoot = join(tmpDir, slug);
+    await mkdir(join(projectRoot, '.pi'), { recursive: true });
+    await writeFile(join(projectRoot, '.pi', 'code-research.json'), '{"graph":{"enable":true}}\n', 'utf8');
+    await writeTestFile(
+      `${slug}/app/PatternExample.java`,
+      `package app;\n\npublic class PatternExample {\n  boolean isNumber(Object value) {\n    return value instanceof Number matched;\n  }\n}\n`
+    );
+
+    const file = join(projectRoot, 'app/PatternExample.java');
+
+    const direct = await findSymbol(projectRoot, {
+      path: file,
+      symbol: 'matched',
+      language: 'java',
+      declaration_kind: 'pattern_variable',
+    });
+
+    await buildWorkspaceGraph(projectRoot);
+    const graph = await findSymbol(projectRoot, {
+      path: file,
+      symbol: 'matched',
+      language: 'java',
+      declaration_kind: 'pattern_variable',
+    });
+
+    expect(direct).toHaveLength(1);
+    expect(graph).toHaveLength(1);
+    expect(graph[0]).toMatchObject({ declaration_kind: 'pattern_variable', kind: 'variable', owner: 'isNumber' });
+    expect(graph[0].symbol_id).toBe(direct[0].symbol_id);
+  });
+
+  it('extracts single unparenthesized lambda parameters in direct and fresh graph modes', async () => {
+    const slug = `graph-java-lambda-${Date.now()}`;
+    const projectRoot = join(tmpDir, slug);
+    await mkdir(join(projectRoot, '.pi'), { recursive: true });
+    await writeFile(join(projectRoot, '.pi', 'code-research.json'), '{"graph":{"enable":true}}\n', 'utf8');
+    await writeTestFile(
+      `${slug}/app/LambdaExample.java`,
+      `package app;\n\nimport java.util.function.Function;\n\npublic class LambdaExample {\n  Function<Integer, Integer> plusOne() {\n    return lambdaArg -> lambdaArg + 1;\n  }\n}\n`
+    );
+
+    const file = join(projectRoot, 'app/LambdaExample.java');
+
+    const direct = await findSymbol(projectRoot, {
+      path: file,
+      symbol: 'lambdaArg',
+      language: 'java',
+      declaration_kind: 'lambda_parameter',
+    });
+
+    await buildWorkspaceGraph(projectRoot);
+    const graph = await findSymbol(projectRoot, {
+      path: file,
+      symbol: 'lambdaArg',
+      language: 'java',
+      declaration_kind: 'lambda_parameter',
+    });
+
+    expect(direct).toHaveLength(1);
+    expect(graph).toHaveLength(1);
+    expect(direct[0]).toMatchObject({ declaration_kind: 'lambda_parameter', kind: 'variable' });
+    expect(direct[0].owner).toContain('<lambda@');
+    expect(graph[0].owner).toBe(direct[0].owner);
+    expect(graph[0].symbol_id).toBe(direct[0].symbol_id);
+  });
+
   it('returns individual declarators, bindings, and package/module declarations with inclusion rules', async () => {
     const projectRoot = join(tmpDir, `java-parity-${Date.now()}`);
     await mkdir(projectRoot, { recursive: true });
