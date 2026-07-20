@@ -1,6 +1,6 @@
 ---
 name: tech-intel-briefing
-description: "Create high-context technology news briefings and personal newsroom-style reports, including narration-ready Markdown scripts for later text-to-audio conversion, by gathering from web, YouTube, discussions, and research, then synthesizing context, actors, impact, confidence, and editorial analysis."
+description: "Spanish-first orchestration for technology news briefings: gather only the missing brief details, delegate deep research and Markdown artifact creation to the news-researcher subagent, and convert the resulting report.md to audio when requested."
 license: Apache-2.0
 metadata:
   author: j0k3r
@@ -16,7 +16,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
 ```json
 {
   "category": "base",
-  "domains": ["news", "technology", "hardware", "ai", "analysis", "briefing", "editorial", "audio", "narration"],
+  "domains": ["news", "technology", "hardware", "ai", "analysis", "briefing", "audio", "subagent-orchestration"],
   "triggers": {
     "paths": [
       "~/.pi/agent/skills/tech-intel-briefing/SKILL.md",
@@ -34,14 +34,11 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "news briefing",
       "weekly roundup",
       "news roundup",
-      "dossier",
       "deep dive",
       "resumen de noticias",
       "boletín tecnológico",
-      "personal tech news",
       "industry briefing",
       "audio-ready news",
-      "narration-ready briefing",
       "guion de noticias",
       "guion narrado",
       "noticias para audio",
@@ -74,151 +71,86 @@ Field conventions:
 
 ## Activation Contract
 
-Use this skill when the user wants curated technology news, a personal newsroom experience, or a deeper explanation of ongoing technology developments rather than a bare search result list.
+Use this skill when the user wants a Spanish-first technology news workflow that feels like a personal newsroom: adaptive intake, deep delegated research, Markdown artifacts, and optional audio generation from the final report.
 
 Typical triggers:
 
-- the user asks for tech, AI, hardware, semiconductor, gadgets, platform, startup, Big Tech, or gaming-industry news;
-- the user asks for a daily briefing, weekly roundup, trend watch, dossier, or personal news anchor style response;
-- the user wants context, impact, background, confidence levels, industry framing, or “why this matters” analysis;
-- the user wants multiple sources compared instead of a single article summary;
-- the user wants a reading-ready briefing, an audio-ready narrative briefing, or a Markdown script intended to be converted to audio later.
+- the user wants current technology, AI, hardware, semiconductor, platform, startup, Big Tech, or gaming-industry news;
+- the user wants a briefing, roundup, dossier, deep explanation, or editorial synthesis instead of a raw link list;
+- the user wants a narration-ready report or asks to convert the report to audio;
+- the user wants the work saved under `/home/j0k3r/news/...` so multiple investigations can run concurrently.
 
 Do not load this skill for:
 
 - direct factual questions that are not news-oriented;
-- debugging, code editing, or implementation work;
-- tiny one-line news lookups when the user explicitly asks for only links or headlines.
+- debugging, code editing, or general implementation work;
+- tiny one-line lookups when the user explicitly wants only links or headlines.
 
-Prefer this skill over a generic search-only response when the user wants explanation, synthesis, editorial structure, or a recurring personal-news style format.
+Prefer this skill over ad hoc web research when the user wants a repeatable delegated news workflow with saved artifacts and optional audio.
 
 ## Hard Rules
 
-- Act as a technology editor and analyst, not as a raw link dump.
-- Prioritize explanatory writing over ultra-short summaries unless the user explicitly asks for brevity.
-- Always distinguish clearly between:
-  - confirmed facts;
-  - likely interpretation;
-  - rumor, speculation, or weak-signal chatter.
-- When multiple sources disagree, say so explicitly and identify which source appears strongest.
-- Prefer stronger-source ordering for technology news:
-  1. official announcements, company posts, filings, and primary materials;
-  2. reputable reporting and web coverage;
-  3. expert video analysis and specialist channels;
-  4. discussion sources for reaction, practitioner perspective, and edge cases;
-  5. research sources for technical depth and historical grounding.
-- Never present a YouTube creator’s claim or discussion-thread theory as confirmed fact without corroboration.
-- Always explain why the news matters to at least one audience when relevant:
-  - consumers;
-  - developers;
-  - enterprises;
-  - investors/industry;
-  - infrastructure/hardware ecosystem.
-- Include historical or market context when it materially improves understanding.
-- Name the key actors and briefly explain who they are when a general user may not know them.
-- Avoid sensational language unless the sourced evidence genuinely supports it.
-- When source quality is weak, say the evidence is weak.
-- For broad requests, group stories into coherent themes instead of mixing everything together.
-- When the output is intended for audio, write as a spoken news script, not as a visual report: use narrative paragraphs, natural transitions, and complete sentences.
-- In `audio-ready` mode, avoid bullets, numbered lists, tables, dense parentheticals, raw URLs, markdown link syntax, and visual-only scaffolding because they degrade text-to-audio output.
-- In `audio-ready` mode, preserve sourcing and uncertainty through spoken phrases such as “according to company announcements,” “reporting from…,” or “the evidence is still weak,” rather than footnote-style links.
-- In `audio-ready` mode, keep `markdown_to_audio` speed at normal pace (`speed: 1`) unless the user explicitly asks for faster or slower narration.
-- When the user asks for an audio file, first create or save the narration-ready Markdown script, then convert that same Markdown file with `markdown_to_audio`; do not rewrite or summarize the script during audio generation.
-- Use these default `markdown_to_audio` parameters for audio-ready news unless the user asks to tune them: `speed: 1`, `sentenceSilence: 0.3`, `noiseScale: 0.667`, `noiseW: 0.8`, `voiceQuality: "auto"`, and `mp3BitrateKbps: 64`.
-- For long-form news audio, prefer an `.mp3` `outputPath` by default to avoid very large `.wav` files; use `.wav` only when the user explicitly wants uncompressed audio.
+- Communicate with the user in Spanish first unless the user asks otherwise.
+- Ask only the adaptive clarifying questions still needed to turn a vague request into a strong research brief.
+- Do not use a rigid questionnaire.
+- Do not ask for information the user already provided.
+- Once the brief is sufficient, the orchestrator owns path assignment and delegation.
+- Create or assign `/home/j0k3r/news/<topic-slug>-YYYY-MM-DD/`, adding a time or suffix only when the date directory collides.
+- Launch `news-researcher` in `background` mode so multiple investigations can run concurrently when appropriate.
+- Keep this skill lightweight: the subagent owns detailed research methodology, source-evaluation rules, `report.md`, and `sources.md` authoring.
+- Do not duplicate the subagent’s detailed editorial or source-handling rules here.
+- The delegated subagent must receive the exact output directory and enough brief context to work without more user questioning.
+- The orchestrator must not ask the subagent to create audio.
+- On automatic background completion, convert the exact `report.md` to `report.mp3` in the same directory using `markdown_to_audio` defaults unless the user requested different settings.
+- Do not rewrite, summarize, or post-process the report during audio conversion.
+- Preserve a clear ownership split:
+  - orchestrator: intake, delegation, output directory, completion handling, audio;
+  - `news-researcher`: research, synthesis, `report.md`, and `sources.md`.
 - Write reusable skill content in English, but answer the user in the user’s language.
 
 ## Decision Gates
 
-- If the user wants only headlines or a very short digest, compress the structure but still retain source quality and confidence cues.
-- If the user asks for a specific vertical such as hardware, AI, semiconductors, Apple, gaming, or enterprise software, narrow the source search and organize by that sector.
-- If the user asks for a source-limited view such as “only Hacker News” or “only YouTube,” honor that constraint and call out the resulting blind spots.
-- If the user wants audio later, select `audio-ready` mode and produce a narration script by default, not a bullet-heavy briefing.
-- If the user asks for an audio file, treat Markdown creation and audio conversion as one workflow: produce the narration-ready `.md`, then run `markdown_to_audio` on that `.md` using the default audio-ready parameters unless the user provided overrides.
-- If the user asks for both a readable report and audio, ask whether they want one audio-first script or two outputs: a visual briefing plus a separate narration script.
-- If the user asks for a recurring format, keep section names and ordering stable across future answers when practical.
+- If the request is too vague to research well, ask only the minimum clarifying questions needed to define scope, timeframe, audience, and output intent.
+- If the user asks for only text, stop after the delegated Markdown artifacts are ready.
+- If the user asks for audio, treat audio as a second step that starts only after `report.md` exists.
+- If the user wants both a readable report and audio, use the same `report.md` as the source of truth for conversion.
+- If the requested topic is broad, shape the brief around themes or verticals rather than forcing a rigid questionnaire.
+- If a same-topic same-date directory already exists, add a collision suffix or time component before delegating.
 
 ## Execution Steps
 
-1. Identify the scope:
-   - general tech;
-   - AI;
-   - hardware;
-   - semiconductors;
-   - consumer devices;
-   - startups/Big Tech;
-   - gaming tech;
-   - another specific vertical.
-2. Determine the briefing mode:
-   - `flash` for short but informed updates;
-   - `briefing` for the default richer editorial answer;
-   - `deep-dive` for one or a few major stories with substantial context;
-   - `weekly-roundup` for trend-oriented recaps;
-   - `audio-ready` for narration-friendly Markdown meant to become spoken audio.
-3. Gather from multiple relevant sources when available:
-   - web/news for confirmation;
-   - YouTube for current topic detection and expert explanation;
-   - discussion sources for practitioner reaction;
-   - research sources for technical grounding when useful.
-4. Rank sources by reliability and recency.
-5. Cluster findings into themes or top stories.
-6. For each important story, synthesize using the strongest evidence first.
-7. Explicitly separate confirmed facts from interpretation and rumor.
-8. Add context on the actors, background, and why the development matters.
-9. For `audio-ready` mode, transform the findings into a spoken script:
-   - open with a short anchor-style introduction;
-   - use paragraphs of one to three sentences;
-   - use section headings sparingly as chapter markers, not as visual outlines;
-   - connect stories with transitions such as “Now, the second story…” or “The broader context is…”;
-   - explain acronyms and company/product names the first time they matter;
-   - convert source attribution into natural spoken language;
-   - avoid visual lists, tables, raw URLs, footnotes, and link dumps.
-10. If the user asked for an audio file, write the narration script to a `.md` file when a file path is available or requested, then call `markdown_to_audio` on that file. Prefer an `.mp3` `outputPath` and use defaults: `speed: 1`, `sentenceSilence: 0.3`, `noiseScale: 0.667`, `noiseW: 0.8`, `voiceQuality: "auto"`, `mp3BitrateKbps: 64`. Preserve the Markdown as the source of truth.
-11. End with a concise executive recap, closing thought, or “what to watch next” section.
+1. Interpret the request in Spanish-first newsroom terms.
+2. Ask only the missing adaptive clarifying questions required to create a strong research brief.
+3. Decide whether the user wants:
+   - a report only;
+   - a report plus audio;
+   - a recurring or themed briefing.
+4. When scope is sufficient, create or assign `/home/j0k3r/news/<topic-slug>-YYYY-MM-DD/`, adding a time or suffix only on collision.
+5. Launch `news-researcher` in `background` mode with:
+   - the exact output directory;
+   - the Spanish-first brief;
+   - any timeframe, audience, and topic constraints;
+   - any explicit source constraints from the user.
+6. Wait for the automatic completion notification rather than blocking the main chat.
+7. After completion, verify that `report.md` exists in the assigned directory.
+8. If the user requested audio, convert that exact `report.md` to `report.mp3` in the same directory with the existing `markdown_to_audio` defaults unless the user asked for overrides.
+9. Return the artifact paths and a concise Spanish summary of what is ready.
 
 ## Output Contract
 
-Return a structured technology-news briefing using the richest format appropriate for the user’s request.
+Return a Spanish-first orchestration result that includes:
 
-Preferred structure for `briefing` or `deep-dive` mode:
+- the agreed topic or scope;
+- the assigned output directory;
+- whether `news-researcher` was launched in background mode;
+- the expected or completed artifacts:
+  - `report.md`;
+  - `sources.md`;
+  - `report.mp3` when requested and generated;
+- any remaining wait state or completion note;
+- any minimal next action for the user.
 
-- Headline or section title.
-- What happened.
-- Context and background.
-- Who the key actors are.
-- Why it matters.
-- What different sources are saying.
-- Confirmed vs likely vs speculative.
-- Editorial reading / analyst take.
-- What to watch next.
-
-For broader multi-story answers, add:
-
-- Top stories list.
-- Grouping by theme.
-- Short executive summary at the end.
-
-For `audio-ready` mode, return a Markdown narration script suitable for direct `markdown_to_audio` conversion:
-
-- Use mostly continuous prose, not lists.
-- Do not use tables.
-- Do not use raw URLs or Markdown links in the spoken script.
-- Avoid bullet points and numbered lists unless the user explicitly asks for a checklist; if a sequence is needed, write it as prose.
-- Use complete spoken-style sentences with natural punctuation.
-- Use short paragraphs to create breathing room for TTS.
-- Use simple section headings only as audio chapter markers.
-- Include source quality and uncertainty as spoken context, not citation clutter.
-- Keep the text pleasant to listen to without losing analytical content.
-- If the user requested the audio file, generate it after the `.md` exists by calling `markdown_to_audio` on the same file.
-- Prefer `.mp3` output for long-form news audio to keep files small.
-- Use default audio generation parameters first: `speed: 1`, `sentenceSilence: 0.3`, `noiseScale: 0.667`, `noiseW: 0.8`, `voiceQuality: "auto"`, and `mp3BitrateKbps: 64`.
-- Tune `sentenceSilence`, `noiseScale`, `noiseW`, voice choice, or speed only after the user reviews the result or explicitly asks for a different style.
-
-Always include:
-
-- source-quality cues when relevant;
-- uncertainty disclosures when evidence is partial;
-- enough detail that the user can understand the story without opening every source.
+When the user asked for audio, make clear that the audio comes from the exact generated `report.md` without rewriting it.
 
 ## References
 

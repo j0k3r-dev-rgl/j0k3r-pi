@@ -16,6 +16,10 @@
       "model": "openai-codex/gpt-5.6-terra",
       "effort": "medium"
     },
+    "news-researcher": {
+      "model": "openai-codex/gpt-5.6-terra",
+      "effort": "medium"
+    },
     "prd-review": {
       "model": "opencode-go/kimi-k2.7-code",
       "effort": "off"
