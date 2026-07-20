@@ -875,8 +875,8 @@ export function registerMemoryTools(pi: any, db: Db): void {
   pi.registerTool({
     name: 'memory_project_profile',
     label: 'Memory Project Profile',
-    description: 'Create, read, or update the current project profile.',
-    promptSnippet: 'Maintain the living project profile with durable stack, commands, conventions, risks, and current work.',
+    description: 'Create, read, or update the current project profile. Get and update return the complete canonical profile content.',
+    promptSnippet: 'Read and maintain the living project profile with durable stack, commands, conventions, risks, and current work.',
     parameters: Type.Object({
       action: Type.Union([Type.Literal('get'), Type.Literal('ensure'), Type.Literal('update')]),
       content: Type.Optional(Type.String()),
@@ -888,15 +888,16 @@ export function registerMemoryTools(pi: any, db: Db): void {
         if (params.action === 'update') {
           if (!params.content) throw new Error('content is required for update');
           const profile = updateProjectProfile(db, context, params.content, params.tags);
-          return ok('Project profile updated.', { profile: compactMemory(profile) });
+          return ok(formatProjectProfileToolText('Project profile updated.', profile), { profile: fullProjectProfile(profile) });
         }
         if (params.action === 'get') {
           const profile = getCurrentProjectProfile(db, context);
-          return ok(profile ? 'Project profile loaded.' : 'No project profile found.', { profile: profile ? compactMemory(profile) : null, created: false });
+          return ok(profile ? formatProjectProfileToolText('Project profile loaded.', profile) : 'No project profile found.', { profile: profile ? fullProjectProfile(profile) : null, created: false });
         }
         const result = ensureProjectProfile(db, context);
-        return ok(result.created ? 'Project profile created.' : 'Project profile loaded.', {
-          profile: result.profile ? compactMemory(result.profile) : null,
+        const status = result.created ? 'Project profile created.' : 'Project profile loaded.';
+        return ok(result.profile ? formatProjectProfileToolText(status, result.profile) : status, {
+          profile: result.profile ? fullProjectProfile(result.profile) : null,
           created: result.created,
         });
       } catch (e) {
@@ -988,6 +989,38 @@ export function registerMemoryTools(pi: any, db: Db): void {
       }
     },
   });
+}
+
+function memoryTags(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String);
+  if (typeof value !== 'string' || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+function fullProjectProfile(profile: any) {
+  return {
+    ...compactMemory(profile),
+    content: String(profile.content ?? ''),
+    tags: memoryTags(profile.tags),
+  };
+}
+
+function formatProjectProfileToolText(status: string, profile: any): string {
+  const tags = memoryTags(profile.tags);
+  return [
+    status,
+    `id: ${profile.id}`,
+    `updated: ${profile.updated_at}`,
+    `tags: ${tags.join(', ') || 'none'}`,
+    '',
+    'content:',
+    String(profile.content ?? ''),
+  ].join('\n');
 }
 
 function compactMemory(m: any) {

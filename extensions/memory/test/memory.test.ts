@@ -168,6 +168,12 @@ describe('extension setup', () => {
     expect(expanded).toContain('Behavior rules:');
     expect(expanded).toContain('Store durable reusable knowledge');
     expect(expanded).toContain('ctrl+o collapse');
+
+    const plainTheme = { fg: (_name: string, text: string) => text, bg: (_name: string, text: string) => text, bold: (text: string) => text };
+    const narrowExpandedLines = renderMemoryContextMessage({ customType: 'memory-context', content }, { expanded: true }, plainTheme).render(60);
+    const narrowExpanded = narrowExpandedLines.map((line) => line.trim()).join(' ').replace(/\s+/g, ' ');
+    for (const line of content.split('\n').filter(Boolean)) expect(narrowExpanded).toContain(line);
+    expect(narrowExpanded.slice(narrowExpanded.indexOf('Pi Memory Extension'))).not.toContain('…');
   });
 
   it('does not register when disabled from config', () => {
@@ -210,7 +216,9 @@ describe('extension setup', () => {
     expect(content).toContain('Proactively call memory_search with specific task terms');
     expect(content).toContain('previous work, prior decisions, user preferences, project conventions, unresolved todos, or known bugs');
     expect(content).toContain('Use memory_recall for broad workflow context');
-    expect(content).toContain('inspect the current project profile early with memory_project_profile get unless startup context already includes an up-to-date profile');
+    expect(content).toContain('A canonical project profile is available through memory_project_profile');
+    expect(content).toContain('call memory_project_profile with action=get early when relevant');
+    expect(content).toContain('use action=update when durable project facts change');
     expect(content).toContain('Store durable reusable knowledge with memory_add');
     expect(content).toContain('Ask before saving global or general user preferences, large project_profile rewrites, contradictions, or policy changes that affect future agents');
     expect(content).not.toContain('precommit checkpoint');
@@ -264,6 +272,44 @@ describe('extension setup', () => {
     }
   });
 
+  it('returns the full canonical project profile to the agent after get and update and renders it fully when expanded', async () => {
+    const { projectDir, tools } = registerMemoryToolHarness('Profile Tool App');
+    const tool = tools.get('memory_project_profile');
+    const profileContent = [
+      'type: project_profile',
+      'stack: typescript and node.js',
+      'architecture: AGENTS.md defines policy, and the canonical profile remains readable to the agent while this deliberately long sentence wraps across narrow terminal lines without losing any stored words or replacing them with an ellipsis.',
+      'current work: improve project profile tool output',
+    ].join('\n');
+
+    const updated = await tool.execute('profile-update', {
+      action: 'update',
+      content: profileContent,
+      tags: ['project_profile', 'context'],
+    }, undefined, undefined, { cwd: projectDir });
+    const loaded = await tool.execute('profile-get', { action: 'get' }, undefined, undefined, { cwd: projectDir });
+
+    for (const result of [updated, loaded]) {
+      expect(result.content[0].text).toContain(profileContent);
+      expect(result.content[0].text).toContain('id: mem_');
+      expect(result.content[0].text).toContain('updated:');
+      expect(result.content[0].text).toContain('tags: project_profile, context');
+      expect(result.details.profile.content).toBe(profileContent);
+      expect(result.details.profile.tags).toEqual(['project_profile', 'context']);
+    }
+
+    const theme = { fg: (_name: string, text: string) => text, bold: (text: string) => text };
+    const compact = tool.renderResult(loaded, { expanded: false }, theme).render(60).join('\n');
+    const expandedLines = tool.renderResult(loaded, { expanded: true }, theme).render(60);
+    const expanded = expandedLines.map((line: string) => line.trim()).join(' ').replace(/\s+/g, ' ');
+
+    expect(compact).toContain('Project profile loaded.');
+    expect(compact).not.toContain('canonical profile remains readable');
+    expect(expanded).toContain(profileContent.split('\n').join(' '));
+    expect(expanded).toContain('ctrl+o collapse');
+    expect(expanded).not.toContain('…');
+  });
+
   it('memory search and list tool text include compact result ids', async () => {
     const dbPath = path.join(tmp, 'tool-ids.sqlite');
     const projectDir = path.join(tmp, 'tool-project');
@@ -288,7 +334,7 @@ describe('extension setup', () => {
     expect(list.content[0].text).toContain('search ids decision');
   });
 
-  it('lifecycle shutdown writes summary metadata and auto-updates project profile', async () => {
+  it('lifecycle shutdown writes summary metadata without modifying the canonical project profile', async () => {
     const dbPath = path.join(tmp, 'lifecycle.sqlite');
     const projectDir = path.join(tmp, 'project');
     fs.mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
@@ -298,6 +344,12 @@ describe('extension setup', () => {
     const handlers = new Map<string, Function>();
     extension({ registerTool: () => {}, registerCommand: () => {}, on: (name: string, handler: Function) => handlers.set(name, handler) });
     if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
+
+    const seededDb = openMemoryDb(dbPath);
+    const canonicalProfile = 'type: project_profile\ncurrent work: maintain this curated profile explicitly';
+    updateProjectProfile(seededDb, resolveMemoryContext(projectDir, os.homedir(), {}), canonicalProfile, ['project_profile', 'profile', 'context']);
+    seededDb.close();
+
     const ctx = {
       cwd: projectDir,
       ui: { setStatus: () => {}, notify: () => {} },
@@ -317,8 +369,9 @@ describe('extension setup', () => {
     expect(session.summary).toContain('summary:');
     expect(JSON.parse(session.metadata_json).summary_source).toBe('heuristic');
     const profile = d.prepare("SELECT content FROM memories WHERE kind='project_profile' LIMIT 1").get() as any;
-    expect(profile.content).toContain('recent session updates');
-    expect(profile.content).toContain('npm test');
+    expect(profile.content).toBe(canonicalProfile);
+    expect(profile.content).not.toContain('recent session updates');
+    expect(profile.content).not.toContain('npm test');
   });
 });
 
@@ -521,6 +574,7 @@ describe('store/search/sessions', () => {
     expect(getMemory(d, added.id)?.access_count).toBe(1);
     const updated = updateMemory(d, added.id, { content: 'Use SQLite and FTS5 for local memory' }, c);
     expect(updated.version).toBe(2);
+    expect(updated.content).toBe('use sqlite and fts5 for local memory');
     expect(archiveMemory(d, added.id, c).status).toBe('archived');
   });
   it('searches compact active memories and excludes archived', () => {
@@ -650,7 +704,7 @@ describe('profile/consolidation/export/sync', () => {
       kind: 'project_profile',
       title: 'advanced app project profile',
       summary: 'living project profile for advanced app',
-      content: 'type: project_profile\ndetails: first profile body',
+      content: 'type: project_profile\nimportant file: AGENTS.md\ndetails: first profile body',
       tags: ['project_profile', 'profile'],
       origin_type: 'confirmed_by_user',
       confidence: 0.7,
@@ -661,12 +715,13 @@ describe('profile/consolidation/export/sync', () => {
     const second = addMemory(d, {
       scope: 'project',
       kind: 'project_profile',
-      content: 'type: project_profile\ndetails: replacement body',
+      content: 'type: project_profile\nimportant file: AGENTS.md\nstack: TypeScript and Node.js\ndetails: replacement body',
       metadata_json: { owner: 'second', extra: true },
     }, c).memory;
 
     expect(second.id).toBe(first.id);
-    expect(second.content).toBe('type: project_profile\ndetails: replacement body');
+    expect(first.content).toContain('AGENTS.md');
+    expect(second.content).toBe('type: project_profile\nimportant file: AGENTS.md\nstack: TypeScript and Node.js\ndetails: replacement body');
     expect(second.title).toBe(first.title);
     expect(second.summary).toBe(first.summary);
     expect(second.tags).toBe(first.tags);

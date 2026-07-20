@@ -6,7 +6,6 @@ import { addSessionPrompt, finishMemorySession, reopenMemorySessionIfClosed, sta
 import { selectStartupMemories } from './startup-selection.js';
 import { setCurrentMemorySessionId } from './runtime-state.js';
 import { buildHeuristicSessionSummary, buildSemanticSessionSummary, extractConversationFacts } from './session-summary.js';
-import { autoUpdateProjectProfileFromSession, semanticUpdateProjectProfileFromSession } from './project-profile.js';
 import { observeRetrieval } from './retrieval-telemetry.js';
 
 const MEMORY_SESSION_ENTRY_TYPE = 'memory-session';
@@ -58,7 +57,7 @@ function buildMemoryInstructions(context: any): string {
     '- Proactively call memory_search with specific task terms when the request may depend on previous work, prior decisions, user preferences, project conventions, unresolved todos, or known bugs.',
     '- Use memory_recall for broad workflow context when the task phase needs missing or uncertain project history. Do not repeat retrieval when the relevant context is already in the conversation.',
     '- Skip retrieval for tiny self-contained tasks that clearly cannot benefit from project history.',
-    '- For substantial tasks in this project, inspect the current project profile early with memory_project_profile get unless startup context already includes an up-to-date profile.',
+    '- A canonical project profile is available through memory_project_profile. For substantial tasks in a project, call memory_project_profile with action=get early when relevant, and use action=update when durable project facts change.',
     '- Prefer local project memory plus general preferences and global rules; do not use other project memories unless explicitly requested or cwd is HOME.',
     '- Store durable reusable knowledge with memory_add: user preferences, confirmed project decisions, workflow/policy decisions, commands, constraints, architecture, bugs, todos, learnings, progress, and project_profile updates.',
     '- Ask before saving global or general user preferences, large project_profile rewrites, contradictions, or policy changes that affect future agents.',
@@ -315,23 +314,6 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
           summary_error: summaryError ?? null,
         },
       }, context);
-      const profileFacts = {
-        session_id: activeMemorySessionId,
-        summary,
-        learned,
-        decisions: evidence.decisions.map((m) => m.title ?? m.summary).filter(Boolean) as string[],
-        validations: evidence.validations.filter(Boolean) as string[],
-        filesTouched: evidence.filesTouched,
-        todos: evidence.todos.map((m) => m.title ?? m.summary).filter(Boolean) as string[],
-      };
-      const semanticProfileUpdate = semanticShutdownEnabled
-        ? await semanticUpdateProjectProfileFromSession(db, context, profileFacts, ctx).catch((error) => {
-          ctx?.ui?.notify?.(`Semantic project profile update unavailable: ${error instanceof Error ? error.message : String(error)}`, 'warning');
-          return null;
-        })
-        : null;
-      const profileUpdate = semanticProfileUpdate ?? autoUpdateProjectProfileFromSession(db, context, profileFacts);
-      if (profileUpdate.updated) ctx?.ui?.notify?.('Project profile auto-updated from session summary.', 'info');
       sessionClosed = true;
       setCurrentMemorySessionId(undefined);
     } catch (error) {

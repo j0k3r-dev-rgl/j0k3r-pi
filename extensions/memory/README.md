@@ -232,8 +232,9 @@ When a completed memory session is resumed with the same Pi identity, `session_s
 
 Shutdown behavior:
 
-- Default: fast heuristic local summary. A heuristic project-profile update is attempted only when useful durable signals are present.
-- With `session_end.semantic=true`: tries semantic summary and semantic project-profile update with the active model, then falls back to heuristic behavior on error or missing auth.
+- Default: writes a fast heuristic local session summary.
+- With `session_end.semantic=true`: tries a semantic session summary with the active model, then falls back to the heuristic summary on error or missing auth.
+- Session shutdown never changes the canonical project profile. Agents read and explicitly maintain it through `memory_project_profile` when durable project facts change.
 
 ### Memory quality behavior
 
@@ -256,7 +257,9 @@ The selector uses durable kind priority, importance, and a bounded staleness pen
 
 - each project keeps at most one active `project_profile`;
 - `memory_add(kind='project_profile')` updates the canonical active record in place instead of creating a second active profile;
-- `memory_project_profile` follows the same canonical behavior;
+- `memory_project_profile` follows the same canonical behavior and returns the complete profile after get, ensure, or update;
+- canonical profile content preserves original case so case-sensitive paths and identifiers remain accurate, while titles and tags keep their normal lowercase normalization;
+- agents are instructed to read it when relevant and update it explicitly when durable project facts change;
 - duplicate active profiles found during migration are marked `superseded`, kept readable, and linked to the canonical record;
 - superseded duplicate content is preserved.
 
@@ -291,7 +294,7 @@ Generic links are explicit:
 | `memory_session_finish` | Finish a memory session and optionally extract durable memories. |
 | `memory_start_chat` | Start a memory session and return compact startup context. |
 | `memory_recall` | Recall compact workflow-moment context. Aliases: `task`, `edit`, `test`, `commit`, `end`. |
-| `memory_project_profile` | Get/ensure/update the current project profile. |
+| `memory_project_profile` | Get/ensure/update the current project profile and return its complete canonical content. |
 | `memory_consolidate` | Find or apply duplicate-memory consolidation. Dry-run defaults to true. |
 | `memory_link` | Create an explicit generic relationship between two existing memories. |
 | `memory_sync_status` | Show local sync-aware status counts. |
@@ -722,8 +725,9 @@ Cuando una sesión memory completada se resume con la misma identidad Pi, `sessi
 
 Comportamiento de shutdown:
 
-- Default: resumen local heurístico rápido. Se intenta actualizar heurísticamente el perfil de proyecto solo cuando hay señales durables útiles.
-- Con `session_end.semantic=true`: intenta resumen semántico y update semántico del perfil con el modelo activo, luego cae a comportamiento heurístico si hay error o falta auth.
+- Default: escribe un resumen local heurístico rápido de la sesión.
+- Con `session_end.semantic=true`: intenta un resumen semántico con el modelo activo y cae al resumen heurístico si hay error o falta auth.
+- El cierre de sesión nunca modifica el perfil canónico del proyecto. Los agentes lo leen y mantienen explícitamente mediante `memory_project_profile` cuando cambian hechos durables del proyecto.
 
 ### Comportamiento de calidad de memoria
 
@@ -746,7 +750,9 @@ El selector usa prioridad por kind durable, importancia y una penalización acot
 
 - cada proyecto mantiene como máximo un `project_profile` activo;
 - `memory_add(kind='project_profile')` actualiza el registro activo canónico in-place en vez de crear un segundo perfil activo;
-- `memory_project_profile` sigue el mismo comportamiento canónico;
+- `memory_project_profile` sigue el mismo comportamiento canónico y devuelve el perfil completo después de get, ensure o update;
+- el contenido del perfil canónico preserva mayúsculas y minúsculas para mantener rutas e identificadores case-sensitive correctos, mientras títulos y tags conservan su normalización habitual a minúsculas;
+- los agentes reciben instrucciones para leerlo cuando sea relevante y actualizarlo explícitamente cuando cambien hechos durables del proyecto;
 - los perfiles activos duplicados detectados durante migración se marcan `superseded`, siguen siendo legibles y se linkean al registro canónico;
 - el contenido de los duplicados superseded se preserva.
 
@@ -781,7 +787,7 @@ Los links genéricos son explícitos:
 | `memory_session_finish` | Finaliza una sesión memory y opcionalmente extrae memorias durables. |
 | `memory_start_chat` | Inicia una sesión memory y devuelve contexto startup compacto. |
 | `memory_recall` | Recupera contexto compacto de momento de workflow. Aliases: `task`, `edit`, `test`, `commit`, `end`. |
-| `memory_project_profile` | Obtiene/asegura/actualiza el perfil del proyecto actual. |
+| `memory_project_profile` | Obtiene/asegura/actualiza el perfil actual y devuelve su contenido canónico completo. |
 | `memory_consolidate` | Encuentra o aplica consolidación de memorias duplicadas. Dry-run por defecto. |
 | `memory_link` | Crea una relación genérica explícita entre dos memorias existentes. |
 | `memory_sync_status` | Muestra conteos locales conscientes de sync status. |

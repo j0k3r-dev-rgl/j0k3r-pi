@@ -15,6 +15,25 @@ function truncate(text: string, width: number): string {
   return lineWidth(text) <= width ? text : `${text.slice(0, Math.max(0, width - 1))}…`;
 }
 
+function wrapPlainLine(text: string, width: number): string[] {
+  if (!text || lineWidth(text) <= width) return [text];
+  const remaining = [...text];
+  const lines: string[] = [];
+  while (remaining.length > width) {
+    let breakAt = width;
+    for (let index = width - 1; index > 0; index -= 1) {
+      if (/\s/.test(remaining[index] ?? '')) {
+        breakAt = index;
+        break;
+      }
+    }
+    lines.push(remaining.splice(0, breakAt).join(''));
+    while (remaining.length && /\s/.test(remaining[0] ?? '')) remaining.shift();
+  }
+  lines.push(remaining.join(''));
+  return lines;
+}
+
 function padToWidth(text: string, width: number): string {
   return `${text}${' '.repeat(Math.max(0, width - lineWidth(text)))}`;
 }
@@ -124,7 +143,7 @@ export function renderMemoryContextMessage(message: MemoryMessage, options: Memo
   const dim = (value: string) => theme?.fg?.('dim', value) ?? value;
   const title = (value: string) => theme?.fg?.('toolTitle', theme?.bold?.(value) ?? value) ?? value;
 
-  return toolShellComponent((_width) => {
+  return toolShellComponent((width) => {
     const project = matchLine(text, /^Current memory project: (.+)\.$/m) || matchLine(text, /^Current memory scope: (.+)\.$/m) || 'unknown scope';
     const session = matchLine(text, /^Memory session:\s*(.+)$/m);
     const items = startupItems(text);
@@ -132,7 +151,7 @@ export function renderMemoryContextMessage(message: MemoryMessage, options: Memo
     const header = `${title('memory_context')} · ${accent(project)} · ${items.length} ${noun}`;
 
     if (expanded) {
-      return [header, dim('ctrl+o collapse'), '', ...text.split('\n')];
+      return [header, dim('ctrl+o collapse'), '', ...text.split('\n').flatMap((line) => wrapPlainLine(line, width))];
     }
 
     const lines = [
@@ -152,10 +171,28 @@ export function renderMemoryToolResult(result: any, options: MemoryRenderOptions
   const accent = (text: string) => theme?.fg?.('accent', text) ?? text;
   const dim = (text: string) => theme?.fg?.('dim', text) ?? text;
   const title = (text: string) => theme?.fg?.('toolTitle', theme?.bold?.(text) ?? text) ?? text;
-  return textComponent((_width) => {
+  return textComponent((width) => {
     const noun = rows.length === 1 ? 'result' : 'results';
-    const header = `${title('memory')} · ${rows.length} ${noun} · ${accent(inferLabel(result))}`;
+    const label = inferLabel(result);
+    const header = `${title('memory')} · ${rows.length} ${noun} · ${accent(label)}`;
     if (!rows.length) return [header, dim(String(result?.content?.[0]?.text ?? 'No memory results.'))];
+    if (label === 'memory_project_profile') {
+      const status = String(result?.content?.[0]?.text ?? '').split('\n')[0] || 'Project profile loaded.';
+      if (!expanded) return [header, dim(status), dim('ctrl+o expand')];
+      const profile = rows[0];
+      const tags = Array.isArray(profile?.tags) ? profile.tags.join(', ') : '';
+      return [
+        header,
+        dim('ctrl+o collapse'),
+        '',
+        `id: ${profile?.id ?? 'unknown'}`,
+        profile?.updated_at ? `updated: ${profile.updated_at}` : '',
+        `tags: ${tags || 'none'}`,
+        '',
+        'content:',
+        ...String(profile?.content ?? '').split('\n'),
+      ].flatMap((line) => wrapPlainLine(line, width));
+    }
     if (!expanded) return [header, ...rows.slice(0, 5).map(compactRow), dim('ctrl+o expand')];
     const lines: string[] = [header, dim('ctrl+o collapse')];
     for (const [index, row] of rows.slice(0, 20).entries()) {

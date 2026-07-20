@@ -11,6 +11,7 @@ import { replaceMemoryEntities } from './entities.js';
 function userId(): string { return process.env.USER || process.env.USERNAME || os.userInfo().username || 'user'; }
 function deviceId(): string { return os.hostname(); }
 function normalizeMemoryText(text: string): string { return text.trim().toLowerCase(); }
+function normalizeMemoryContent(kind: string, text: string): string { return kind === 'project_profile' ? text.trim() : normalizeMemoryText(text); }
 function normalizeTags(tags: string[] | undefined): string[] { return (tags ?? []).map((t) => t.trim().toLowerCase()).filter(Boolean); }
 
 function projectFields(scope: MemoryScope, context: ResolvedContext): { scope: MemoryScope; project_id: string | null; project_name: string | null; warning?: string } {
@@ -22,7 +23,7 @@ function projectFields(scope: MemoryScope, context: ResolvedContext): { scope: M
 }
 
 function insertMemoryRow(db: Db, input: AddMemoryInput, context: ResolvedContext, fields: { scope: MemoryScope; project_id: string | null; project_name: string | null; warning?: string }) {
-  const normalizedContent = normalizeMemoryText(input.content);
+  const normalizedContent = normalizeMemoryContent(input.kind, input.content);
   const normalizedTags = normalizeTags(input.tags);
   const created = nowIso();
   const title = normalizeMemoryText(input.title ?? firstLine(normalizedContent));
@@ -61,7 +62,7 @@ export function upsertProjectProfile(db: Db, input: AddMemoryInput, context: Res
       return created;
     }
 
-    const content = normalizeMemoryText(input.content);
+    const content = normalizeMemoryContent(input.kind, input.content);
     const title = input.title !== undefined ? normalizeMemoryText(input.title) : existing.title;
     const summary = input.summary !== undefined ? normalizeMemoryText(input.summary) : existing.summary;
     const tags = input.tags !== undefined ? jsonString(normalizeTags(input.tags)) : existing.tags;
@@ -132,7 +133,7 @@ export function updateMemory(db: Db, id: string, patch: { content?: string; tags
   const old = getMemoryRaw(db, id);
   if (!old) throw new Error(`Memory not found: ${id}`);
   if (patch.content) assertSafeText(patch.content);
-  const content = patch.content ? normalizeMemoryText(patch.content) : old.content;
+  const content = patch.content ? normalizeMemoryContent(old.kind, patch.content) : old.content;
   const tags = patch.tags ? jsonString(normalizeTags(patch.tags)) : old.tags;
   const contentHash = sha256(JSON.stringify({ title: old.title, summary: old.summary, content, tags }));
   const syncStatus = old.scope === 'project' && context.config?.cloud.enabled ? 'pending' : old.sync_status;
