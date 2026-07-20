@@ -144,10 +144,11 @@ Rules:
 Use memory as the agent's persistent brain, not as a transcript dump or a mechanical checklist.
 
 - First rely on startup context, loaded skills, and the current conversation.
-- For substantial tasks in this project, inspect the current project profile early with `memory_project_profile get` unless startup context already includes an up-to-date profile.
+- For substantial tasks in this project, inspect the current project profile early with `memory_project_profile get` when relevant. The canonical profile is not part of the regular startup memory slots.
 - Search or recall memory only when persistent context is missing, stale, ambiguous, or decision-critical.
 - Do not repeat memory recall just because the task moved from planning to editing or testing if the relevant context is already present.
 - Store durable knowledge when it is reusable, current, non-sensitive, and valuable for future sessions.
+- Write normal durable memory prose in lowercase-oriented English for retrieval consistency, but preserve exact case for case-sensitive paths, commands, symbols, identifiers, versions, acronyms, and quoted literals.
 - Save confirmed decisions, workflow rules, architectural decisions, validated commands, meaningful progress, open todos, unresolved risks, and reusable learnings as durable memories when they affect future work.
 - After every meaningful discussion or substantial task, perform a decision checkpoint before the final response: identify durable decisions, progress, validations, todos, risks, and learnings; save the useful non-sensitive items with `memory_add`, update the project profile when appropriate, and explicitly say what was saved or why nothing was saved.
 - Prefer a small number of atomic memories over large noisy summaries; for normal work, save 1-3 durable memories unless the user asks for a richer record.

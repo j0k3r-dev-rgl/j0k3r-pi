@@ -209,6 +209,7 @@ describe('extension setup', () => {
     await handlers.get('session_start')?.({}, ctx);
     const injected = await handlers.get('before_agent_start')?.({ prompt: 'Review memory policy' }, ctx);
     const content = String(injected?.message?.content ?? '');
+    const agentsGuide = fs.readFileSync(new URL('../../../AGENTS.md', import.meta.url), 'utf8');
 
     expect(content).toContain('Treat it as the agent persistent brain');
     expect(content).toContain('first rely on startup brain context, loaded skill content, and current conversation');
@@ -221,10 +222,12 @@ describe('extension setup', () => {
     expect(content).toContain('use action=update when durable project facts change');
     expect(content).toContain('Store durable reusable knowledge with memory_add');
     expect(content).toContain('Ask before saving global or general user preferences, large project_profile rewrites, contradictions, or policy changes that affect future agents');
+    expect(content).toContain('preserve exact case for case-sensitive paths, commands, symbols, identifiers, versions, acronyms, and quoted literals');
     expect(content).not.toContain('precommit checkpoint');
     expect(content).not.toContain('For user-requested commits');
     expect(content).toContain('memory_search returns compact candidates; use memory_get only when full content is needed');
     expect(content).toContain('Use memory_archive instead of deleting obsolete memories');
+    expect(agentsGuide).toContain('preserve exact case for case-sensitive paths, commands, symbols, identifiers, versions, acronyms, and quoted literals');
   });
   it('memory search and list tool results render compact by default and expand details on demand', () => {
     const result = {
@@ -310,7 +313,20 @@ describe('extension setup', () => {
     expect(expanded).not.toContain('…');
   });
 
-  it('memory search and list tool text include compact result ids', async () => {
+  it('memory tool metadata preserves exact literals and broadens memory_get guidance beyond search-only flows', () => {
+    const { tools } = registerMemoryToolHarness('Metadata Wording App');
+    const memoryAdd = tools.get('memory_add');
+    const memoryGet = tools.get('memory_get');
+
+    expect(memoryAdd.promptGuidelines[0]).toContain('english lowercase-oriented prose for normal titles, summaries, content, and tags');
+    expect(memoryAdd.promptGuidelines[0]).toContain('preserve exact case for case-sensitive paths, commands, symbols, identifiers, versions, acronyms, and quoted literals');
+    expect(memoryGet.promptSnippet).toContain('trusted compact indexes/results');
+    expect(memoryGet.promptSnippet).not.toContain('after memory_search');
+    expect(memoryGet.promptGuidelines[0]).toContain('startup context');
+    expect(memoryGet.promptGuidelines[0]).toContain('memory_recall');
+  });
+
+  it('memory search, recall, and get expose actionable ids while selected-memory rendering preserves full multiline content', async () => {
     const dbPath = path.join(tmp, 'tool-ids.sqlite');
     const projectDir = path.join(tmp, 'tool-project');
     fs.mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
@@ -318,20 +334,82 @@ describe('extension setup', () => {
     const d = openMemoryDb(dbPath);
     migrate(d);
     const context = resolveMemoryContext(projectDir, os.homedir(), {});
-    const memory = addMemory(d, { scope: 'project', kind: 'decision', title: 'search ids decision', content: 'memory search ids should be visible', importance: 0.8 }, context).memory;
+    const longTail = 'unique tail after six hundred characters zyxwvutsrqponmlkjihgfedcba';
+    const multilineContent = `line one\nline two with extra spacing\n${'x'.repeat(640)}\n${longTail}`;
+    const memory = addMemory(d, { scope: 'project', kind: 'decision', title: 'search ids decision', content: multilineContent, importance: 0.8 }, context).memory;
     const old = process.env.PI_MEMORY_DB_PATH;
     process.env.PI_MEMORY_DB_PATH = dbPath;
     const tools = new Map<string, any>();
     extension({ registerTool: (tool: any) => tools.set(tool.name, tool), registerCommand: () => {}, on: () => {} });
     if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
 
-    const search = await tools.get('memory_search').execute('search-call', { query: 'search ids', limit: 5 }, undefined, undefined, { cwd: projectDir });
-    const list = await tools.get('memory_list').execute('list-call', { scope: 'project', limit: 5 }, undefined, undefined, { cwd: projectDir });
+    const search = await tools.get('memory_search').execute('search-call', { query: 'unique tail', limit: 5 }, undefined, undefined, { cwd: projectDir });
+    const recall = await tools.get('memory_recall').execute('recall-call', { context: 'task', query: 'unique tail', limit: 5 }, undefined, undefined, { cwd: projectDir });
+    const getResult = await tools.get('memory_get').execute('get-call', { id: memory.id }, undefined, undefined, { cwd: projectDir });
 
     expect(search.content[0].text).toContain(memory.id);
     expect(search.content[0].text).toContain('decision');
-    expect(list.content[0].text).toContain(memory.id);
-    expect(list.content[0].text).toContain('search ids decision');
+    expect(recall.content[0].text).toContain(memory.id);
+    expect(recall.content[0].text).toContain('search ids decision');
+    expect(getResult.content[0].text).toContain(`id: ${memory.id}`);
+    expect(getResult.content[0].text).toContain('kind: decision');
+    expect(getResult.content[0].text).toContain('scope: project/Tool Ids App');
+    expect(getResult.content[0].text).toContain('content:');
+    expect(getResult.content[0].text).toContain(longTail);
+
+    const theme = { fg: (_name: string, text: string) => text, bold: (text: string) => text };
+    const compact = tools.get('memory_get').renderResult(getResult, { expanded: false }, theme).render(80).join('\n');
+    const expanded = tools.get('memory_get').renderResult(getResult, { expanded: true }, theme).render(80).join('\n');
+
+    expect(compact).toContain(memory.id);
+    expect(compact).not.toContain(longTail);
+    expect(expanded).toContain('line one');
+    expect(expanded).toContain('line two with extra spacing');
+    expect(expanded).toContain(longTail);
+    expect(expanded).not.toContain('…');
+  });
+
+  it('memory mutation and session tools return canonical ids and compact follow-up context without leaking the project profile', async () => {
+    const { d, projectDir, tools } = registerMemoryToolHarness('Action Continuity App');
+    const memoryAdd = tools.get('memory_add');
+    const memoryUpdate = tools.get('memory_update');
+    const memoryArchive = tools.get('memory_archive');
+    const sessionStart = tools.get('memory_session_start');
+    const sessionPromptAdd = tools.get('memory_session_prompt_add');
+    const sessionFinish = tools.get('memory_session_finish');
+    const startChat = tools.get('memory_start_chat');
+
+    updateProjectProfile(d, resolveMemoryContext(projectDir, os.homedir(), {}), 'type: project_profile\nstack: typescript');
+    addMemory(d, { scope: 'project', kind: 'decision', title: 'startup decision', content: 'keep startup compact' }, resolveMemoryContext(projectDir, os.homedir(), {}));
+
+    const added = await memoryAdd.execute('add-call', { kind: 'note', content: 'action continuity memory' }, undefined, undefined, { cwd: projectDir });
+    expect(added.content[0].text).toContain('id:');
+    expect(added.content[0].text).toContain(added.details.memory.id);
+
+    const updated = await memoryUpdate.execute('update-call', { id: added.details.memory.id, content: 'updated action continuity memory' }, undefined, undefined, { cwd: projectDir });
+    expect(updated.content[0].text).toContain(added.details.memory.id);
+    expect(updated.content[0].text).toContain('status: active');
+
+    const archived = await memoryArchive.execute('archive-call', { id: added.details.memory.id, reason: 'done' }, undefined, undefined, { cwd: projectDir });
+    expect(archived.content[0].text).toContain(added.details.memory.id);
+    expect(archived.content[0].text).toContain('status: archived');
+
+    const started = await sessionStart.execute('session-start', { title: 'continuity session' }, undefined, undefined, { cwd: projectDir });
+    expect(started.content[0].text).toContain(started.details.session.id);
+
+    const promptSaved = await sessionPromptAdd.execute('prompt-add', { session_id: started.details.session.id, role: 'user', prompt: 'secret prompt text must not echo', prompt_index: 1 }, undefined, undefined, { cwd: projectDir });
+    expect(promptSaved.content[0].text).toContain(started.details.session.id);
+    expect(promptSaved.content[0].text).not.toContain('secret prompt text must not echo');
+
+    const finished = await sessionFinish.execute('session-finish', { session_id: started.details.session.id, summary: 'completed continuity checks', memories_to_add: [{ kind: 'learning', content: 'session finish created a durable memory' }] }, undefined, undefined, { cwd: projectDir });
+    expect(finished.content[0].text).toContain(started.details.session.id);
+    expect(finished.content[0].text).toContain(finished.details.added_memory_ids[0]);
+
+    const chat = await startChat.execute('start-chat', { user_prompt: 'review startup context', limit_memories: 5 }, undefined, undefined, { cwd: projectDir });
+    expect(chat.content[0].text).toContain(chat.details.session_id);
+    expect(chat.content[0].text).toContain('active_decisions');
+    expect(chat.content[0].text).not.toContain('project_profile');
+    expect(chat.details.startup_context.project_profile).toBeUndefined();
   });
 
   it('lifecycle shutdown writes summary metadata without modifying the canonical project profile', async () => {
@@ -837,6 +915,7 @@ describe('startup selection', () => {
     const noteB = addMemory(d, { scope: 'project', kind: 'note', title: 'same score note b', content: 'tie by updated_at then id', importance: 3 }, context).memory;
     const noteC = addMemory(d, { scope: 'project', kind: 'note', title: 'same score note c', content: 'tie by id', importance: 3 }, context).memory;
     const globalCommand = addMemory(d, { scope: 'global', kind: 'command', title: 'global command', content: 'global command should be included', importance: 4 }, context).memory;
+    const profile = addMemory(d, { scope: 'project', kind: 'project_profile', title: 'startup profile', content: 'type: project_profile\nstack: typescript', importance: 5 }, context).memory;
     addMemory(d, { scope: 'project', kind: 'decision', title: 'other project decision', content: 'must not leak across projects', importance: 5 }, otherContext);
     addMemory(d, { scope: 'project', kind: 'release_record', title: 'unknown-ish fallback', content: 'extra active row for cap', importance: 2 }, context);
 
@@ -848,6 +927,7 @@ describe('startup selection', () => {
     d.prepare('UPDATE memories SET updated_at=? WHERE id=?').run('2026-03-02T00:00:00.000Z', decision.id);
     d.prepare('UPDATE memories SET updated_at=? WHERE id=?').run('2026-04-01T00:00:00.000Z', progress.id);
     d.prepare('UPDATE memories SET updated_at=? WHERE id=?').run('2026-04-01T00:00:00.000Z', globalCommand.id);
+    d.prepare('UPDATE memories SET updated_at=? WHERE id=?').run('2026-04-01T23:59:59.000Z', profile.id);
 
     const originalFetch = (globalThis as any).fetch;
     let fetchCalls = 0;
@@ -864,6 +944,7 @@ describe('startup selection', () => {
       expect(first.map((item) => item.id)).toContain(decision.id);
       expect(first.map((item) => item.id)).toContain(globalCommand.id);
       expect(first.map((item) => item.id)).not.toContain(progress.id);
+      expect(first.map((item) => item.id)).not.toContain(profile.id);
 
       const tieDb = db();
       const tieContext = project(path.join(tmp, 'startup-tie-project'));
@@ -1099,9 +1180,12 @@ describe('commit changelog tool contracts', () => {
     expect(commitSchema).not.toContain('allow_duplicate');
 
     const currentCommitSchema = JSON.stringify(tools.get('memory_record_current_commit')?.parameters ?? {});
+    const currentCommitRequired = JSON.parse(currentCommitSchema).required as string[];
     expect(currentCommitSchema).toContain('functional_description');
     expect(currentCommitSchema).toContain('changelog_bullets');
     expect(currentCommitSchema).toContain('release_impact');
+    expect(currentCommitRequired).toEqual(expect.arrayContaining(['summary', 'functional_description', 'changelog_bullets', 'change_type', 'release_impact']));
+    expect(currentCommitRequired).toHaveLength(5);
     expect(currentCommitSchema).not.toContain('commit_hash');
 
     const changelogSchema = JSON.stringify(tools.get('memory_changelog_entry_add')?.parameters ?? {});
@@ -1184,6 +1268,7 @@ describe('commit changelog tool contracts', () => {
     }, undefined, undefined, { cwd: projectDir });
     expect(commit.isError).not.toBe(true);
     expect(commit.details.memory.kind).toBe('commit_record');
+    expect(commit.content[0].text).toContain(commit.details.memory.id);
 
     const changelog = await changelogAdd.execute('tool-call', {
       version: '1.2.3',
@@ -1194,6 +1279,7 @@ describe('commit changelog tool contracts', () => {
     }, undefined, undefined, { cwd: projectDir });
     expect(changelog.isError).not.toBe(true);
     expect(changelog.details.memory.kind).toBe('changelog_entry');
+    expect(changelog.content[0].text).toContain(changelog.details.memory.id);
 
     const links = d.prepare('SELECT from_memory_id, to_memory_id, relation_type FROM memory_links ORDER BY relation_type, from_memory_id, to_memory_id').all() as Array<{ from_memory_id: string; to_memory_id: string; relation_type: string }>;
     expect(links).toHaveLength(2);
@@ -1570,6 +1656,7 @@ describe('commit changelog tool contracts', () => {
       commit_ids: [rich.details.memory.id],
     }, undefined, undefined, { cwd: projectDir });
     expect(release.isError).not.toBe(true);
+    expect(release.content[0].text).toContain(release.details.memory.id);
 
     const afterRelease = await candidatesSearch.execute('tool-call', {
       repo: 'git@github.com:j0k3r-dev-rgl/sias-app.git',
@@ -1625,6 +1712,7 @@ describe('commit changelog tool contracts', () => {
     }, undefined, undefined, { cwd: projectDir });
     expect(release.isError).not.toBe(true);
     expect(release.details.memory.kind).toBe('release_record');
+    expect(release.content[0].text).toContain(release.details.memory.id);
     expect(release.details.memory.metadata_summary).toMatchObject({ version: '1.5.0', release_tag: 'v1.5.0' });
 
     const releaseMeta = d.prepare('SELECT metadata_json FROM memories WHERE id=?').get(release.details.memory.id) as { metadata_json: string };

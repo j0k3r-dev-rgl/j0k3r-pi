@@ -96,6 +96,34 @@ function expandedRow(row: any, index: number): string[] {
   return lines;
 }
 
+function memoryTags(row: any): string[] {
+  if (Array.isArray(row?.tags)) return row.tags.map(String);
+  if (typeof row?.tags !== 'string' || !row.tags.trim()) return [];
+  try {
+    const parsed = JSON.parse(row.tags);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+function fullMemoryLines(row: any): string[] {
+  const tags = memoryTags(row);
+  return [
+    `id: ${row?.id ?? 'unknown'}`,
+    row?.scope ? `scope: ${rowScope(row)}` : undefined,
+    row?.kind ? `kind: ${row.kind}` : undefined,
+    row?.status ? `status: ${row.status}` : undefined,
+    row?.importance !== undefined ? `importance: ${row.importance}` : undefined,
+    row?.confidence !== undefined ? `confidence: ${row.confidence}` : undefined,
+    row?.updated_at ? `updated: ${row.updated_at}` : undefined,
+    `tags: ${tags.join(', ') || 'none'}`,
+    '',
+    'content:',
+    ...String(row?.content ?? '').split('\n'),
+  ].filter((line) => line !== undefined) as string[];
+}
+
 function inferLabel(result: any): string {
   const text = String(result?.content?.[0]?.text ?? '').toLowerCase();
   if (text.startsWith('found ')) return 'memory_search';
@@ -192,6 +220,14 @@ export function renderMemoryToolResult(result: any, options: MemoryRenderOptions
         'content:',
         ...String(profile?.content ?? '').split('\n'),
       ].flatMap((line) => wrapPlainLine(line, width));
+    }
+    if (label === 'memory_get') {
+      const row = rows[0];
+      if (!expanded) {
+        const compact = [`1. ${row?.id ?? 'unknown'}`, row?.kind, row?.scope ? rowScope(row) : undefined, rowTitle(row)].filter(Boolean).join(' · ');
+        return [header, compact, dim('ctrl+o expand')];
+      }
+      return [header, dim('ctrl+o collapse'), '', ...fullMemoryLines(row)].flatMap((line) => wrapPlainLine(line, width));
     }
     if (!expanded) return [header, ...rows.slice(0, 5).map(compactRow), dim('ctrl+o expand')];
     const lines: string[] = [header, dim('ctrl+o collapse')];

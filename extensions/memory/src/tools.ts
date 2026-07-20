@@ -28,11 +28,15 @@ function fail(error: unknown): ToolResult {
   return { content: [{ type: 'text', text: msg }], details: { error: msg }, isError: true };
 }
 
+function scopeLabel(item: any): string {
+  return item?.scope ? `${item.scope}${item.project_name ? `/${item.project_name}` : ''}` : '';
+}
+
 function compactResultLine(item: any): string {
   const parts = [
     item.id,
     item.type ?? 'memory',
-    item.scope ? `${item.scope}${item.project_name ? `/${item.project_name}` : ''}` : undefined,
+    scopeLabel(item),
     item.kind,
     item.title,
   ].filter(Boolean);
@@ -43,6 +47,76 @@ function compactResultLine(item: any): string {
 function resultListText(prefix: string, rows: any[]): string {
   if (!rows.length) return prefix;
   return `${prefix}\n${rows.slice(0, 20).map(compactResultLine).join('\n')}`;
+}
+
+function compactStatusLine(memory: any): string {
+  return [
+    `id: ${memory.id}`,
+    memory.kind ? `kind: ${memory.kind}` : undefined,
+    scopeLabel(memory) ? `scope: ${scopeLabel(memory)}` : undefined,
+    memory.title ? `title: ${memory.title}` : undefined,
+    memory.status ? `status: ${memory.status}` : undefined,
+  ].filter(Boolean).join(' · ');
+}
+
+function formatFullMemoryToolText(memory: any): string {
+  const tags = memoryTags(memory.tags);
+  return [
+    `Memory: ${memory.title ?? memory.id}`,
+    `id: ${memory.id}`,
+    `scope: ${scopeLabel(memory) || 'unknown'}`,
+    `kind: ${memory.kind ?? 'memory'}`,
+    memory.status ? `status: ${memory.status}` : undefined,
+    memory.importance !== undefined ? `importance: ${memory.importance}` : undefined,
+    memory.confidence !== undefined ? `confidence: ${memory.confidence}` : undefined,
+    memory.updated_at ? `updated: ${memory.updated_at}` : undefined,
+    `tags: ${tags.join(', ') || 'none'}`,
+    '',
+    'content:',
+    String(memory.content ?? ''),
+  ].filter((line) => line !== undefined).join('\n');
+}
+
+function formatStartupContextText(sessionId: string, startupContext: Record<string, any[]>): string {
+  const sections = Object.entries(startupContext)
+    .filter(([, items]) => Array.isArray(items) && items.length)
+    .map(([label, items]) => `${label}:\n${items.slice(0, 5).map(compactResultLine).join('\n')}`);
+  return [`Memory chat started.`, `session_id: ${sessionId}`, ...(sections.length ? ['', ...sections] : [])].join('\n');
+}
+
+function formatConsolidationText(result: any): string {
+  const candidates = Array.isArray(result?.candidates) ? result.candidates : [];
+  const lines = [`Consolidation ${result?.dry_run ? 'dry run' : 'applied'}: ${candidates.length} candidate group(s).`];
+  for (const candidate of candidates.slice(0, 10)) {
+    lines.push(`- ${candidate.kind ?? 'memory'} · ${candidate.scope ?? 'unknown'} · ${candidate.title ?? candidate.key ?? 'candidate'} — ${candidate.ids.join(', ')}`);
+  }
+  if (candidates.length > 10) lines.push(`- omitted ${candidates.length - 10} more candidate group(s)`);
+  return lines.join('\n');
+}
+
+function formatImportText(result: any, warnings: string[] = []): string {
+  const lines = [
+    `Memory import ${result.mode}: inserted=${result.inserted}, would_insert=${result.would_insert}, conflicts=${result.conflicts}, replaced=${result.replaced}, skipped_git=${result.skipped_git}.`,
+  ];
+  const conflicts = Array.isArray(result?.conflict_details) ? result.conflict_details : [];
+  for (const conflict of conflicts.slice(0, 10)) lines.push(`- conflict · ${conflict.table} · ${conflict.id} · ${conflict.action}`);
+  if (conflicts.length > 10) lines.push(`- omitted ${conflicts.length - 10} more conflict detail row(s)`);
+  const profileCollisions = Array.isArray(result?.profile_collision_details) ? result.profile_collision_details : [];
+  for (const collision of profileCollisions.slice(0, 5)) lines.push(`- project_profile collision · ${collision.incoming_profile_id} -> ${collision.canonical_profile_id} · ${collision.action}`);
+  if (profileCollisions.length > 5) lines.push(`- omitted ${profileCollisions.length - 5} more profile collision row(s)`);
+  if (warnings.length) lines.push(`warnings=${warnings.join(' | ')}`);
+  return lines.join('\n');
+}
+
+function formatSyncStatusText(status: any): string {
+  const formatCounts = (label: string, counts: Record<string, number> | undefined) => `${label}(local=${counts?.local ?? 0}, pending=${counts?.pending ?? 0}, synced=${counts?.synced ?? 0}, conflict=${counts?.conflict ?? 0})`;
+  return `Memory sync status: ${formatCounts('memories', status?.memories)}; ${formatCounts('sessions', status?.sessions)}; ${formatCounts('prompts', status?.prompts)}.`;
+}
+
+function formatExportText(result: any, warnings: string[] = []): string {
+  const lines = [`Memory backup exported (${result.mode}): ${result.path}`, `rows=${result.rows}`, `includes_git=${result.includes_git === true ? 'true' : 'false'}`];
+  if (warnings.length) lines.push(`warnings=${warnings.join(' | ')}`);
+  return lines.join('\n');
 }
 
 const Scope = Type.Union([Type.Literal('general'), Type.Literal('project'), Type.Literal('global')]);
@@ -214,7 +288,7 @@ export function registerMemoryTools(pi: any, db: Db): void {
     description: 'Store a persistent memory. The tool auto-resolves project_id/project_name.',
     promptSnippet: 'Store durable memories only when needed.',
     promptGuidelines: [
-      'Use memory_add only for durable reusable knowledge; never store secrets; do not provide project_id/project_name. Write title, summary, content, and tags in english lowercase.',
+      'Use memory_add only for durable reusable knowledge; never store secrets; do not provide project_id/project_name. Write english lowercase-oriented prose for normal titles, summaries, content, and tags, but preserve exact case for case-sensitive paths, commands, symbols, identifiers, versions, acronyms, and quoted literals.',
     ],
     parameters: Type.Object({
       scope: Type.Optional(Scope),
@@ -232,7 +306,7 @@ export function registerMemoryTools(pi: any, db: Db): void {
       try {
         const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
         const res = addMemory(db, params, context);
-        return ok(`Memory saved: "${res.memory.title ?? res.memory.summary ?? res.memory.kind}"${res.warning ? ` (${res.warning})` : ''}`, {
+        return ok(`Memory saved.${res.warning ? ` Warning: ${res.warning}.` : ''}\n${compactStatusLine(compactMemory(res.memory))}`, {
           memory: compactMemory(res.memory),
           warning: res.warning,
         });
@@ -248,7 +322,7 @@ export function registerMemoryTools(pi: any, db: Db): void {
     description: 'Record the current Git HEAD commit in Memory with rich release/changelog provenance context. Does not commit, tag, push, or edit files.',
     parameters: Type.Object({
       scope: Type.Optional(Scope),
-      change_type: Type.Optional(Type.Union([
+      change_type: Type.Union([
         Type.Literal('fix'),
         Type.Literal('feature'),
         Type.Literal('chore'),
@@ -257,17 +331,17 @@ export function registerMemoryTools(pi: any, db: Db): void {
         Type.Literal('test'),
         Type.Literal('sync'),
         Type.Literal('other'),
-      ])),
-      release_impact: Type.Optional(Type.Union([
+      ]),
+      release_impact: Type.Union([
         Type.Literal('major'),
         Type.Literal('minor'),
         Type.Literal('patch'),
         Type.Literal('none'),
-      ])),
-      summary: Type.Optional(Type.String()),
+      ]),
+      summary: Type.String(),
       content: Type.Optional(Type.String()),
-      functional_description: Type.Optional(Type.String()),
-      changelog_bullets: Type.Optional(Type.Array(Type.String())),
+      functional_description: Type.String(),
+      changelog_bullets: Type.Array(Type.String()),
       areas: Type.Optional(Type.Array(Type.String())),
       validation: Type.Optional(Type.Array(Type.String())),
       risks: Type.Optional(Type.Array(Type.String())),
@@ -284,7 +358,7 @@ export function registerMemoryTools(pi: any, db: Db): void {
         const context = resolveMemoryContext(cwd);
         assertGitMemoryEnabled(context);
         const result = addCommitRecord(db, currentCommitInput(cwd, params ?? {}), context);
-        return ok(`Current commit record saved: ${result.memory.title ?? result.memory.id}${result.warning ? ` (${result.warning})` : ''}`, result);
+        return ok(`Current commit record saved.${result.warning ? ` Warning: ${result.warning}.` : ''}\n${compactStatusLine(result.memory)}`, result);
       } catch (e) {
         return fail(e);
       }
@@ -341,7 +415,7 @@ export function registerMemoryTools(pi: any, db: Db): void {
         const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
         assertGitMemoryEnabled(context);
         const result = addCommitRecord(db, params, context);
-        return ok(`Commit record saved: ${result.memory.title ?? result.memory.id}${result.warning ? ` (${result.warning})` : ''}`, result);
+        return ok(`Commit record saved.${result.warning ? ` Warning: ${result.warning}.` : ''}\n${compactStatusLine(result.memory)}`, result);
       } catch (e) {
         return fail(e);
       }
@@ -374,7 +448,7 @@ export function registerMemoryTools(pi: any, db: Db): void {
         const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
         assertGitMemoryEnabled(context);
         const result = addChangelogEntry(db, params, context);
-        return ok(`Changelog entry saved: ${result.memory.title ?? result.memory.id}${result.warning ? ` (${result.warning})` : ''}`, result);
+        return ok(`Changelog entry saved.${result.warning ? ` Warning: ${result.warning}.` : ''}\n${compactStatusLine(result.memory)}`, result);
       } catch (e) {
         return fail(e);
       }
@@ -536,7 +610,7 @@ export function registerMemoryTools(pi: any, db: Db): void {
         const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
         assertGitMemoryEnabled(context);
         const result = addReleaseRecord(db, params, context);
-        return ok(`Release record saved: ${result.memory.title ?? result.memory.id}${result.warning ? ` (${result.warning})` : ''}`, result);
+        return ok(`Release record saved.${result.warning ? ` Warning: ${result.warning}.` : ''}\n${compactStatusLine(result.memory)}`, result);
       } catch (e) {
         return fail(e);
       }
@@ -635,14 +709,14 @@ export function registerMemoryTools(pi: any, db: Db): void {
     name: 'memory_get',
     label: 'Memory Get',
     description: 'Read a complete memory by id.',
-    promptSnippet: 'Load one full memory by id after memory_search.',
-    promptGuidelines: ['Use memory_get only for candidate IDs returned by memory_search.'],
+    promptSnippet: 'Load one full memory by id from trusted compact indexes/results when full content is needed.',
+    promptGuidelines: ['Use memory_get only for candidate IDs returned by trusted compact indexes such as startup context, memory_search, memory_list, memory_recall, and related Memory result tools.'],
     parameters: Type.Object({ id: Type.String() }),
     async execute(_id: string, params: any) {
       try {
         const mem = getMemory(db, params.id);
         if (!mem) throw new Error('Memory not found');
-        return ok(`Memory: ${mem.title ?? mem.id}`, { memory: mem });
+        return ok(formatFullMemoryToolText(mem), { memory: mem });
       } catch (e) {
         return fail(e);
       }
@@ -693,7 +767,7 @@ export function registerMemoryTools(pi: any, db: Db): void {
       try {
         const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
         const mem = updateMemory(db, params.id, params, context);
-        return ok(`Memory updated: "${mem.title ?? mem.summary ?? mem.kind}"`, { memory: compactMemory(mem) });
+        return ok(`Memory updated.\n${compactStatusLine(compactMemory(mem))}`, { memory: compactMemory(mem) });
       } catch (e) {
         return fail(e);
       }
@@ -711,7 +785,7 @@ export function registerMemoryTools(pi: any, db: Db): void {
       try {
         const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
         const mem = archiveMemory(db, params.id, context, params.reason);
-        return ok(`Memory archived: "${mem.title ?? mem.summary ?? mem.kind}"`, { memory: compactMemory(mem) });
+        return ok(`Memory archived.\n${compactStatusLine(compactMemory(mem))}`, { memory: compactMemory(mem) });
       } catch (e) {
         return fail(e);
       }
@@ -730,8 +804,8 @@ export function registerMemoryTools(pi: any, db: Db): void {
     async execute(_id: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
       try {
         const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
-        const session = startMemorySession(db, params ?? {}, context);
-        return ok('Memory session started.', { session });
+        const session = startMemorySession(db, params ?? {}, context) as any;
+        return ok(`Memory session started.\nsession_id: ${session.id}`, { session });
       } catch (e) {
         return fail(e);
       }
@@ -758,8 +832,8 @@ export function registerMemoryTools(pi: any, db: Db): void {
     async execute(_id: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
       try {
         const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
-        const prompt = addSessionPrompt(db, params, context);
-        return ok('Session prompt saved for audit.', { prompt });
+        const prompt = addSessionPrompt(db, params, context) as any;
+        return ok(`Session prompt saved for audit.\nsession_id: ${prompt.session_id}\nprompt_index: ${prompt.prompt_index}`, { prompt });
       } catch (e) {
         return fail(e);
       }
@@ -781,7 +855,8 @@ export function registerMemoryTools(pi: any, db: Db): void {
       try {
         const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
         const result = finishMemorySession(db, params, context);
-        return ok('Memory session finished.', result as any);
+        const addedIds = Array.isArray((result as any).added_memory_ids) ? (result as any).added_memory_ids : [];
+        return ok(`Memory session finished.\nsession_id: ${(result as any)?.session?.id ?? params.session_id}${addedIds.length ? `\nadded_memory_ids: ${addedIds.join(', ')}` : ''}`, result as any);
       } catch (e) {
         return fail(e);
       }
@@ -793,7 +868,7 @@ export function registerMemoryTools(pi: any, db: Db): void {
     label: 'Memory Start Chat',
     description: 'Start memory session and return compact startup context.',
     promptSnippet: 'Create a memory session and retrieve compact startup memory context.',
-    promptGuidelines: ['Use memory_start_chat at the beginning of substantial sessions/tasks.'],
+    promptGuidelines: ['Use memory_start_chat only as an explicit manual API when you intentionally need a separate startup-context response; normal lifecycle startup already creates or reopens the session automatically.'],
     parameters: Type.Object({
       user_prompt: Type.Optional(Type.String()),
       session_title: Type.Optional(Type.String()),
@@ -806,17 +881,17 @@ export function registerMemoryTools(pi: any, db: Db): void {
         const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
         const session = startMemorySession(db, { title: params?.session_title, metadata_json: { user_prompt: params?.user_prompt } }, context);
         const startup = searchMemory(db, { query: params?.user_prompt || 'project preferences decisions commands learnings todos', limit: params?.limit_memories ?? 12 }, context);
+        const startupResults = startup.results.filter((r: any) => r.kind !== 'project_profile');
         const startup_context = {
-          global_rules: startup.results.filter((r: any) => r.scope === 'global'),
-          general_preferences: startup.results.filter((r: any) => r.scope === 'general'),
-          project_profile: startup.results.find((r: any) => r.kind === 'project_profile') ?? null,
-          active_decisions: startup.results.filter((r: any) => r.kind === 'architectural_decision' || r.kind === 'decision'),
-          known_commands: startup.results.filter((r: any) => r.kind === 'command'),
-          recent_learnings: startup.results.filter((r: any) => r.kind === 'learning'),
-          open_todos: startup.results.filter((r: any) => r.kind === 'todo'),
-          recent_sessions: startup.results.filter((r: any) => r.type === 'session'),
+          global_rules: startupResults.filter((r: any) => r.scope === 'global'),
+          general_preferences: startupResults.filter((r: any) => r.scope === 'general'),
+          active_decisions: startupResults.filter((r: any) => r.kind === 'architectural_decision' || r.kind === 'decision'),
+          known_commands: startupResults.filter((r: any) => r.kind === 'command'),
+          recent_learnings: startupResults.filter((r: any) => r.kind === 'learning'),
+          open_todos: startupResults.filter((r: any) => r.kind === 'todo'),
+          recent_sessions: startupResults.filter((r: any) => r.type === 'session'),
         };
-        return ok('Memory chat started.', { session_id: (session as any).id, context, startup_context });
+        return ok(formatStartupContextText((session as any).id, startup_context), { session_id: (session as any).id, context, startup_context });
       } catch (e) {
         return fail(e);
       }
@@ -864,7 +939,7 @@ export function registerMemoryTools(pi: any, db: Db): void {
             context,
           ).results,
         );
-        return ok(`Recalled ${results.length} item(s).`, { results, recall_context: moment, query });
+        return ok(resultListText(`Recalled ${results.length} item(s).`, results), { results, recall_context: moment, query });
       } catch (e) {
         return fail(e);
       }
@@ -924,7 +999,7 @@ export function registerMemoryTools(pi: any, db: Db): void {
       try {
         const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
         const result = consolidateMemories(db, params ?? {}, context);
-        return ok(`Consolidation ${result.dry_run ? 'dry run' : 'applied'}: ${result.candidates.length} candidate group(s).`, result);
+        return ok(formatConsolidationText(result), result);
       } catch (e) {
         return fail(e);
       }
@@ -941,7 +1016,7 @@ export function registerMemoryTools(pi: any, db: Db): void {
       try {
         const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
         const status = getSyncStatus(db, context);
-        return ok(`Memory sync status: pending=${status.has_pending}, conflicts=${status.has_conflicts}.`, status);
+        return ok(formatSyncStatusText(status), status);
       } catch (e) {
         return fail(e);
       }
@@ -963,7 +1038,7 @@ export function registerMemoryTools(pi: any, db: Db): void {
         const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
         const input = resolveExportDefaults(params, context);
         const result = exportMemory(db, input);
-        return ok(`Memory backup exported (${result.mode}): ${result.path}`, { ...result, warnings: context.warnings });
+        return ok(formatExportText(result, context.warnings), { ...result, warnings: context.warnings });
       } catch (e) {
         return fail(e);
       }
@@ -980,7 +1055,7 @@ export function registerMemoryTools(pi: any, db: Db): void {
         const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
         const input = resolveImportDefaults(params, context);
         const result = importMemory(db, input);
-        return ok(`Memory import ${result.mode}: ${result.inserted} inserted, ${result.would_insert} would insert, ${result.conflicts} conflicts.`, {
+        return ok(formatImportText(result, context.warnings), {
           ...result,
           warnings: context.warnings,
         });

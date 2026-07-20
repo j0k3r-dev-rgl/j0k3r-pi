@@ -64,6 +64,7 @@ export function selectStartupMemories(
   const now = options.now ?? new Date();
   const rows = db.prepare(`SELECT * FROM memories
     WHERE status='active'
+      AND kind != 'project_profile'
       AND (
         scope IN ('general','global')
         OR (? = 'project' AND scope='project' AND project_id = ?)

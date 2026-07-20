@@ -104,7 +104,7 @@ function durableSignals(facts: ProjectProfileSessionFacts): string[] {
 export function buildSemanticProjectProfilePrompt(currentProfile: string, facts: ProjectProfileSessionFacts): string {
   return [
     'update the project_profile for a software development memory system.',
-    'write in english lowercase only and keep the existing canonical structure.',
+    'write normal prose in english lowercase and keep the existing canonical structure, but preserve exact case for case-sensitive paths, commands, symbols, identifiers, versions, acronyms, and quoted literals.',
     'do not invent facts. only include durable project facts supported by the session facts.',
     'preserve useful existing profile content and merge new durable facts into the right sections.',
     'avoid temporary details, secrets, raw logs, and duplicate recent-session noise.',

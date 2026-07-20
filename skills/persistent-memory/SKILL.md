@@ -68,10 +68,10 @@ Use this skill to operate the Pi Memory Extension deliberately: recall context w
 - Never store secrets, tokens, passwords, private keys, private personal data, or raw logs.
 - Prefer current project memory plus general preferences and global rules.
 - Do not use other projects unless the user explicitly asks or cwd is home.
-- `memory_search` returns compact candidates; use `memory_get` only for selected full records.
+- `memory_search` returns compact candidates; use `memory_get` only for selected full records from trusted compact indexes such as startup context, search, list, recall, and related Memory result tools.
 - Archive or supersede obsolete memory; do not delete normal memories.
 - Current user instruction beats active memory. If the user contradicts memory, follow the user and ask whether to update, archive, or supersede the old memory.
-- Durable memories should be written in lowercase english; audited prompts may stay in their original language.
+- Durable memories should use lowercase-oriented english prose for titles, summaries, and tags, while preserving exact case for case-sensitive paths, commands, symbols, identifiers, versions, acronyms, and quoted literals. Audited prompts may stay in their original language.
 - Treat closed memory sessions as immutable until lifecycle reopen: do not assume `memory_add`, recall, or ordinary memory tooling reopens a completed session. After Pi emits `session_start`/resume, the Memory Extension keeps the completed session closed until the first non-empty user prompt reuses the same Pi session identity and reopens it lazily.
 
 Good activation triggers:
@@ -216,7 +216,7 @@ Rules:
 
 - Exactly one active canonical `project_profile` should exist per project.
 - `memory_add(kind='project_profile')` updates the canonical active record in place instead of creating duplicates.
-- `memory_project_profile` follows the same canonical update-in-place behavior.
+- `memory_project_profile` follows the same canonical update-in-place behavior and is the primary read/update API for the canonical profile.
 - Avoid append-only growth forever; if it gets noisy or too long, rewrite/consolidate instead of adding more blocks.
 - Ask for confirmation before large semantic rewrites.
 - Treat the profile as a dashboard, not a history log.

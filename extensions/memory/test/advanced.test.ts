@@ -226,7 +226,7 @@ async function runMemoryImportTool(memoryConfig: Record<string, unknown>, params
   if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
   const { path: _ignoredPath, ...toolParams } = params;
   const result = await tools.get('memory_import').execute('tool-call', toolParams, undefined, undefined, { cwd: projectDir });
-  return result.details as any;
+  return { result, details: result.details as any };
 }
 
 async function telemetryToolHarness(name: string, memoryConfig: Record<string, unknown> = {}) {
@@ -1732,12 +1732,12 @@ describe('semantic profile, consolidation links, and entities', () => {
 
   it('uses git.sync.import to include or skip git memory records from configured imports', async () => {
     const out = createGitMemoryBackup();
-    const disabled = await runMemoryImportTool({ git: { enabled: true, sync: { import: false } }, import: { mode: 'merge', on_conflict: 'keep_local' } }, { path: out });
+    const { details: disabled } = await runMemoryImportTool({ git: { enabled: true, sync: { import: false } }, import: { mode: 'merge', on_conflict: 'keep_local' } }, { path: out });
     expect(disabled.inserted).toBeGreaterThan(0);
     expect(disabled.skipped_git).toBeGreaterThan(0);
     expect(disabled.seen_by_table.memories).toBeGreaterThan(disabled.inserted_by_table.memories);
 
-    const enabled = await runMemoryImportTool({ git: { enabled: true, sync: { import: true } }, import: { mode: 'merge', on_conflict: 'keep_local' } }, { path: out });
+    const { details: enabled } = await runMemoryImportTool({ git: { enabled: true, sync: { import: true } }, import: { mode: 'merge', on_conflict: 'keep_local' } }, { path: out });
     expect(enabled.skipped_git).toBe(0);
     expect(enabled.inserted_by_table.memories).toBeGreaterThanOrEqual(2);
   });
@@ -1808,7 +1808,7 @@ describe('semantic profile, consolidation links, and entities', () => {
 
   it('uses safe memory_import tool defaults without config', async () => {
     const out = createMemoryBackup();
-    const details = await runMemoryImportTool({}, { path: out });
+    const { details } = await runMemoryImportTool({}, { path: out });
     expect(details.mode).toBe('dry_run');
     expect(details.on_conflict).toBe('mark_conflict');
     expect(details.inserted).toBe(0);
@@ -1817,7 +1817,7 @@ describe('semantic profile, consolidation links, and entities', () => {
 
   it('uses configured memory_import defaults when params are omitted', async () => {
     const out = createMemoryBackup();
-    const details = await runMemoryImportTool({ import: { mode: 'merge', on_conflict: 'keep_local' } }, { path: out });
+    const { details } = await runMemoryImportTool({ import: { mode: 'merge', on_conflict: 'keep_local' } }, { path: out });
     expect(details.mode).toBe('merge');
     expect(details.on_conflict).toBe('keep_local');
     expect(details.inserted).toBeGreaterThan(0);
@@ -1825,20 +1825,70 @@ describe('semantic profile, consolidation links, and entities', () => {
 
   it('lets explicit memory_import params override configured defaults', async () => {
     const out = createMemoryBackup();
-    const details = await runMemoryImportTool({ import: { mode: 'merge', on_conflict: 'keep_local' } }, { path: out, mode: 'dry_run', on_conflict: 'mark_conflict' });
+    const { details } = await runMemoryImportTool({ import: { mode: 'merge', on_conflict: 'keep_local' } }, { path: out, mode: 'dry_run', on_conflict: 'mark_conflict' });
     expect(details.mode).toBe('dry_run');
     expect(details.on_conflict).toBe('mark_conflict');
     expect(details.inserted).toBe(0);
   });
 
-  it('does not break memory_import on invalid configured defaults', async () => {
+  it('does not break memory_import on invalid configured defaults and keeps warnings visible to the agent', async () => {
     const out = createMemoryBackup();
-    const details = await runMemoryImportTool({ import: { mode: 'apply', on_conflict: 'explode' } }, { path: out });
+    const { result, details } = await runMemoryImportTool({ import: { mode: 'apply', on_conflict: 'explode' } }, { path: out });
     expect(details.mode).toBe('dry_run');
     expect(details.on_conflict).toBe('mark_conflict');
     expect(details.inserted).toBe(0);
     expect(details.warnings.join('\n')).toContain('invalid import.mode');
     expect(details.warnings.join('\n')).toContain('invalid import.on_conflict');
+    expect(result.content[0].text).toContain('warnings=');
+    expect(result.content[0].text).toContain('invalid import.mode');
+    expect(result.content[0].text).toContain('invalid import.on_conflict');
+  });
+
+  it('memory consolidate/import/export/sync tool text exposes bounded review details and counts', async () => {
+    const dbPath = path.join(tmp, `review-tools-${Date.now()}-${Math.random()}.sqlite`);
+    const projectDir = path.join(tmp, `review-tools-project-${Date.now()}-${Math.random()}`);
+    fs.mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Review Tools App', enabled: true, git: { enabled: true } }));
+    const d = openMemoryDb(dbPath);
+    migrate(d);
+    const context = resolveMemoryContext(projectDir, os.homedir(), {});
+    const duplicateA = addMemory(d, { scope: 'project', kind: 'progress', title: 'same thing', content: 'first duplicate review candidate' }, context).memory;
+    const duplicateB = addMemory(d, { scope: 'project', kind: 'progress', title: 'same thing', content: 'second duplicate review candidate' }, context).memory;
+    d.prepare("UPDATE memories SET sync_status='pending' WHERE id=?").run(duplicateA.id);
+    const old = process.env.PI_MEMORY_DB_PATH;
+    process.env.PI_MEMORY_DB_PATH = dbPath;
+    const tools = new Map<string, any>();
+    extension({ registerTool: (tool: any) => tools.set(tool.name, tool), registerCommand: () => {}, on: () => {} });
+    if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
+
+    const consolidate = await tools.get('memory_consolidate').execute('tool-call', { kind: 'progress', dry_run: true }, undefined, undefined, { cwd: projectDir });
+    expect(consolidate.content[0].text).toContain(duplicateA.id);
+    expect(consolidate.content[0].text).toContain(duplicateB.id);
+    expect(consolidate.content[0].text).toContain('same thing');
+
+    const sync = await tools.get('memory_sync_status').execute('tool-call', {}, undefined, undefined, { cwd: projectDir });
+    expect(sync.content[0].text).toContain('memories');
+    expect(sync.content[0].text).toContain('pending=1');
+
+    const exportResult = await tools.get('memory_export').execute('tool-call', {}, undefined, undefined, { cwd: projectDir });
+    expect(exportResult.content[0].text).toContain(exportResult.details.path);
+    expect(exportResult.content[0].text).toContain(`rows=${exportResult.details.rows}`);
+
+    const importSource = db();
+    const importSourceContext = project(path.join(tmp, `import-source-${Date.now()}-${Math.random()}`));
+    const importMemoryRow = addMemory(importSource, { scope: 'project', kind: 'note', title: 'import conflict note', content: 'import conflict note body' }, importSourceContext).memory;
+    const importBackup = path.join(tmp, `import-review-${Date.now()}-${Math.random()}.jsonl`);
+    exportMemory(importSource, { path: importBackup, context: importSourceContext });
+    const importedRawRow = importSource.prepare('SELECT * FROM memories WHERE id=?').get(importMemoryRow.id) as Record<string, unknown>;
+    const memoryColumns = Object.keys(importedRawRow);
+    d.prepare(`INSERT INTO memories(${memoryColumns.join(',')}) VALUES(${memoryColumns.map(() => '?').join(',')})`).run(...memoryColumns.map((column) => importedRawRow[column]) as any[]);
+    fs.mkdirSync(path.join(projectDir, '.pi', 'mempry-backups'), { recursive: true });
+    fs.copyFileSync(importBackup, path.join(projectDir, '.pi', 'mempry-backups', 'memory-backup.jsonl'));
+
+    const imported = await tools.get('memory_import').execute('tool-call', { mode: 'dry_run', on_conflict: 'mark_conflict' }, undefined, undefined, { cwd: projectDir });
+    expect(imported.content[0].text).toContain('conflicts=1');
+    expect(imported.content[0].text).toContain(importMemoryRow.id);
+    expect(imported.content[0].text).toContain('kept_local');
   });
 
   it('extracts file and command entities when adding memories', () => {
