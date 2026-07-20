@@ -404,6 +404,66 @@ describe('advanced lifecycle behavior', () => {
     expect(second).toBeUndefined();
   });
 
+  it('injects context once per Pi session across extension reloads', async () => {
+    const h = await lifecycleHarness();
+    const firstCtx = {
+      ...h.ctx,
+      sessionManager: {
+        ...h.ctx.sessionManager,
+        getSessionId: () => 'pi-session-one',
+        getSessionFile: () => path.join(tmp, 'pi-session-one.jsonl'),
+        getEntries: () => [],
+      },
+    };
+    const first = await h.handlers.get('before_agent_start')?.({ prompt: 'first Pi session' }, firstCtx);
+    const firstMemorySessionId = String(first?.message?.content ?? '').match(/Memory session: (session_[^\s]+)/)?.[1];
+    await h.handlers.get('session_shutdown')?.({ reason: 'reload' }, firstCtx);
+
+    const registerReloadedHandlers = () => {
+      const handlers = new Map<string, Function>();
+      const old = process.env.PI_MEMORY_DB_PATH;
+      process.env.PI_MEMORY_DB_PATH = h.dbPath;
+      extension({ registerTool: () => {}, registerCommand: () => {}, on: (name: string, handler: Function) => handlers.set(name, handler) });
+      if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
+      return handlers;
+    };
+
+    const reloadedHandlers = registerReloadedHandlers();
+    const reloadedCtx = {
+      ...firstCtx,
+      sessionManager: {
+        ...firstCtx.sessionManager,
+        getEntries: () => [
+          { type: 'custom', customType: 'memory-session', data: { memory_session_id: firstMemorySessionId } },
+          { type: 'custom_message', customType: 'memory-context', content: first.message.content },
+        ],
+      },
+    };
+    await reloadedHandlers.get('session_start')?.({ reason: 'reload' }, reloadedCtx);
+    const sameSessionReload = await reloadedHandlers.get('before_agent_start')?.({ prompt: 'same Pi session after reload' }, reloadedCtx);
+
+    const newSessionHandlers = registerReloadedHandlers();
+    const newSessionCtx = {
+      ...h.ctx,
+      sessionManager: {
+        ...h.ctx.sessionManager,
+        getSessionId: () => 'pi-session-two',
+        getSessionFile: () => path.join(tmp, 'pi-session-two.jsonl'),
+        getEntries: () => [],
+      },
+    };
+    await newSessionHandlers.get('session_start')?.({ reason: 'new' }, newSessionCtx);
+    const second = await newSessionHandlers.get('before_agent_start')?.({ prompt: 'second Pi session' }, newSessionCtx);
+    const secondMemorySessionId = String(second?.message?.content ?? '').match(/Memory session: (session_[^\s]+)/)?.[1];
+
+    expect(first?.message?.customType).toBe('memory-context');
+    expect(sameSessionReload).toBeUndefined();
+    expect(second?.message?.customType).toBe('memory-context');
+    expect(firstMemorySessionId).toMatch(/^session_/);
+    expect(secondMemorySessionId).toMatch(/^session_/);
+    expect(secondMemorySessionId).not.toBe(firstMemorySessionId);
+  });
+
   it('reopens a closed memory session lazily on the first real prompt after resume', async () => {
     const h = await lifecycleHarness();
     await h.handlers.get('before_agent_start')?.({ prompt: 'first turn before close' }, h.ctx);
@@ -500,6 +560,13 @@ describe('advanced lifecycle behavior', () => {
     const c = resolveMemoryContext(projectDir, os.homedir(), {});
     const previous: any = (await import('../src/sessions.js')).startMemorySession(d, { title: 'Previous Done' }, c);
     (await import('../src/sessions.js')).finishMemorySession(d, { session_id: previous.id, summary: 'previous useful summary' }, c);
+    addMemory(d, {
+      scope: 'project',
+      kind: 'decision',
+      title: 'bounded startup summary',
+      summary: `compact retrieval cue ${'useful context '.repeat(20)}hidden-tail-marker`,
+      content: 'full memory content should not be loaded at startup',
+    }, c);
     const active: any = (await import('../src/sessions.js')).startMemorySession(d, { title: 'Active Summary' }, c);
     d.prepare('UPDATE memory_sessions SET summary=?, started_at=? WHERE id=?').run('active summary should not win', '2999-01-01T00:00:00.000Z', active.id);
     const handlers = new Map<string, Function>();
@@ -508,7 +575,10 @@ describe('advanced lifecycle behavior', () => {
     const ctx = { cwd: projectDir, ui: { setStatus: () => {}, notify: () => {} }, sessionManager: { getSessionFile: () => path.join(tmp, 'new-pi-session.json') } };
     await handlers.get('session_start')?.({}, ctx);
     const first = await handlers.get('before_agent_start')?.({ prompt: 'new turn' }, ctx);
-    expect(first.message.content).toContain('Previous Done');
+    expect(first.message.content).toContain('Previous Done — previous useful summary');
+    expect(first.message.content).toContain('bounded startup summary — compact retrieval cue');
+    expect(first.message.content).not.toContain('hidden-tail-marker');
+    expect(first.message.content).not.toContain('full memory content should not be loaded at startup');
     expect(first.message.content).not.toContain('Active Summary');
     expect(first.message.content).not.toContain('Session without summary yet');
   });

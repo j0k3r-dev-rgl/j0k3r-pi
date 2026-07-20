@@ -205,7 +205,10 @@ describe('extension setup', () => {
 
     expect(content).toContain('Treat it as the agent persistent brain');
     expect(content).toContain('first rely on startup brain context, loaded skill content, and current conversation');
-    expect(content).toContain('memory_search or memory_recall only when persistent context is missing, stale, ambiguous, or needed for a decision');
+    expect(content).toContain('Startup brain context is a compact index, not fully loaded knowledge');
+    expect(content).toContain('Proactively call memory_search with specific task terms');
+    expect(content).toContain('previous work, prior decisions, user preferences, project conventions, unresolved todos, or known bugs');
+    expect(content).toContain('Use memory_recall for broad workflow context');
     expect(content).toContain('inspect the current project profile early with memory_project_profile get unless startup context already includes an up-to-date profile');
     expect(content).toContain('Store durable reusable knowledge with memory_add');
     expect(content).toContain('Ask before saving global or general user preferences, large project_profile rewrites, contradictions, or policy changes that affect future agents');

@@ -10,7 +10,14 @@ import { autoUpdateProjectProfileFromSession, semanticUpdateProjectProfileFromSe
 
 const MEMORY_SESSION_ENTRY_TYPE = 'memory-session';
 const RECENT_ACTIVE_FALLBACK_MS = 15 * 60 * 1000;
+const STARTUP_SNIPPET_LIMIT = 160;
 const SUBAGENT_SESSION_REGISTRY_KEY = Symbol.for('pi.permissionGuard.subagentSessions');
+
+function compactStartupSnippet(value: unknown): string {
+  const normalized = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (normalized.length <= STARTUP_SNIPPET_LIMIT) return normalized;
+  return `${normalized.slice(0, STARTUP_SNIPPET_LIMIT - 1).trimEnd()}…`;
+}
 
 function memoryDebugLog(ctx: any, event: string, data: Record<string, unknown> = {}): void {
   try {
@@ -46,7 +53,10 @@ function buildMemoryInstructions(context: any): string {
     projectLine,
     'Behavior rules:',
     '- Use memory intelligently, not mechanically: first rely on startup brain context, loaded skill content, and current conversation.',
-    '- Call memory_search or memory_recall only when persistent context is missing, stale, ambiguous, or needed for a decision; do not repeat recall just because a task moves from edit to test if the relevant context is already in conversation.',
+    '- Startup brain context is a compact index, not fully loaded knowledge. If an item may matter, search for it and use memory_get only for the selected full record.',
+    '- Proactively call memory_search with specific task terms when the request may depend on previous work, prior decisions, user preferences, project conventions, unresolved todos, or known bugs.',
+    '- Use memory_recall for broad workflow context when the task phase needs missing or uncertain project history. Do not repeat retrieval when the relevant context is already in the conversation.',
+    '- Skip retrieval for tiny self-contained tasks that clearly cannot benefit from project history.',
     '- For substantial tasks in this project, inspect the current project profile early with memory_project_profile get unless startup context already includes an up-to-date profile.',
     '- Prefer local project memory plus general preferences and global rules; do not use other project memories unless explicitly requested or cwd is HOME.',
     '- Store durable reusable knowledge with memory_add: user preferences, confirmed project decisions, workflow/policy decisions, commands, constraints, architecture, bugs, todos, learnings, progress, and project_profile updates.',
@@ -68,6 +78,11 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
   let promptIndex = 0;
   let startupContextInjected = false;
   let sessionClosed = false;
+
+  function startupContextAlreadyPersisted(ctx: any): boolean {
+    const entries = ctx?.sessionManager?.getEntries?.() ?? ctx?.sessionManager?.getBranch?.() ?? [];
+    return entries.some((entry: any) => entry?.type === 'custom_message' && entry?.customType === 'memory-context');
+  }
 
   function memorySessionEntryId(ctx: any): string | null {
     const entries = ctx?.sessionManager?.getEntries?.() ?? ctx?.sessionManager?.getBranch?.() ?? [];
@@ -158,6 +173,7 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
     }
     const byEntry = findSessionByMemoryId(entryMemorySessionId, context);
     if (byEntry) return byEntry;
+    if (piSessionId || piSessionFile || entryMemorySessionId) return undefined;
     return findRecentActiveSession(context);
   }
 
@@ -323,6 +339,7 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
   }
 
   pi.on?.('session_start', async (event: any, ctx: any) => {
+    startupContextInjected = startupContextAlreadyPersisted(ctx);
     memoryDebugLog(ctx, 'session_start', {
       reason: event?.reason ?? null,
       previous_session_file: event?.previousSessionFile ?? null,
@@ -350,6 +367,7 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
     });
     if (!hasPrompt) return undefined;
 
+    startupContextInjected ||= startupContextAlreadyPersisted(ctx);
     const { id: sessionId, context: c, closed } = ensureMemorySession(ctx, { reopenClosed: true });
 
     if (!closed) {
@@ -402,7 +420,12 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
         })),
       ];
       const startupLines = startupItems.length
-        ? startupItems.map((m: any) => `- ${m.type} · ${m.scope}${m.project_name ? `/${m.project_name}` : ''} · ${m.kind ?? ''} · ${m.title ?? String(m.snippet).slice(0, 180)}`).join('\n')
+        ? startupItems.map((m: any) => {
+          const title = compactStartupSnippet(m.title || m.snippet);
+          const snippet = compactStartupSnippet(m.snippet);
+          const indexedContent = snippet && snippet !== title ? `${title} — ${snippet}` : title;
+          return `- ${m.type} · ${m.scope}${m.project_name ? `/${m.project_name}` : ''} · ${m.kind ?? ''} · ${indexedContent}`;
+        }).join('\n')
         : '- No recent local memories or session summaries found yet.';
       return {
         message: {

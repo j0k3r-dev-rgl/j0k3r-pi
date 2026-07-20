@@ -51,3 +51,4 @@ openspec/
 bin
 .pi/workspace-code-graph/
 .pi/subagents-debug.log
+models-store.json
