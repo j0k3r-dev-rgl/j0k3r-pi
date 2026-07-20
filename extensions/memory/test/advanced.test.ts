@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import extension from '../index.js';
 import { openMemoryDb } from '../src/db.js';
 import { migrate } from '../src/migrations.js';
@@ -61,6 +62,126 @@ function createGitMemoryBackup(): string {
   return out;
 }
 
+function createLegacyProfileDb() {
+  const d = openMemoryDb(':memory:');
+  d.exec(`
+CREATE TABLE memory_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE memories (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  device_id TEXT,
+  scope TEXT NOT NULL CHECK (scope IN ('general','project','global')),
+  project_id TEXT,
+  project_name TEXT,
+  kind TEXT NOT NULL,
+  title TEXT,
+  summary TEXT,
+  content TEXT NOT NULL,
+  tags TEXT,
+  source TEXT NOT NULL DEFAULT 'agent',
+  origin_type TEXT DEFAULT 'inferred_by_agent',
+  confidence REAL NOT NULL DEFAULT 1.0,
+  importance INTEGER NOT NULL DEFAULT 3,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived','superseded')),
+  version INTEGER NOT NULL DEFAULT 1,
+  sync_status TEXT NOT NULL DEFAULT 'local' CHECK (sync_status IN ('local','pending','synced','conflict')),
+  cloud_sync_id TEXT,
+  cloud_synced_at TEXT,
+  cloud_revision TEXT,
+  content_hash TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  last_accessed_at TEXT,
+  access_count INTEGER NOT NULL DEFAULT 0,
+  metadata_json TEXT,
+  CHECK ((scope IN ('general','global') AND project_id IS NULL AND project_name IS NULL) OR (scope='project' AND project_id IS NOT NULL AND project_name IS NOT NULL))
+);
+CREATE TABLE memory_links (
+  id TEXT PRIMARY KEY,
+  from_memory_id TEXT NOT NULL REFERENCES memories(id),
+  to_memory_id TEXT NOT NULL REFERENCES memories(id),
+  relation_type TEXT NOT NULL CHECK (relation_type IN ('supports','supersedes','contradicts','derived_from','related_to')),
+  created_at TEXT NOT NULL,
+  metadata_json TEXT
+);
+CREATE TABLE memory_entities (
+  id TEXT PRIMARY KEY,
+  memory_id TEXT REFERENCES memories(id),
+  entity_type TEXT NOT NULL,
+  name TEXT NOT NULL,
+  value TEXT,
+  created_at TEXT NOT NULL
+);
+`);
+  return d;
+}
+
+function insertLegacyProjectProfile(d: any, row: {
+  id: string;
+  project_id: string;
+  project_name: string;
+  title: string;
+  summary: string;
+  content: string;
+  tags?: string[];
+  origin_type?: string;
+  confidence?: number;
+  importance?: number;
+  status?: string;
+  version?: number;
+  sync_status?: string;
+  metadata_json?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}) {
+  d.prepare(`INSERT INTO memories(
+    id,user_id,device_id,scope,project_id,project_name,kind,title,summary,content,tags,source,origin_type,confidence,importance,status,version,sync_status,content_hash,created_at,updated_at,metadata_json
+  ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    row.id,
+    'test-user',
+    'test-device',
+    'project',
+    row.project_id,
+    row.project_name,
+    'project_profile',
+    row.title,
+    row.summary,
+    row.content,
+    JSON.stringify(row.tags ?? ['project_profile']),
+    'agent',
+    row.origin_type ?? 'confirmed_by_user',
+    row.confidence ?? 1,
+    row.importance ?? 5,
+    row.status ?? 'active',
+    row.version ?? 1,
+    row.sync_status ?? 'local',
+    null,
+    row.created_at,
+    row.updated_at,
+    JSON.stringify(row.metadata_json ?? {}),
+  );
+}
+
+function createProjectProfileBackup(profile: { content: string; title?: string; summary?: string; metadata_json?: Record<string, unknown>; tags?: string[]; }) {
+  const sourceDir = path.join(tmp, `profile-backup-source-${Date.now()}-${Math.random()}`);
+  const source = db();
+  const c = project(sourceDir);
+  const memory = addMemory(source, {
+    scope: 'project',
+    kind: 'project_profile',
+    title: profile.title ?? 'advanced app project profile',
+    summary: profile.summary ?? 'living project profile for advanced app',
+    content: profile.content,
+    tags: profile.tags ?? ['project_profile', 'profile'],
+    metadata_json: profile.metadata_json ?? {},
+    importance: 5,
+    origin_type: 'confirmed_by_user',
+  }, c).memory;
+  const out = path.join(tmp, `profile-backup-${Date.now()}-${Math.random()}.jsonl`);
+  exportMemory(source, { path: out, context: c });
+  return { path: out, memory, context: c };
+}
+
 async function runMemoryExportTool(memoryConfig: Record<string, unknown> = {}, params: Record<string, unknown> = {}) {
   const dbPath = path.join(tmp, `export-target-${Date.now()}-${Math.random()}.sqlite`);
   const projectDir = path.join(tmp, `export-project-${Date.now()}-${Math.random()}`);
@@ -106,6 +227,23 @@ async function runMemoryImportTool(memoryConfig: Record<string, unknown>, params
   const { path: _ignoredPath, ...toolParams } = params;
   const result = await tools.get('memory_import').execute('tool-call', toolParams, undefined, undefined, { cwd: projectDir });
   return result.details as any;
+}
+
+async function telemetryToolHarness(name: string, memoryConfig: Record<string, unknown> = {}) {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  const dbPath = path.join(tmp, `${slug}.sqlite`);
+  const projectDir = path.join(tmp, `${slug}-project`);
+  fs.mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
+  fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: name, enabled: true, git: { enabled: true }, ...memoryConfig }));
+  const d = openMemoryDb(dbPath);
+  migrate(d);
+  const old = process.env.PI_MEMORY_DB_PATH;
+  process.env.PI_MEMORY_DB_PATH = dbPath;
+  const tools = new Map<string, any>();
+  const handlers = new Map<string, Function>();
+  extension({ registerTool: (tool: any) => tools.set(tool.name, tool), registerCommand: () => {}, on: (event: string, handler: Function) => handlers.set(event, handler) });
+  if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
+  return { d, dbPath, projectDir, tools, handlers };
 }
 
 async function lifecycleHarness(memoryConfig: Record<string, unknown> = {}) {
@@ -583,6 +721,64 @@ describe('advanced lifecycle behavior', () => {
     expect(first.message.content).not.toContain('Session without summary yet');
   });
 
+  it('injects scored startup context with active-only current-project results plus one completed session summary', async () => {
+    const dbPath = path.join(tmp, 'startup-scored.sqlite');
+    const projectDir = path.join(tmp, 'startup-scored-project');
+    const otherDir = path.join(tmp, 'startup-scored-other');
+    fs.mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
+    fs.mkdirSync(path.join(otherDir, '.pi'), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Startup Scored App' }));
+    fs.writeFileSync(path.join(otherDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Other Startup Scored App' }));
+    const old = process.env.PI_MEMORY_DB_PATH;
+    process.env.PI_MEMORY_DB_PATH = dbPath;
+    const d = openMemoryDb(dbPath);
+    migrate(d);
+    const c = resolveMemoryContext(projectDir, os.homedir(), {});
+    const other = resolveMemoryContext(otherDir, os.homedir(), {});
+
+    const previous: any = (await import('../src/sessions.js')).startMemorySession(d, { title: 'Previous Startup Session' }, c);
+    (await import('../src/sessions.js')).finishMemorySession(d, { session_id: previous.id, summary: 'previous startup summary survives append' }, c);
+
+    const decision = addMemory(d, { scope: 'project', kind: 'decision', title: 'startup decision', summary: 'decision should outrank fresh progress', content: 'decision should outrank fresh progress', importance: 3 }, c).memory;
+    const freshCommand = addMemory(d, { scope: 'project', kind: 'command', title: 'fresh command', summary: 'fresh command summary', content: 'fresh command summary', importance: 3 }, c).memory;
+    const globalCommand = addMemory(d, { scope: 'global', kind: 'command', title: 'global startup command', summary: 'global startup command summary', content: 'global startup command summary', importance: 4 }, c).memory;
+    const note = addMemory(d, { scope: 'project', kind: 'note', title: 'startup note', summary: 'startup note summary', content: 'startup note summary', importance: 5 }, c).memory;
+    const progress = addMemory(d, { scope: 'project', kind: 'progress', title: 'fresh progress', summary: 'fresh progress with prompt keyword match', content: 'fresh progress with prompt keyword match', importance: 5 }, c).memory;
+    const archived = addMemory(d, { scope: 'project', kind: 'decision', title: 'archived startup decision', summary: 'archived', content: 'archived', importance: 5 }, c).memory;
+    const superseded = addMemory(d, { scope: 'project', kind: 'command', title: 'superseded startup command', summary: 'superseded', content: 'superseded', importance: 5 }, c).memory;
+    addMemory(d, { scope: 'project', kind: 'decision', title: 'other project startup decision', summary: 'must not leak', content: 'must not leak', importance: 5 }, other);
+
+    d.prepare('UPDATE memories SET updated_at=? WHERE id=?').run('2026-03-02T00:00:00.000Z', decision.id);
+    d.prepare('UPDATE memories SET updated_at=? WHERE id=?').run('2026-04-01T00:00:00.000Z', freshCommand.id);
+    d.prepare('UPDATE memories SET updated_at=? WHERE id=?').run('2026-04-01T00:00:00.000Z', globalCommand.id);
+    d.prepare('UPDATE memories SET updated_at=? WHERE id=?').run('2026-04-01T00:00:00.000Z', note.id);
+    d.prepare('UPDATE memories SET updated_at=? WHERE id=?').run('2026-04-01T00:00:00.000Z', progress.id);
+    d.prepare('UPDATE memories SET status=? WHERE id=?').run('archived', archived.id);
+    d.prepare('UPDATE memories SET status=? WHERE id=?').run('superseded', superseded.id);
+
+    const handlers = new Map<string, Function>();
+    extension({ registerTool: () => {}, registerCommand: () => {}, on: (name: string, handler: Function) => handlers.set(name, handler) });
+    if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
+    const ctx = { cwd: projectDir, ui: { setStatus: () => {}, notify: () => {} }, sessionManager: { getSessionFile: () => path.join(tmp, 'scored-pi-session.json') } };
+    await handlers.get('session_start')?.({}, ctx);
+    const first = await handlers.get('before_agent_start')?.({ prompt: 'prompt keyword match should not affect startup order' }, ctx);
+    const text = String(first.message.content);
+    const startupSection = text.split('Startup brain context (recent memories and session summaries):\n')[1] ?? '';
+    const startupLines = startupSection.split('\n').filter((line) => line.startsWith('- memory') || line.startsWith('- session'));
+
+    expect(startupLines).toHaveLength(5);
+    expect(text).toContain('Previous Startup Session — previous startup summary survives append');
+    expect(text).toContain('startup decision');
+    expect(text).toContain('fresh command');
+    expect(text).toContain('global startup command');
+    expect(text).toContain('startup note');
+    expect(startupSection).not.toContain('fresh progress —');
+    expect(startupSection).not.toContain('archived startup decision');
+    expect(startupSection).not.toContain('superseded startup command');
+    expect(startupSection).not.toContain('other project startup decision');
+    expect(startupSection.indexOf('startup decision')).toBeLessThan(startupSection.indexOf('fresh command'));
+  });
+
   it('does not rewrite prompt foreign keys to a temporary legacy sessions table', () => {
     const dbPath = path.join(tmp, 'old-schema.sqlite');
     const d = openMemoryDb(dbPath);
@@ -655,6 +851,142 @@ describe('advanced lifecycle behavior', () => {
     expect(row.summary).toContain('semantic model summary was unavailable');
     expect(meta.summary_source).toBe('heuristic');
     expect(meta.summary_error).toContain('auth exploded');
+  });
+});
+
+describe('retrieval telemetry', () => {
+  it('writes nothing and prunes nothing when telemetry is disabled by default', async () => {
+    const { d, projectDir, tools } = await telemetryToolHarness('Telemetry Disabled App');
+    const context = resolveMemoryContext(projectDir, os.homedir(), {});
+    addMemory(d, { scope: 'project', kind: 'decision', title: 'disabled telemetry decision', content: 'disabled telemetry decision', importance: 5 }, context);
+    d.prepare(`INSERT INTO retrieval_telemetry(id,timestamp,operation,trigger_category,project_id,session_id,result_memory_ids,result_ranks,result_count,latency_ms,success,error_category)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      'telemetry_old_disabled', '2000-01-01T00:00:00.000Z', 'search', 'tool_call', context.project_id, null, '[]', '[]', 0, 1, 1, 'none',
+    );
+
+    const search = await tools.get('memory_search').execute('tool-call', { query: 'disabled telemetry', limit: 5 }, undefined, undefined, { cwd: projectDir });
+    expect(search.isError).not.toBe(true);
+    const rows = d.prepare('SELECT id FROM retrieval_telemetry ORDER BY id').all() as Array<{ id: string }>;
+    expect(rows).toEqual([{ id: 'telemetry_old_disabled' }]);
+  });
+
+  it('records enabled search, recall, and startup telemetry with ids/ranks/count/latency/categories only', async () => {
+    const sentinel = 'sensitive sentinel alpha 123';
+    const sentinelHash = createHash('sha256').update(sentinel).digest('hex');
+    const { d, projectDir, tools, handlers } = await telemetryToolHarness('Telemetry Enabled App', { telemetry: { retrieval: { enabled: true, retention_days: 30 } } });
+    const context = resolveMemoryContext(projectDir, os.homedir(), {});
+    const note = addMemory(d, {
+      scope: 'project',
+      kind: 'note',
+      title: `title ${sentinel}`,
+      summary: `summary ${sentinel}`,
+      content: `content ${sentinel}`,
+      importance: 5,
+    }, context).memory;
+
+    const ctx = { cwd: projectDir, ui: { setStatus: () => {}, notify: () => {} }, sessionManager: { getSessionFile: () => path.join(tmp, 'telemetry-enabled-session.json') } };
+    await handlers.get('session_start')?.({}, ctx);
+    const startup = await handlers.get('before_agent_start')?.({ prompt: `prompt ${sentinel}` }, ctx);
+    expect(startup.message.content).toContain('Memory session:');
+
+    const search = await tools.get('memory_search').execute('tool-call', { query: sentinel, limit: 5 }, undefined, undefined, { cwd: projectDir });
+    const recall = await tools.get('memory_recall').execute('tool-call', { context: 'task', query: sentinel, limit: 5 }, undefined, undefined, { cwd: projectDir });
+    expect(search.isError).not.toBe(true);
+    expect(recall.isError).not.toBe(true);
+
+    const rows = d.prepare('SELECT timestamp,operation,trigger_category,project_id,session_id,result_memory_ids,result_ranks,result_count,latency_ms,success,error_category FROM retrieval_telemetry ORDER BY timestamp ASC').all() as Array<any>;
+    expect(rows.map((row) => row.operation)).toEqual(['startup', 'search', 'recall']);
+    expect(rows.map((row) => row.trigger_category)).toEqual(['lifecycle', 'tool_call', 'tool_call']);
+    for (const row of rows) {
+      expect(Object.keys(row).sort()).toEqual(['error_category', 'latency_ms', 'operation', 'project_id', 'result_count', 'result_memory_ids', 'result_ranks', 'session_id', 'success', 'timestamp', 'trigger_category'].sort());
+      expect(row.project_id).toBe(context.project_id);
+      expect(typeof row.result_memory_ids).toBe('string');
+      expect(typeof row.result_ranks).toBe('string');
+      expect(JSON.parse(row.result_memory_ids)).toEqual(expect.arrayContaining([note.id]));
+      expect(JSON.parse(row.result_ranks)[0]).toBe(0);
+      expect(row.result_count).toBeGreaterThan(0);
+      expect(row.latency_ms).toBeGreaterThanOrEqual(0);
+      expect(row.success).toBe(1);
+      expect(row.error_category).toBe('none');
+      const persisted = JSON.stringify(row);
+      expect(persisted).not.toContain(sentinel);
+      expect(persisted).not.toContain(sentinelHash);
+    }
+
+    const schemaText = d.prepare("SELECT sql FROM sqlite_master WHERE name='retrieval_telemetry'").get() as { sql: string };
+    expect(schemaText.sql).not.toContain('metadata_json');
+    expect(schemaText.sql).not.toContain('query');
+    expect(schemaText.sql).not.toContain('content');
+    expect(schemaText.sql).not.toContain('summary');
+    expect(schemaText.sql).not.toContain('title');
+    expect(schemaText.sql).not.toContain('hash');
+  });
+
+  it('prunes only telemetry rows older than the enabled retention boundary', async () => {
+    const { d, projectDir, tools } = await telemetryToolHarness('Telemetry Prune App', { telemetry: { retrieval: { enabled: true, retention_days: 30 } } });
+    const context = resolveMemoryContext(projectDir, os.homedir(), {});
+    addMemory(d, { scope: 'project', kind: 'note', content: 'prune target memory', importance: 5 }, context);
+    d.prepare(`INSERT INTO retrieval_telemetry(id,timestamp,operation,trigger_category,project_id,session_id,result_memory_ids,result_ranks,result_count,latency_ms,success,error_category)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run('telemetry_old', '2026-01-01T00:00:00.000Z', 'search', 'tool_call', context.project_id, null, '[]', '[]', 0, 1, 1, 'none');
+    d.prepare(`INSERT INTO retrieval_telemetry(id,timestamp,operation,trigger_category,project_id,session_id,result_memory_ids,result_ranks,result_count,latency_ms,success,error_category)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run('telemetry_boundary', '2026-01-31T00:00:00.000Z', 'search', 'tool_call', context.project_id, null, '[]', '[]', 0, 1, 1, 'none');
+
+    const realDate = Date;
+    class FixedDate extends Date {
+      constructor(value?: any) { super(value ?? '2026-03-01T00:00:00.000Z'); }
+      static now() { return new realDate('2026-03-01T00:00:00.000Z').getTime(); }
+    }
+    (globalThis as any).Date = FixedDate;
+    try {
+      const result = await tools.get('memory_search').execute('tool-call', { query: 'prune target', limit: 5 }, undefined, undefined, { cwd: projectDir });
+      expect(result.isError).not.toBe(true);
+    } finally {
+      (globalThis as any).Date = realDate;
+    }
+
+    const rows = d.prepare('SELECT id FROM retrieval_telemetry ORDER BY id').all() as Array<{ id: string }>;
+    expect(rows.map((row) => row.id)).not.toContain('telemetry_old');
+    expect(rows.map((row) => row.id)).toContain('telemetry_boundary');
+  });
+
+  it('swallows telemetry write and prune failures without altering retrieval results and stays local/export-free', async () => {
+    const sentinel = 'privacy sentinel beta 456';
+    const { d, projectDir, tools, handlers } = await telemetryToolHarness('Telemetry Failure App', { telemetry: { retrieval: { enabled: true, retention_days: 30 } } });
+    const context = resolveMemoryContext(projectDir, os.homedir(), {});
+    const memory = addMemory(d, { scope: 'project', kind: 'note', title: `title ${sentinel}`, summary: `summary ${sentinel}`, content: `content ${sentinel}`, importance: 5 }, context).memory;
+
+    const originalFetch = (globalThis as any).fetch;
+    let fetchCalls = 0;
+    (globalThis as any).fetch = (..._args: any[]) => { fetchCalls += 1; throw new Error('telemetry must remain local only'); };
+    d.exec(`CREATE TRIGGER retrieval_telemetry_fail_delete BEFORE DELETE ON retrieval_telemetry BEGIN SELECT RAISE(ABORT, 'prune blocked'); END;`);
+    d.prepare(`INSERT INTO retrieval_telemetry(id,timestamp,operation,trigger_category,project_id,session_id,result_memory_ids,result_ranks,result_count,latency_ms,success,error_category)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run('telemetry_failure_seed', '2000-01-01T00:00:00.000Z', 'search', 'tool_call', context.project_id, null, '[]', '[]', 0, 1, 1, 'none');
+    const ctx = { cwd: projectDir, ui: { setStatus: () => {}, notify: () => {} }, sessionManager: { getSessionFile: () => path.join(tmp, 'telemetry-failure-session.json') } };
+    try {
+      await handlers.get('session_start')?.({}, ctx);
+      const startup = await handlers.get('before_agent_start')?.({ prompt: sentinel }, ctx);
+      const search = await tools.get('memory_search').execute('tool-call', { query: sentinel, limit: 5 }, undefined, undefined, { cwd: projectDir });
+      const recall = await tools.get('memory_recall').execute('tool-call', { context: 'task', query: sentinel, limit: 5 }, undefined, undefined, { cwd: projectDir });
+      expect(startup.message.content).toContain('Memory session:');
+      expect(search.isError).not.toBe(true);
+      expect(recall.isError).not.toBe(true);
+      expect(search.details.results.map((item: any) => item.id)).toContain(memory.id);
+      expect(recall.details.results.map((item: any) => item.id)).toContain(memory.id);
+      expect(fetchCalls).toBe(0);
+    } finally {
+      (globalThis as any).fetch = originalFetch;
+    }
+
+    d.exec('DROP TABLE retrieval_telemetry');
+    const searchAfterDrop = await tools.get('memory_search').execute('tool-call', { query: sentinel, limit: 5 }, undefined, undefined, { cwd: projectDir });
+    expect(searchAfterDrop.isError).not.toBe(true);
+    expect(searchAfterDrop.details.results.map((item: any) => item.id)).toContain(memory.id);
+
+    const exported = path.join(tmp, 'telemetry-export.jsonl');
+    exportMemory(d, { path: exported, context });
+    const payload = fs.readFileSync(exported, 'utf8');
+    expect(payload).not.toContain('retrieval_telemetry');
+    expect(payload).not.toContain('telemetry_failure_seed');
   });
 });
 
@@ -1087,6 +1419,192 @@ describe('semantic profile, consolidation links, and entities', () => {
     const preview = buildProjectProfileUpdatePreview('a\nb', 'a\nc');
     expect(preview).toContain('+ c');
     expect(preview).toContain('- b');
+  });
+
+  it('canonicalizes legacy duplicate active project profiles during migration and preserves superseded rows byte-for-byte', () => {
+    const legacy = createLegacyProfileDb();
+    insertLegacyProjectProfile(legacy, {
+      id: 'profile-a',
+      project_id: 'project-1',
+      project_name: 'advanced app',
+      title: 'advanced app project profile a',
+      summary: 'profile a summary',
+      content: 'type: project_profile\ndetails: profile a',
+      metadata_json: { source: 'a', nested: { value: 1 } },
+      created_at: '2026-01-01T00:00:00.000Z',
+      updated_at: '2026-01-03T00:00:00.000Z',
+    });
+    insertLegacyProjectProfile(legacy, {
+      id: 'profile-b',
+      project_id: 'project-1',
+      project_name: 'advanced app',
+      title: 'advanced app project profile b',
+      summary: 'profile b summary',
+      content: 'type: project_profile\ndetails: profile b',
+      metadata_json: { source: 'b', nested: { value: 2 } },
+      created_at: '2026-01-01T00:00:00.000Z',
+      updated_at: '2026-01-04T00:00:00.000Z',
+    });
+    insertLegacyProjectProfile(legacy, {
+      id: 'profile-c',
+      project_id: 'project-2',
+      project_name: 'other app',
+      title: 'other app profile c',
+      summary: 'profile c summary',
+      content: 'type: project_profile\ndetails: profile c',
+      metadata_json: { source: 'c' },
+      created_at: '2026-01-01T00:00:00.000Z',
+      updated_at: '2026-01-02T00:00:00.000Z',
+    });
+
+    migrate(legacy);
+
+    const projectOne = legacy.prepare("SELECT id, status, content, title, summary, metadata_json FROM memories WHERE project_id='project-1' ORDER BY id ASC").all() as Array<any>;
+    expect(projectOne.map((row) => ({ id: row.id, status: row.status }))).toEqual([
+      { id: 'profile-a', status: 'superseded' },
+      { id: 'profile-b', status: 'active' },
+    ]);
+    expect(projectOne[0].content).toBe('type: project_profile\ndetails: profile a');
+    expect(projectOne[0].title).toBe('advanced app project profile a');
+    expect(projectOne[0].summary).toBe('profile a summary');
+    expect(JSON.parse(projectOne[0].metadata_json)).toEqual({ source: 'a', nested: { value: 1 } });
+
+    const links = legacy.prepare("SELECT from_memory_id, to_memory_id, relation_type FROM memory_links WHERE to_memory_id='profile-b' ORDER BY from_memory_id ASC").all() as Array<any>;
+    expect(links).toEqual([
+      { from_memory_id: 'profile-a', to_memory_id: 'profile-b', relation_type: 'supersedes' },
+    ]);
+
+    const indexes = legacy.prepare("PRAGMA index_list('memories')").all() as Array<any>;
+    expect(indexes.some((row) => row.name === 'uq_active_project_profile')).toBe(true);
+    expect(() => insertLegacyProjectProfile(legacy, {
+      id: 'profile-d',
+      project_id: 'project-1',
+      project_name: 'advanced app',
+      title: 'duplicate active profile',
+      summary: 'should violate unique invariant',
+      content: 'type: project_profile\ndetails: duplicate',
+      created_at: '2026-01-05T00:00:00.000Z',
+      updated_at: '2026-01-05T00:00:00.000Z',
+    })).toThrow();
+  });
+
+  it('uses id ascending to break project_profile migration ties on updated_at', () => {
+    const legacy = createLegacyProfileDb();
+    insertLegacyProjectProfile(legacy, {
+      id: 'profile-a',
+      project_id: 'project-tie',
+      project_name: 'tie app',
+      title: 'tie profile a',
+      summary: 'tie a',
+      content: 'type: project_profile\ndetails: tie a',
+      created_at: '2026-01-01T00:00:00.000Z',
+      updated_at: '2026-01-05T00:00:00.000Z',
+    });
+    insertLegacyProjectProfile(legacy, {
+      id: 'profile-z',
+      project_id: 'project-tie',
+      project_name: 'tie app',
+      title: 'tie profile z',
+      summary: 'tie z',
+      content: 'type: project_profile\ndetails: tie z',
+      created_at: '2026-01-01T00:00:00.000Z',
+      updated_at: '2026-01-05T00:00:00.000Z',
+    });
+
+    migrate(legacy);
+
+    const rows = legacy.prepare("SELECT id, status FROM memories WHERE project_id='project-tie' ORDER BY id ASC").all() as Array<any>;
+    expect(rows).toEqual([
+      { id: 'profile-a', status: 'active' },
+      { id: 'profile-z', status: 'superseded' },
+    ]);
+  });
+
+  it('reports project_profile import collisions in dry run without writes and preserves one active profile for merge policies', () => {
+    const target = db();
+    const targetDir = path.join(tmp, 'profile-import-target');
+    const context = project(targetDir);
+    const canonical = addMemory(target, {
+      scope: 'project',
+      kind: 'project_profile',
+      title: 'advanced app project profile',
+      summary: 'living project profile for advanced app',
+      content: 'type: project_profile\ndetails: local canonical profile',
+      tags: ['project_profile', 'profile'],
+      metadata_json: { owner: 'local' },
+      importance: 5,
+      origin_type: 'confirmed_by_user',
+    }, context).memory;
+
+    const backup = createProjectProfileBackup({
+      content: 'type: project_profile\ndetails: imported profile',
+      metadata_json: { owner: 'imported' },
+    });
+
+    const beforeRows = target.prepare("SELECT COUNT(*) AS count FROM memories WHERE project_id=?").get(context.project_id) as { count: number };
+    const dryRun = importMemory(target, { path: backup.path, mode: 'dry_run', on_conflict: 'keep_local' });
+    const afterDryRunRows = target.prepare("SELECT COUNT(*) AS count FROM memories WHERE project_id=?").get(context.project_id) as { count: number };
+
+    expect(afterDryRunRows.count).toBe(beforeRows.count);
+    expect(dryRun.profile_collision_details).toEqual([
+      {
+        project_id: context.project_id,
+        incoming_profile_id: backup.memory.id,
+        canonical_profile_id: canonical.id,
+        action: 'keep_local',
+      },
+    ]);
+    expect(dryRun.inserted).toBe(0);
+    expect(dryRun.would_insert).toBe(0);
+
+    for (const policy of ['keep_local', 'keep_imported', 'mark_conflict'] as const) {
+      const policyDb = db();
+      const policyDir = path.join(tmp, `profile-import-target-${policy}`);
+      const policyContext = project(policyDir);
+      const local = addMemory(policyDb, {
+        scope: 'project',
+        kind: 'project_profile',
+        title: 'advanced app project profile',
+        summary: 'living project profile for advanced app',
+        content: 'type: project_profile\ndetails: local canonical profile',
+        tags: ['project_profile', 'profile'],
+        metadata_json: { owner: 'local' },
+        importance: 5,
+        origin_type: 'confirmed_by_user',
+      }, policyContext).memory;
+
+      const result = importMemory(policyDb, { path: backup.path, mode: 'merge', on_conflict: policy });
+      expect(result.profile_collision_details).toEqual([
+        {
+          project_id: policyContext.project_id,
+          incoming_profile_id: backup.memory.id,
+          canonical_profile_id: local.id,
+          action: policy,
+        },
+      ]);
+
+      const rows = policyDb.prepare("SELECT id, status, content, sync_status, metadata_json FROM memories WHERE project_id=? AND kind='project_profile' ORDER BY id ASC").all(policyContext.project_id) as Array<any>;
+      expect(rows.filter((row) => row.status === 'active')).toHaveLength(1);
+      expect(rows.find((row) => row.id === backup.memory.id)?.status).toBe('superseded');
+      expect(rows.find((row) => row.id === backup.memory.id)?.content).toBe('type: project_profile\ndetails: imported profile');
+
+      const link = policyDb.prepare("SELECT from_memory_id, to_memory_id, relation_type FROM memory_links WHERE from_memory_id=?").get(backup.memory.id) as any;
+      expect(link).toEqual({ from_memory_id: backup.memory.id, to_memory_id: local.id, relation_type: 'supersedes' });
+
+      const active = rows.find((row) => row.status === 'active');
+      if (policy === 'keep_local') {
+        expect(active.id).toBe(local.id);
+        expect(active.content).toBe('type: project_profile\ndetails: local canonical profile');
+      } else if (policy === 'keep_imported') {
+        expect(active.id).toBe(local.id);
+        expect(active.content).toBe('type: project_profile\ndetails: imported profile');
+        expect(JSON.parse(active.metadata_json)).toMatchObject({ owner: 'imported' });
+      } else {
+        expect(active.id).toBe(local.id);
+        expect(active.content).toBe('type: project_profile\ndetails: local canonical profile');
+        expect(rows.find((row) => row.id === backup.memory.id)?.sync_status).toBe('conflict');
+      }
+    }
   });
 
   it('skips similarity consolidation candidates with contradiction risk', () => {

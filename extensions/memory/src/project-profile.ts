@@ -1,6 +1,6 @@
 import type { Db } from './db.js';
 import type { ResolvedContext } from './types.js';
-import { addMemory, getMemoryRaw, updateMemory } from './memory-store.js';
+import { addMemory, getMemoryRaw, updateMemory, upsertProjectProfile } from './memory-store.js';
 
 export type ProjectProfileSessionFacts = {
   session_id: string;
@@ -66,7 +66,13 @@ export function updateProjectProfile(db: Db, context: ResolvedContext, content: 
     origin_type: 'confirmed_by_user',
     importance: 5,
   }, context).memory;
-  return updateMemory(db, existing.id, { content, tags: tags ?? JSON.parse(existing.tags || '[]'), importance: 5 }, context);
+  return upsertProjectProfile(db, {
+    scope: 'project',
+    kind: 'project_profile',
+    content,
+    tags: tags ?? JSON.parse(existing.tags || '[]'),
+    importance: 5,
+  }, context).memory;
 }
 
 function compactLine(text: string, max = 180): string {

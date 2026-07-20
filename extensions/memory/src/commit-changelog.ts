@@ -1,10 +1,10 @@
 import type { Db } from './db.js';
-import type { MemoryRecord, ResolvedContext } from './types.js';
+import type { MemoryLinkRelation, MemoryRecord, ResolvedContext } from './types.js';
 import { addMemory, getMemoryRaw } from './memory-store.js';
-import { generateGenericId } from './ids.js';
-import { jsonString, nowIso, parseJson, snippet } from './utils.js';
+import { addMemoryLink } from './links.js';
+import { jsonString, parseJson, snippet } from './utils.js';
 
-export type CommitChangelogRelation = 'derived_from' | 'supports' | 'related_to' | 'supersedes';
+export type CommitChangelogRelation = Extract<MemoryLinkRelation, 'derived_from' | 'supports' | 'related_to' | 'supersedes'>;
 export type CommitChangelogRecordType = 'commit_record' | 'changelog_entry' | 'release_record';
 
 export type CommitChangeType = 'fix' | 'feature' | 'chore' | 'docs' | 'refactor' | 'test' | 'sync' | 'other';
@@ -165,10 +165,6 @@ function memoryMatchesProjectMode(record: MemoryRecord, input: SearchInput, cont
   if (projectMode === 'selected') return record.scope !== 'project' || record.project_name === input.project_name;
   if (context.scope === 'project') return record.scope !== 'project' || record.project_id === context.project_id;
   return true;
-}
-
-function sameProjectBoundary(a: MemoryRecord, b: MemoryRecord): boolean {
-  return a.scope === b.scope && a.project_id === b.project_id && a.project_name === b.project_name;
 }
 
 function desiredProjectFields(scope: CommitRecordInput['scope'] | ChangelogEntryInput['scope'] | undefined, context: ResolvedContext): { scope: 'general' | 'project' | 'global'; project_id: string | null; project_name: string | null } {
@@ -401,26 +397,13 @@ function compactLink(row: Record<string, unknown>): Record<string, unknown> {
 
 function insertLinkIfMissing(db: Db, from: MemoryRecord, to: MemoryRecord, relationType: CommitChangelogRelation, metadata: Record<string, unknown> = {}): { link: Record<string, unknown>; warning?: string } {
   if (!ALLOWED_RELATIONS.includes(relationType)) throw new Error(`unsupported relation_type: ${relationType}`);
-  if (!sameProjectBoundary(from, to)) throw new Error(`cross-project links are not allowed: ${from.id} -> ${to.id}`);
-  const existing = db.prepare('SELECT * FROM memory_links WHERE from_memory_id=? AND to_memory_id=? AND relation_type=?').get(from.id, to.id, relationType) as Record<string, unknown> | undefined;
-  if (existing) return { link: compactLink(existing), warning: 'duplicate link; returned existing link' };
-  const row = {
-    id: generateGenericId('link'),
+  const result = addMemoryLink(db, {
     from_memory_id: from.id,
     to_memory_id: to.id,
     relation_type: relationType,
-    created_at: nowIso(),
-    metadata_json: jsonString(metadata),
-  };
-  db.prepare('INSERT INTO memory_links(id,from_memory_id,to_memory_id,relation_type,created_at,metadata_json) VALUES(?,?,?,?,?,?)').run(
-    row.id,
-    row.from_memory_id,
-    row.to_memory_id,
-    row.relation_type,
-    row.created_at,
-    row.metadata_json,
-  );
-  return { link: compactLink(row) };
+    metadata_json: metadata,
+  });
+  return { link: result.link as unknown as Record<string, unknown>, warning: result.warning };
 }
 
 function linkRelatedMemories(db: Db, from: MemoryRecord, related: MemoryRecord[], sourceTool: 'memory_commit_record_add' | 'memory_changelog_entry_add'): void {

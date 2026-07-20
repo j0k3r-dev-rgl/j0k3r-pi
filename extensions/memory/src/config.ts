@@ -82,6 +82,12 @@ function buildBaseConfig(): Omit<ProjectMemoryConfig, 'project_name' | 'aliases'
         import: false,
       },
     },
+    telemetry: {
+      retrieval: {
+        enabled: false,
+        retention_days: 30,
+      },
+    },
   };
 }
 
@@ -99,12 +105,16 @@ export function readProjectMemoryConfig(cwd: string, env: NodeJS.ProcessEnv = pr
     const backupsRaw = (raw.backups && typeof raw.backups === 'object') ? raw.backups as Record<string, unknown> : {};
     const gitRaw = (raw.git && typeof raw.git === 'object') ? raw.git as Record<string, unknown> : {};
     const gitSyncRaw = (gitRaw.sync && typeof gitRaw.sync === 'object') ? gitRaw.sync as Record<string, unknown> : {};
+    const telemetryRaw = (raw.telemetry && typeof raw.telemetry === 'object') ? raw.telemetry as Record<string, unknown> : {};
+    const telemetryRetrievalRaw = (telemetryRaw.retrieval && typeof telemetryRaw.retrieval === 'object') ? telemetryRaw.retrieval as Record<string, unknown> : {};
 
     if (raw.import !== undefined && (typeof raw.import !== 'object' || raw.import === null)) warnings.push('Ignoring invalid import config; expected object.');
     if (raw.backups !== undefined && (typeof raw.backups !== 'object' || raw.backups === null)) warnings.push('Ignoring invalid backups config; expected object.');
     if (raw.cloud !== undefined && (typeof raw.cloud !== 'object' || raw.cloud === null)) warnings.push('Ignoring invalid cloud config; expected object.');
     if (raw.git !== undefined && (typeof raw.git !== 'object' || raw.git === null)) warnings.push('Ignoring invalid git config; expected object.');
     if (gitRaw.sync !== undefined && (typeof gitRaw.sync !== 'object' || gitRaw.sync === null)) warnings.push('Ignoring invalid git.sync config; expected object.');
+    if (raw.telemetry !== undefined && (typeof raw.telemetry !== 'object' || raw.telemetry === null)) warnings.push('Ignoring invalid telemetry config; expected object.');
+    if (telemetryRaw.retrieval !== undefined && (typeof telemetryRaw.retrieval !== 'object' || telemetryRaw.retrieval === null)) warnings.push('Ignoring invalid telemetry.retrieval config; expected object.');
 
     if ('token' in cloudRaw) warnings.push('Do not store cloud.token in .pi/memory.json; use token_env.');
 
@@ -160,6 +170,22 @@ export function readProjectMemoryConfig(cwd: string, env: NodeJS.ProcessEnv = pr
     if (gitSyncRaw.export !== undefined && typeof gitSyncRaw.export !== 'boolean') warnings.push('Ignoring invalid git.sync.export in .pi/memory.json; expected true or false.');
     if (gitSyncRaw.import !== undefined && typeof gitSyncRaw.import !== 'boolean') warnings.push('Ignoring invalid git.sync.import in .pi/memory.json; expected true or false.');
 
+    const telemetryEnabled = telemetryRetrievalRaw.enabled === true;
+    if (telemetryRetrievalRaw.enabled !== undefined && typeof telemetryRetrievalRaw.enabled !== 'boolean') {
+      warnings.push('Ignoring invalid telemetry.retrieval.enabled in .pi/memory.json; expected true or false.');
+    }
+    let telemetryRetention = 30;
+    if (telemetryRetrievalRaw.retention_days !== undefined) {
+      if (Number.isInteger(telemetryRetrievalRaw.retention_days)) {
+        const value = Number(telemetryRetrievalRaw.retention_days);
+        const clamped = Math.max(1, Math.min(365, value));
+        telemetryRetention = clamped;
+        if (clamped !== value) warnings.push('Clamped telemetry.retrieval.retention_days in .pi/memory.json to the supported range 1..365.');
+      } else {
+        warnings.push('Ignoring invalid telemetry.retrieval.retention_days in .pi/memory.json; expected integer.');
+      }
+    }
+
     const cfg: ProjectMemoryConfig = {
       enabled,
       project_name: typeof raw.project_name === 'string' ? raw.project_name : undefined,
@@ -192,6 +218,12 @@ export function readProjectMemoryConfig(cwd: string, env: NodeJS.ProcessEnv = pr
           cloud: gitSyncCloud,
           export: gitSyncExport,
           import: gitSyncImport,
+        },
+      },
+      telemetry: {
+        retrieval: {
+          enabled: telemetryEnabled,
+          retention_days: telemetryRetention,
         },
       },
       warnings,

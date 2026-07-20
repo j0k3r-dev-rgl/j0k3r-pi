@@ -2,7 +2,7 @@ import type { Db } from './db.js';
 import { nowIso } from './utils.js';
 import { generateGenericId } from './ids.js';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 3;
 
 export function migrate(db: Db): void {
   db.exec(`
@@ -94,10 +94,11 @@ CREATE TABLE IF NOT EXISTS memory_links (
   id TEXT PRIMARY KEY,
   from_memory_id TEXT NOT NULL REFERENCES memories(id),
   to_memory_id TEXT NOT NULL REFERENCES memories(id),
-  relation_type TEXT NOT NULL CHECK (relation_type IN ('supports','supersedes','contradicts','derived_from','related_to')),
+  relation_type TEXT NOT NULL CHECK (relation_type IN ('supports','supersedes','contradicts','derived_from','related_to','implements')),
   created_at TEXT NOT NULL,
   metadata_json TEXT
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_link ON memory_links(from_memory_id, to_memory_id, relation_type);
 
 CREATE TABLE IF NOT EXISTS memory_entities (
   id TEXT PRIMARY KEY,
@@ -108,12 +109,103 @@ CREATE TABLE IF NOT EXISTS memory_entities (
   created_at TEXT NOT NULL
 );
 `);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    canonicalizeActiveProjectProfiles(db);
+    ensureMemoryLinksSchema(db);
+    ensureRetrievalTelemetrySchema(db);
+    ensureActiveProjectProfileIndex(db);
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
   createFts(db);
   rebuildFts(db);
   upsertMeta(db, 'schema_version', String(SCHEMA_VERSION));
   if (!getMeta(db, 'brain_id')) upsertMeta(db, 'brain_id', generateGenericId('brain'));
   if (!getMeta(db, 'created_at')) upsertMeta(db, 'created_at', nowIso());
   upsertMeta(db, 'updated_at', nowIso());
+}
+
+function canonicalizeActiveProjectProfiles(db: Db): void {
+  const duplicateGroups = db.prepare(`SELECT user_id, project_id
+    FROM memories
+    WHERE scope='project' AND kind='project_profile' AND status='active'
+    GROUP BY user_id, project_id
+    HAVING COUNT(*) > 1`).all() as Array<{ user_id: string; project_id: string }>;
+
+  for (const group of duplicateGroups) {
+    const rows = db.prepare(`SELECT * FROM memories
+      WHERE user_id=? AND scope='project' AND project_id=? AND kind='project_profile' AND status='active'
+      ORDER BY updated_at DESC, id ASC`).all(group.user_id, group.project_id) as Array<{ id: string }>;
+    const canonical = rows[0];
+    for (const duplicate of rows.slice(1)) {
+      db.prepare("UPDATE memories SET status='superseded' WHERE id=?").run(duplicate.id);
+      const existingLink = db.prepare("SELECT id FROM memory_links WHERE from_memory_id=? AND to_memory_id=? AND relation_type='supersedes'").get(duplicate.id, canonical.id) as { id?: string } | undefined;
+      if (!existingLink) {
+        db.prepare('INSERT INTO memory_links(id,from_memory_id,to_memory_id,relation_type,created_at,metadata_json) VALUES(?,?,?,?,?,?)').run(
+          generateGenericId('link'),
+          duplicate.id,
+          canonical.id,
+          'supersedes',
+          nowIso(),
+          JSON.stringify({ source: 'canonicalize_project_profile' }),
+        );
+      }
+    }
+  }
+}
+
+function ensureMemoryLinksSchema(db: Db): void {
+  const memoryLinksSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='memory_links'").get() as { sql?: string } | undefined;
+  const indexRows = db.prepare("PRAGMA index_list('memory_links')").all() as Array<{ name: string; unique: number }>;
+  const hasImplements = memoryLinksSql?.sql?.includes("'implements'") ?? false;
+  const hasUniqueIndex = indexRows.some((row) => row.name === 'uq_memory_link' && row.unique === 1);
+  if (hasImplements && hasUniqueIndex) return;
+
+  db.exec(`
+DROP INDEX IF EXISTS uq_memory_link;
+ALTER TABLE memory_links RENAME TO memory_links_old;
+CREATE TABLE memory_links (
+  id TEXT PRIMARY KEY,
+  from_memory_id TEXT NOT NULL REFERENCES memories(id),
+  to_memory_id TEXT NOT NULL REFERENCES memories(id),
+  relation_type TEXT NOT NULL CHECK (relation_type IN ('supports','supersedes','contradicts','derived_from','related_to','implements')),
+  created_at TEXT NOT NULL,
+  metadata_json TEXT
+);
+CREATE UNIQUE INDEX uq_memory_link ON memory_links(from_memory_id, to_memory_id, relation_type);
+INSERT OR IGNORE INTO memory_links(id,from_memory_id,to_memory_id,relation_type,created_at,metadata_json)
+SELECT id, from_memory_id, to_memory_id, relation_type, created_at, metadata_json
+FROM memory_links_old
+ORDER BY created_at ASC, id ASC;
+DROP TABLE memory_links_old;
+`);
+}
+
+function ensureRetrievalTelemetrySchema(db: Db): void {
+  db.exec(`CREATE TABLE IF NOT EXISTS retrieval_telemetry (
+  id TEXT PRIMARY KEY,
+  timestamp TEXT NOT NULL,
+  operation TEXT NOT NULL CHECK(operation IN ('search','startup','recall')),
+  trigger_category TEXT NOT NULL CHECK(trigger_category IN ('tool_call','lifecycle','command','evaluation','unknown')),
+  project_id TEXT,
+  session_id TEXT,
+  result_memory_ids TEXT NOT NULL,
+  result_ranks TEXT NOT NULL,
+  result_count INTEGER NOT NULL CHECK(result_count >= 0),
+  latency_ms INTEGER CHECK(latency_ms IS NULL OR latency_ms >= 0),
+  success INTEGER NOT NULL CHECK(success IN (0,1)),
+  error_category TEXT NOT NULL CHECK(error_category IN ('none','db_error','validation','timeout','internal','unknown'))
+);
+CREATE INDEX IF NOT EXISTS idx_retrieval_telemetry_timestamp ON retrieval_telemetry(timestamp);`);
+}
+
+function ensureActiveProjectProfileIndex(db: Db): void {
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_active_project_profile
+ON memories(user_id, project_id)
+WHERE scope='project' AND kind='project_profile' AND status='active'`);
 }
 
 function rebuildFts(db: Db): void {

@@ -2,11 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Db } from './db.js';
 import { resolveMemoryContext } from './context.js';
-import { listMemories } from './memory-store.js';
 import { addSessionPrompt, finishMemorySession, reopenMemorySessionIfClosed, startMemorySession } from './sessions.js';
+import { selectStartupMemories } from './startup-selection.js';
 import { setCurrentMemorySessionId } from './runtime-state.js';
 import { buildHeuristicSessionSummary, buildSemanticSessionSummary, extractConversationFacts } from './session-summary.js';
 import { autoUpdateProjectProfileFromSession, semanticUpdateProjectProfileFromSession } from './project-profile.js';
+import { observeRetrieval } from './retrieval-telemetry.js';
 
 const MEMORY_SESSION_ENTRY_TYPE = 'memory-session';
 const RECENT_ACTIVE_FALLBACK_MS = 15 * 60 * 1000;
@@ -388,7 +389,11 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
 
     if (!startupContextInjected) {
       startupContextInjected = true;
-      const recentMemories = listMemories(db, { limit: 4 }, c).map((m: any) => ({
+      const recentMemories = observeRetrieval(db, c, {
+        operation: 'startup',
+        trigger_category: 'lifecycle',
+        session_id: sessionId,
+      }, () => selectStartupMemories(db, c)).map((m: any) => ({
         type: 'memory',
         id: m.id,
         scope: m.scope,

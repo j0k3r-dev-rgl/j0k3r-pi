@@ -183,6 +183,80 @@ function rebuildFts(db: Db): void {
   }
 }
 
+function isActiveProjectProfileRow(row: Record<string, unknown>): boolean {
+  return row.scope === 'project' && row.kind === 'project_profile' && row.status === 'active' && typeof row.project_id === 'string' && typeof row.user_id === 'string';
+}
+
+function findCanonicalProjectProfile(db: Db, row: Record<string, unknown>) {
+  return db.prepare(`SELECT * FROM memories
+    WHERE user_id=? AND scope='project' AND project_id=? AND kind='project_profile' AND status='active'
+    ORDER BY updated_at DESC, id ASC
+    LIMIT 1`).get(row.user_id as any, row.project_id as any) as Record<string, unknown> | undefined;
+}
+
+function insertRow(db: Db, table: TableName, row: Record<string, unknown>): void {
+  const cols = Object.keys(row);
+  const placeholders = cols.map(() => '?').join(',');
+  db.prepare(`INSERT INTO ${table}(${cols.join(',')}) VALUES(${placeholders})`).run(...cols.map((c) => row[c]) as any[]);
+}
+
+function normalizeImportedMetadata(row: Record<string, unknown>): string {
+  if (!row.metadata_json) return JSON.stringify({});
+  if (typeof row.metadata_json === 'string') return row.metadata_json;
+  return JSON.stringify(row.metadata_json);
+}
+
+function updateCanonicalProfileFromImport(db: Db, canonicalId: unknown, row: Record<string, unknown>): void {
+  db.prepare(`UPDATE memories SET
+    title=?,
+    summary=?,
+    content=?,
+    tags=?,
+    origin_type=?,
+    confidence=?,
+    importance=?,
+    version=version+1,
+    sync_status='local',
+    content_hash=?,
+    updated_at=?,
+    metadata_json=?
+    WHERE id=?`).run(
+    (row.title ?? null) as any,
+    (row.summary ?? null) as any,
+    row.content as any,
+    (row.tags ?? null) as any,
+    (row.origin_type ?? 'inferred_by_agent') as any,
+    (row.confidence ?? 1) as any,
+    (row.importance ?? 3) as any,
+    (row.content_hash ?? null) as any,
+    nowIso(),
+    normalizeImportedMetadata(row),
+    canonicalId as any,
+  );
+}
+
+function insertImportedSupersededProfile(db: Db, row: Record<string, unknown>, canonicalId: unknown, syncStatus?: string): boolean {
+  const importedRow: Record<string, unknown> = {
+    ...row,
+    status: 'superseded',
+    sync_status: syncStatus ?? row.sync_status ?? 'local',
+  };
+  const exists = db.prepare('SELECT id FROM memories WHERE id=?').get(importedRow.id as any) as { id?: string } | undefined;
+  if (!exists) insertRow(db, 'memories', importedRow);
+  const existingLink = db.prepare("SELECT id FROM memory_links WHERE from_memory_id=? AND to_memory_id=? AND relation_type='supersedes'").get(importedRow.id as any, canonicalId as any) as { id?: string } | undefined;
+  if (!existingLink) {
+    db.prepare('INSERT INTO memory_links(id,from_memory_id,to_memory_id,relation_type,created_at,metadata_json) VALUES(?,?,?,?,?,?)').run(
+      `link_import_${String(importedRow.id)}`,
+      importedRow.id as any,
+      canonicalId as any,
+      'supersedes',
+      nowIso(),
+      JSON.stringify({ source: 'memory_import' }),
+    );
+  }
+  return !exists;
+}
+
 export function importMemory(db: Db, input: { path: string; mode?: MemoryImportMode; on_conflict?: MemoryImportConflictPolicy; include_git?: boolean }) {
   const mode = input.mode ?? 'dry_run';
   const onConflict = input.on_conflict ?? 'mark_conflict';
@@ -206,48 +280,106 @@ export function importMemory(db: Db, input: { path: string; mode?: MemoryImportM
   const seenByTable: Record<string, number> = {};
   const insertedByTable: Record<string, number> = {};
   const conflictDetails: Array<{ table: string; id: unknown; action: string }> = [];
-  for (const item of rowItems) {
-    seen++;
-    seenByTable[item.type] = (seenByTable[item.type] ?? 0) + 1;
-    const skipGit = includeGit === false && (
-      (item.type === 'memories' && isGitMemoryRow(item.row))
-      || (item.type === 'memory_links' && (gitMemoryIds.has(String(item.row.from_memory_id ?? '')) || gitMemoryIds.has(String(item.row.to_memory_id ?? ''))))
-      || (item.type === 'memory_entities' && gitMemoryIds.has(String(item.row.memory_id ?? '')))
-    );
-    if (skipGit) {
-      skippedGit++;
-      continue;
-    }
-    const table = item.type;
-    const id = item.row.id;
-    const exists = db.prepare(`SELECT id FROM ${table} WHERE id=?`).get(id as any);
-    if (exists) {
-      conflicts++;
-      let action = 'kept_local';
-      if (mode === 'merge' && onConflict === 'mark_conflict' && 'sync_status' in item.row) {
-        db.prepare(`UPDATE ${table} SET sync_status='conflict' WHERE id=?`).run(id as any);
-        action = 'marked_conflict';
+  const profileCollisionDetails: Array<{ project_id: string; incoming_profile_id: string; canonical_profile_id: string; action: MemoryImportConflictPolicy }> = [];
+
+  const apply = () => {
+    for (const item of rowItems) {
+      seen++;
+      seenByTable[item.type] = (seenByTable[item.type] ?? 0) + 1;
+      const skipGit = includeGit === false && (
+        (item.type === 'memories' && isGitMemoryRow(item.row))
+        || (item.type === 'memory_links' && (gitMemoryIds.has(String(item.row.from_memory_id ?? '')) || gitMemoryIds.has(String(item.row.to_memory_id ?? ''))))
+        || (item.type === 'memory_entities' && gitMemoryIds.has(String(item.row.memory_id ?? '')))
+      );
+      if (skipGit) {
+        skippedGit++;
+        continue;
       }
-      if (mode === 'merge' && onConflict === 'keep_imported') {
-        action = 'replaced_with_imported';
-        const cols = Object.keys(item.row);
-        const assignments = cols.filter((c) => c !== 'id').map((c) => `${c}=?`).join(',');
-        if (assignments) db.prepare(`UPDATE ${table} SET ${assignments} WHERE id=?`).run(...cols.filter((c) => c !== 'id').map((c) => item.row![c]) as any[], id as any);
-        replaced++;
+
+      if (item.type === 'memories' && isActiveProjectProfileRow(item.row)) {
+        const canonical = findCanonicalProjectProfile(db, item.row);
+        if (canonical && canonical.id !== item.row.id) {
+          profileCollisionDetails.push({
+            project_id: String(item.row.project_id),
+            incoming_profile_id: String(item.row.id),
+            canonical_profile_id: String(canonical.id),
+            action: onConflict,
+          });
+          if (mode === 'merge') {
+            if (onConflict === 'keep_imported') {
+              updateCanonicalProfileFromImport(db, canonical.id, item.row);
+              replaced++;
+            }
+            const createdImportedRow = insertImportedSupersededProfile(db, item.row, canonical.id, onConflict === 'mark_conflict' ? 'conflict' : undefined);
+            if (createdImportedRow) {
+              inserted++;
+              insertedByTable.memories = (insertedByTable.memories ?? 0) + 1;
+            }
+          }
+          continue;
+        }
       }
-      conflictDetails.push({ table, id, action });
-      continue;
+
+      const table = item.type;
+      const id = item.row.id;
+      const exists = db.prepare(`SELECT id FROM ${table} WHERE id=?`).get(id as any);
+      if (exists) {
+        conflicts++;
+        let action = 'kept_local';
+        if (mode === 'merge' && onConflict === 'mark_conflict' && 'sync_status' in item.row) {
+          db.prepare(`UPDATE ${table} SET sync_status='conflict' WHERE id=?`).run(id as any);
+          action = 'marked_conflict';
+        }
+        if (mode === 'merge' && onConflict === 'keep_imported') {
+          action = 'replaced_with_imported';
+          const cols = Object.keys(item.row);
+          const assignments = cols.filter((c) => c !== 'id').map((c) => `${c}=?`).join(',');
+          if (assignments) db.prepare(`UPDATE ${table} SET ${assignments} WHERE id=?`).run(...cols.filter((c) => c !== 'id').map((c) => item.row![c]) as any[], id as any);
+          replaced++;
+        }
+        conflictDetails.push({ table, id, action });
+        continue;
+      }
+
+      wouldInsert++;
+      if (mode === 'merge') {
+        insertRow(db, table, item.row);
+        inserted++;
+        insertedByTable[table] = (insertedByTable[table] ?? 0) + 1;
+      }
     }
-    wouldInsert++;
-    if (mode === 'merge') {
-      const cols = Object.keys(item.row);
-      const placeholders = cols.map(() => '?').join(',');
-      db.prepare(`INSERT INTO ${table}(${cols.join(',')}) VALUES(${placeholders})`).run(...cols.map((c) => item.row![c]) as any[]);
-      inserted++;
-      insertedByTable[table] = (insertedByTable[table] ?? 0) + 1;
+  };
+
+  let rebuiltFts = false;
+  if (mode === 'merge') {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      apply();
+      rebuildFts(db);
+      db.exec('COMMIT');
+      rebuiltFts = true;
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
     }
+  } else {
+    apply();
   }
-  const rebuiltFts = mode === 'merge';
-  if (rebuiltFts) rebuildFts(db);
-  return { mode, on_conflict: onConflict, seen, inserted, would_insert: wouldInsert, conflicts, replaced, skipped_git: skippedGit, includes_git: includeGit, seen_by_table: seenByTable, inserted_by_table: insertedByTable, rebuilt_fts: rebuiltFts, conflict_details: conflictDetails };
+
+  return {
+    mode,
+    on_conflict: onConflict,
+    seen,
+    inserted,
+    would_insert: wouldInsert,
+    conflicts,
+    replaced,
+    skipped_git: skippedGit,
+    includes_git: includeGit,
+    seen_by_table: seenByTable,
+    inserted_by_table: insertedByTable,
+    rebuilt_fts: rebuiltFts,
+    conflict_details: conflictDetails,
+    profile_collision_details: profileCollisionDetails,
+  };
 }

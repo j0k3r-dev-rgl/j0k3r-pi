@@ -63,6 +63,7 @@ Use this skill to operate the Pi Memory Extension deliberately: recall context w
 
 - Treat memory as a curated brain, not a transcript dump.
 - Search/recall deliberately when persistent context is missing, stale, ambiguous, or decision-critical; skip memory for obvious tiny tasks and avoid redundant recalls when context is already loaded.
+- Startup brain context is a compact deterministic active-only index: archived and superseded memories are excluded, stale low-value progress/noise is demoted, and startup remains prompt-independent.
 - Save less, but save better.
 - Never store secrets, tokens, passwords, private keys, private personal data, or raw logs.
 - Prefer current project memory plus general preferences and global rules.
@@ -114,6 +115,8 @@ Ask or stop when any of these are unresolved and material:
 
 Do not call recall mechanically. First ask: do startup brain context, loaded skill content, and the current conversation already contain the needed memory? If yes, do not call recall again.
 
+The startup brain context is already a deterministic active-only shortlist. It excludes archived/superseded rows, deprioritizes stale low-value progress/noise, and is not ranked by prompt keywords.
+
 Use the narrowest recall moment only when it would add missing or fresher persistent context:
 
 - start of a substantial task with insufficient context: `memory_recall(context="before_task", query="...")`
@@ -145,7 +148,8 @@ Good automatic candidates:
 - reusable learnings from implementation or tests;
 - meaningful progress after substantial work;
 - session summaries;
-- conservative `project_profile` updates.
+- conservative `project_profile` updates;
+- explicit `discovery_finding` memories for durable investigation findings worth linking to later implementation or supersession.
 
 Ask before saving:
 
@@ -183,6 +187,8 @@ Do not save:
 - duplicates with different wording;
 - trivial progress with no future value.
 
+Do not infer or auto-create discovery links while saving. Store `discovery_finding` explicitly only when the finding itself is durable.
+
 ## Scope policy
 
 - `project`: project decisions, architecture, commands, bugs, todos, progress, project profile.
@@ -208,7 +214,9 @@ It should contain:
 
 Rules:
 
-- Prefer updating existing profile over creating duplicates.
+- Exactly one active canonical `project_profile` should exist per project.
+- `memory_add(kind='project_profile')` updates the canonical active record in place instead of creating duplicates.
+- `memory_project_profile` follows the same canonical update-in-place behavior.
 - Avoid append-only growth forever; if it gets noisy or too long, rewrite/consolidate instead of adding more blocks.
 - Ask for confirmation before large semantic rewrites.
 - Treat the profile as a dashboard, not a history log.
@@ -232,6 +240,14 @@ Use similarity mode cautiously:
 {"similarity": true, "dry_run": true}
 ```
 
+For `project_profile` duplicates or imported profile collisions:
+
+- dry-run first;
+- keep one canonical active profile;
+- preserve duplicate/imported content as readable `superseded` records when the workflow keeps them;
+- link preserved duplicates to the canonical record;
+- do not destructively delete duplicate profile content.
+
 ## Legacy identity caveat
 
 Current memory import/export preserves the project identity stored in exported rows. The extension no longer provides a dedicated project-canonical migration tool.
@@ -244,6 +260,59 @@ If imported backups contain rows from an old alias or unwanted project identity:
 
 Use the same dry-run-first rule for imports with possible conflicts: inspect the dry-run/conflict report before merge/apply.
 
+When import reports active `project_profile` collisions, expect one canonical active profile to remain. Depending on `on_conflict`, the imported duplicate may update the canonical profile or be preserved as a superseded duplicate linked to it.
+
+## Discovery links policy
+
+Use explicit links when a durable finding is implemented, supported, contradicted, or superseded later.
+
+Rules:
+
+- use `memory_link` explicitly; do not assume automatic extraction or automatic link creation;
+- use `implements` to connect a `discovery_finding` to later implementation memory when that relationship is confirmed;
+- use `supersedes` when a newer finding or record replaces an older one;
+- endpoints must already exist;
+- self-links are invalid;
+- reverse mutual `implements` and reverse mutual `supersedes` links are invalid;
+- generic `memory_link` is not gated by `git.enabled`;
+- commit/changelog tools keep their existing Git gate.
+
+## Retrieval telemetry policy
+
+Retrieval telemetry is local operational metadata, not content analytics.
+
+Rules:
+
+- telemetry is opt-in only via `.pi/memory.json`;
+- default is disabled;
+- default retention is 30 days and supported range is `1..365` days with clamp/warning behavior;
+- telemetry stays local in SQLite and is never a prompt to call network services;
+- telemetry is best-effort and must not break search, recall, or startup when it fails.
+
+Allowed stored fields are only:
+
+- `timestamp`
+- `operation`
+- `trigger_category`
+- `project_id`
+- `session_id`
+- `result_memory_ids`
+- `result_ranks`
+- `result_count`
+- `latency_ms`
+- `success`
+- `error_category`
+
+Do not describe or permit storing:
+
+- prompt text;
+- query text;
+- query-derived hashes;
+- memory titles, summaries, or contents;
+- rendered results;
+- secrets;
+- arbitrary free-form telemetry payloads.
+
 ## Memory session lifecycle policy
 
 Memory sessions may be active or completed. A completed session is intentionally closed:
@@ -254,6 +323,15 @@ Memory sessions may be active or completed. A completed session is intentionally
 - When a completed session is reopened, preserve the previous summary/learned fields until the next finish. Agents may read the previous summary and combine it with new activity before the session is finished again.
 - `memory_session_finish` may be run again for the same session and should be understood as rewriting the latest closing summary/learned state, not appending a second independent close record.
 - If a memory operation appears to target a closed session before lifecycle reopen, do not force it into that session; let lifecycle reopen happen on the first real user prompt after lifecycle resume or start a new explicit session if the user asks.
+
+## Quality evaluation policy
+
+When validating memory quality behavior:
+
+- use deterministic fixed-clock fixtures for startup ranking and telemetry retention boundaries;
+- use synthetic local SQLite data only;
+- keep evaluation offline with no external services, embeddings, or network dependencies;
+- extend the existing memory test owners rather than inventing a separate evaluation workflow unless the project explicitly changes that structure.
 
 ## Session-end policy
 
@@ -287,7 +365,7 @@ When this skill affects the answer, return concise memory handling notes:
 - Whether memory was recalled/searched and why, or why it was skipped.
 - Memories or project profile updated, if any.
 - Durable decisions/todos/risks saved or explicitly not saved.
-- Any contradictions, open confirmation needs, or safe-import/consolidation caveats.
+- Any contradictions, open confirmation needs, or safe-import/consolidation/link/telemetry caveats.
 
 ## References
 

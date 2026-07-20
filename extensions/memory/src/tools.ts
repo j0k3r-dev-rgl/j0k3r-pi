@@ -9,11 +9,13 @@ import { searchMemory } from './search.js';
 import { addSessionPrompt, finishMemorySession, startMemorySession } from './sessions.js';
 import { exportMemory, importMemory } from './export-import.js';
 import { getCurrentMemorySessionId } from './runtime-state.js';
+import { observeRetrieval } from './retrieval-telemetry.js';
 import { consolidateMemories } from './consolidation.js';
 import { ensureProjectProfile, getCurrentProjectProfile, updateProjectProfile } from './project-profile.js';
 import { getSyncStatus } from './sync-status.js';
 import { renderMemoryToolResult } from './render.js';
 import { addChangelogEntry, addCommitChangelogLink, addCommitRecord, addReleaseRecord, previewReleaseNotes, searchCommitChangelog, searchReleaseCandidates } from './commit-changelog.js';
+import { addMemoryLink, MEMORY_LINK_RELATIONS } from './links.js';
 import { MEMORY_KINDS } from './types.js';
 import type { MemoryExportMode, MemoryImportConflictPolicy, MemoryImportMode, ToolResult } from './types.js';
 
@@ -380,6 +382,26 @@ export function registerMemoryTools(pi: any, db: Db): void {
   });
 
   pi.registerTool({
+    name: 'memory_link',
+    label: 'Memory Link',
+    description: 'Create a generic relationship between two existing memories.',
+    parameters: Type.Object({
+      from_memory_id: Type.String(),
+      to_memory_id: Type.String(),
+      relation_type: Type.Union(MEMORY_LINK_RELATIONS.map((relation) => Type.Literal(relation)) as any),
+      metadata_json: Type.Optional(Type.Record(Type.String(), Type.Any())),
+    }),
+    async execute(_id: string, params: any) {
+      try {
+        const result = addMemoryLink(db, params);
+        return ok(`Link saved: ${result.link.id}${result.warning ? ` (${result.warning})` : ''}`, result);
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  });
+
+  pi.registerTool({
     name: 'memory_commit_changelog_link',
     label: 'Memory Commit Changelog Link',
     description: 'Link commit/changelog memories or supporting memories through memory_links.',
@@ -596,8 +618,12 @@ export function registerMemoryTools(pi: any, db: Db): void {
     async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
       try {
         const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
-        const results = searchMemory(db, { ...params, current_session_id: getCurrentMemorySessionId() }, context);
-        return ok(resultListText(`Found ${results.results.length} memory result(s).`, results.results), results);
+        const results = observeRetrieval(db, context, {
+          operation: 'search',
+          trigger_category: 'tool_call',
+          session_id: getCurrentMemorySessionId() ?? null,
+        }, () => searchMemory(db, { ...params, current_session_id: getCurrentMemorySessionId() }, context).results);
+        return ok(resultListText(`Found ${results.length} memory result(s).`, results), { results });
       } catch (e) {
         return fail(e);
       }
@@ -817,19 +843,28 @@ export function registerMemoryTools(pi: any, db: Db): void {
         const moment = normalizeRecallContext(String(params?.context || 'startup'));
         const query = recallQuery(moment, params?.query);
         const isSessionEnd = moment === 'session_end';
-        const result = searchMemory(
+        const results = observeRetrieval(
           db,
-          {
-            query,
-            limit: params?.limit ?? 10,
-            current_session_id: getCurrentMemorySessionId(),
-            current_session_only: isSessionEnd,
-            include_prompts: isSessionEnd ? true : undefined,
-            types: isSessionEnd ? ['memory', 'session', 'prompt'] : undefined,
-          },
           context,
+          {
+            operation: 'recall',
+            trigger_category: 'tool_call',
+            session_id: getCurrentMemorySessionId() ?? null,
+          },
+          () => searchMemory(
+            db,
+            {
+              query,
+              limit: params?.limit ?? 10,
+              current_session_id: getCurrentMemorySessionId(),
+              current_session_only: isSessionEnd,
+              include_prompts: isSessionEnd ? true : undefined,
+              types: isSessionEnd ? ['memory', 'session', 'prompt'] : undefined,
+            },
+            context,
+          ).results,
         );
-        return ok(`Recalled ${result.results.length} item(s).`, { ...result, recall_context: moment, query });
+        return ok(`Recalled ${results.length} item(s).`, { results, recall_context: moment, query });
       } catch (e) {
         return fail(e);
       }

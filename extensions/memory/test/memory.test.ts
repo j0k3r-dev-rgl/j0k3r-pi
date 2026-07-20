@@ -20,6 +20,7 @@ import { consolidateMemories } from '../src/consolidation.js';
 import { exportMemory, importMemory } from '../src/export-import.js';
 import { getSyncStatus } from '../src/sync-status.js';
 import { renderMemoryContextMessage, renderMemoryToolResult } from '../src/render.js';
+import { STARTUP_IMPORTANCE_FACTOR, STARTUP_KIND_FACTOR, STARTUP_KIND_WEIGHTS, STARTUP_MEMORY_LIMIT, STARTUP_STALENESS_DAYS, STARTUP_STALENESS_FACTOR, STARTUP_STALENESS_MAX, scoreStartupMemory, selectStartupMemories } from '../src/startup-selection.js';
 
 let tmp: string;
 beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-memory-test-')); });
@@ -425,6 +426,69 @@ describe('config', () => {
     fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({ project_name: 'X', debug: 'yes' }));
     expect(readProjectMemoryConfig(tmp, {}).debug).toBe(false);
   });
+
+  it('reads retrieval telemetry config with disabled default, opt-in, clamps, and warnings', () => {
+    expect((readProjectMemoryConfig(tmp, {}) as any).telemetry).toEqual({ retrieval: { enabled: false, retention_days: 30 } });
+
+    fs.mkdirSync(path.join(tmp, '.pi'));
+    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({
+      project_name: 'X',
+      telemetry: { retrieval: { enabled: true, retention_days: 90 } },
+    }));
+    expect((readProjectMemoryConfig(tmp, {}) as any).telemetry).toEqual({ retrieval: { enabled: true, retention_days: 90 } });
+
+    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({
+      project_name: 'X',
+      telemetry: { retrieval: { enabled: false, retention_days: 0 } },
+    }));
+    const minClamped = readProjectMemoryConfig(tmp, {}) as any;
+    expect(minClamped.telemetry).toEqual({ retrieval: { enabled: false, retention_days: 1 } });
+    expect(minClamped.warnings.join('\n')).toContain('telemetry.retrieval.retention_days');
+
+    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({
+      project_name: 'X',
+      telemetry: { retrieval: { enabled: true, retention_days: 500 } },
+    }));
+    const maxClamped = readProjectMemoryConfig(tmp, {}) as any;
+    expect(maxClamped.telemetry).toEqual({ retrieval: { enabled: true, retention_days: 365 } });
+    expect(maxClamped.warnings.join('\n')).toContain('telemetry.retrieval.retention_days');
+
+    fs.writeFileSync(path.join(tmp, '.pi', 'memory.json'), JSON.stringify({
+      project_name: 'X',
+      telemetry: { retrieval: { enabled: 'yes', retention_days: 'often' } },
+    }));
+    const invalid = readProjectMemoryConfig(tmp, {}) as any;
+    expect(invalid.telemetry).toEqual({ retrieval: { enabled: false, retention_days: 30 } });
+    expect(invalid.warnings.join('\n')).toContain('invalid telemetry.retrieval.enabled');
+    expect(invalid.warnings.join('\n')).toContain('invalid telemetry.retrieval.retention_days');
+  });
+
+  it('creates a closed retrieval telemetry schema allowlist', () => {
+    const d = db();
+    const columns = d.prepare("PRAGMA table_info('retrieval_telemetry')").all() as Array<{ name: string }>;
+    const names = columns.map((column) => column.name);
+    expect(names).toEqual([
+      'id',
+      'timestamp',
+      'operation',
+      'trigger_category',
+      'project_id',
+      'session_id',
+      'result_memory_ids',
+      'result_ranks',
+      'result_count',
+      'latency_ms',
+      'success',
+      'error_category',
+    ]);
+    expect(names).not.toContain('metadata_json');
+    expect(names).not.toContain('query');
+    expect(names).not.toContain('prompt');
+    expect(names).not.toContain('content');
+    expect(names).not.toContain('summary');
+    expect(names).not.toContain('title');
+    expect(names).not.toContain('hash');
+  });
 });
 
 describe('context', () => {
@@ -578,6 +642,47 @@ describe('profile/consolidation/export/sync', () => {
     const updated = updateProjectProfile(d, c, 'type: project_profile\ndetails: tests use npm test');
     expect(updated.version).toBe(2);
   });
+
+  it('adds project_profile canonically by updating the same active record id and preserving omitted optional fields', () => {
+    const d = db(), c = project();
+    const first = addMemory(d, {
+      scope: 'project',
+      kind: 'project_profile',
+      title: 'advanced app project profile',
+      summary: 'living project profile for advanced app',
+      content: 'type: project_profile\ndetails: first profile body',
+      tags: ['project_profile', 'profile'],
+      origin_type: 'confirmed_by_user',
+      confidence: 0.7,
+      importance: 4,
+      metadata_json: { owner: 'first', nested: { keep: true } },
+    }, c).memory;
+
+    const second = addMemory(d, {
+      scope: 'project',
+      kind: 'project_profile',
+      content: 'type: project_profile\ndetails: replacement body',
+      metadata_json: { owner: 'second', extra: true },
+    }, c).memory;
+
+    expect(second.id).toBe(first.id);
+    expect(second.content).toBe('type: project_profile\ndetails: replacement body');
+    expect(second.title).toBe(first.title);
+    expect(second.summary).toBe(first.summary);
+    expect(second.tags).toBe(first.tags);
+    expect(second.origin_type).toBe(first.origin_type);
+    expect(second.confidence).toBe(first.confidence);
+    expect(second.importance).toBe(first.importance);
+    expect(second.version).toBe(2);
+    expect(JSON.parse(second.metadata_json || '{}')).toEqual({
+      owner: 'second',
+      nested: { keep: true },
+      extra: true,
+    });
+
+    const activeProfiles = d.prepare("SELECT id, status FROM memories WHERE kind='project_profile' AND project_id=? ORDER BY id ASC").all(c.project_id) as Array<{ id: string; status: string }>;
+    expect(activeProfiles).toEqual([{ id: first.id, status: 'active' }]);
+  });
   it('auto-updates project profile from durable session facts once per session', () => {
     const d = db(), c = project();
     const result = autoUpdateProjectProfileFromSession(d, c, {
@@ -629,6 +734,273 @@ describe('profile/consolidation/export/sync', () => {
     addMemory(d, { scope: 'project', kind: 'note', content: 'local sync status item' }, c);
     const status = getSyncStatus(d, c);
     expect(status.memories.local).toBeGreaterThan(0);
+  });
+});
+
+describe('startup selection', () => {
+  it('uses exact startup constants, kind tiers, unknown fallback, corrected scores, caps, and stable tie-breaks', () => {
+    expect(STARTUP_MEMORY_LIMIT).toBe(4);
+    expect(STARTUP_KIND_FACTOR).toBe(0.5);
+    expect(STARTUP_IMPORTANCE_FACTOR).toBe(0.3);
+    expect(STARTUP_STALENESS_DAYS).toBe(30);
+    expect(STARTUP_STALENESS_MAX).toBe(0.3);
+    expect(STARTUP_STALENESS_FACTOR).toBe(0.5);
+    expect(STARTUP_KIND_WEIGHTS.project_profile).toBe(1);
+    expect(STARTUP_KIND_WEIGHTS.architectural_decision).toBe(1);
+    expect(STARTUP_KIND_WEIGHTS.command).toBe(0.75);
+    expect(STARTUP_KIND_WEIGHTS.note).toBe(0.5);
+    expect(STARTUP_KIND_WEIGHTS.progress).toBe(0.25);
+    expect(STARTUP_KIND_WEIGHTS.discovery_finding).toBe(0.25);
+
+    const staleCommand = scoreStartupMemory({ kind: 'command', importance: 5, updated_at: '2026-01-01T00:00:00.000Z' } as any, new Date('2026-04-01T00:00:00.000Z'));
+    const freshCommand = scoreStartupMemory({ kind: 'command', importance: 3, updated_at: '2026-04-01T00:00:00.000Z' } as any, new Date('2026-04-01T00:00:00.000Z'));
+    expect(staleCommand).toBe(0.525);
+    expect(freshCommand).toBe(0.555);
+
+    const wholeDayTieA = scoreStartupMemory({ kind: 'command', importance: 4, updated_at: '2026-03-20T00:00:00.000Z' } as any, new Date('2026-04-01T00:00:00.000Z'));
+    const wholeDayTieB = scoreStartupMemory({ kind: 'command', importance: 3, updated_at: '2026-04-01T23:59:59.000Z' } as any, new Date('2026-04-01T23:59:59.000Z'));
+    expect(wholeDayTieA).toBe(0.555);
+    expect(wholeDayTieB).toBe(0.555);
+
+    const capped = scoreStartupMemory({ kind: 'note', importance: 5, updated_at: '2020-01-01T12:00:00.000Z' } as any, new Date('2026-04-01T11:59:59.000Z'));
+    expect(capped).toBe(0.4);
+    expect(scoreStartupMemory({ kind: 'unlisted_kind', importance: 5, updated_at: '2026-04-01T00:00:00.000Z' } as any, new Date('2026-04-01T00:00:00.000Z'))).toBe(0.425);
+
+    const d = db();
+    const projectDir = path.join(tmp, 'startup-memory-test-project');
+    const context = project(projectDir);
+    const otherDir = path.join(tmp, 'startup-memory-test-other');
+    fs.mkdirSync(path.join(otherDir, '.pi'), { recursive: true });
+    fs.writeFileSync(path.join(otherDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Other Startup App', enabled: true, git: { enabled: true } }));
+    const otherContext = resolveMemoryContext(otherDir, os.homedir(), {});
+
+    const decision = addMemory(d, { scope: 'project', kind: 'decision', title: 'durable decision', content: 'decision should outrank noisy progress', importance: 3 }, context).memory;
+    const progress = addMemory(d, { scope: 'project', kind: 'progress', title: 'fresh progress', content: 'keyword prompt match should not matter', importance: 5 }, context).memory;
+    const archived = addMemory(d, { scope: 'project', kind: 'decision', title: 'archived decision', content: 'should be excluded', importance: 5 }, context).memory;
+    const superseded = addMemory(d, { scope: 'project', kind: 'command', title: 'superseded command', content: 'should be excluded', importance: 5 }, context).memory;
+    const noteA = addMemory(d, { scope: 'project', kind: 'note', title: 'same score note a', content: 'tie by importance', importance: 4 }, context).memory;
+    const noteB = addMemory(d, { scope: 'project', kind: 'note', title: 'same score note b', content: 'tie by updated_at then id', importance: 3 }, context).memory;
+    const noteC = addMemory(d, { scope: 'project', kind: 'note', title: 'same score note c', content: 'tie by id', importance: 3 }, context).memory;
+    const globalCommand = addMemory(d, { scope: 'global', kind: 'command', title: 'global command', content: 'global command should be included', importance: 4 }, context).memory;
+    addMemory(d, { scope: 'project', kind: 'decision', title: 'other project decision', content: 'must not leak across projects', importance: 5 }, otherContext);
+    addMemory(d, { scope: 'project', kind: 'release_record', title: 'unknown-ish fallback', content: 'extra active row for cap', importance: 2 }, context);
+
+    updateMemory(d, archived.id, { status: 'archived' }, context);
+    updateMemory(d, superseded.id, { status: 'superseded' }, context);
+    d.prepare('UPDATE memories SET updated_at=? WHERE id=?').run('2026-03-20T00:00:00.000Z', noteA.id);
+    d.prepare('UPDATE memories SET updated_at=? WHERE id=?').run('2026-04-01T23:59:59.000Z', noteB.id);
+    d.prepare('UPDATE memories SET updated_at=? WHERE id=?').run('2026-04-01T23:59:59.000Z', noteC.id);
+    d.prepare('UPDATE memories SET updated_at=? WHERE id=?').run('2026-03-02T00:00:00.000Z', decision.id);
+    d.prepare('UPDATE memories SET updated_at=? WHERE id=?').run('2026-04-01T00:00:00.000Z', progress.id);
+    d.prepare('UPDATE memories SET updated_at=? WHERE id=?').run('2026-04-01T00:00:00.000Z', globalCommand.id);
+
+    const originalFetch = (globalThis as any).fetch;
+    let fetchCalls = 0;
+    (globalThis as any).fetch = (..._args: any[]) => { fetchCalls += 1; throw new Error('startup selector must stay offline'); };
+    try {
+      const first = selectStartupMemories(d, context, { now: new Date('2026-04-01T23:59:59.000Z') });
+      const second = selectStartupMemories(d, context, { now: new Date('2026-04-01T23:59:59.000Z') });
+      expect(fetchCalls).toBe(0);
+      expect(first.map((item) => item.id)).toEqual(second.map((item) => item.id));
+      expect(first).toHaveLength(4);
+      expect(first.some((item) => item.id === archived.id)).toBe(false);
+      expect(first.some((item) => item.id === superseded.id)).toBe(false);
+      expect(first.some((item) => item.project_id === otherContext.project_id)).toBe(false);
+      expect(first.map((item) => item.id)).toContain(decision.id);
+      expect(first.map((item) => item.id)).toContain(globalCommand.id);
+      expect(first.map((item) => item.id)).not.toContain(progress.id);
+
+      const tieDb = db();
+      const tieContext = project(path.join(tmp, 'startup-tie-project'));
+      const tieA = addMemory(tieDb, { scope: 'project', kind: 'command', title: 'tie a', content: 'tie a', importance: 4 }, tieContext).memory;
+      const tieB = addMemory(tieDb, { scope: 'project', kind: 'command', title: 'tie b', content: 'tie b', importance: 3 }, tieContext).memory;
+      const tieC = addMemory(tieDb, { scope: 'project', kind: 'command', title: 'tie c', content: 'tie c', importance: 3 }, tieContext).memory;
+      tieDb.prepare('UPDATE memories SET updated_at=? WHERE id=?').run('2026-03-20T00:00:00.000Z', tieA.id);
+      tieDb.prepare('UPDATE memories SET updated_at=? WHERE id=?').run('2026-04-01T23:59:59.000Z', tieB.id);
+      tieDb.prepare('UPDATE memories SET updated_at=? WHERE id=?').run('2026-04-01T23:59:59.000Z', tieC.id);
+      const ties = selectStartupMemories(tieDb, tieContext, { now: new Date('2026-04-01T23:59:59.000Z') });
+      expect(ties.map((item) => item.id)[0]).toBe(tieA.id);
+      const expectedIdOrder = [tieB.id, tieC.id].sort();
+      expect(ties.filter((item) => [tieB.id, tieC.id].includes(item.id)).map((item) => item.id)).toEqual(expectedIdOrder);
+    } finally {
+      (globalThis as any).fetch = originalFetch;
+    }
+  });
+});
+
+describe('generic memory links', () => {
+  it('registers discovery_finding and generic memory_link schemas', () => {
+    const { tools } = registerMemoryToolHarness('Generic Link Schema App');
+
+    expect(tools.has('memory_link')).toBe(true);
+
+    const addSchema = JSON.stringify(tools.get('memory_add')?.parameters ?? {});
+    expect(addSchema).toContain('discovery_finding');
+
+    const searchSchema = JSON.stringify(tools.get('memory_search')?.parameters ?? {});
+    expect(searchSchema).toContain('discovery_finding');
+
+    const linkSchema = JSON.stringify(tools.get('memory_link')?.parameters ?? {});
+    expect(linkSchema).toContain('from_memory_id');
+    expect(linkSchema).toContain('to_memory_id');
+    expect(linkSchema).toContain('implements');
+    expect(linkSchema).toContain('supports');
+    expect(linkSchema).toContain('supersedes');
+    expect(linkSchema).toContain('contradicts');
+    expect(linkSchema).toContain('derived_from');
+    expect(linkSchema).toContain('related_to');
+  });
+
+  it('creates idempotent generic implements links with git disabled while preserving commit/changelog git gating', async () => {
+    const { d, projectDir, tools } = registerMemoryToolHarness('Generic Link Git App');
+    fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Generic Link Git App', enabled: true, git: { enabled: false } }));
+
+    const memoryAdd = tools.get('memory_add');
+    const memorySearch = tools.get('memory_search');
+    const memoryLink = tools.get('memory_link');
+    const commitLink = tools.get('memory_commit_changelog_link');
+
+    const finding = await memoryAdd.execute('tool-call', {
+      kind: 'discovery_finding',
+      title: 'linkable finding',
+      content: 'discovery findings should link to later implementation work',
+    }, undefined, undefined, { cwd: projectDir });
+    const implementation = await memoryAdd.execute('tool-call', {
+      kind: 'note',
+      title: 'implementation note',
+      content: 'implements the discovery finding',
+    }, undefined, undefined, { cwd: projectDir });
+
+    expect(finding.isError).not.toBe(true);
+    expect(implementation.isError).not.toBe(true);
+
+    const search = await memorySearch.execute('tool-call', {
+      query: 'linkable finding',
+      kinds: ['discovery_finding'],
+      limit: 5,
+    }, undefined, undefined, { cwd: projectDir });
+    expect(search.isError).not.toBe(true);
+    expect(search.details.results).toHaveLength(1);
+    expect(search.details.results[0].kind).toBe('discovery_finding');
+
+    const firstLink = await memoryLink.execute('tool-call', {
+      from_memory_id: finding.details.memory.id,
+      to_memory_id: implementation.details.memory.id,
+      relation_type: 'implements',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(firstLink.isError).not.toBe(true);
+
+    const secondLink = await memoryLink.execute('tool-call', {
+      from_memory_id: finding.details.memory.id,
+      to_memory_id: implementation.details.memory.id,
+      relation_type: 'implements',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(secondLink.isError).not.toBe(true);
+
+    const links = d.prepare('SELECT from_memory_id, to_memory_id, relation_type FROM memory_links').all() as Array<{ from_memory_id: string; to_memory_id: string; relation_type: string }>;
+    expect(links).toEqual([{ from_memory_id: finding.details.memory.id, to_memory_id: implementation.details.memory.id, relation_type: 'implements' }]);
+
+    const gated = await commitLink.execute('tool-call', {
+      from_memory_id: finding.details.memory.id,
+      to_memory_id: implementation.details.memory.id,
+      relation_type: 'related_to',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(gated.isError).toBe(true);
+    expect(gated.content[0].text).toContain('git.enabled=true');
+  });
+
+  it('rejects self, missing, invalid, mutual reverse, and cross-project generic links', async () => {
+    const { d, projectDir, tools } = registerMemoryToolHarness('Generic Link Validation App');
+    const projectTwoDir = path.join(tmp, 'generic-link-validation-other-project');
+    fs.mkdirSync(path.join(projectTwoDir, '.pi'), { recursive: true });
+    fs.writeFileSync(path.join(projectTwoDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Other Link Project', enabled: true, git: { enabled: false } }));
+    fs.writeFileSync(path.join(projectDir, '.pi', 'memory.json'), JSON.stringify({ project_name: 'Generic Link Validation App', enabled: true, git: { enabled: false } }));
+
+    const memoryAdd = tools.get('memory_add');
+    const memoryLink = tools.get('memory_link');
+
+    const a = await memoryAdd.execute('tool-call', {
+      kind: 'discovery_finding',
+      title: 'finding a',
+      content: 'finding a content',
+    }, undefined, undefined, { cwd: projectDir });
+    const b = await memoryAdd.execute('tool-call', {
+      kind: 'note',
+      title: 'note b',
+      content: 'note b content',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(a.isError).not.toBe(true);
+    expect(b.isError).not.toBe(true);
+
+    const otherContext = resolveMemoryContext(projectTwoDir, os.homedir(), {});
+    const other = addMemory(d, {
+      scope: 'project',
+      kind: 'note',
+      title: 'other project note',
+      content: 'other project note content',
+    }, otherContext).memory;
+
+    const selfLink = await memoryLink.execute('tool-call', {
+      from_memory_id: a.details.memory.id,
+      to_memory_id: a.details.memory.id,
+      relation_type: 'implements',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(selfLink.isError).toBe(true);
+
+    const missingLink = await memoryLink.execute('tool-call', {
+      from_memory_id: a.details.memory.id,
+      to_memory_id: 'mem_missing_link_target',
+      relation_type: 'implements',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(missingLink.isError).toBe(true);
+
+    const invalidRelation = await memoryLink.execute('tool-call', {
+      from_memory_id: a.details.memory.id,
+      to_memory_id: b.details.memory.id,
+      relation_type: 'invalid',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(invalidRelation.isError).toBe(true);
+
+    const firstImplements = await memoryLink.execute('tool-call', {
+      from_memory_id: a.details.memory.id,
+      to_memory_id: b.details.memory.id,
+      relation_type: 'implements',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(firstImplements.isError).not.toBe(true);
+
+    const reverseImplements = await memoryLink.execute('tool-call', {
+      from_memory_id: b.details.memory.id,
+      to_memory_id: a.details.memory.id,
+      relation_type: 'implements',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(reverseImplements.isError).toBe(true);
+
+    const firstSupersedes = await memoryLink.execute('tool-call', {
+      from_memory_id: a.details.memory.id,
+      to_memory_id: b.details.memory.id,
+      relation_type: 'supersedes',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(firstSupersedes.isError).not.toBe(true);
+
+    const reverseSupersedes = await memoryLink.execute('tool-call', {
+      from_memory_id: b.details.memory.id,
+      to_memory_id: a.details.memory.id,
+      relation_type: 'supersedes',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(reverseSupersedes.isError).toBe(true);
+
+    const crossProject = await memoryLink.execute('tool-call', {
+      from_memory_id: a.details.memory.id,
+      to_memory_id: other.id,
+      relation_type: 'implements',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(crossProject.isError).toBe(true);
+
+    const links = d.prepare('SELECT from_memory_id, to_memory_id, relation_type FROM memory_links ORDER BY relation_type, from_memory_id, to_memory_id').all() as Array<{ from_memory_id: string; to_memory_id: string; relation_type: string }>;
+    expect(links).toEqual([
+      { from_memory_id: a.details.memory.id, to_memory_id: b.details.memory.id, relation_type: 'implements' },
+      { from_memory_id: a.details.memory.id, to_memory_id: b.details.memory.id, relation_type: 'supersedes' },
+    ]);
   });
 });
 
