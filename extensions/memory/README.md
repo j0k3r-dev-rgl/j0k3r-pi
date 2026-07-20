@@ -217,16 +217,19 @@ Use `/memory-context` or the `memory_context` tool to inspect the resolved conte
 Registered lifecycle events:
 
 - `session_start`: resolves memory context and sets footer status without creating or reopening a memory session.
-- `before_agent_start`: lazily creates, resumes, or reopens the memory session on the first non-empty user prompt, captures that prompt, and injects startup brain context once per distinct Pi session. The context is a compact index with bounded summaries and explicit cues for task-relevant retrieval.
+- `before_agent_start`: lazily creates, resumes, or reopens the memory session on the first non-empty user prompt, captures that prompt, and injects startup brain context once per distinct Pi session. New lifecycle-managed sessions use the exact non-empty `ctx.sessionManager.getSessionId()` as `memory_sessions.id`; if Pi does not provide one, lifecycle creation is skipped safely instead of generating a fallback id. The context is a compact index with bounded summaries and explicit cues for task-relevant retrieval.
 - `session_shutdown`: closes the memory session unless shutdown reason is `reload`.
 
 Memory sessions are linked to Pi sessions using this conservative priority:
 
-1. `ctx.sessionManager.getSessionId()` stored as `metadata_json.pi_session_id`.
-2. `ctx.sessionManager.getSessionFile()` stored as `metadata_json.pi_session_file`.
-3. A Pi custom session entry persisted with `pi.appendEntry("memory-session", { memory_session_id })`.
-4. When no Pi id, session file, or custom entry is available, one unambiguous recent active auto-started session for the same project and cwd.
-5. Create a new memory session.
+1. Reuse an existing compatible session whose row id already equals `ctx.sessionManager.getSessionId()`.
+2. Reuse an existing compatible session matched by `metadata_json.pi_session_id`.
+3. Reuse an existing compatible session matched by `metadata_json.pi_session_file`.
+4. Reuse an existing compatible Pi custom session entry persisted with `pi.appendEntry("memory-session", { memory_session_id })`.
+5. When no Pi id, session file, or custom entry is available, reuse one unambiguous recent active auto-started session for the same project and cwd.
+6. Otherwise create a new lifecycle-managed session whose `memory_sessions.id` exactly equals the non-empty Pi session id.
+
+Compatible legacy rows keep their existing ids unchanged. If Pi cannot provide a non-empty session id and no compatible session can be reused, the extension skips lifecycle session creation and prompt capture instead of generating a fallback lifecycle id.
 
 When a completed memory session is resumed with the same Pi identity, `session_start` leaves it closed and the first non-empty `before_agent_start` prompt reactivates it with `status='active'` and `ended_at=NULL`. Empty startup prompts do not create or reopen sessions. The previous summary is preserved until the next finish rewrites it.
 
@@ -234,6 +237,8 @@ Shutdown behavior:
 
 - Default: writes a fast heuristic local session summary.
 - With `session_end.semantic=true`: tries a semantic session summary with the active model, then falls back to the heuristic summary on error or missing auth.
+- Explicit `memory_session_finish` is the real visible close action for user-requested close/end/finish flows. If a session was already completed explicitly, later graceful shutdown marks local runtime state closed without overwriting the saved summary, learned content, metadata, or ended timestamp.
+- Reload does not close the active lifecycle session.
 - Session shutdown never changes the canonical project profile. Agents read and explicitly maintain it through `memory_project_profile` when durable project facts change. The canonical profile is intentionally excluded from the regular startup memory slots and compact `memory_start_chat` context.
 
 ### Memory quality behavior
@@ -289,10 +294,10 @@ Generic links are explicit:
 | `memory_list` | List compact memories by filters. |
 | `memory_update` | Update memory content/tags/status/confidence/importance. |
 | `memory_archive` | Archive a memory without deleting it. |
-| `memory_session_start` | Create/register a memory session. |
+| `memory_session_start` | Create/register a separate manual non-lifecycle memory session. |
 | `memory_session_prompt_add` | Store a relevant session prompt for audit. |
-| `memory_session_finish` | Finish a memory session and optionally extract durable memories. |
-| `memory_start_chat` | Explicit/manual API to start a memory session and return compact startup context without the canonical project profile. |
+| `memory_session_finish` | Finish a memory session; `session_id` is optional only for the active lifecycle session, and explicit close/end requests should use it before confirming closure. |
+| `memory_start_chat` | Explicit/manual API to start a separate non-lifecycle memory session and return compact startup context without the canonical project profile. |
 | `memory_recall` | Recall compact workflow-moment context. Aliases: `task`, `edit`, `test`, `commit`, `end`. |
 | `memory_project_profile` | Get/ensure/update the current project profile and return its complete canonical content. |
 | `memory_consolidate` | Find or apply duplicate-memory consolidation. Dry-run defaults to true. |
@@ -710,16 +715,19 @@ Usa `/memory-context` o la tool `memory_context` para inspeccionar el contexto r
 Eventos lifecycle registrados:
 
 - `session_start`: resuelve el contexto de memoria y setea estado de footer sin crear ni reabrir una sesión memory.
-- `before_agent_start`: crea, resume o reabre la sesión memory de forma lazy con el primer prompt no vacío del usuario, captura ese prompt e inyecta startup brain context una vez por cada sesión Pi distinta. El contexto es un índice compacto con resúmenes acotados y señales explícitas para recuperar memoria relevante para la tarea.
+- `before_agent_start`: crea, resume o reabre la sesión memory de forma lazy con el primer prompt no vacío del usuario, captura ese prompt e inyecta startup brain context una vez por cada sesión Pi distinta. Las nuevas sesiones lifecycle-managed usan el `ctx.sessionManager.getSessionId()` exacto y no vacío como `memory_sessions.id`; si Pi no lo provee o colisiona con una fila de contexto incompatible, la creación lifecycle se omite de forma segura en lugar de generar un id fallback o reabrir/finalizar una fila ajena. El contexto es un índice compacto con resúmenes acotados y señales explícitas para recuperar memoria relevante para la tarea.
 - `session_shutdown`: cierra la sesión memory salvo que la razón de shutdown sea `reload`.
 
 Las sesiones Memory se linkean a sesiones Pi usando esta prioridad conservadora:
 
-1. `ctx.sessionManager.getSessionId()` guardado como `metadata_json.pi_session_id`.
-2. `ctx.sessionManager.getSessionFile()` guardado como `metadata_json.pi_session_file`.
-3. Una entrada custom de sesión Pi persistida con `pi.appendEntry("memory-session", { memory_session_id })`.
-4. Cuando no hay Pi id, archivo de sesión ni entrada custom disponibles, una sesión reciente activa auto-started no ambigua para el mismo proyecto y cwd.
-5. Crear una nueva sesión memory.
+1. Reusar una sesión compatible existente cuya fila ya tenga `id === ctx.sessionManager.getSessionId()`.
+2. Reusar una sesión compatible existente matcheada por `metadata_json.pi_session_id`.
+3. Reusar una sesión compatible existente matcheada por `metadata_json.pi_session_file`.
+4. Reusar una entrada custom compatible de sesión Pi persistida con `pi.appendEntry("memory-session", { memory_session_id })`.
+5. Cuando no hay Pi id, archivo de sesión ni entrada custom disponibles, reusar una sesión reciente activa auto-started no ambigua para el mismo proyecto y cwd.
+6. Si no hay match compatible, crear una nueva sesión lifecycle-managed cuyo `memory_sessions.id` sea exactamente el Pi session id no vacío.
+
+Las filas legacy compatibles conservan sus ids existentes sin cambios. Si Pi no puede proveer un session id no vacío y no hay una sesión compatible para reusar, la extensión omite la creación lifecycle y la captura de prompts en lugar de generar un id fallback. Si el Pi session id exacto ya pertenece a una fila de scope/contexto incompatible, la extensión falla de forma segura y no reabre ni finaliza esa fila ajena.
 
 Cuando una sesión memory completada se resume con la misma identidad Pi, `session_start` la deja cerrada y el primer prompt no vacío en `before_agent_start` la reactiva con `status='active'` y `ended_at=NULL`. Los prompts vacíos de startup no crean ni reabren sesiones. El resumen previo se preserva hasta que el próximo finish lo reescribe.
 
@@ -727,6 +735,8 @@ Comportamiento de shutdown:
 
 - Default: escribe un resumen local heurístico rápido de la sesión.
 - Con `session_end.semantic=true`: intenta un resumen semántico con el modelo activo y cae al resumen heurístico si hay error o falta auth.
+- `memory_session_finish` explícita es la acción real y visible de cierre para pedidos del usuario de close/end/finish. Si una sesión ya quedó completada explícitamente, un shutdown graceful posterior solo marca el estado runtime local como cerrado y no sobreescribe el summary guardado, learned, metadata ni `ended_at`.
+- Reload no cierra la sesión lifecycle activa.
 - El cierre de sesión nunca modifica el perfil canónico del proyecto. Los agentes lo leen y mantienen explícitamente mediante `memory_project_profile` cuando cambian hechos durables del proyecto. El perfil canónico queda fuera de los slots startup regulares y del contexto compacto de `memory_start_chat`.
 
 ### Comportamiento de calidad de memoria
@@ -782,10 +792,10 @@ Los links genéricos son explícitos:
 | `memory_list` | Lista memorias compactas por filtros. |
 | `memory_update` | Actualiza contenido/tags/status/confidence/importance. |
 | `memory_archive` | Archiva una memoria sin borrarla. |
-| `memory_session_start` | Crea/registra una sesión memory. |
+| `memory_session_start` | Crea/registra una sesión memory manual separada, no lifecycle. |
 | `memory_session_prompt_add` | Guarda un prompt relevante de sesión para auditoría. |
-| `memory_session_finish` | Finaliza una sesión memory y opcionalmente extrae memorias durables. |
-| `memory_start_chat` | API explícita/manual para iniciar una sesión memory y devolver contexto startup compacto sin el project profile canónico. |
+| `memory_session_finish` | Finaliza una sesión memory; `session_id` es opcional solo para la sesión lifecycle activa y los pedidos explícitos de close/end deben usarla antes de confirmar el cierre. |
+| `memory_start_chat` | API explícita/manual para iniciar una sesión memory separada, no lifecycle, y devolver contexto startup compacto sin el project profile canónico. |
 | `memory_recall` | Recupera contexto compacto de momento de workflow. Aliases: `task`, `edit`, `test`, `commit`, `end`. |
 | `memory_project_profile` | Obtiene/asegura/actualiza el perfil actual y devuelve su contenido canónico completo. |
 | `memory_consolidate` | Encuentra o aplica consolidación de memorias duplicadas. Dry-run por defecto. |

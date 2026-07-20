@@ -205,13 +205,20 @@ describe('extension setup', () => {
     extension({ registerTool: () => {}, registerCommand: () => {}, registerMessageRenderer: () => {}, on: (name: string, handler: Function) => handlers.set(name, handler) });
     if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
 
-    const ctx = { cwd: projectDir, ui: { setStatus: () => {}, notify: () => {} }, sessionManager: { getSessionFile: () => path.join(tmp, 'pi-session.json') } };
+    const ctx = { cwd: projectDir, ui: { setStatus: () => {}, notify: () => {} }, sessionManager: { getSessionId: () => 'policy-session-id', getSessionFile: () => path.join(tmp, 'pi-session.json') } };
     await handlers.get('session_start')?.({}, ctx);
     const injected = await handlers.get('before_agent_start')?.({ prompt: 'Review memory policy' }, ctx);
     const content = String(injected?.message?.content ?? '');
     const agentsGuide = fs.readFileSync(new URL('../../../AGENTS.md', import.meta.url), 'utf8');
 
     expect(content).toContain('Treat it as the agent persistent brain');
+    expect(content).toContain('Memory lifecycle sessions are lazy: session_start and empty startup prompts do not create or reopen them; the first non-empty user prompt does.');
+    expect(content).toContain('New lifecycle-managed sessions use the exact Pi session id as the Memory session id');
+    expect(content).toContain('If the user explicitly asks to close, end, or finish the session');
+    expect(content).toContain('call memory_session_finish');
+    expect(content).toContain('confirm closure only after memory_session_finish reports completion');
+    expect(content).toContain('Graceful Pi shutdown closes the active memory session automatically, but reload does not');
+    expect(content).toContain('Manual tools such as memory_session_start and memory_start_chat create separate non-lifecycle sessions');
     expect(content).toContain('first rely on startup brain context, loaded skill content, and current conversation');
     expect(content).toContain('Startup brain context is a compact index, not fully loaded knowledge');
     expect(content).toContain('Proactively call memory_search with specific task terms');
@@ -313,10 +320,13 @@ describe('extension setup', () => {
     expect(expanded).not.toContain('…');
   });
 
-  it('memory tool metadata preserves exact literals and broadens memory_get guidance beyond search-only flows', () => {
+  it('memory tool metadata preserves exact literals and describes real lifecycle finish behavior', () => {
     const { tools } = registerMemoryToolHarness('Metadata Wording App');
     const memoryAdd = tools.get('memory_add');
     const memoryGet = tools.get('memory_get');
+    const memoryFinish = tools.get('memory_session_finish');
+    const memoryStart = tools.get('memory_session_start');
+    const memoryStartChat = tools.get('memory_start_chat');
 
     expect(memoryAdd.promptGuidelines[0]).toContain('english lowercase-oriented prose for normal titles, summaries, content, and tags');
     expect(memoryAdd.promptGuidelines[0]).toContain('preserve exact case for case-sensitive paths, commands, symbols, identifiers, versions, acronyms, and quoted literals');
@@ -324,6 +334,12 @@ describe('extension setup', () => {
     expect(memoryGet.promptSnippet).not.toContain('after memory_search');
     expect(memoryGet.promptGuidelines[0]).toContain('startup context');
     expect(memoryGet.promptGuidelines[0]).toContain('memory_recall');
+    expect(memoryFinish.description).toContain('active lifecycle memory session');
+    expect(memoryFinish.promptGuidelines.join('\n')).toContain('close, end, or finish the session');
+    expect(memoryFinish.promptGuidelines.join('\n')).toContain('call memory_session_finish');
+    expect(memoryFinish.promptGuidelines.join('\n')).toContain('Do not claim the session is closed until memory_session_finish reports completion');
+    expect(memoryStart.description).toContain('separate non-lifecycle');
+    expect(memoryStartChat.promptGuidelines[0]).toContain('separate non-lifecycle');
   });
 
   it('memory search, recall, and get expose actionable ids while selected-memory rendering preserves full multiline content', async () => {
@@ -432,6 +448,7 @@ describe('extension setup', () => {
       cwd: projectDir,
       ui: { setStatus: () => {}, notify: () => {} },
       sessionManager: {
+        getSessionId: () => 'lifecycle-shutdown-session',
         getSessionFile: () => path.join(tmp, 'pi-session.json'),
         getBranch: () => [
           { type: 'message', message: { role: 'user', content: [{ type: 'text', text: 'Add lifecycle tests' }] } },

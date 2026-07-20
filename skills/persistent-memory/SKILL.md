@@ -73,6 +73,9 @@ Use this skill to operate the Pi Memory Extension deliberately: recall context w
 - Current user instruction beats active memory. If the user contradicts memory, follow the user and ask whether to update, archive, or supersede the old memory.
 - Durable memories should use lowercase-oriented english prose for titles, summaries, and tags, while preserving exact case for case-sensitive paths, commands, symbols, identifiers, versions, acronyms, and quoted literals. Audited prompts may stay in their original language.
 - Treat closed memory sessions as immutable until lifecycle reopen: do not assume `memory_add`, recall, or ordinary memory tooling reopens a completed session. After Pi emits `session_start`/resume, the Memory Extension keeps the completed session closed until the first non-empty user prompt reuses the same Pi session identity and reopens it lazily.
+- New lifecycle-managed sessions use the exact non-empty Pi session id as the Memory session id. If Pi cannot provide a non-empty session id and no compatible session can be reused, lifecycle session creation is skipped instead of generating a fallback id.
+- Explicit user requests to close, end, or finish the session require a real `memory_session_finish` call with a structured summary before you confirm the session is closed. Graceful shutdown can close an active lifecycle session automatically, but reload does not close it.
+- `memory_session_start` and `memory_start_chat` remain explicit manual APIs for separate non-lifecycle sessions; they are not the normal way to begin ordinary Pi lifecycle work.
 
 Good activation triggers:
 

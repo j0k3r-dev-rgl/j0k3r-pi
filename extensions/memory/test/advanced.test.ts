@@ -261,6 +261,7 @@ async function lifecycleHarness(memoryConfig: Record<string, unknown> = {}) {
     cwd: projectDir,
     ui: { setStatus: () => {}, notify: (msg: string) => notifications.push(msg) },
     sessionManager: {
+      getSessionId: () => 'pi-lifecycle-session',
       getSessionFile: () => path.join(tmp, 'pi-session.json'),
       getBranch: () => [
         { type: 'message', message: { role: 'user', content: [{ type: 'text', text: 'Run lifecycle checks' }] } },
@@ -273,7 +274,7 @@ async function lifecycleHarness(memoryConfig: Record<string, unknown> = {}) {
 }
 
 describe('advanced lifecycle behavior', () => {
-  it('creates the lifecycle memory session lazily on the first real user prompt', async () => {
+  it('creates the lifecycle memory session lazily on the first real user prompt using the exact Pi session id', async () => {
     const h = await lifecycleHarness();
     const d = openMemoryDb(h.dbPath);
 
@@ -287,25 +288,47 @@ describe('advanced lifecycle behavior', () => {
 
     const first = await h.handlers.get('before_agent_start')?.({ prompt: 'first real turn' }, h.ctx);
     expect(first?.message?.customType).toBe('memory-context');
-    expect(String(first?.message?.content ?? '')).toContain('Memory session: session_');
+    expect(String(first?.message?.content ?? '')).toContain('Memory session: pi-lifecycle-session');
 
     const rows = d.prepare('SELECT id, status, ended_at FROM memory_sessions').all() as any[];
     expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe('pi-lifecycle-session');
     expect(rows[0].status).toBe('active');
     expect(rows[0].ended_at).toBeNull();
 
-    const prompt = d.prepare('SELECT role, prompt, prompt_index FROM memory_session_prompts WHERE session_id=?').get(rows[0].id) as any;
-    expect(prompt).toMatchObject({ role: 'user', prompt: 'first real turn', prompt_index: 1 });
+    const prompt = d.prepare('SELECT session_id, role, prompt, prompt_index FROM memory_session_prompts WHERE session_id=?').get(rows[0].id) as any;
+    expect(prompt).toMatchObject({ session_id: 'pi-lifecycle-session', role: 'user', prompt: 'first real turn', prompt_index: 1 });
   });
 
-  it('does not close memory session on reload shutdown', async () => {
-    const h = await lifecycleHarness();
-    await h.handlers.get('before_agent_start')?.({ prompt: 'first turn' }, h.ctx);
-    await h.handlers.get('session_shutdown')?.({ reason: 'reload' }, h.ctx);
-    const d = openMemoryDb(h.dbPath);
-    const row = d.prepare('SELECT ended_at, summary FROM memory_sessions LIMIT 1').get() as any;
-    expect(row.ended_at).toBeNull();
-    expect(row.summary).toBeNull();
+  it('closes active lifecycle sessions for new/resume/fork shutdowns while reload stays open', async () => {
+    for (const reason of ['new', 'resume', 'fork'] as const) {
+      const h = await lifecycleHarness();
+      await h.handlers.get('before_agent_start')?.({ prompt: `prompt before ${reason}` }, h.ctx);
+      await h.handlers.get('session_shutdown')?.({ reason }, h.ctx);
+      const d = openMemoryDb(h.dbPath);
+      const row = d.prepare('SELECT ended_at, status, summary FROM memory_sessions LIMIT 1').get() as any;
+      expect(row.status).toBe('completed');
+      expect(row.ended_at).not.toBeNull();
+      expect(row.summary).toContain(`memory session closed automatically on ${reason}`);
+    }
+
+    const { d: reloadDb, projectDir: reloadProjectDir, handlers: reloadHandlers } = await telemetryToolHarness('Reload Shutdown Exception App');
+    const reloadCtx: any = {
+      cwd: reloadProjectDir,
+      ui: { setStatus: () => {}, notify: () => {} },
+      sessionManager: {
+        getSessionId: () => 'pi-reload-stays-open',
+        getSessionFile: () => path.join(tmp, 'pi-reload-stays-open.jsonl'),
+        getEntries: () => [],
+        getBranch: () => [],
+      },
+    };
+    await reloadHandlers.get('session_start')?.({ reason: 'startup' }, reloadCtx);
+    await reloadHandlers.get('before_agent_start')?.({ prompt: 'first turn' }, reloadCtx);
+    await reloadHandlers.get('session_shutdown')?.({ reason: 'reload' }, reloadCtx);
+    const reloadRow = reloadDb.prepare('SELECT ended_at, summary FROM memory_sessions WHERE id=?').get('pi-reload-stays-open') as any;
+    expect(reloadRow.ended_at).toBeNull();
+    expect(reloadRow.summary).toBeNull();
   });
 
   it('reactivates a resumed memory session and backfills pi session id on reuse', async () => {
@@ -419,7 +442,7 @@ describe('advanced lifecycle behavior', () => {
 
     expect(appended).toHaveLength(1);
     expect(appended[0].customType).toBe('memory-session');
-    expect(appended[0].data.memory_session_id).toMatch(/^session_/);
+    expect(appended[0].data.memory_session_id).toBe('pi-lifecycle-session');
     expect(appended[0].data.project_name).toBe('Lifecycle Advanced');
   });
 
@@ -487,7 +510,7 @@ describe('advanced lifecycle behavior', () => {
     expect(rows[0].id).toBe(existing.id);
   });
 
-  it('does not use the recent active fallback when multiple candidates are ambiguous', async () => {
+  it('does not create a new lifecycle session when Pi session id is unavailable and recent fallback is ambiguous', async () => {
     const dbPath = path.join(tmp, 'recent-active-ambiguous.sqlite');
     const projectDir = path.join(tmp, 'recent-active-ambiguous-project');
     fs.mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
@@ -513,10 +536,30 @@ describe('advanced lifecycle behavior', () => {
     const rowsAfterSessionStart = d.prepare('SELECT id FROM memory_sessions').all() as any[];
     expect(rowsAfterSessionStart).toHaveLength(2);
 
-    await handlers.get('before_agent_start')?.({ prompt: 'ambiguous fallback creates a new session lazily' }, ctx);
+    const result = await handlers.get('before_agent_start')?.({ prompt: 'ambiguous fallback does not create a new lifecycle session' }, ctx);
 
     const rows = d.prepare('SELECT id FROM memory_sessions').all() as any[];
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(2);
+    expect(String(result?.message?.content ?? '')).toContain('Memory session: unavailable');
+  });
+
+  it('skips lifecycle session creation when Pi session id is missing and no compatible session can be reused', async () => {
+    const h = await lifecycleHarness();
+    const ctx = {
+      ...h.ctx,
+      sessionManager: {
+        ...h.ctx.sessionManager,
+        getSessionId: () => '',
+        getSessionFile: () => null,
+      },
+    };
+    const first = await h.handlers.get('before_agent_start')?.({ prompt: 'first turn without pi id' }, ctx);
+    const d = openMemoryDb(h.dbPath);
+    const rows = d.prepare('SELECT id FROM memory_sessions').all() as any[];
+
+    expect(rows).toHaveLength(0);
+    expect(String(first?.message?.content ?? '')).toContain('Memory session: unavailable');
+    expect(h.notifications.some((message) => message.includes('Pi session id'))).toBe(true);
   });
 
   it('writes memory session debug log only when memory.json debug is true', async () => {
@@ -554,7 +597,7 @@ describe('advanced lifecycle behavior', () => {
       },
     };
     const first = await h.handlers.get('before_agent_start')?.({ prompt: 'first Pi session' }, firstCtx);
-    const firstMemorySessionId = String(first?.message?.content ?? '').match(/Memory session: (session_[^\s]+)/)?.[1];
+    const firstMemorySessionId = String(first?.message?.content ?? '').match(/Memory session: ([^\s]+)/)?.[1];
     await h.handlers.get('session_shutdown')?.({ reason: 'reload' }, firstCtx);
 
     const registerReloadedHandlers = () => {
@@ -592,13 +635,13 @@ describe('advanced lifecycle behavior', () => {
     };
     await newSessionHandlers.get('session_start')?.({ reason: 'new' }, newSessionCtx);
     const second = await newSessionHandlers.get('before_agent_start')?.({ prompt: 'second Pi session' }, newSessionCtx);
-    const secondMemorySessionId = String(second?.message?.content ?? '').match(/Memory session: (session_[^\s]+)/)?.[1];
+    const secondMemorySessionId = String(second?.message?.content ?? '').match(/Memory session: ([^\s]+)/)?.[1];
 
     expect(first?.message?.customType).toBe('memory-context');
     expect(sameSessionReload).toBeUndefined();
     expect(second?.message?.customType).toBe('memory-context');
-    expect(firstMemorySessionId).toMatch(/^session_/);
-    expect(secondMemorySessionId).toMatch(/^session_/);
+    expect(firstMemorySessionId).toBe('pi-session-one');
+    expect(secondMemorySessionId).toBe('pi-session-two');
     expect(secondMemorySessionId).not.toBe(firstMemorySessionId);
   });
 
@@ -633,6 +676,178 @@ describe('advanced lifecycle behavior', () => {
     expect(refinished.summary).toContain('captured 2 prompt(s)');
   });
 
+  it('memory_session_finish resolves the active lifecycle id, reports completion, and preserves the summary through later shutdown', async () => {
+    const { d, projectDir, tools, handlers } = await telemetryToolHarness('Lifecycle Finish Tool App');
+    const ctx: any = {
+      cwd: projectDir,
+      ui: { setStatus: () => {}, notify: () => {} },
+      sessionManager: {
+        getSessionId: () => 'pi-finish-session',
+        getSessionFile: () => path.join(tmp, 'pi-finish-session.jsonl'),
+        getEntries: () => [],
+        getBranch: () => [],
+      },
+    };
+
+    await handlers.get('session_start')?.({ reason: 'startup' }, ctx);
+    await handlers.get('before_agent_start')?.({ prompt: 'first lifecycle prompt' }, ctx);
+    const finished = await tools.get('memory_session_finish').execute('finish-call', {
+      summary: 'Manual Summary Keeps Case',
+      memories_to_add: [{ kind: 'learning', content: 'manual close created durable memory' }],
+    }, undefined, undefined, { cwd: projectDir });
+
+    expect(finished.isError).not.toBe(true);
+    expect(finished.content[0].text).toContain('session_id: pi-finish-session');
+    expect(finished.content[0].text).toContain('status: completed');
+    expect(finished.content[0].text).toContain('summary_saved: yes');
+    expect(finished.details.session.id).toBe('pi-finish-session');
+
+    const finishedRow = d.prepare('SELECT status, summary, ended_at FROM memory_sessions WHERE id=?').get('pi-finish-session') as any;
+    expect(finishedRow.status).toBe('completed');
+    expect(finishedRow.summary).toBe('Manual Summary Keeps Case');
+    expect(finishedRow.ended_at).not.toBeNull();
+
+    await handlers.get('session_shutdown')?.({ reason: 'quit' }, ctx);
+    const afterShutdown = d.prepare('SELECT status, summary, ended_at FROM memory_sessions WHERE id=?').get('pi-finish-session') as any;
+    expect(afterShutdown.status).toBe('completed');
+    expect(afterShutdown.summary).toBe('Manual Summary Keeps Case');
+    expect(afterShutdown.ended_at).toBe(finishedRow.ended_at);
+  });
+
+  it('reopens the same lifecycle row on the next non-empty prompt after explicit finish', async () => {
+    const { d, projectDir, tools, handlers } = await telemetryToolHarness('Lifecycle Reopen After Finish App');
+    const ctx: any = {
+      cwd: projectDir,
+      ui: { setStatus: () => {}, notify: () => {} },
+      sessionManager: {
+        getSessionId: () => 'pi-reopen-after-finish',
+        getSessionFile: () => path.join(tmp, 'pi-reopen-after-finish.jsonl'),
+        getEntries: () => [],
+        getBranch: () => [],
+      },
+    };
+
+    await handlers.get('session_start')?.({ reason: 'startup' }, ctx);
+    await handlers.get('before_agent_start')?.({ prompt: 'first lifecycle prompt' }, ctx);
+    const finished = await tools.get('memory_session_finish').execute('finish-call', {
+      summary: 'Manual Summary Keeps Case',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(finished.isError).not.toBe(true);
+
+    await handlers.get('before_agent_start')?.({ prompt: 'next prompt reopens the same row' }, ctx);
+    const reopened = d.prepare('SELECT id, status, ended_at, summary FROM memory_sessions WHERE id=?').get('pi-reopen-after-finish') as any;
+    expect(reopened).toMatchObject({ id: 'pi-reopen-after-finish', status: 'active', summary: 'Manual Summary Keeps Case' });
+    expect(reopened.ended_at).toBeNull();
+
+    const prompts = d.prepare('SELECT prompt_index, prompt FROM memory_session_prompts WHERE session_id=? ORDER BY prompt_index ASC').all('pi-reopen-after-finish') as any[];
+    expect(prompts.map((prompt) => prompt.prompt)).toEqual(['first lifecycle prompt', 'next prompt reopens the same row']);
+    expect(prompts.map((prompt) => prompt.prompt_index)).toEqual([1, 2]);
+  });
+
+  it('manual session APIs stay separate and do not replace the active lifecycle session', async () => {
+    const { d, projectDir, tools, handlers } = await telemetryToolHarness('Manual Session Separation App');
+    const ctx: any = {
+      cwd: projectDir,
+      ui: { setStatus: () => {}, notify: () => {} },
+      sessionManager: {
+        getSessionId: () => 'pi-lifecycle-active',
+        getSessionFile: () => path.join(tmp, 'pi-lifecycle-active.jsonl'),
+        getEntries: () => [],
+        getBranch: () => [],
+      },
+    };
+
+    await handlers.get('session_start')?.({ reason: 'startup' }, ctx);
+    await handlers.get('before_agent_start')?.({ prompt: 'lifecycle prompt before manual sessions' }, ctx);
+
+    const manualSession = await tools.get('memory_session_start').execute('manual-start', {
+      title: 'separate manual session',
+    }, undefined, undefined, { cwd: projectDir });
+    const manualChat = await tools.get('memory_start_chat').execute('manual-chat', {
+      user_prompt: 'separate manual startup context',
+    }, undefined, undefined, { cwd: projectDir });
+
+    expect(manualSession.details.session.id).not.toBe('pi-lifecycle-active');
+    expect(manualChat.details.session_id).not.toBe('pi-lifecycle-active');
+    expect(manualChat.details.session_id).not.toBe(manualSession.details.session.id);
+
+    const finishedLifecycle = await tools.get('memory_session_finish').execute('finish-lifecycle', {
+      summary: 'Lifecycle Session Keeps Ownership',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(finishedLifecycle.isError).not.toBe(true);
+    expect(finishedLifecycle.details.session.id).toBe('pi-lifecycle-active');
+
+    const rows = d.prepare('SELECT id, status, summary FROM memory_sessions ORDER BY started_at ASC').all() as any[];
+    const lifecycleRow = rows.find((row) => row.id === 'pi-lifecycle-active');
+    const manualRow = rows.find((row) => row.id === manualSession.details.session.id);
+    const manualChatRow = rows.find((row) => row.id === manualChat.details.session_id);
+    expect(lifecycleRow).toMatchObject({ id: 'pi-lifecycle-active', status: 'completed', summary: 'Lifecycle Session Keeps Ownership' });
+    expect(manualRow).toMatchObject({ id: manualSession.details.session.id, status: 'active' });
+    expect(manualChatRow).toMatchObject({ id: manualChat.details.session_id, status: 'active' });
+  });
+
+  it('fails safely on incompatible cross-context exact-id reuse and finish', async () => {
+    const { d, projectDir, tools, handlers } = await telemetryToolHarness('Cross Context Collision App');
+    const projectContext = resolveMemoryContext(projectDir, os.homedir(), {});
+    startMemorySession(d, {
+      session_id: 'shared-pi-session',
+      title: 'project scoped lifecycle row',
+      metadata_json: { pi_session_id: 'shared-pi-session', auto_started: true },
+    }, projectContext);
+    finishMemorySession(d, {
+      session_id: 'shared-pi-session',
+      summary: 'project summary stays closed',
+    }, projectContext);
+
+    const notifications: string[] = [];
+    const generalCtx: any = {
+      cwd: os.homedir(),
+      ui: { setStatus: () => {}, notify: (message: string) => notifications.push(message) },
+      sessionManager: {
+        getSessionId: () => 'shared-pi-session',
+        getSessionFile: () => path.join(tmp, 'general-session.jsonl'),
+        getEntries: () => [],
+        getBranch: () => [],
+      },
+    };
+
+    await handlers.get('session_start')?.({ reason: 'startup' }, generalCtx);
+    const injected = await handlers.get('before_agent_start')?.({ prompt: 'general prompt must not reuse foreign row' }, generalCtx);
+    expect(String(injected?.message?.content ?? '')).toContain('Memory session: unavailable');
+    expect(notifications.some((message) => message.includes('incompatible memory session'))).toBe(true);
+
+    const stillCompleted = d.prepare('SELECT id, scope, status, ended_at, summary FROM memory_sessions WHERE id=?').get('shared-pi-session') as any;
+    expect(stillCompleted).toMatchObject({ id: 'shared-pi-session', scope: 'project', status: 'completed', summary: 'project summary stays closed' });
+    expect(stillCompleted.ended_at).not.toBeNull();
+
+    const prompts = d.prepare('SELECT COUNT(*) AS count FROM memory_session_prompts WHERE session_id=?').get('shared-pi-session') as any;
+    expect(prompts.count).toBe(0);
+
+    const finishForeign = await tools.get('memory_session_finish').execute('finish-foreign', {
+      session_id: 'shared-pi-session',
+      summary: 'general context must not finish foreign row',
+    }, undefined, undefined, { cwd: os.homedir() });
+    expect(finishForeign.isError).toBe(true);
+    expect(finishForeign.content[0].text).toContain('Session not found: shared-pi-session');
+  });
+
+  it('memory_session_finish fails clearly when no active or target session exists', async () => {
+    const { tools, projectDir } = await telemetryToolHarness('Lifecycle Finish Error App');
+
+    const missingActive = await tools.get('memory_session_finish').execute('finish-call', {
+      summary: 'cannot finish without a target',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(missingActive.isError).toBe(true);
+    expect(missingActive.content[0].text).toContain('No active lifecycle memory session');
+
+    const missingTarget = await tools.get('memory_session_finish').execute('finish-call', {
+      session_id: 'missing-session-id',
+      summary: 'missing target session',
+    }, undefined, undefined, { cwd: projectDir });
+    expect(missingTarget.isError).toBe(true);
+    expect(missingTarget.content[0].text).toContain('Session not found: missing-session-id');
+  });
+
   it('does not reopen the current closed memory session just because a durable memory is saved', async () => {
     const dbPath = path.join(tmp, 'memory-add-closed.sqlite');
     const projectDir = path.join(tmp, 'memory-add-closed-project');
@@ -644,7 +859,7 @@ describe('advanced lifecycle behavior', () => {
     const tools = new Map<string, any>();
     extension({ registerTool: (tool: any) => tools.set(tool.name, tool), registerCommand: () => {}, on: (name: string, handler: Function) => handlers.set(name, handler) });
     if (old === undefined) delete process.env.PI_MEMORY_DB_PATH; else process.env.PI_MEMORY_DB_PATH = old;
-    const ctx = { cwd: projectDir, ui: { setStatus: () => {}, notify: () => {} }, sessionManager: { getSessionFile: () => path.join(tmp, 'memory-add-closed.jsonl'), getBranch: () => [] } };
+    const ctx = { cwd: projectDir, ui: { setStatus: () => {}, notify: () => {} }, sessionManager: { getSessionId: () => 'memory-add-closed-session', getSessionFile: () => path.join(tmp, 'memory-add-closed.jsonl'), getBranch: () => [] } };
 
     await handlers.get('session_start')?.({}, ctx);
     await handlers.get('before_agent_start')?.({ prompt: 'first turn before memory add' }, ctx);

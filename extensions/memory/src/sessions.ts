@@ -11,9 +11,18 @@ function sessionProjectFields(scope: MemoryScope, context: ResolvedContext) {
   return { scope: scope === 'project' ? 'general' : scope, project_id: null, project_name: null };
 }
 
-export function startMemorySession(db: Db, input: { title?: string; scope?: MemoryScope; metadata_json?: Record<string, unknown> }, context: ResolvedContext) {
+export function isSessionCompatibleWithContext(session: { scope?: MemoryScope | null; project_id?: string | null } | undefined, context: ResolvedContext): boolean {
+  if (!session || session.scope !== context.scope) return false;
+  if (context.scope === 'project') return session.project_id === context.project_id;
+  return session.project_id == null;
+}
+
+export function startMemorySession(db: Db, input: { title?: string; scope?: MemoryScope; session_id?: string; metadata_json?: Record<string, unknown> }, context: ResolvedContext) {
   const fields = sessionProjectFields(input.scope ?? context.scope, context);
-  const id = generateSessionId({ scope: fields.scope, projectName: fields.project_name });
+  const id = typeof input.session_id === 'string'
+    ? input.session_id
+    : generateSessionId({ scope: fields.scope, projectName: fields.project_name });
+  if (!id || !String(id).trim()) throw new Error('Session id must be a non-empty string');
   const now = nowIso();
   const sync = fields.scope === 'project' && context.config?.cloud.enabled ? initialSyncStatus(context) : 'local';
   db.prepare('INSERT INTO memory_sessions(id,scope,project_id,project_name,title,started_at,status,sync_status,metadata_json) VALUES(?,?,?,?,?,?,?,?,?)')
@@ -47,11 +56,15 @@ export function addSessionPrompt(db: Db, input: { session_id: string; role: stri
 export function finishMemorySession(db: Db, input: { session_id: string; summary: string; learned?: string; architectural_decisions?: string[]; memories_to_add?: Array<Partial<AddMemoryInput> & { content: string }>; metadata_json?: Record<string, unknown> }, context: ResolvedContext) {
   assertSafeText(input.summary);
   if (input.learned) assertSafeText(input.learned);
-  const summary = input.summary.trim().toLowerCase();
-  const learned = input.learned?.trim().toLowerCase();
+  const summary = input.summary.trim();
+  const learned = input.learned?.trim();
   const hash = sha256(JSON.stringify({ summary, learned: learned ?? '' }));
-  const sync = context.scope === 'project' && context.config?.cloud.enabled ? 'pending' : 'local';
-  const existing = db.prepare('SELECT metadata_json FROM memory_sessions WHERE id=?').get(input.session_id) as any;
+  const existing = db.prepare(`SELECT * FROM memory_sessions
+    WHERE id=?
+      AND status IN ('active','completed')
+    LIMIT 1`).get(input.session_id) as any;
+  if (!isSessionCompatibleWithContext(existing, context)) throw new Error(`Session not found: ${input.session_id}`);
+  const sync = existing.scope === 'project' && context.config?.cloud.enabled ? 'pending' : 'local';
   const metadata = { ...(existing?.metadata_json ? JSON.parse(existing.metadata_json) : {}), ...(input.metadata_json ?? {}) };
   db.prepare('UPDATE memory_sessions SET ended_at=?, summary=?, learned=?, status=?, sync_status=?, content_hash=?, metadata_json=? WHERE id=?')
     .run(nowIso(), summary, learned ?? null, 'completed', sync, hash, jsonString(metadata), input.session_id);

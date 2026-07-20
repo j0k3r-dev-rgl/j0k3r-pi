@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Db } from './db.js';
 import { resolveMemoryContext } from './context.js';
-import { addSessionPrompt, finishMemorySession, reopenMemorySessionIfClosed, startMemorySession } from './sessions.js';
+import { addSessionPrompt, finishMemorySession, isSessionCompatibleWithContext, reopenMemorySessionIfClosed, startMemorySession } from './sessions.js';
 import { selectStartupMemories } from './startup-selection.js';
 import { setCurrentMemorySessionId } from './runtime-state.js';
 import { buildHeuristicSessionSummary, buildSemanticSessionSummary, extractConversationFacts } from './session-summary.js';
@@ -65,6 +65,11 @@ function buildMemoryInstructions(context: any): string {
     '- Write normal memory titles, summaries, prose content, and tags in english lowercase to improve retrieval consistency, but preserve exact case for case-sensitive paths, commands, symbols, identifiers, versions, acronyms, and quoted literals.',
     '- Good memories are durable, actionable, atomic, recoverable, current, and non-sensitive.',
     '- Memory content should include the idea type, context, concrete details, implications for future agents, and source when useful.',
+    '- Memory lifecycle sessions are lazy: session_start and empty startup prompts do not create or reopen them; the first non-empty user prompt does.',
+    '- New lifecycle-managed sessions use the exact Pi session id as the Memory session id. If Pi does not provide a non-empty session id, skip lifecycle session creation safely instead of generating a fallback id.',
+    '- If the user explicitly asks to close, end, or finish the session, first checkpoint the current-session context, then provide a structured summary with changes, decisions, validations, todos, risks, and learnings as applicable, call memory_session_finish, and confirm closure only after memory_session_finish reports completion.',
+    '- Graceful Pi shutdown closes the active memory session automatically, but reload does not close it.',
+    '- Manual tools such as memory_session_start and memory_start_chat create separate non-lifecycle sessions and are not required for ordinary Pi lifecycle work.',
     '- Load the `persistent-memory` skill when you need detailed memory operating policy and it is not already loaded in the conversation: substantial tasks, deciding what to save, project_profile updates, consolidation, import/export, or session-end summaries.',
     '- At the end of substantial work, summarize what changed, decisions made, progress, validations, open todos, and reusable learnings.',
     '- Do not store secrets, tokens, passwords, private keys, or low-value temporary details.',
@@ -96,11 +101,11 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
 
   function findSessionByMemoryId(memorySessionId: string | null, context: any): any | undefined {
     if (!memorySessionId) return undefined;
-    return db.prepare(`SELECT * FROM memory_sessions
+    const row = db.prepare(`SELECT * FROM memory_sessions
       WHERE id = ?
         AND status IN ('active','completed')
-        AND (? != 'project' OR scope != 'project' OR project_id = ?)
-      LIMIT 1`).get(memorySessionId, context.scope, context.project_id) as any | undefined;
+      LIMIT 1`).get(memorySessionId) as any | undefined;
+    return isSessionCompatibleWithContext(row, context) ? row : undefined;
   }
 
   function parseSessionMetadata(row: any): Record<string, unknown> {
@@ -146,10 +151,10 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
       WHERE status = 'active'
         AND ended_at IS NULL
         AND started_at >= ?
-        AND (? != 'project' OR scope != 'project' OR project_id = ?)
       ORDER BY started_at DESC
-      LIMIT 5`).all(since, context.scope, context.project_id) as any[];
+      LIMIT 20`).all(since) as any[];
     const candidates = rows.filter((row) => {
+      if (!isSessionCompatibleWithContext(row, context)) return false;
       const meta = parseSessionMetadata(row);
       return meta.auto_started === true && meta.cwd === context.cwd;
     });
@@ -159,11 +164,14 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
   function findExistingSessionByPiIdentity(piSessionId: string | null, piSessionFile: string | null, entryMemorySessionId: string | null, context: any): any | undefined {
     const rows = db.prepare(`SELECT * FROM memory_sessions
       WHERE status IN ('active','completed')
-        AND (? != 'project' OR scope != 'project' OR project_id = ?)
       ORDER BY started_at DESC
-      LIMIT 100`).all(context.scope, context.project_id) as any[];
-    const parsed = rows.map((row) => ({ row, meta: parseSessionMetadata(row) }));
+      LIMIT 100`).all() as any[];
+    const parsed = rows
+      .filter((row) => isSessionCompatibleWithContext(row, context))
+      .map((row) => ({ row, meta: parseSessionMetadata(row) }));
     if (piSessionId) {
+      const byExactId = parsed.find(({ row }) => row.id === piSessionId);
+      if (byExactId) return byExactId.row;
       const byId = parsed.find(({ meta }) => meta.pi_session_id === piSessionId);
       if (byId) return byId.row;
     }
@@ -194,9 +202,10 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
     }
   }
 
-  function ensureMemorySession(ctx: any, options: { reopenClosed?: boolean } = {}): { id: string; context: any; closed: boolean } {
+  function ensureMemorySession(ctx: any, options: { reopenClosed?: boolean } = {}): { id?: string; context: any; closed: boolean; unavailableReason?: string } {
     const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
-    const piSessionId = ctx?.sessionManager?.getSessionId?.() ?? null;
+    const rawPiSessionId = ctx?.sessionManager?.getSessionId?.() ?? null;
+    const piSessionId = typeof rawPiSessionId === 'string' && rawPiSessionId.length > 0 ? rawPiSessionId : null;
     const piSessionFile = ctx?.sessionManager?.getSessionFile?.() ?? null;
     const entryMemorySessionId = memorySessionEntryId(ctx);
     if (!activeMemorySessionId) {
@@ -229,7 +238,27 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
           prompt_index: promptIndex,
         });
       } else {
+        if (!piSessionId) {
+          const unavailableReason = 'Pi session id is unavailable; skipping lifecycle memory session creation.';
+          memoryDebugLog(ctx, 'ensure_memory_session:skipped_missing_pi_session_id', {
+            pi_session_file_seen: piSessionFile,
+          });
+          ctx?.ui?.notify?.(unavailableReason, 'warning');
+          return { context, closed: true, unavailableReason };
+        }
+        const incompatibleExactId = db.prepare('SELECT id, scope, project_id FROM memory_sessions WHERE id=? LIMIT 1').get(piSessionId) as any | undefined;
+        if (incompatibleExactId && !isSessionCompatibleWithContext(incompatibleExactId, context)) {
+          const unavailableReason = `Pi session id ${piSessionId} collides with an incompatible memory session; skipping lifecycle session creation.`;
+          memoryDebugLog(ctx, 'ensure_memory_session:skipped_incompatible_exact_id_collision', {
+            memory_session_id: incompatibleExactId.id,
+            memory_scope: incompatibleExactId.scope,
+            memory_project_id: incompatibleExactId.project_id ?? null,
+          });
+          ctx?.ui?.notify?.(unavailableReason, 'warning');
+          return { context, closed: true, unavailableReason };
+        }
         const session = startMemorySession(db, {
+          session_id: piSessionId,
           title: `Pi session ${new Date().toISOString()}`,
           metadata_json: {
             pi_session_id: piSessionId,
@@ -261,7 +290,7 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
       });
     }
     setCurrentMemorySessionId(activeMemorySessionId);
-    return { id: activeMemorySessionId!, context, closed: sessionClosed };
+    return { id: activeMemorySessionId, context, closed: sessionClosed };
   }
 
   async function closeActiveMemorySession(ctx: any, reason: string): Promise<void> {
@@ -269,6 +298,18 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
     const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
     try {
       const session = db.prepare('SELECT * FROM memory_sessions WHERE id=?').get(activeMemorySessionId) as any;
+      if (!session) {
+        sessionClosed = true;
+        activeMemorySessionId = undefined;
+        setCurrentMemorySessionId(undefined);
+        return;
+      }
+      if (session.status === 'completed' && session.ended_at != null) {
+        sessionClosed = true;
+        activeMemorySessionId = undefined;
+        setCurrentMemorySessionId(undefined);
+        return;
+      }
       const prompts = db.prepare(`SELECT role, prompt_index, prompt, created_at
         FROM memory_session_prompts
         WHERE session_id=?
@@ -323,6 +364,7 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
 
   pi.on?.('session_start', async (event: any, ctx: any) => {
     startupContextInjected = startupContextAlreadyPersisted(ctx);
+    setCurrentMemorySessionId(activeMemorySessionId);
     memoryDebugLog(ctx, 'session_start', {
       reason: event?.reason ?? null,
       previous_session_file: event?.previousSessionFile ?? null,
@@ -351,9 +393,9 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
     if (!hasPrompt) return undefined;
 
     startupContextInjected ||= startupContextAlreadyPersisted(ctx);
-    const { id: sessionId, context: c, closed } = ensureMemorySession(ctx, { reopenClosed: true });
+    const { id: sessionId, context: c, closed, unavailableReason } = ensureMemorySession(ctx, { reopenClosed: true });
 
-    if (!closed) {
+    if (sessionId && !closed) {
       try {
         addSessionPrompt(db, {
           session_id: sessionId,
@@ -374,7 +416,7 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
       const recentMemories = observeRetrieval(db, c, {
         operation: 'startup',
         trigger_category: 'lifecycle',
-        session_id: sessionId,
+        session_id: sessionId ?? null,
       }, () => selectStartupMemories(db, c)).map((m: any) => ({
         type: 'memory',
         id: m.id,
@@ -388,11 +430,11 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
       const recentSessions = db.prepare(`SELECT id, scope, project_name, title, summary, learned, ended_at, started_at
         FROM memory_sessions
         WHERE status = 'completed'
-          AND id != ?
+          AND (? IS NULL OR id != ?)
           AND (summary IS NOT NULL OR learned IS NOT NULL)
           AND (? != 'project' OR scope != 'project' OR project_id = ?)
         ORDER BY COALESCE(ended_at, started_at) DESC
-        LIMIT 1`).all(sessionId, c.scope, c.project_id) as any[];
+        LIMIT 1`).all(sessionId ?? null, sessionId ?? null, c.scope, c.project_id) as any[];
       const startupItems = [
         ...recentMemories,
         ...recentSessions.map((s) => ({
@@ -418,7 +460,7 @@ export function registerMemoryLifecycle(pi: any, db: Db): void {
         message: {
           customType: 'memory-context',
           display: true,
-          content: `${instructions}\n\nMemory session: ${sessionId}\n\nStartup brain context (recent memories and session summaries):\n${startupLines}`,
+          content: `${instructions}\n\nMemory session: ${sessionId ?? `unavailable (${unavailableReason ?? 'Pi session id missing'})`}\n\nStartup brain context (recent memories and session summaries):\n${startupLines}`,
         },
       };
     }

@@ -147,6 +147,9 @@ Use memory as the agent's persistent brain, not as a transcript dump or a mechan
 - For substantial tasks in this project, inspect the current project profile early with `memory_project_profile get` when relevant. The canonical profile is not part of the regular startup memory slots.
 - Search or recall memory only when persistent context is missing, stale, ambiguous, or decision-critical.
 - Do not repeat memory recall just because the task moved from planning to editing or testing if the relevant context is already present.
+- Memory lifecycle sessions are lazy: `session_start` and empty startup prompts do not create or reopen them; the first non-empty user prompt does. New lifecycle-managed sessions use the exact Pi session id as the Memory session id when available.
+- If the user explicitly asks to close, end, or finish the session, checkpoint the current-session context, produce a structured summary, call `memory_session_finish`, and confirm closure only after that tool reports completion. Graceful shutdown closes active lifecycle sessions; reload does not.
+- `memory_session_start` and `memory_start_chat` are explicit manual APIs for separate non-lifecycle sessions; do not use them just to begin ordinary lifecycle work.
 - Store durable knowledge when it is reusable, current, non-sensitive, and valuable for future sessions.
 - Write normal durable memory prose in lowercase-oriented English for retrieval consistency, but preserve exact case for case-sensitive paths, commands, symbols, identifiers, versions, acronyms, and quoted literals.
 - Save confirmed decisions, workflow rules, architectural decisions, validated commands, meaningful progress, open todos, unresolved risks, and reusable learnings as durable memories when they affect future work.

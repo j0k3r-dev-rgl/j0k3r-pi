@@ -795,7 +795,8 @@ export function registerMemoryTools(pi: any, db: Db): void {
   pi.registerTool({
     name: 'memory_session_start',
     label: 'Memory Session Start',
-    description: 'Create/register a memory session.',
+    description: 'Create/register a separate non-lifecycle memory session.',
+    promptGuidelines: ['Use memory_session_start only when you intentionally need a separate manual memory session; ordinary Pi lifecycle work starts lazily on the first non-empty user prompt instead.'],
     parameters: Type.Object({
       title: Type.Optional(Type.String()),
       scope: Type.Optional(Scope),
@@ -843,9 +844,14 @@ export function registerMemoryTools(pi: any, db: Db): void {
   pi.registerTool({
     name: 'memory_session_finish',
     label: 'Memory Session Finish',
-    description: 'Finish a memory session and extract learnings/decisions.',
+    description: 'Finish a memory session or the active lifecycle memory session and extract learnings/decisions.',
+    promptGuidelines: [
+      'If the user explicitly asks to close, end, or finish the session, checkpoint the current-session context, write a structured summary, call memory_session_finish, and confirm closure only after the tool reports completion.',
+      'session_id is optional only when the active lifecycle memory session should be finished.',
+      'Do not claim the session is closed until memory_session_finish reports completion.',
+    ],
     parameters: Type.Object({
-      session_id: Type.String(),
+      session_id: Type.Optional(Type.String()),
       summary: Type.String(),
       learned: Type.Optional(Type.String()),
       architectural_decisions: Type.Optional(Type.Array(Type.String())),
@@ -854,9 +860,13 @@ export function registerMemoryTools(pi: any, db: Db): void {
     async execute(_id: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
       try {
         const context = resolveMemoryContext(ctx?.cwd ?? process.cwd());
-        const result = finishMemorySession(db, params, context);
+        const sessionId = typeof params?.session_id === 'string' && params.session_id.length > 0
+          ? params.session_id
+          : getCurrentMemorySessionId();
+        if (!sessionId) throw new Error('No active lifecycle memory session is available. Provide session_id explicitly or finish a currently active lifecycle session.');
+        const result = finishMemorySession(db, { ...params, session_id: sessionId }, context);
         const addedIds = Array.isArray((result as any).added_memory_ids) ? (result as any).added_memory_ids : [];
-        return ok(`Memory session finished.\nsession_id: ${(result as any)?.session?.id ?? params.session_id}${addedIds.length ? `\nadded_memory_ids: ${addedIds.join(', ')}` : ''}`, result as any);
+        return ok(`Memory session finished.\nsession_id: ${(result as any)?.session?.id ?? sessionId}\nstatus: ${((result as any)?.session?.status ?? 'completed')}\nsummary_saved: ${((result as any)?.session?.summary ? 'yes' : 'no')}${addedIds.length ? `\nadded_memory_ids: ${addedIds.join(', ')}` : ''}`, result as any);
       } catch (e) {
         return fail(e);
       }
@@ -866,9 +876,9 @@ export function registerMemoryTools(pi: any, db: Db): void {
   pi.registerTool({
     name: 'memory_start_chat',
     label: 'Memory Start Chat',
-    description: 'Start memory session and return compact startup context.',
-    promptSnippet: 'Create a memory session and retrieve compact startup memory context.',
-    promptGuidelines: ['Use memory_start_chat only as an explicit manual API when you intentionally need a separate startup-context response; normal lifecycle startup already creates or reopens the session automatically.'],
+    description: 'Start a separate non-lifecycle memory session and return compact startup context.',
+    promptSnippet: 'Create a separate non-lifecycle memory session and retrieve compact startup memory context.',
+    promptGuidelines: ['Use memory_start_chat only as an explicit manual API when you intentionally need a separate non-lifecycle startup-context response; ordinary Pi lifecycle work starts lazily on the first non-empty user prompt.'],
     parameters: Type.Object({
       user_prompt: Type.Optional(Type.String()),
       session_title: Type.Optional(Type.String()),
