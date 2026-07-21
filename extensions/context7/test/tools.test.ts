@@ -1,4 +1,4 @@
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
@@ -65,6 +65,8 @@ describe('context7 tool registration', () => {
       expect(tool.parameters?.type).toBe('object');
       expect(typeof tool.description).toBe('string');
       expect(typeof tool.execute).toBe('function');
+      expect(typeof tool.renderCall).toBe('function');
+      expect(typeof tool.renderResult).toBe('function');
     }
   });
 
@@ -160,6 +162,9 @@ describe('context7_search_library public behavior', () => {
     expect(result.content[0].text).not.toContain('-end');
     expect((result.details.results as LibraryCandidate[])[0].description).toContain('[truncated: showing');
     expect((result.details.results as LibraryCandidate[])[0].description).not.toContain('-end');
+    expect(result.details.artifact).toMatchObject({ kind: 'file', mediaType: 'text/plain' });
+    expect(result.content[0].text).toContain(result.details.artifact.path);
+    await expect(readFile(result.details.artifact.path, 'utf8')).resolves.toContain('-end');
   });
 
   it('uses cache when enabled and returns cached search results without calling the client', async () => {
@@ -279,6 +284,10 @@ describe('context7_get_context public behavior', () => {
 
     expect(result.content[0].text).toContain('[truncated: showing');
     expect(result.details.truncation).toMatchObject({ truncated: true, originalChars: 1200 });
+    expect(result.details.artifact).toMatchObject({ kind: 'file', mediaType: 'text/plain' });
+    expect(result.details.artifact.chars).toBeGreaterThan(1200);
+    expect(result.content[0].text).toContain(result.details.artifact.path);
+    await expect(readFile(result.details.artifact.path, 'utf8')).resolves.toContain('a'.repeat(1200));
     expect(JSON.stringify(result)).not.toContain('redaction-sentinel');
   });
 

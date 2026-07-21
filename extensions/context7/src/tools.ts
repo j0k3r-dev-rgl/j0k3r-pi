@@ -3,9 +3,11 @@ import { Type } from 'typebox';
 import { createCacheKey, createContext7Cache, type Context7Cache } from './cache.js';
 import { createContext7Client } from './client.js';
 import { loadContext7Config } from './config.js';
+import { appendContext7ArtifactNotice, writeContext7OutputArtifact } from './core/output-artifact.js';
+import { context7ToolRenderers } from './render/index.js';
 import { resolveLibraryCandidate, type ScoredLibraryCandidate } from './resolve.js';
 import { clampMaxChars, formatSafeContext7Error, redactSecrets, truncateSnippets, truncateText } from './security.js';
-import type { Context7Client, Context7Documentation, Context7RuntimeConfig, DocumentationSnippet, LibraryCandidate } from './types.js';
+import type { Context7Client, Context7Documentation, Context7OutputArtifact, Context7RuntimeConfig, DocumentationSnippet, LibraryCandidate } from './types.js';
 import { isNonEmptyString } from './utils.js';
 
 export const CONTEXT7_TOOL_NAMES = [
@@ -133,15 +135,25 @@ function truncateSearchDescription(description: string): string {
   return `${description.slice(0, bodyBudget)}${notice}`;
 }
 
-function safeCandidate(candidate: LibraryCandidate, apiKey?: string): LibraryCandidate {
-  const description = candidate.description ? redactSecrets(candidate.description, [apiKey]) : candidate.description;
+function redactCandidate(candidate: LibraryCandidate, apiKey?: string): LibraryCandidate {
   return {
     ...candidate,
     id: redactSecrets(candidate.id, [apiKey]),
     name: redactSecrets(candidate.name, [apiKey]),
-    description: description ? truncateSearchDescription(description) : description,
+    description: candidate.description ? redactSecrets(candidate.description, [apiKey]) : candidate.description,
     versions: candidate.versions?.map((version) => redactSecrets(version, [apiKey])),
   };
+}
+
+function boundCandidate(candidate: LibraryCandidate): LibraryCandidate {
+  return {
+    ...candidate,
+    description: candidate.description ? truncateSearchDescription(candidate.description) : candidate.description,
+  };
+}
+
+function safeCandidate(candidate: LibraryCandidate, apiKey?: string): LibraryCandidate {
+  return boundCandidate(redactCandidate(candidate, apiKey));
 }
 
 function safeScoredCandidate(scored: ScoredLibraryCandidate, apiKey?: string): Record<string, unknown> {
@@ -217,6 +229,15 @@ function formatSearchContent(libraryName: string, query: string, results: Librar
   return `Context7 search returned ${results.length} result(s) for "${libraryName}" and query "${query}":\n${lines.join('\n')}`;
 }
 
+async function preserveFullOutput(content: string, fullContent: string, truncated: boolean): Promise<{
+  content: string;
+  artifact?: Context7OutputArtifact;
+}> {
+  if (!truncated) return { content };
+  const artifact = await writeContext7OutputArtifact(fullContent);
+  return { content: appendContext7ArtifactNotice(content, artifact), artifact };
+}
+
 async function executeSearch(params: unknown, signal: AbortSignal | undefined, ctx: ToolContext | undefined, deps: RegisterContext7ToolsOptions): Promise<ToolResult> {
   const request = (params ?? {}) as Record<string, unknown>;
   const runtime = await runtimeFor(ctx, deps);
@@ -233,10 +254,20 @@ async function executeSearch(params: unknown, signal: AbortSignal | undefined, c
       ttlSeconds: runtime.config.cache.ttlSeconds,
       fetch: () => clientFor(runtime, deps).searchLibrary({ libraryName, query, limit }, signal),
     });
-    const results = value.slice(0, limit).map((candidate) => safeCandidate(candidate, runtime.env.CONTEXT7_API_KEY));
-    return ok(formatSearchContent(libraryName, query, results), {
+    const fullResults = value.slice(0, limit).map((candidate) => redactCandidate(candidate, runtime.env.CONTEXT7_API_KEY));
+    const results = fullResults.map(boundCandidate);
+    const truncated = fullResults.some((candidate, index) => candidate.description !== results[index]?.description);
+    const output = await preserveFullOutput(
+      formatSearchContent(libraryName, query, results),
+      formatSearchContent(libraryName, query, fullResults),
+      truncated,
+    );
+    return ok(output.content, {
+      request: { libraryName, query, limit },
       results,
       count: results.length,
+      truncation: { truncated },
+      artifact: output.artifact,
       cache: meta,
       warnings: [...runtime.config.warnings, ...cacheRuntime.warnings],
     });
@@ -258,6 +289,13 @@ function formatJsonDocumentationContent(documentation: Context7Documentation): s
   return `Context7 documentation for ${documentation.libraryId} and query "${documentation.query}":\n${lines.join('\n\n')}`;
 }
 
+function formatDocumentationContent(documentation: Context7Documentation): string {
+  if (documentation.type === 'txt') {
+    return `Context7 documentation for ${documentation.libraryId} and query "${documentation.query}":\n${documentation.text ?? ''}`;
+  }
+  return formatJsonDocumentationContent(documentation);
+}
+
 function boundDocumentation(documentation: Context7Documentation, maxChars: number): {
   documentation: Context7Documentation;
   truncation: Record<string, unknown>;
@@ -269,7 +307,7 @@ function boundDocumentation(documentation: Context7Documentation, maxChars: numb
     return {
       documentation: bounded,
       truncation: { truncated: truncated.truncated, originalChars: truncated.originalChars },
-      content: `Context7 documentation for ${documentation.libraryId} and query "${documentation.query}":\n${truncated.text}`,
+      content: formatDocumentationContent(bounded),
     };
   }
 
@@ -301,9 +339,16 @@ async function executeGetContext(params: unknown, signal: AbortSignal | undefine
     });
     const safeDocs = safeDocumentation(value, runtime.env.CONTEXT7_API_KEY);
     const bounded = boundDocumentation(safeDocs, maxChars);
-    return ok(bounded.content, {
+    const output = await preserveFullOutput(
+      bounded.content,
+      formatDocumentationContent(safeDocs),
+      Boolean(bounded.truncation.truncated),
+    );
+    return ok(output.content, {
+      request: { libraryId, query, type, maxChars },
       documentation: bounded.documentation,
       truncation: bounded.truncation,
+      artifact: output.artifact,
       cache: meta,
       warnings: [...runtime.config.warnings, ...cacheRuntime.warnings],
     });
@@ -336,6 +381,7 @@ async function executeResolveAndGet(params: unknown, signal: AbortSignal | undef
     if (resolution.status === 'no_results') {
       return ok(`No Context7 library candidates were found for "${libraryName}". Refine the library name or query before fetching documentation.`, {
         status: 'no_results',
+        request: { libraryName, query, version, maxChars },
         candidates: [],
         rationale: resolution.rationale,
         cache: { search: search.meta },
@@ -346,6 +392,7 @@ async function executeResolveAndGet(params: unknown, signal: AbortSignal | undef
     if (resolution.status === 'ambiguous') {
       return ok(`Context7 library resolution is ambiguous for "${libraryName}". Choose a specific Context7 library ID before fetching documentation.`, {
         status: 'ambiguous',
+        request: { libraryName, query, version, maxChars },
         candidates: resolution.candidates.map((candidate) => safeScoredCandidate(candidate, runtime.env.CONTEXT7_API_KEY)),
         rationale: resolution.rationale,
         cache: { search: search.meta },
@@ -363,14 +410,19 @@ async function executeResolveAndGet(params: unknown, signal: AbortSignal | undef
     });
     const safeDocs = safeDocumentation(get.value, runtime.env.CONTEXT7_API_KEY);
     const bounded = boundDocumentation(safeDocs, maxChars);
+    const boundedContent = `Selected ${selected.id}. ${resolution.rationale}\n\n${bounded.content}`;
+    const fullContent = `Selected ${selected.id}. ${resolution.rationale}\n\n${formatDocumentationContent(safeDocs)}`;
+    const output = await preserveFullOutput(boundedContent, fullContent, Boolean(bounded.truncation.truncated));
 
-    return ok(`Selected ${selected.id}. ${resolution.rationale}\n\n${bounded.content}`, {
+    return ok(output.content, {
       status: 'selected',
+      request: { libraryName, query, version, maxChars },
       selected,
       selectionRationale: resolution.rationale,
       candidates: resolution.candidates.map((candidate) => safeScoredCandidate(candidate, runtime.env.CONTEXT7_API_KEY)),
       documentation: bounded.documentation,
       truncation: bounded.truncation,
+      artifact: output.artifact,
       cache: { search: search.meta, get: get.meta },
       warnings: [...runtime.config.warnings, ...cacheRuntime.warnings],
     });
@@ -385,6 +437,7 @@ export function registerContext7Tools(pi: any, deps: RegisterContext7ToolsOption
     label: 'Context7 Status',
     description: 'Report Context7 extension readiness without exposing secrets.',
     parameters: emptyParameters,
+    ...context7ToolRenderers('context7_status'),
     async execute(_id: string, _params: unknown, _signal: unknown, _onUpdate: unknown, ctx: any) {
       const runtime = await runtimeFor(ctx, deps);
       const guidance = runtime.config.apiKeyPresent
@@ -405,6 +458,7 @@ export function registerContext7Tools(pi: any, deps: RegisterContext7ToolsOption
     label: 'Context7 Search Library',
     description: 'Search Context7 libraries and return compact candidates.',
     parameters: searchParameters,
+    ...context7ToolRenderers('context7_search_library'),
     async execute(_id: string, params: unknown, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: any) {
       return executeSearch(params, signal, ctx, deps);
     },
@@ -415,6 +469,7 @@ export function registerContext7Tools(pi: any, deps: RegisterContext7ToolsOption
     label: 'Context7 Get Context',
     description: 'Fetch focused Context7 documentation for a known library ID.',
     parameters: getContextParameters,
+    ...context7ToolRenderers('context7_get_context'),
     async execute(_id: string, params: unknown, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: any) {
       return executeGetContext(params, signal, ctx, deps);
     },
@@ -425,6 +480,7 @@ export function registerContext7Tools(pi: any, deps: RegisterContext7ToolsOption
     label: 'Context7 Resolve And Get Context',
     description: 'Resolve a library and fetch focused Context7 documentation when unambiguous.',
     parameters: resolveAndGetParameters,
+    ...context7ToolRenderers('context7_resolve_and_get_context'),
     async execute(_id: string, params: unknown, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: any) {
       return executeResolveAndGet(params, signal, ctx, deps);
     },

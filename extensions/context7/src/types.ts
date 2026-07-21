@@ -1,5 +1,13 @@
 export type Context7CacheLocation = 'disabled' | 'xdg' | 'home';
 
+export interface Context7OutputArtifact {
+  kind: 'file';
+  path: string;
+  mediaType: 'text/plain';
+  chars: number;
+  instruction: string;
+}
+
 export interface Context7ProjectConfigFile {
   cache?: {
     enabled?: boolean;

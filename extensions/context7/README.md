@@ -14,7 +14,8 @@ Native Pi extension for fetching up-to-date library and framework documentation 
 - Convenience resolver that searches, selects an unambiguous candidate, and fetches docs.
 - Optional user-local TTL cache for repeated queries.
 - Secret redaction in tool content, structured details, and formatted errors.
-- Output truncation with explicit metadata to protect LLM context.
+- Output truncation with explicit metadata and a recoverable redacted artifact to protect LLM context without silent data loss.
+- Native Pi tool rendering that is collapsed by default and shows the complete current result when expanded.
 - Offline unit-testable client/tool design using injectable clients.
 
 ### Extension location
@@ -206,6 +207,8 @@ All tool outputs are designed to be safe for LLM context:
 - private key blocks are redacted;
 - `txt` documentation output is truncated by `max_chars`; JSON snippet content is bounded per snippet and may exceed `max_chars` in total;
 - search descriptions are capped;
+- when local bounding removes content, the complete redacted output is written under the operating-system temp directory with private directory/file modes and the tool result provides its path for `read`;
+- the TUI renderer is collapsed by default, uses Pi's configured expand keybinding, and changes presentation only—the current model-facing result remains available when expanded;
 - errors are formatted with actionable messages;
 - upstream `401`, `403`, `404`, `429`, and `5xx` failures get user-actionable wording.
 
@@ -216,7 +219,7 @@ All tool outputs are designed to be safe for LLM context:
 3. Pick the correct `libraryId` from candidates.
 4. Run `context7_get_context` with a narrow query.
 5. Summarize only the relevant facts in the answer or SDD artifact.
-6. Do not store full Context7 dumps in Pi Memory or OpenSpec artifacts.
+6. Do not copy full Context7 dumps into durable memory or planning artifacts; keep concise source metadata instead.
 
 Example focused query:
 
@@ -269,6 +272,8 @@ The test suite is designed to run without live Context7 network access or a real
 - `extensions/context7/src/tools.ts` — tool schemas and output shaping.
 - `extensions/context7/src/cache.ts` — cache location and safety behavior.
 - `extensions/context7/src/security.ts` — redaction and safe output helpers.
+- `extensions/context7/src/render/index.ts` — native collapsed/expanded tool rendering.
+- `extensions/context7/src/core/output-artifact.ts` — private recoverable artifacts for locally bounded output.
 
 ## Español
 
@@ -282,7 +287,8 @@ Extensión nativa de Pi para obtener documentación actualizada de librerías y 
 - Resolver de conveniencia que busca, selecciona un candidato no ambiguo y obtiene docs.
 - Caché TTL opcional local de usuario para queries repetidas.
 - Redacción de secretos en contenido de tools, detalles estructurados y errores formateados.
-- Truncamiento de salida con metadata explícita para proteger el contexto LLM.
+- Truncamiento de salida con metadata explícita y artefacto redactado recuperable para proteger el contexto LLM sin pérdida silenciosa.
+- Renderizado nativo de tools de Pi, colapsado por defecto y con el resultado actual completo al expandir.
 - Diseño de cliente/tools testeable offline con clientes inyectables.
 
 ### Ubicación de la extensión
@@ -474,6 +480,8 @@ Todas las salidas de tools están diseñadas para ser seguras para contexto LLM:
 - bloques de private key se redactan;
 - la salida de documentación `txt` se trunca por `max_chars`; el contenido JSON de snippets está acotado por snippet y puede superar `max_chars` en total;
 - las descripciones de búsqueda se acotan;
+- cuando el acotado local omite contenido, la salida completa redactada se escribe en el directorio temporal del sistema operativo con modos privados y el resultado devuelve su ruta para usar `read`;
+- el renderer TUI está colapsado por defecto, usa el keybinding configurado de Pi y cambia solo la presentación: el resultado actual para el modelo permanece disponible al expandir;
 - los errores se formatean con mensajes accionables;
 - fallos upstream `401`, `403`, `404`, `429` y `5xx` reciben wording accionable para el usuario.
 
@@ -484,7 +492,7 @@ Todas las salidas de tools están diseñadas para ser seguras para contexto LLM:
 3. Elegir el `libraryId` correcto entre candidatos.
 4. Ejecutar `context7_get_context` con una query estrecha.
 5. Resumir solo los hechos relevantes en la respuesta o artefacto SDD.
-6. No guardar dumps completos de Context7 en Pi Memory ni artefactos OpenSpec.
+6. No copiar dumps completos de Context7 en memoria durable ni artefactos de planificación; conservar metadata de fuente concisa.
 
 Ejemplo de query enfocada:
 
@@ -537,3 +545,5 @@ La suite de tests está diseñada para correr sin acceso live a Context7 ni API 
 - `extensions/context7/src/tools.ts` — schemas de tools y shaping de salida.
 - `extensions/context7/src/cache.ts` — ubicación de caché y comportamiento de seguridad.
 - `extensions/context7/src/security.ts` — helpers de redacción y salida segura.
+- `extensions/context7/src/render/index.ts` — renderizado nativo colapsado/expandido de tools.
+- `extensions/context7/src/core/output-artifact.ts` — artefactos privados recuperables para salida acotada localmente.
