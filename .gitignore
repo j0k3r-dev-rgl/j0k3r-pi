@@ -28,6 +28,7 @@ pnpm-debug.log*
 *.db
 *.db-*
 *.ndjson
+.pi/memory-backups/staging/
 .pi/subagents-history.sqlite
 .pi/**/history*.jsonl
 .pi/**/session*.jsonl
