@@ -1,10 +1,10 @@
 ---
 name: tdd
-description: "guide language-agnostic test-driven changes with existing-test discovery, framework reuse, mirrored test-tree organization, regression coverage, feature-removal cleanup, and red-green-refactor evidence."
+description: "guide language-agnostic test-driven changes with existing-test discovery, safety baselines, meaningful assertions, appropriate test layers, feature-removal cleanup, and red-green-refactor evidence."
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.1"
+  version: "1.2"
 ---
 
 # TDD
@@ -46,6 +46,12 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "regression test",
       "failing test",
       "test coverage",
+      "test baseline",
+      "assertion quality",
+      "test layer",
+      "mock hygiene",
+      "triangulation",
+      "characterization test",
       "test organization",
       "bug fix",
       "fix this bug",
@@ -97,6 +103,13 @@ Do not load it for answer-only questions, read-only investigation with no test d
 - Before creating a file, state which existing candidates were checked and why none is suitable.
 - Never duplicate an existing scenario, fixture, helper, setup block, or assertion pattern when the existing one can be extended safely.
 
+### Safety baseline and pre-existing failures
+
+- Before modifying existing production behavior, run the narrowest established tests that currently exercise the affected surface when the environment is available.
+- Record enough baseline evidence to distinguish existing failures from regressions introduced by the change; exact test counts are useful when the runner provides them but are not mandatory.
+- Do not silently fix unrelated or pre-existing failures. Report them and continue only when they do not invalidate the focused TDD evidence or when the user approves the necessary scope.
+- A missing or unreliable baseline is a risk to report, not a reason to invent replacement tests that do not exercise the affected behavior.
+
 ### Test framework ownership
 
 - Detect the active test framework from repository evidence: dependency manifests, lockfiles, test configuration, task scripts, imports, and existing test files.
@@ -104,6 +117,14 @@ Do not load it for answer-only questions, read-only investigation with no test d
 - If different frameworks are intentionally used for different layers, use the framework already assigned to the relevant layer.
 - Do not install, replace, upgrade, or configure a test framework without explicit user approval.
 - If no test framework or test infrastructure exists, stop before writing tests and ask the user to choose. The agent may present stack-appropriate options and trade-offs, but the user owns the decision.
+
+### Test layer and dependency boundaries
+
+- Choose the test layer that can demonstrate the agreed observable behavior with the least unnecessary coupling, following the repository's existing layer conventions.
+- Prefer unit tests for isolated logic, integration tests for meaningful component or service boundaries, and end-to-end tests for critical user journeys or external contracts.
+- Do not automatically choose the highest or lowest available layer. A faster layer is not a valid substitute when it cannot prove the same contract.
+- If the appropriate layer is unavailable, do not hide the gap behind mocks. Use a narrower layer only when it still provides meaningful evidence; otherwise report the blocked validation and ask for a strategy when material.
+- Prefer pure functions when they naturally express domain logic and improve design. Do not extract production code solely to make an internal implementation detail easier to test.
 
 ### Dedicated mirrored test tree
 
@@ -122,6 +143,14 @@ Do not load it for answer-only questions, read-only investigation with no test d
 - Before adding a case, check for equivalent inputs, assertions, setup, and behavior coverage.
 - If the correct test file is already excessively large or mixes responsibilities, do not append blindly and do not create a duplicate parallel file. Propose a cohesive split and ask for approval before performing that structural refactor.
 - Split by responsibility, behavior boundary, or test layer rather than by arbitrary line count.
+
+### Assertion quality and mock hygiene
+
+- Each test claimed as behavioral evidence must exercise a relevant runtime or compile-time production contract, assert a specific meaningful outcome, and be capable of failing when that contract is wrong.
+- Do not count tautologies, incidental type/existence-only checks, render-without-behavior smoke checks, or assertions inside potentially empty loops as behavioral coverage. Type, schema, existence, or smoke tests remain valid when that limited contract is explicitly the intended outcome.
+- Empty or negative results are valid when the setup intentionally produces them and the production path actually runs; do not require a companion test mechanically when equivalent positive behavior is already covered elsewhere.
+- Prefer observable outputs and contracts over internal state, incidental call counts, private symbols, or styling implementation. Internal or visual details may be asserted when they are explicitly part of the product contract and the chosen test layer is appropriate.
+- Use the fewest mocks needed to isolate the owned behavior. Heavy mock setup is a signal to reconsider the layer or design, not an automatic failure based on an arbitrary numeric threshold.
 
 ### Behavior ownership and feature removal
 
@@ -145,11 +174,19 @@ Do not load it for answer-only questions, read-only investigation with no test d
 - Do not alter a valid expectation merely to make the implementation pass; delete an expectation only when its owning behavior is explicitly being removed.
 - Use established project commands; this skill must not invent or standardize language-specific commands.
 
+### Selective triangulation and characterization
+
+- Add another case when the first could pass through hardcoding, misses a meaningful branch or boundary, or the approved scenarios require materially different inputs and outcomes.
+- Do not impose a minimum number of tests per behavior. One strong case can be sufficient when it proves the complete contract; multiple weak cases do not add confidence.
+- Before a behavior-preserving refactor, inspect existing coverage and add characterization tests only for important behavior that is not already protected.
+- Characterization tests preserve behavior that must remain stable; they must not entrench behavior the approved change explicitly intends to correct or remove.
+- After each meaningful refactor step, rerun the narrowest relevant tests; broaden validation when structural changes affect wider boundaries.
+
 ### Scope and evidence
 
 - Keep test changes within the approved behavior and test layer.
 - Run the narrowest useful test during RED and GREEN when they apply; for pure removals, run the relevant broader suite after obsolete test cleanup.
-- Preserve concise evidence for the selected test file, framework, RED failure reason when applicable, GREEN or removal result, obsolete test/support cleanup, and post-refactor validation.
+- Preserve concise evidence for the safety baseline, selected layer and test file, RED failure reason when applicable, GREEN or removal result, obsolete test/support cleanup, and post-refactor validation.
 - Passing tests are validation evidence, not permission to commit or reorganize additional files.
 
 ## Decision Gates
@@ -158,6 +195,8 @@ Stop and ask the user when:
 
 - no test framework or infrastructure exists;
 - multiple frameworks could own the same test layer and repository evidence does not resolve the choice;
+- pre-existing failures or a missing test environment materially prevent trustworthy focused evidence;
+- the test layer needed to prove the agreed contract is unavailable and a narrower layer would not provide equivalent evidence;
 - relevant tests are colocated with production code and migration to a dedicated mirrored tree has not been decided;
 - the appropriate existing test file needs a structural split before it can accept the new scenario cleanly;
 - existing tests encode behavior that conflicts with the requested expectation, unless they exclusively own an explicitly approved feature removal;
@@ -168,17 +207,20 @@ When asking about colocated tests, present both choices explicitly: migrate the 
 
 ## Execution Steps
 
-1. Confirm the expected behavior and affected production surface; classify the change as adding, changing, or removing behavior.
-2. Detect the existing test framework, commands, roots, naming patterns, and test layers from repository evidence.
+1. Confirm the expected behavior and affected production surface; classify the change as adding, changing, removing, or preserving behavior through refactoring.
+2. Detect the existing test framework, commands, roots, naming patterns, and available test layers from repository evidence.
 3. Map the affected source path or behavior to candidate existing tests before creating anything.
-4. For added or changed behavior, select the closest semantically responsible test file; if none qualifies, justify a new file under the dedicated mirrored test tree.
-5. For feature removal, inventory tests and test-only support artifacts owned exclusively by the removed behavior, shared tests that need narrowing, and any real observable absence contract.
-6. Resolve any framework, colocation, migration, oversized-file, or conflicting-expectation decision gate with the user.
-7. RED for added, changed, or observable-absence behavior: adapt or create the approved test and confirm the expected failure with the narrowest relevant command. For a pure removal without such a contract, record why RED is not applicable rather than creating an artificial test.
-8. GREEN: make the smallest implementation change or approved removal, delete obsolete tests and support artifacts, update shared tests, and confirm the focused validation passes when applicable.
-9. REFACTOR only when useful, keeping responsibilities cohesive and removing duplication; rerun validation.
-10. Run the relevant broader suite when practical and review changed test paths for obsolete coverage, orphaned artifacts, mirrored organization, and accidental duplication.
-11. Report evidence, decisions, risks, and any validation that could not run.
+4. When modifying existing behavior, run the narrowest relevant baseline and separate pre-existing failures from task regressions.
+5. Choose the layer that can prove the contract without unnecessary coupling, then select the closest semantically responsible test file; if none qualifies, justify a new file under the dedicated mirrored test tree.
+6. For feature removal, inventory tests and test-only support artifacts owned exclusively by the removed behavior, shared tests that need narrowing, and any real observable absence contract.
+7. For behavior-preserving refactors, confirm existing coverage and add characterization only for important uncovered behavior.
+8. Resolve any baseline, framework, layer, colocation, migration, oversized-file, or conflicting-expectation decision gate with the user.
+9. RED for added, changed, or observable-absence behavior: adapt or create the approved test and confirm the expected failure with the narrowest relevant command. For a pure removal without such a contract, record why RED is not applicable rather than creating an artificial test.
+10. GREEN: make the smallest implementation change or approved removal, delete obsolete tests and support artifacts, update shared tests, and confirm the focused validation passes when applicable.
+11. Triangulate only when another case is needed to defeat a trivial implementation, exercise a meaningful branch, or cover another approved scenario.
+12. REFACTOR only when useful, keeping responsibilities cohesive and removing duplication; rerun validation after meaningful steps.
+13. Run the relevant broader suite when practical and review assertions, mocks, changed test paths, obsolete coverage, orphaned artifacts, mirrored organization, and accidental duplication.
+14. Report evidence, decisions, risks, and any validation that could not run.
 
 ## Output Contract
 
@@ -187,12 +229,12 @@ Return:
 - Skill applied: `tdd`.
 - Expected behavior and affected test layer.
 - Existing test candidates inspected and the files selected for adaptation or deletion, or the reason a new file was necessary.
-- Detected framework and repository evidence supporting its use.
+- Detected framework, safety baseline, selected test layer, and repository evidence supporting those choices.
 - Location of retained or new tests and how they mirror the production source structure; include any user decision about colocated tests.
 - RED command/result and expected failure reason, or why RED correctly did not apply to a pure removal.
 - GREEN or removal command/result and post-refactor or broader validation.
 - For feature removals, obsolete tests and support artifacts deleted or updated, shared coverage preserved, and any observable absence contract retained.
-- Duplication/size/obsolete-coverage review, remaining risks, blocked checks, and decisions still needed.
+- Assertion quality, mock usage, triangulation, duplication, size, and obsolete-coverage review, with remaining risks, blocked checks, and decisions still needed.
 - Explicit confirmation that no framework, migration, or commit was performed without approval.
 
 ## References
