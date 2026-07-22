@@ -17,11 +17,13 @@ Personal/global Pi agent configuration used from `~/.pi/agent`. It contains the 
 | [`docs/`](docs/) | Supporting docs for this agent configuration, such as [keyboard shortcuts](docs/keyboard-shortcuts.md). |
 | [`subagents.json`](subagents.json) | Global/user subagent configuration and model profile defaults. |
 | [`permissions.json`](permissions.json) | Global/user Permission Guard configuration. Project-local config may also live at `.pi/permissions.json`. |
+| [`install.sh`](install.sh) | First-time installer for copying the managed configuration into a separate Pi agent directory. |
+| [`update.sh`](update.sh) | Git-free, non-destructive updater for an existing Pi agent directory, with backup and package refresh. |
 | [`.pi/`](.pi/) | Project-local runtime/config data for this repository, including Code Research and Skill Registry configuration. |
 
 ### Installation
 
-Prerequisites: the `pi` CLI, Node.js/npm, `tar`, and Bash. On Windows, use an environment that provides Bash, such as Git Bash or WSL.
+Prerequisites: the `pi` CLI, Node.js/npm, `tar`, `cmp`, `find`, and Bash. On Windows, use an environment that provides Bash, such as Git Bash or WSL.
 
 Clone the repository and run the installer. One command sequence copies the managed agent files, installs every local extension dependency, and installs the external Pi packages:
 
@@ -33,7 +35,7 @@ bash install.sh
 
 The default target is `~/.pi/agent`. The installer:
 
-1. Copies `extensions/`, `skills/`, `subagents/`, `AGENTS.md`, and `permissions.json`.
+1. Copies `extensions/`, `skills/`, `subagents/`, `AGENTS.md`, `permissions.json`, and `subagents.json`.
 2. Runs `npm install` in every copied extension that has a `package.json`.
 3. Runs Pi's package manager for the following unversioned packages:
 
@@ -64,13 +66,34 @@ bash install.sh --no-backup
 
 `--skip-npm` copies the configuration but skips both local extension dependencies and Pi package installation. Run the installer again without this option to install them. By default, replaced target files are backed up under `~/.pi/agent/.install-backups/<timestamp>/`.
 
-To update package-managed Pi extensions later:
+### Updating an existing installation
+
+Download and extract a current copy of this distribution, then run its updater. The target must already exist; use `install.sh` for a first-time installation.
 
 ```bash
-pi update --extensions
+bash update.sh
 ```
 
-For a custom agent directory:
+The updater does not use Git. Before changing anything, it creates a compressed snapshot under `~/.pi/agent/.update-backups/<timestamp>-<pid>/agent.tar.gz`. The backup includes the complete target agent directory except:
+
+- `.update-backups/` itself;
+- `auth.json` and `trust.json`;
+- `.env` and `.env.*`;
+- `*.key` and `*.pem`.
+
+These excluded files remain untouched in the live target; they are omitted only from the backup archive. The updater then merges the managed `extensions/`, `skills/`, `subagents/`, `AGENTS.md`, `permissions.json`, and `subagents.json` into the target. Only missing or byte-different regular files are copied. Identical files are not rewritten, and the merge never deletes target-only files. Finally, it runs `npm install` for each managed extension and updates package-managed Pi extensions with `pi update --extensions`; those package managers may independently manage files inside their own dependency/package directories.
+
+Useful options:
+
+```bash
+bash update.sh --dry-run
+bash update.sh --target "$HOME/.pi/agent"
+bash update.sh --skip-npm
+```
+
+`--dry-run` reports backup, copy, and package actions without changing the target. `--skip-npm` still creates the backup and updates managed files, but skips npm and Pi package commands.
+
+To refresh only package-managed Pi extensions manually:
 
 ```bash
 PI_CODING_AGENT_DIR="/path/to/agent" pi update --extensions
@@ -173,10 +196,11 @@ Note: Skill Registry is disabled until a project explicitly opts in through `.pi
 
 ### Validation commands
 
-Validate the installer without changing the real agent directory:
+Validate the installer and updater without changing the real agent directory:
 
 ```bash
 bash tests/install_test.sh
+bash tests/update_test.sh
 ```
 
 Run extension validation from each extension directory as needed:
@@ -263,11 +287,13 @@ Configuración global/personal de Pi usada desde `~/.pi/agent`. Contiene la guí
 | [`docs/`](docs/) | Documentos de apoyo para esta configuración, como [atajos de teclado](docs/keyboard-shortcuts.md). |
 | [`subagents.json`](subagents.json) | Configuración global/de usuario para subagentes y perfiles de modelo. |
 | [`permissions.json`](permissions.json) | Configuración global/de usuario de Permission Guard. También puede existir configuración por proyecto en `.pi/permissions.json`. |
+| [`install.sh`](install.sh) | Instalador inicial que copia la configuración gestionada a un directorio de agente Pi separado. |
+| [`update.sh`](update.sh) | Actualizador sin Git y no destructivo para una instalación existente, con backup y actualización de paquetes. |
 | [`.pi/`](.pi/) | Datos runtime/config locales de este repositorio, incluyendo configuración de Code Research y Skill Registry. |
 
 ### Instalación
 
-Requisitos: CLI `pi`, Node.js/npm, `tar` y Bash. En Windows, usa un entorno con Bash, como Git Bash o WSL.
+Requisitos: CLI `pi`, Node.js/npm, `tar`, `cmp`, `find` y Bash. En Windows, usa un entorno con Bash, como Git Bash o WSL.
 
 Clona el repositorio y ejecuta el instalador. Esta única secuencia copia los archivos de agente gestionados, instala las dependencias de cada extensión local e instala los paquetes externos de Pi:
 
@@ -279,7 +305,7 @@ bash install.sh
 
 El destino predeterminado es `~/.pi/agent`. El instalador:
 
-1. Copia `extensions/`, `skills/`, `subagents/`, `AGENTS.md` y `permissions.json`.
+1. Copia `extensions/`, `skills/`, `subagents/`, `AGENTS.md`, `permissions.json` y `subagents.json`.
 2. Ejecuta `npm install` en cada extensión copiada que contenga un `package.json`.
 3. Ejecuta el gestor de paquetes de Pi para estos paquetes sin versión fijada:
 
@@ -310,13 +336,34 @@ bash install.sh --no-backup
 
 `--skip-npm` copia la configuración, pero omite tanto las dependencias de las extensiones locales como los paquetes de Pi. Ejecuta nuevamente el instalador sin esta opción para instalarlos. Por defecto, los archivos reemplazados se respaldan en `~/.pi/agent/.install-backups/<timestamp>/`.
 
-Para actualizar después las extensiones gestionadas como paquetes de Pi:
+### Actualizar una instalación existente
+
+Descarga y extrae una copia actual de esta distribución y ejecuta su actualizador. El destino debe existir; usa `install.sh` para una instalación inicial.
 
 ```bash
-pi update --extensions
+bash update.sh
 ```
 
-Para un directorio de agente personalizado:
+El actualizador no usa Git. Antes de cambiar nada, crea una copia comprimida en `~/.pi/agent/.update-backups/<timestamp>-<pid>/agent.tar.gz`. El backup incluye todo el directorio del agente de destino excepto:
+
+- el propio directorio `.update-backups/`;
+- `auth.json` y `trust.json`;
+- `.env` y `.env.*`;
+- `*.key` y `*.pem`.
+
+Estos archivos excluidos permanecen intactos en el destino activo; solo se omiten del backup. Después, el actualizador fusiona `extensions/`, `skills/`, `subagents/`, `AGENTS.md`, `permissions.json` y `subagents.json` con el destino. Solo copia archivos regulares ausentes o cuyo contenido sea distinto. No reescribe archivos idénticos y el merge nunca elimina archivos que existan únicamente en el destino. Finalmente, ejecuta `npm install` para cada extensión gestionada y actualiza los paquetes de Pi mediante `pi update --extensions`; esos gestores pueden administrar por separado los archivos dentro de sus propios directorios de dependencias o paquetes.
+
+Opciones útiles:
+
+```bash
+bash update.sh --dry-run
+bash update.sh --target "$HOME/.pi/agent"
+bash update.sh --skip-npm
+```
+
+`--dry-run` muestra las acciones de backup, copia y paquetes sin modificar el destino. `--skip-npm` conserva el backup y la actualización de archivos gestionados, pero omite los comandos npm y Pi.
+
+Para actualizar manualmente solo las extensiones gestionadas como paquetes de Pi:
 
 ```bash
 PI_CODING_AGENT_DIR="/ruta/al/agent" pi update --extensions
@@ -419,10 +466,11 @@ Nota: Skill Registry permanece deshabilitado hasta que un proyecto lo active exp
 
 ### Comandos de validación
 
-Valida el instalador sin modificar el directorio de agente real:
+Valida el instalador y el actualizador sin modificar el directorio de agente real:
 
 ```bash
 bash tests/install_test.sh
+bash tests/update_test.sh
 ```
 
 Ejecuta la validación de cada extensión desde su directorio según sea necesario:

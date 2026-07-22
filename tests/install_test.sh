@@ -53,6 +53,9 @@ run_installer() {
 
 run_installer > "$TMP_DIR/install.out"
 
+cmp -s "$ROOT_DIR/subagents.json" "$TARGET_DIR/subagents.json" \
+  || fail "installer should copy subagents.json"
+
 expected_pi_calls="$(cat <<EOF
 $TARGET_DIR|install npm:pi-subagents-j0k3r
 $TARGET_DIR|install npm:gentle-engram

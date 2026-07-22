@@ -92,6 +92,7 @@ ITEMS=(
   "subagents"
   "AGENTS.md"
   "permissions.json"
+  "subagents.json"
 )
 
 PI_PACKAGES=(
