@@ -10,7 +10,7 @@ Install this repository into the Pi global agent directory.
 Options:
   --target DIR     Target Pi agent directory (default: ~/.pi/agent or $PI_AGENT_DIR)
   --dry-run        Show what would be copied/installed without changing files
-  --skip-npm       Copy files but skip npm install in extensions
+  --skip-npm       Copy files but skip npm installs and Pi package installation
   --no-backup      Do not create backups of existing target files before replacing them
   -h, --help       Show this help
 
@@ -66,6 +66,7 @@ done
 command -v tar >/dev/null 2>&1 || fail "tar is required"
 if [ "$SKIP_NPM" -eq 0 ]; then
   command -v npm >/dev/null 2>&1 || fail "npm is required unless --skip-npm is used"
+  command -v pi >/dev/null 2>&1 || fail "pi is required unless --skip-npm is used"
 fi
 
 case "$TARGET_DIR" in
@@ -91,6 +92,11 @@ ITEMS=(
   "subagents"
   "AGENTS.md"
   "permissions.json"
+)
+
+PI_PACKAGES=(
+  "npm:pi-subagents-j0k3r"
+  "npm:gentle-engram"
 )
 
 BACKUP_DIR=""
@@ -182,8 +188,16 @@ if [ "$SKIP_NPM" -eq 0 ]; then
       (cd "$ext_dir" && npm install)
     fi
   done
+
+  for package_source in "${PI_PACKAGES[@]}"; do
+    log "pi install: $package_source"
+    if [ "$DRY_RUN" -eq 0 ]; then
+      PI_CODING_AGENT_DIR="$TARGET_DIR" pi install "$package_source"
+    fi
+  done
 else
-  log "Skipping npm install in extensions. Run later with: find '$TARGET_DIR/extensions' -maxdepth 2 -name package.json -execdir npm install \\;"
+  log "Skipping npm installs and Pi package installation."
+  log "Run install.sh again without --skip-npm to install them."
 fi
 
 log "Install complete. Restart Pi or run /reload in an active session."
