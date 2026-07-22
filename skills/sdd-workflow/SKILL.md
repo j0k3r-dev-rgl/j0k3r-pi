@@ -304,15 +304,16 @@ Always separate these approvals:
 In `interactive` mode, ask before every phase and artifact write or update.
 In `auto` mode, proceed without routine phase prompts except for blockers, material decisions, the mandatory apply gate, and the mandatory archive gate.
 
-## Workflow Contract Validation
+## Workflow Validation
 
-After changing `AGENTS.md`, this skill/companions, or PRD/SDD subagent contracts, run from the global agent project root:
+After changing `AGENTS.md`, this skill/companions, or PRD/SDD subagent contracts:
 
-```bash
-node --test tests/workflow-contracts.test.mjs
-```
+1. run `git diff --check`;
+2. run any relevant validation scripts that actually exist in the current workspace;
+3. run Skill Registry generation/resolution when skill launchers or Registry Contract JSON changed;
+4. report explicitly when no dedicated executable workflow-contract suite exists instead of citing or inventing one.
 
-This dependency-free contract suite checks section-scoped packet/envelope fields, fresh per-flow mode/store selection and continuation locks, deterministic PRD/mini/formal routes, phase responsibility boundaries, local approval revisions, local hybrid precedence/recovery, one-shot apply behavior, security supersession, command invocation, and Registry Contract JSON. A failure blocks reporting the workflow contracts as aligned. Also run Skill Registry generation/resolution when skill launchers or registry JSON changed.
+Do not claim comprehensive executable contract coverage from Markdown inspection or registry validation alone. Report the checks that actually ran, their scope, and remaining runtime/integration blind spots.
 
 ## Output Contract
 
