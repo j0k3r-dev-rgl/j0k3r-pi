@@ -4,30 +4,27 @@ Load this companion when the active route needs PRD-first planning, existing-PRD
 
 ## Discovery vs sdd-explore
 
-Use `discovery` when research is standalone or pre-SDD and the orchestrator needs read-only evidence:
+Workspace investigation follows the executor-choice and evidence-packet contract in `AGENTS.md`.
 
-- local workspace source-code inspection must still use code-research tools first for symbols, references, impact, and call flow; `bash` search is only for non-code surfaces, file inventory, validation, or an explicit fallback reason;
-- no OpenSpec artifacts;
-- no active SDD flow memory updates;
-- no source code edits;
-- output is a bounded research report with facts, constraints, options, risks, and unknowns;
-- the orchestrator interprets the result, chooses the next workflow, and waits for the user's decision before implementation.
+Use `discovery` when the user selected delegated standalone or pre-SDD research:
 
-Use `sdd-explore` only after the user approved a named SDD flow and the execution mode is resolved:
+- no OpenSpec artifacts, source edits, or Engram writes;
+- return the bounded evidence packet defined by its system prompt;
+- the orchestrator consumes the packet without repeating research and retains routing/approval responsibility.
 
-- it may create or update `openspec/changes/<change>/exploration.md`;
-- it may update compact active SDD flow memory;
-- it feeds proposal/spec/design/tasks work.
+Use `sdd-explore` only after a named formal or mini-SDD flow is selected, its mode/store pair is asked and locked, and phase/artifact authorization is supplied:
 
-For large Pi documentation work:
+- formal explore may maintain `exploration.md`, `implementation-map.md`, or detailed Engram state according to the configured store and feeds proposal/spec/design/tasks;
+- mini explore consumes prior evidence, avoids formal artifacts, updates only `mini-sdd.md` and/or active Engram state, and returns an apply-ready packet;
+- both variants stop on missing decisions instead of choosing another route.
 
-- before SDD approval, use `discovery`;
-- after SDD approval, use `sdd-explore`;
-- avoid loading long Pi docs inline unless the answer is narrow and local.
+For large Pi documentation work, keep pre-SDD evidence in the selected investigation executor and pass only compact relevant findings into the chosen SDD explore variant.
 
 ## Optional PRD Flow
 
 Use a PRD-first route when the user asks for a PRD or when complex product, UX, integration, OAuth/auth, security, or architecture work needs requirements definition before formal proposal/spec/design/tasks.
+
+When PRD-first work will persist artifacts/state, ask mode/store for that PRD flow and lock the pair through `prd-review`. The selection ends only after review persists `lifecycle_status: prd-review-complete-returned-to-triage`; that terminal state preserves PRD artifacts but never selects a later SDD's settings. Reviewing an existing persisted PRD reuses its own locked PRD-flow selection; if no valid selection exists, ask rather than infer.
 
 The main orchestrator drafts or revises the PRD directly with the user because it has the full conversation, approvals, and gathered context. Use `discovery` only for bounded pre-PRD research when evidence is missing. Do not create or delegate extra PRD drafting/analyzer subagents just to transform context.
 
@@ -35,10 +32,11 @@ The main orchestrator drafts or revises the PRD directly with the user because i
 
 1. Gather enough evidence to write a strong PRD: user goals, local files, project docs, Pi docs, installed package sources, Context7 docs, and web references when available.
 2. Ask only decision-critical questions.
-3. Write or update `openspec/changes/<change>/prd.md` when artifact storage is `openspec` or `hybrid`; otherwise store the PRD content in active SDD flow memory.
+3. Write or update `openspec/changes/<change>/prd.md` when artifact storage is `openspec` or `hybrid`; for `engram`, store enough PRD content in the active `sdd.active-flow.<change>` observation.
 4. Use the canonical PRD structure below unless the user explicitly supplies another format.
-5. Run `prd-review` before downstream SDD whenever a PRD is present or PRD-first was used. The `prd-review` subagent must approve the PRD as ready for SDD unless the user explicitly says to continue with the PRD as-is despite review gaps.
+5. Run `prd-review` before downstream SDD whenever a PRD is present or PRD-first was used. Supply resolved configuration, phase authorization, and artifact-write authorization.
 6. Resolve CRITICAL PRD debts, contradictions, untestable requirements, or open product decisions before proceeding, unless the user explicitly accepts continuing with those risks as-is.
+7. After approval or explicit continue-as-is, persist `prd-review-complete-returned-to-triage`, then return to `workflow-triage`. The user then chooses mini-SDD, formal SDD, another route, or deferral; PRD approval never implies planning or implementation approval. If a new mini-SDD or formal SDD is chosen, ask its artifact store and execution mode afresh rather than inheriting the terminal PRD flow's selection.
 
 ### Canonical PRD Format
 
@@ -91,6 +89,7 @@ Approval: pending-prd-review | approved by prd-review | explicit user continue-a
 ## Existing PRD Rule
 
 - If `openspec/changes/<change>/prd.md` exists, the orchestrator must treat it as needing `prd-review` unless a current `prd-review.md` approves it for SDD or the user explicitly says to continue with the PRD as-is.
+- After review approval or explicit continue-as-is, return to triage for a separate downstream route decision.
 - PRDs approved by `prd-review`, or explicitly continued as-is by the user, are mandatory downstream context for `sdd-explore`, `sdd-proposal`, `sdd-spec`, `sdd-design`, `sdd-task`, `sdd-apply`, and `sdd-verify`.
 - If `openspec/changes/<change>/metadata.yaml` exists, it is mandatory context for SDD phases and `prd-review`.
 - Each phase output should include concise metadata/PRD/artifact alignment notes covering relevant requirements, assumptions, gaps, and conflicts.

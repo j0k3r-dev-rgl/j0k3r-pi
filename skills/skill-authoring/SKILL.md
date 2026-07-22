@@ -41,8 +41,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
   },
   "sdd_phases": ["explore", "design", "task", "apply", "verify"],
   "related_skills": [
-    "sdd-workflow",
-    "persistent-memory"
+    "sdd-workflow"
   ],
   "priority": 85
 }
@@ -91,7 +90,7 @@ Before considering a skill update complete, check the launchers:
 ## Decision Gates
 
 - If the skill governs PRD/SDD/OpenSpec workflows, also consider `sdd-workflow` and do not contradict its gates.
-- If the skill governs memory behavior, also consider `persistent-memory` and keep save/recall policy consistent.
+- If the skill governs memory behavior, follow `AGENTS.md` and the current Engram tool contract so save/recall policy remains consistent.
 - If creating a project-local skill for a codebase you have not inspected, ask whether to inspect the relevant files first or write a generic starter skill.
 - If the requested skill would change future agent behavior globally, confirm the intended scope: global agent skill vs project-local skill.
 
@@ -133,5 +132,5 @@ Return:
 ## References
 
 - `extensions/skill-registry/templates/skill-template.md` — canonical skill file format and registry contract conventions.
-- `~/.pi/agent/skills/persistent-memory/SKILL.md` or project-local equivalent selected by the skill registry — memory policy skill example.
+- `AGENTS.md` — authoritative memory behavior and Engram policy.
 - `~/.pi/agent/skills/sdd-workflow/SKILL.md` or project-local equivalent selected by the skill registry — workflow/gating skill example.

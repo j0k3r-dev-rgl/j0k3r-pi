@@ -49,6 +49,7 @@ Rules:
 - `workflow-triage` owns route selection and follow-on skill loading; it is the mandatory routing gate.
 - Before non-trivial edits, consult `skill_registry_resolve` (with `stale_check=true`) when routing is ambiguous or when the request involves fixing/correcting/refactoring — not only during the formal SDD preflight. Regenerate with `skill_registry_generate` if the resolver reports stale/missing cache.
 - When triage selects PRD/SDD/OpenSpec work, load `sdd-workflow` core plus only the companion modules required by that route.
+- Before every new formal SDD or mini-SDD, ask the user to choose artifact store (`openspec`, `engram`, or `hybrid`) and execution mode (`interactive` or `auto`). Lock that pair for the flow until archive or explicit abandonment. Continuation reuses it without asking; the next new flow asks again.
 - A user-ordered fix does not bypass route selection, but route selection must not happen before the request is sufficiently understood. If context is missing, choose `blocked-ask-user`, ask for the missing details, and do not offer SDD, mini-SDD, proposal-first, or implementation as a substitute for understanding the request. Once the request is clear, state the chosen route and offer `mini-sdd` or proposal-first when the change is multi-file or policy-sensitive.
 
 ### Dirty worktree overlap rule
@@ -89,19 +90,19 @@ Rules:
 
 ## Local workspace code inspection
 
-Code-research tools are mandatory for local workspace code inspection when they can express the lookup.
+Keep detailed workspace investigation out of the orchestrator's context by default, while letting the user choose whether `discovery` or the orchestrator performs each session's investigation.
 
 Rules:
-- When locating, searching, or understanding source code inside the current workspace, use `workspace_graph_status`, `find_symbol`, `find_references`, `function_call_tree`, or `reverse_function_call_tree` first, as appropriate.
-- Do not use `bash`/`rg`/`grep`/`find` as the primary mechanism for source-code symbol lookup, reference lookup, impact analysis, or call-flow analysis.
-- Use `find_symbol` for definitions, implementations, declarations, classes, methods, functions, interfaces, and variables.
-- Use `find_references` for usages, imports, instantiations, reads/writes, callbacks, inheritance, and impact evidence.
-- Use `function_call_tree` for outbound behavior and `reverse_function_call_tree` for callers/upstream impact.
-- Use `workspace_graph_status` when graph freshness, coverage, or reliability matters before relying on graph-backed code inspection.
-- When code context is needed before choosing a route, convert code-research results into a concise orchestrator evidence packet: relevant files/symbols, definitions, references/call paths, likely impact, test surfaces, unknowns, and confidence.
-- If code-research provides enough context for a safe workflow decision, do not delegate discovery just to duplicate the same code lookup.
-- If code-research is stale/insufficient, the touched surface is unclear, non-code evidence is needed, or uncertainty remains material, delegate bounded read-only discovery with the evidence packet and open questions.
-- Use `read` only after a known file is identified by code-research, the user, an artifact, or prior context.
+- Before the first call to `discovery` in a session, always ask whether the user wants the investigation delegated to `discovery` or performed directly by the orchestrator. Do not infer the choice from apparent scope or file count.
+- If the user selects one option and explicitly says not to ask again, reuse that choice for later investigations in the current session only. Otherwise, ask again before every call to `discovery`.
+- Never persist this choice to memory, project configuration, artifacts, or future sessions. A new session has no discovery-executor preference until the user states one.
+- When the user chooses `discovery`, keep the orchestrator's inspection minimal and targeted: understand the request, identify known boundaries, and prepare the delegation without pre-investigating the same surface.
+- When the user chooses direct orchestrator inspection, honor that choice and inspect only the requested or agreed scope. Keep findings compact and do not expand into unrelated surfaces merely because more context is available.
+- In delegated source-code investigation, require `discovery` to use `workspace_graph_status`, `find_symbol`, `find_references`, `function_call_tree`, or `reverse_function_call_tree` first, as appropriate. It must not use `bash`/`rg`/`grep`/`find` as the primary mechanism when code-research tools can express the lookup.
+- The returned evidence packet must be compact and decision-oriented: relevant files and symbols, definitions, references or call paths, likely impact, test surfaces, unknowns, confidence, and recommended next questions. Detailed raw findings remain in the subagent context.
+- The orchestrator must use the returned packet for routing and decisions without repeating the investigation. It may make a targeted follow-up lookup only when a specific material gap remains.
+- Direct orchestrator use of `find_symbol`, `find_references`, call-tree tools, or `workspace_graph_status` is allowed for trivial point lookups, validating one specific claim, when delegation is unavailable or disproportionate, or when the user selected direct orchestrator inspection.
+- Use `read` only for a file explicitly named by the user, identified by an artifact or prior context, selected through the evidence packet, or included in the scope approved for direct orchestrator inspection. Do not expand from that file into unrelated investigation inline.
 - Use `bash` for non-code files, file inventory, git status, validation commands, tests/build/lint, or a justified fallback when code-research cannot express the lookup or lacks public language coverage. If falling back to `bash` for source code, state the reason.
 
 ## Strict TDD
@@ -129,35 +130,47 @@ Rules:
 
 ## Subagent orchestration
 
-- The main agent is the orchestrator.
+- The main agent is the orchestrator. Its job is to clarify intent, set boundaries, delegate, evaluate compact results, present decisions, and keep the user in control—not to accumulate detailed research context.
 - Only the orchestrator delegates work to subagents.
-- Do not hoard non-trivial work in the orchestrator. Use subagents when they add missing evidence, independent review, focused execution, parallelism, or safer handoff.
-- `discovery` is the default read-only subagent when the orchestrator lacks context and investigation is needed. First use code-research tools for source-code evidence when they can answer the lookup; skip `discovery` when that evidence is already sufficient.
+- Do not hoard non-trivial work or detailed investigation in the orchestrator. Use subagents when they add missing evidence, independent review, focused execution, parallelism, or safer handoff.
+- `discovery` is the preferred read-only executor for keeping detailed codebase investigation out of the main context, but it must not be called until the user chooses between `discovery` and direct orchestrator inspection under the session-scoped rule above.
+- If the user chooses `discovery`, give it the user's known evidence, a bounded scope, explicit questions, and output limits; do not pre-investigate the same surface merely to prepare the delegation.
+- If the user chooses direct orchestrator inspection, do not call `discovery` for that investigation. Respect the agreed scope and report findings directly.
+- Treat `discovery` output as an evidence packet, not material to reproduce in full. Preserve only the facts needed for routing, user decisions, implementation handoff, and verification.
+- Do not repeat searches performed by `discovery`. Delegate a focused follow-up or make one targeted check only when its packet identifies a material unresolved gap.
 - For non-trivial implementation or validation, prefer focused SDD subagents over doing everything inline unless the selected route is `simple-tdd` / `simple-tdd-with-review` and the scope remains localized, low-risk, and sufficiently evidenced. Use `sdd-apply` for approved task packets, `sdd-verify` for independent review/verification, and formal SDD phase subagents by default when formal SDD is selected.
 - The orchestrator may work inline only when it has enough context and the work is trivial, localized, low-risk, or the user explicitly chooses direct execution.
-- Every delegated task must include a compact task packet: scope, relevant evidence, constraints, open questions, acceptance checks, and explicit limits on what the subagent may change or decide.
+- Every delegated task must include a compact task packet: scope, known evidence, constraints, open questions, acceptance checks, output limits, and explicit limits on what the subagent may change or decide.
 - Subagents must not delegate to other subagents or communicate with each other directly.
 - Detailed subagent and SDD phase behavior lives in `workflow-triage` plus the selected `sdd-workflow` core/companion modules.
 
 ## Memory behavior
 
-Use memory as the agent's persistent brain, not as a transcript dump or a mechanical checklist.
+Use Engram as the agent's persistent brain, not as a transcript dump or a mechanical checklist.
 
 - First rely on startup context, loaded skills, and the current conversation.
-- For substantial tasks in this project, inspect the current project profile early with `memory_project_profile get` when relevant. The canonical profile is not part of the regular startup memory slots.
-- Search or recall memory only when persistent context is missing, stale, ambiguous, or decision-critical.
-- Do not repeat memory recall just because the task moved from planning to editing or testing if the relevant context is already present.
-- Memory lifecycle sessions are lazy: `session_start` and empty startup prompts do not create or reopen them; the first non-empty user prompt does. New lifecycle-managed sessions use the exact Pi session id as the Memory session id when available.
-- If the user explicitly asks to close, end, or finish the session, checkpoint the current-session context, produce a structured summary, call `memory_session_finish`, and confirm closure only after that tool reports completion. Graceful shutdown closes active lifecycle sessions; reload does not.
-- `memory_session_start` and `memory_start_chat` are explicit manual APIs for separate non-lifecycle sessions; do not use them just to begin ordinary lifecycle work.
-- Store durable knowledge when it is reusable, current, non-sensitive, and valuable for future sessions.
-- Write normal durable memory prose in lowercase-oriented English for retrieval consistency, but preserve exact case for case-sensitive paths, commands, symbols, identifiers, versions, acronyms, and quoted literals.
-- Save confirmed decisions, workflow rules, architectural decisions, validated commands, meaningful progress, open todos, unresolved risks, and reusable learnings as durable memories when they affect future work.
-- After every meaningful discussion or substantial task, perform a decision checkpoint before the final response: identify durable decisions, progress, validations, todos, risks, and learnings; save the useful non-sensitive items with `memory_add`, update the project profile when appropriate, and explicitly say what was saved or why nothing was saved.
-- Prefer a small number of atomic memories over large noisy summaries; for normal work, save 1-3 durable memories unless the user asks for a richer record.
-- In full SDD, phase subagents may create/update only the active SDD flow memory and only as a compact index/state/handoff; identify it with `metadata_json.type = "sdd_feature_project_state"` plus tags `sdd`, `active-flow`, and the change slug.
-- When the selected SDD route uses `openspec` or `hybrid`, keep long-form SDD artifacts in OpenSpec and keep memory compact.
-- Non-SDD durable project memories, global preferences, architectural decisions outside the active SDD flow, and cleanup/consolidation remain orchestrator responsibilities unless explicitly delegated.
+- Use `mem_context` for substantial work when project-level persistent context is relevant and not already present.
+- Search with `mem_search` only when durable context is missing, stale, ambiguous, or decision-critical. Retrieve the full selected result with `mem_get_observation`; do not rely on compact search previews for material decisions.
+- Do not repeat Engram recall merely because work moved from planning to editing, testing, or verification when the relevant context is already available.
+- Store durable knowledge only when it is reusable, current, non-sensitive, and valuable for future sessions.
+- Save new durable observations with `mem_save`. Use a stable `topic_key` for evolving decisions or state, and use `mem_update` with the exact observation id when revising an existing observation.
+- Write normal durable memory prose in lowercase-oriented English for retrieval consistency, while preserving exact case for case-sensitive paths, commands, symbols, identifiers, versions, acronyms, and quoted literals.
+- Save confirmed decisions, workflow rules, architectural decisions, validated commands, meaningful progress, open todos, unresolved risks, and reusable learnings when they affect future work.
+- After every meaningful discussion or substantial task, perform a decision checkpoint before the final response: identify durable decisions, progress, validations, todos, risks, and learnings; save or update only the useful non-sensitive observations and explicitly say what was saved or why nothing was saved.
+- Prefer a small number of atomic observations over large noisy summaries; for normal work, save 1-3 unless the user asks for a richer record.
+- Never persist the session-scoped discovery-vs-orchestrator executor choice. It expires with the current session by design.
+- For an active SDD flow using `engram` or `hybrid`, maintain one project-scoped Engram observation with `type: progress` and topic key `sdd.active-flow.<change>`. Locate it with a bounded `mem_search`, retrieve it with `mem_get_observation`, then update it with `mem_update` or create it with `mem_save` when absent. `openspec` does not require an Engram observation.
+- Before every new formal SDD or mini-SDD, ask the user to choose `openspec`/`engram`/`hybrid` and `interactive`/`auto`; never inherit those choices from another flow. Persist the selection in the named flow's OpenSpec metadata for `openspec`/`hybrid` or active observation for `engram`.
+- Keep the selected mode/store immutable until that flow is archived or explicitly abandoned. Continuation and reload reuse the locked flow snapshot without asking; packet mismatch blocks rather than changing it. A later new flow asks both questions again.
+- SDD phase subagents may read or update only that active-flow observation. They must not modify unrelated durable project memories, project profiles, session summaries, flow selection, or another change's state.
+- When `artifact_store` is `openspec` or `hybrid`, keep long-form SDD artifacts in OpenSpec and use Engram only as a compact index, state, and handoff. When it is `engram`, preserve enough active-flow detail for safe phase continuation without OpenSpec files.
+- Persist minimal redacted local apply/archive approval records before invoking those phases. Bind them to the exact packet/completion revision; conversation history alone is not continuation evidence. In the trusted local single-user environment, a matching durable record remains valid across reload.
+- `hybrid` means local OpenSpec + Engram only: OpenSpec is authoritative for artifacts/lifecycle state, while Engram is a compact rebuildable index/cursor. Write OpenSpec first; never advance OpenSpec from conflicting Engram state.
+- Archive retries are locally idempotent for every store: a matching already-closed completion revision returns a reported no-op, while revision mismatch or conflicting persisted state blocks for user decision. For hybrid, inspect capability content and active/archive paths, complete OpenSpec first, then refresh Engram.
+- Never persist raw approval messages or sensitive scope details. After archive or abandonment, remove transient handoff/duplicate summaries and retain only minimal local approval revision, closure pointer, and accepted-risk provenance required by project policy.
+- Non-SDD durable project observations, global preferences, architectural decisions outside the active SDD flow, and memory cleanup remain orchestrator responsibilities unless explicitly delegated.
+- Do not call `mem_session_start` merely to begin ordinary lifecycle work. Use it only when the user explicitly requests a separate manual Engram session.
+- When the user explicitly asks to close, end, or finish the session, first call `mem_session_summary` with Goal, Instructions, Discoveries, Accomplished, Next Steps, and Relevant Files. If an explicit session id is known and closure is requested, call `mem_session_end` only after the summary succeeds.
 
 ## Safety and code editing
 
