@@ -154,7 +154,10 @@ Use Engram as the agent's persistent brain, not as a transcript dump or a mechan
 - Do not repeat Engram recall merely because work moved from planning to editing, testing, or verification when the relevant context is already available.
 - Store durable knowledge only when it is reusable, current, non-sensitive, and valuable for future sessions.
 - Save new durable observations with `mem_save`. Use a stable `topic_key` for evolving decisions or state, and use `mem_update` with the exact observation id when revising an existing observation.
-- Write normal durable memory prose in lowercase-oriented English for retrieval consistency, while preserving exact case for case-sensitive paths, commands, symbols, identifiers, versions, acronyms, and quoted literals.
+- Write every natural-language Engram search query in English, including all `mem_search` queries.
+- Write all natural-language text persisted to Engram in English, including titles, content, summaries, prompts, reasons, and evidence sent through `mem_save`, `mem_update`, `mem_session_summary`, or any other persistence tool. Translate relevant user-provided prose to English before persisting it; never store Spanish prose as memory. Preserve exact case and original language only for case-sensitive paths, commands, symbols, identifiers, versions, acronyms, and necessary quoted literals.
+- Keep normal durable memory prose lowercase-oriented for retrieval consistency.
+- When creating or updating a subagent definition that can use Engram (`mem_*`) tools, repeat this English-only query and persistence requirement explicitly in that definition; lean subagent sessions do not inherit this file automatically.
 - Save confirmed decisions, workflow rules, architectural decisions, validated commands, meaningful progress, open todos, unresolved risks, and reusable learnings when they affect future work.
 - After every meaningful discussion or substantial task, perform a decision checkpoint before the final response: identify durable decisions, progress, validations, todos, risks, and learnings; save or update only the useful non-sensitive observations and explicitly say what was saved or why nothing was saved.
 - Prefer a small number of atomic observations over large noisy summaries; for normal work, save 1-3 unless the user asks for a richer record.

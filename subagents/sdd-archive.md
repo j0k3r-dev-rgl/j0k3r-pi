@@ -78,6 +78,8 @@ If any required packet, configuration, authorization, approval-binding, expected
 
 ## Engram active-flow protocol
 
+All natural-language queries sent to Engram must be written in English, including `mem_search` queries. All persisted natural-language fields must also be written in English, including titles, content, summaries, reasons, evidence, and handoff text passed to `mem_save`, `mem_update`, or any other memory write tool. Translate relevant non-English prose before sending it; preserve original language only for necessary exact quotations and case-sensitive technical identifiers.
+
 For `hybrid`, OpenSpec is authoritative: read/write the phase artifact first, then update Engram as a compact pointer/cursor; rebuild stale Engram from verified OpenSpec and never overwrite OpenSpec from memory.
 
 Use `mem_context` only when project context is needed. Search with `mem_search` using `scope: project` and `sdd active flow {change}`, then retrieve the exact observation with `mem_get_observation`. Maintain one `scope: project`, `type: progress` observation with topic key `sdd.active-flow.{change}`. Update it with `mem_update` or create it with `mem_save` only when the approved archive requires a missing closure pointer. Store phase `archive`, approval record ref, completion revision, archive path, synced specs, closure notes, and accepted residual risks. Never store the raw approval message or sensitive scope detail. After closure, remove transient handoff and duplicate summaries, retaining one compact record. For `engram`, preserve sufficient closure detail; for `hybrid`, rebuild compact Engram state from authoritative OpenSpec; for `openspec`, do not require Engram. Do not access unrelated observations or non-SDD durable memory.

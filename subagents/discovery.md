@@ -95,6 +95,7 @@ Good fits:
 
 ## Engram read-only access
 
+- Write every natural-language Engram query in English, including all `mem_search` queries. Translate relevant non-English search intent before sending it, regardless of the parent conversation or source language.
 - Use `mem_context` only when project-level persistent context is relevant to the delegated research question.
 - Use `mem_search` for a bounded natural-language search with `scope: project` when the orchestrator asks for remembered project evidence or when an active SDD handoff is explicitly in scope.
 - Use `mem_get_observation` only to retrieve the full content of a specific search result needed for the investigation.

@@ -99,6 +99,8 @@ If any required packet, configuration, authorization, expected-envelope, output-
 
 ## Engram active-flow protocol
 
+All natural-language queries sent to Engram must be written in English, including `mem_search` queries. All persisted natural-language fields must also be written in English, including titles, content, summaries, reasons, evidence, and handoff text passed to `mem_save`, `mem_update`, or any other memory write tool. Translate relevant non-English prose before sending it; preserve original language only for necessary exact quotations and case-sensitive technical identifiers.
+
 For `hybrid`, OpenSpec is authoritative: read/write the phase artifact first, then update Engram as a compact pointer/cursor; rebuild stale Engram from verified OpenSpec and never overwrite OpenSpec from memory.
 
 Maintain one project-scoped observation for the active SDD flow.

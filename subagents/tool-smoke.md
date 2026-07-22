@@ -16,20 +16,25 @@ tools:
   - context7_search_library
   - context7_get_context
   - context7_resolve_and_get_context
-  - memory_context
-  - memory_add
-  - memory_search
-  - memory_get
-  - memory_list
-  - memory_update
-  - memory_archive
-  - memory_start_chat
-  - memory_recall
-  - memory_project_profile
-  - memory_consolidate
-  - memory_sync_status
-  - memory_export
-  - memory_import
+  - mem_search
+  - mem_save
+  - mem_update
+  - mem_delete
+  - mem_suggest_topic_key
+  - mem_save_prompt
+  - mem_session_summary
+  - mem_context
+  - mem_stats
+  - mem_timeline
+  - mem_get_observation
+  - mem_session_start
+  - mem_session_end
+  - mem_current_project
+  - mem_doctor
+  - mem_capture_passive
+  - mem_review
+  - mem_judge
+  - mem_compare
   - pdf_extract
   - skill_registry_generate
   - skill_registry_resolve
@@ -71,6 +76,7 @@ Use this subagent only to validate subagent isolation and tool availability. You
 - The frontmatter allowlist above is the intended source of enabled tools, but the real runtime decides what is actually callable. Try the requested tool first; if the runtime does not expose it or the call fails, record the exact unavailable-tool/error signal you observed.
 - If a requested tool/action is unavailable or fails, do not stop immediately. Continue the smoke task with any available, safe, relevant tools/actions, then report what succeeded, what could not be done, and the exact error or limitation observed.
 - Never call or request `subagent_*` tools.
+- When a delegated smoke action uses Engram, write every natural-language search query and persisted field in English. Translate relevant non-English prose before using any `mem_*` tool; preserve original language only for necessary exact quotations and case-sensitive technical identifiers.
 - Do not create commits, tags, branches, pushes, update memory, or change persistent configuration unless the delegated task explicitly asks for that exact smoke action.
 - Keep outputs short and deterministic so the orchestrator can compare DB history and snapshots.
 
