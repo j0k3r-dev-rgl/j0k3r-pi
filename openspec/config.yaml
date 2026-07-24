@@ -1,0 +1,75 @@
+schema_version: 2
+config_revision: sdd-contract-v7-20260724T202300Z
+purpose: Global PRD/SDD execution config for fixed-trigger zero-payload phase delegation. Flow-local lifecycle state belongs in per-flow metadata.yaml or Engram.
+
+invocation:
+  fixed_trigger: execute-authoritative-phase
+  zero_payload: true
+  exact_match_required: true
+  reject_additional_payload: true
+  state_transport: authoritative-files-or-engram-only
+
+active_flow_reference: openspec/changes/api-tools-swagger-graphql-contracts/metadata.yaml
+active_flow_invocation:
+  flow_reference: null
+  lease_id: null
+  lease_status: idle
+  target_phase: null
+  target_executor: null
+  lease_owner: orchestrator
+  stale_behavior: block-before-phase-work
+active_flow_policy:
+  concurrency: multiple-active-flows-single-invocation-lease
+  default_reference_role: orchestrator-convenience-pointer-not-lifecycle-authority
+  invocation_cursor_owner: orchestrator-before-zero-payload-launch
+  dependent_phase_parallelism: forbidden
+
+state_locations:
+  openspec_metadata_template: openspec/changes/{change}/metadata.yaml
+  engram_topic_template: sdd.active-flow.{change}
+
+contract_refs:
+  artifact_conventions: skills/sdd-workflow/artifact-conventions.md
+  shared_phase_rules: skills/sdd-workflow/shared-phase-rules.md
+  phase_contracts: skills/sdd-workflow/phase-contracts.md
+  mini_sdd: skills/sdd-workflow/mini-sdd.md
+  prd_and_discovery: skills/sdd-workflow/prd-and-discovery.md
+
+phase_executors:
+  prd-review:
+    lifecycle: prd-first
+    executors: [prd_review]
+  explore:
+    lifecycle: [formal-sdd, mini-sdd]
+    executors: [formal_sdd_explore, mini_sdd_explore]
+  proposal:
+    lifecycle: formal-sdd
+    executors: [formal_sdd_proposal]
+  spec:
+    lifecycle: formal-sdd
+    executors: [formal_sdd_spec]
+  design:
+    lifecycle: formal-sdd
+    executors: [formal_sdd_design]
+  task:
+    lifecycle: formal-sdd
+    executors: [formal_sdd_task]
+  apply:
+    lifecycle: [formal-sdd, mini-sdd, minimal-delegated-apply]
+    executors: [formal_sdd_apply, mini_sdd_apply, minimal_delegated_apply]
+  verify:
+    lifecycle: [formal-sdd, mini-sdd, minimal-delegated-apply]
+    executors: [formal_sdd_verify, mini_sdd_verify, minimal_delegated_verify]
+  archive:
+    lifecycle: [formal-sdd, mini-sdd, minimal-delegated-apply]
+    executors: [formal_sdd_archive, mini_sdd_archive, minimal_delegated_archive]
+
+global_limits:
+  default_phase_output_max_chars: 16000
+  expanded_planning_output_max_chars: 20000
+  return_envelope_required: true
+
+revision_policy:
+  project_contract_change: bump config_revision and update active flow project_config_revision when continuing that flow
+  flow_state_change: bump flow_state_revision in the affected per-flow state
+  semantic_recovery: requires explicit user-approved remediation

@@ -1,0 +1,135 @@
+slug: api-tools-swagger-graphql-contracts
+title: Conditional API tools, rendering, and lossless output contracts
+metadata_schema_version: 2
+flow_type: formal-sdd
+lifecycle_status: active
+project_config_reference: openspec/config.yaml
+project_config_revision: sdd-contract-v7-20260724T202300Z
+flow_state_reference: openspec/changes/api-tools-swagger-graphql-contracts/metadata.yaml
+flow_state_revision: design-rerun-reviewed-20260724T205238Z-v1
+flow_selection_locked: true
+selection_timestamp: 2026-07-24 16:35:26+00:00
+execution_mode: interactive
+artifact_store: hybrid
+prd_policy: waived
+stable_conventions:
+- strict-tdd
+- native-collapsed-expanded-rendering
+- lossless-bounded-model-output
+- openspec-authoritative
+- engram-compact-cursor
+- session-bound-continuation
+artifacts:
+  metadata: openspec/changes/api-tools-swagger-graphql-contracts/metadata.yaml
+  exploration: openspec/changes/api-tools-swagger-graphql-contracts/exploration.md
+  proposal: openspec/changes/api-tools-swagger-graphql-contracts/proposal.md
+  spec: openspec/changes/api-tools-swagger-graphql-contracts/spec.md
+  design: openspec/changes/api-tools-swagger-graphql-contracts/design.md
+  implementation_map: openspec/changes/api-tools-swagger-graphql-contracts/implementation-map.md
+summary: Design rerun completed against the user-approved api_status remediation.
+  Active decision DES-STS-001 R1 preserves safe non-URL status behavior, removes endpoint
+  URL disclosure, and adds only safe integration state; the packet is ready for task planning.
+blockers: []
+validation_expectations_ref: openspec/changes/api-tools-swagger-graphql-contracts/spec.md#acceptance--testability-summary
+security_context_ref: openspec/changes/api-tools-swagger-graphql-contracts/spec.md#security--privacy-requirements
+handoff_ref: openspec/changes/api-tools-swagger-graphql-contracts/implementation-map.md#handoff-notes
+phase_state:
+  phase: design
+  executor: formal_sdd_design
+  phase_status: completed
+  packet_revision: design-rerun-20260724T204914Z-v1
+  artifact_writes_authorized: true
+  completed_at: 2026-07-24 20:49:14+00:00
+  authorization_consumed:
+    authorization_id: phase-auth-design-rerun-20260724T204725Z
+    authorized_packet_revision: spec-status-remediation-20260724T204427Z-v1
+    result: accepted
+  result_summary: Design aligned with the remediated status contract. DES-STS-001
+    R1 preserves safe non-URL api_status fields and configured-state booleans, removes
+    endpoint URL strings, and adds only safe integration enabled/framework state.
+  required_artifacts:
+    proposal: openspec/changes/api-tools-swagger-graphql-contracts/proposal.md
+    spec: openspec/changes/api-tools-swagger-graphql-contracts/spec.md
+    design: openspec/changes/api-tools-swagger-graphql-contracts/design.md
+    implementation_map: openspec/changes/api-tools-swagger-graphql-contracts/implementation-map.md
+  produced_artifacts:
+    design: openspec/changes/api-tools-swagger-graphql-contracts/design.md
+    implementation_map: openspec/changes/api-tools-swagger-graphql-contracts/implementation-map.md
+  skills_loaded:
+    source: refreshed-plan
+    plan_revision: skill-plan-design-rerun-20260724T204914Z-v1
+    names:
+    - sdd-workflow
+    - tdd
+    - pi-extension-authoring
+    fallback_registry_reviewed: true
+  review:
+    orchestrator_review: accepted
+    review_memory_ref: engram:49
+    validation_summary: Orchestrator read project config, metadata, design, implementation
+      map, and relevant remediated spec sections; design result aligns with metadata,
+      spec, security, and implementation-map handoff; git diff --check clean; no source/test/runtime
+      files modified.
+  next_phase:
+    phase: task
+    executor: formal_sdd_task
+    eligibility: needs-phase-authorization
+    authorization_required: user-approved
+    required_artifacts:
+      proposal: openspec/changes/api-tools-swagger-graphql-contracts/proposal.md
+      spec: openspec/changes/api-tools-swagger-graphql-contracts/spec.md
+      design: openspec/changes/api-tools-swagger-graphql-contracts/design.md
+      implementation_map: openspec/changes/api-tools-swagger-graphql-contracts/implementation-map.md
+    summary: Obtain revision-bound task-phase authorization, then produce the ordered
+      strict-TDD apply-ready task packet. Apply remains separately approval-gated.
+phase_authorization: null
+approval_records: {}
+flow_skill_plan:
+  plan_revision: skill-plan-design-rerun-20260724T204914Z-v1
+  source_phase: design
+  registry_hash: 78c75533496ad99bb51e1152d2d529745b45db9c21d6386d3aaf714d448e8eac
+  registry_freshness: fresh
+  covered_phases:
+  - design
+  covered_paths:
+  - openspec/changes/api-tools-swagger-graphql-contracts/**
+  - extensions/api-tools/**
+  - extensions/context7/src/render/index.ts
+  - extensions/agent-todo/index.ts
+  covered_intents:
+  - technical design for conditional Swagger and GraphQL Pi tools
+  - lossless bounded session continuation and endpoint security
+  - native collapsed and expanded result rendering
+  required_skills:
+  - name: sdd-workflow
+    path: /home/j0k3r/.pi/agent/skills/sdd-workflow/SKILL.md
+  - name: tdd
+    path: /home/j0k3r/.pi/agent/skills/tdd/SKILL.md
+  - name: pi-extension-authoring
+    path: /home/j0k3r/.pi/agent/skills/pi-extension-authoring/SKILL.md
+  optional_skills:
+  - name: cognitive-doc-design
+    path: /home/j0k3r/.pi/agent/skills/cognitive-doc-design/SKILL.md
+  resolver_noise_reviewed:
+  - workflow-triage
+  - skill-authoring
+  - cognitive-doc-design
+  - comment-writer
+  - api-tools-configuration
+  - permission-guard-configuration
+  fallback_resolution:
+    reason: Remediated public status contract triggered the plan invalidation rule.
+    registry_hash_unchanged: true
+    required_skills_changed: false
+    scope_or_security_assumptions_changed: false
+    applicability_note: Configuration-only and permission-policy skills do not govern
+      extension implementation design; required SDD, TDD, and extension-authoring skills remain authoritative.
+  invalidation_rules:
+  - registry_hash_changed
+  - phase_not_covered
+  - paths_or_intent_outside_coverage
+  - approved_scope_or_security_policy_changed
+  - spec_remediation_changes_public_status_contract
+  confidence: high-for-design-scope
+  updated_at: 2026-07-24 20:49:14+00:00
+  status: refreshed-and-validated-for-design
