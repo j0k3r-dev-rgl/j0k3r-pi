@@ -3,7 +3,7 @@
 	"max_concurrency": 5,
 	"debug": true,
 	"session_resources": "lean",
-	"mode": "claude",
+	"mode": "opencode",
 	"default_tools": ["read"],
 	"model_profiles": {
 		"discovery": {

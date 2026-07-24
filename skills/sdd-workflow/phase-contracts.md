@@ -2,9 +2,9 @@
 
 Load this companion when planning a formal SDD sequence or when you need high-level responsibilities for each SDD phase.
 
-For subagent task-packet requirements, return envelopes, and cross-phase apply/verify/archive rules, also load `skills/sdd-workflow/shared-phase-rules.md`.
+For authoritative phase-state requirements, return envelopes, and cross-phase apply/verify/archive rules, also load `skills/sdd-workflow/shared-phase-rules.md`.
 
-Local workspace source-code inspection in any phase follows `AGENTS.md` and the compact task packet from shared phase rules. Phase agents must also receive resolved configuration and authorization fields before acting.
+Local workspace source-code inspection in any phase follows `AGENTS.md` and authoritative phase state from shared rules. Phase agents receive only the fixed invocation trigger; they read config, active flow, authorization, handoff, mode/store/lock/conventions, and artifact references from authoritative sources.
 
 ## Deterministic Flow Routes
 
@@ -55,6 +55,7 @@ Expected outputs:
 - exploration artifact or memory section
 - initial implementation-map with explored files, symbols, validation commands, and context gaps
 - security/trust-boundary observations: authn/authz, secrets, data exposure, privacy, input validation, dependencies, or `not-applicable`
+- initial `flow_skill_plan` with registry hash, covered phases, covered paths/intents, required/optional skills, confidence, invalidation rules, and fallback notes
 - recommendation
 - open questions
 - readiness for proposal
@@ -74,19 +75,21 @@ Expected outputs:
 
 ### sdd-spec
 
-Purpose: define normative requirements, scenarios, security requirements, and testability mapping.
+Purpose: define bounded normative requirements, representative scenarios, security requirements, and references to detailed traceability without turning the canonical spec into a giant review artifact.
 
 Expected outputs:
 
 - changed capabilities or requirements
-- SHALL-style requirements
-- scenarios or examples
-- edge cases and abuse/failure scenarios
+- SHALL-style requirements grouped by capability
+- representative scenarios or examples sufficient to define externally observable behavior
+- edge cases and abuse/failure scenarios when behavior has security, privacy, data, input, dependency, or permission impact
 - security/privacy/auth/data requirements or explicit `not-applicable`
-- acceptance-criteria/testability matrix mapping each requirement or scenario to expected validation evidence
+- compact testability summary with references to detailed traceability when needed
 - compatibility constraints
-- deterministic archive capability mapping from change requirements/scenarios to exact capability-spec targets, or explicit `none` with rationale
+- compact archive mapping summary with references to detailed mapping when needed
 - stable requirement/scenario ids and bidirectional supersession metadata for material replacements
+
+Detailed per-requirement test matrices, exhaustive schema tables, and archive target expansions belong in separate bounded artifacts such as `testability.md`, `traceability.md`, or `archive-map.md` when they would make `spec.md` difficult to review.
 
 ### sdd-design
 
@@ -127,13 +130,14 @@ Purpose: retrieve the persisted local approval record and implement only the com
 
 ### sdd-verify
 
-Purpose: verify implementation against formal SDD artifacts or, for mini-SDD/minimal delegated apply, against the orchestrator task packet, acceptance criteria, apply output, changed files, security requirements, and validation evidence.
+Purpose: verify implementation against formal SDD artifacts or, for mini-SDD/minimal delegated apply, against the authoritative approved task packet, acceptance criteria, apply output, changed files, security requirements, and validation evidence.
 
 Expected outputs:
 
 - requirement/scenario compliance matrix
 - security compliance matrix when security requirements exist
 - implementation-map compliance and context-gap notes
+- skill-plan usage/freshness evidence and any fallback resolution
 - command evidence from tests/build/typecheck/runtime checks, or an explicit downgrade when executable evidence is unavailable
 - verdict that cannot be full PASS when testable requirements lack runtime/build/typecheck/test evidence
 - persisted local apply-approval revision and active supersession-link validation

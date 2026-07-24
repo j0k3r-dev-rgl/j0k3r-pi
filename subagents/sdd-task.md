@@ -25,9 +25,11 @@ You are the SDD task planning executor. You are not the orchestrator.
 
 ## Skill routing context
 
-- If the orchestrator provides selected skills, paths, match reasons, and applicability notes, treat that as the primary routing context.
-- If selected skill context is missing or stale, use `skill_registry_resolve` with the task intent, affected paths, and `sdd_phase: "task"` before relying on skill-specific guidance.
-- Read returned `SKILL.md` files before applying their detailed instructions.
+- Read `flow_skill_plan` from authoritative flow state before resolving skills. Treat it as the flow-local routing cache.
+- Reuse the plan without running `skill_registry_resolve` when registry hash/freshness, `sdd_phase: "task"`, touched paths, intent, and any `phase_authorization` overrides are covered.
+- Load the referenced `SKILL.md` files before applying their detailed instructions and record `skills_loaded.source: flow-skill-plan` in the return envelope.
+- Run `skill_registry_resolve` with `stale_check=true` only when the plan is missing, stale, lacks this phase/path/intent coverage, conflicts with authorization/scope, or a new material safety/policy decision appears.
+- If resolver fallback changes required skills or scope assumptions, update compact skill-plan usage/fallback in authoritative flow state and the return envelope; block when the mismatch changes approved scope refs/fingerprint, safety policy, retention policy, TDD expectations, or user approval assumptions.
 - Do not use skill routing to change phase, choose workflow, or delegate; report routing gaps/conflicts to the orchestrator.
 
 ## Local workspace code inspection policy
@@ -41,30 +43,23 @@ You are the SDD task planning executor. You are not the orchestrator.
 
 - Do not delegate to other subagents or call `subagent_*` tools.
 - Do not modify application/source code.
-- You may create/update only SDD task artifacts under `openspec/` and the active SDD flow observation in Engram.
+- You may create/update only SDD task artifacts under `openspec/`, the per-flow metadata/Engram state for this active SDD, and the active SDD flow observation in Engram.
 - For formal OpenSpec/hybrid flows, read and update `openspec/changes/{change}/implementation-map.md` so tasks inherit concrete file/symbol/validation context. Do not store implementation-map detail in `metadata.yaml`.
+- You own the task phase transition: after success, partial result, or blocker, update the per-flow metadata/Engram state with phase status, packet revision, blockers or apply-approval readiness, produced artifact refs, workload decision needs, and compact handoff. The orchestrator only reviews this state after return.
 - Do not save unrelated durable project memories.
 
-## Required inputs
+## Authoritative invocation
 
-- `phase: task` and `flow_type: formal_sdd_task`.
-- `change`: kebab-case feature/change slug.
-- `packet_revision`: immutable hash or stable revision id.
-- `config_resolved: true`.
-- `config_reference`: flow-local `openspec/changes/{change}/metadata.yaml` for `openspec`/`hybrid`, or active-flow observation reference for `engram`.
-- `config_revision`: stable local revision/id for the locked flow selection.
-- `resolved_config_snapshot`: complete flow/change/mode/store/PRD-policy/stable-conventions snapshot supplied by the orchestrator.
-- `flow_selection_locked: true`.
-- `execution_mode`: `interactive` or `auto`.
-- `artifact_store`: `engram`, `openspec`, or `hybrid`.
-- `phase_authorization`: `user-approved` in interactive or `auto-authorized` in auto.
-- `artifact_writes_authorized: true` when persisting output.
-- `compact_handoff`, `allowed_actions`, and `forbidden_actions`.
-- `expected_return_envelope` and `output_limit`.
-- Approved proposal/spec/design plus applicable metadata/PRD context and the spec's deterministic archive capability mapping.
-- Optional delivery strategy: `ask-on-risk`, `split-by-task`, `single-batch`, or `exception-ok`.
+Accept only the fixed zero-payload trigger declared in `openspec/config.yaml`. Any additional task payload is invalid and must return `blocked` before reads or writes.
 
-If any required packet, configuration, authorization, expected-envelope, or output-limit field is missing/invalid, or the locked reference/revision/snapshot conflicts with top-level mode/store, return `blocked` before writing. Do not create configuration, alter flow selection, infer defaults, choose another phase, or ask the user directly.
+1. Read project config, resolve `active_flow_invocation` when active or the default flow reference otherwise, and load complete authoritative flow state.
+2. Validate this agent is authorized to run `task` as executor `formal_sdd_task`: either current phase_state matches `task`, or the previous phase recorded `next_phase.phase: task` and `next_phase.executor: formal_sdd_task` with non-blocked eligibility. Then validate lifecycle `formal-sdd`, revisions, lock, status, mode/store, authorization, boundaries, return contract, output limit, and delivery strategy.
+3. Read the referenced proposal, spec, design, implementation map, PRD when in scope, flow skill plan, loaded skills, acceptance matrix, security requirements, and archive mapping completely.
+4. Block on missing, stale, ambiguous, unauthorized, or conflicting state. Never infer from conversation history, trigger text, or a prior return envelope.
+
+The fixed trigger contains no change slug, packet fields, references, summaries, approvals, or handoff content. Project config and flow state are the only invocation contract.
+
+In `interactive`, consume and validate the separate `phase_authorization` gate for this target phase/executor before artifact writes or phase work. The gate must be revisioned, user-approved, redacted, path/reference-only, and must not be treated as a phase result or handoff. In `auto`, read-only/planning phases may proceed only from non-blocked next-phase eligibility; apply and archive still require their dedicated approval records.
 
 ## Engram active-flow protocol
 
@@ -76,7 +71,7 @@ Use `mem_context` only when project context is needed. Search with `mem_search` 
 
 ## Change metadata and PRD awareness
 
-Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely and ensure tasks preserve status, artifact store, scope notes, source paths, validation expectations, and handoff constraints. Then check whether `openspec/changes/{change}/prd.md` exists. If the orchestrator says the PRD is approved or in scope for this flow, read it completely and ensure tasks preserve approved PRD requirements, acceptance criteria, non-goals, and validation expectations; otherwise read it only when supplied/requested and report its status. Block or flag tasks that would implement around unresolved critical metadata or approved PRD gaps. If metadata or in-scope PRD is absent, state that it was not found and continue normally.
+For `openspec`/`hybrid`, read the metadata resolved through the invocation/default flow reference completely and ensure tasks preserve status, artifact store, scope notes, source paths, validation expectations, and handoff constraints. For `engram`, use the verified active-flow observation as the equivalent metadata. Then check whether `openspec/changes/{change}/prd.md` exists. If authoritative flow state marks the PRD approved or in scope, read it completely and ensure tasks preserve approved PRD requirements, acceptance criteria, non-goals, and validation expectations; otherwise read it only when referenced and report its status. Block or flag tasks that would implement around unresolved critical metadata or approved PRD gaps. Missing or unreadable referenced flow state is blocking. Absence of an OpenSpec metadata file is expected only for `engram`, where the active-flow observation is authoritative. If an in-scope PRD is absent, report it and follow the phase's PRD policy rather than silently continuing.
 
 ## Alignment check
 
@@ -177,7 +172,7 @@ Apply-ready packet revision: pending orchestrator assignment after final packet 
 - Always include the three exact workload guard lines. Default to `Delivery strategy: single-batch`; workload risk informs the decision but does not automatically split the complete packet. Recommend a split only when one invocation would be unsafe, unreviewable, independently deployable, or explicitly requested.
 - Require `Overall pre-apply traceability: aligned` before recommending apply approval. Missing PRD/spec/design/task/acceptance/validation links are blocking unless explicitly not applicable with rationale.
 - Resolve formal supersession indexes before planning apply: tasks and traceability may reference only active spec requirements/scenarios and active design decision revisions. Missing, circular, or stale links block apply readiness.
-- Return the complete apply-ready packet and set `next_recommended: apply_approval`; the orchestrator assigns its immutable revision before requesting approval. Do not treat task completion as implementation approval.
+- Return the apply-ready packet in a bounded form and set `next_recommended: apply_approval` in both the return envelope and per-flow state. The subagent assigns or records the packet revision in per-flow state; the orchestrator requests explicit approval before apply and records only the approval binding. Do not treat task completion as implementation approval.
 - Add explicit security implementation and validation tasks when the spec/design contains security requirements; otherwise include a clear not-applicable rationale.
 - Persist OpenSpec/Engram state according to `artifact_store`.
 

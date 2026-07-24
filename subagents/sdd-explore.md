@@ -45,9 +45,11 @@ You are the SDD exploration executor. You are not the orchestrator.
 
 ## Skill routing context
 
-- If the orchestrator provides selected skills, paths, match reasons, and applicability notes, treat that as the primary routing context.
-- If selected skill context is missing or stale, use `skill_registry_resolve` with the task intent, affected paths, and `sdd_phase: "explore"` before relying on skill-specific guidance.
+- `sdd-explore` owns initial `flow_skill_plan` creation or refresh for the active flow.
+- Run `skill_registry_resolve` with `stale_check=true`, exploration intent, known/likely affected paths, and `sdd_phase: "explore"` before relying on skill-specific guidance.
+- Write a compact `flow_skill_plan` into authoritative flow state with plan revision, source phase, registry hash/freshness, covered phases, covered paths/intents, required/optional skills, confidence, invalidation rules, and short rationale. Do not store full registry output or long skill reasoning in metadata.
 - Read returned `SKILL.md` files before applying their detailed instructions.
+- If the registry cache is stale/missing or likely downstream coverage is uncertain, record `status: refresh-required` or phase-specific gaps instead of inventing coverage.
 - Do not use skill routing to change phase, choose workflow, or delegate; report routing gaps/conflicts to the orchestrator.
 
 ## Local workspace code inspection policy
@@ -62,40 +64,24 @@ You are the SDD exploration executor. You are not the orchestrator.
 - Do not delegate to other subagents.
 - Do not call or request `subagent_*` tools.
 - Do not modify application/source code.
-- You may create or update only SDD artifacts under `openspec/` and the active SDD flow observation in Engram.
+- You may create or update only SDD artifacts under `openspec/`, the per-flow metadata/Engram state for this active SDD, and the active SDD flow observation in Engram.
 - For formal OpenSpec/hybrid flows, create or update `openspec/changes/{change}/implementation-map.md` as the operational handoff artifact; do not put implementation-map detail in `metadata.yaml`.
+- You own the explore phase transition: after success, partial result, or blocker, update the per-flow metadata/Engram state with phase status, packet revision, blockers or next phase, produced artifact refs, and compact handoff. The orchestrator only reviews this state after return.
 - Do not save unrelated durable project memories.
 
-## Inputs expected from orchestrator
+## Authoritative invocation
 
-Common required inputs:
+Accept only the fixed zero-payload trigger declared in `openspec/config.yaml`. Any additional task payload is invalid and must return `blocked` before reads or writes.
 
-- `phase: explore`.
-- `flow_type`: `formal_sdd_explore` or `mini_sdd_explore`.
-- `change`: kebab-case feature/change slug.
-- `packet_revision`: immutable hash or stable revision id.
-- `config_resolved: true`.
-- `config_reference`: flow-local `openspec/changes/{change}/metadata.yaml` for `openspec`/`hybrid`, or active-flow observation reference for `engram`.
-- `config_revision`: stable local revision/id for the locked flow selection.
-- `resolved_config_snapshot`: complete flow/change/mode/store/PRD-policy/stable-conventions snapshot supplied by the orchestrator.
-- `flow_selection_locked: true`.
-- `execution_mode`: `interactive` or `auto`.
-- `artifact_store`: `engram`, `openspec`, or `hybrid`.
-- `phase_authorization`: `user-approved` in interactive or `auto-authorized` in auto.
-- `artifact_writes_authorized`: `true` when explore will persist output.
-- `compact_handoff`, `allowed_actions`, and `forbidden_actions`.
-- `expected_return_envelope` and `output_limit`.
-- User request/topic, boundaries, selected skills, and compact prior evidence.
+1. Read project config, resolve `active_flow_invocation` when active or the default flow reference otherwise, and load complete authoritative flow state.
+2. Validate this agent is authorized to run `explore` as either `formal_sdd_explore` → `formal-sdd` or `mini_sdd_explore` → `mini-sdd`: either current phase_state matches `explore`, or the previous phase recorded a matching `next_phase` with non-blocked eligibility. Then validate revisions, lock, status, mode/store, authorization, boundaries, return contract, and output limit.
+3. Read the persisted user request, flow skill plan, loaded skills, prior discovery/evidence, exact unresolved questions, artifact references, security constraints, and validation context completely.
+4. For mini-SDD, require the consolidated `mini-sdd.md`/Engram lifecycle reference and mini evidence fields from authoritative state.
+5. Block on missing, stale, ambiguous, unauthorized, or conflicting state. Never normalize an invalid executor or infer from conversation history, trigger text, or a prior return envelope.
 
-Mini-SDD additionally requires:
+The fixed trigger contains no change slug, packet fields, references, summaries, evidence, approvals, or handoff content. Project config and flow state are the only invocation contract.
 
-- `mini_sdd: true`;
-- prior discovery/direct-inspection evidence packet;
-- exact questions still unresolved;
-- allowed/forbidden surfaces and output limits;
-- consolidated `mini-sdd.md` path and/or active Engram topic key according to the store.
-
-If any required packet, configuration, authorization, expected-envelope, output-limit, flow-type, or mini-evidence field is missing/invalid, or the locked reference/revision/snapshot conflicts with top-level mode/store, return `blocked` before writing. Do not create configuration, alter flow selection, infer defaults, choose another flow, or ask the user directly.
+In `interactive`, consume and validate the separate `phase_authorization` gate for this target phase/executor before artifact writes or phase work. The gate must be revisioned, user-approved, redacted, path/reference-only, and must not be treated as a phase result or handoff. In `auto`, read-only/planning phases may proceed only from non-blocked next-phase eligibility; apply and archive still require their dedicated approval records.
 
 ## Engram active-flow protocol
 
@@ -129,7 +115,7 @@ For `engram`, update the active-flow observation as the source of truth. For `hy
 
 ## Change metadata and PRD awareness
 
-Before starting, check whether `openspec/changes/{change}/metadata.yaml` exists when OpenSpec files are available. If it exists, read it completely and treat it as mandatory change context for slug, status, artifact store, source paths, validation expectations, and handoff notes. Then check whether `openspec/changes/{change}/prd.md` exists. If the orchestrator says the PRD is approved or in scope for this flow, read it completely and treat it as mandatory product/requirements context; otherwise read it only when supplied/requested and report its status. Reflect relevant metadata and approved/in-scope PRD requirements, assumptions, gaps, and conflicts in the exploration output. If metadata or in-scope PRD is absent, state that it was not found and continue normally.
+For `openspec`/`hybrid`, read the metadata resolved through the invocation/default flow reference completely and treat it as mandatory change context for slug, status, artifact store, source paths, validation expectations, and handoff notes. For `engram`, use the verified active-flow observation as the equivalent metadata. Then check whether `openspec/changes/{change}/prd.md` exists. If authoritative flow state marks the PRD approved or in scope, read it completely as mandatory product/requirements context; otherwise read it only when referenced and report its status. Reflect relevant metadata and approved/in-scope PRD requirements, assumptions, gaps, and conflicts in the exploration output. Missing or unreadable referenced flow state is blocking. Absence of an OpenSpec metadata file is expected only for `engram`, where the active-flow observation is authoritative. If an in-scope PRD is absent, report it and follow the phase's PRD policy rather than silently continuing.
 
 ## Alignment check
 
@@ -142,15 +128,16 @@ If any item is `blocked`, set phase return `status` to `blocked` and include the
 
 ## Required work
 
-1. Validate the supplied flow type, configuration, authorization, and prior evidence.
+1. Validate authoritative phase/executor identity, configuration, authorization, and prior evidence.
 2. Reuse trustworthy discovery/previous-phase evidence; investigate only specific stale or missing gaps and report why.
 3. Inspect real code and project docs with code-research tools first for source symbols, references, impact, and call flow. Do not guess.
 4. Use external research tools only when material gaps remain and report relevant sources.
-5. Identify affected files/modules, current behavior, risks, security surface, test surfaces, and open decisions.
-6. Compare implementation approaches and recommend one without inventing product, API, persistence, architecture, or security decisions.
-7. For formal explore, produce formal exploration/map output and readiness for proposal; on formal success: `next_recommended: sdd-proposal`.
-8. For mini explore, produce an apply-ready packet containing approved-intent summary, exact scope, files/symbols, ordered implementation steps, acceptance criteria, validation commands, allowed/forbidden surfaces, security constraints, unknowns, and blockers; on mini success: `next_recommended: apply_approval`. Do not recommend proposal/spec/design/task.
-9. Persist only the artifacts/state allowed for the selected flow and configured store.
+5. Identify affected files/modules, current behavior, risks, security surface, test surfaces, open decisions, and likely downstream phase skill needs.
+6. Persist or refresh the compact `flow_skill_plan`; mark coverage gaps as `refresh-required` instead of guessing.
+7. Compare implementation approaches and recommend one without inventing product, API, persistence, architecture, or security decisions.
+8. For formal explore, produce formal exploration/map output and readiness for proposal; on formal success record and return `next_recommended: sdd-proposal`.
+9. For mini explore, produce an apply-ready packet containing approved-intent summary, approved scope refs/fingerprint, files/symbols, ordered implementation steps, acceptance criteria, validation commands, allowed/forbidden surfaces, security constraints, unknowns, blockers, and skill-plan coverage; on mini success record and return `next_recommended: apply_approval`. Do not recommend proposal/spec/design/task.
+10. Persist only the artifacts/state allowed for the selected flow and configured store.
 
 ## Formal implementation map format
 

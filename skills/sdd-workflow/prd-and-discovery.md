@@ -12,7 +12,7 @@ Use `discovery` when the user selected delegated standalone or pre-SDD research:
 - return the bounded evidence packet defined by its system prompt;
 - the orchestrator consumes the packet without repeating research and retains routing/approval responsibility.
 
-Use `sdd-explore` only after a named formal or mini-SDD flow is selected, its mode/store pair is asked and locked, and phase/artifact authorization is supplied:
+Use `sdd-explore` only after a named formal or mini-SDD flow is selected, its mode/store pair is asked and locked, and the active per-flow state contains enough user-approved context for the explore subagent to validate or block:
 
 - formal explore may maintain `exploration.md`, `implementation-map.md`, or detailed Engram state according to the configured store and feeds proposal/spec/design/tasks;
 - mini explore consumes prior evidence, avoids formal artifacts, updates only `mini-sdd.md` and/or active Engram state, and returns an apply-ready packet;
@@ -34,9 +34,9 @@ The main orchestrator drafts or revises the PRD directly with the user because i
 2. Ask only decision-critical questions.
 3. Write or update `openspec/changes/<change>/prd.md` when artifact storage is `openspec` or `hybrid`; for `engram`, store enough PRD content in the active `sdd.active-flow.<change>` observation.
 4. Use the canonical PRD structure below unless the user explicitly supplies another format.
-5. Run `prd-review` before downstream SDD whenever a PRD is present or PRD-first was used. Supply resolved configuration, phase authorization, and artifact-write authorization.
+5. Run `prd-review` before downstream SDD whenever a PRD is present or PRD-first was used. Ensure the PRD flow has an active-flow pointer and readable PRD reference, then invoke only the fixed trigger; the `prd-review` subagent writes its own review status, lifecycle transition, blockers, and next recommendation.
 6. Resolve CRITICAL PRD debts, contradictions, untestable requirements, or open product decisions before proceeding, unless the user explicitly accepts continuing with those risks as-is.
-7. After approval or explicit continue-as-is, persist `prd-review-complete-returned-to-triage`, then return to `workflow-triage`. The user then chooses mini-SDD, formal SDD, another route, or deferral; PRD approval never implies planning or implementation approval. If a new mini-SDD or formal SDD is chosen, ask its artifact store and execution mode afresh rather than inheriting the terminal PRD flow's selection.
+7. After approval or explicit continue-as-is, the `prd-review` subagent persists `prd-review-complete-returned-to-triage`, then returns to `workflow-triage`. The user then chooses mini-SDD, formal SDD, another route, or deferral; PRD approval never implies planning or implementation approval. If a new mini-SDD or formal SDD is chosen, ask its artifact store and execution mode afresh rather than inheriting the terminal PRD flow's selection.
 
 ### Canonical PRD Format
 
