@@ -1,10 +1,10 @@
 ---
 name: pi-extension-authoring
-description: "create, restructure, or review Pi extensions, custom tools, lifecycle hooks, and TUI renderers with a consistent modular layout, native collapsed/expanded rendering, and lossless bounded model-facing output."
+description: "create, restructure, or review independent Pi extensions, custom tools, lifecycle hooks, package dependencies, and TUI renderers with a consistent modular layout, native collapsed/expanded rendering, and lossless bounded model-facing output."
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.0"
+  version: "1.1"
 ---
 
 # Pi Extension Authoring
@@ -56,7 +56,11 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "tool renderer",
       "expand collapse",
       "collapsible tool output",
-      "Pi TUI component"
+      "Pi TUI component",
+      "extension dependency independence",
+      "own node_modules",
+      "cross-extension dependency",
+      "independent extension package"
     ]
   },
   "sdd_phases": ["explore", "design", "task", "apply", "verify"],
@@ -178,9 +182,18 @@ Use a custom reusable component only when native components cannot express the r
 - Guard TUI-only custom UI with the runtime mode when the extension can also run through RPC or non-interactive modes.
 - Keep the fallback in `src/render/` and reuse it across the extension instead of embedding anonymous component implementations in each tool.
 
+### Dependency independence
+
+- Every extension MUST be independently installable, removable, testable, reloadable, and distributable. Its operation MUST NOT depend on another extension being present.
+- Every external package imported or resolved by an extension MUST be declared by that extension's own `package.json` under the category required by the installed Pi package contract. Runtime third-party packages belong in `dependencies`; Pi-bundled core packages belong in `peerDependencies` with the documented range, and package-local development declarations/installations MUST provide the extension's own test and typecheck environment when needed.
+- An extension MUST resolve packages from its own package installation or from Pi's documented bundled-core package contract. It MUST NOT import, resolve, probe, search, or fall back to another extension's directory, `package.json`, package tree, or `node_modules`, whether through relative paths, absolute paths, `createRequire`, custom search paths, dynamic imports, symlinks, environment-specific fallbacks, or test-only adapters.
+- Never use a sibling extension as an implicit dependency provider. Shared runtime code is allowed only through an explicitly declared standalone package or a deliberately designed repository-level shared package with its own ownership and dependency contract.
+- Tests MUST NOT pass merely because another extension happens to have installed a required module. Validate package ownership statically and run the extension's test/typecheck commands from its own directory with its own package installation.
+- Any cross-extension dependency borrowing is a release blocker, not an acceptable temporary fallback.
+
 ### Package and documentation contract
 
-- Put runtime third-party packages in `dependencies`. For a distributable Pi package, declare Pi core packages as peer dependencies according to the installed packaging documentation.
+- Put runtime third-party packages in `dependencies`. For a distributable Pi package, declare Pi core packages as peer dependencies according to the installed packaging documentation and ensure the extension's own local package environment supports its tests and typecheck.
 - Keep package-manager choice and lockfile handling consistent with the containing repository.
 - The README must document public tools, inputs, configuration location and trust behavior, credentials, output bounds/continuation, cancellation, lifecycle resources, rendering behavior, and known limits.
 - Do not duplicate a testing process in this skill or in extension-specific agent guidance. Load `tdd` and let it own test selection, red-green-refactor behavior, and validation strategy.
@@ -195,6 +208,8 @@ Use a custom reusable component only when native components cannot express the r
 - If long-lived resources are required, define ownership, startup, cancellation, restart, and idempotent shutdown before implementation.
 - If project-local configuration is desired, define trusted-project behavior and safe behavior for untrusted projects before reading it.
 - If the extension is distributable, read the installed package documentation and decide package metadata, dependencies, entrypoints, and included files explicitly.
+- If an import resolves only because a sibling extension has the package installed, stop and repair the current extension's own package contract; never add a sibling-path resolver or fallback.
+- If shared code is genuinely required across extensions, create or select an explicitly owned shared package and declare it normally in each consumer. Do not use filesystem reach-through as sharing.
 - Before any implementation, load `tdd`; this skill must not substitute its own testing workflow.
 
 ## Execution Steps
@@ -209,8 +224,9 @@ Use a custom reusable component only when native components cannot express the r
 8. Implement native collapsed/expanded rendering for every public tool result, including partial, error, empty, and continuation states.
 9. Add a custom reusable component only after the native-component decision gate is satisfied.
 10. Keep the README and package contract aligned with the implementation.
-11. Run the validation selected by `tdd` and the repository, then review every changed file for structure, public-contract drift, secret exposure, cancellation, cleanup, output continuation, and width-safe rendering.
-12. Reload Pi or restart the relevant session when required by the installed extension-loading contract, then report any manual TUI validation still needed.
+11. Validate dependency independence: inspect the extension's own `package.json` and lockfile, reject sibling-extension paths or custom resolver fallbacks, and run tests/typecheck from the extension directory using only its own declared package environment and Pi's documented bundled-core contract.
+12. Run the validation selected by `tdd` and the repository, then review every changed file for structure, public-contract drift, secret exposure, cancellation, cleanup, output continuation, and width-safe rendering.
+13. Reload Pi or restart the relevant session when required by the installed extension-loading contract, then report any manual TUI validation still needed.
 
 ## Output Contract
 
@@ -220,6 +236,7 @@ Return:
 - Extension scope and path.
 - Pi documentation and examples inspected.
 - Public tools and canonical folder structure created or changed.
+- Dependency-independence evidence: extension-owned declarations/install environment, no sibling-extension package resolution, and package-local validation.
 - Lifecycle, configuration, security, and provider boundaries considered.
 - Model-facing output budget and lossless continuation strategy.
 - Native collapsed/expanded rendering used, including `isPartial` and error behavior.
@@ -233,7 +250,7 @@ Return:
 - Installed Pi `docs/tui.md` — component interface, native components, width guarantees, input, and invalidation.
 - Installed Pi `docs/keybindings.md` — namespaced actions and `app.tools.expand`.
 - Installed Pi `docs/themes.md` — theme colors and Markdown themes.
-- Installed Pi `docs/packages.md` — package discovery, dependencies, and distribution.
+- Installed Pi `docs/packages.md` — package discovery, extension-owned dependencies, bundled Pi core peer dependencies, isolated module roots, and distribution.
 - Installed Pi `examples/extensions/` — version-matched implementation examples.
 - `extensions/code-research/index.ts`, `extensions/code-research/src/tools/`, and `extensions/code-research/src/render.ts` — thin entrypoint and tool/core/render separation.
 - `extensions/websearch/index.ts`, `extensions/websearch/src/tools/`, `extensions/websearch/src/render/index.ts`, and `extensions/websearch/src/security.ts` — modular tool registry, rendering, provider, and security boundaries.

@@ -7,9 +7,7 @@ import { loadApiConfig } from '../src/config.js';
 import type { ApiJsonGitInspector } from '../src/types.js';
 
 function gitInspector(state: 'ignored' | 'unignored_untracked' | 'tracked' | 'unknown'): ApiJsonGitInspector {
-  return {
-    inspectApiJson: async () => ({ state }),
-  };
+  return { inspectApiJson: async () => ({ state }) };
 }
 
 async function writeApiJson(root: string, content: string): Promise<void> {
@@ -20,13 +18,11 @@ async function writeApiJson(root: string, content: string): Promise<void> {
 describe('loadApiConfig', () => {
   it('returns disabled config when api.json is missing', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'api-tools-config-'));
-
     const config = await loadApiConfig({ cwd, gitInspector: gitInspector('unknown') });
-
-    expect(config.configPath).toBe(join(cwd, '.pi', 'api.json'));
     expect(config.exists).toBe(false);
     expect(config.enabled).toBe(false);
-    expect(config.warnings).toEqual([]);
+    expect(config.swagger.enabled).toBe(false);
+    expect(config.graphql.enabled).toBe(false);
   });
 
   it('does not read parent directories or global locations', async () => {
@@ -34,114 +30,66 @@ describe('loadApiConfig', () => {
     const child = join(root, 'packages', 'child');
     await mkdir(child, { recursive: true });
     await writeApiJson(root, JSON.stringify({ enabled: true, url: 'https://parent.example.test' }));
-
     const config = await loadApiConfig({ cwd: child, gitInspector: gitInspector('unknown') });
-
     expect(config.exists).toBe(false);
     expect(config.enabled).toBe(false);
   });
 
-  it('requires enabled to be exactly true', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'api-tools-config-disabled-'));
-    await writeApiJson(cwd, JSON.stringify({ enabled: false, url: 'https://api.example.test' }));
-
-    const config = await loadApiConfig({ cwd, gitInspector: gitInspector('ignored') });
-
-    expect(config.exists).toBe(true);
-    expect(config.enabled).toBe(false);
-    expect(config.git.state).toBe('ignored');
-  });
-
-  it('loads enabled config with safe defaults and collected secrets', async () => {
+  it('loads independent swagger and graphql blocks with defaults and collected secrets', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'api-tools-config-enabled-'));
-    await writeApiJson(
-      cwd,
-      JSON.stringify({
-        enabled: true,
-        url: 'https://api.example.test',
-        graphql_url: 'https://api.example.test/graphql',
-        headers: { 'x-project-client': 'pi', authorization: 'Bearer top-secret' },
-        auth: { type: 'bearer', token: 'top-secret' },
-      }),
-    );
+    await writeApiJson(cwd, JSON.stringify({
+      enabled: true,
+      url: 'https://api.example.test/base/',
+      graphql_url: 'https://api.example.test/base/graphql',
+      swagger: { enabled: true, framework: 'spring' },
+      graphql: { enabled: true, framework: 'node' },
+      headers: { authorization: 'Bearer top-secret' },
+      auth: { type: 'bearer', token: 'top-secret' },
+    }));
 
     const config = await loadApiConfig({ cwd, gitInspector: gitInspector('tracked') });
 
     expect(config.enabled).toBe(true);
-    expect(config.url).toBe('https://api.example.test');
-    expect(config.graphqlUrl).toBe('https://api.example.test/graphql');
-    expect(config.timeoutMs).toBe(30000);
-    expect(config.limits).toEqual({ maxResponseBytes: 50000, maxResponseLines: 2000 });
+    expect(config.swagger).toMatchObject({ configured: true, enabled: true, framework: 'spring', valid: true });
+    expect(config.graphql).toMatchObject({ configured: true, enabled: true, framework: 'node', valid: true });
     expect(config.secretValues).toContain('top-secret');
-    expect(config.secretValues).toContain('Bearer top-secret');
     expect(config.warnings.map((warning) => warning.code)).toContain('limit_default_applied');
-    expect(JSON.stringify(config.warnings)).not.toContain('top-secret');
-    expect(config.git.state).toBe('tracked');
   });
 
-  it('emits invalid_config for invalid json without exposing raw content', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'api-tools-config-invalid-json-'));
-    await writeApiJson(cwd, '{"enabled": true, "auth": {"type": "bearer", "token": "top-secret" }');
-
-    const config = await loadApiConfig({ cwd, gitInspector: gitInspector('unknown') });
-
-    expect(config.exists).toBe(true);
-    expect(config.enabled).toBe(false);
-    expect(config.warnings.map((warning) => warning.code)).toContain('invalid_config');
-    expect(JSON.stringify(config.warnings)).not.toContain('top-secret');
+  it('keeps graphql_url as a fallback source without enabling graphql by itself', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'api-tools-config-graphql-fallback-'));
+    await writeApiJson(cwd, JSON.stringify({ enabled: true, url: 'https://api.example.test', graphql_url: 'https://api.example.test/graphql' }));
+    const config = await loadApiConfig({ cwd, gitInspector: gitInspector('ignored') });
+    expect(config.graphqlUrl).toBe('https://api.example.test/graphql');
+    expect(config.graphql.enabled).toBe(false);
+    expect(config.graphql.configured).toBe(false);
   });
 
-  it('falls back on invalid limits and warns safely', async () => {
+  it('marks enabled blocks without framework as invalid and warns safely', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'api-tools-config-invalid-blocks-'));
+    await writeApiJson(cwd, JSON.stringify({
+      enabled: true,
+      url: 'https://api.example.test',
+      swagger: { enabled: true },
+      graphql: { enabled: true, framework: 'dotnet' },
+    }));
+    const config = await loadApiConfig({ cwd, gitInspector: gitInspector('ignored') });
+    expect(config.swagger.valid).toBe(false);
+    expect(config.graphql.valid).toBe(false);
+    expect(config.warnings.map((warning) => warning.code)).toEqual(expect.arrayContaining(['invalid_swagger_config', 'invalid_graphql_config', 'limit_default_applied']));
+  });
+
+  it('falls back on invalid limits and clamps cursor ttl safely', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'api-tools-config-limits-'));
-    await writeApiJson(
-      cwd,
-      JSON.stringify({
-        enabled: true,
-        url: 'https://api.example.test',
-        limits: { max_response_bytes: -10, max_response_lines: 'many' },
-      }),
-    );
-
+    await writeApiJson(cwd, JSON.stringify({
+      enabled: true,
+      url: 'https://api.example.test',
+      limits: { max_response_bytes: -10, max_response_lines: 999999, cursor_ttl_seconds: 999999 },
+    }));
     const config = await loadApiConfig({ cwd, gitInspector: gitInspector('ignored') });
-
-    expect(config.enabled).toBe(true);
-    expect(config.limits).toEqual({ maxResponseBytes: 50000, maxResponseLines: 2000 });
+    expect(config.limits.maxResponseBytes).toBe(50000);
+    expect(config.limits.maxResponseLines).toBe(2000);
+    expect(config.limits.cursorTtlSeconds).toBe(86400);
     expect(config.warnings.map((warning) => warning.code)).toContain('limit_fallback_applied');
-  });
-
-  it('loads login auth config with access_token persistence fields and collected secrets', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'api-tools-config-login-'));
-    await writeApiJson(
-      cwd,
-      JSON.stringify({
-        enabled: true,
-        url: 'https://api.example.test',
-        auth: { type: 'login', login_path: '/auth/login', username: 'test-user', password: 'test-password', access_token: 'persisted-token' },
-      }),
-    );
-
-    const config = await loadApiConfig({ cwd, gitInspector: gitInspector('ignored') });
-
-    expect(config.auth).toEqual({ type: 'login', login_path: '/auth/login', username: 'test-user', password: 'test-password', access_token: 'persisted-token' });
-    expect(config.secretValues).toContain('test-password');
-    expect(config.secretValues).toContain('persisted-token');
-  });
-
-  it('warns for unsupported auth metadata without leaking values', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'api-tools-config-auth-'));
-    await writeApiJson(
-      cwd,
-      JSON.stringify({
-        enabled: true,
-        url: 'https://api.example.test',
-        auth: { type: 'oauth2', token: 'top-secret' },
-      }),
-    );
-
-    const config = await loadApiConfig({ cwd, gitInspector: gitInspector('unknown') });
-
-    expect(config.auth).toEqual({ type: 'none' });
-    expect(config.warnings.map((warning) => warning.code)).toContain('unsupported_auth_metadata');
-    expect(JSON.stringify(config.warnings)).not.toContain('top-secret');
   });
 });

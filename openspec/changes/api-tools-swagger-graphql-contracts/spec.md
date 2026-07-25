@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the normative replacement of the three legacy GraphQL tools (`api_graphql_query`, `api_graphql_schema_queries`, `api_graphql_schema_query`) with exactly two independently enabled, opt-in API-contract tools (`api_swagger` and `api_graphql`). Preserve `api_auth_status`, `api_login`, and `api_rest_request` unchanged, and preserve `api_status` except for the explicit security-driven removal of public endpoint URL disclosure plus safe additive integration state. Add explicit `swagger` and `graphql` configuration blocks, session-bound lossless bounded output, and native Pi collapsed/expanded tool-row rendering. Keep the configured REST origin and base path as the sole trust boundary for external calls; add no runtime or development dependency.
+Define the normative replacement of the three legacy GraphQL tools (`api_graphql_query`, `api_graphql_schema_queries`, `api_graphql_schema_query`) with exactly two independently enabled, opt-in API-contract tools (`api_swagger` and `api_graphql`). Preserve `api_auth_status`, `api_login`, and `api_rest_request` unchanged, and preserve `api_status` except for the explicit security-driven removal of public endpoint URL disclosure plus safe additive integration state. Add explicit `swagger` and `graphql` configuration blocks, session-bound lossless bounded output, and native Pi collapsed/expanded tool-row rendering. Keep the configured REST origin and base path as the sole trust boundary for external calls; add no arbitrary runtime or development dependency, and resolve only API Tools-owned official Pi runtime packages through the official Pi runtime package contract when needed for native rendering.
 
 ## Metadata and PRD Alignment
 
@@ -25,8 +25,8 @@ Define the normative replacement of the three legacy GraphQL tools (`api_graphql
   - Native collapsed/expanded rendering, Pi-owned expansion state → `REQ-REN-001` through `REQ-REN-004`.
   - Safe additive `api_status` fields → `REQ-STS-001` through `REQ-STS-003`.
   - Legacy tool removal, unchanged retained tools, and the `api_status` URL-disclosure security exception → `REQ-TOOL-001`, `REQ-TOOL-010`, `REQ-TOOL-011`, `REQ-STS-001` through `REQ-STS-003`.
-  - No new dependency, no OpenAPI YAML, no cross-session continuation, no OpenAPI `servers` routing, no third tool → `REQ-OUT-003`, `REQ-URL-003`, `REQ-TOOL-012`, `REQ-TOOL-013`.
-- Metadata/PRD gaps/conflicts_detected: Removed the dangling reference to a non-existent eighth URL-requirement identifier from the alignment mapping; GraphQL URL precedence and fallback are fully covered by `REQ-URL-005` through `REQ-URL-007`. User-approved status remediation resolves the design-discovered `api_status` conflict by making URL-field removal an explicit security-driven exception to retained behavior. No other conflicts.
+  - No arbitrary dependency except authorized API Tools-owned official Pi runtime packages, no OpenAPI YAML, no cross-session continuation, no OpenAPI `servers` routing, no third tool → `REQ-OUT-003`, `REQ-URL-003`, `REQ-TOOL-012`, `REQ-TOOL-013 R2`.
+- Metadata/PRD gaps/conflicts_detected: Removed the dangling reference to a non-existent eighth URL-requirement identifier from the alignment mapping; GraphQL URL precedence and fallback are fully covered by `REQ-URL-005` through `REQ-URL-007`. User-approved status remediation resolves the design-discovered `api_status` conflict by making URL-field removal an explicit security-driven exception to retained behavior. The proposal's "No new dependency" constraint is superseded by the user-approved authorization `phase-auth-dependency-contract-spec-20260725T060540Z` and is now represented as `REQ-TOOL-013 R2` (no arbitrary dependencies; authorized API Tools-owned Pi runtime packages only through the official Pi runtime package contract). No other conflicts.
 
 ## Requirements
 
@@ -521,13 +521,27 @@ The extension SHALL NOT perform arbitrary endpoint scanning, route guessing, or 
 - WHEN `api_swagger` is invoked
 - THEN the extension SHALL NOT attempt to discover `/api-docs`, `/swagger.json`, `/openapi.json`, or any other default path.
 
-#### Requirement `REQ-TOOL-013`: No new dependency
+#### Requirement `REQ-TOOL-013`: Dependency contract — no arbitrary dependencies; authorized Pi runtime packages only
 - Revision: `R1`
-- Status: active
+- Status: superseded
 - `supersedes`: None
-- `superseded_by`: None
+- `superseded_by`: `REQ-TOOL-013 R2`
 
 The change SHALL NOT add any runtime or development dependency to the package. The extension SHALL use only the installed Pi extension APIs, Node standard-library filesystem/temporary-directory/cryptographic-randomness APIs, and existing package dependencies.
+
+#### Requirement `REQ-TOOL-013`: Dependency contract — no arbitrary dependencies; authorized Pi runtime packages only
+- Revision: `R2`
+- Status: active
+- `supersedes`: `REQ-TOOL-013 R1`
+- `superseded_by`: None
+
+The change SHALL NOT add any arbitrary runtime or development dependency to the package. The extension MAY resolve and use official Pi runtime packages that are owned by the API Tools team, provided they are loaded through the official Pi runtime package contract and not through sibling-extension `node_modules` paths. The extension SHALL continue to use the installed Pi extension APIs, Node standard-library filesystem/temporary-directory/cryptographic-randomness APIs, and existing package dependencies for all other functionality.
+
+#### Scenario `SCN-TOOL-018`: Official Pi runtime package resolution allowed
+- GIVEN the renderer needs Pi runtime helpers such as `keyHint` or `Text`
+- WHEN the extension resolves `@earendil-works/pi-coding-agent` or `@earendil-works/pi-tui`
+- THEN the package SHALL be loaded through the official Pi runtime package contract
+- AND no sibling-extension `node_modules` path SHALL be used.
 
 ### Output, Continuation, and Boundedness
 
@@ -1069,7 +1083,8 @@ Redaction SHALL target actual configured secret values. Field names such as `api
 | `REQ-TOOL-010` | `R1` | active | None | None | Initial spec. |
 | `REQ-TOOL-011` | `R1` | active | None | None | Initial spec. |
 | `REQ-TOOL-012` | `R1` | active | None | None | Initial spec. |
-| `REQ-TOOL-013` | `R1` | active | None | None | Initial spec. |
+| `REQ-TOOL-013` | `R1` | superseded | None | `REQ-TOOL-013 R2` | Authorization `phase-auth-dependency-contract-spec-20260725T060540Z` replaced the blanket no-dependency rule with authorized API Tools-owned Pi runtime packages. |
+| `REQ-TOOL-013` | `R2` | active | `REQ-TOOL-013 R1` | None | Spec phase revision under authorization `phase-auth-dependency-contract-spec-20260725T060540Z`: narrows dependency rule to API Tools-owned official Pi runtime packages loaded through the official Pi runtime package contract. |
 | `REQ-OUT-001` | `R1` | active | None | None | Initial spec. |
 | `REQ-OUT-002` | `R1` | active | None | None | Initial spec. |
 | `REQ-OUT-003` | `R1` | active | None | None | Initial spec. |
@@ -1165,7 +1180,8 @@ Redaction SHALL target actual configured secret values. Field names such as `api
 | `SCN-TOOL-016` | Test: `api_rest_request` inputs/outputs preserved | Unit | `extensions/api-tools/test/tools.test.ts`. |
 | `REQ-TOOL-012` | Test: no route enumeration | Unit | `extensions/api-tools/test/config.test.ts` and `extensions/api-tools/test/swagger.test.ts`. |
 | `SCN-TOOL-017` | Test: Node missing URL → error, not scan | Unit | `extensions/api-tools/test/config.test.ts`. |
-| `REQ-TOOL-013` | Test: no package.json dependency changes | Static | `git diff extensions/api-tools/package.json` shows no dependency additions. |
+| `REQ-TOOL-013 R2` | Test: no package.json dependency changes; only authorized API Tools-owned Pi runtime packages are loaded | Static | `git diff extensions/api-tools/package.json` shows no arbitrary dependency additions; renderer source imports only through official Pi runtime package contract. |
+| `SCN-TOOL-018` | Test: no sibling-extension `node_modules` import path for Pi runtime helpers | Static | Renderer source and `src/pi-runtime.ts` do not import from `extensions/*/node_modules/...`. |
 | `REQ-OUT-001` | Test: complete result returned | Unit | `extensions/api-tools/test/continuation.test.ts` (new). |
 | `SCN-OUT-001` | Test: small result has `has_more: false` | Unit | `extensions/api-tools/test/continuation.test.ts`. |
 | `REQ-OUT-002` | Test: artifact write + first chunk + cursor | Unit | `extensions/api-tools/test/continuation.test.ts`. |
@@ -1237,20 +1253,20 @@ Redaction SHALL target actual configured secret values. Field names such as `api
 | `SCN-OUT-019`, `SCN-OUT-020` | Test: wrong-tool and execution-input error codes | Unit | `extensions/api-tools/test/continuation.test.ts` (new). |
 | Full suite | `cd extensions/api-tools && npm test` | Integration | All tests pass. |
 | Typecheck | `cd extensions/api-tools && npm run typecheck` | Static | Clean. |
-| Package | Package validation script from `package.json` | Static | No new dependency. |
-| Renderer manual | Collapsed/expanded review in Pi TUI | Manual | No new dependency; no hard-coded key. |
+| Package | Package validation script from `package.json` | Static | No arbitrary dependency; authorized API Tools-owned Pi runtime packages only through official Pi runtime package contract. |
+| Renderer manual | Collapsed/expanded review in Pi TUI | Manual | No arbitrary dependency; no hard-coded key. |
 | Independent security/public-contract | Review of `content`/`details`/errors/cursors | Manual | No path/secret leakage. |
 
 ## Archive Capability Mapping
 
 | Change requirement/scenario ids | Target capability spec path | Operation | Target section/requirement | Sync intent |
 |---|---|---|---|---|
-| `REQ-TOOL-001`, `REQ-TOOL-002`, `REQ-TOOL-003`, `REQ-TOOL-004`–`REQ-TOOL-009`, `SCN-TOOL-001`–`SCN-TOOL-017` | `openspec/specs/conditional-api-contract-tools/spec.md` | add | Public API tools section: `api_swagger` and `api_graphql` action contracts, registration rules, and migration from legacy GraphQL tools. | New capability; add this change's normative tool contracts as the initial capability spec. |
+| `REQ-TOOL-001`, `REQ-TOOL-002`, `REQ-TOOL-003`, `REQ-TOOL-004`–`REQ-TOOL-009`, `REQ-TOOL-013 R2`, `SCN-TOOL-001`–`SCN-TOOL-018` | `openspec/specs/conditional-api-contract-tools/spec.md` | add | Public API tools section: `api_swagger` and `api_graphql` action contracts, registration rules, dependency contract, and migration from legacy GraphQL tools. | New capability; add this change's normative tool contracts as the initial capability spec. |
 | `REQ-OUT-001`–`REQ-OUT-007`, `SCN-OUT-001`–`SCN-OUT-010` | `openspec/specs/lossless-bounded-api-results/spec.md` | add | Bounded output and continuation section: redaction, serialization, opaque cursors, same-tool reconstruction, and no public path. | New capability; add this change as the initial capability spec. |
 | `REQ-REN-001`–`REQ-REN-004`, `SCN-REN-001`–`SCN-REN-006` | `openspec/specs/native-api-tool-rendering/spec.md` | add | Renderer section: collapsed/expanded Pi tool-row contracts, Pi-owned expansion, width safety, and state handling. | New capability; add this change as the initial capability spec. |
 | `REQ-SEC-001`–`REQ-SEC-012`, `REQ-URL-004`, `REQ-URL-007`, `SCN-SEC-001`–`SCN-SEC-012`, `SCN-URL-007`–`SCN-URL-013` | `openspec/specs/api-contract-endpoint-security/spec.md` | add | Trust-boundary section: same-origin/base-path containment, URL hardening, redirect policy, redaction, artifact containment, and cursor ownership. | New capability; add this change as the initial capability spec. |
 | `REQ-STS-001`–`REQ-STS-003`, `SCN-STS-001`–`SCN-STS-003`, `REQ-TOOL-011` status exception | `openspec/specs/api-status/spec.md` | modify | Status section: add safe `swagger`/`graphql` enabled/framework state; remove REST/GraphQL URL disclosure; no URL/credential/path disclosure. | Existing capability; extend the status specification with safe integration state and record the security-driven removal of endpoint URL fields. |
-| `REQ-TOOL-013`, `REQ-CFG-001`–`REQ-CFG-004`, `REQ-URL-001`–`REQ-URL-003`, `REQ-URL-005`–`REQ-URL-006`, `SCN-CFG-001`–`SCN-CFG-006`, `SCN-URL-001`–`SCN-URL-012` | `openspec/specs/conditional-api-contract-tools/spec.md` and `openspec/specs/api-contract-endpoint-security/spec.md` | add | Configuration and URL precedence sections; also dependency-free and framework-validation rules. | Cross-capability; add configuration and URL precedence rules to the relevant new capability specs. |
+| `REQ-TOOL-013 R2`, `REQ-CFG-001`–`REQ-CFG-004`, `REQ-URL-001`–`REQ-URL-003`, `REQ-URL-005`–`REQ-URL-006`, `SCN-CFG-001`–`SCN-CFG-006`, `SCN-URL-001`–`SCN-URL-012` | `openspec/specs/conditional-api-contract-tools/spec.md` and `openspec/specs/api-contract-endpoint-security/spec.md` | add | Configuration and URL precedence sections; also dependency contract (no arbitrary dependencies; authorized API Tools-owned Pi runtime packages only) and framework-validation rules. | Cross-capability; add configuration and URL precedence rules to the relevant new capability specs. |
 | `REQ-SCH-001`–`REQ-SCH-003`, `SCN-SCH-001`–`SCN-SCH-008` | `openspec/specs/conditional-api-contract-tools/spec.md` | add | Public input schema section: strict TypeBox-compatible action schemas, unknown-input rejection, and cursor field rules. | New capability spec section for exact tool inputs. |
 | `REQ-OUT-008`–`REQ-OUT-012`, `SCN-OUT-011`–`SCN-OUT-020` | `openspec/specs/lossless-bounded-api-results/spec.md` | add | Continuation and output section: cursor mutual exclusions, result envelope, byte/line budgets, cursor TTL, and typed cursor errors. | Extend lossless bounded results capability with remediated contracts. |
 

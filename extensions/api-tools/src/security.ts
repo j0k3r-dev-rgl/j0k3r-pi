@@ -1,8 +1,11 @@
+import { Buffer } from 'node:buffer';
 import type { ApiAuthConfig, ApiToolResult, ApiTruncationMetadata, ApiWarning } from './types.js';
 
 export const REDACTION_MARKER = '[REDACTED]';
 export const DEFAULT_MAX_RESPONSE_BYTES = 50000;
 export const DEFAULT_MAX_RESPONSE_LINES = 2000;
+export const DEFAULT_CURSOR_TTL_SECONDS = 3600;
+export const MAX_CURSOR_TTL_SECONDS = 86400;
 
 const SECRET_KEY_PATTERN = /(?:authorization|api[_-]?key|token|secret|password|cookie|set-cookie)/i;
 
@@ -23,6 +26,15 @@ function isSecretLikeHeader(key: string): boolean {
 
 function uniqueNonEmpty(values: Array<string | undefined>): string[] {
   return [...new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))];
+}
+
+export function clampPositiveInteger(value: unknown, fallback: number, max: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return fallback;
+  return Math.min(max, Math.floor(value));
+}
+
+export function clampCursorTtlSeconds(value: unknown): number {
+  return clampPositiveInteger(value, DEFAULT_CURSOR_TTL_SECONDS, MAX_CURSOR_TTL_SECONDS);
 }
 
 export function collectConfiguredSecrets(input: {
@@ -104,7 +116,6 @@ export function getAuthMetadataStatus(
   options: { now?: () => Date } = {},
 ): AuthMetadataStatus {
   const now = options.now ?? (() => new Date());
-
   const token = auth.type === 'bearer' ? auth.token : auth.type === 'login' ? auth.access_token : undefined;
 
   if (!token) {
@@ -130,19 +141,13 @@ export function getAuthMetadataStatus(
   }
 }
 
-function normalizePositiveInteger(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
-}
-
 function countLines(value: string): number {
   return value.length === 0 ? 0 : value.split('\n').length;
 }
 
 function trimToBytes(value: string, maxBytes: number): string {
   let end = value.length;
-  while (end > 0 && Buffer.byteLength(value.slice(0, end), 'utf8') > maxBytes) {
-    end -= 1;
-  }
+  while (end > 0 && Buffer.byteLength(value.slice(0, end), 'utf8') > maxBytes) end -= 1;
   return value.slice(0, end);
 }
 
@@ -150,8 +155,8 @@ export function applyOutputTruncation(
   text: string,
   limits?: { maxResponseBytes?: unknown; maxResponseLines?: unknown },
 ): { text: string; metadata: ApiTruncationMetadata } {
-  const limitBytes = normalizePositiveInteger(limits?.maxResponseBytes, DEFAULT_MAX_RESPONSE_BYTES);
-  const limitLines = normalizePositiveInteger(limits?.maxResponseLines, DEFAULT_MAX_RESPONSE_LINES);
+  const limitBytes = clampPositiveInteger(limits?.maxResponseBytes, DEFAULT_MAX_RESPONSE_BYTES, DEFAULT_MAX_RESPONSE_BYTES);
+  const limitLines = clampPositiveInteger(limits?.maxResponseLines, DEFAULT_MAX_RESPONSE_LINES, DEFAULT_MAX_RESPONSE_LINES);
   const originalLines = countLines(text);
   const originalBytes = Buffer.byteLength(text, 'utf8');
 

@@ -1,10 +1,19 @@
 import { Buffer } from 'node:buffer';
-import type { ApiAuthConfig, ApiClient, ApiGraphqlRequest, ApiHttpResponse, ApiRestRequest, ApiToolsConfig } from './types.js';
+import type {
+  ApiAuthConfig,
+  ApiClient,
+  ApiGraphqlRequest,
+  ApiHttpResponse,
+  ApiRestRequest,
+  ApiToolsConfig,
+  SwaggerDocumentResponse,
+} from './types.js';
 
 const ALLOWED_REST_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']);
 const ABSOLUTE_URL_PATTERN = /^[a-zA-Z][a-zA-Z\d+.-]*:/;
 const ENCODED_TRAVERSAL_PATTERN = /%2e/i;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/;
+const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
 
 export interface FetchResponseLike {
   status: number;
@@ -37,9 +46,7 @@ function applyConfiguredPort(url: URL, port?: number): URL {
 
 function headersToRecord(headers?: Headers | Record<string, string>): Record<string, string> {
   if (!headers) return {};
-  if (typeof (headers as Headers).entries === 'function') {
-    return Object.fromEntries((headers as Headers).entries());
-  }
+  if (typeof (headers as Headers).entries === 'function') return Object.fromEntries((headers as Headers).entries());
   return { ...(headers as Record<string, string>) };
 }
 
@@ -49,7 +56,10 @@ function isAbortLike(error: unknown): boolean {
 
 function makeBaseUrl(config: ApiToolsConfig): URL {
   if (!config.url) throw new ApiClientError('REST base URL is not configured.');
-  return applyConfiguredPort(new URL(config.url), config.port);
+  const url = applyConfiguredPort(new URL(config.url), config.port);
+  if (!/^https?:$/i.test(url.protocol)) throw new ApiClientError('Only HTTP(S) API base URLs are allowed.');
+  if (url.username || url.password) throw new ApiClientError('API base URL may not include URL credentials.');
+  return url;
 }
 
 function buildAuthHeaders(auth: ApiAuthConfig, useToken = true): Record<string, string> {
@@ -85,50 +95,69 @@ function normalizeRequestHeaders(
 }
 
 function hasTraversalSegment(path: string): boolean {
-  return path
-    .split(/[/?#]/)
-    .some((segment) => segment === '.' || segment === '..');
+  return path.split(/[/?#]/).some((segment) => segment === '.' || segment === '..');
 }
 
-function validateRelativePath(path: string): void {
-  if (!path || typeof path !== 'string') throw new ApiClientError('A request path is required.');
-  if (CONTROL_CHARACTER_PATTERN.test(path)) throw new ApiClientError('Control characters are not allowed in request paths.');
-  if (ABSOLUTE_URL_PATTERN.test(path)) throw new ApiClientError('Absolute URLs are not allowed for REST requests.');
-  if (path.includes('\\')) throw new ApiClientError('Backslashes are not allowed in request paths.');
-  if (hasTraversalSegment(path) || ENCODED_TRAVERSAL_PATTERN.test(path)) {
-    throw new ApiClientError('Path traversal is not allowed.');
-  }
+function validateUnsafeText(value: string, label: string): void {
+  if (CONTROL_CHARACTER_PATTERN.test(value)) throw new ApiClientError(`Control characters are not allowed in ${label}.`);
+  if (value.includes('\\')) throw new ApiClientError(`Backslashes are not allowed in ${label}.`);
+  if (ENCODED_TRAVERSAL_PATTERN.test(value) || hasTraversalSegment(value)) throw new ApiClientError('Path traversal is not allowed.');
 }
 
 function ensureWithinBasePath(baseUrl: URL, resolvedUrl: URL): void {
-  if (resolvedUrl.origin !== baseUrl.origin) throw new ApiClientError('REST request escaped the configured origin.');
+  if (resolvedUrl.origin !== baseUrl.origin) throw new ApiClientError('Request escaped the configured origin.');
+  const basePath = baseUrl.pathname.endsWith('/') ? baseUrl.pathname : `${baseUrl.pathname}/`;
+  const resolvedPath = resolvedUrl.pathname.endsWith('/') ? resolvedUrl.pathname : `${resolvedUrl.pathname}/`;
+  if (!resolvedPath.startsWith(basePath)) throw new ApiClientError('Request escaped the configured base path.');
+}
 
-  const normalizedBasePath = baseUrl.pathname.endsWith('/') ? baseUrl.pathname : `${baseUrl.pathname}/`;
-  const normalizedResolvedPath = resolvedUrl.pathname.endsWith('/') ? resolvedUrl.pathname : `${resolvedUrl.pathname}/`;
-
-  if (!normalizedResolvedPath.startsWith(normalizedBasePath)) {
-    throw new ApiClientError('REST request escaped the configured base path.');
+function resolveConfiguredUrl(config: ApiToolsConfig, input: string, label: string): string {
+  validateUnsafeText(input, label);
+  const baseUrl = makeBaseUrl(config);
+  let resolved: URL;
+  if (ABSOLUTE_URL_PATTERN.test(input)) {
+    resolved = new URL(input);
+  } else if (input.startsWith('/')) {
+    const trimmedBasePath = baseUrl.pathname.endsWith('/') ? baseUrl.pathname.slice(0, -1) : baseUrl.pathname;
+    resolved = new URL(`${trimmedBasePath}${input}`, baseUrl.origin);
+  } else {
+    resolved = new URL(input, baseUrl);
   }
+  if (!/^https?:$/i.test(resolved.protocol)) throw new ApiClientError('Only HTTP(S) URLs are allowed.');
+  if (resolved.username || resolved.password) throw new ApiClientError('URL credentials are not allowed.');
+  ensureWithinBasePath(baseUrl, resolved);
+  return resolved.toString();
 }
 
 function buildRestUrl(config: ApiToolsConfig, path: string): string {
-  validateRelativePath(path);
-  const baseUrl = makeBaseUrl(config);
-  const resolvedUrl = new URL(path, baseUrl);
-  ensureWithinBasePath(baseUrl, resolvedUrl);
-  if (resolvedUrl.username || resolvedUrl.password) throw new ApiClientError('REST requests may not include URL credentials.');
-  return resolvedUrl.toString();
+  if (!path || typeof path !== 'string') throw new ApiClientError('A request path is required.');
+  if (ABSOLUTE_URL_PATTERN.test(path)) throw new ApiClientError('Absolute URLs are not allowed for REST requests.');
+  return resolveConfiguredUrl(config, path, 'request paths');
 }
 
 function buildLoginUrl(config: ApiToolsConfig): string {
   if (config.auth.type !== 'login') throw new ApiClientError('Login auth is not configured.');
-  validateRelativePath(config.auth.login_path);
-  const baseUrl = makeBaseUrl(config);
-  const originBase = new URL('/', baseUrl.origin);
-  const resolvedUrl = new URL(config.auth.login_path, originBase);
-  if (resolvedUrl.origin !== baseUrl.origin) throw new ApiClientError('Login request escaped the configured origin.');
-  if (resolvedUrl.username || resolvedUrl.password) throw new ApiClientError('Login requests may not include URL credentials.');
-  return resolvedUrl.toString();
+  if (ABSOLUTE_URL_PATTERN.test(config.auth.login_path)) throw new ApiClientError('Absolute URLs are not allowed for login requests.');
+  return resolveConfiguredUrl(config, config.auth.login_path, 'login paths');
+}
+
+function resolveGraphqlUrl(config: ApiToolsConfig): string {
+  if (!config.graphql.enabled) throw new ApiClientError('GraphQL is not enabled.');
+  if (!config.graphql.valid) throw new ApiClientError('GraphQL configuration is invalid.');
+  if (config.graphql.url) return resolveConfiguredUrl(config, config.graphql.url, 'GraphQL URLs');
+  if (config.graphqlUrl) return resolveConfiguredUrl(config, config.graphqlUrl, 'GraphQL URLs');
+  return resolveConfiguredUrl(config, '/graphql', 'GraphQL URLs');
+}
+
+function swaggerCandidateUrls(config: ApiToolsConfig): string[] {
+  if (!config.swagger.enabled) throw new ApiClientError('Swagger is not enabled.');
+  if (!config.swagger.valid) throw new ApiClientError('Swagger configuration is invalid.');
+  if (config.swagger.url) return [resolveConfiguredUrl(config, config.swagger.url, 'Swagger URLs')];
+  if (config.swagger.framework === 'node') throw new ApiClientError('swagger.url is required when swagger.framework is node.');
+  return [
+    resolveConfiguredUrl(config, '/v3/api-docs', 'Swagger URLs'),
+    resolveConfiguredUrl(config, '/v2/api-docs', 'Swagger URLs'),
+  ];
 }
 
 function createRequestSignal(
@@ -141,9 +170,7 @@ function createRequestSignal(
   let timedOut = false;
 
   const onAbort = () => {
-    if (!controller.signal.aborted) {
-      controller.abort(externalSignal?.reason ?? new Error('request cancelled'));
-    }
+    if (!controller.signal.aborted) controller.abort(externalSignal?.reason ?? new Error('request cancelled'));
   };
 
   if (externalSignal) {
@@ -171,17 +198,34 @@ async function executeRequest(
   url: string,
   init: RequestInit,
   runtime: { timeoutMs: number; externalSignal?: AbortSignal; setTimeoutFn: typeof setTimeout; clearTimeoutFn: typeof clearTimeout },
+  config: ApiToolsConfig,
 ): Promise<ApiHttpResponse> {
   const requestSignal = createRequestSignal(runtime.timeoutMs, runtime.externalSignal, runtime.setTimeoutFn, runtime.clearTimeoutFn);
+  let currentUrl = url;
+  let currentInit: RequestInit = { ...init, signal: requestSignal.signal, redirect: 'manual' };
 
   try {
-    const response = await fetchImpl(url, { ...init, signal: requestSignal.signal });
-    return {
-      status: response.status,
-      statusText: response.statusText,
-      headers: headersToRecord(response.headers),
-      bodyText: await response.text(),
-    };
+    for (let redirectCount = 0; redirectCount < 5; redirectCount += 1) {
+      const response = await fetchImpl(currentUrl, currentInit);
+      const headers = headersToRecord(response.headers);
+      if (REDIRECT_STATUS.has(response.status)) {
+        const location = headers.location;
+        if (!location) throw new ApiClientError('Redirect response did not include a location.');
+        currentUrl = resolveConfiguredUrl(config, location, 'redirect URLs');
+        if (response.status === 303) {
+          currentInit = { ...currentInit, method: 'GET', body: undefined, signal: requestSignal.signal, redirect: 'manual' };
+        }
+        continue;
+      }
+      return {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+        bodyText: await response.text(),
+        url: currentUrl,
+      };
+    }
+    throw new ApiClientError('Too many redirects.');
   } catch (error) {
     if (requestSignal.getTimedOut()) throw new ApiClientError('Request timed out.');
     if (requestSignal.signal.aborted || isAbortLike(error)) throw new ApiClientError('Request cancelled.');
@@ -189,6 +233,11 @@ async function executeRequest(
   } finally {
     requestSignal.cleanup();
   }
+}
+
+function isSwaggerDocument(document: unknown): document is Record<string, any> {
+  return !!document && typeof document === 'object' && !Array.isArray(document)
+    && (typeof (document as any).openapi === 'string' || typeof (document as any).swagger === 'string');
 }
 
 export function createApiClient(options: CreateApiClientOptions): ApiClient {
@@ -202,81 +251,83 @@ export function createApiClient(options: CreateApiClientOptions): ApiClient {
     async login(signal?: AbortSignal): Promise<ApiHttpResponse> {
       if (options.config.auth.type !== 'login') throw new ApiClientError('Login auth is not configured.');
       const url = buildLoginUrl(options.config);
-      const headers = normalizeRequestHeaders(options.config, undefined, {
-        accept: 'application/json',
-        'content-type': 'application/json',
-      }, false);
-
-      return executeRequest(
-        fetchImpl,
-        url,
-        {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ username: options.config.auth.username, password: options.config.auth.password }),
-        },
-        {
-          timeoutMs: options.config.timeoutMs,
-          externalSignal: signal,
-          setTimeoutFn,
-          clearTimeoutFn,
-        },
-      );
+      return executeRequest(fetchImpl, url, {
+        method: 'POST',
+        headers: normalizeRequestHeaders(options.config, undefined, {
+          accept: 'application/json',
+          'content-type': 'application/json',
+        }, false),
+        body: JSON.stringify({ username: options.config.auth.username, password: options.config.auth.password }),
+      }, {
+        timeoutMs: options.config.timeoutMs,
+        externalSignal: signal,
+        setTimeoutFn,
+        clearTimeoutFn,
+      }, options.config);
     },
 
     async rest(request: ApiRestRequest, signal?: AbortSignal): Promise<ApiHttpResponse> {
       if (!ALLOWED_REST_METHODS.has(request.method)) throw new ApiClientError(`Unsupported REST method: ${request.method}`);
-
       const url = buildRestUrl(options.config, request.path);
-      const headers = normalizeRequestHeaders(options.config, request.headers, undefined, request.useToken ?? true);
+      return executeRequest(fetchImpl, url, {
+        method: request.method,
+        headers: normalizeRequestHeaders(options.config, request.headers, undefined, request.useToken ?? true),
+        body: request.body,
+      }, {
+        timeoutMs: options.config.timeoutMs,
+        externalSignal: signal,
+        setTimeoutFn,
+        clearTimeoutFn,
+      }, options.config);
+    },
 
-      return executeRequest(
-        fetchImpl,
-        url,
-        {
-          method: request.method,
-          headers,
-          body: request.body,
-        },
-        {
-          timeoutMs: options.config.timeoutMs,
-          externalSignal: signal,
-          setTimeoutFn,
-          clearTimeoutFn,
-        },
-      );
+    resolveGraphqlUrl(): string {
+      return resolveGraphqlUrl(options.config);
     },
 
     async graphql(request: ApiGraphqlRequest, signal?: AbortSignal): Promise<ApiHttpResponse> {
-      if (!options.config.graphqlUrl) throw new ApiClientError('GraphQL URL is not configured.');
       if (!request.query || typeof request.query !== 'string') throw new ApiClientError('A GraphQL query is required.');
+      const url = resolveGraphqlUrl(options.config);
+      return executeRequest(fetchImpl, url, {
+        method: 'POST',
+        headers: normalizeRequestHeaders(options.config, request.headers, {
+          accept: 'application/json',
+          'content-type': 'application/json',
+        }, request.useToken ?? true),
+        body: JSON.stringify({ query: request.query, variables: request.variables, operationName: request.operationName }),
+      }, {
+        timeoutMs: options.config.timeoutMs,
+        externalSignal: signal,
+        setTimeoutFn,
+        clearTimeoutFn,
+      }, options.config);
+    },
 
-      const headers = normalizeRequestHeaders(options.config, request.headers, {
-        accept: 'application/json',
-        'content-type': 'application/json',
-      }, request.useToken ?? true);
-
-      return executeRequest(
-        fetchImpl,
-        options.config.graphqlUrl,
-        {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            query: request.query,
-            variables: request.variables,
-            operationName: request.operationName,
-          }),
-        },
-        {
-          timeoutMs: options.config.timeoutMs,
-          externalSignal: signal,
-          setTimeoutFn,
-          clearTimeoutFn,
-        },
-      );
+    async fetchSwaggerDocument(signal?: AbortSignal): Promise<SwaggerDocumentResponse> {
+      const candidates = swaggerCandidateUrls(options.config);
+      let lastError: Error | undefined;
+      for (const candidate of candidates) {
+        try {
+          const response = await executeRequest(fetchImpl, candidate, {
+            method: 'GET',
+            headers: normalizeRequestHeaders(options.config, undefined, { accept: 'application/json' }, true),
+          }, {
+            timeoutMs: options.config.timeoutMs,
+            externalSignal: signal,
+            setTimeoutFn,
+            clearTimeoutFn,
+          }, options.config);
+          if (response.status < 200 || response.status >= 300) throw new ApiClientError(`Swagger document request failed with ${response.status}.`);
+          const document = JSON.parse(response.bodyText);
+          if (!isSwaggerDocument(document)) throw new ApiClientError('Swagger document was not a valid OpenAPI/Swagger JSON document.');
+          return { url: candidate, document };
+        } catch (error) {
+          lastError = error as Error;
+        }
+      }
+      throw lastError ?? new ApiClientError('Swagger document is unavailable.');
     },
   };
 }
 
-export { ApiClientError };
+export { ApiClientError, buildRestUrl, resolveConfiguredUrl, resolveGraphqlUrl };

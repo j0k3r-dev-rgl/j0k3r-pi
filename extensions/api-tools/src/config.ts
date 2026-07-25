@@ -2,14 +2,25 @@ import { access, readFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createApiJsonGitInspector } from './git.js';
-import { collectConfiguredSecrets, DEFAULT_MAX_RESPONSE_BYTES, DEFAULT_MAX_RESPONSE_LINES } from './security.js';
-import type { ApiAuthConfig, ApiJsonGitInspector, ApiToolsConfig, ApiWarning } from './types.js';
+import {
+  clampCursorTtlSeconds,
+  clampPositiveInteger,
+  collectConfiguredSecrets,
+  DEFAULT_CURSOR_TTL_SECONDS,
+  DEFAULT_MAX_RESPONSE_BYTES,
+  DEFAULT_MAX_RESPONSE_LINES,
+} from './security.js';
+import type { ApiAuthConfig, ApiFramework, ApiIntegrationState, ApiJsonGitInspector, ApiToolsConfig, ApiWarning } from './types.js';
 
 const DEFAULT_TIMEOUT_MS = 30000;
 
 export interface LoadApiConfigOptions {
   cwd?: string;
   gitInspector?: ApiJsonGitInspector;
+}
+
+function createIntegrationState(): ApiIntegrationState {
+  return { configured: false, enabled: false, valid: true };
 }
 
 function createBaseConfig(configPath: string): ApiToolsConfig {
@@ -20,7 +31,13 @@ function createBaseConfig(configPath: string): ApiToolsConfig {
     headers: {},
     auth: { type: 'none' },
     timeoutMs: DEFAULT_TIMEOUT_MS,
-    limits: { maxResponseBytes: DEFAULT_MAX_RESPONSE_BYTES, maxResponseLines: DEFAULT_MAX_RESPONSE_LINES },
+    limits: {
+      maxResponseBytes: DEFAULT_MAX_RESPONSE_BYTES,
+      maxResponseLines: DEFAULT_MAX_RESPONSE_LINES,
+      cursorTtlSeconds: DEFAULT_CURSOR_TTL_SECONDS,
+    },
+    swagger: createIntegrationState(),
+    graphql: createIntegrationState(),
     warnings: [],
     secretValues: [],
     git: { state: 'unknown' },
@@ -37,7 +54,7 @@ async function fileExists(path: string): Promise<boolean> {
 }
 
 function pushWarning(warnings: ApiWarning[], warning: ApiWarning): void {
-  if (!warnings.some((entry) => entry.code === warning.code)) warnings.push(warning);
+  if (!warnings.some((entry) => entry.code === warning.code && entry.message === warning.message)) warnings.push(warning);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -72,10 +89,8 @@ function parseAuth(value: unknown, warnings: ApiWarning[]): ApiAuthConfig {
       return typeof record.header === 'string' && typeof record.value === 'string'
         ? { type: 'api_key', header: record.header, value: record.value }
         : { type: 'none' };
-    case 'headers': {
-      const headers = parseHeaders(record.headers, warnings);
-      return { type: 'headers', headers };
-    }
+    case 'headers':
+      return { type: 'headers', headers: parseHeaders(record.headers, warnings) };
     case 'login':
       return typeof record.login_path === 'string' && typeof record.username === 'string' && typeof record.password === 'string'
         ? {
@@ -94,30 +109,70 @@ function parseAuth(value: unknown, warnings: ApiWarning[]): ApiAuthConfig {
   }
 }
 
+function parseFramework(value: unknown): ApiFramework | undefined {
+  return value === 'spring' || value === 'node' ? value : undefined;
+}
+
+function parseIntegrationBlock(
+  kind: 'swagger' | 'graphql',
+  value: unknown,
+  warnings: ApiWarning[],
+): ApiIntegrationState {
+  const record = asRecord(value);
+  if (!record) return createIntegrationState();
+
+  const enabled = record.enabled === true;
+  const framework = parseFramework(record.framework);
+  const state: ApiIntegrationState = {
+    configured: true,
+    enabled,
+    framework,
+    url: typeof record.url === 'string' ? record.url : undefined,
+    valid: true,
+  };
+
+  if (typeof record.enabled !== 'boolean') {
+    pushWarning(warnings, { code: `invalid_${kind}_config` as const, message: `${kind}.enabled must be a boolean.` });
+    state.valid = false;
+  }
+
+  if (enabled && !framework) {
+    pushWarning(warnings, { code: `invalid_${kind}_config` as const, message: `${kind}.framework must be spring or node when enabled.` });
+    state.valid = false;
+  }
+
+  return state;
+}
+
 function parseLimits(value: unknown, warnings: ApiWarning[]): ApiToolsConfig['limits'] {
   const limits = asRecord(value);
   if (!limits) {
     pushWarning(warnings, { code: 'limit_default_applied', message: 'Default response limits were applied.' });
-    return { maxResponseBytes: DEFAULT_MAX_RESPONSE_BYTES, maxResponseLines: DEFAULT_MAX_RESPONSE_LINES };
+    return {
+      maxResponseBytes: DEFAULT_MAX_RESPONSE_BYTES,
+      maxResponseLines: DEFAULT_MAX_RESPONSE_LINES,
+      cursorTtlSeconds: DEFAULT_CURSOR_TTL_SECONDS,
+    };
   }
 
   const bytes = limits.max_response_bytes;
   const lines = limits.max_response_lines;
-  const hasBytes = typeof bytes !== 'undefined';
-  const hasLines = typeof lines !== 'undefined';
+  const ttl = limits.cursor_ttl_seconds;
   const bytesValid = typeof bytes === 'number' && Number.isFinite(bytes) && bytes > 0;
   const linesValid = typeof lines === 'number' && Number.isFinite(lines) && lines > 0;
+  const ttlValid = typeof ttl === 'number' && Number.isFinite(ttl) && ttl > 0;
 
-  if (!hasBytes || !hasLines) {
+  if (typeof bytes === 'undefined' || typeof lines === 'undefined') {
     pushWarning(warnings, { code: 'limit_default_applied', message: 'Default response limits were applied.' });
   }
-  if ((hasBytes && !bytesValid) || (hasLines && !linesValid)) {
+  if ((typeof bytes !== 'undefined' && !bytesValid) || (typeof lines !== 'undefined' && !linesValid) || (typeof ttl !== 'undefined' && !ttlValid)) {
     pushWarning(warnings, { code: 'limit_fallback_applied', message: 'Invalid response limits were replaced safely.' });
   }
 
   return {
-    maxResponseBytes: bytesValid ? Math.floor(bytes) : DEFAULT_MAX_RESPONSE_BYTES,
-    maxResponseLines: linesValid ? Math.floor(lines) : DEFAULT_MAX_RESPONSE_LINES,
+    maxResponseBytes: bytesValid ? clampPositiveInteger(bytes, DEFAULT_MAX_RESPONSE_BYTES, DEFAULT_MAX_RESPONSE_BYTES) : DEFAULT_MAX_RESPONSE_BYTES,
+    maxResponseLines: linesValid ? clampPositiveInteger(lines, DEFAULT_MAX_RESPONSE_LINES, DEFAULT_MAX_RESPONSE_LINES) : DEFAULT_MAX_RESPONSE_LINES,
+    cursorTtlSeconds: clampCursorTtlSeconds(ttlValid ? ttl : DEFAULT_CURSOR_TTL_SECONDS),
   };
 }
 
@@ -154,6 +209,8 @@ export async function loadApiConfig(options: LoadApiConfigOptions = {}): Promise
     : DEFAULT_TIMEOUT_MS;
   config.headers = parseHeaders(parsed.headers, config.warnings);
   config.auth = parseAuth(parsed.auth, config.warnings);
+  config.swagger = parseIntegrationBlock('swagger', parsed.swagger, config.warnings);
+  config.graphql = parseIntegrationBlock('graphql', parsed.graphql, config.warnings);
   config.limits = parseLimits(parsed.limits, config.warnings);
   config.secretValues = collectConfiguredSecrets({ headers: config.headers, auth: config.auth });
 
