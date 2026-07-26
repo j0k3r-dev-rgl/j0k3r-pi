@@ -171,7 +171,7 @@ Routine phase transitions are written by the phase subagent, not hand-authored b
 - Update `mini-sdd.md` or Engram state after meaningful phase results according to the configured store.
 - Keep raw discovery and verbose subagent output outside the orchestrator context unless a material decision requires it.
 - Do not make a later phase rediscover evidence already preserved in a trustworthy handoff.
-- After every phase, the orchestrator reads all reported created/updated artifacts completely and checks them against authoritative prior artifacts before advancing.
+- After every phase, the orchestrator reads all reported created/updated workflow-owned artifacts (`openspec/**` Markdown/state or the authoritative Engram flow observation) completely and checks them against authoritative prior workflow artifacts before advancing. The orchestrator does not read application source, tests, lockfiles, generated outputs, or product documentation reported by apply; `sdd-verify` owns inspection and validation of those changed surfaces.
 
 ## Local Approval Records
 

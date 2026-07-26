@@ -1,0 +1,210 @@
+slug: code-research-go-support
+title: Tree-sitter Go support for code-research
+metadata_schema_version: 2
+flow_type: mini-sdd
+lifecycle_status: closed
+project_config_reference: openspec/config.yaml
+project_config_revision: sdd-contract-v7-20260724T202300Z
+flow_state_reference: openspec/changes/archive/2026-07-26-code-research-go-support/metadata.yaml
+flow_state_revision: go-support-archive-recovery-completed-20260726T022129Z-v18
+flow_selection_locked: true
+selection_timestamp: 2026-07-26T00:34:11Z
+execution_mode: auto
+artifact_store: hybrid
+prd_policy: waived
+stable_conventions:
+  - strict-tdd
+  - tree-sitter-language-parity
+  - existing-code-research-patterns
+  - openspec-authoritative
+  - engram-compact-cursor
+artifacts:
+  metadata: openspec/changes/archive/2026-07-26-code-research-go-support/metadata.yaml
+  mini_sdd: openspec/changes/archive/2026-07-26-code-research-go-support/mini-sdd.md
+summary: Add Go as a first-class Tree-sitter-backed language with practical parity to existing Java and TypeScript/JavaScript code-research behavior.
+blockers: []
+validation_expectations_ref: openspec/changes/archive/2026-07-26-code-research-go-support/mini-sdd.md#initial-acceptance-direction
+security_context_ref: openspec/changes/archive/2026-07-26-code-research-go-support/mini-sdd.md#security-and-boundaries
+handoff_ref: openspec/changes/archive/2026-07-26-code-research-go-support/mini-sdd.md#go-examples-validation-apply-result
+phase_state:
+  phase: archive
+  executor: mini_sdd_archive
+  phase_status: success
+  packet_revision: go-support-examples-20260726T020121Z-v1
+  artifact_writes_authorized: true
+  authorization_basis: archive-approval-record
+  required_artifacts:
+    mini_sdd: openspec/changes/archive/2026-07-26-code-research-go-support/mini-sdd.md
+  approval_id: archive-code-research-go-support-20260726T021726Z
+  approval_record_ref: openspec/changes/archive/2026-07-26-code-research-go-support/mini-sdd.md#archive-approval-record
+  approval_scope_fingerprint: sha256:efb8d8a13374c259d3401720c39189b3ca6e43f1473b4120aa57390efb9acfbe
+  prior_verify_result_ref: openspec/changes/archive/2026-07-26-code-research-go-support/mini-sdd.md#go-examples-validation-verify-result
+  archive_path: openspec/changes/archive/2026-07-26-code-research-go-support
+  verify_result_ref: openspec/changes/archive/2026-07-26-code-research-go-support/mini-sdd.md#go-examples-validation-verify-result
+  verdict: PASS
+  skill_plan_usage:
+    source: flow-skill-plan
+    reason: archive phase covered; sdd-workflow skill confirmed via registry
+    registry_hash: 01a848e155...
+    scope_or_policy_change: none
+  next_phase: null
+  next_recommended: closed
+phase_authorization:
+  target_phase: archive
+  target_executor: mini_sdd_archive
+  authorization_revision: go-support-archive-approved-20260726T021726Z-v15
+  authorization_id: archive-code-research-go-support-20260726T021726Z
+  authorized_at: 2026-07-26T02:17:26Z
+  approval_summary: Archive the verified Go support mini-SDD flow.
+  approval_summary_redacted: true
+  artifact_writes_authorized: true
+  flow_skill_plan_revision: go-support-explore-20260726T003411Z-v2
+  artifact_refs:
+    - openspec/changes/archive/2026-07-26-code-research-go-support/mini-sdd.md#go-examples-validation-verify-result
+    - openspec/changes/archive/2026-07-26-code-research-go-support/mini-sdd.md#archive-approval-record
+approval_records:
+  apply:
+    approval_id: apply-go-support-20260726T003919Z
+    type: apply
+    apply_approved_by_user: true
+    approved_packet_revision: go-support-explore-20260726T003411Z-v2
+    execution_strategy: single-batch
+    approval_scope_refs:
+      - packet:go-support-explore-20260726T003411Z-v2
+      - strategy:single-batch
+      - scope:extensions/code-research/**
+      - artifact:openspec/changes/archive/2026-07-26-code-research-go-support/mini-sdd.md
+      - acceptance:criteria-1-10
+      - validation:code-research-typecheck-and-full-tests
+    approval_scope_fingerprint: sha256:87db928ea2b7422eaf300b86d650358521bbb50271b4d0e1e695b3b08ea49709
+    approval_record_ref: openspec/changes/archive/2026-07-26-code-research-go-support/mini-sdd.md#apply-approval-record
+    approval_recorded_at: 2026-07-26T00:39:19Z
+    approval_summary: Implement the approved Tree-sitter Go parity packet within the code-research extension as one TDD batch.
+    approval_summary_redacted: true
+  apply_remediation_ac9:
+    approval_id: apply-go-support-remediation-ac9-20260726T011048Z
+    type: apply
+    apply_approved_by_user: true
+    approved_packet_revision: go-support-remediation-ac9-20260726T011048Z-v1
+    execution_strategy: single-batch-remediation
+    approval_scope_refs:
+      - packet:go-support-remediation-ac9-20260726T011048Z-v1
+      - strategy:single-batch-remediation
+      - issue:acceptance-criterion-9-go-file-symbol-counts
+      - acceptance:workspace-graph-status-reports-go-file-and-symbol-counts
+      - acceptance:focused-runtime-test-covers-go-status-counts
+      - docs:readme-go-tool-descriptions-consistent
+      - scope:extensions/code-research/src/tools/workspace-graph.ts
+      - scope:extensions/code-research/test/**
+      - scope:extensions/code-research/README.md
+      - validation:typecheck-focused-status-test-full-suite
+    approval_scope_fingerprint: sha256:4cccc46dd56238c0580a1a4939724ef1f06699c86bb0e77f98fa5b15f7c7d8b7
+    approval_record_ref: openspec/changes/archive/2026-07-26-code-research-go-support/mini-sdd.md#remediation-apply-approval-record
+    approval_recorded_at: 2026-07-26T01:10:48Z
+    approval_summary: Remediate Go workspace status file and symbol counts, add focused runtime coverage, and align detailed README Go descriptions.
+    approval_summary_redacted: true
+  apply_remediation_readme_notes:
+    approval_id: apply-go-support-readme-notes-20260726T012630Z
+    type: apply
+    apply_approved_by_user: true
+    approved_packet_revision: go-support-remediation-readme-notes-20260726T012630Z-v1
+    execution_strategy: single-file-documentation-remediation
+    approval_scope_refs:
+      - packet:go-support-remediation-readme-notes-20260726T012630Z-v1
+      - issue:english-spanish-readme-notes-omit-go
+      - scope:extensions/code-research/README.md
+      - acceptance:both-broad-indexing-notes-include-go
+      - validation:readme-inspection-and-regression
+    approval_scope_fingerprint: sha256:bdc0c6e46c6a9524fae07a4f28f47500fcfeae6a1f0bc8e5e902c409fa8ed627
+    approval_record_ref: openspec/changes/archive/2026-07-26-code-research-go-support/mini-sdd.md#readme-warning-remediation-approval-record
+    approval_recorded_at: 2026-07-26T01:26:30Z
+    approval_summary: Correct the two non-blocking README notes that omit Go.
+    approval_summary_redacted: true
+  apply_go_examples_validation:
+    approval_id: apply-go-support-examples-20260726T020121Z
+    type: apply
+    apply_approved_by_user: true
+    approved_packet_revision: go-support-examples-20260726T020121Z-v1
+    execution_strategy: example-fixtures-and-real-tool-validation
+    approval_scope_refs:
+      - packet:go-support-examples-20260726T020121Z-v1
+      - scope:examples/go/**
+      - scope:examples/README.md
+      - acceptance:go-contract-fixtures-and-five-real-tool-validations
+      - forbidden:go-toolchain-archive-git-writes
+    approval_scope_fingerprint: sha256:a6713cdcb99ca8feccecb4c038f183ad8e117cf6ecd4887a21a2a9de342ed6d7
+    approval_record_ref: openspec/changes/archive/2026-07-26-code-research-go-support/mini-sdd.md#go-examples-validation-approval-record
+    approval_recorded_at: 2026-07-26T02:01:21Z
+    approval_summary: Add permanent Go example fixtures and validate every public code-research capability against them.
+    approval_summary_redacted: true
+  archive:
+    approval_id: archive-code-research-go-support-20260726T021726Z
+    type: archive
+    archive_approved_by_user: true
+    approved_completion_revision: go-support-examples-verified-20260726T231200Z-v14
+    approved_packet_revision: go-support-examples-20260726T020121Z-v1
+    approved_verdict: PASS
+    approval_scope_refs:
+      - flow:code-research-go-support
+      - completion:go-support-examples-verified-20260726T231200Z-v14
+      - packet:go-support-examples-20260726T020121Z-v1
+      - verdict:PASS
+      - store:hybrid
+    approval_scope_fingerprint: sha256:efb8d8a13374c259d3401720c39189b3ca6e43f1473b4120aa57390efb9acfbe
+    approval_record_ref: openspec/changes/archive/2026-07-26-code-research-go-support/mini-sdd.md#archive-approval-record
+    approval_recorded_at: 2026-07-26T02:17:26Z
+    approval_summary: Archive the verified Go support mini-SDD flow.
+    approval_summary_redacted: true
+archive_recovery_authorization:
+  authorization_id: archive-recovery-code-research-go-support-20260726T022129Z
+  authorized_by_user: true
+  authorized_at: 2026-07-26T02:21:29Z
+  original_archive_approval_id: archive-code-research-go-support-20260726T021726Z
+  source_path: openspec/changes/code-research-go-support
+  target_path: openspec/changes/archive/2026-07-26-code-research-go-support
+  required_recovery: remove-identical-stale-source-and-close-cursor
+  approval_scope_fingerprint: sha256:eda5686477b538a8561b6c5a6a2e4835b555cdb7b21c0d3b777a6ee8c9cb33c0
+  approval_record_ref: openspec/changes/archive/2026-07-26-code-research-go-support/mini-sdd.md#archive-recovery-approval-record
+  approval_summary: Complete the partial archive by removing the identical stale source and closing the cursor.
+  approval_summary_redacted: true
+  recovery_status: completed
+  completed_effects:
+    - stale-active-source-removed
+    - invocation-lease-cleared
+    - active-flow-reference-redirected-to-archive
+    - archived-cross-references-normalized
+flow_skill_plan:
+  revision: go-support-explore-20260726T003411Z-v2
+  source_phase: explore
+  registry_hash: e5e5bd9179...
+  registry_freshness: fresh
+  covered_phases:
+    - explore
+    - apply
+    - verify
+    - archive
+  covered_paths:
+    - extensions/code-research/src
+    - extensions/code-research/test
+    - extensions/code-research/package.json
+    - extensions/code-research/README.md
+  covered_intents:
+    - add tree-sitter Go support to code-research
+    - extend language parity to existing Java/TS-JS tools
+  required_skills:
+    - sdd-workflow
+    - tdd
+    - pi-extension-authoring
+  optional_skills:
+    - code-research-configuration
+  confidence: high
+  invalidation_rules:
+    - tree-sitter or tree-sitter-go version changes
+    - graph schema version changes
+    - new language module added that changes dispatch patterns
+    - package.json dependency graph changes
+    - public tool schema contract changes
+  rationale: >-
+    The change is bounded to the existing code-research extension, follows the
+    established Java language module pattern, and requires strict TDD plus
+    extension-authoring dependency-independence discipline.

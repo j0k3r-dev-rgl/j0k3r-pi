@@ -9,15 +9,7 @@ invocation:
   reject_additional_payload: true
   state_transport: authoritative-files-or-engram-only
 
-active_flow_reference: openspec/changes/api-tools-swagger-graphql-contracts/metadata.yaml
-active_flow_invocation:
-  flow_reference: null
-  lease_id: null
-  lease_status: idle
-  target_phase: null
-  target_executor: null
-  lease_owner: orchestrator
-  stale_behavior: block-before-phase-work
+active_flow_reference: openspec/changes/archive/2026-07-26-code-research-go-support/metadata.yaml
 active_flow_policy:
   concurrency: multiple-active-flows-single-invocation-lease
   default_reference_role: orchestrator-convenience-pointer-not-lifecycle-authority

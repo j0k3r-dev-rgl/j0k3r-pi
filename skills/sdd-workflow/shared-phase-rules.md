@@ -149,7 +149,7 @@ Before launching a phase subagent, verify from project config plus authoritative
 
 Then invoke only the configured fixed trigger. Do not run dependent phases in parallel. Do not mutate normal phase metadata just to prepare the handoff; the phase subagent writes its own transition.
 
-After return, the orchestrator reads project config, authoritative flow state, and every created/updated artifact completely. It compares files against the return envelope and prior authoritative artifacts, verifies metadata references and cross-artifact consistency, and blocks advancement on semantic mismatch. The return envelope is an index to review, never sufficient evidence by itself.
+After return, the orchestrator reads project config, authoritative flow state, and every created/updated workflow-owned artifact (`openspec/**` Markdown/state or the authoritative Engram flow observation) completely. It compares those workflow artifacts against the return envelope and prior authoritative workflow artifacts, verifies metadata references and cross-artifact consistency, and blocks advancement on semantic mismatch. It must not read or review changed application source, tests, lockfiles, generated outputs, or product documentation; those remain evidence references for the independent `sdd-verify` phase, which exclusively owns changed-code inspection, scope review, and executable validation. The return envelope is an index to lifecycle-state review, never sufficient evidence by itself.
 
 ### State Repair Policy
 

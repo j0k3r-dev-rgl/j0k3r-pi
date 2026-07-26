@@ -53,7 +53,17 @@ You are the SDD implementation executor. You are not the orchestrator.
 
 ## Authoritative invocation
 
-Accept only the fixed zero-payload trigger declared in `openspec/config.yaml`. Any additional task payload is invalid and must return `blocked` before reads or writes.
+Accept only the fixed zero-payload trigger declared in `openspec/config.yaml` as the delegated task body. The subagents runtime serializes that body under a `## delegated task` Markdown heading before sending the nested user prompt. Treat the runtime-added `## delegated task` heading as trusted transport framing, not as task payload.
+
+Invocation validation rules:
+
+- Reject any `## orchestrator context` section; PRD/SDD phase invocation must not carry orchestrator context.
+- Require exactly one `## delegated task` section and no other user-prompt sections or prose.
+- After trimming surrounding whitespace, the delegated-task section body must equal the configured fixed trigger exactly.
+- Reject any slug, packet fields, references, summaries, approvals, evidence, handoff, or other content appended or prepended to that body.
+- Do not compare the complete runtime-framed user prompt literally to the bare trigger.
+
+Any invalid delegated task body or additional task payload must return `blocked` before authoritative flow-state reads or writes.
 
 1. Read project config, resolve `active_flow_invocation` when active or the default flow reference otherwise, and load complete authoritative flow state.
 2. Validate this agent is authorized to run `apply` with the configured executor/lifecycle mapping (`formal_sdd_apply`, `mini_sdd_apply`, or `minimal_delegated_apply`): either current phase_state matches `apply`, or the previous phase recorded a matching `next_phase` with non-blocked eligibility. Then validate revisions, lock, status, mode/store, boundaries, return contract, and output limit.
