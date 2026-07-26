@@ -21,7 +21,7 @@ export function registerReverseFunctionCallTreeTool(pi: any) {
     parameters: Type.Object({
       path: Type.String({ description: 'Java file containing the target method, or directory to scan for the application index.' }),
       symbol: Type.String({ description: 'Name of the target method/function whose callers should be traced.' }),
-      language: Type.Optional(Type.Union([Type.Literal('java'), Type.Literal('ts'), Type.Literal('js')], { description: 'Language to use. Supported: java, ts, js. Default: java.' })),
+      language: Type.Optional(Type.Union([Type.Literal('java'), Type.Literal('go'), Type.Literal('ts'), Type.Literal('js')], { description: 'Language to use. Supported: java, go, ts, js. Default: java.' })),
       kind: Type.Optional(Type.Union([Type.Literal('method'), Type.Literal('function'), Type.Literal('class')], { description: 'Optional kind filter for the target symbol.' })),
       max_depth: Type.Optional(Type.Number({ description: 'Maximum recursion depth for caller expansion. Default: 10.' })),
       include_external: Type.Optional(Type.Boolean({ description: 'Reserved for API parity with function_call_tree. Reverse caller expansion returns application callers only. Default: false.' })),

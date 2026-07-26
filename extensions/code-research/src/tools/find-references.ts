@@ -21,7 +21,7 @@ export function registerFindReferencesTool(pi: any) {
     parameters: Type.Object({
       path: Type.String({ description: 'File or directory to search. Relative paths resolve against the current working directory.' }),
       symbol: Type.String({ description: 'Name of the target symbol whose usages or references should be found.' }),
-      language: Type.Optional(Type.Union([Type.Literal('ts'), Type.Literal('js'), Type.Literal('java')], { description: 'Language to use. Supported: ts, js, java. Default: java.' })),
+      language: Type.Optional(Type.Union([Type.Literal('ts'), Type.Literal('js'), Type.Literal('java'), Type.Literal('go')], { description: 'Language to use. Supported: ts, js, java, go. Default: java.' })),
       kind: Type.Optional(Type.Union([Type.Literal('function'), Type.Literal('class'), Type.Literal('method'), Type.Literal('interface'), Type.Literal('variable')], { description: 'Optional symbol kind filter for the target symbol.' })),
       scope: Type.Optional(Type.Union([Type.Literal('file'), Type.Literal('directory')], { description: 'Override whether path is treated as a single file or scanned as a directory.' })),
       glob: Type.Optional(Type.String({ description: 'Optional glob pattern to filter files when scanning a directory.' })),

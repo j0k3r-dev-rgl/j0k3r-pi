@@ -31,6 +31,15 @@ These files exist only for testing the `find_symbol`, `find_references`, `functi
 - `CallbackExamples.java` — lambda callback and method-reference usages for manual `find_references` checks (`helper`, `run`)
 - `app/**` — library-agnostic application fixtures for user-owned interfaces/ports, custom annotations, adapters, use cases, normalizers, validators, providers/factories, records/enums/sealed types, wildcard imports, fluent builders, lambdas, and method references
 
+### Go fixtures (`go/`)
+
+- `go.mod` — minimal marker so `examples/go` is detected as its own graph subproject
+- `app/contracts.go` — package symbol, top-level constant/variable, interfaces (`Greeter`, `Recorder`), and a concrete implementation (`FriendlyGreeter`)
+- `app/service.go` — receiver methods, struct fields, interface-backed collaborators, and a syntactic interface implementation (`Service`)
+- `app/helpers.go` — same-package helper calls, local variable reads/writes, and external/package-qualified calls via `strings.*`
+- `app/workflow.go` — same-package cross-file calls, deep reverse-caller chains, and top-level variable reads/writes
+- `cmd/demo/main.go` — local package import alias plus package-qualified external call via `fmt.Println`
+
 ### Suggested test queries
 
 ```
@@ -60,6 +69,11 @@ find_references path:examples/javascript/ui/default-panel.jsx symbol:DefaultPane
 find_references path:examples/java/CallbackExamples.java symbol:helper language:java kind:method
 reverse_function_call_tree path:examples/javascript/reverse-callers.js symbol:helper language:js kind:function
 reverse_function_call_tree path:examples/java/reversecallers/AppService.java symbol:helper language:java kind:method
+find_symbol path:examples/go/app symbol:Greeter language:go kind:interface
+find_symbol path:examples/go/app symbol:StartWorkflow language:go kind:function
+find_references path:examples/go/app/workflow.go symbol:GlobalCounter language:go kind:variable
+function_call_tree path:examples/go/app/workflow.go symbol:StartWorkflow language:go kind:function include_external:true
+reverse_function_call_tree path:examples/go/app/helpers.go symbol:formatMessage language:go kind:function
 ```
 
 ## Español
@@ -91,6 +105,15 @@ Estos archivos existen solo para probar las herramientas `find_symbol`, `find_re
 - `CallbackExamples.java` — callback lambda y usos de method reference para checks manuales de `find_references` (`helper`, `run`).
 - `app/**` — fixtures de aplicación agnósticos de librería para interfaces/puertos propios, anotaciones custom, adapters, use cases, normalizers, validators, providers/factories, records/enums/sealed types, wildcard imports, fluent builders, lambdas y method references.
 
+### Fixtures Go (`go/`)
+
+- `go.mod` — marker mínimo para que `examples/go` se detecte como subproyecto propio del grafo.
+- `app/contracts.go` — símbolo de paquete, constante/variable top-level, interfaces (`Greeter`, `Recorder`) y una implementación concreta (`FriendlyGreeter`).
+- `app/service.go` — métodos con receiver, campos de struct, colaboradores basados en interfaces y una implementación sintáctica de interfaz (`Service`).
+- `app/helpers.go` — helper calls dentro del mismo paquete, lecturas/escrituras de variables locales y llamadas externas/package-qualified vía `strings.*`.
+- `app/workflow.go` — llamadas cross-file dentro del mismo paquete, cadenas profundas de reverse callers y lecturas/escrituras de variables top-level.
+- `cmd/demo/main.go` — alias de import local de paquete más llamada externa package-qualified vía `fmt.Println`.
+
 ### Consultas de prueba sugeridas
 
 ```
@@ -120,4 +143,9 @@ find_references path:examples/javascript/ui/default-panel.jsx symbol:DefaultPane
 find_references path:examples/java/CallbackExamples.java symbol:helper language:java kind:method
 reverse_function_call_tree path:examples/javascript/reverse-callers.js symbol:helper language:js kind:function
 reverse_function_call_tree path:examples/java/reversecallers/AppService.java symbol:helper language:java kind:method
+find_symbol path:examples/go/app symbol:Greeter language:go kind:interface
+find_symbol path:examples/go/app symbol:StartWorkflow language:go kind:function
+find_references path:examples/go/app/workflow.go symbol:GlobalCounter language:go kind:variable
+function_call_tree path:examples/go/app/workflow.go symbol:StartWorkflow language:go kind:function include_external:true
+reverse_function_call_tree path:examples/go/app/helpers.go symbol:formatMessage language:go kind:function
 ```

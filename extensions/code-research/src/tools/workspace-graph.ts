@@ -1,25 +1,47 @@
 import { Type } from 'typebox';
 import { loadCodeResearchConfig } from '../config.js';
-import { getWorkspaceGraphRoot, readWorkspaceGraphManifest } from '../core/graph-persistence.js';
+import { getWorkspaceGraphRoot, readSubprojectGraphShard, readWorkspaceGraphManifest } from '../core/graph-persistence.js';
 import { loadWorkspaceGraphState } from '../core/workspace-state.js';
 import type { GraphManifest, WorkspaceGraphState } from '../types.js';
 
-function summarizeWorkspaceGraphState(
+async function summarizeWorkspaceGraphState(
   state: WorkspaceGraphState,
   manifestStatus: 'ok' | 'missing' | 'incompatible' | 'corrupt' | 'oversized' | 'errored',
   manifest?: GraphManifest
 ) {
-  const languages = { java: 0, ts: 0, js: 0, py: 0 };
+  const languages = { java: 0, go: 0, ts: 0, js: 0, py: 0 };
+  const languageCoverage = {
+    java: { subprojects: 0, fileCount: 0, symbolCount: 0 },
+    go: { subprojects: 0, fileCount: 0, symbolCount: 0 },
+    ts: { subprojects: 0, fileCount: 0, symbolCount: 0 },
+    js: { subprojects: 0, fileCount: 0, symbolCount: 0 },
+    py: { subprojects: 0, fileCount: 0, symbolCount: 0 },
+  };
   const now = Date.now();
   const updatedAtMs = Date.parse(state.updatedAt);
   const ageSeconds = Number.isFinite(updatedAtMs) ? Math.max(0, Math.floor((now - updatedAtMs) / 1000)) : undefined;
   const shardPathById = new Map((manifest?.subprojects ?? []).map((subproject) => [subproject.id, subproject.shardPath]));
-  const projects = state.subprojects.map((subproject) => {
+  const projects = await Promise.all(state.subprojects.map(async (subproject) => {
     for (const language of subproject.languageHints) {
       languages[language] += 1;
+      languageCoverage[language].subprojects += 1;
     }
 
-    const fileCount = Object.keys(subproject.snapshot).length;
+    let shardCounts = { fileCount: 0, symbolCount: 0 };
+    const shardResult = await readSubprojectGraphShard(state.projectRoot, subproject.id, { generation: subproject.generation });
+    if (shardResult.status === 'ok') {
+      for (const node of shardResult.data.nodes) {
+        if (node.kind === 'file') {
+          languageCoverage[node.language].fileCount += 1;
+          shardCounts.fileCount += 1;
+        } else if (node.kind === 'symbol') {
+          languageCoverage[node.language].symbolCount += 1;
+          shardCounts.symbolCount += 1;
+        }
+      }
+    }
+
+    const snapshotFileCount = Object.keys(subproject.snapshot).length;
     const primaryLanguage = subproject.languageHints[0] ?? 'unknown';
     return {
       id: subproject.id,
@@ -30,11 +52,12 @@ function summarizeWorkspaceGraphState(
       languageHints: subproject.languageHints,
       primaryLanguage,
       generation: subproject.generation,
-      fileCount,
-      snapshotStatus: fileCount > 0 ? 'indexed' : 'empty',
+      fileCount: shardCounts.fileCount || snapshotFileCount,
+      symbolCount: shardCounts.symbolCount,
+      snapshotStatus: snapshotFileCount > 0 ? 'indexed' : 'empty',
       shardPath: shardPathById.get(subproject.id),
     };
-  });
+  }));
   const indexedProjects = projects.filter((project) => project.snapshotStatus === 'indexed').length;
   const emptyProjectRoots = projects.filter((project) => project.snapshotStatus === 'empty').map((project) => project.workspaceRelativeRoot);
   const emptyProjects = emptyProjectRoots.length;
@@ -83,6 +106,7 @@ function summarizeWorkspaceGraphState(
       projectsWithUnreadableDirs: state.coverage.unreadableDirectories.length > 0 ? state.subprojects.length : 0,
     },
     languages,
+    languageCoverage,
     unreadableDirectories: state.coverage.unreadableDirectories,
     projects,
     subprojects: projects,
@@ -124,12 +148,12 @@ export function registerWorkspaceGraphStatusTool(pi: any) {
       }
       if (state.status === 'ok') {
         const manifest = await readWorkspaceGraphManifest(ctx.cwd);
-        const summary = summarizeWorkspaceGraphState(state.data, manifest.status, manifest.status === 'ok' ? manifest.data : undefined);
+        const summary = await summarizeWorkspaceGraphState(state.data, manifest.status, manifest.status === 'ok' ? manifest.data : undefined);
         const projectList = summary.projects.map((project) => project.workspaceRelativeRoot).join(',');
         return {
           content: [{
             type: 'text',
-            text: `Workspace graph status: ${summary.status} | usable=${summary.graphUsableForQueries ? 'yes' : 'no'} | age_s=${summary.ageSeconds ?? 'unknown'} | monorepo=${summary.monorepo.detected ? 'yes' : 'no'} | shards=${summary.indexing.shardCount} | indexed_files=${summary.coverage.indexedFiles} | detected_projects=${summary.coverage.detectedProjects} | indexed_projects=${summary.coverage.indexedProjects} | empty_projects=${summary.coverage.emptyProjects} | partial_projects=${summary.coverage.partialProjects} | unreadable_dirs=${summary.coverage.unreadableDirectoryCount} | workspace_projects=${projectList}`,
+            text: `Workspace graph status: ${summary.status} | usable=${summary.graphUsableForQueries ? 'yes' : 'no'} | age_s=${summary.ageSeconds ?? 'unknown'} | monorepo=${summary.monorepo.detected ? 'yes' : 'no'} | shards=${summary.indexing.shardCount} | indexed_files=${summary.coverage.indexedFiles} | detected_projects=${summary.coverage.detectedProjects} | indexed_projects=${summary.coverage.indexedProjects} | empty_projects=${summary.coverage.emptyProjects} | partial_projects=${summary.coverage.partialProjects} | unreadable_dirs=${summary.coverage.unreadableDirectoryCount} | go_files=${summary.languageCoverage.go.fileCount} | go_symbols=${summary.languageCoverage.go.symbolCount} | workspace_projects=${projectList}`,
           }],
           details: summary,
         };

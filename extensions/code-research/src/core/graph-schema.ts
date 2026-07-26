@@ -4,6 +4,7 @@ import type {
   GraphEdge,
   GraphManifest,
   GraphNode,
+  GoSymbolCoverage,
   JavaSymbolCoverage,
   SubprojectGraphShard,
   TypeScriptDeclarationKind,
@@ -86,8 +87,10 @@ export function validateSubprojectGraphShard(value: any): value is SubprojectGra
     if (!nodeIds.has(edge.to) && !edge.to.startsWith('external:')) return false;
   }
   const hasTypeScriptFiles = (value.nodes as GraphNode[]).some((node) => node.kind === 'file' && (node.language === 'ts' || node.language === 'js'));
+  const hasGoFiles = (value.nodes as GraphNode[]).some((node) => node.kind === 'file' && node.language === 'go');
   if (hasTypeScriptFiles && value.typescriptSymbolCoverage === undefined) return false;
-  return validateTypeScriptSymbolCoverage(value.typescriptSymbolCoverage, value) && validateJavaSymbolCoverage(value.javaSymbolCoverage, value);
+  if (hasGoFiles && value.goSymbolCoverage === undefined) return false;
+  return validateTypeScriptSymbolCoverage(value.typescriptSymbolCoverage, value) && validateJavaSymbolCoverage(value.javaSymbolCoverage, value) && validateGoSymbolCoverage(value.goSymbolCoverage, value);
 }
 
 export function createBaseArtifact<T extends object>(artifact: T): T & { schemaVersion: number; createdBy: 'pi-code-research-extension' } {
@@ -102,7 +105,7 @@ export function isGraphNode(value: any): value is GraphNode {
   if (!value || typeof value.id !== 'string' || typeof value.kind !== 'string') return false;
   if (value.kind === 'workspace') return typeof value.name === 'string' && typeof value.root === 'string';
   if (value.kind === 'subproject') return typeof value.name === 'string' && typeof value.root === 'string' && Array.isArray(value.markers) && Array.isArray(value.languages);
-  if (value.kind === 'file') return typeof value.path === 'string' && value.path.length > 0 && (value.language === 'java' || value.language === 'ts' || value.language === 'js' || value.language === 'py') && Number.isSafeInteger(value.size) && value.size >= 0;
+  if (value.kind === 'file') return typeof value.path === 'string' && value.path.length > 0 && (value.language === 'java' || value.language === 'go' || value.language === 'ts' || value.language === 'js' || value.language === 'py') && Number.isSafeInteger(value.size) && value.size >= 0;
   if (value.kind !== 'symbol') return false;
   return Boolean(
     typeof value.language === 'string' &&
@@ -126,7 +129,7 @@ export function isGraphNode(value: any): value is GraphNode {
       (value.isDefinition === undefined || typeof value.isDefinition === 'boolean') &&
       (value.isImplementation === undefined || typeof value.isImplementation === 'boolean') &&
       (value.sourceHash === undefined || isSha256(value.sourceHash)) &&
-      ((value.language !== 'ts' && value.language !== 'js') || (
+      ((value.language !== 'ts' && value.language !== 'js' && value.language !== 'go') || (
         isDeclarationKind(value.declarationKind) &&
         isSha256(value.symbolId) &&
         typeof value.qualifiedName === 'string' && value.qualifiedName.length > 0 &&
@@ -248,6 +251,43 @@ function validateJavaSymbolCoverage(value: unknown, shard: { nodes: GraphNode[];
     .update(coverage.completeFiles.map((file) => `${file}:${coverage.fileProofs[file].sourceHash}`).join('|'))
     .digest('hex');
   return coverage.sourceSnapshotId === expectedSnapshotId;
+}
+
+function validateGoSymbolCoverage(value: unknown, shard: { nodes: GraphNode[]; generation: number }): value is GoSymbolCoverage | undefined {
+  if (value === undefined) return true;
+  if (!value || typeof value !== 'object') return false;
+  const coverage = value as GoSymbolCoverage;
+  if (coverage.modelVersion !== 1) return false;
+  if (coverage.grammar?.package !== 'tree-sitter-go' || coverage.grammar?.version !== '0.23.3') return false;
+  if (coverage.generation !== shard.generation) return false;
+  if (!Array.isArray(coverage.completeFiles) || !Array.isArray(coverage.skippedFiles) || !coverage.fileProofs || typeof coverage.fileProofs !== 'object') return false;
+  const fileNodes = new Set(shard.nodes.filter((node): node is Extract<GraphNode, { kind: 'file' }> => node.kind === 'file' && node.language === 'go').map((node) => node.path));
+  const completeFiles = new Set<string>();
+  for (const file of coverage.completeFiles) {
+    if (typeof file !== 'string' || file.length === 0 || completeFiles.has(file) || !fileNodes.has(file)) return false;
+    completeFiles.add(file);
+    const proof = coverage.fileProofs[file];
+    if (!proof || !isSha256(proof.sourceHash) || !Number.isInteger(proof.symbolCount) || proof.symbolCount < 0) return false;
+  }
+  const skippedFiles = new Set<string>();
+  const skippedReasons = new Set(['parse_error', 'input_unreadable', 'unsupported_source']);
+  for (const skipped of coverage.skippedFiles) {
+    if (!skipped || typeof skipped.file !== 'string' || skipped.file.length === 0 || !skippedReasons.has(skipped.reason) || skippedFiles.has(skipped.file) || completeFiles.has(skipped.file) || !fileNodes.has(skipped.file)) return false;
+    skippedFiles.add(skipped.file);
+  }
+  if ([...fileNodes].some((file) => !completeFiles.has(file) && !skippedFiles.has(file))) return false;
+  const symbolsByFile = new Map<string, number>();
+  for (const node of shard.nodes) {
+    if (node.kind !== 'symbol' || node.language !== 'go') continue;
+    if (!node.declarationKind || !node.symbolId || !node.qualifiedName || !Array.isArray(node.modifiers) || typeof node.isDefinition !== 'boolean' || typeof node.isImplementation !== 'boolean' || !isSha256(node.sourceHash)) return false;
+    const proof = coverage.fileProofs[node.file];
+    if (!proof || node.sourceHash !== proof.sourceHash) return false;
+    symbolsByFile.set(node.file, (symbolsByFile.get(node.file) ?? 0) + 1);
+  }
+  for (const file of completeFiles) {
+    if ((symbolsByFile.get(file) ?? 0) !== coverage.fileProofs[file].symbolCount) return false;
+  }
+  return true;
 }
 
 function isSortedUniqueStrings(values: unknown, allowed?: Set<string>): values is string[] {

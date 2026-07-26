@@ -4,6 +4,7 @@ import { readWorkspaceGraphManifest, readWorkspaceGraphState } from './graph-per
 import { evaluateGraphUsability, getFindReferencesGraphCoverage } from './graph-policy.js';
 import { findTypeScriptReferences } from '../languages/typescript/find-references.js';
 import { findJavaReferences } from '../languages/java/find-references.js';
+import { findGoReferences } from '../languages/go/find-references.js';
 import type { FindReferencesInput, FindReferencesResolution, ReferenceLocation, ReferenceQueryDiagnostics } from '../types.js';
 
 export async function resolveFindReferences(cwd: string, input: FindReferencesInput): Promise<FindReferencesResolution> {
@@ -59,6 +60,8 @@ async function findReferencesDirect(cwd: string, input: FindReferencesInput): Pr
     case 'ts':
     case 'js':
       return findTypeScriptReferences(cwd, input);
+    case 'go':
+      return findGoReferences(cwd, input as any);
     case 'auto':
       throw new Error('find_references does not support auto language detection yet');
     default:

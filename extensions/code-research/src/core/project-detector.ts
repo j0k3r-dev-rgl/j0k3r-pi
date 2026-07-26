@@ -10,6 +10,8 @@ export const SUBPROJECT_MARKERS = [
   'pom.xml',
   'build.gradle',
   'settings.gradle',
+  'go.mod',
+  'go.work',
   'pyproject.toml',
   'uv.lock',
   'setup.py',

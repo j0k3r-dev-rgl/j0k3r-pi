@@ -1,4 +1,4 @@
-export type SupportedLanguage = 'ts' | 'js' | 'java' | 'py' | 'auto';
+export type SupportedLanguage = 'ts' | 'js' | 'java' | 'go' | 'py' | 'auto';
 export type SymbolKind = 'function' | 'class' | 'method' | 'interface' | 'variable' | 'unknown';
 export type SearchScope = 'file' | 'directory';
 export type SearchMode = 'exact' | 'prefix' | 'contains';
@@ -331,7 +331,7 @@ export interface SubprojectGraphState {
   id: string;
   root: string;
   status: WorkspaceGraphStatusKind;
-  languageHints: Array<'java' | 'ts' | 'js' | 'py'>;
+  languageHints: Array<'java' | 'go' | 'ts' | 'js' | 'py'>;
   shardPath: string;
   snapshot: SubprojectSnapshot;
   generation: number;
@@ -369,11 +369,11 @@ export interface GraphManifest {
 export type GraphNode =
   | { id: string; kind: 'workspace'; name: string; root: string }
   | { id: string; kind: 'subproject'; name: string; root: string; markers: string[]; languages: string[] }
-  | { id: string; kind: 'file'; path: string; language: 'java' | 'ts' | 'js' | 'py'; size: number; entrypoint?: boolean }
+  | { id: string; kind: 'file'; path: string; language: 'java' | 'go' | 'ts' | 'js' | 'py'; size: number; entrypoint?: boolean }
   | {
       id: string;
       kind: 'symbol';
-      language: 'java' | 'ts' | 'js' | 'py';
+      language: 'java' | 'go' | 'ts' | 'js' | 'py';
       symbolKind: SymbolKind;
       name: string;
       file: string;
@@ -460,6 +460,25 @@ export interface JavaSymbolCoverage {
   fileProofs: Record<string, JavaSymbolCoverageFileProof>;
 }
 
+export interface GoSymbolCoverageFileProof {
+  sourceHash: string;
+  symbolCount: number;
+}
+
+export interface GoSymbolCoverageSkippedFile {
+  file: string;
+  reason: 'parse_error' | 'input_unreadable' | 'unsupported_source';
+}
+
+export interface GoSymbolCoverage {
+  modelVersion: 1;
+  grammar: { package: 'tree-sitter-go'; version: '0.23.3' };
+  generation: number;
+  completeFiles: string[];
+  skippedFiles: GoSymbolCoverageSkippedFile[];
+  fileProofs: Record<string, GoSymbolCoverageFileProof>;
+}
+
 export interface SubprojectGraphShard {
   schemaVersion: number;
   createdBy: 'pi-code-research-extension';
@@ -469,6 +488,7 @@ export interface SubprojectGraphShard {
   edges: GraphEdge[];
   typescriptSymbolCoverage?: TypeScriptSymbolCoverage;
   javaSymbolCoverage?: JavaSymbolCoverage;
+  goSymbolCoverage?: GoSymbolCoverage;
 }
 
 export interface GraphLookupPolicy {

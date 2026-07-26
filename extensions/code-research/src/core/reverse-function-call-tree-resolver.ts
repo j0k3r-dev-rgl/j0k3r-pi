@@ -1,5 +1,6 @@
 import type { FunctionCallTreeInput, FunctionCallTreeResult } from '../types.js';
 import { executeJavaReverseFunctionCallTree } from '../languages/java/reverse-function-call-tree.js';
+import { executeGoReverseFunctionCallTree } from '../languages/go/reverse-function-call-tree.js';
 import { executeTypeScriptReverseFunctionCallTree } from '../languages/typescript/reverse-function-call-tree.js';
 import { loadCodeResearchConfig } from '../config.js';
 import { readWorkspaceGraphManifest, readWorkspaceGraphState } from './graph-persistence.js';
@@ -38,6 +39,8 @@ export async function executeReverseFunctionCallTree(
     case 'ts':
     case 'js':
       return executeTypeScriptReverseFunctionCallTree(cwd, input);
+    case 'go':
+      return executeGoReverseFunctionCallTree(cwd, input as any);
     case 'auto':
       throw new Error('reverse_function_call_tree does not support auto language detection yet');
     default:

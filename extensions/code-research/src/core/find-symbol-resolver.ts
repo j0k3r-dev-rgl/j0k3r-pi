@@ -16,6 +16,7 @@ import {
 } from '../languages/typescript/find-symbol.js';
 import type { CanonicalTypeScriptSymbolRecord } from '../languages/typescript/symbol-model.js';
 import { buildSymbolLocation as buildJavaSymbolLocation, extractSymbols as extractJavaSymbols, findImplementationsOf as findJavaImplementationsOf } from '../languages/java/find-symbol.js';
+import { buildSymbolLocation as buildGoSymbolLocation, extractSymbols as extractGoSymbols, findImplementationsOf as findGoImplementationsOf } from '../languages/go/find-symbol.js';
 import { queryInclusionForJavaDeclarationKind } from '../languages/java/symbol-model.js';
 import type {
   CanonicalSymbolRecord,
@@ -91,8 +92,16 @@ const javaAdapter: LanguageAdapter = {
   buildSymbolLocation: buildJavaSymbolLocation,
 };
 
+const goAdapter: LanguageAdapter = {
+  extractSymbols: extractGoSymbols,
+  findImplementationsOf: findGoImplementationsOf,
+  buildSymbolLocation: buildGoSymbolLocation,
+};
+
 function getLanguageAdapter(language: Exclude<SupportedLanguage, 'auto'>): LanguageAdapter {
-  return language === 'java' ? javaAdapter : typeScriptAdapter;
+  if (language === 'java') return javaAdapter;
+  if (language === 'go') return goAdapter;
+  return typeScriptAdapter;
 }
 
 export async function resolveFindSymbol(cwd: string, input: FindSymbolInput): Promise<FindSymbolResolution> {
@@ -107,7 +116,7 @@ export async function resolveFindSymbol(cwd: string, input: FindSymbolInput): Pr
 
   let graphRecords = new Map<string, CanonicalSymbolRecord[]>();
   let graphCompleteFiles = new Set<string>();
-  if (config.graph.enable && (explicitLanguage === 'auto' || explicitLanguage === 'ts' || explicitLanguage === 'js' || explicitLanguage === 'java')) {
+  if (config.graph.enable && (explicitLanguage === 'auto' || explicitLanguage === 'ts' || explicitLanguage === 'js' || explicitLanguage === 'java' || explicitLanguage === 'go')) {
     const graph = await loadGraphRecords(cwd, resolved.filesToScan, input);
     diagnostics.setGraph(graph.graphStatus, graph.graphGeneration);
     diagnostics.setSourceMode(graph.sourceMode);
@@ -132,7 +141,11 @@ export async function resolveFindSymbol(cwd: string, input: FindSymbolInput): Pr
     if (!source && includeCode && graphCompleteFiles.has(file)) source = await readFile(file, 'utf8').catch(() => undefined);
     for (const record of graphRecords.get(file) ?? []) {
       if (!matchesCanonicalSymbol(record, input.symbol, searchMode, input.kind, input.declaration_kind, effectiveScope)) continue;
-      const builder = input.language === 'java' ? buildJavaSymbolLocation : buildTypeScriptSymbolLocation;
+      const builder = detectLanguage(file, explicitLanguage) === 'java'
+        ? buildJavaSymbolLocation
+        : detectLanguage(file, explicitLanguage) === 'go'
+          ? buildGoSymbolLocation
+          : buildTypeScriptSymbolLocation;
       graphLocations.push(builder(file, record.name, record.coarseKind, record, record.isDefinition, record.isImplementation, includeSignature, includeCode, source));
     }
   }
@@ -159,7 +172,7 @@ async function parseFiles(cwd: string, filesToScan: string[], explicitLanguage: 
     const language = detectLanguage(filePath, explicitLanguage);
     try {
       const source = await readFile(filePath, 'utf8');
-      if (language === 'java') {
+      if (language === 'java' || language === 'go') {
         const parser = getParserForFile(filePath, language);
         const tree = parseSource(parser, source);
         (tree.rootNode as any).__filePath = filePath;
@@ -328,7 +341,7 @@ async function loadGraphRecords(
       snapshotByFile,
       fileNodes,
       symbolsByFile,
-      coverage: input.language === 'java' ? shard.data.javaSymbolCoverage : shard.data.typescriptSymbolCoverage,
+      coverage: input.language === 'java' ? shard.data.javaSymbolCoverage : input.language === 'go' ? shard.data.goSymbolCoverage : shard.data.typescriptSymbolCoverage,
       generation: shard.data.generation,
       language: input.language,
     });
@@ -403,7 +416,7 @@ export async function validateGraphAuthorityForFiles(
     snapshotByFile: Map<string, GraphFileSnapshot>;
     fileNodes: Set<string>;
     symbolsByFile: Map<string, Array<Extract<GraphNode, { kind: 'symbol' }>>>;
-    coverage: SubprojectGraphShard['typescriptSymbolCoverage'] | SubprojectGraphShard['javaSymbolCoverage'];
+    coverage: SubprojectGraphShard['typescriptSymbolCoverage'] | SubprojectGraphShard['javaSymbolCoverage'] | SubprojectGraphShard['goSymbolCoverage'];
     generation: number;
     language?: SupportedLanguage;
   },

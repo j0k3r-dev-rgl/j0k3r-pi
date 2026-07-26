@@ -1,5 +1,6 @@
 import type { FunctionCallTreeInput, FunctionCallTreeResult } from '../types.js';
 import { executeJavaFunctionCallTree } from '../languages/java/function-call-tree.js';
+import { executeGoFunctionCallTree } from '../languages/go/function-call-tree.js';
 import { executeTypeScriptFunctionCallTree } from '../languages/typescript/function-call-tree.js';
 import { loadCodeResearchConfig } from '../config.js';
 import { readWorkspaceGraphManifest, readWorkspaceGraphState } from './graph-persistence.js';
@@ -38,6 +39,8 @@ export async function executeFunctionCallTree(
     case 'ts':
     case 'js':
       return executeTypeScriptFunctionCallTree(cwd, input);
+    case 'go':
+      return executeGoFunctionCallTree(cwd, input as any);
     case 'auto':
       throw new Error('function_call_tree does not support auto language detection yet');
     default:

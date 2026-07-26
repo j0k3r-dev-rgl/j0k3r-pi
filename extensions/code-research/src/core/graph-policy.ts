@@ -38,7 +38,7 @@ export interface FindReferencesGraphCoverage {
   graphCoverageMode: 'supported-subset' | 'conservative-fallback';
 }
 
-export const GRAPH_POLICY_SUPPORTED_LANGUAGES = new Set(['ts', 'js', 'java'] as const);
+export const GRAPH_POLICY_SUPPORTED_LANGUAGES = new Set(['ts', 'js', 'java', 'go'] as const);
 export const GRAPH_REFERENCE_KINDS = new Set<ReferenceKind>(['call', 'read', 'implements', 'extends']);
 const UNUSABLE_GRAPH_STATUSES = new Set<WorkspaceGraphStatusKind>([
   'missing',
@@ -51,12 +51,12 @@ const UNUSABLE_GRAPH_STATUSES = new Set<WorkspaceGraphStatusKind>([
 export function normalizeGraphLanguage(input: {
   language?: SupportedLanguage;
   path?: string;
-}): 'ts' | 'js' | 'java' | undefined {
+}): 'ts' | 'js' | 'java' | 'go' | undefined {
   const language = input.language ?? 'auto';
-  if (language === 'ts' || language === 'js' || language === 'java') return language;
+  if (language === 'ts' || language === 'js' || language === 'java' || language === 'go') return language;
   if (language === 'auto' && input.path) {
     const detected = detectGraphLanguage(input.path);
-    if (detected === 'ts' || detected === 'js' || detected === 'java') return detected;
+    if (detected === 'ts' || detected === 'js' || detected === 'java' || detected === 'go') return detected;
   }
   return undefined;
 }

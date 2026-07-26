@@ -6,7 +6,7 @@ import type { FindSymbolInput } from '../types.js';
 const declarationKinds = [
   'function', 'function_overload', 'callable_variable', 'variable', 'class', 'constructor', 'method', 'getter', 'setter', 'field',
   'interface', 'interface_method', 'property', 'call_signature', 'construct_signature', 'index_signature', 'type_alias', 'enum', 'enum_member',
-  'namespace', 'module', 'import_alias', 'export_alias', 'object_method', 'object_property', 'assignment', 'commonjs_export', 'unknown',
+  'namespace', 'module', 'import_alias', 'export_alias', 'object_method', 'object_property', 'assignment', 'commonjs_export', 'package', 'unknown',
 ] as const;
 
 export function registerFindSymbolTool(pi: any) {
@@ -25,7 +25,7 @@ export function registerFindSymbolTool(pi: any) {
     parameters: Type.Object({
       path: Type.String({ description: 'File or directory to search. Relative paths resolve against the current working directory.' }),
       symbol: Type.String({ description: 'Name of the symbol to find (function, class, interface, method, or variable name).' }),
-      language: Type.Optional(Type.Union([Type.Literal('ts'), Type.Literal('js'), Type.Literal('java'), Type.Literal('auto')], { description: 'Language to use for parsing. Default: auto (detect from file extension).' })),
+      language: Type.Optional(Type.Union([Type.Literal('ts'), Type.Literal('js'), Type.Literal('java'), Type.Literal('go'), Type.Literal('auto')], { description: 'Language to use for parsing. Default: auto (detect from file extension).' })),
       kind: Type.Optional(Type.Union([Type.Literal('function'), Type.Literal('class'), Type.Literal('method'), Type.Literal('interface'), Type.Literal('variable')], { description: 'Optional coarse symbol kind filter.' })),
       declaration_kind: Type.Optional(Type.Union(declarationKinds.map((kind) => Type.Literal(kind)), { description: 'Optional granular TypeScript declaration-kind filter.' })),
       include_signature: Type.Optional(Type.Boolean({ description: 'If true, include the symbol signature (e.g. function signature) without the body.' })),

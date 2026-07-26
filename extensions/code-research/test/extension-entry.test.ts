@@ -507,6 +507,65 @@ describe('code-research extension entry integration', () => {
     expect(statusAfter.details.subprojects[0]).toHaveProperty('shardPath');
   });
 
+  it('reports Go file and symbol counts in workspace_graph_status details and summary text', async () => {
+    const tools: RegisteredTool[] = [];
+    codeResearchExtension({
+      registerTool(tool: RegisteredTool) {
+        tools.push(tool);
+      },
+    });
+
+    const workspaceGraphStatusTool = tools.find((tool) => tool.name === 'workspace_graph_status');
+    expect(workspaceGraphStatusTool).toBeDefined();
+
+    const rootDir = await createJavaProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'go.mod': 'module example\n',
+      'service/service.go': `package service
+
+type Worker struct{}
+
+func (w *Worker) Run(name string) string {
+	return helper(name)
+}
+
+func helper(name string) string {
+	return format(name)
+}
+
+func format(name string) string {
+	return name
+}
+`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+
+    const statusAfter = await workspaceGraphStatusTool!.execute(
+      'test-call-go-status',
+      {},
+      undefined,
+      undefined,
+      { cwd: rootDir }
+    );
+
+    expect(statusAfter.details.languageCoverage).toMatchObject({
+      go: {
+        subprojects: 1,
+        fileCount: 1,
+        symbolCount: 5,
+      },
+    });
+    expect(statusAfter.details.languages).toMatchObject({ go: 1 });
+    expect(statusAfter.details.projects[0]).toMatchObject({
+      primaryLanguage: 'go',
+      fileCount: 1,
+      symbolCount: 5,
+    });
+    expect(statusAfter.content[0].text).toContain('go_files=1');
+    expect(statusAfter.content[0].text).toContain('go_symbols=5');
+  });
+
   it('reports empty detected projects separately from indexed projects', async () => {
     const tools: RegisteredTool[] = [];
     codeResearchExtension({

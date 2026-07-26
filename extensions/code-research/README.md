@@ -4,17 +4,17 @@
 
 ## English
 
-Global Pi extension for code navigation and codebase impact analysis. It provides symbol lookup, reference lookup, forward and reverse call trees, and workspace graph health reporting for TypeScript, JavaScript, and Java tools. The workspace graph also indexes Python files and symbols as a foundation for future Python-specific query tools.
+Global Pi extension for code navigation and codebase impact analysis. It provides symbol lookup, reference lookup, forward and reverse call trees, and workspace graph health reporting for TypeScript, JavaScript, Java, and Go tools. The workspace graph also indexes Python files and symbols as a foundation for future Python-specific query tools.
 
 ### Supported languages
 
-| Capability | TypeScript | JavaScript | Java | Python |
-|------------|------------|------------|------|--------|
-| `find_symbol` public tool | ✅ `ts` / `auto` | ✅ `js` / `auto` | ✅ `java` / `auto` | 🚧 indexed in graph only; no public `py` option yet |
-| `find_references` public tool | ✅ `ts` | ✅ `js` | ✅ `java` | 🚧 not exposed yet |
-| `function_call_tree` public tool | ✅ `ts` | ✅ `js` | ✅ `java` | 🚧 graph indexes symbols/entrypoints, but call-tree queries are not exposed yet |
-| `reverse_function_call_tree` public tool | ✅ `ts` | ✅ `js` | ✅ `java` | 🚧 not exposed yet |
-| Workspace graph indexing | ✅ files/symbols/calls | ✅ files/symbols/calls | ✅ files/symbols/calls | ✅ files/symbols/entrypoints; no Python call edges yet |
+| Capability | TypeScript | JavaScript | Java | Go | Python |
+|------------|------------|------------|------|----|--------|
+| `find_symbol` public tool | ✅ `ts` / `auto` | ✅ `js` / `auto` | ✅ `java` / `auto` | ✅ `go` / `auto` | 🚧 indexed in graph only; no public `py` option yet |
+| `find_references` public tool | ✅ `ts` | ✅ `js` | ✅ `java` | ✅ `go` | 🚧 not exposed yet |
+| `function_call_tree` public tool | ✅ `ts` | ✅ `js` | ✅ `java` | ✅ `go` | 🚧 graph indexes symbols/entrypoints, but call-tree queries are not exposed yet |
+| `reverse_function_call_tree` public tool | ✅ `ts` | ✅ `js` | ✅ `java` | ✅ `go` | 🚧 not exposed yet |
+| Workspace graph indexing | ✅ files/symbols/calls | ✅ files/symbols/calls | ✅ files/symbols/calls | ✅ files/symbols/calls | ✅ files/symbols/entrypoints; no Python call edges yet |
 
 ### Workspace graph and fallback behavior
 
@@ -41,13 +41,13 @@ The extension can persist a workspace graph under `.pi/workspace-code-graph` whe
 
 #### `find_symbol`
 
-Finds the definition and/or implementation of a TypeScript, JavaScript, or Java symbol in a file or directory.
+Finds the definition and/or implementation of a TypeScript, JavaScript, Java, or Go symbol in a file or directory.
 
 ##### Parameters
 
 - `path` *(string, required)*: file or directory to search. Relative paths resolve against the current working directory.
 - `symbol` *(string, required)*: symbol name.
-- `language` *(string, optional)*: `ts`, `js`, `java`, or `auto` (default).
+- `language` *(string, optional)*: `ts`, `js`, `java`, `go`, or `auto` (default).
 - `kind` *(string, optional)*: filters by compatibility kind `function`, `class`, `method`, `interface`, or `variable`.
 - `declaration_kind` *(string, optional)*: granular TypeScript/Java declaration filter; see the [TypeScript v1 symbol contract](docs/typescript-symbol-contract-v1.md) and [Java coverage v1](docs/java-symbol-coverage-v1.md).
 - `include_signature` *(boolean, optional)*: when `true`, includes the symbol signature without the body.
@@ -74,13 +74,13 @@ See [TypeScript symbol contract v1](docs/typescript-symbol-contract-v1.md), [Typ
 
 #### `find_references`
 
-Finds where a TypeScript, JavaScript, or Java symbol is used. The direct analyzers cover semantic usages such as calls, imports, instantiation, inheritance, variable reads/writes, callbacks, method references, and type references.
+Finds where a TypeScript, JavaScript, Java, or Go symbol is used. The direct analyzers cover semantic usages such as calls, imports, instantiation, inheritance, variable reads/writes, callbacks, method references, and type references.
 
 ##### Parameters
 
 - `path` *(string, required)*: file or directory to search. Relative paths resolve against the current working directory.
 - `symbol` *(string, required)*: target symbol name.
-- `language` *(string, optional)*: `ts`, `js`, or `java`. Default: `java`.
+- `language` *(string, optional)*: `ts`, `js`, `java`, or `go`. Default: `java`.
 - `kind` *(string, optional)*: filters by `function`, `class`, `method`, `interface`, or `variable`.
 - `scope` *(string, optional)*: `file` or `directory`. When omitted, it is inferred from `path`.
 - `glob` *(string, optional)*: glob pattern for filtering files while scanning a directory.
@@ -98,13 +98,13 @@ Array of reference locations with:
 
 #### `function_call_tree`
 
-Builds a recursive forward call tree for a Java, TypeScript, or JavaScript function/method, expanding application-internal calls and optionally showing external framework/library/language calls as leaves.
+Builds a recursive forward call tree for a Java, Go, TypeScript, or JavaScript function/method, expanding application-internal calls and optionally showing external framework/library/language calls as leaves.
 
 ##### Parameters
 
-- `path` *(string, required)*: Java file containing the root method, or a directory to scan for TypeScript/JavaScript/Java project context.
+- `path` *(string, required)*: Java or Go file containing the root method/function, or a directory to scan for TypeScript/JavaScript/Java/Go project context.
 - `symbol` *(string, required)*: root function or method name.
-- `language` *(string, optional)*: `java`, `ts`, or `js`. Default: `java`.
+- `language` *(string, optional)*: `java`, `go`, `ts`, or `js`. Default: `java`.
 - `kind` *(string, optional)*: `function`, `method`, or `class`.
 - `max_depth` *(number, optional)*: maximum recursive depth. Default: `10`.
 - `include_external` *(boolean, optional)*: when `true`, includes framework/library/language calls as external leaves. Default: `false`.
@@ -122,13 +122,13 @@ Object with:
 
 #### `reverse_function_call_tree`
 
-Builds a reverse call tree for Java, TypeScript, or JavaScript code. It starts at a target function/method and recursively returns application callers to support impact analysis.
+Builds a reverse call tree for Java, Go, TypeScript, or JavaScript code. It starts at a target function/method and recursively returns application callers to support impact analysis.
 
 ##### Parameters
 
-- `path` *(string, required)*: Java file containing the target method, or a directory to scan for TypeScript/JavaScript/Java project context.
+- `path` *(string, required)*: Java or Go file containing the target method/function, or a directory to scan for TypeScript/JavaScript/Java/Go project context.
 - `symbol` *(string, required)*: target function or method name.
-- `language` *(string, optional)*: `java`, `ts`, or `js`. Default: `java`.
+- `language` *(string, optional)*: `java`, `go`, `ts`, or `js`. Default: `java`.
 - `kind` *(string, optional)*: `function`, `method`, or `class`.
 - `max_depth` *(number, optional)*: maximum caller expansion depth. Default: `10`.
 - `include_external` *(boolean, optional)*: reserved for API parity with `function_call_tree`; reverse caller expansion returns application callers only.
@@ -155,7 +155,7 @@ Object with:
 - graph root, manifest path, generation, updated time, and freshness age when available
 - monorepo/subproject layout
 - coverage counts for indexed/skipped/excluded/unreadable files and directories
-- language coverage counts for `java`, `ts`, `js`, and `py`
+- language coverage counts for `java`, `go`, `ts`, `js`, and `py`, including per-language file and symbol counts from persisted graph shards
 - subproject details and errors when available
 
 ### Installation
@@ -202,22 +202,22 @@ code-research/
 - Implementation detection is syntactic (based on `implements Name` in TS/Java).
 - TS/JS call-tree support prioritizes local/imported calls and methods on locally constructed instances.
 - Java call-tree support includes Java-specific class/method resolution and interface/implementation relationships where available.
-- Workspace graph indexing supports TypeScript, JavaScript, Java, and Python file/symbol nodes.
+- Workspace graph indexing supports TypeScript, JavaScript, Java, Go, and Python file/symbol nodes.
 - Python graph support currently indexes `.py` files, classes, functions, methods, top-level assignments, and obvious entrypoints such as `__main__.py` and `if __name__ == "__main__"`; Python-specific query/call-tree tools will be added separately.
 
 ## Español
 
-Extensión global de Pi para navegación de código y análisis de impacto en codebases. Provee búsqueda de símbolos, búsqueda de referencias, call trees directos e inversos, y estado del workspace graph para tools TypeScript, JavaScript y Java. El workspace graph también indexa archivos y símbolos Python como base para futuras tools específicas de Python.
+Extensión global de Pi para navegación de código y análisis de impacto en codebases. Provee búsqueda de símbolos, búsqueda de referencias, call trees directos e inversos, y estado del workspace graph para tools TypeScript, JavaScript, Java y Go. El workspace graph también indexa archivos y símbolos Python como base para futuras tools específicas de Python.
 
 ### Lenguajes soportados
 
-| Capacidad | TypeScript | JavaScript | Java | Python |
-|-----------|------------|------------|------|--------|
-| Tool pública `find_symbol` | ✅ `ts` / `auto` | ✅ `js` / `auto` | ✅ `java` / `auto` | 🚧 indexado solo en graph; todavía sin opción pública `py` |
-| Tool pública `find_references` | ✅ `ts` | ✅ `js` | ✅ `java` | 🚧 todavía no expuesto |
-| Tool pública `function_call_tree` | ✅ `ts` | ✅ `js` | ✅ `java` | 🚧 el graph indexa símbolos/entrypoints, pero las consultas call-tree no están expuestas todavía |
-| Tool pública `reverse_function_call_tree` | ✅ `ts` | ✅ `js` | ✅ `java` | 🚧 todavía no expuesto |
-| Indexado del workspace graph | ✅ archivos/símbolos/llamadas | ✅ archivos/símbolos/llamadas | ✅ archivos/símbolos/llamadas | ✅ archivos/símbolos/entrypoints; aún sin call edges Python |
+| Capacidad | TypeScript | JavaScript | Java | Go | Python |
+|-----------|------------|------------|------|----|--------|
+| Tool pública `find_symbol` | ✅ `ts` / `auto` | ✅ `js` / `auto` | ✅ `java` / `auto` | ✅ `go` / `auto` | 🚧 indexado solo en graph; todavía sin opción pública `py` |
+| Tool pública `find_references` | ✅ `ts` | ✅ `js` | ✅ `java` | ✅ `go` | 🚧 todavía no expuesto |
+| Tool pública `function_call_tree` | ✅ `ts` | ✅ `js` | ✅ `java` | ✅ `go` | 🚧 el graph indexa símbolos/entrypoints, pero las consultas call-tree no están expuestas todavía |
+| Tool pública `reverse_function_call_tree` | ✅ `ts` | ✅ `js` | ✅ `java` | ✅ `go` | 🚧 todavía no expuesto |
+| Indexado del workspace graph | ✅ archivos/símbolos/llamadas | ✅ archivos/símbolos/llamadas | ✅ archivos/símbolos/llamadas | ✅ archivos/símbolos/llamadas | ✅ archivos/símbolos/entrypoints; aún sin call edges Python |
 
 ### Workspace graph y comportamiento de fallback
 
@@ -244,13 +244,13 @@ La extensión puede persistir un workspace graph en `.pi/workspace-code-graph` c
 
 #### `find_symbol`
 
-Busca la definición y/o implementación de un símbolo TypeScript, JavaScript o Java en un archivo o directorio.
+Busca la definición y/o implementación de un símbolo TypeScript, JavaScript, Java o Go en un archivo o directorio.
 
 ##### Parámetros
 
 - `path` *(string, requerido)*: archivo o directorio a buscar. Las rutas relativas se resuelven contra el working directory actual.
 - `symbol` *(string, requerido)*: nombre del símbolo.
-- `language` *(string, opcional)*: `ts`, `js`, `java` o `auto` (por defecto).
+- `language` *(string, opcional)*: `ts`, `js`, `java`, `go` o `auto` (por defecto).
 - `kind` *(string, opcional)*: filtra por el kind de compatibilidad `function`, `class`, `method`, `interface` o `variable`.
 - `declaration_kind` *(string, opcional)*: filtro granular de declaración TypeScript/Java; consulta el [contrato TypeScript v1](docs/typescript-symbol-contract-v1.md) y la [cobertura Java v1](docs/java-symbol-coverage-v1.md).
 - `include_signature` *(boolean, opcional)*: si es `true`, incluye la firma del símbolo sin el cuerpo.
@@ -277,13 +277,13 @@ Consulta [TypeScript symbol contract v1](docs/typescript-symbol-contract-v1.md),
 
 #### `find_references`
 
-Encuentra dónde se usa un símbolo TypeScript, JavaScript o Java. Los analizadores directos cubren usos semánticos como calls, imports, instanciación, herencia, reads/writes de variables, callbacks, method references y type references.
+Encuentra dónde se usa un símbolo TypeScript, JavaScript, Java o Go. Los analizadores directos cubren usos semánticos como calls, imports, instanciación, herencia, reads/writes de variables, callbacks, method references y type references.
 
 ##### Parámetros
 
 - `path` *(string, requerido)*: archivo o directorio a buscar. Las rutas relativas se resuelven contra el working directory actual.
 - `symbol` *(string, requerido)*: nombre del símbolo objetivo.
-- `language` *(string, opcional)*: `ts`, `js` o `java`. Por defecto: `java`.
+- `language` *(string, opcional)*: `ts`, `js`, `java` o `go`. Por defecto: `java`.
 - `kind` *(string, opcional)*: filtra por `function`, `class`, `method`, `interface` o `variable`.
 - `scope` *(string, opcional)*: `file` o `directory`. Si se omite, se infiere desde `path`.
 - `glob` *(string, opcional)*: patrón glob para filtrar archivos al escanear un directorio.
@@ -301,13 +301,13 @@ Array de ubicaciones de referencia con:
 
 #### `function_call_tree`
 
-Construye un call tree directo recursivo para una función o método Java, TypeScript o JavaScript, expandiendo llamadas internas de la aplicación y opcionalmente mostrando llamadas externas de framework/librería/lenguaje como hojas.
+Construye un call tree directo recursivo para una función o método Java, Go, TypeScript o JavaScript, expandiendo llamadas internas de la aplicación y opcionalmente mostrando llamadas externas de framework/librería/lenguaje como hojas.
 
 ##### Parámetros
 
-- `path` *(string, requerido)*: archivo Java que contiene el método raíz, o directorio para escanear contexto TypeScript/JavaScript/Java.
+- `path` *(string, requerido)*: archivo Java o Go que contiene el método/función raíz, o directorio para escanear contexto TypeScript/JavaScript/Java/Go.
 - `symbol` *(string, requerido)*: nombre de la función o método raíz.
-- `language` *(string, opcional)*: `java`, `ts` o `js`. Por defecto: `java`.
+- `language` *(string, opcional)*: `java`, `go`, `ts` o `js`. Por defecto: `java`.
 - `kind` *(string, opcional)*: `function`, `method` o `class`.
 - `max_depth` *(number, opcional)*: profundidad recursiva máxima. Por defecto: `10`.
 - `include_external` *(boolean, opcional)*: si es `true`, incluye llamadas de framework/librería/lenguaje como hojas externas. Por defecto: `false`.
@@ -325,13 +325,13 @@ Objeto con:
 
 #### `reverse_function_call_tree`
 
-Construye un call tree inverso para código Java, TypeScript o JavaScript. Empieza en una función/método objetivo y devuelve recursivamente callers de la aplicación para análisis de impacto.
+Construye un call tree inverso para código Java, Go, TypeScript o JavaScript. Empieza en una función/método objetivo y devuelve recursivamente callers de la aplicación para análisis de impacto.
 
 ##### Parámetros
 
-- `path` *(string, requerido)*: archivo Java que contiene el método objetivo, o directorio para escanear contexto TypeScript/JavaScript/Java.
+- `path` *(string, requerido)*: archivo Java o Go que contiene el método/función objetivo, o directorio para escanear contexto TypeScript/JavaScript/Java/Go.
 - `symbol` *(string, requerido)*: nombre de la función o método objetivo.
-- `language` *(string, opcional)*: `java`, `ts` o `js`. Por defecto: `java`.
+- `language` *(string, opcional)*: `java`, `go`, `ts` o `js`. Por defecto: `java`.
 - `kind` *(string, opcional)*: `function`, `method` o `class`.
 - `max_depth` *(number, opcional)*: profundidad máxima de expansión de callers. Por defecto: `10`.
 - `include_external` *(boolean, opcional)*: reservado por paridad de API con `function_call_tree`; la expansión inversa devuelve callers de aplicación.
@@ -358,7 +358,7 @@ Objeto con:
 - graph root, manifest path, generation, updated time y edad de freshness cuando están disponibles
 - layout de monorepo/subproyectos
 - contadores de cobertura para archivos/directorios indexados, omitidos, excluidos e ilegibles
-- conteo de lenguajes para `java`, `ts`, `js` y `py`
+- conteo de lenguajes para `java`, `go`, `ts`, `js` y `py`, incluyendo conteos por lenguaje de archivos y símbolos desde shards persistidos del graph
 - detalles de subproyectos y errores cuando están disponibles
 
 ### Instalación
@@ -403,5 +403,5 @@ code-research/
 - La detección de implementaciones es sintáctica (basada en `implements Nombre` en TS/Java).
 - El soporte TS/JS de call-tree prioriza llamadas locales/importadas y métodos de instancias construidas localmente.
 - El soporte Java de call-tree incluye resolución específica de clases/métodos Java y relaciones interfaz/implementación donde estén disponibles.
-- El indexado de workspace graph soporta nodos de archivo/símbolo para TypeScript, JavaScript, Java y Python.
+- El indexado de workspace graph soporta nodos de archivo/símbolo para TypeScript, JavaScript, Java, Go y Python.
 - El soporte Python del graph actualmente indexa archivos `.py`, clases, funciones, métodos, asignaciones top-level y entrypoints obvios como `__main__.py` e `if __name__ == "__main__"`; las tools específicas de consulta/call-tree Python se agregarán por separado.

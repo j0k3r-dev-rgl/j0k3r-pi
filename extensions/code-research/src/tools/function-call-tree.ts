@@ -21,7 +21,7 @@ export function registerFunctionCallTreeTool(pi: any) {
     parameters: Type.Object({
       path: Type.String({ description: 'Java file containing the root method, or directory to scan for the application index.' }),
       symbol: Type.String({ description: 'Name of the root method/function to trace.' }),
-      language: Type.Optional(Type.Union([Type.Literal('java'), Type.Literal('ts'), Type.Literal('js')], { description: 'Language to use. Supported: java, ts, js. Default: java.' })),
+      language: Type.Optional(Type.Union([Type.Literal('java'), Type.Literal('go'), Type.Literal('ts'), Type.Literal('js')], { description: 'Language to use. Supported: java, go, ts, js. Default: java.' })),
       kind: Type.Optional(Type.Union([Type.Literal('method'), Type.Literal('function'), Type.Literal('class')], { description: 'Optional kind filter for the root symbol.' })),
       max_depth: Type.Optional(Type.Number({ description: 'Maximum recursion depth for application-internal calls. Default: 10.' })),
       include_external: Type.Optional(Type.Boolean({ description: 'If true, include framework/language calls as external leaf nodes. Default: false.' })),
