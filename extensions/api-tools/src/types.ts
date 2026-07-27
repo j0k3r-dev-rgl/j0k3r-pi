@@ -10,8 +10,12 @@ export const API_WARNING_CODES = [
   'invalid_graphql_config',
 ] as const;
 
+export const API_CONTRACT_VERSION = 2 as const;
+
 export type ApiWarningCode = (typeof API_WARNING_CODES)[number];
 export type ApiFramework = 'spring' | 'node';
+export type ApiToolName = 'api_rest_request' | 'api_swagger' | 'api_graphql';
+export type ApiActionStatus = 'success' | 'failure';
 
 export const GIT_API_JSON_STATES = ['ignored', 'unignored_untracked', 'tracked', 'unknown'] as const;
 export type GitApiJsonState = (typeof GIT_API_JSON_STATES)[number];
@@ -109,15 +113,6 @@ export interface ApiTruncationMetadata {
   reason?: 'byte_limit' | 'line_limit' | 'byte_and_line_limit';
 }
 
-export interface ApiContinuationMetadata {
-  has_more: boolean;
-  next_cursor?: string;
-  returned_bytes: number;
-  returned_lines: number;
-  total_bytes: number;
-  total_lines: number;
-}
-
 export interface ApiJsonGitInspection {
   state: GitApiJsonState;
 }
@@ -126,8 +121,98 @@ export interface ApiJsonGitInspector {
   inspectApiJson(input: { cwd: string }): Promise<ApiJsonGitInspection>;
 }
 
+export type ApiFailureCategory =
+  | 'http_error'
+  | 'graphql_error'
+  | 'validation_error'
+  | 'provider_error'
+  | 'configuration_error'
+  | 'timeout_error'
+  | 'cancellation_error'
+  | 'continuation_error'
+  | 'reference_error'
+  | 'authorization_metadata_error'
+  | 'unknown_error';
+
+export interface ApiFailureEnvelope {
+  category: ApiFailureCategory;
+  code: string;
+  message: string;
+  http_status?: number;
+  graphql_classification?: string;
+  retryable: boolean;
+  next_step?: string;
+}
+
+export type ApiAuthorizationState = 'declared' | 'not_declared' | 'unavailable' | 'unknown';
+export type ApiAuthorizationSource = 'openapi_security' | 'oauth_scope' | 'openapi_vendor' | 'graphql_applied_directive';
+
+export interface ApiAuthorizationScheme {
+  name: string;
+  type: string;
+  scheme?: string;
+  scopes?: string[];
+}
+
+export interface ApiAuthorizationMetadata {
+  state: ApiAuthorizationState;
+  sources?: ApiAuthorizationSource[];
+  schemes?: ApiAuthorizationScheme[];
+  roles?: string[];
+  permissions?: string[];
+  authorities?: string[];
+  scopes?: string[];
+  reason?: string;
+  truncated?: boolean;
+  unsupported_metadata?: boolean;
+}
+
+export interface ApiLogicalRecord {
+  id: string;
+  kind: string;
+  text: string;
+}
+
+export interface ApiActionDocument {
+  contract_version: typeof API_CONTRACT_VERSION;
+  tool: ApiToolName;
+  action: string;
+  identity?: string;
+  status: ApiActionStatus;
+  records: ApiLogicalRecord[];
+  total?: number;
+  failure?: ApiFailureEnvelope;
+  render?: {
+    authorization?: ApiAuthorizationMetadata;
+    count_label?: string;
+  };
+}
+
+export interface ApiContinuationMetadata {
+  returned_count: number;
+  total?: number;
+  has_more: boolean;
+  next_cursor?: string;
+  follow_up: { tool: string; action: string; cursor_parameter: 'cursor' };
+  returned_bytes: number;
+  returned_lines: number;
+}
+
+export interface ApiResultDetails {
+  contract_version: typeof API_CONTRACT_VERSION;
+  status: ApiActionStatus;
+  action: string;
+  identity?: string;
+  failure?: ApiFailureEnvelope;
+  continuation: ApiContinuationMetadata;
+  render?: {
+    authorization_state?: ApiAuthorizationState;
+    count_label?: string;
+  };
+}
+
 export interface ApiToolResult {
   content: Array<{ type: 'text'; text: string }>;
-  details?: Record<string, any>;
+  details?: ApiResultDetails & Record<string, any>;
   isError?: boolean;
 }

@@ -31,11 +31,18 @@ export interface CreateApiClientOptions {
   clearTimeoutFn?: typeof clearTimeout;
 }
 
-class ApiClientError extends Error {
-  constructor(message: string) {
+export class ApiClientError extends Error {
+  constructor(
+    public readonly kind: 'validation' | 'configuration' | 'timeout' | 'cancellation' | 'provider' | 'reference' = 'provider',
+    message: string,
+  ) {
     super(message);
     this.name = 'ApiClientError';
   }
+}
+
+function err(kind: ApiClientError['kind'], message: string): ApiClientError {
+  return new ApiClientError(kind, message);
 }
 
 function applyConfiguredPort(url: URL, port?: number): URL {
@@ -55,10 +62,10 @@ function isAbortLike(error: unknown): boolean {
 }
 
 function makeBaseUrl(config: ApiToolsConfig): URL {
-  if (!config.url) throw new ApiClientError('REST base URL is not configured.');
+  if (!config.url) throw err('configuration', 'REST base URL is not configured.');
   const url = applyConfiguredPort(new URL(config.url), config.port);
-  if (!/^https?:$/i.test(url.protocol)) throw new ApiClientError('Only HTTP(S) API base URLs are allowed.');
-  if (url.username || url.password) throw new ApiClientError('API base URL may not include URL credentials.');
+  if (!/^https?:$/i.test(url.protocol)) throw err('configuration', 'Only HTTP(S) API base URLs are allowed.');
+  if (url.username || url.password) throw err('configuration', 'API base URL may not include URL credentials.');
   return url;
 }
 
@@ -99,16 +106,16 @@ function hasTraversalSegment(path: string): boolean {
 }
 
 function validateUnsafeText(value: string, label: string): void {
-  if (CONTROL_CHARACTER_PATTERN.test(value)) throw new ApiClientError(`Control characters are not allowed in ${label}.`);
-  if (value.includes('\\')) throw new ApiClientError(`Backslashes are not allowed in ${label}.`);
-  if (ENCODED_TRAVERSAL_PATTERN.test(value) || hasTraversalSegment(value)) throw new ApiClientError('Path traversal is not allowed.');
+  if (CONTROL_CHARACTER_PATTERN.test(value)) throw err('validation', `Control characters are not allowed in ${label}.`);
+  if (value.includes('\\')) throw err('validation', `Backslashes are not allowed in ${label}.`);
+  if (ENCODED_TRAVERSAL_PATTERN.test(value) || hasTraversalSegment(value)) throw err('validation', 'Path traversal is not allowed.');
 }
 
 function ensureWithinBasePath(baseUrl: URL, resolvedUrl: URL): void {
-  if (resolvedUrl.origin !== baseUrl.origin) throw new ApiClientError('Request escaped the configured origin.');
+  if (resolvedUrl.origin !== baseUrl.origin) throw err('validation', 'Request escaped the configured origin.');
   const basePath = baseUrl.pathname.endsWith('/') ? baseUrl.pathname : `${baseUrl.pathname}/`;
   const resolvedPath = resolvedUrl.pathname.endsWith('/') ? resolvedUrl.pathname : `${resolvedUrl.pathname}/`;
-  if (!resolvedPath.startsWith(basePath)) throw new ApiClientError('Request escaped the configured base path.');
+  if (!resolvedPath.startsWith(basePath)) throw err('validation', 'Request escaped the configured base path.');
 }
 
 function resolveConfiguredUrl(config: ApiToolsConfig, input: string, label: string): string {
@@ -123,37 +130,37 @@ function resolveConfiguredUrl(config: ApiToolsConfig, input: string, label: stri
   } else {
     resolved = new URL(input, baseUrl);
   }
-  if (!/^https?:$/i.test(resolved.protocol)) throw new ApiClientError('Only HTTP(S) URLs are allowed.');
-  if (resolved.username || resolved.password) throw new ApiClientError('URL credentials are not allowed.');
+  if (!/^https?:$/i.test(resolved.protocol)) throw err('validation', 'Only HTTP(S) URLs are allowed.');
+  if (resolved.username || resolved.password) throw err('validation', 'URL credentials are not allowed.');
   ensureWithinBasePath(baseUrl, resolved);
   return resolved.toString();
 }
 
 function buildRestUrl(config: ApiToolsConfig, path: string): string {
-  if (!path || typeof path !== 'string') throw new ApiClientError('A request path is required.');
-  if (ABSOLUTE_URL_PATTERN.test(path)) throw new ApiClientError('Absolute URLs are not allowed for REST requests.');
+  if (!path || typeof path !== 'string') throw err('validation', 'A request path is required.');
+  if (ABSOLUTE_URL_PATTERN.test(path)) throw err('validation', 'Absolute URLs are not allowed for REST requests.');
   return resolveConfiguredUrl(config, path, 'request paths');
 }
 
 function buildLoginUrl(config: ApiToolsConfig): string {
-  if (config.auth.type !== 'login') throw new ApiClientError('Login auth is not configured.');
-  if (ABSOLUTE_URL_PATTERN.test(config.auth.login_path)) throw new ApiClientError('Absolute URLs are not allowed for login requests.');
+  if (config.auth.type !== 'login') throw err('configuration', 'Login auth is not configured.');
+  if (ABSOLUTE_URL_PATTERN.test(config.auth.login_path)) throw err('validation', 'Absolute URLs are not allowed for login requests.');
   return resolveConfiguredUrl(config, config.auth.login_path, 'login paths');
 }
 
 function resolveGraphqlUrl(config: ApiToolsConfig): string {
-  if (!config.graphql.enabled) throw new ApiClientError('GraphQL is not enabled.');
-  if (!config.graphql.valid) throw new ApiClientError('GraphQL configuration is invalid.');
+  if (!config.graphql.enabled) throw err('configuration', 'GraphQL is not enabled.');
+  if (!config.graphql.valid) throw err('configuration', 'GraphQL configuration is invalid.');
   if (config.graphql.url) return resolveConfiguredUrl(config, config.graphql.url, 'GraphQL URLs');
   if (config.graphqlUrl) return resolveConfiguredUrl(config, config.graphqlUrl, 'GraphQL URLs');
   return resolveConfiguredUrl(config, '/graphql', 'GraphQL URLs');
 }
 
 function swaggerCandidateUrls(config: ApiToolsConfig): string[] {
-  if (!config.swagger.enabled) throw new ApiClientError('Swagger is not enabled.');
-  if (!config.swagger.valid) throw new ApiClientError('Swagger configuration is invalid.');
+  if (!config.swagger.enabled) throw err('configuration', 'Swagger is not enabled.');
+  if (!config.swagger.valid) throw err('configuration', 'Swagger configuration is invalid.');
   if (config.swagger.url) return [resolveConfiguredUrl(config, config.swagger.url, 'Swagger URLs')];
-  if (config.swagger.framework === 'node') throw new ApiClientError('swagger.url is required when swagger.framework is node.');
+  if (config.swagger.framework === 'node') throw err('configuration', 'swagger.url is required when swagger.framework is node.');
   return [
     resolveConfiguredUrl(config, '/v3/api-docs', 'Swagger URLs'),
     resolveConfiguredUrl(config, '/v2/api-docs', 'Swagger URLs'),
@@ -210,7 +217,7 @@ async function executeRequest(
       const headers = headersToRecord(response.headers);
       if (REDIRECT_STATUS.has(response.status)) {
         const location = headers.location;
-        if (!location) throw new ApiClientError('Redirect response did not include a location.');
+        if (!location) throw err('provider', 'Redirect response did not include a location.');
         currentUrl = resolveConfiguredUrl(config, location, 'redirect URLs');
         if (response.status === 303) {
           currentInit = { ...currentInit, method: 'GET', body: undefined, signal: requestSignal.signal, redirect: 'manual' };
@@ -225,11 +232,12 @@ async function executeRequest(
         url: currentUrl,
       };
     }
-    throw new ApiClientError('Too many redirects.');
+    throw err('provider', 'Too many redirects.');
   } catch (error) {
-    if (requestSignal.getTimedOut()) throw new ApiClientError('Request timed out.');
-    if (requestSignal.signal.aborted || isAbortLike(error)) throw new ApiClientError('Request cancelled.');
-    throw error;
+    if (requestSignal.getTimedOut()) throw err('timeout', 'Request timed out.');
+    if (requestSignal.signal.aborted || isAbortLike(error)) throw err('cancellation', 'Request cancelled.');
+    if (error instanceof ApiClientError) throw error;
+    throw err('provider', error instanceof Error ? error.message : 'Unexpected request failure.');
   } finally {
     requestSignal.cleanup();
   }
@@ -245,11 +253,11 @@ export function createApiClient(options: CreateApiClientOptions): ApiClient {
   const setTimeoutFn = options.setTimeoutFn ?? setTimeout;
   const clearTimeoutFn = options.clearTimeoutFn ?? clearTimeout;
 
-  if (!fetchImpl) throw new ApiClientError('API client requires an injected fetch implementation.');
+  if (!fetchImpl) throw err('configuration', 'API client requires an injected fetch implementation.');
 
   return {
     async login(signal?: AbortSignal): Promise<ApiHttpResponse> {
-      if (options.config.auth.type !== 'login') throw new ApiClientError('Login auth is not configured.');
+      if (options.config.auth.type !== 'login') throw err('configuration', 'Login auth is not configured.');
       const url = buildLoginUrl(options.config);
       return executeRequest(fetchImpl, url, {
         method: 'POST',
@@ -267,7 +275,7 @@ export function createApiClient(options: CreateApiClientOptions): ApiClient {
     },
 
     async rest(request: ApiRestRequest, signal?: AbortSignal): Promise<ApiHttpResponse> {
-      if (!ALLOWED_REST_METHODS.has(request.method)) throw new ApiClientError(`Unsupported REST method: ${request.method}`);
+      if (!ALLOWED_REST_METHODS.has(request.method)) throw err('validation', `Unsupported REST method: ${request.method}`);
       const url = buildRestUrl(options.config, request.path);
       return executeRequest(fetchImpl, url, {
         method: request.method,
@@ -286,7 +294,7 @@ export function createApiClient(options: CreateApiClientOptions): ApiClient {
     },
 
     async graphql(request: ApiGraphqlRequest, signal?: AbortSignal): Promise<ApiHttpResponse> {
-      if (!request.query || typeof request.query !== 'string') throw new ApiClientError('A GraphQL query is required.');
+      if (!request.query || typeof request.query !== 'string') throw err('validation', 'A GraphQL query is required.');
       const url = resolveGraphqlUrl(options.config);
       return executeRequest(fetchImpl, url, {
         method: 'POST',
@@ -317,17 +325,17 @@ export function createApiClient(options: CreateApiClientOptions): ApiClient {
             setTimeoutFn,
             clearTimeoutFn,
           }, options.config);
-          if (response.status < 200 || response.status >= 300) throw new ApiClientError(`Swagger document request failed with ${response.status}.`);
+          if (response.status < 200 || response.status >= 300) throw err('provider', `Swagger document request failed with ${response.status}.`);
           const document = JSON.parse(response.bodyText);
-          if (!isSwaggerDocument(document)) throw new ApiClientError('Swagger document was not a valid OpenAPI/Swagger JSON document.');
+          if (!isSwaggerDocument(document)) throw err('provider', 'Swagger document was not a valid OpenAPI/Swagger JSON document.');
           return { url: candidate, document };
         } catch (error) {
           lastError = error as Error;
         }
       }
-      throw lastError ?? new ApiClientError('Swagger document is unavailable.');
+      throw lastError ?? err('provider', 'Swagger document is unavailable.');
     },
   };
 }
 
-export { ApiClientError, buildRestUrl, resolveConfiguredUrl, resolveGraphqlUrl };
+export { buildRestUrl, resolveConfiguredUrl, resolveGraphqlUrl };

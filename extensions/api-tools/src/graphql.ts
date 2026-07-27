@@ -1,126 +1,171 @@
+import { classifyError, graphqlFailure, httpFailure } from './error-classify.js';
+import { ApiClientError } from './client.js';
+import { failureDocument, frameText, record, successDocument } from './result-format.js';
 import { redactDeep } from './security.js';
-import type { ApiClient, ApiToolResult, ApiToolsConfig } from './types.js';
-
-function buildFailure(code: string, message: string, details: Record<string, unknown> = {}): ApiToolResult {
-  return {
-    content: [{ type: 'text', text: message }],
-    details: { status: 'failure', error: { code, message, recoverable: true }, ...details },
-    isError: true,
-  };
-}
-
-function buildSuccess(text: string, details: Record<string, unknown>): ApiToolResult {
-  return { content: [{ type: 'text', text }], details: { status: 'success', ...details } };
-}
-
-function classifyError(error: unknown) {
-  const message = error instanceof Error ? error.message : 'Unexpected GraphQL tool failure.';
-  if (/cancelled|canceled|aborted/i.test(message)) return { code: 'cancelled', message };
-  if (/timed out/i.test(message)) return { code: 'timeout', message };
-  return { code: 'validation_error', message };
-}
+import type { ApiActionDocument, ApiClient, ApiGraphqlRequest, ApiToolsConfig } from './types.js';
+import { buildGraphqlDetailDocument, buildGraphqlSchemaDocument } from './graphql/detail.js';
+import { buildGraphqlDiscoverDocument, unwrapType } from './graphql/discovery.js';
 
 function clampDepth(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 3;
-  return Math.max(0, Math.min(6, Math.floor(value)));
+  return Math.max(0, Math.min(5, Math.floor(value)));
 }
 
-async function graphqlJson(client: ApiClient, query: string, useToken: boolean, signal?: AbortSignal): Promise<any> {
-  const response = await client.graphql({ query, useToken }, signal);
-  return JSON.parse(response.bodyText);
-}
-
-function formatType(type: any): string {
-  if (!type) return 'Unknown';
-  if (type.kind === 'NON_NULL') return `${formatType(type.ofType)}!`;
-  if (type.kind === 'LIST') return `[${formatType(type.ofType)}]`;
-  return type.name ?? 'Unknown';
-}
-
-function unwrapType(type: any): string | undefined {
-  if (!type) return undefined;
-  if (type.name) return type.name;
-  return unwrapType(type.ofType);
-}
-
-function describeFields(typeName: string | undefined, typesByName: Map<string, any>, depth: number): Array<Record<string, unknown>> | undefined {
-  if (!typeName || depth <= 0) return undefined;
-  const target = typesByName.get(typeName);
-  if (!target) return undefined;
-  const rawFields = [...(target.fields ?? []), ...(target.inputFields ?? [])];
-  if (rawFields.length === 0) return undefined;
-  return rawFields.map((field: any) => {
-    const nextTypeName = unwrapType(field.type);
-    const described: Record<string, unknown> = {
-      name: field.name,
-      description: field.description ?? undefined,
-      type: formatType(field.type),
-      type_name: nextTypeName,
-    };
-    const nested = describeFields(nextTypeName, typesByName, depth - 1);
-    if (nested) described.fields = nested;
-    return described;
-  });
-}
-
-const DISCOVER_QUERY = `query ApiToolsGraphqlDiscover {
-  __schema {
-    queryType { fields { name type { kind name ofType { kind name ofType { kind name } } } } }
-    mutationType { fields { name type { kind name ofType { kind name ofType { kind name } } } } }
-  }
-}`;
-
-const TYPE_QUERY = `query ApiToolsGraphqlTypes {
-  __schema {
-    types {
+const DISCOVER_ROOT_QUERY = `query ApiToolsGraphqlDiscoverRoot($root: String!) {
+  __type(name: $root) {
+    fields {
       name
-      kind
-      fields { name description type { kind name ofType { kind name ofType { kind name ofType { kind name } } } } }
-      inputFields { name description type { kind name ofType { kind name ofType { kind name ofType { kind name } } } } }
+      type { kind name ofType { kind name ofType { kind name } } }
     }
   }
 }`;
+
+const ROOT_FIELD_QUERY = `query ApiToolsGraphqlRootField($root: String!) {
+  __type(name: $root) {
+    fields {
+      name
+      description
+      args { name description defaultValue type { kind name ofType { kind name ofType { kind name ofType { kind name } } } } }
+      type { kind name ofType { kind name ofType { kind name ofType { kind name } } } }
+    }
+  }
+}`;
+
+const TYPE_BY_NAME_QUERY = `query ApiToolsGraphqlTypeByName($name: String!) {
+  __type(name: $name) {
+    name
+    kind
+    fields { name description type { kind name ofType { kind name ofType { kind name ofType { kind name } } } } }
+    inputFields { name description type { kind name ofType { kind name ofType { kind name ofType { kind name } } } } }
+  }
+}`;
+
+function splitSelector(selector: string): { root: 'Query' | 'Mutation'; field: string } {
+  const match = /^(Query|Mutation)\.(.+)$/.exec(selector);
+  if (!match) throw new ApiClientError('validation', `GraphQL selector must use Query.field or Mutation.field: ${selector}.`);
+  return { root: match[1] as 'Query' | 'Mutation', field: match[2]! };
+}
+
+async function graphqlJson(client: ApiClient, request: ApiGraphqlRequest, action: string, useToken: boolean, signal?: AbortSignal): Promise<any> {
+  const response = await client.graphql({ ...request, useToken }, signal);
+  const json = JSON.parse(response.bodyText);
+  if (response.status >= 400) throw httpFailure('api_graphql', action, response.status, response.statusText, `GraphQL request failed with ${response.status} ${response.statusText}.`);
+  if (Array.isArray(json?.errors) && json.errors.length > 0) {
+    const first = json.errors[0] ?? {};
+    throw graphqlFailure('api_graphql', action, first?.extensions?.code, typeof first?.message === 'string' ? first.message : 'GraphQL returned top-level errors.');
+  }
+  return json;
+}
+
+async function fetchRootFields(client: ApiClient, root: 'Query' | 'Mutation', action: string, useToken: boolean, signal?: AbortSignal): Promise<any[] | null> {
+  const json = await graphqlJson(client, { query: DISCOVER_ROOT_QUERY, variables: { root } }, action, useToken, signal);
+  const type = json?.data?.__type;
+  if (type == null) return null;
+  if (!Array.isArray(type.fields)) throw new ApiClientError('validation', `GraphQL introspection did not include ${root} fields.`);
+  return type.fields;
+}
+
+async function fetchRootFieldDetails(client: ApiClient, root: 'Query' | 'Mutation', action: string, useToken: boolean, signal?: AbortSignal): Promise<any[]> {
+  const json = await graphqlJson(client, { query: ROOT_FIELD_QUERY, variables: { root } }, action, useToken, signal);
+  const fields = json?.data?.__type?.fields;
+  if (!Array.isArray(fields)) throw new ApiClientError('validation', `GraphQL introspection did not include ${root} detail fields.`);
+  return fields;
+}
+
+async function fetchTypeByName(client: ApiClient, name: string, action: string, useToken: boolean, signal?: AbortSignal): Promise<any | null> {
+  const json = await graphqlJson(client, { query: TYPE_BY_NAME_QUERY, variables: { name } }, action, useToken, signal);
+  return json?.data?.__type ?? null;
+}
+
+async function collectTypeEntries(client: ApiClient, startingNames: Array<string | undefined>, depth: number, action: string, useToken: boolean, signal?: AbortSignal): Promise<any[]> {
+  const queued = startingNames.filter((name): name is string => typeof name === 'string' && name.length > 0).map((name) => ({ name, depth }));
+  const visited = new Set<string>();
+  const entries: any[] = [];
+
+  while (queued.length > 0) {
+    const next = queued.shift()!;
+    if (next.depth <= 0 || visited.has(next.name)) continue;
+    visited.add(next.name);
+    const type = await fetchTypeByName(client, next.name, action, useToken, signal);
+    if (!type) continue;
+    entries.push(type);
+    if (next.depth <= 1) continue;
+    const nested = [
+      ...(Array.isArray(type.fields) ? type.fields : []),
+      ...(Array.isArray(type.inputFields) ? type.inputFields : []),
+    ];
+    for (const field of nested) {
+      const childName = unwrapType(field?.type);
+      if (childName && !visited.has(childName)) queued.push({ name: childName, depth: next.depth - 1 });
+    }
+  }
+
+  return entries;
+}
+
+function normalizeFailure(toolAction: string, error: unknown): ApiActionDocument {
+  if (error && typeof error === 'object' && 'category' in error && 'code' in error && 'message' in error) {
+    return failureDocument({ tool: 'api_graphql', action: toolAction, failure: error as any });
+  }
+  return failureDocument({ tool: 'api_graphql', action: toolAction, failure: classifyError('api_graphql', toolAction, error) });
+}
 
 export async function executeGraphqlAction(
   params: Record<string, unknown>,
   signal: AbortSignal | undefined,
   client: ApiClient,
   config: ApiToolsConfig,
-): Promise<ApiToolResult> {
+): Promise<ApiActionDocument> {
   const action = typeof params.action === 'string' ? params.action : '';
   const useToken = params.use_token === false ? false : true;
 
   try {
     if (action === 'discover') {
-      const json = await graphqlJson(client, DISCOVER_QUERY, useToken, signal);
-      const filter = typeof params.filter === 'string' ? params.filter.toLowerCase() : undefined;
-      const queries = (json?.data?.__schema?.queryType?.fields ?? [])
-        .filter((entry: any) => !filter || String(entry.name ?? '').toLowerCase().includes(filter))
-        .map((entry: any) => ({ name: entry.name, type: 'query', return_type: formatType(entry.type) }));
-      const mutations = (json?.data?.__schema?.mutationType?.fields ?? [])
-        .filter((entry: any) => !filter || String(entry.name ?? '').toLowerCase().includes(filter))
-        .map((entry: any) => ({ name: entry.name, type: 'mutation', return_type: formatType(entry.type) }));
-      return buildSuccess(`api_graphql discover: ${queries.length + mutations.length} operations`, { data: { operations: [...queries, ...mutations] } });
+      const [queryFields, mutationFields] = await Promise.all([
+        fetchRootFields(client, 'Query', action, useToken, signal),
+        fetchRootFields(client, 'Mutation', action, useToken, signal),
+      ]);
+      return buildGraphqlDiscoverDocument({
+        data: {
+          __schema: {
+            queryType: queryFields ? { fields: queryFields } : null,
+            mutationType: mutationFields ? { fields: mutationFields } : null,
+          },
+        },
+      }, typeof params.filter === 'string' ? params.filter : undefined);
+    }
+
+    if (action === 'detail') {
+      const selector = typeof params.operation === 'string' ? params.operation : '';
+      if (!selector) return normalizeFailure(action, new Error('A GraphQL operation selector is required.'));
+      const depth = clampDepth(params.max_depth);
+      const { root, field } = splitSelector(selector);
+      const rootFields = await fetchRootFieldDetails(client, root, action, useToken, signal);
+      const target = rootFields.find((entry: any) => entry?.name === field);
+      if (!target) throw new ApiClientError('validation', `GraphQL selector not found: ${selector}.`);
+      const types = await collectTypeEntries(client, [unwrapType(target.type)], depth, action, useToken, signal);
+      return buildGraphqlDetailDocument({
+        data: {
+          __schema: {
+            queryType: root === 'Query' ? { fields: rootFields } : { fields: [] },
+            mutationType: root === 'Mutation' ? { fields: rootFields } : { fields: [] },
+            types,
+          },
+        },
+      }, selector, depth);
     }
 
     if (action === 'schema') {
       const name = typeof params.name === 'string' ? params.name : '';
-      if (!name) return buildFailure('validation_error', 'A GraphQL schema name is required.');
-      const maxDepth = clampDepth(params.max_depth);
-      const json = await graphqlJson(client, TYPE_QUERY, useToken, signal);
-      const allTypes = (json?.data?.__schema?.types ?? []) as Array<Record<string, any>>;
-      const typesByName = new Map<string, Record<string, any>>(
-        allTypes.filter((entry) => typeof entry?.name === 'string').map((entry) => [String(entry.name), entry]),
-      );
-      const type = typesByName.get(name);
-      if (!type) return buildFailure('not_found', `GraphQL schema name not found: ${name}.`);
-      const fields = describeFields(String(type.name), typesByName, maxDepth) ?? [];
-      return buildSuccess(`api_graphql schema: ${name}`, { data: { name: type.name, kind: type.kind, fields } });
+      if (!name) return normalizeFailure(action, new Error('A GraphQL schema name is required.'));
+      const depth = clampDepth(params.max_depth);
+      const types = await collectTypeEntries(client, [name], depth, action, useToken, signal);
+      return buildGraphqlSchemaDocument({ data: { __schema: { types } } }, name, depth);
     }
 
     if (action === 'execute') {
       const query = typeof params.query === 'string' ? params.query : '';
-      if (!query) return buildFailure('validation_error', 'A GraphQL query is required.');
+      if (!query) return normalizeFailure(action, new Error('A GraphQL query is required.'));
       const response = await client.graphql({
         query,
         variables: params.variables,
@@ -128,15 +173,30 @@ export async function executeGraphqlAction(
         headers: params.headers as Record<string, string> | undefined,
         useToken,
       }, signal);
-      return buildSuccess('api_graphql execute', {
-        request: redactDeep({ query, variables: params.variables, operation_name: params.operationName, use_token: useToken }, config.secretValues),
-        response: redactDeep({ status: response.status, status_text: response.statusText, headers: response.headers, body: response.bodyText }, config.secretValues),
-      });
+      const safe = redactDeep({ status: response.status, status_text: response.statusText, headers: response.headers, body: response.bodyText }, config.secretValues);
+      let bodyJson: any;
+      try {
+        bodyJson = JSON.parse(response.bodyText);
+      } catch {
+        bodyJson = undefined;
+      }
+      const records = [
+        record('request-1', 'request', typeof params.operationName === 'string' ? `operation ${params.operationName}` : 'operation execute'),
+        record('response-1', 'response', `status: ${response.status} ${response.statusText}`),
+        ...frameText('response-body', 'text_frame', typeof safe.body === 'string' ? safe.body : JSON.stringify(safe.body, null, 2)),
+      ];
+      if (response.status >= 400) {
+        return failureDocument({ tool: 'api_graphql', action, failure: httpFailure('api_graphql', action, response.status, response.statusText, `GraphQL request failed with ${response.status} ${response.statusText}.`), records });
+      }
+      if (Array.isArray(bodyJson?.errors) && bodyJson.errors.length > 0) {
+        const first = bodyJson.errors[0] ?? {};
+        return failureDocument({ tool: 'api_graphql', action, failure: graphqlFailure('api_graphql', action, first?.extensions?.code, typeof first?.message === 'string' ? first.message : 'GraphQL returned top-level errors.'), records });
+      }
+      return successDocument({ tool: 'api_graphql', action, identity: typeof params.operationName === 'string' ? params.operationName : 'execute', records, total: records.length });
     }
 
-    return buildFailure('validation_error', 'Unsupported GraphQL action.');
+    return normalizeFailure(action || 'unknown', new Error('Unsupported GraphQL action.'));
   } catch (error) {
-    const safe = classifyError(error);
-    return buildFailure(safe.code, safe.message);
+    return normalizeFailure(action || 'unknown', error);
   }
 }

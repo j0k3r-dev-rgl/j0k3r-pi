@@ -11,7 +11,7 @@ Project-local Pi extension for bounded REST, Swagger, and GraphQL API tools.
 - `api_swagger`
 - `api_graphql`
 
-Legacy GraphQL tools are removed:
+Legacy GraphQL tools remain removed:
 
 - `api_graphql_query`
 - `api_graphql_schema_queries`
@@ -50,6 +50,44 @@ The extension reads exactly `<ctx.cwd>/.pi/api.json`.
 }
 ```
 
+## Contract version 2
+
+All revised tool results now report `details.contract_version = 2`.
+
+Version 2 intentionally replaces the prior envelopes in place. There is no parallel legacy result shape.
+
+### Shared v2 result behavior
+
+- `content` contains only the current bounded page.
+- `details` contains status, action, identity, failure metadata, and continuation metadata.
+- `details` does not duplicate the full payload.
+- oversized results continue on the same tool and same action.
+
+### Shared failure envelope
+
+Failure results use:
+
+- `details.failure.category`
+- `details.failure.code`
+- `details.failure.message`
+- optional `http_status` or `graphql_classification`
+- `retryable`
+- `next_step`
+
+Primary categories:
+
+- `http_error`
+- `graphql_error`
+- `validation_error`
+- `provider_error`
+- `configuration_error`
+- `timeout_error`
+- `cancellation_error`
+- `continuation_error`
+- `reference_error`
+- `authorization_metadata_error`
+- `unknown_error`
+
 ## Tool contracts
 
 ### `api_swagger`
@@ -57,24 +95,78 @@ The extension reads exactly `<ctx.cwd>/.pi/api.json`.
 Actions:
 
 - `discover`
+- `detail`
 - `schema`
 - `request`
+
+`discover` returns compact operation rows only:
+
+- selector (`operationId` when present)
+- method and path
+- compact authorization summary
+
+`detail` returns one selected executable operation contract:
+
+- parameters by location
+- request body content
+- response status/content/header contracts
+- declared security schemes and scopes
+- safe allowlisted authorization metadata
+- `unsupported_reference` markers for unsupported external refs
+
+`schema` remains separate from executable detail.
 
 ### `api_graphql`
 
 Actions:
 
 - `discover`
+- `detail`
 - `schema`
 - `execute`
 
+`discover` returns compact root-field rows only:
+
+- canonical selector (`Query.field` / `Mutation.field`)
+- operation kind
+- compact authorization summary
+
+`detail` returns one selected executable root field contract:
+
+- arguments
+- return type
+- bounded nested field contract
+- cycle markers
+- authorization provenance (`declared`, `not_declared`, `unavailable`, `unknown`)
+
+`schema` remains separate from executable detail.
+
+### `api_rest_request`
+
+Uses the same bounded response and truthful failure semantics as Swagger request execution.
+
+## Authorization provenance
+
+Swagger and GraphQL report only contract-derived authorization metadata.
+
+States:
+
+- `declared`
+- `not_declared`
+- `unavailable`
+- `unknown`
+
+The extension does not infer runtime access from endpoint names, tokens, or successful execution.
+
 ## Continuation
 
-Oversized `api_swagger` and `api_graphql` responses return:
+Oversized `api_rest_request`, `api_swagger`, and `api_graphql` responses return:
 
-- bounded first chunk
+- `details.continuation.returned_count`
+- `details.continuation.total` when known
 - `details.continuation.has_more`
 - opaque `details.continuation.next_cursor`
+- `details.continuation.follow_up`
 
 Continuation stays on the same tool and same action.
 

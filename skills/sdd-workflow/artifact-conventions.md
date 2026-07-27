@@ -70,6 +70,15 @@ For `engram`, Engram remains the source of truth. For `openspec`, OpenSpec remai
 
 ## Canonical OpenSpec Paths
 
+OpenSpec directory roles are mutually exclusive:
+
+- Active changes root: `openspec/changes/`
+- Active change folder: `openspec/changes/<change>/`
+- Archived changes root: `openspec/archive/`
+- Archived change folder: `openspec/archive/YYYY-MM-DD-<change>/`
+- Global workflow config: `openspec/config.yaml`
+- `openspec/changes/archive/` is invalid; archived folders must never be nested among active changes.
+
 Formal-flow paths:
 
 - Change metadata: `openspec/changes/<change>/metadata.yaml`
@@ -220,8 +229,8 @@ Hybrid archive follows one deterministic local order:
 
 1. verify approval and verification evidence against the current completion revision;
 2. sync mapped capability specs for formal SDD, or record `not-applicable` for mini-SDD;
-3. move the OpenSpec change folder to its deterministic archive path;
-4. refresh the Engram closure pointer from the archived OpenSpec state.
+3. move the entire OpenSpec change folder from `openspec/changes/<change>/` to `openspec/archive/YYYY-MM-DD-<change>/`, then rewrite authoritative archived path references to that target;
+4. verify that no source folder remains under `openspec/changes/` and refresh the Engram closure pointer from the archived OpenSpec state.
 
 Each step is idempotent. Before writing, inspect capability content plus the source and target paths. An already-applied identical sync, move, or Engram refresh is a no-op only after the full closure invariant is checked. If the folder moved but capability sync status is missing/failed, return `blocked-recovery-needed` and identify the incomplete invariant rather than claiming closure. If the folder moved but Engram is stale/missing, rebuild Engram from the archived OpenSpec record after verifying capability sync. If Engram claims closure while OpenSpec remains active, rebuild Engram from OpenSpec rather than advancing OpenSpec from memory.
 
@@ -231,7 +240,7 @@ Conflicting source and target content, unexpected capability content, missing ca
 
 Archive retry behavior is idempotent for every local store:
 
-- For `openspec`, if the active source is absent and the deterministic archive target already contains the expected artifacts, matching completion revision, approval fingerprint, lifecycle closure, and capability-sync marker for every mapped target, return a no-op `closed` result. If the source remains and the target is absent, continue the approved archive. If only some effects are present, return `blocked-recovery-needed` with the missing invariant. Conflicting source/target content is `blocked`.
+- For `openspec`, the active source is always `openspec/changes/<change>/` and the deterministic target is always `openspec/archive/YYYY-MM-DD-<change>/`. If the active source is absent and the target already contains the expected artifacts, matching completion revision, approval fingerprint, lifecycle closure, rewritten archived references, and capability-sync marker for every mapped target, return a no-op `closed` result. If the source remains and the target is absent, continue the approved archive. If an archived folder exists under `openspec/changes/`, authoritative archived references still point at the active root, or only some effects are present, return `blocked-recovery-needed` with the missing invariant. Conflicting source/target content is `blocked`.
 - For `engram`, if the active-flow/closure observation already records `closed` for the matching completion revision, approval fingerprint, and closure refs, return a no-op `closed` result. Otherwise complete the approved closure from the current active state.
 - For `hybrid`, use the OpenSpec-first recovery order above, verify capability sync and archive path, then rebuild the Engram pointer before returning `closed`.
 
@@ -247,9 +256,9 @@ After successful verification:
 2. Wait for explicit user validation and archive approval.
 3. Invoke `sdd-archive` only after approval.
 4. Archive according to the configured store:
-   - `openspec`: close or move the OpenSpec change and sync capability specs when applicable;
+   - `openspec`: move `openspec/changes/<change>/` to `openspec/archive/YYYY-MM-DD-<change>/`, rewrite authoritative archived references, and sync capability specs when applicable;
    - `engram`: close the active-flow state and preserve only durable decisions or handoff summaries;
-   - `hybrid`: follow the local OpenSpec-first archive order, then refresh Engram from the verified archived state.
+   - `hybrid`: perform the same strict OpenSpec move first, verify active/archive separation, then refresh Engram from the verified archived state.
 5. Report the archived state, Engram pointer status when configured, and any residual risks.
 
 A failed or blocked verification cannot proceed to archive. Archive approval is separate from commit, tag, branch, or push approval.

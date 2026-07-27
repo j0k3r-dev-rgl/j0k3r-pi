@@ -125,7 +125,7 @@ After successful verify, the orchestrator presents a concise summary containing:
 - residual risks, accepted deviations, and follow-up work;
 - what archive will close or move.
 
-Wait for explicit user validation and archive approval in both `interactive` and `auto`. Persist the redacted local approval, then invoke `sdd-archive` with `archive_approved_by_user: true`, archive approval id/time/scope, `approval_record_ref`, the successful verification verdict, the versioned orchestrator completion summary, and a matching `approved_completion_revision`. For `hybrid`, archive the authoritative OpenSpec record first and refresh Engram from the verified archive path.
+Wait for explicit user validation and archive approval in both `interactive` and `auto`. Persist the redacted local approval, then invoke `sdd-archive` with `archive_approved_by_user: true`, archive approval id/time/scope, `approval_record_ref`, the successful verification verdict, the versioned orchestrator completion summary, and a matching `approved_completion_revision`. For `openspec`/`hybrid`, move the complete mini-SDD folder from `openspec/changes/<change>/` to `openspec/archive/YYYY-MM-DD-<change>/`; never place it under `openspec/changes/archive/`. For `hybrid`, refresh Engram from the verified archived path after the move.
 
 Archive closes the configured persistence state and reports what was archived. It must not create commits, tags, branches, or pushes without separate explicit Git approval.
 

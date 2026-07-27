@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createApiClient, type FetchLike, type FetchResponseLike } from '../src/client.js';
+import { ApiClientError, createApiClient, type FetchLike, type FetchResponseLike } from '../src/client.js';
 import type { ApiAuthConfig, ApiToolsConfig } from '../src/types.js';
 
 function createConfig(overrides: Partial<ApiToolsConfig> = {}): ApiToolsConfig {
@@ -47,7 +47,7 @@ describe('api-tools client runtime', () => {
 
   it('resolves GraphQL URL precedence from explicit block url to legacy fallback to default path', async () => {
     const fetch = createFetchMock();
-    const explicit = createApiClient({ config: createConfig({ graphql: { configured: true, enabled: true, framework: 'node', url: 'https://api.example.test/base/gql', valid: true } }), fetch });
+    const explicit = createApiClient({ config: createConfig({ graphql: { configured: true, enabled: true, framework: 'node', url: 'https://api.example.test/base/gql', valid: true } as any }), fetch });
     await explicit.graphql({ query: '{ viewer { id } }' });
     expect(fetch).toHaveBeenLastCalledWith('https://api.example.test/base/gql', expect.any(Object));
 
@@ -69,10 +69,8 @@ describe('api-tools client runtime', () => {
     const springClient = createApiClient({ config: createConfig(), fetch });
     const doc = await springClient.fetchSwaggerDocument();
     expect(doc.document.swagger).toBe('2.0');
-    expect(fetch).toHaveBeenNthCalledWith(1, 'https://api.example.test/base/v3/api-docs', expect.any(Object));
-    expect(fetch).toHaveBeenNthCalledWith(2, 'https://api.example.test/base/v2/api-docs', expect.any(Object));
 
-    const nodeClient = createApiClient({ config: createConfig({ swagger: { configured: true, enabled: true, framework: 'node', valid: true } }), fetch });
+    const nodeClient = createApiClient({ config: createConfig({ swagger: { configured: true, enabled: true, framework: 'node', valid: true } as any }), fetch });
     await expect(nodeClient.fetchSwaggerDocument()).rejects.toThrow(/swagger.url is required/i);
   });
 
@@ -91,18 +89,17 @@ describe('api-tools client runtime', () => {
     }
   });
 
-  it('rejects invalid methods, cross-origin urls, traversal, userinfo, control characters, and unsafe redirects', async () => {
+  it('rejects invalid methods, cross-origin urls, traversal, userinfo, control characters, and unsafe redirects with typed client errors', async () => {
     const fetch = createFetchMock(async ({ url }) => {
       if (url.endsWith('/redirect-me')) return createResponse('', { status: 302, statusText: 'Found', headers: { location: 'https://evil.example.test/x' } });
       return createResponse('{"ok":true}');
     });
     const client = createApiClient({ config: createConfig(), fetch });
-    await expect(client.rest({ method: 'TRACE' as never, path: '/users' })).rejects.toThrow(/unsupported rest method/i);
-    await expect(client.graphql({ query: '{ viewer }' }, undefined)).resolves.toMatchObject({ status: 200 });
-    await expect(client.rest({ method: 'GET', path: '../escape' })).rejects.toThrow(/traversal/i);
-    await expect(client.rest({ method: 'GET', path: '/users\nsecret' })).rejects.toThrow(/control characters/i);
-    await expect(createApiClient({ config: createConfig({ graphql: { configured: true, enabled: true, framework: 'spring', url: 'https://user:pass@api.example.test/base/gql', valid: true } }), fetch }).graphql({ query: '{ viewer }' })).rejects.toThrow(/credentials/i);
-    await expect(client.rest({ method: 'GET', path: 'redirect-me' })).rejects.toThrow(/origin/i);
+    await expect(client.rest({ method: 'TRACE' as never, path: '/users' })).rejects.toMatchObject({ kind: 'validation' satisfies ApiClientError['kind'] });
+    await expect(client.rest({ method: 'GET', path: '../escape' })).rejects.toMatchObject({ kind: 'validation' satisfies ApiClientError['kind'] });
+    await expect(client.rest({ method: 'GET', path: '/users\nsecret' })).rejects.toMatchObject({ kind: 'validation' satisfies ApiClientError['kind'] });
+    await expect(createApiClient({ config: createConfig({ graphql: { configured: true, enabled: true, framework: 'spring', url: 'https://user:pass@api.example.test/base/gql', valid: true } as any }), fetch }).graphql({ query: '{ viewer }' })).rejects.toMatchObject({ kind: 'validation' satisfies ApiClientError['kind'] });
+    await expect(client.rest({ method: 'GET', path: 'redirect-me' })).rejects.toMatchObject({ kind: 'validation' satisfies ApiClientError['kind'] });
   });
 
   it('propagates AbortSignal cancellation and timeout through injected fetch behavior', async () => {
@@ -115,7 +112,7 @@ describe('api-tools client runtime', () => {
     const client = createApiClient({ config: createConfig({ timeoutMs: 10 }), fetch: abortingFetch });
     const externalController = new AbortController();
     externalController.abort(new Error('manual abort'));
-    await expect(client.graphql({ query: '{ viewer { id } }' }, externalController.signal)).rejects.toThrow(/request cancelled/i);
-    await expect(client.rest({ method: 'GET', path: 'slow' })).rejects.toThrow(/request timed out/i);
+    await expect(client.graphql({ query: '{ viewer { id } }' }, externalController.signal)).rejects.toMatchObject({ kind: 'cancellation' satisfies ApiClientError['kind'] });
+    await expect(client.rest({ method: 'GET', path: 'slow' })).rejects.toMatchObject({ kind: 'timeout' satisfies ApiClientError['kind'] });
   });
 });

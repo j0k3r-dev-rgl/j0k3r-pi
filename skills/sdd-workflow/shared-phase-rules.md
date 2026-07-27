@@ -125,7 +125,7 @@ Rules:
 ### `sdd-archive`
 
 - require successful verification evidence, completion summary, and persisted local revision-bound archive approval;
-- for `hybrid`, treat OpenSpec as authority, make capability sync/folder move idempotent, then rebuild the Engram closure pointer from verified OpenSpec state;
+- for `hybrid`, treat OpenSpec as authority, idempotently move the whole change from `openspec/changes/<change>/` to `openspec/archive/YYYY-MM-DD-<change>/`, rewrite authoritative archived references, verify that active and archived folders are not mixed, then rebuild the Engram closure pointer from verified OpenSpec state;
 - formal SDD syncs only capability-spec targets explicitly mapped by the canonical change spec; missing or ambiguous required mapping blocks archive rather than being interpreted by the archive agent;
 - mini-SDD archives only its configured consolidated lifecycle record/state and any explicitly linked tracker;
 - update compact Engram closure state when configured;
@@ -138,7 +138,7 @@ Before launching a phase subagent, verify from project config plus authoritative
 - `active_flow_invocation` lease/default reference and exact current phase/executor mapping;
 - packet revision, phase authorization, and artifact-write authorization state;
 - local approval-record references and approved packet/completion revisions when applicable;
-- OpenSpec source/archive paths and Engram pointer when `hybrid`;
+- exact OpenSpec source `openspec/changes/<change>/`, archive target `openspec/archive/YYYY-MM-DD-<change>/`, absence of the invalid `openspec/changes/archive/` nesting, and Engram pointer when `hybrid`;
 - compact phase goal/reference, blockers, and required prior artifacts;
 - relevant metadata/PRD status;
 - formal implementation-map or mini-SDD lifecycle handoff, as applicable;

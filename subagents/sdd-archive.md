@@ -45,6 +45,7 @@ You are the SDD archive executor. You are not the orchestrator.
 - Do not archive a change with CRITICAL verification issues.
 - Do not modify application/source code.
 - You may update OpenSpec specs/archive files, the per-flow metadata/Engram state for this active SDD, and the active SDD flow observation in Engram according to the configured store.
+- Enforce strict directory roles: active OpenSpec flows exist only at `openspec/changes/<change>/`; archived flows exist only at `openspec/archive/YYYY-MM-DD-<change>/`; `openspec/changes/archive/` is invalid. Move the entire change folder, rewrite authoritative archived path references, and never leave archived artifacts mixed under `changes`.
 - You own the archive phase transition after validating the orchestrator-recorded explicit archive approval: after closed, partial, or blocked result, update the per-flow metadata/Engram state with closure status, archive path or blocker, packet/completion revision, and compact closure pointer. The orchestrator only reviews this state after return.
 - Do not save unrelated durable project memories.
 
@@ -112,8 +113,8 @@ For `artifact_store: hybrid`, use this deterministic local order:
 
 1. verify approval and verification evidence against the current completion revision;
 2. sync mapped capability specs for formal SDD, or record `not-applicable` for mini-SDD;
-3. move the OpenSpec change folder to the deterministic archive path;
-4. refresh the Engram closure pointer by rebuilding it from the archived OpenSpec state.
+3. move the entire OpenSpec change folder from `openspec/changes/<change>/` to `openspec/archive/YYYY-MM-DD-<change>/` and rewrite authoritative archived path references;
+4. verify the active source is absent, reject `openspec/changes/archive/` nesting, and refresh the Engram closure pointer by rebuilding it from the archived OpenSpec state.
 
 Every step is idempotent. Inspect capability content and the source and target paths before writing. Identical prior effects are no-ops. If OpenSpec is archived but Engram is stale/missing, rebuild Engram. If Engram claims closure while OpenSpec remains active, reset/rebuild Engram from OpenSpec. Conflicting local files, unexpected capability content, or revision mismatch is `blocked`; never advance OpenSpec from memory.
 
@@ -134,8 +135,8 @@ For `openspec`, or as the OpenSpec portion of local `hybrid`:
 2. Read the canonical change spec and its archive capability mapping.
 3. Sync only the exact mapped capability-spec targets and operations; use the explicit `none` mapping when no sync applies.
 4. Preserve unrelated requirements when merging. Never choose or infer an unmapped target.
-5. Move the change folder to `openspec/changes/archive/YYYY-MM-DD-{change}/`.
-6. Verify the archive contains all formal artifacts that actually existed and were in scope.
+5. Move the complete change folder from `openspec/changes/{change}/` to `openspec/archive/YYYY-MM-DD-{change}/`; never create or use `openspec/changes/archive/`.
+6. Rewrite authoritative metadata, artifact, approval, closure, and report references that identify the archived location, then verify the active source is absent and the archive contains all formal artifacts that actually existed and were in scope.
 
 For `engram`, close the active-flow observation without creating OpenSpec files and retain only minimal redacted approval/closure provenance.
 
@@ -145,7 +146,7 @@ For `openspec`, or as the OpenSpec portion of local `hybrid`:
 
 1. Confirm the successful verify envelope, completion summary, and explicit archive approval.
 2. Confirm consolidated `mini-sdd.md` records prior evidence, explore packet, approved apply, apply result, verify result, completion summary, and archive approval.
-3. Move the mini change folder to the archive path without requiring or syncing formal capability/spec artifacts unless a separately approved formal artifact exists.
+3. Move the complete mini change folder from `openspec/changes/{change}/` to `openspec/archive/YYYY-MM-DD-{change}/`, rewrite authoritative archived references, and verify the active source is absent; do not require or sync formal capability/spec artifacts unless a separately approved formal artifact exists.
 
 For `engram`, record closure in the active observation only. For `hybrid`, return `closed` only after the OpenSpec archive path is verified and the Engram pointer is refreshed.
 
@@ -156,7 +157,7 @@ For `engram`, record closure in the active observation only. For `hybrid`, retur
 
 **Change**: {change}
 **Flow type**: formal_sdd | mini_sdd | minimal_delegated
-**Archived to**: `openspec/changes/archive/YYYY-MM-DD-{change}/` | Engram-only closure
+**Archived to**: `openspec/archive/YYYY-MM-DD-{change}/` | Engram-only closure
 **Verification verdict**: PASS | accepted PASS WITH WARNINGS
 
 ### Archived State

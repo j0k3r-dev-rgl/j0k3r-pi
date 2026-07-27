@@ -7,42 +7,28 @@ export interface ApiRenderOptions {
 }
 
 function buildSummary(toolName: string, result: ApiToolResult): string {
-  const status = result.isError ? 'error' : String(result.details?.status ?? 'success');
-  const action = typeof result.details?.request?.action === 'string' ? ` · ${result.details.request.action}` : '';
+  const status = result.isError ? 'failure' : String(result.details?.status ?? 'success');
+  const action = typeof result.details?.action === 'string' ? result.details.action : 'action';
+  const identity = typeof result.details?.identity === 'string' ? ` · ${result.details.identity}` : '';
   const continuation = result.details?.continuation?.has_more ? ' · more available' : '';
-  return `${toolName} · ${status}${action}${continuation}`;
+  return `${toolName} ${action} · ${status}${identity}${continuation}`;
 }
 
 function metadataLines(result: ApiToolResult): string[] {
   const lines: string[] = [];
-  const request = result.details?.request;
-  const response = result.details?.response;
   const continuation = result.details?.continuation;
-  const error = result.details?.error;
+  const failure = result.details?.failure;
+  const render = result.details?.render;
 
-  if (request && typeof request === 'object') {
-    const action = typeof request.action === 'string' ? request.action : undefined;
-    const method = typeof request.method === 'string' ? request.method : undefined;
-    const path = typeof request.path === 'string' ? request.path : undefined;
-    const operation = typeof request.operation_name === 'string' ? request.operation_name : undefined;
-    const parts = [action, method && path ? `${method} ${path}` : undefined, operation].filter(Boolean);
-    if (parts.length > 0) lines.push(`request: ${parts.join(' · ')}`);
+  if (typeof result.details?.contract_version === 'number') lines.push(`contract_version: ${result.details.contract_version}`);
+  if (render?.authorization_state) lines.push(`authorization: ${render.authorization_state}`);
+  if (typeof continuation?.returned_count === 'number') {
+    lines.push(`returned: ${continuation.returned_count}${typeof continuation.total === 'number' ? `/${continuation.total}` : ''}`);
   }
-
-  if (response && typeof response === 'object') {
-    const status = (response as Record<string, unknown>).status;
-    const statusText = (response as Record<string, unknown>).status_text;
-    if (typeof status !== 'undefined') lines.push(`response: ${status}${statusText ? ` ${statusText}` : ''}`);
-  }
-
-  if (continuation) {
-    const returned = typeof continuation.returned_lines === 'number' ? continuation.returned_lines : undefined;
-    const total = typeof continuation.total_lines === 'number' ? continuation.total_lines : undefined;
-    if (typeof returned === 'number' && typeof total === 'number') lines.push(`continuation: ${returned}/${total} lines`);
-    if (typeof continuation.next_cursor === 'string' && continuation.next_cursor.length > 0) lines.push(`cursor: ${continuation.next_cursor.slice(0, 10)}`);
-  }
-
-  if (error && typeof error === 'object' && typeof error.code === 'string') lines.push(`error: ${error.code}`);
+  if (typeof continuation?.next_cursor === 'string' && continuation.next_cursor.length > 0) lines.push(`cursor: ${continuation.next_cursor.slice(0, 10)}`);
+  if (failure?.category) lines.push(`failure: ${failure.category}`);
+  if (failure?.code) lines.push(`code: ${failure.code}`);
+  if (failure?.next_step) lines.push(`next: ${failure.next_step}`);
   return lines;
 }
 
@@ -70,12 +56,6 @@ export function renderApiToolResult(toolName: string, result: ApiToolResult, opt
 
   const detailLines = metadataLines(result);
   const body = resultBody(result);
-  const sections = [
-    summary,
-    safeKeyHint(true),
-    ...detailLines,
-    body,
-  ].filter((value) => typeof value === 'string' && value.length > 0);
-
+  const sections = [summary, safeKeyHint(true), ...detailLines, body].filter((value) => typeof value === 'string' && value.length > 0);
   return new Text(sections.join('\n'), 0, 0);
 }

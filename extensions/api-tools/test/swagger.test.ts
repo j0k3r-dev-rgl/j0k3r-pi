@@ -22,7 +22,7 @@ function createConfig(overrides: Partial<ApiToolsConfig> = {}): ApiToolsConfig {
   };
 }
 
-function createClient(document?: Record<string, any>): ApiClient {
+function createClient(document?: Record<string, any>, restStatus = 200): ApiClient {
   return {
     login: vi.fn(),
     graphql: vi.fn(),
@@ -32,61 +32,69 @@ function createClient(document?: Record<string, any>): ApiClient {
       document: document ?? {
         openapi: '3.0.0',
         info: { title: 'Demo API', version: '1.0.0' },
-        paths: {
-          '/users': {
-            get: { operationId: 'listUsers', summary: 'List users', tags: ['users'], responses: { 200: { description: 'ok' } } },
+        security: [{ bearerAuth: ['items:read'] }],
+        components: {
+          securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+          parameters: {
+            ItemId: { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
           },
-          '/orders': {
-            post: { operationId: 'createOrder', summary: 'Create order', tags: ['orders'], responses: { 201: { description: 'created' } } },
+        },
+        paths: {
+          '/users/{id}': {
+            parameters: [{ $ref: '#/components/parameters/ItemId' }],
+            get: {
+              operationId: 'getUser',
+              tags: ['users'],
+              'x-roles': ['admin', 'owner'],
+              parameters: [{ name: 'verbose', in: 'query', schema: { type: 'boolean' } }],
+              requestBody: { required: false, content: { 'application/json': { schema: { type: 'object' } } } },
+              responses: {
+                200: { description: 'ok', headers: { 'x-trace': { schema: { type: 'string' } } }, content: { 'application/json': { schema: { type: 'object' } } } },
+                404: { description: 'missing', content: { 'application/json': { schema: { $ref: 'https://evil.example/schema.json#/Item' } } } },
+              },
+            },
           },
         },
       },
     })),
     rest: vi.fn(async () => ({
-      status: 200,
-      statusText: 'OK',
+      status: restStatus,
+      statusText: restStatus === 200 ? 'OK' : 'Forbidden',
       headers: { 'content-type': 'application/json' },
-      bodyText: JSON.stringify({ ok: true, token: 'top-secret' }),
+      bodyText: JSON.stringify({ ok: restStatus === 200, token: 'top-secret' }),
     })),
   };
 }
 
 describe('executeSwaggerAction', () => {
-  it('discovers operations with optional tag filters', async () => {
+  it('discovers compact operation rows with authorization summary', async () => {
     const client = createClient();
     const result = await executeSwaggerAction({ action: 'discover', tag: 'users' }, undefined, client, createConfig());
-    expect(result.details?.status).toBe('success');
-    expect(result.details?.data.tags).toEqual(['users']);
-    expect(result.details?.data.operations).toHaveLength(1);
-    expect(result.details?.data.operations[0]).toMatchObject({ id: 'listUsers', method: 'GET', path: '/users' });
+    expect(result.status).toBe('success');
+    expect(result.records[0].text).toContain('GET /users/{id} · getUser');
+    expect(result.records[0].text).toContain('auth: declared');
   });
 
-  it('returns bounded schema data for a selected operation', async () => {
-    const client = createClient({
-      openapi: '3.0.0',
-      info: { title: 'Demo API', version: '1.0.0' },
-      paths: {
-        '/users/{id}': {
-          get: {
-            operationId: 'getUser',
-            summary: 'Get user',
-            parameters: [{ name: 'id', in: 'path', schema: { type: 'string', nested: { extra: true } } }],
-            responses: { 200: { description: 'ok', content: { 'application/json': { schema: { type: 'object', properties: { user: { type: 'string' } } } } } } },
-          },
-        },
-      },
-    });
-
-    const result = await executeSwaggerAction({ action: 'schema', operation: 'getUser', max_depth: 1 }, undefined, client, createConfig());
-    expect(result.details?.status).toBe('success');
-    expect(result.details?.data.id).toBe('getUser');
-    expect(result.details?.data.responses).toBe('[Truncated]');
-  });
-
-  it('executes configured-origin requests and redacts response secrets', async () => {
+  it('returns detail for one selector with inherited params, auth metadata, local refs, and unsupported external refs', async () => {
     const client = createClient();
-    const result = await executeSwaggerAction({ action: 'request', method: 'GET', path: '/users' }, undefined, client, createConfig());
-    expect(client.rest).toHaveBeenCalledWith(expect.objectContaining({ method: 'GET', path: '/users' }), undefined);
-    expect(JSON.stringify(result)).not.toContain('top-secret');
+    const result = await executeSwaggerAction({ action: 'detail', operation: 'getUser' }, undefined, client, createConfig());
+    const text = result.records.map((entry) => entry.text).join('\n');
+    expect(text).toContain('GET /users/{id} · getUser');
+    expect(text).toContain('parameter path.id required');
+    expect(text).toContain('parameter query.verbose optional');
+    expect(text).toContain('authorization: declared');
+    expect(text).toContain('roles=admin,owner');
+    expect(text).toContain('response 404');
+    expect(text).toContain('unsupported_reference');
+  });
+
+  it('requires a selector for schema and reports HTTP failures for request', async () => {
+    const client = createClient(undefined, 403);
+    const missing = await executeSwaggerAction({ action: 'schema' }, undefined, client, createConfig());
+    expect(missing.status).toBe('failure');
+
+    const request = await executeSwaggerAction({ action: 'request', method: 'GET', path: '/users' }, undefined, client, createConfig());
+    expect(request.status).toBe('failure');
+    expect(request.failure?.category).toBe('http_error');
   });
 });

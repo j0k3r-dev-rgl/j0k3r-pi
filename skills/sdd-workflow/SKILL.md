@@ -4,7 +4,7 @@ description: Operate the project's PRD/SDD/OpenSpec workflow as a thin orchestra
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.3"
+  version: "1.4"
 ---
 
 # SDD Workflow
@@ -118,6 +118,7 @@ Do not load this skill for greetings, tiny inline answers, obvious one-line fixe
 - Local workspace inspection, discovery delegation, evidence-packet handling, and source-search tool policy are governed by `AGENTS.md`; do not restate or override them here.
 - For mini-SDD and minimal delegated apply, do not invent missing design or product decisions; stop and return `blocked` when they appear.
 - Formal SDD, mini-SDD, and minimal delegated apply use the configured `openspec`, `engram`, or `hybrid` store. Do not silently substitute `none` or a different persistence mode.
+- Enforce strict OpenSpec directory separation: active flows live only under `openspec/changes/<change>/`, archived flows live only under `openspec/archive/YYYY-MM-DD-<change>/`, and `openspec/changes/archive/` is invalid. Archive must move the whole change folder out of `changes`, rewrite authoritative archived path references, and leave no archived folder mixed with active changes.
 - PRD/SDD phase invocation is zero-payload. `openspec/config.yaml` supplies only global workflow configuration plus a transient `active_flow_invocation` cursor; the referenced per-flow metadata/Engram state supplies the current SDD instance state. `active_flow_reference` is only a default human/orchestrator convenience pointer and not proof that only one flow may exist. Invoke only the fixed trigger required by the subagent tool API. Any extra task payload is invalid.
 - Routine phase transitions are subagent-owned. Phase agents update per-flow metadata/Engram state with completed/partial/blocked status, next phase, blockers, artifact refs, packet revision, and compact handoff. The orchestrator may write only initial flow selection, transient `active_flow_invocation`/default pointer changes, revision-bound `phase_authorization` gates, mechanical syntax/format repairs that preserve semantics, and explicit apply/archive approval records.
 - After every PRD/SDD phase return, the orchestrator must read project config, authoritative flow state, and every reported created/updated workflow-owned artifact (`openspec/**` Markdown/state or the authoritative Engram flow observation) completely. Compare them with prior authoritative workflow artifacts and the return envelope; do not accept lifecycle readiness or advance on the envelope alone. Do not read or review application source, tests, lockfiles, generated outputs, or product documentation reported by `sdd-apply`; retain those paths only as evidence references. `sdd-verify` exclusively owns changed-code inspection, scope review, and executable validation. Workflow-artifact inconsistency requires remediation and user control. Mechanical state repair may fix parse/format/null optional-field damage only when the intended value is already unambiguous from authoritative workflow artifacts; semantic repair of status, blockers, approvals, next phase, scope, or artifact meaning remains blocked unless the user explicitly approves a remediation path.
