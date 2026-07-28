@@ -15,17 +15,17 @@ Ask even when another flow used known values, a PRD-first route just returned to
 
 A project-wide `openspec/config.yaml` is the global SDD execution contract for every phase. It defines only shared workflow policy: schema/config revision, fixed zero-payload invocation trigger, transient `active_flow_invocation` cursor, default `active_flow_reference`, supported lifecycle and phase-executor identities, global return envelopes, output limits, validation order, and revision semantics. Every PRD/SDD subagent reads it first and follows the invocation cursor. The cursor is a single-flight lease for one zero-payload phase invocation, not a statement that only one SDD flow may exist. Multiple flow metadata records may be active; switching the invocation cursor is an orchestrator action that does not change flow-local lifecycle state.
 
-`openspec/config.yaml` never selects execution mode, artifact store, PRD policy, selected skills, acceptance checks, phase handoff, blockers, approval bindings, or another flow-local user choice. Those values remain authoritative only in each flow's metadata or Engram state. The default pointer/cursor may contain only flow references and lease metadata, never routine phase state.
+`openspec/config.yaml` never selects execution mode, artifact store, PRD policy, selected skills, acceptance checks, phase handoff, blockers, approval bindings, or another flow-local user choice. Those values remain authoritative only in each flow's metadata or Engram state. The invocation cursor may contain only flow reference, exact active Engram observation id for `engram`, immutable attempt id, lease id/expiry, expected flow/packet revisions, target phase/executor, and authorization refs—never routine phase results.
 
 ### Flow-local selection persistence
 
 Persist the selected pair before the first SDD phase:
 
 - `openspec`: record it in `openspec/changes/<change>/metadata.yaml`;
-- `engram`: record it in the active `sdd.active-flow.<change>` observation;
-- `hybrid`: record it authoritatively in `openspec/changes/<change>/metadata.yaml`, then copy only the compact selection revision/reference into the active Engram cursor.
+- `engram`: the orchestrator creates exactly one `sdd.active-flow.<change>` observation, records the selection there, and persists its exact observation id in the invocation/default flow reference;
+- `hybrid`: the orchestrator creates exactly one active observation, records its exact id authoritatively in `openspec/changes/<change>/metadata.yaml`, then writes only the compact selection revision/reference into that observation.
 
-The flow record contains metadata schema/revision, selection timestamp, change/lifecycle identity, execution mode, artifact store, PRD policy when applicable, stable conventions, lock state, lifecycle status, compact current phase/executor/result refs, packet revision, narrow phase authorization gates, artifact-write permission, required artifact/handoff references, blockers, next phase, and approval bindings when applicable. It is the authoritative per-flow state; none of these fields are copied into the trigger or duplicated into global config.
+The flow record contains metadata schema/revision, selection timestamp, change/lifecycle identity, applicable change kind(s), execution mode, artifact store, PRD policy when applicable, stable conventions, lock state, lifecycle status, compact current phase/executor/result refs, packet revision, narrow phase authorization gates, artifact-write permission, required artifact/handoff references, blockers, next phase, and approval bindings when applicable. It is the authoritative per-flow state; none of these fields are copied into the trigger or duplicated into global config.
 
 Rules:
 
@@ -33,7 +33,7 @@ Rules:
 2. For a genuinely new flow (no active state, or prior flow archived/explicitly abandoned), ask both questions and persist one new flow-local selection.
 3. The selection is immutable until the flow is archived or explicitly abandoned. A request to change mode/store mid-flow is `blocked`; finish or abandon that flow, then start a new flow and ask again.
 4. On continuation or `/reload`, read project config, resolve the target from `active_flow_invocation.flow_reference` when a live invocation is in progress or from the selected/default flow reference otherwise, verify the referenced authoritative flow state, and do not ask mode/store again.
-5. Any locked selection-field mismatch or missing lock is `blocked`. For `hybrid`, a stale/missing Engram cursor or minor cross-reference drift is rebuildable from verified OpenSpec and repository state when those authoritative sources are coherent; semantic conflicts in OpenSpec files or repository state are `blocked`. Never migrate an active flow between stores or silently rewrite its mode.
+5. Any locked selection-field mismatch or missing lock is `blocked`. For `hybrid`, rebuild a stale/missing Engram cursor from the current OpenSpec revisions already in context; consult repository state only when a material semantic conflict cannot be resolved from artifact deltas. Never reread all OpenSpec files or run Git merely because Engram is stale. Never migrate an active flow between stores or silently rewrite its mode.
 6. Phase subagents load the locked selection from the active authoritative flow state. They never choose, infer from the trigger, or change mode/store themselves.
 7. A PRD-first flow's selection does not choose downstream settings. On approval or explicit continue-as-is, persist `lifecycle_status: prd-review-complete-returned-to-triage`. The status `prd-review-complete-returned-to-triage` is a non-active terminal state that preserves PRD/review artifacts. Any new formal SDD or mini-SDD then passes through triage and must ask both questions again.
 8. Never treat `auto` as apply or archive approval. Both gates remain mandatory.
@@ -60,9 +60,9 @@ For `hybrid`, precedence is deterministic:
 
 1. OpenSpec is the source of truth for PRD, proposal, spec, design, tasks, approvals, verification, archive location, and lifecycle status.
 2. Engram is a compact index and recovery cursor; it is never a second normative copy.
-3. On every durable update, write OpenSpec first, verify the write, then update Engram with compact state and pointers.
-4. On reload or mismatch, inspect OpenSpec plus verified repository state and rebuild Engram from that evidence.
-5. Engram must not overwrite OpenSpec. A missing/stale Engram record, stale pointer, or outdated compact summary is repairable when OpenSpec is coherent; conflicting OpenSpec files, approval/revision mismatches, or repository evidence that changes meaning are `blocked` for user decision.
+3. On every durable phase update, use `phase-commit-contract.md`: write/validate owner artifacts, write metadata as `prepared` with next eligibility blocked, update only the exact existing Engram observation id, then finalize metadata as `committed`. Success is forbidden before finalization.
+4. On reload, read the compact active-flow pointer plus current metadata revision and only the artifact sections needed for the next phase. On mismatch, inspect the conflicting sections; consult repository state only if artifact evidence cannot resolve the conflict.
+5. Engram must not overwrite OpenSpec. A missing/stale cursor is repairable from coherent current OpenSpec revisions without full artifact rereads or routine Git commands; semantic conflicts remain blocked for user decision.
 
 For `engram`, Engram remains the source of truth. For `openspec`, OpenSpec remains the sole source of truth.
 
@@ -90,6 +90,7 @@ Formal-flow paths:
 - Optional dense traceability table: `openspec/changes/<change>/traceability.md`
 - Implementation map: `openspec/changes/<change>/implementation-map.md`
 - Active verification report: `openspec/changes/<change>/verify-report.md`
+- Versioned remediation packet after failed verification: `openspec/changes/<change>/remediation.md`
 - Capability spec on archive when explicitly mapped: `openspec/specs/<capability>/spec.md`
 
 Mini-SDD uses one consolidated lifecycle document when the store is `openspec` or `hybrid`:
@@ -139,20 +140,22 @@ A named OpenSpec or hybrid flow maintains `openspec/changes/<change>/metadata.ya
 
 - slug, title, flow identity, flow type, and lifecycle status (`active`, `prd-review-complete-returned-to-triage`, `archived`, or `abandoned` as applicable);
 - `metadata_schema_version`, immutable flow-state revision, and `flow_selection_locked: true`;
-- flow-local execution mode, artifact store, stable conventions, and selection timestamp;
+- flow-local execution mode, artifact store, stable conventions, selection timestamp, and exact `engram_observation_id` for `hybrid`;
 - current phase/executor, packet revision, artifact-write authorization, and phase status;
-- compact `flow_skill_plan` cache with registry hash, plan revision, coverage, invalidation rules, and bounded skill refs;
+- authorized phase attempt id, invocation lease id, expected prior flow/packet revisions, authorization revision, parent attempt/checkpoint, and consumed state;
+- compact orchestrator-owned `flow_skill_plan` with registry/session marker, plan revision, coverage, exact selected skill refs, and reported skill gaps;
 - narrow `phase_authorization` gates written by the orchestrator for interactive phase advancement, referencing the flow skill plan plus any overrides;
-- required artifact/handoff references, blockers, next phase, and short summaries;
+- required artifact/handoff references, including the active remediation packet revision when applicable, blockers, next phase, and short summaries;
 - persisted approval bindings and approval fingerprints for apply/archive when applicable;
 - PRD policy/stable conventions when applicable;
-- relevant artifact paths and references to detailed owner artifacts.
+- relevant artifact paths and references to detailed owner artifacts;
+- the latest complete Phase Commit Record: commit id/state, attempt/lease identity, previous/current flow revisions, artifact manifest, input/evidence coverage, persisted validation, blockers/decision, exact next eligibility, Engram cursor status, and return-envelope projection.
 
 Metadata should not contain long acceptance-check lists, verbose allowed/forbidden action lists, full security constraints, detailed validation context, or lengthy selected-skill rationales. Store those in the owning phase artifact (`proposal.md`, `spec.md`, `design.md`, `tasks.md`, `testability.md`, `archive-map.md`, `implementation-map.md`, `mini-sdd.md`, or Engram state for `engram` flows) and keep metadata as ids, revisions, statuses, paths, blockers, authorization refs, and compact summaries.
 
 Global workflow schema, fixed trigger, executor mapping, return-envelope shape, output limits, and validation-order policy belong only in `openspec/config.yaml`; do not duplicate them into metadata beyond revision references needed for consistency checks.
 
-For `engram`, store the same selection fields in the active `sdd.active-flow.<change>` observation. For `hybrid`, copy only the compact metadata revision/reference into Engram after the OpenSpec metadata write is verified.
+For `engram`, store the same selection fields and commit records in the single exact `sdd.active-flow.<change>` observation created by the orchestrator. For `hybrid`, persist its exact observation id in metadata and update only that id during the prepared-to-committed protocol. Phase agents never search/create a replacement observation.
 
 Do not duplicate detailed exploration, acceptance matrices, implementation plans, raw evidence, security checklists, selected-skill reasoning, or full phase reports in metadata. Store them in formal phase artifacts or `mini-sdd.md` and reference those paths from the operational phase state. Metadata may contain only compact ids, revisions, status, paths, blockers, authorization refs, skill-plan refs, short summaries, and references needed for zero-payload execution.
 
@@ -174,13 +177,28 @@ Before reusing a slug, inspect the selected store's state to avoid accidental ov
 
 Authoritative files/state are the transport between phases. The subagent tool prompt is only the fixed trigger declared in `openspec/config.yaml` and contains no phase packet or handoff content.
 
-Routine phase transitions are written by the phase subagent, not hand-authored by the orchestrator. Before invocation, the orchestrator validates the global config, writes or verifies a transient `active_flow_invocation` lease for the target flow, validates user authorization, and validates existing per-flow state. In `interactive`, it may write only the narrow revision-bound `phase_authorization` gate for the approved target phase/executor. Then it invokes the fixed trigger. The subagent records its own phase identity/status/result, packet revision, blocker state, artifact references, handoff pointers, skill-plan usage/refresh, and next phase in the authoritative flow state. Apply and archive additionally require persisted local approval records; those approval records remain an orchestrator/user gate.
+Routine phase transitions are written by the phase subagent, not hand-authored by the orchestrator. Before invocation, the orchestrator validates global config, authorization, and per-flow state, then records only the narrow attempt gate bound to immutable attempt/lease ids and expected prior revisions. The subagent follows `phase-commit-contract.md`; owner artifacts validate first and the authoritative phase transition commits last. During explicitly selected remediation, the orchestrator instead directly reconciles affected artifacts and semantic flow state, preserving revisions/supersession and invalidating stale approvals before any new apply request. Apply and archive approval records remain orchestrator/user gates.
 
-- Persist compact phase-specific evidence and acceptance checks in metadata references plus the owning phase artifact or Engram state.
+- Persist compact phase-specific evidence and acceptance checks with stable input/evidence ids in metadata references plus the owning phase artifact or Engram state; every applicable input id receives a consumed/not-applicable/blocked disposition before commit.
 - Update `mini-sdd.md` or Engram state after meaningful phase results according to the configured store.
 - Keep raw discovery and verbose subagent output outside the orchestrator context unless a material decision requires it.
 - Do not make a later phase rediscover evidence already preserved in a trustworthy handoff.
-- After every phase, the orchestrator reads all reported created/updated workflow-owned artifacts (`openspec/**` Markdown/state or the authoritative Engram flow observation) completely and checks them against authoritative prior workflow artifacts before advancing. The orchestrator does not read application source, tests, lockfiles, generated outputs, or product documentation reported by apply; `sdd-verify` owns inspection and validation of those changed surfaces.
+- After every phase, validate the persisted Phase Commit Record before trusting `artifact_deltas`. The deltas are copied from its committed artifact manifest. Read a new small artifact once when needed; for existing artifacts read only changed headings/ids and exact prior refs. Application source/tests reported by apply remain verify-owned.
+
+## Formal Remediation Packet
+
+After failed verification and the user's remediation-planning decision, the orchestrator must reconcile every affected normative artifact and persist formal remediation scope in `openspec/changes/<change>/remediation.md` for `openspec`/`hybrid`, or as an equivalent authoritative section in the active Engram flow for `engram`. This targeted reconciliation uses verify findings and user context and does not replay proposal/spec/design/task phases.
+
+The remediation packet is normative for the remediation apply and must include:
+
+- immutable `remediation_packet_revision` and source verify revision;
+- exact verification finding ids;
+- active requirement and design revisions that remain in force;
+- exact required mechanism and forbidden substitutions for every finding;
+- bounded files/symbols, RED tests, negative/abuse evidence, acceptance criteria, validation commands, and risk-based slices;
+- verify-owned manual checks and explicit non-goals.
+
+`implementation-map.md`, approval prose, metadata summaries, and conversation history cannot replace this packet. Any packet content change creates a new revision and invalidates prior apply approval. The apply approval fingerprint must reference the remediation revision, findings, active normative revisions, mechanisms, forbidden substitutions, and named slices rather than relying on a broad prose category.
 
 ## Local Approval Records
 
@@ -192,8 +210,8 @@ After approval and before invoking the phase, persist a minimal local record con
 
 - `approval_id` and type (`apply` or `archive`);
 - `approved_packet_revision` for apply or `approved_completion_revision` for archive;
-- `approval_scope_refs`: non-sensitive paths, artifact revisions, task ids, requirement ids, or completion-summary refs covered by the approval;
-- `approval_scope_fingerprint`: deterministic digest over the normalized non-sensitive refs/revisions, not over raw user prose or secret-bearing content;
+- `approval_scope_refs`: non-sensitive paths, artifact revisions, task ids, active requirement/design ids, exact mechanism ids/descriptions, forbidden-substitution ids, finding ids, and named slice revisions covered by the approval;
+- `approval_scope_fingerprint`: deterministic digest over the ordered normalized non-sensitive refs/revisions, not over raw user prose or secret-bearing content; the apply executor must recompute and compare it before edits;
 - concise redacted approved scope summary;
 - `approval_record_ref`: OpenSpec path/section or Engram observation/topic pointer;
 - `approval_recorded_at`;
@@ -207,7 +225,7 @@ Persistence by store:
 
 Local approvals remain valid after `/reload` or process restart when the durable record exists and the current packet/completion revision still matches exactly. Missing records, changed revisions, changed scope, failed writes, or conflicting OpenSpec/repository evidence require fresh approval. Conversation history alone is not continuation evidence, and legacy approval must not be synthesized or backdated.
 
-Apply/archive agents retrieve `approval_record_ref` and compare the approved revision, `approval_scope_refs`, `approval_scope_fingerprint`, type, and store before acting. Do not reconstruct authorization from redacted prose. Do not reuse approval after scope, acceptance criteria, task slice, verification verdict, completion summary, or archive scope changes.
+Apply/archive agents retrieve `approval_record_ref`, recompute the documented fingerprint from normalized scope refs, and compare the approved revision, refs, fingerprint, type, and store before acting. Do not reconstruct authorization from redacted prose. Do not reuse approval after scope, exact mechanism, forbidden substitution, acceptance criteria, task/remediation slice, verification verdict, completion summary, or archive scope changes.
 
 ## Approval Retention and Redaction
 

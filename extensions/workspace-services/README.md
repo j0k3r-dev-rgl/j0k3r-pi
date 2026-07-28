@@ -1,10 +1,10 @@
 # Workspace Services Extension
 
-Pi extension for managing manually configured services in a monorepo workspace.
+Pi extension for Linux-only management of manually configured workspace services.
 
 ## Configuration
 
-Create a project-local config file:
+Create a project-local config file at `.pi/workspace-services.json`:
 
 ```json
 {
@@ -14,66 +14,51 @@ Create a project-local config file:
       "path": "front",
       "command": "npm run dev",
       "env_file": true
-    },
-    "back": {
-      "type": "spring",
-      "path": "back",
-      "command": "./mvnw spring-boot:run",
-      "env_file": true
     }
   }
 }
 ```
 
-Path:
-
-```txt
-.pi/workspace-services.json
-```
-
 Rules:
-
 - No service auto-discovery is performed.
 - Only configured service keys can be managed.
 - Service keys are also log file names, so they may only contain letters, numbers, dots, underscores, and dashes.
-- `env_file: true` loads `<service path>/.env` for that service process.
-- `env_file: false` never loads `.env`, even if the file exists.
-- `.env` contents are never returned in tool output.
+- `env_file: true` loads `<service path>/.env` for the managed process.
+- Project trust is required before the extension reads config, state, or logs, or starts/stops processes.
 
 ## Runtime files
 
-The extension writes local runtime files under:
+The extension writes workspace-local runtime files under `.pi/workspace-services/`:
 
-```txt
-.pi/workspace-services/
-```
+- `logs/<service>.log`
+- `state.json`
+- `state.last-good.json`
+- `transaction-owner.json`
+- `quarantine/`
 
-Logs:
+When any service is started, the extension ensures `.gitignore` contains `.pi/workspace-services/`.
 
-```txt
-.pi/workspace-services/logs/<service>.log
-```
+## Safety and lifecycle behavior
 
-State:
-
-```txt
-.pi/workspace-services/state.json
-```
-
-When any service is started, the extension ensures `.gitignore` contains:
-
-```gitignore
-.pi/workspace-services/
-```
+- Linux-only lifecycle semantics.
+- Process identity uses procfs-backed PID, process-group, session, start-time, command-line, and cwd validation.
+- Stop and restart require confirmed managed-group absence before state deletion or replacement start.
+- Lifecycle operations are serialized across processes that share the same runtime-state path.
+- Runtime state is schema-versioned, atomically replaced, and recovered from `state.last-good.json` when possible.
+- Invalid state is quarantined and never silently treated as empty state.
+- Non-empty `.env` values are treated as secrets and redacted from managed logs, results, details, errors, and rendering.
+- Log output remains bounded and includes continuation metadata when more data exists.
 
 ## Tools
 
-- `workspace_services_list` — list configured services.
-- `workspace_service_start` — start one configured service.
-- `workspace_service_stop` — stop one managed service.
-- `workspace_service_logs` — read bounded service logs.
-- `workspace_services_status` — show managed service status.
-- `workspace_service_restart` — stop, truncate log, then start one service.
+- `workspace_services_list`
+- `workspace_service_start`
+- `workspace_service_stop`
+- `workspace_service_logs`
+- `workspace_services_status`
+- `workspace_service_restart`
+
+Each public tool has native collapsed/expanded rendering.
 
 ## Development
 

@@ -24,8 +24,9 @@ Minimal delegated apply is the tracker-backed mechanical variant. It may skip `s
 - No new external contract, persistence model, security policy, or architecture decision is being invented.
 - For minimal delegated apply, a tracker or checklist exists and its path/content reference is persisted in authoritative flow state.
 - The user selected execution mode and artifact store specifically for this new mini-SDD, and the selection plus phase/artifact authorization are persisted/locked before the fixed-trigger invocation.
+- The approved packet contains the complete slice execution contract required by `executor-contract.md`: exact ordered operations, named RED/GREEN evidence, bounded context refs, one primary safety invariant per risk-bearing slice, and `completion_authority: sdd-verify`.
 
-If any precondition becomes false, stop and return `blocked`; do not silently promote the flow or invent missing decisions.
+If any precondition becomes false, stop and return `blocked`; do not silently promote the flow, invent missing decisions, or weaken an exact mechanism.
 
 ## Execution Modes and Mandatory Gates
 
@@ -41,18 +42,18 @@ After mini-SDD selection, advance through approved read-only work and from succe
 
 ### Gates that mode cannot bypass
 
-1. **Apply gate:** assign the exact apply packet an immutable revision, present its scope/acceptance/validation summary, wait for explicit approval, and persist its redacted local record before every `sdd-apply`.
+1. **Apply gate:** assign the exact apply packet and every mandatory slice an immutable revision, persist its complete slice execution contract without paraphrasing ordered operations, preserve exact mechanism constraints and forbidden substitutions, present scope/acceptance/validation summary, wait for explicit approval, and persist its redacted local record before every `sdd-apply`.
 2. **Archive gate:** after successful `sdd-verify`, assign the completion summary a revision, present what archive will close, wait for explicit approval, and persist its redacted local record before invoking `sdd-archive`.
 
 Choosing mini-SDD is not apply approval. `auto` is not apply or archive approval.
 
-If verify fails or is blocked, do not invoke or offer automatic archive. Report the issues and wait for the user to choose remediation, further investigation, acceptance of risk, or deferral. Every remediation apply requires a new explicit apply approval.
+If verify fails or is blocked, do not invoke or offer automatic archive. Report exact finding ids and wait for the user to choose remediation planning, further investigation, acceptance of risk, or deferral. When remediation planning is chosen, the orchestrator directly reconciles affected sections of authoritative `mini-sdd.md`/Engram state and creates a new versioned remediation packet from verify evidence and user context; do not rerun `sdd-explore`. Every remediation apply then requires new explicit approval; summaries or non-normative handoff cannot replace that packet.
 
 ## Prior Evidence and Explore Handoff
 
 Before mini-SDD begins, workspace investigation follows the discovery-executor choice in `AGENTS.md`. The resulting evidence may come from `discovery` or direct orchestrator inspection.
 
-Before invoking `sdd-explore`, ensure the initial mini-SDD selection and compact prior evidence exist in `mini-sdd.md` or authoritative Engram flow state. The orchestrator may create only this initial user-approved evidence/selection record; the `sdd-explore` subagent owns the phase transition and must validate, refine, or block it. Initial evidence should include:
+Before invoking `sdd-explore`, ensure the initial mini-SDD selection and compact prior evidence exist in `mini-sdd.md` or authoritative Engram flow state. Give every prior-evidence row a stable `evidence_id`; mini explore must disposition every id under `phase-commit-contract.md` before success. The orchestrator may create only this initial user-approved evidence/selection record; the `sdd-explore` subagent owns the phase transition and must validate, refine, or block it. Initial evidence should include:
 
 - user request and confirmed expected behavior;
 - known scope, files, symbols, and references;
@@ -77,7 +78,7 @@ Explore is read-only with respect to implementation. It must:
 
 - validate the proposed scope and identify affected files, symbols, and tests;
 - identify risks, security implications, dependencies, and forbidden surfaces;
-- produce a small ordered implementation plan;
+- produce a complete slice execution contract with one primary safety invariant for risk-bearing work, exact ordered operations/checks/first-use boundaries, named RED/GREEN evidence, forbidden substitutions, and bounded context refs;
 - define measurable acceptance checks and validation commands;
 - report unresolved decisions and return `blocked` when necessary;
 - return a compact apply-ready packet.
@@ -89,6 +90,7 @@ Explore must not implement, refactor, or create formal proposal/spec/design/task
 Invoke only after explicit apply approval has been persisted. Authoritative mini lifecycle state must contain `apply_approved_by_user: true`, approval id/time/redacted summary, current packet revision, matching approved packet revision, approval record reference, and the compact explore packet plus:
 
 - approved scope refs/fingerprint and task slice;
+- the complete slice execution contract, copied without weakening or reordered operations;
 - allowed and forbidden files or surfaces;
 - acceptance criteria and validation commands;
 - strict TDD expectations from `AGENTS.md`, or the user-approved validation strategy when no test framework exists;
@@ -97,11 +99,11 @@ Invoke only after explicit apply approval has been persisted. Authoritative mini
 - configured persistence requirements;
 - compact handoff, expected return envelope, and output limit.
 
-Apply first loads project config, resolves `active_flow_invocation` when active or the default flow reference otherwise, and reads the approved mini packet from authoritative lifecycle state, then implements the complete approved mini packet in one invocation by default and returns changed files/symbols, tests, validation, deviations, blockers, skill-plan usage/fallback, and residual risks. Split only for an explicit workload/user decision. It must not expand scope or make new product, architecture, API, persistence, privacy, or security decisions.
+Apply first loads project config, resolves `active_flow_invocation` when active or the default flow reference otherwise, reads `executor-contract.md`, and reads the approved mini packet from authoritative lifecycle state. It copies the ordered operations verbatim, proves every behavior-changing RED case before production edits, and records successful implementation as `implemented-pending-independent-verify`. If RED cannot be produced, it blocks for an explicit validation-strategy decision rather than labeling the behavior change non-testable. Bounded low-risk work may run once. High workload/review risk or security, secrets, persistence, process lifecycle, concurrency, migrations, permissions, or destructive behavior requires separate revisioned apply invocations with independent review between safety-critical slices. Apply returns changed files/symbols, RED/GREEN evidence, validation, compliance rows, deviations, blockers, skill-plan usage/fallback, and residual risks. It must not close normative acceptance, expand scope, substitute mechanisms, leave partial controls, or make new product, architecture, API, persistence, privacy, or security decisions.
 
 ### 3. `sdd-verify`
 
-After successful apply, run independent verification unless the user explicitly waives it. Persist explicit phase authorization in `interactive` or `auto-authorized` in `auto`, plus artifact-write authorization, before invoking the fixed trigger.
+After successful apply, independent `sdd-verify` is mandatory for normative closure and archive eligibility. A user may defer or abandon verification, but cannot waive it while retaining completed acceptance or archive readiness; without verify, implementation remains pending and archive stays blocked. Persist explicit phase authorization in `interactive` or `auto-authorized` in `auto`, plus artifact-write authorization, before invoking the fixed trigger.
 
 Verify reads the approved apply packet, acceptance criteria, changed-file summary, and validation evidence from authoritative mini lifecycle state. It checks:
 
@@ -109,6 +111,9 @@ Verify reads the approved apply packet, acceptance criteria, changed-file summar
 - tests and validation evidence;
 - security applicability and forbidden surfaces;
 - unexpected changes or unresolved risks;
+- exact approved ordered-operation fidelity and absence of partial/mostly/deferred controls;
+- negative/adversarial RED/GREEN evidence for safety and security constraints;
+- closure of normative acceptance only by verify after independent PASS;
 - persistence continuity for the configured artifact store.
 
 A failed or blocked verification stops the lifecycle before archive.
@@ -125,13 +130,13 @@ After successful verify, the orchestrator presents a concise summary containing:
 - residual risks, accepted deviations, and follow-up work;
 - what archive will close or move.
 
-Wait for explicit user validation and archive approval in both `interactive` and `auto`. Persist the redacted local approval, then invoke `sdd-archive` with `archive_approved_by_user: true`, archive approval id/time/scope, `approval_record_ref`, the successful verification verdict, the versioned orchestrator completion summary, and a matching `approved_completion_revision`. For `openspec`/`hybrid`, move the complete mini-SDD folder from `openspec/changes/<change>/` to `openspec/archive/YYYY-MM-DD-<change>/`; never place it under `openspec/changes/archive/`. For `hybrid`, refresh Engram from the verified archived path after the move.
+Wait for explicit user validation and archive approval in both `interactive` and `auto`. Persist `archive_approved_by_user: true`, archive approval id/time/scope, `approval_record_ref`, the successful verification verdict, the versioned orchestrator completion summary, and a matching `approved_completion_revision` in authoritative flow state. Then invoke `sdd-archive` using only the configured fixed zero-payload trigger. For `openspec`/`hybrid`, move the complete mini-SDD folder from `openspec/changes/<change>/` to `openspec/archive/YYYY-MM-DD-<change>/`; never place it under `openspec/changes/archive/`. For `hybrid`, refresh Engram from the verified archived path after the move.
 
 Archive closes the configured persistence state and reports what was archived. It must not create commits, tags, branches, or pushes without separate explicit Git approval.
 
 ## Persistence
 
-Use the artifact store configured for the flow. Valid stores are `openspec`, `engram`, and `hybrid`; do not silently replace one with another.
+Use the artifact store configured for the flow. Valid stores are `openspec`, `engram`, and `hybrid`; do not silently replace one with another. Every mini phase loads `phase-commit-contract.md`, writes the consolidated lifecycle output before authoritative state, and derives its return only from the committed receipt.
 
 ### `openspec`
 
@@ -155,4 +160,4 @@ Authoritative flow state and lifecycle artifacts are the only phase-to-phase tra
 
 Every mini-SDD phase returns the normalized base envelope from `shared-phase-rules.md`: status, phase, flow type, packet revision, executive summary, alignment object, conflicts, required decision, skills loaded, context efficiency, artifacts, Engram ids, validations, risks, and next recommendation.
 
-Put mini-specific scope/files, apply-ready packet, acceptance evidence, verification verdict, or archive report inside `phase_output`. The phase subagent also writes the corresponding lifecycle transition into authoritative mini state. The orchestrator reads the updated authoritative lifecycle record after return, verifies it against the envelope, and asks for any required user decision; it does not hand-author the next routine phase state before another fixed-trigger invocation.
+Put mini-specific scope/files, apply-ready packet, acceptance evidence, verification verdict, or archive report inside `phase_output`. The phase subagent writes its routine lifecycle transition through the mandatory metadata-last `phase-commit-contract.md`. The orchestrator first validates the persisted receipt, then reads only the changed lifecycle sections named by its artifact manifest. It does not hand-author routine phase state, but after a user remediation decision it directly revisions affected mini artifacts/state before requesting fresh apply approval.

@@ -118,7 +118,7 @@ Never spam repeated permission requests. If uncertain whether a command will req
 
 1. Restate the research question briefly.
 2. Inspect only the code, documentation, Engram observations, or external sources necessary to answer it.
-3. Separate confirmed evidence from inference; identify stale, missing, or contradictory evidence explicitly.
+3. Separate confirmed evidence from inference; identify stale, missing, or contradictory evidence explicitly. Assign a stable packet-local `evidence_id` to every confirmed file/symbol, behavior/call path, impact, test surface, constraint, risk/unknown, and required follow-up so a later named flow can prove one-to-one consumption without repeating research.
 4. For source-code investigation, identify relevant files and symbols, definitions/current behavior, references or call paths, likely impact, and test surfaces. Mark fields `not-applicable` for non-code research rather than inventing entries.
 5. Identify constraints, risks, material unknowns, and confidence with a short rationale.
 6. For external research, prefer primary sources such as official documentation, source repositories, release notes, standards, and original papers. Use independent or community sources to corroborate, challenge, or add operational context.
@@ -131,6 +131,7 @@ Never spam repeated permission requests. If uncertain whether a command will req
 ## Output discipline
 
 - Return a compact, decision-oriented evidence packet rather than a research transcript.
+- Evidence ids are unique and stable within the returned packet. Never reuse one id for materially different claims or emit an unnumbered material finding that cannot be dispositioned downstream.
 - Prioritize facts that affect scope, safety, implementation handoff, tests, or workflow choice.
 - Cite inspected paths, symbols, observation ids, URLs, provider references, library ids, DOIs, repository refs, or artifact names precisely enough for targeted follow-up.
 - For every material internet-derived claim, include at least one relevant inspected source. Never invent a URL, title, author, publication date, version, or identifier.
@@ -148,15 +149,16 @@ Return this envelope:
 - `research_question`;
 - `sources_inspected`;
 - `evidence_packet`:
-  - `relevant_files_and_symbols`;
-  - `definitions_and_current_behavior`;
-  - `references_or_call_paths`;
-  - `likely_impact`;
-  - `test_surfaces`;
-  - `confirmed_findings`;
-  - `inferences`;
-  - `constraints`;
-  - `risks_or_unknowns`;
+  - `evidence_manifest`, with rows `{ evidence_id, category, claim, source_refs, confidence, downstream_disposition_required }`;
+  - `relevant_files_and_symbols`, referencing evidence ids;
+  - `definitions_and_current_behavior`, referencing evidence ids;
+  - `references_or_call_paths`, referencing evidence ids;
+  - `likely_impact`, referencing evidence ids;
+  - `test_surfaces`, referencing evidence ids;
+  - `confirmed_findings`, referencing evidence ids;
+  - `inferences`, clearly separate and referencing supporting evidence ids;
+  - `constraints`, referencing evidence ids;
+  - `risks_or_unknowns`, referencing evidence ids;
   - `confidence`: `high`, `medium`, or `low`, with rationale;
   - `recommended_next_questions`;
 - `options`, only when requested;

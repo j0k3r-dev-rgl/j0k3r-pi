@@ -4,13 +4,9 @@ description: creates the sdd technical design from proposal/specs, with architec
 tools:
   - read
   - bash
-  - skill_registry_resolve
   - write
   - edit
-  - mem_context
-  - mem_search
   - mem_get_observation
-  - mem_save
   - mem_update
   - workspace_graph_status
   - find_symbol
@@ -21,23 +17,22 @@ tools:
 
 # SDD Design Subagent
 
-You are the SDD technical design executor. You are not the orchestrator.
+You are the SDD technical design executor. You are not the orchestrator. Read and obey the complete `skills/sdd-workflow/phase-commit-contract.md`; it is normative for this attempt, input coverage, persistence, resume, and return.
 
 ## Skill routing context
 
-- Read `flow_skill_plan` from authoritative flow state before resolving skills. Treat it as the flow-local routing cache.
-- Reuse the plan without running `skill_registry_resolve` when registry hash/freshness, `sdd_phase: "design"`, touched paths, intent, and any `phase_authorization` overrides are covered.
-- Load the referenced `SKILL.md` files before applying their detailed instructions and record `skills_loaded.source: flow-skill-plan` in the return envelope.
-- Run `skill_registry_resolve` with `stale_check=true` only when the plan is missing, stale, lacks this phase/path/intent coverage, conflicts with authorization/scope, or a new material safety/policy decision appears.
-- If resolver fallback changes required skills or scope assumptions, update compact skill-plan usage/fallback in authoritative flow state and the return envelope; block when the mismatch changes approved scope refs/fingerprint, safety policy, retention policy, TDD expectations, or user approval assumptions.
-- Do not use skill routing to change phase, choose workflow, or delegate; report routing gaps/conflicts to the orchestrator.
+- Read the orchestrator-owned `flow_skill_plan` from authoritative state.
+- Load only the exact referenced `SKILL.md` files needed for this phase and record them in `skills_loaded`.
+- Never call Skill Registry tools, refresh the plan, discover additional skills, or read unselected skill definitions.
+- If the plan lacks a materially required capability, return `skill_gap` with the exact missing need and stop for orchestrator resolution.
 
 ## Local workspace code inspection policy
 
-- When this task requires searching or understanding source code inside the current workspace, use code-research tools first: `workspace_graph_status` for graph readiness, `find_symbol` for definitions/implementations, `find_references` for usages/impact, `function_call_tree` for outbound flow, and `reverse_function_call_tree` for callers/upstream impact.
+- The current workspace and phase-assigned paths/artifacts are a hard boundary. Never inspect another repository, unrelated workspace surfaces, package installations, or external documentation. Return `research_gap` instead.
+- When this task requires searching or understanding source code inside that boundary, use code-research tools first: `workspace_graph_status` for graph readiness, `find_symbol` for definitions/implementations, `find_references` for usages/impact, `function_call_tree` for outbound flow, and `reverse_function_call_tree` for callers/upstream impact.
 - Do not use `bash`/`rg`/`grep`/`find` as the primary source-code search mechanism when a code-research tool can express the lookup.
 - Use `read` only after a known source file is identified by code-research, artifacts, the orchestrator, or prior context.
-- Use `bash` for non-code files, file inventory, git status, validation commands, tests/build/lint, or a stated fallback when code-research cannot express the lookup or lacks public language coverage; include the fallback reason in the return envelope.
+- Use `bash` only for required validation or a named fallback that resolves a material gap. Routine inventories, `git status`, repeated searches, and duplicate checks are forbidden.
 
 ## Hard boundaries
 
@@ -62,7 +57,7 @@ Invocation validation rules:
 
 Any invalid delegated task body or additional task payload must return `blocked` before authoritative flow-state reads or writes.
 
-1. Read project config, resolve `active_flow_invocation` when active or the default flow reference otherwise, and load complete authoritative flow state.
+1. Read project config, the complete `skills/sdd-workflow/phase-commit-contract.md`, resolve the active/default flow, and read the complete authoritative flow state once. Cache them for this invocation; do not rely on orchestrator context or a prior envelope. Validate immutable attempt/lease identity, expected prior flow/packet revisions, authorization revision, and parent checkpoint before phase work.
 2. Validate this agent is authorized to run `design` as executor `formal_sdd_design`: either current phase_state matches `design`, or the previous phase recorded `next_phase.phase: design` and `next_phase.executor: formal_sdd_design` with non-blocked eligibility. Then validate lifecycle `formal-sdd`, revisions, lock, status, mode/store, authorization, boundaries, return contract, and output limit.
 3. Read the referenced proposal, canonical spec, implementation map, PRD when in scope, flow skill plan, loaded skills, goal, acceptance checks, and security constraints completely.
 4. Block on missing, stale, ambiguous, unauthorized, or conflicting state. Never infer from conversation history, trigger text, or a prior return envelope.
@@ -77,11 +72,11 @@ All natural-language queries sent to Engram must be written in English, includin
 
 For `hybrid`, OpenSpec is authoritative: read/write the phase artifact first, then update Engram as a compact pointer/cursor; rebuild stale Engram from verified OpenSpec and never overwrite OpenSpec from memory.
 
-Use `mem_context` only when project context is needed. Search with `mem_search` using `scope: project` and `sdd active flow {change}`, then retrieve the exact observation with `mem_get_observation`. Maintain one `scope: project`, `type: progress` observation with topic key `sdd.active-flow.{change}`. Update it with `mem_update` or create it with `mem_save` when absent. Store phase `design`, artifact paths, key decisions, open questions, next phase, and compact handoff. For `engram`, include enough design detail for downstream phases; for `openspec` or `hybrid`, keep Engram compact. Do not access unrelated observations or non-SDD durable memory.
+Read the exact observation id from `metadata.yaml.engram_observation_id` for `hybrid`, or from the invocation/default flow reference for `engram`. Retrieve only that id with `mem_get_observation`, confirm project/type/topic identity, and update only it with `mem_update`. Never search for another candidate and never invoke `mem_save` when the exact id is unavailable; missing/mismatched identity is blocking. Store a compact cursor for `hybrid` and enough design detail for `engram`. Do not access unrelated observations or non-SDD durable memory.
 
 ## Change metadata and PRD awareness
 
-For `openspec`/`hybrid`, read the metadata resolved through the invocation/default flow reference completely and treat it as mandatory change context for status, artifact store, source paths, validation expectations, and handoff notes. For `engram`, use the verified active-flow observation as the equivalent metadata. Then check whether `openspec/changes/{change}/prd.md` exists. If authoritative flow state marks the PRD approved or in scope, read it completely as mandatory context for approved product goals, non-goals, constraints, UX expectations, and acceptance criteria; otherwise read it only when referenced and report its status. If design tradeoffs affect metadata or approved PRD goals, call them out explicitly. Missing or unreadable referenced flow state is blocking. Absence of an OpenSpec metadata file is expected only for `engram`, where the active-flow observation is authoritative. If an in-scope PRD is absent, report it and follow the phase's PRD policy rather than silently continuing.
+For `openspec`/`hybrid`, the complete authoritative metadata loaded at invocation is mandatory design context; reuse that cached read rather than rereading it. For `engram`, use the verified active-flow observation as the equivalent metadata. Then check the current PRD reference. If approved/in scope, read the complete current PRD once and cache it; otherwise read it only when current authority references it. If design tradeoffs affect metadata or approved PRD goals, call them out explicitly. Missing or unreadable referenced flow state is blocking. Absence of an OpenSpec metadata file is expected only for `engram`, where the active-flow observation is authoritative. If an in-scope PRD is absent, report it and follow the phase's PRD policy rather than silently continuing.
 
 ## Alignment check
 
@@ -95,13 +90,15 @@ If any item is `blocked`, set phase `status` to `blocked` and return `required_d
 
 ## Dependencies
 
+Build an Input Evidence Coverage Ledger for every referenced active requirement/scenario, proposal decision, PRD/metadata constraint, exploration/map row, security control need, and open question. Every applicable id must map to an exact design decision/control/map heading, be not applicable with rationale, or block success.
+
 Read proposal and specs first:
 
 - openspec/hybrid: authoritative `proposal.md` and `openspec/changes/{change}/spec.md`.
 - engram: complete active-flow observation and proposal/spec content.
 - hybrid: Engram compact pointer/cursor only; rebuild it from OpenSpec when stale.
 
-Then read `openspec/changes/{change}/implementation-map.md` if present, and read real affected code. Never design from guesses. If the map is stale, incomplete, or conflicts with proposal/spec/code, update it or report the conflict.
+Then read the complete current `implementation-map.md` once and read the real affected code required for design. Cache the map within the invocation; reread only after an external write, revision mismatch, or specific inconsistency. Never design from guesses.
 
 ## OpenSpec artifact
 
@@ -111,7 +108,8 @@ When `artifact_store` is `openspec` or `hybrid`, ensure base OpenSpec structure 
 
 Also update the operational handoff artifact when `artifact_store` is `openspec` or `hybrid`:
 
-`openspec/changes/{change}/implementation-map.md`
+- `openspec/changes/{change}/implementation-map.md`;
+- `openspec/changes/{change}/metadata.yaml` for the Phase Commit Record and transition only.
 
 Missing or invalid locked flow selection is a blocker returned to the orchestrator. If the target artifact exists, read it before updating it.
 
@@ -184,6 +182,10 @@ Missing or invalid locked flow selection is a blocker returned to the orchestrat
 
 On success set `next_recommended: sdd-task` in both the return envelope and the per-flow metadata/Engram state. On blocked/partial output record the exact blocker or missing evidence in per-flow state and return it instead of choosing another phase.
 
+## Phase completion and commit gate
+
+Before success, validate persisted active decision revisions, exact mechanisms, alternatives, security controls, complete input coverage, implementation-map refs, packet/flow revisions, blockers, and exact `sdd-task` eligibility. Then execute `phase-commit-contract.md`: commit metadata/state last, update only the exact hybrid Engram id, validate the committed receipt, and derive the return from it. Current-context prose or successful artifact writes alone are invalid. Any mismatch is resumable `partial` only with a complete checkpoint; otherwise `blocked`.
+
 ## Return envelope
 
-Return: status, phase (`design`), flow_type (`formal_sdd_design`), packet_revision, executive_summary, alignment `{ metadata, prd, spec, security }`, conflicts_detected, required_decision, skills_loaded, context_efficiency, artifacts_updated, engram_observation_ids, validations, risks, next_recommended, and `phase_output` containing key decisions with supersession state, security controls, affected files, and implementation-map updates.
+Return the normalized envelope from `shared-phase-rules.md`, including `attempt_id`, `invocation_lease_id`, `phase_commit_id`, `commit_state`, `previous_flow_revision`, `current_flow_revision`, `input_coverage_complete`, `uncovered_input_ids`, and `persisted_validation`, committed artifact deltas, and exact Engram ids. Set phase `design`, flow_type `formal_sdd_design`, and put key decisions/supersession state, security controls, affected files, and map updates inside `phase_output`.

@@ -4,7 +4,7 @@ description: "guide language-agnostic test-driven changes with existing-test dis
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.2"
+  version: "1.4"
 ---
 
 # TDD
@@ -144,6 +144,16 @@ Do not load it for answer-only questions, read-only investigation with no test d
 - If the correct test file is already excessively large or mixes responsibilities, do not append blindly and do not create a duplicate parallel file. Propose a cohesive split and ask for approval before performing that structural refactor.
 - Split by responsibility, behavior boundary, or test layer rather than by arbitrary line count.
 
+### Evidence by development context
+
+- `greenfield`: start from the first observable contract and avoid testing speculative architecture.
+- `legacy-continuation`: establish characterization for important existing behavior before changing it; preserve required compatibility and expose known debt separately.
+- `migration`: test source and target invariants, compatibility/cutover behavior, and rollback or recovery where applicable.
+- `feature`: drive the new acceptance behavior plus relevant compatibility boundaries.
+- `bugfix`: reproduce the defect with a failing regression test, then make the smallest sufficient correction.
+- `refactor`: prove behavior preservation before and after structural changes; do not hide new behavior in the refactor.
+- `removal`: remove tests/support owned exclusively by obsolete behavior and retain meaningful absence/dependency evidence.
+
 ### Assertion quality and mock hygiene
 
 - Each test claimed as behavioral evidence must exercise a relevant runtime or compile-time production contract, assert a specific meaningful outcome, and be capable of failing when that contract is wrong.
@@ -182,6 +192,13 @@ Do not load it for answer-only questions, read-only investigation with no test d
 - Characterization tests preserve behavior that must remain stable; they must not entrench behavior the approved change explicitly intends to correct or remove.
 - After each meaningful refactor step, rerun the narrowest relevant tests; broaden validation when structural changes affect wider boundaries.
 
+### Security and negative assurance
+
+- When the approved behavior protects secrets, authorization, persistence, process identity/signals, concurrency, filesystem containment, migrations, or destructive operations, include negative/adversarial evidence for the prohibited outcome, not only a happy-path assertion.
+- Test the exact approved mechanism when that mechanism is normative and externally or operationally observable. An outcome-equivalent implementation test must not hide a forbidden substitution.
+- Examples include proving that secrets are absent from files, argv, and process environments; mismatched identities receive zero signals; replacement processes are not spawned before confirmed stop; symlink escapes fail closed; malformed persisted identities are rejected; and separate OS processes cannot overlap a serialized transaction.
+- If the required negative evidence cannot be produced, report the requirement as blocked or residual risk. Passing positive tests alone is not GREEN for that safety contract.
+
 ### Scope and evidence
 
 - Keep test changes within the approved behavior and test layer.
@@ -219,8 +236,9 @@ When asking about colocated tests, present both choices explicitly: migrate the 
 10. GREEN: make the smallest implementation change or approved removal, delete obsolete tests and support artifacts, update shared tests, and confirm the focused validation passes when applicable.
 11. Triangulate only when another case is needed to defeat a trivial implementation, exercise a meaningful branch, or cover another approved scenario.
 12. REFACTOR only when useful, keeping responsibilities cohesive and removing duplication; rerun validation after meaningful steps.
-13. Run the relevant broader suite when practical and review assertions, mocks, changed test paths, obsolete coverage, orphaned artifacts, mirrored organization, and accidental duplication.
-14. Report evidence, decisions, risks, and any validation that could not run.
+13. For safety/security behavior, run the required negative/adversarial cases and confirm they fail when the exact control is absent.
+14. Run the relevant broader suite when practical and review assertions, mocks, changed test paths, obsolete coverage, orphaned artifacts, mirrored organization, and accidental duplication.
+15. Report evidence, decisions, risks, and any validation that could not run.
 
 ## Output Contract
 

@@ -4,7 +4,7 @@ description: "Mandatory routing gate before any non-trivial edit (including user
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.2"
+  version: "1.6"
 ---
 
 # Workflow Triage
@@ -112,15 +112,17 @@ Do not load this skill only for greetings or obvious direct answers. A user-orde
 - Never invent hidden requirements. Ask a concise clarifying question when intent, success criteria, scope, constraints, or approval are unclear.
 - Investigation and diagnosis are read-only by default.
 - Implementation approval is separate from investigation, planning, verification, and commit approval.
-- Apply the local workspace inspection and discovery-executor choice rules from `AGENTS.md`; do not restate or override them here.
+- Apply the hard workspace, context-cache, command-economy, and user-specified inspection boundaries from `AGENTS.md`. Routing never invalidates already-current context, never triggers mechanical rereads, repository inventories, or routine Git commands, and must not broaden requested surfaces. Only explicitly approved discovery/documentation research may widen research scope.
 - Do not call `discovery` before applying triage when routing is unclear or before resolving the session-scoped executor choice required by `AGENTS.md`.
 - When investigation is needed, route it through the executor selected by the user: bounded direct inspection by the orchestrator or bounded read-only `discovery`. Investigation output is not implementation approval.
 - Use formal SDD only when the change is genuinely cross-cutting, high-risk, contract-changing, architecture-bearing, or needs durable artifacts; formal SDD phases are delegated to `sdd-*` subagents by default.
 - Let the orchestrator handle direct implementation only when it already has enough context, the change is localized and low-risk, and inline execution is the lightest safe path; otherwise choose `mini-sdd` or SDD phase agents. Missing investigation context is resolved separately through the user-selected executor from `AGENTS.md`.
 - PRDs are optional. Use PRD-first only when the user asks for a PRD or when product requirements genuinely need clarification before downstream SDD.
-- For small localized implementation, always offer the route choice: *"¿Prefieres que arregle esto directamente (simple-tdd) o hacemos una revisión/propuesta primero (mini-sdd o investigación)?"* — unless the change is truly trivial (single file, no risk). A user order to "fix it" does not waive this offer.
-- When the change touches multiple files or policy-sensitive surfaces, offer `mini-sdd` or proposal-first even if the user ordered a direct fix; do not default to `simple-tdd` for multi-file or behavior-bearing work.
+- When the user's implementation instruction, scope, expected behavior, and execution preference are already explicit, select the lightest safe matching route and proceed without offering redundant workflow choices. Ask only for a material missing decision.
+- Multi-file or policy-sensitive scope affects route safety, but it does not authorize unrelated inspection or repeated ceremony. Recommend mini-SDD/formal SDD only when it adds necessary control; honor explicit direct execution when allowed by `AGENTS.md` and report its review requirements.
 - For user-requested commits, follow the Git commit policy in `AGENTS.md`; triage is not commit permission.
+- Every non-trivial or risk-bearing code-writing route must load `skills/sdd-workflow/executor-contract.md`. Route selection never waives exact mechanism fidelity, risk-based slices, first-class remediation packets, negative evidence, or the pre-return success gate.
+- Security, secrets, authorization, persistence, process lifecycle, concurrency, migrations, permissions, or destructive behavior cannot use ordinary `simple-tdd`. Use `simple-tdd-with-review` only when the change is genuinely bounded and has an independent review path; otherwise select mini-SDD or formal SDD.
 - Before every new formal SDD or mini-SDD, ask both flow-selection questions: artifact store (`openspec`, `engram`, or `hybrid`) and execution mode (`interactive` or `auto`). Apply the same gate to a minimal delegated apply that starts a new lifecycle. Ask even after PRD approval or a prior flow. For continuation, reuse the locked active-flow snapshot and do not ask again.
 
 ## Policy-Sensitive Gate
@@ -146,6 +148,20 @@ Use the compact evidence-packet contract from `AGENTS.md` for workspace investig
 
 When delegating subsequent work, pass only the relevant packet facts, constraints, unknowns, and acceptance checks to the selected investigation executor or SDD phase subagent so it does not rediscover known context.
 
+## Change-kind classification
+
+Record the applicable development context before routing; multiple kinds may apply:
+
+- `greenfield`: new code from zero;
+- `legacy-continuation`: resume or extend old code;
+- `migration`: move state, API, data, runtime, or architecture between source and target;
+- `feature`: add behavior;
+- `bugfix`: correct reproducible behavior;
+- `refactor`: preserve behavior while changing structure;
+- `removal`: delete behavior, compatibility surfaces, or obsolete code.
+
+Change kind determines required evidence and validation, not workflow weight. A localized migration or legacy fix may remain small; a greenfield feature may still require formal planning when its contracts are broad.
+
 ## Route Catalog
 
 Choose and state one route before editing non-trivial scope:
@@ -153,8 +169,8 @@ Choose and state one route before editing non-trivial scope:
 1. `inline-answer` — direct explanation or opinion.
 2. `inline-readonly` — tiny inspection with no edits.
 3. `inline-docs-only` — small approved wording/config/doc edit with low behavior risk.
-4. `simple-tdd` — localized code change with clear behavior and cheap validation; must end with focused tests/validation plus a lightweight self-review of changed files, scope, and risks.
-5. `simple-tdd-with-review` — localized but policy-sensitive or risk-bearing change implemented by the main agent with focused validation plus a mandatory final review checklist.
+4. `simple-tdd` — localized low-risk code change with clear behavior and cheap validation; must end with focused tests, executor-contract success checks, and a lightweight scope review.
+5. `simple-tdd-with-review` — bounded risk-bearing change implemented by the main agent with focused validation, executor-contract compliance, and a mandatory independent final review. It is not valid for broad security/persistence/process/concurrency work.
 6. `mini-sdd` — medium taskable multi-file work using the lightweight `sdd-explore → approved sdd-apply → sdd-verify → approved sdd-archive` lifecycle.
 7. `minimal-delegated-apply` — tracker-backed mechanical variant that may skip explore when its evidence is complete, while retaining approved apply, verify, summary, and approved archive.
 8. `discovery` — bounded read-only delegated research when the user selected `discovery` under the session-scoped executor choice in `AGENTS.md`.
@@ -175,7 +191,8 @@ Choose and state one route before editing non-trivial scope:
 | small localized implementation with clear behavior | `simple-tdd` | ask route first unless truly trivial; if context is missing, resolve it through the investigation executor selected under `AGENTS.md` |
 | medium taskable multi-file change that does not need formal specification phases | `mini-sdd` | run explore → approved apply → verify → summary → approved archive |
 | tracker-backed mechanical migration | `minimal-delegated-apply` | may skip explore only when prior evidence is complete; retain apply and archive gates |
-| policy-sensitive but still localized edit | `simple-tdd-with-review` or `inline-docs-only` | only if scope is explicit and low-risk |
+| policy-sensitive but still localized edit | `simple-tdd-with-review` or `inline-docs-only` | only if scope is explicit, bounded, and independently reviewable |
+| security, secrets, persistence, process lifecycle, concurrency, migrations, permissions, or destructive code | `mini-sdd` or `formal-sdd` | require executor-contract slices and independent review; never ordinary simple-TDD |
 | product requirements unclear or PRD requested | `prd-first-sdd` | orchestrator drafts PRD with the user |
 | existing PRD in scope | `use-existing-prd-sdd` | resolve approval/review state first, then return to triage |
 | approved PRD ready for downstream work | route again from approved requirements | user chooses mini-SDD, formal SDD, another route, or defer; PRD approval is not implementation approval |
@@ -208,6 +225,8 @@ Ask one concise question when any of these materially affect the route:
 After choosing the route:
 
 - load `sdd-workflow` core when formal SDD/OpenSpec work is likely or requested, when `mini-sdd` / `minimal-delegated-apply` will use their explore/apply/verify/archive lifecycle, or when continuing an SDD phase;
+- load `skills/sdd-workflow/phase-commit-contract.md` for every `prd-review` or `sdd-*` phase transition;
+- load `skills/sdd-workflow/executor-contract.md` for every non-trivial or risk-bearing code-writing route, including direct/simple TDD and remediation;
 - use `discovery` for missing bounded read-only evidence only when the user selected it under the session-scoped rule in `AGENTS.md`; otherwise inspect directly within the agreed scope;
 - consider `skill-authoring` when creating or changing skills;
 - for durable decisions, consolidation, migration, or session-end memory behavior, follow `AGENTS.md` and the current Engram tool contract directly.
@@ -223,8 +242,8 @@ After choosing the route:
 7. Choose the lightest safe route from the route catalog.
 8. When the selected route is a new formal SDD or mini-SDD, ask both flow-selection questions before handoff. When it is continuation, validate/reuse the locked selection without asking.
 9. State the chosen workflow before editing policy-sensitive files.
-10. Before non-trivial edits, consult `skill_registry_resolve` (`stale_check=true`) when routing is ambiguous or the request involves fixing/refactoring; regenerate with `skill_registry_generate` if stale.
-11. Load only the follow-on skills required by that route.
+10. Reuse current conversation/file/worktree/Skill Registry context. Do not reread files or rerun status/search/registry commands merely because routing advanced. Generate the registry once only if necessary or explicitly requested; never regenerate it in the same session.
+11. The orchestrator resolves only the skills needed for the flow and records them in `flow_skill_plan`. Subagents receive that plan, read only those skills, and return `skill_gap` instead of invoking registry tools.
 12. After meaningful work, perform the Engram decision checkpoint from `AGENTS.md`.
 
 ## Output Contract
@@ -245,5 +264,7 @@ When this skill affects the answer, return a concise workflow decision:
 
 - `AGENTS.md` — global guardrails, approvals, dirty worktree, TDD, memory, and Git policy.
 - `skills/sdd-workflow/SKILL.md` — formal SDD/OpenSpec core routing and companion-module loading policy.
+- `skills/sdd-workflow/phase-commit-contract.md` — mandatory logical transaction, exact attempt/lease identity, evidence coverage, resume, and persisted-receipt return rules for every PRD/SDD phase.
+- `skills/sdd-workflow/executor-contract.md` — exact mechanism, risk-based slice, remediation, negative-evidence, and success gates for every code-writing route.
 - `subagents/discovery.md` — bounded read-only research executor.
 - `skills/skill-authoring/SKILL.md` — canonical skill format and registry contract conventions.

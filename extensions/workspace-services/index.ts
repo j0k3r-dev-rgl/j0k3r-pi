@@ -1,15 +1,12 @@
-import { registerWorkspaceServicesTools, type RegisterWorkspaceServicesToolsOptions } from './src/tools.js';
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { registerWorkspaceServicesTools, type RegisterWorkspaceServicesToolsOptions, WORKSPACE_SERVICE_TOOL_NAMES } from './src/tools/index.js';
 
-export {
-  WORKSPACE_SERVICE_TOOL_NAMES,
-  registerWorkspaceServicesTools,
-  type RegisterWorkspaceServicesToolsOptions,
-} from './src/tools.js';
-export * from './src/config.js';
-export * from './src/manager.js';
-export * from './src/state.js';
-export * from './src/types.js';
+export { WORKSPACE_SERVICE_TOOL_NAMES, registerWorkspaceServicesTools, type RegisterWorkspaceServicesToolsOptions };
+export type { WorkspaceServiceOutcome, WorkspaceServicesConfig, RuntimeStateV1, ManagedProcessIdentityV1 } from './src/types.js';
 
-export default function workspaceServicesExtension(pi: any, options: RegisterWorkspaceServicesToolsOptions = {}): void {
+export default function workspaceServicesExtension(
+  pi: ExtensionAPI,
+  options: RegisterWorkspaceServicesToolsOptions = {},
+): void {
   registerWorkspaceServicesTools(pi, options);
 }
