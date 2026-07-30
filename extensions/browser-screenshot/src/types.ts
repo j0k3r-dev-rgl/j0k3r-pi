@@ -42,6 +42,15 @@ export interface BrowserPageScreenshotResult {
   warnings: string[];
 }
 
+export interface BrowserGoToPageResult {
+  targetId: string;
+  target: Pick<BrowserPageTarget, 'id' | 'title' | 'url'>;
+  requestedUrl: string;
+  completionMode: 'loadEventFired';
+  durationMs: number;
+  warnings: string[];
+}
+
 export interface BrowserTabsListResult {
   cdpUrl: string;
   totalPageTargets: number;

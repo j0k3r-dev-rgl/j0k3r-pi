@@ -43,14 +43,39 @@ function createFetch(map: Record<string, unknown>) {
 }
 
 describe('tool registration', () => {
-  it('registers the required browser screenshot tools', () => {
+  it('navigates an existing target and returns a screenshot handoff id', async () => {
+    const pi = createMockPi();
+    browserScreenshotExtension(pi as any);
+    const tool = pi.tools.find((entry) => entry.name === 'go_to_page');
+    const result: any = await tool?.execute('call-nav', {
+      url: 'https://example.test/next',
+      fetchFn: createFetch({ 'http://127.0.0.1:9222/json/list': [{ id: 'page-1', type: 'page', title: 'Dashboard', url: 'https://example.test', webSocketDebuggerUrl: 'ws://page-1' }] }),
+      transportFactory: async (): Promise<CdpTransport> => ({
+        async send<T = unknown>(): Promise<T> { return {} as T; }, async waitForEvent<T = unknown>(): Promise<T> { return {} as T; }, async close() {},
+      }),
+    });
+    expect(result.details.data.targetId).toBe('page-1');
+    expect(JSON.stringify(result.content)).toContain('browser_page_screenshot');
+    expect(JSON.stringify(result.content)).not.toContain('ws://page-1');
+  });
+  it('registers the required browser screenshot tools with a strict go_to_page schema', () => {
     const pi = createMockPi();
     browserScreenshotExtension(pi as any);
     expect(pi.tools.map((tool) => tool.name)).toEqual([
       'browser_cdp_status',
       'browser_tabs_list',
+      'go_to_page',
       'browser_page_screenshot',
     ]);
+
+    const goToPage = pi.tools.find((tool) => tool.name === 'go_to_page');
+    expect(goToPage?.parameters).toMatchObject({
+      additionalProperties: false,
+      required: ['url'],
+      properties: expect.objectContaining({
+        url: expect.anything(),
+      }),
+    });
   });
 
   it('returns bounded tab output without websocket urls', async () => {

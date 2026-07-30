@@ -1,8 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { Type } from 'typebox';
-import { captureBrowserPageScreenshot, getBrowserCdpStatus, listBrowserPageTargets, type CdpTransportFactory, type FetchLike } from './cdp.js';
+import { captureBrowserPageScreenshot, getBrowserCdpStatus, listBrowserPageTargets, navigateBrowserPage, type CdpTransportFactory, type FetchLike } from './cdp.js';
 import { ensureDefaultScreenshotGitIgnored, modelCanAcceptImages, normalizeMaxInlineBytes } from './config.js';
-import type { BrowserPageScreenshotResult, BrowserTabsListResult, PiToolResult, ToolExecutionContext, ToolContent } from './types.js';
+import type { BrowserGoToPageResult, BrowserPageScreenshotResult, BrowserTabsListResult, PiToolResult, ToolExecutionContext, ToolContent } from './types.js';
 
 interface BrowserToolOverrides {
   fetchFn?: FetchLike;
@@ -17,6 +17,14 @@ export interface BrowserCdpStatusParams extends BrowserToolOverrides {
 export interface BrowserTabsListParams extends BrowserToolOverrides {
   cdpUrl?: string;
   limit?: number;
+}
+
+export interface GoToPageParams extends BrowserToolOverrides {
+  url: string;
+  cdpUrl?: string;
+  targetId?: string;
+  urlContains?: string;
+  titleContains?: string;
 }
 
 export interface BrowserPageScreenshotParams extends BrowserToolOverrides {
@@ -36,6 +44,14 @@ const listParameters = Type.Object({
   cdpUrl: Type.Optional(Type.String({ description: 'Optional CDP base URL. Defaults to http://127.0.0.1:9222.' })),
   limit: Type.Optional(Type.Number({ minimum: 1, maximum: 50, description: 'Maximum number of page tabs to return. Defaults to 20.' })),
 });
+
+const goToPageParameters = Type.Object({
+  url: Type.String({ description: 'Absolute http: or https: destination URL. Credentials and non-web schemes are rejected.' }),
+  cdpUrl: Type.Optional(Type.String({ description: 'Optional CDP base URL. Defaults to http://127.0.0.1:9222.' })),
+  targetId: Type.Optional(Type.String({ description: 'Exact existing CDP page target id to navigate.' })),
+  urlContains: Type.Optional(Type.String({ description: 'Navigate the first existing page whose current URL contains this case-insensitive text.' })),
+  titleContains: Type.Optional(Type.String({ description: 'Navigate the first existing page whose title contains this case-insensitive text.' })),
+}, { additionalProperties: false });
 
 const screenshotParameters = Type.Object({
   cdpUrl: Type.Optional(Type.String({ description: 'Optional CDP base URL. Defaults to http://127.0.0.1:9222.' })),
@@ -88,6 +104,18 @@ export function registerBrowserScreenshotTools(pi: any): void {
       } catch (error) {
         return buildFailure('tabs_list_failed', error instanceof Error ? error.message : 'browser_tabs_list failed');
       }
+    },
+  });
+
+  pi.registerTool({
+    name: 'go_to_page',
+    label: 'Go To Page',
+    description: 'Navigate one existing Chrome page target through CDP and wait for its document load event; use the returned target id with browser_page_screenshot.',
+    parameters: goToPageParameters,
+    async execute(_id: string, params: GoToPageParams, signal?: AbortSignal): Promise<PiToolResult<BrowserGoToPageResult>> {
+      const navigation = await navigateBrowserPage({ ...params, signal });
+      const data: BrowserGoToPageResult = { ...navigation, targetId: navigation.target.id };
+      return buildSuccess([textContent(formatNavigationSummary(data))], data);
     },
   });
 
@@ -177,6 +205,15 @@ function formatTabsList(data: BrowserTabsListResult): string {
     data.warnings.length ? `warnings: ${data.warnings.join('; ')}` : undefined,
   ].filter(Boolean);
   return lines.join('\n');
+}
+
+function formatNavigationSummary(data: BrowserGoToPageResult): string {
+  return [
+    `go_to_page: navigation completed for ${truncate(data.requestedUrl, 240)}`,
+    `target: ${data.targetId}`,
+    `completion: ${data.completionMode}`,
+    `follow-up: call browser_page_screenshot with { targetId: "${data.targetId}" }`,
+  ].join('\n');
 }
 
 function formatScreenshotSummary(data: { target: { id: string; title: string; url: string }; outputPath: string; outputSizeBytes: number; width: number; height: number; inlineAttached: boolean; warnings: string[] }): string {

@@ -13,11 +13,31 @@ export interface FetchResponseLike {
 export type FetchLike = (input: string | URL, init?: RequestInit) => Promise<FetchResponseLike>;
 
 export interface CdpTransport {
-  send<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T>;
+  send<T = unknown>(method: string, params?: Record<string, unknown>, signal?: AbortSignal): Promise<T>;
+  waitForEvent?<T = unknown>(method: string, signal?: AbortSignal, timeoutMs?: number): Promise<T>;
   close(): Promise<void>;
 }
 
 export type CdpTransportFactory = (webSocketDebuggerUrl: string, signal?: AbortSignal) => Promise<CdpTransport>;
+
+export interface NavigateBrowserPageInput {
+  url: string;
+  cdpUrl?: string;
+  targetId?: string;
+  urlContains?: string;
+  titleContains?: string;
+  fetchFn?: FetchLike;
+  transportFactory?: CdpTransportFactory;
+  signal?: AbortSignal;
+}
+
+export interface NavigateBrowserPageData {
+  target: Pick<BrowserPageTarget, 'id' | 'title' | 'url'>;
+  requestedUrl: string;
+  completionMode: 'loadEventFired';
+  durationMs: number;
+  warnings: string[];
+}
 
 export interface CapturePageScreenshotInput {
   cwd: string;
@@ -42,7 +62,7 @@ export interface CapturePageScreenshotData {
   imageBase64: string;
 }
 
-export async function getBrowserCdpStatus(cdpUrl?: string, fetchFn: FetchLike = fetch as unknown as FetchLike): Promise<BrowserCdpStatus> {
+export async function getBrowserCdpStatus(cdpUrl?: string, fetchFn: FetchLike = fetch as unknown as FetchLike, signal?: AbortSignal): Promise<BrowserCdpStatus> {
   const normalizedUrl = normalizeCdpUrl(cdpUrl);
   const warnings: string[] = [];
   let versionReachable = false;
@@ -52,7 +72,7 @@ export async function getBrowserCdpStatus(cdpUrl?: string, fetchFn: FetchLike = 
   let pageTargetCount: number | undefined;
 
   try {
-    const version = await fetchJson<Record<string, unknown>>(new URL('/json/version', `${normalizedUrl}/`).toString(), fetchFn);
+    const version = await fetchJson<Record<string, unknown>>(new URL('/json/version', `${normalizedUrl}/`).toString(), fetchFn, signal);
     versionReachable = true;
     browser = stringValue(version.Browser);
     protocolVersion = stringValue(version['Protocol-Version']);
@@ -61,7 +81,7 @@ export async function getBrowserCdpStatus(cdpUrl?: string, fetchFn: FetchLike = 
   }
 
   try {
-    const tabs = await fetchJson<unknown[]>(new URL('/json/list', `${normalizedUrl}/`).toString(), fetchFn);
+    const tabs = await fetchJson<unknown[]>(new URL('/json/list', `${normalizedUrl}/`).toString(), fetchFn, signal);
     tabsReachable = true;
     pageTargetCount = tabs.filter((entry) => parsePageTarget(entry)).length;
   } catch (error) {
@@ -71,9 +91,9 @@ export async function getBrowserCdpStatus(cdpUrl?: string, fetchFn: FetchLike = 
   return { cdpUrl: normalizedUrl, versionReachable, tabsReachable, browser, protocolVersion, pageTargetCount, warnings };
 }
 
-export async function listBrowserPageTargets(cdpUrl?: string, fetchFn: FetchLike = fetch as unknown as FetchLike): Promise<BrowserPageTarget[]> {
+export async function listBrowserPageTargets(cdpUrl?: string, fetchFn: FetchLike = fetch as unknown as FetchLike, signal?: AbortSignal): Promise<BrowserPageTarget[]> {
   const normalizedUrl = normalizeCdpUrl(cdpUrl);
-  const targets = await fetchJson<unknown[]>(new URL('/json/list', `${normalizedUrl}/`).toString(), fetchFn);
+  const targets = await fetchJson<unknown[]>(new URL('/json/list', `${normalizedUrl}/`).toString(), fetchFn, signal);
   return targets.map(parsePageTarget).filter((target): target is BrowserPageTarget => Boolean(target));
 }
 
@@ -100,8 +120,41 @@ export function selectBrowserPageTarget(targets: BrowserPageTarget[], selectors:
   return requireWebSocketTarget(filtered[0]);
 }
 
+export async function navigateBrowserPage(input: NavigateBrowserPageInput): Promise<NavigateBrowserPageData> {
+  const destination = validateNavigationUrl(input.url);
+  const startedAt = Date.now();
+  const deadline = createNavigationDeadline(input.signal, NAVIGATION_TIMEOUT_MS);
+  let transport: CdpTransport | undefined;
+  let loadEventPromise: Promise<unknown> | undefined;
+  try {
+    const targets = await listBrowserPageTargets(input.cdpUrl, input.fetchFn, deadline.signal);
+    const target = selectBrowserPageTarget(targets, input);
+    transport = await (input.transportFactory ?? createWebSocketTransport)(target.webSocketDebuggerUrl!, deadline.signal);
+    await transport.send('Page.enable', undefined, deadline.signal);
+    if (!transport.waitForEvent) throw new Error('CDP transport does not support event waiting');
+    loadEventPromise = transport.waitForEvent('Page.loadEventFired', deadline.signal, NAVIGATION_TIMEOUT_MS);
+    const navigation = await transport.send<{ errorText?: string; isDownload?: boolean }>('Page.navigate', { url: destination }, deadline.signal);
+    if (navigation.errorText) throw new Error(`CDP navigation failed: ${navigation.errorText}`);
+    if (navigation.isDownload) throw new Error('CDP navigation produced a download instead of a document');
+    await loadEventPromise;
+    return {
+      target: { id: target.id, title: target.title, url: target.url },
+      requestedUrl: destination,
+      completionMode: 'loadEventFired',
+      durationMs: Date.now() - startedAt,
+      warnings: [],
+    };
+  } catch (error) {
+    void loadEventPromise?.catch(() => undefined);
+    throw error;
+  } finally {
+    deadline.cleanup();
+    await transport?.close();
+  }
+}
+
 export async function captureBrowserPageScreenshot(input: CapturePageScreenshotInput): Promise<CapturePageScreenshotData> {
-  const targets = await listBrowserPageTargets(input.cdpUrl, input.fetchFn);
+  const targets = await listBrowserPageTargets(input.cdpUrl, input.fetchFn, input.signal);
   const target = selectBrowserPageTarget(targets, input);
   const transport = await (input.transportFactory ?? createWebSocketTransport)(target.webSocketDebuggerUrl!, input.signal);
 
@@ -137,24 +190,62 @@ export async function captureBrowserPageScreenshot(input: CapturePageScreenshotI
   }
 }
 
-export async function createWebSocketTransport(webSocketDebuggerUrl: string, signal?: AbortSignal): Promise<CdpTransport> {
-  const socket = new WebSocket(webSocketDebuggerUrl);
-  const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: unknown) => void }>();
+const NAVIGATION_TIMEOUT_MS = 30_000;
+const NAVIGATION_TIMEOUT_MESSAGE = `CDP navigation timed out after ${NAVIGATION_TIMEOUT_MS}ms`;
+
+export function validateNavigationUrl(value: string): string {
+  let url: URL;
+  try { url = new URL(value); } catch { throw new Error('url must be an absolute http: or https: URL'); }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('url must be an absolute http: or https: URL');
+  if (url.username || url.password) throw new Error('url must not contain credentials');
+  return url.toString();
+}
+
+export async function createWebSocketTransport(
+  webSocketDebuggerUrl: string,
+  signal?: AbortSignal,
+  webSocketFactory: (url: string) => WebSocket = (url) => new WebSocket(url),
+): Promise<CdpTransport> {
+  const socket = webSocketFactory(webSocketDebuggerUrl);
+  const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: unknown) => void; cleanup: () => void }>();
   let nextId = 1;
 
   await new Promise<void>((resolve, reject) => {
-    const onAbort = () => reject(new Error('CDP connection aborted'));
+    const onAbort = () => {
+      cleanup();
+      safeCloseSocket(socket);
+      reject(new Error('CDP connection aborted'));
+    };
+    const onOpen = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      safeCloseSocket(socket);
+      reject(new Error('Failed to connect to CDP websocket'));
+    };
+    const cleanup = () => {
+      signal?.removeEventListener('abort', onAbort);
+      socket.removeEventListener('open', onOpen);
+      socket.removeEventListener('error', onError);
+    };
     if (signal?.aborted) return onAbort();
     signal?.addEventListener('abort', onAbort, { once: true });
-    socket.addEventListener('open', () => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, { once: true });
-    socket.addEventListener('error', () => reject(new Error('Failed to connect to CDP websocket')), { once: true });
+    socket.addEventListener('open', onOpen, { once: true });
+    socket.addEventListener('error', onError, { once: true });
   });
 
+  const eventWaiters = new Map<string, Set<{ resolve: (value: unknown) => void; reject: (error: unknown) => void; cleanup: () => void }>>();
   socket.addEventListener('message', (event) => {
-    const payload = JSON.parse(String(event.data)) as { id?: number; result?: unknown; error?: { message?: string } };
+    const payload = JSON.parse(String(event.data)) as { id?: number; method?: string; params?: unknown; result?: unknown; error?: { message?: string } };
+    if (payload.method) {
+      const waiters = eventWaiters.get(payload.method);
+      if (waiters) {
+        eventWaiters.delete(payload.method);
+        for (const waiter of waiters) { waiter.cleanup(); waiter.resolve(payload.params); }
+      }
+    }
     if (!payload.id) return;
     const entry = pending.get(payload.id);
     if (!entry) return;
@@ -164,21 +255,57 @@ export async function createWebSocketTransport(webSocketDebuggerUrl: string, sig
   });
 
   socket.addEventListener('close', () => {
-    for (const entry of pending.values()) entry.reject(new Error('CDP websocket closed'));
+    for (const entry of pending.values()) {
+      entry.cleanup();
+      entry.reject(new Error('CDP websocket closed'));
+    }
     pending.clear();
+    for (const waiters of eventWaiters.values()) for (const waiter of waiters) { waiter.cleanup(); waiter.reject(new Error('CDP websocket closed')); }
+    eventWaiters.clear();
   });
 
   return {
-    async send<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> {
+    async send<T = unknown>(method: string, params?: Record<string, unknown>, waitSignal?: AbortSignal): Promise<T> {
+      if (waitSignal?.aborted) throw abortReasonError(waitSignal, 'CDP navigation cancelled');
       const id = nextId++;
       const promise = new Promise<T>((resolve, reject) => {
-        pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
+        const onAbort = () => {
+          pending.delete(id);
+          cleanup();
+          reject(abortReasonError(waitSignal, 'CDP navigation cancelled'));
+        };
+        const cleanup = () => waitSignal?.removeEventListener('abort', onAbort);
+        pending.set(id, {
+          resolve: (value) => { cleanup(); resolve(value as T); },
+          reject: (error) => { cleanup(); reject(error); },
+          cleanup,
+        });
+        waitSignal?.addEventListener('abort', onAbort, { once: true });
       });
       socket.send(JSON.stringify({ id, method, params }));
       return await promise;
     },
+    async waitForEvent<T = unknown>(method: string, waitSignal?: AbortSignal, timeoutMs = NAVIGATION_TIMEOUT_MS): Promise<T> {
+      if (waitSignal?.aborted) throw abortReasonError(waitSignal, 'CDP navigation cancelled');
+      return await new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          eventWaiters.get(method)?.delete(waiter);
+          waiter.cleanup();
+          reject(new Error('CDP navigation timed out waiting for Page.loadEventFired'));
+        }, timeoutMs);
+        const onAbort = () => { eventWaiters.get(method)?.delete(waiter); waiter.cleanup(); reject(abortReasonError(waitSignal, 'CDP navigation cancelled')); };
+        const waiter = {
+          resolve: resolve as (value: unknown) => void,
+          reject,
+          cleanup: () => { clearTimeout(timer); waitSignal?.removeEventListener('abort', onAbort); },
+        };
+        waitSignal?.addEventListener('abort', onAbort, { once: true });
+        const waiters = eventWaiters.get(method) ?? new Set();
+        waiters.add(waiter); eventWaiters.set(method, waiters);
+      });
+    },
     async close(): Promise<void> {
-      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close();
+      safeCloseSocket(socket);
     },
   };
 }
@@ -202,10 +329,33 @@ function buildFullPageClip(metrics: LayoutMetricsResult): { x: number; y: number
   };
 }
 
-async function fetchJson<T>(url: string, fetchFn: FetchLike): Promise<T> {
-  const response = await fetchFn(url, { method: 'GET' });
+async function fetchJson<T>(url: string, fetchFn: FetchLike, signal?: AbortSignal): Promise<T> {
+  const response = await fetchFn(url, { method: 'GET', signal });
   if (!response.ok) throw new Error(`HTTP ${response.status}: ${(await response.text()).slice(0, 240)}`);
   return await response.json() as T;
+}
+
+function createNavigationDeadline(signal: AbortSignal | undefined, timeoutMs: number): { signal: AbortSignal; cleanup: () => void } {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error(NAVIGATION_TIMEOUT_MESSAGE)), timeoutMs);
+  const onAbort = () => controller.abort(signal?.reason instanceof Error ? signal.reason : new Error('CDP navigation cancelled'));
+  if (signal?.aborted) onAbort();
+  else signal?.addEventListener('abort', onAbort, { once: true });
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timeout);
+      signal?.removeEventListener('abort', onAbort);
+    },
+  };
+}
+
+function abortReasonError(signal: AbortSignal | undefined, fallback: string): Error {
+  return signal?.reason instanceof Error ? signal.reason : new Error(fallback);
+}
+
+function safeCloseSocket(socket: Pick<WebSocket, 'readyState' | 'close'>): void {
+  if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close();
 }
 
 function parsePageTarget(value: unknown): BrowserPageTarget | null {
