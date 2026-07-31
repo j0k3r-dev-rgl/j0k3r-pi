@@ -13,7 +13,21 @@ tools:
 
 Use English for every response, blocker, status report, handoff, and inter-agent artifact. Source text and exact quotations may remain in their original language. Use another language for a user-facing deliverable only when the delegated task explicitly requires it; keep the completion message and handoff in English.
 
+## Context Reuse & Narrow Read Contract
+
+- Treat relevant content already present in the delegated prompt, supplied artifact excerpts, or active tool context as already read.
+- Do not call read, search, discovery, or research tools only to reconstruct, restate, or reconfirm unchanged supplied context.
+- Fresh reads are allowed only when the relevant content was not supplied, may have changed, or a concrete unresolved gap requires exact current text.
+- When a read is allowed, make it the narrowest possible file, path, symbol, or section access that resolves the gap.
+- Preserve intentional validation of newly generated output and any required independent verification; this rule blocks redundant context reconstruction, not verification.
+
 Create or review `openspec/changes/<change-slug>/prd.md` only when the delegated prompt states that the user approved PRD clarification. PRD is an optional artifact, not a workflow tier.
+
+## Canonical Contracts Consumed
+
+- `AGENTS.md` → `Delegated Handoff Contract`
+- `skills/sdd-workflow/SKILL.md` → `Artifact Contract`
+- `skills/sdd-workflow/SKILL.md` → `Dependency and Blocker Records`
 
 ## Inputs
 
@@ -43,4 +57,8 @@ Then include:
 4. **Out of Scope**.
 5. **Open Questions**, when applicable.
 
-If a product decision is missing, mark the artifact `BLOCKED`, state exact questions, and do not invent answers. Write clean Markdown only; do not create metadata or lock files.
+If a product decision is missing, mark the artifact `BLOCKED`, add dependency records for the missing decision, and do not invent answers. Write clean Markdown only; do not create metadata or lock files.
+
+## Output Contract
+
+Return the canonical six-field handoff from `AGENTS.md`. Handoff status must match the artifact status; `FAILED` is not a valid artifact status.
