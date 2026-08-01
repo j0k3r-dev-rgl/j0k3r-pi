@@ -31,11 +31,13 @@ Use English for every response, blocker, status report, handoff, and inter-agent
 
 Implement an approved change under `openspec/changes/<change-slug>/` and create or update `apply.md`.
 
-## Canonical Contracts Consumed
+## Prompt-Supplied Contracts
 
-- `AGENTS.md` → `Delegated Handoff Contract`
-- `AGENTS.md` → `Candidate Identity and Attempt Budgets`
-- `AGENTS.md` → `Verification and Delivery Safeguards`
+The orchestrator must include the required canonical excerpts in the delegated prompt. Consume those excerpts; do not read `AGENTS.md`.
+
+- `Delegated Handoff Contract`
+- Applicable candidate-identity and attempt-budget rules
+- Applicable verification and delivery safeguards
 - `skills/sdd-workflow/SKILL.md` → `Artifact Contract`
 - `skills/sdd-workflow/SKILL.md` → `Dependency and Blocker Records`
 - `skills/sdd-workflow/SKILL.md` → `Operational Lifecycle Placement`
@@ -86,8 +88,7 @@ When a deterministic manifest is triggered:
 - Build the aggregate payload with LF separators only and no trailing LF, then record the candidate as `sha256:<digest>`.
 - Record the approved explicit inputs, expanded exact path set, deletion evidence, immutable base identity, exact B or F or D records, exact aggregate candidate identifier, one-shot command or equivalent procedure, relevant environment facts, and the freeze point.
 - If a file changes during capture or immediately after hashing, restart within budget or return `BLOCKED`; never claim a mixed-time candidate.
-- For this change, freeze exactly these nine final files and no others: `AGENTS.md`, `skills/workflow-triage/SKILL.md`, `skills/sdd-workflow/SKILL.md`, `subagents/discovery.md`, `subagents/sdd-task.md`, `subagents/sdd-apply.md`, `subagents/sdd-verify.md`, `subagents/sdd-archive.md`, and `docs/pi-workflow-regression-scenarios.md`.
-- For this change, exclude `tasks.md`, `apply.md`, `verify.md`, archive artifacts, generated registry output, and temporary fixtures from the candidate.
+- Freeze only the exact deliverable paths derived from the current ready contract. Exclude workflow evidence, generated outputs, and temporary fixtures unless that contract explicitly includes them.
 
 ## Artifact Contract
 
@@ -119,4 +120,4 @@ For a triggered candidate freeze, `apply.md` must also record the immutable base
 
 ## Output Contract
 
-Return the canonical six-field handoff from `AGENTS.md`. Handoff status must match `apply.md` status and cite `apply.md`, the changed files, and the validation commands under evidence.
+Return the six-field handoff schema supplied in the delegated prompt. Handoff status must match `apply.md` status and cite `apply.md`, the changed files, and the validation commands under evidence.

@@ -32,9 +32,11 @@ For every authorized lookup in TypeScript/JavaScript (`.ts`, `.tsx`, `.js`, `.js
 
 Create or update `openspec/changes/<change-slug>/proposal.md` from the approved context, ready `explore.md`, and optional approved `prd.md`.
 
-## Canonical Contracts Consumed
+## Prompt-Supplied Contracts
 
-- `AGENTS.md` → `Delegated Handoff Contract`
+The orchestrator must include the required canonical excerpts in the delegated prompt. Consume those excerpts; do not read `AGENTS.md`.
+
+- `Delegated Handoff Contract`
 - `skills/sdd-workflow/SKILL.md` → `Artifact Contract`
 - `skills/sdd-workflow/SKILL.md` → `Dependency and Blocker Records`
 
@@ -71,4 +73,4 @@ Then include:
 
 ## Output Contract
 
-Return the canonical six-field handoff from `AGENTS.md`. Handoff status must match the artifact status and cite `proposal.md` under evidence.
+Return the six-field handoff schema supplied in the delegated prompt. Handoff status must match the artifact status and cite `proposal.md` under evidence.

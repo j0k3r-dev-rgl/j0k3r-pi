@@ -1,6 +1,6 @@
 ---
 name: workflow-triage
-description: "routes software requests among exactly three workflows—Direct Orchestrator, Mini-SDD, or Formal SDD—and enforces a separate explicit start instruction before any execution."
+description: "routes software requests among exactly three workflows—Direct Orchestrator, Mini-SDD, or Formal SDD—and begins concrete execution requests without redundant start confirmation."
 license: Apache-2.0
 metadata:
   author: j0k3r
@@ -54,9 +54,9 @@ Field conventions:
 
 ## Activation Contract
 
-Use this skill when a software request needs a workflow recommendation, when the user asks about Direct Orchestrator versus Mini-SDD versus Formal SDD, or when missing context requires an explicit research decision before implementation.
+Use this skill when a software request needs workflow routing, when the user asks about Direct Orchestrator versus Mini-SDD versus Formal SDD, or when missing context requires a research decision before implementation.
 
-Do not reopen triage when the user already selected a workflow unless confirmed scope has materially changed. Preserve the user's choice, but do not treat workflow selection or proposal approval as permission to begin execution.
+Do not reopen triage when the user already selected a workflow unless confirmed scope has materially changed. A concrete request to perform work authorizes the selected or best-fitting workflow to begin; a recommendation-only or hypothetical conversation does not.
 
 ## Canonical Scope
 
@@ -64,7 +64,7 @@ This skill owns:
 
 - selection among exactly three workflows;
 - qualitative routing and escalation signals;
-- separately recorded workflow-selection and start-authorization results;
+- classification of the request as execution-authorized or advice-only;
 - re-triage only when materially changed scope makes the current workflow no longer fit.
 
 This skill consumes the shared semantics in `AGENTS.md` for proportional context assessment, reviewability, consent, handoff, candidate, attempt-budget, and delivery-safeguard policy. It exposes only routing or re-triage consequences from those semantics and must not redefine manifest or archive mechanics.
@@ -73,26 +73,26 @@ This skill consumes the shared semantics in `AGENTS.md` for proportional context
 
 - Support exactly three workflows: **Direct Orchestrator**, **Mini-SDD**, and **Formal SDD**.
 - PRD and discovery are optional artifacts or activities, not independent workflows.
-- Workflow selection and execution authorization are separate semantic results even when one message satisfies both.
-- Treat a combined user message as satisfying both gates only when it unambiguously selects one named workflow and instructs it to start now.
-- Do not inspect project files, investigate, delegate, edit, write artifacts, or run commands before the user explicitly instructs the selected workflow to start.
+- A concrete imperative request to change, fix, build, review, investigate, or otherwise perform work is execution authorization within its stated scope.
+- Do not ask for a second start confirmation after routing or workflow selection.
+- Recommendation-only, comparison, explanation, and hypothetical requests do not authorize project inspection or execution.
 - Make the recommendation from context already available; do not search merely to decide whether to search.
-- If material context is missing, state what is unknown and ask whether research should be small, broad, or skipped.
+- If material context is missing, state what is unknown and ask only for the decision needed to proceed safely.
 - Use the read-only `discovery` subagent for approved unknown research by default.
-- If the user explicitly asks the orchestrator to investigate or execute personally, honor that choice within the approved scope.
-- The explicit start instruction is task-scoped: after it is received, directly relevant reads and expected phase work do not require permission file by file.
+- If the user asks the orchestrator to investigate or execute personally, honor that choice within the approved scope.
+- Task authorization covers directly relevant reads and expected phase work; do not request permission file by file or phase by phase.
 - Never reread current context or completed discovery evidence without a concrete freshness or gap reason.
-- Do not silently broaden research, switch workflows, or treat escalation as start consent.
+- Do not silently broaden research or switch workflows.
 
 ## Routing Table
 
 | Situation | Recommendation | Required User Decision |
 |---|---|---|
-| Context is complete and work is localized or explicitly assigned to the orchestrator | **Direct Orchestrator** | Select Direct, then explicitly start it |
-| Medium multi-file change or targeted refactor needing a shared lightweight plan | **Mini-SDD** | Select Mini-SDD, then explicitly start it |
-| Large, cross-cutting, architectural, or contract-changing work | **Formal SDD** | Select Formal SDD, then explicitly start it |
-| Material implementation context is unknown | **No workflow yet** | Choose research depth and executor first |
-| Product intent is unclear | Keep the likely workflow; optionally add `prd.md` | Approve PRD clarification |
+| Context is complete and work is localized or explicitly assigned to the orchestrator | **Direct Orchestrator** | Begin if work was requested; otherwise provide advice only |
+| Medium multi-file change or targeted refactor needing a shared lightweight plan | **Mini-SDD** | Begin if work was requested; ask only if workflow trade-offs are material |
+| Large, cross-cutting, architectural, or contract-changing work | **Formal SDD** | Begin if work was requested; ask only if workflow trade-offs are material |
+| Material implementation context is unknown | **Likely workflow plus bounded discovery** | Ask only for missing scope, depth, or executor decisions that materially matter |
+| Product intent is unclear | Keep the likely workflow; optionally add `prd.md` | Ask for the missing product decision or PRD choice |
 
 ## Qualitative Escalation Signals
 
@@ -119,10 +119,10 @@ Permitted outcomes only:
 
 ## Decision Gates
 
-- If the user already chose a workflow, do not ask again unless the requested scope materially changes; wait for an explicit start instruction if none has been given.
-- If the user provides an unambiguous combined selection-and-start message, record both results as satisfied while keeping them as separate semantic gates.
-- Ambiguous agreement such as acknowledging the recommendation does not count as a selection or start instruction unless the missing gate is otherwise explicit.
-- If direct execution encounters an unapproved research need after starting, stop and ask whether to use discovery, let the orchestrator investigate, or switch workflows.
+- If the user already chose a workflow, do not ask again unless the requested scope materially changes.
+- If the user requested concrete work, route and begin without asking them to repeat the request as “start.”
+- If the user asked only for advice or acknowledged a recommendation without requesting work, remain conversational until a concrete task is requested.
+- If direct execution encounters an unapproved research need, stop and ask whether to use discovery, let the orchestrator investigate, or switch workflows.
 - If Mini-SDD or Formal SDD produces a `BLOCKED` artifact, stop the sequence and ask the user for the missing decision.
 - If the request is conversational advice with no requested execution, answer directly without forcing workflow selection.
 - If a code change uses Direct Orchestrator, load `tdd`; for Mini-SDD or Formal SDD, load `sdd-workflow`.
@@ -133,11 +133,11 @@ Permitted outcomes only:
 2. Identify only material unknowns that prevent a safe recommendation.
 3. If context quality or reviewability concerns change the route, state the specific signal and the routing consequence.
 4. If research is needed, ask for depth and executor before running it.
-5. Recommend one of the three workflows with one concise reason.
-6. Record workflow-selection status and start-authorization status separately.
-7. Wait for workflow selection unless the user has already made an explicit choice.
-8. State that the selected workflow is ready and wait for a separate, contextually clear start instruction unless the same message already supplied one unambiguously.
-9. Only after authorization, hand the route to Direct Orchestrator execution or `sdd-workflow`.
+5. Select or recommend one of the three workflows with one concise reason.
+6. Classify the request as `EXECUTION_AUTHORIZED` or `ADVICE_ONLY`.
+7. For `EXECUTION_AUTHORIZED`, hand the route directly to Direct Orchestrator execution or `sdd-workflow` without another start prompt.
+8. For `ADVICE_ONLY`, answer conversationally and wait for a concrete task request.
+9. Ask the user only when a material workflow, scope, research, executor, or product decision remains unresolved.
 10. Re-triage only when scope changes materially or a blocker shows the selected workflow no longer fits.
 
 ## Output Contract
@@ -149,13 +149,13 @@ Return:
 - Material unknowns, if any.
 - Research depth or executor decision required, if any.
 - Workflow selection status.
-- Explicit start status: `WAITING` or `AUTHORIZED`.
-- Related skill to load only after start authorization.
+- Request mode: `EXECUTION_AUTHORIZED` or `ADVICE_ONLY`.
+- Related skill loaded for execution or recommended for later advice-only use.
 - Any recorded escalation signal and consequence.
 
 ## References
 
 - `AGENTS.md` — canonical authority, consent, proportional context assessment, review-workload, handoff, candidate, attempt-budget, and delivery-safeguard policy.
-- `skills/sdd-workflow/SKILL.md` — Mini-SDD and Formal SDD lifecycle after authorization.
+- `skills/sdd-workflow/SKILL.md` — Mini-SDD and Formal SDD lifecycle for authorized execution requests.
 - `skills/tdd/SKILL.md` — Direct Orchestrator code-change protocol.
 - `docs/pi-workflow-regression-scenarios.md` — non-authoritative routing and consent regression catalog for reviewer maintenance.

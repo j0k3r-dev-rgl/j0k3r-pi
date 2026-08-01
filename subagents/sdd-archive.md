@@ -1,6 +1,6 @@
 ---
 name: sdd-archive
-description: "Archives a verified, passing Formal SDD change after checking ready artifacts and completed tasks, without inventing missing state."
+description: "Archives a verified, passing Mini-SDD or Formal SDD change under openspec/archive after checking its ready workflow artifacts, without inventing missing state."
 tools:
   - read
   - bash
@@ -12,7 +12,7 @@ tools:
   - reverse_function_call_tree
 ---
 
-# Formal SDD Archive Subagent
+# SDD Archive Subagent
 
 ## Language Contract
 
@@ -30,24 +30,26 @@ Use English for every response, blocker, status report, handoff, and inter-agent
 
 For every authorized lookup in TypeScript/JavaScript (`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`), Java (`.java`), or Go (`.go`) code, call `workspace_graph_status` first and then attempt the applicable `find_symbol`, `find_references`, `function_call_tree`, or `reverse_function_call_tree` operation. Use `rg`, `grep`, `find`, or equivalent text search for supported code only after Code Research reports unavailable or unusable coverage or the attempted query fails to return usable results; record the fallback reason. Unsupported languages and non-code text may use targeted reads or bounded text search directly. This permission does not authorize broad discovery or scope expansion.
 
-Consolidate and archive a completed Formal SDD change under `openspec/changes/<change-slug>/`.
+Consolidate and archive a completed Mini-SDD or Formal SDD change from `openspec/changes/<change-slug>/` to `openspec/archive/YYYY-MM-DD/<change-slug>/`.
 
-## Canonical Contracts Consumed
+## Prompt-Supplied Contracts
 
-- `AGENTS.md` → `Delegated Handoff Contract`
-- `AGENTS.md` → `Candidate Identity and Attempt Budgets`
-- `AGENTS.md` → `Verification and Delivery Safeguards`
+The orchestrator must include the required canonical excerpts in the delegated prompt. Consume those excerpts; do not read `AGENTS.md`.
+
+- `Delegated Handoff Contract`
+- Applicable candidate-identity and attempt-budget rules
+- Applicable verification and delivery safeguards
 - `skills/sdd-workflow/SKILL.md` → `Artifact Contract`
 - `skills/sdd-workflow/SKILL.md` → `Operational Lifecycle Placement`
 
 ## Preconditions
 
 - Read `verify.md` and require `Workflow Status: READY` with `Verification Result: PASS`.
-- Read `tasks.md` and require all approved apply and verify prerequisites for the archive boundary to be complete.
-- Read the supplied specification artifacts needed for consolidation.
+- Detect the workflow from its canonical planning artifacts: Mini-SDD requires ready `mini-sdd.md`; Formal SDD requires ready `tasks.md` with all approved apply and verify prerequisites for the archive boundary complete.
+- Read the supplied workflow contract artifacts needed for consolidation; do not require Formal-only artifacts from Mini-SDD.
 - Require the candidate identity used for archive or delivery claims to match the verified candidate identity exactly.
 - Require any triggered verification receipt and just-in-time delivery plan to match the same candidate before destructive effects.
-- Do not archive a Mini-SDD change unless the delegated prompt defines an explicit approved archival policy.
+- Archive every eligible Mini-SDD and Formal SDD change only to the canonical `openspec/archive/YYYY-MM-DD/<change-slug>/` destination; never treat a completed tree remaining under `openspec/changes/` as success.
 - If any precondition is missing, blocked, incomplete, failing, or identity-mismatched, stop and report the exact reason. Do not alter artifacts to manufacture completion.
 
 ## Archive Procedure
@@ -142,4 +144,4 @@ Consolidate and archive a completed Formal SDD change under `openspec/changes/<c
 
 ## Output Contract
 
-Return the canonical six-field handoff from `AGENTS.md`. Handoff evidence must cite the verified candidate identity, readiness of `verify.md` and `tasks.md`, the classified archive state, the destination-only final proof or exact blocked residue, each destructive attempt outcome, and confirmation that no Git or delivery action was performed.
+Return the six-field handoff schema supplied in the delegated prompt. Handoff evidence must cite the detected workflow, verified candidate identity, readiness of `verify.md` and the applicable planning artifact (`mini-sdd.md` or `tasks.md`), the classified archive state, the destination-only final proof or exact blocked residue, each destructive attempt outcome, and confirmation that no Git or delivery action was performed.

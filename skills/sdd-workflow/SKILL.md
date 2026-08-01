@@ -1,6 +1,6 @@
 ---
 name: sdd-workflow
-description: "runs Mini-SDD or Formal SDD only after a separate explicit start instruction, with phase artifacts, assigned skills, blocker gates, Strict TDD evidence, and orchestrator review."
+description: "runs authorized Mini-SDD or Formal SDD execution requests without redundant start confirmation, with phase artifacts, assigned skills, blocker gates, Strict TDD evidence, and orchestrator review."
 license: Apache-2.0
 metadata:
   author: j0k3r
@@ -20,6 +20,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
   "triggers": {
     "paths": [
       "openspec/changes/**/*.md",
+      "openspec/archive/**/*.md",
       "subagents/sdd-*.md",
       "subagents/prd-review.md",
       "skills/sdd-workflow/SKILL.md"
@@ -32,6 +33,8 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "workflow status",
       "apply.md",
       "verify.md",
+      "sdd archive",
+      "archivar mini-sdd",
       "sdd completo",
       "bloqueo sdd"
     ]
@@ -54,7 +57,7 @@ Field conventions:
 
 ## Activation Contract
 
-Use this skill after the user has selected Mini-SDD or Formal SDD, or when discussing an existing OpenSpec change. Selection permits planning the conversation, but execution starts only after a separate explicit user instruction. This skill governs artifacts under `openspec/changes/<change-slug>/` and the handoff between SDD subagents.
+Use this skill for a concrete request to execute Mini-SDD or Formal SDD, or when discussing an existing OpenSpec change. A concrete execution request begins the workflow without a second start instruction; discussion-only requests remain conversational. This skill governs active artifacts under `openspec/changes/<change-slug>/`, completed archives under `openspec/archive/YYYY-MM-DD/<change-slug>/`, and the handoff between SDD subagents.
 
 Do not use it to select a workflow; use `workflow-triage`. Do not treat PRD or discovery as additional workflow tiers.
 
@@ -66,7 +69,7 @@ This skill owns:
 - the exact visible `Workflow Status` block;
 - dependency and blocker record placement for SDD artifacts;
 - placement and timing of forecasts, candidate linkage, receipts, attempt exhaustion, and just-in-time delivery plans;
-- the Formal SDD archive convention; and
+- the shared Mini-SDD and Formal SDD archive convention; and
 - the artifact and handoff consistency gate before phase advancement.
 
 This skill consumes, and must not redefine, the shared semantics in `AGENTS.md` sections `Authority and Conflict Escalation`, `Delegated Handoff Contract`, `Candidate Identity and Attempt Budgets`, and `Verification and Delivery Safeguards`.
@@ -116,13 +119,18 @@ openspec/changes/<change-slug>/
 ├── tasks.md       # Formal SDD implementation checklist by sdd-task
 ├── apply.md       # Implementation and TDD evidence by sdd-apply
 └── verify.md      # Independent verification by sdd-verify
+
+openspec/archive/YYYY-MM-DD/<change-slug>/
+└── ...            # Complete immutable tree after Mini-SDD or Formal SDD archive
 ```
+
+`openspec/changes/` contains active changes only. Completed Mini-SDD and Formal SDD trees must be retired from that location and preserved only under `openspec/archive/`.
 
 ## Hard Rules
 
-- Selecting Mini-SDD or Formal SDD does not authorize execution.
-- Before the explicit start instruction, do not read project artifacts, resolve implementation context, delegate phases, write artifacts, or run commands.
-- Begin only after the user gives a contextually clear instruction to start the selected workflow.
+- A concrete request to perform a change with Mini-SDD or Formal SDD authorizes execution within its stated scope.
+- Do not ask for a separate “start,” “go ahead,” or equivalent confirmation after receiving that request.
+- A request that only discusses, compares, or recommends an SDD workflow does not authorize project inspection or execution.
 - Use PRD only as an optional clarification artifact approved by the user.
 - Use `discovery` for approved unknown research; `sdd-explore` synthesizes known context and discovery evidence rather than performing broad research.
 - Resolve relevant skills after workflow approval. Pass exact `SKILL.md` paths to lean-mode subagents.
@@ -154,7 +162,9 @@ openspec/changes/<change-slug>/
 7. The orchestrator reads `apply.md`; if `BLOCKED`, consult the user and resume `sdd-apply`.
 8. Run `sdd-verify`, reading `mini-sdd.md` and `apply.md`.
 9. If receipt triggers apply, `verify.md` includes the canonical verification receipt from `AGENTS.md`.
-10. The orchestrator reads `verify.md` and reports `PASS`, `ISSUES_FOUND`, or `BLOCKED`.
+10. The orchestrator reads `verify.md`; if verification is not ready and passing, resolve the result without archiving.
+11. Run `sdd-archive` when `verify.md` is ready, passing, and tied to the same candidate identity.
+12. Report Mini-SDD completion only after archive reaches destination-only success under `openspec/archive/YYYY-MM-DD/<change-slug>/`.
 
 ### Formal SDD
 
@@ -171,9 +181,9 @@ openspec/changes/<change-slug>/
 11. If receipt triggers apply, `verify.md` includes the canonical verification receipt and repeats the exact candidate identity from `apply.md`.
 12. Run `sdd-archive` only when `verify.md` is ready, passing, and tied to the same candidate identity.
 
-## Formal SDD Archive Convention
+## SDD Archive Convention
 
-Archive operates only for an authorized Formal SDD change and preserves the whole `openspec/changes/<change-slug>/` tree.
+Archive is mandatory after ready passing verification for every authorized Mini-SDD and Formal SDD change. It preserves the whole active `openspec/changes/<change-slug>/` tree at the canonical archive destination and retires the active source.
 
 ### Terminal invariant and immutable destination
 
@@ -264,13 +274,14 @@ Before delegating a phase:
 1. Resolve only skills relevant to the approved scope and current phase.
 2. Read selected `SKILL.md` files before relying on them.
 3. Provide the subagent with the ordered canonical delegation input contract from `AGENTS.md`, including approved goal, known evidence, missing facts, scope and paths, exclusions, governing contracts, prior decisions and ready artifacts, exact assigned skill paths, expected output and evidence, blocker criteria, and the one next permitted action.
-4. Remember that lean-mode subagents do not receive `AGENTS.md`, prior conversation, startup memory, or skills automatically.
+4. Include the exact canonical contract excerpts the assignment needs, such as the six-field handoff schema, attempt limits, candidate rules, workload factors, or receipt schema. Do not merely cite their location.
+5. Lean-mode subagents do not receive `AGENTS.md`, prior conversation, startup memory, or skills automatically. Do not instruct or expect them to read `AGENTS.md`; they consume the prompt-supplied excerpts and assigned artifacts or skills only.
 
 ## Decision Gates
 
-- If the workflow is selected but no explicit start instruction has been received, remain idle and ask whether the user wants to start; do not read or delegate.
+- If the user requested concrete SDD execution, begin without a second start prompt; if they asked only for advice or comparison, remain conversational.
 - If product intent is materially unclear, propose optional PRD and ask the user before creating it.
-- If implementation context is unknown after starting, ask for research depth and executor before research.
+- If implementation context is unknown, ask for research depth and executor only when that choice materially affects scope or risk.
 - If the user explicitly asks the orchestrator to research personally, honor that choice and pass the curated result to the phase agent.
 - If any artifact is `BLOCKED`, do not delegate the next phase.
 - If scope changes, return to the user and confirm whether to update the current workflow or re-triage.
@@ -279,22 +290,22 @@ Before delegating a phase:
 ## Execution Steps
 
 1. Confirm the selected workflow and change slug from current context without reading project files.
-2. Confirm that the user issued a separate explicit instruction to start, unless the same message already provided unambiguous combined consent. If not, stop with status `WAITING`.
+2. Classify the request as concrete execution or discussion-only. Begin immediately for concrete execution; remain conversational for discussion-only.
 3. Identify existing artifacts already available in context; do not reread them without need.
-4. Resolve phase-relevant skills and prepare explicit lean-mode prompts.
+4. Resolve phase-relevant skills and prepare explicit lean-mode prompts with all required canonical excerpts.
 5. Delegate one phase at a time.
 6. Read the produced artifact and enforce its status gate.
 7. Compare the artifact and handoff before advancing.
 8. Resolve blockers with the user and resume the same phase when needed.
 9. Continue through apply and independent verification.
-10. Archive only a ready, passing Formal SDD change tied to the verified candidate.
+10. Archive every ready, passing Mini-SDD or Formal SDD change tied to the verified candidate, and report completion only after destination-only proof.
 
 ## Output Contract
 
 Return:
 
 - Selected workflow and change slug.
-- Explicit start status: `WAITING` or `AUTHORIZED`.
+- Request mode: `EXECUTION_AUTHORIZED` or `ADVICE_ONLY`.
 - Current phase and artifact path.
 - Skills assigned to the phase.
 - Artifact status and blockers.
@@ -306,7 +317,7 @@ Return:
 ## References
 
 - `AGENTS.md` — authoritative consent, authority, context, workload, handoff, candidate, attempt-budget, and delivery-safeguard policy.
-- `skills/workflow-triage/SKILL.md` — pre-authorization workflow selection.
+- `skills/workflow-triage/SKILL.md` — request classification and workflow routing.
 - `skills/tdd/SKILL.md` — Strict TDD execution guidance.
 - `subagents/*.md` — lean-mode phase contracts and artifact responsibilities.
 - `docs/pi-workflow-regression-scenarios.md` — non-authoritative lifecycle and archive regression catalog for reviewer maintenance.

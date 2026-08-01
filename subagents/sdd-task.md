@@ -32,10 +32,12 @@ For every authorized lookup in TypeScript/JavaScript (`.ts`, `.tsx`, `.js`, `.js
 
 Create or update `openspec/changes/<change-slug>/tasks.md` from ready specification and design artifacts.
 
-## Canonical Contracts Consumed
+## Prompt-Supplied Contracts
 
-- `AGENTS.md` → `Verification and Delivery Safeguards`
-- `AGENTS.md` → `Delegated Handoff Contract`
+The orchestrator must include the required canonical excerpts in the delegated prompt. Consume those excerpts; do not read `AGENTS.md`.
+
+- Applicable verification and delivery safeguards
+- `Delegated Handoff Contract`
 - `skills/sdd-workflow/SKILL.md` → `Artifact Contract`
 - `skills/sdd-workflow/SKILL.md` → `Dependency and Blocker Records`
 - `skills/sdd-workflow/SKILL.md` → `Operational Lifecycle Placement`
@@ -72,11 +74,11 @@ Use dependency records when required inputs block the next phase. `READY` means 
 
 ## Planning Rules
 
-- Use `AGENTS.md` as the canonical owner for proportional context assessment, review-workload factors, exception limits, candidate triggers, and delivery safeguards.
+- Apply the prompt-supplied canonical excerpts for proportional context assessment, review-workload factors, exception limits, candidate triggers, and delivery safeguards; do not open `AGENTS.md`.
 - When the workload is materially difficult, decompose the work into ordered, coherent review units inside approved scope unless exact user exception evidence authorizes proceeding without that decomposition.
 - Every review unit must state bounded scope and exclusions, contracts, dependencies or order, expected evidence, and any candidate or handoff boundary.
 - Record an explicit `Workload result` based on all canonical factors rather than any numeric threshold.
-- If this change or another approved contract already establishes a required review order, preserve it exactly. For this change, the task artifact must state that the work is materially difficult as one unstructured review and decomposed into four ordered review units.
+- If the approved change contract already establishes a required review order, preserve it exactly. Otherwise derive coherent review units from the current scope without importing requirements from unrelated changes.
 - Include a `## Just-in-Time Delivery Plan` whenever the apply-to-verify freeze boundary, delayed delivery risk, mutable outputs, or other trigger is already known while planning.
 - Record archive and Git delivery authority honestly. Do not imply that candidate freeze, verification, or archive is authorized when it is not.
 - If a dependency, prompt gap, or attempt-budget exhaustion prevents an implementation-ready task artifact, keep `tasks.md` blocked with the failure class, attempts used, last evidence, material hypotheses tried, and exact required decision or dependency.
@@ -100,15 +102,6 @@ When `## Delivery and Review Forecast` is applicable, include all of these field
 - `Sequence`
 - `Delivery and rollback`
 
-For this change, the task artifact must require these exact four ordered review units:
-
-1. `AGENTS.md` shared semantics only.
-2. `skills/workflow-triage/SKILL.md` and `skills/sdd-workflow/SKILL.md` ownership or placement with registry-preservation review.
-3. `subagents/discovery.md`, `subagents/sdd-task.md`, `subagents/sdd-apply.md`, `subagents/sdd-verify.md`, and `subagents/sdd-archive.md` in lifecycle order.
-4. `docs/pi-workflow-regression-scenarios.md` plus final cross-surface validation, ownership scan, fixtures, and candidate-freeze readiness.
-
-For this change, the JIT plan must also state that archive and Git delivery are not authorized during apply.
-
 ## Output Contract
 
-Return the canonical six-field handoff from `AGENTS.md`. Handoff status must match the artifact status and cite `tasks.md` under evidence.
+Return the six-field handoff schema supplied in the delegated prompt. Handoff status must match the artifact status and cite `tasks.md` under evidence.

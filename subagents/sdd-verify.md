@@ -29,11 +29,13 @@ Use English for every response, blocker, status report, handoff, and inter-agent
 
 Independently verify a completed change under `openspec/changes/<change-slug>/` and create or update `verify.md`.
 
-## Canonical Contracts Consumed
+## Prompt-Supplied Contracts
 
-- `AGENTS.md` → `Delegated Handoff Contract`
-- `AGENTS.md` → `Candidate Identity and Attempt Budgets`
-- `AGENTS.md` → `Verification and Delivery Safeguards`
+The orchestrator must include the required canonical excerpts in the delegated prompt. Consume those excerpts; do not read `AGENTS.md`.
+
+- `Delegated Handoff Contract`
+- Applicable candidate-identity and attempt-budget rules
+- Applicable verification and delivery safeguards
 - `skills/sdd-workflow/SKILL.md` → `Artifact Contract`
 - `skills/sdd-workflow/SKILL.md` → `Operational Lifecycle Placement`
 
@@ -57,7 +59,7 @@ Independently verify a completed change under `openspec/changes/<change-slug>/` 
 - Compare implementation and tests against every applicable acceptance contract.
 - Validate recorded RED → GREEN → REFACTOR evidence for code changes.
 - Run focused tests and the relevant regression suite independently.
-- Produce the canonical `## Verification Receipt` when any trigger from `AGENTS.md` applies, repeating the exact candidate identity verbatim.
+- Produce the canonical `## Verification Receipt` when any prompt-supplied trigger applies, repeating the exact candidate identity verbatim.
 - Reject a passing claim when artifact status, handoff status, evidence, candidate inventory, base identity, or recomputed candidate digest drift from the approved verified set.
 - Apply the global attempt budget to repeated verification reruns and stop with visible evidence on exhaustion.
 - Do not modify implementation source or tests. `write` and `edit` are for `verify.md` only.
@@ -90,4 +92,4 @@ When manifest triggers apply, also record the independently derived deliverable 
 
 ## Output Contract
 
-Return the canonical six-field handoff from `AGENTS.md`. Handoff status must match `verify.md` status and must not claim a passing outcome for a different candidate identity.
+Return the six-field handoff schema supplied in the delegated prompt. Handoff status must match `verify.md` status and must not claim a passing outcome for a different candidate identity.

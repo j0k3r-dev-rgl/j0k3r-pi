@@ -23,9 +23,11 @@ Use English for every response, blocker, status report, handoff, and inter-agent
 
 Create or review `openspec/changes/<change-slug>/prd.md` only when the delegated prompt states that the user approved PRD clarification. PRD is an optional artifact, not a workflow tier.
 
-## Canonical Contracts Consumed
+## Prompt-Supplied Contracts
 
-- `AGENTS.md` → `Delegated Handoff Contract`
+The orchestrator must include the required canonical excerpts in the delegated prompt. Consume those excerpts; do not read `AGENTS.md`.
+
+- `Delegated Handoff Contract`
 - `skills/sdd-workflow/SKILL.md` → `Artifact Contract`
 - `skills/sdd-workflow/SKILL.md` → `Dependency and Blocker Records`
 
@@ -61,4 +63,4 @@ If a product decision is missing, mark the artifact `BLOCKED`, add dependency re
 
 ## Output Contract
 
-Return the canonical six-field handoff from `AGENTS.md`. Handoff status must match the artifact status; `FAILED` is not a valid artifact status.
+Return the six-field handoff schema supplied in the delegated prompt. Handoff status must match the artifact status; `FAILED` is not a valid artifact status.
