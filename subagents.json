@@ -1,6 +1,7 @@
 {
   "default_model": null,
   "default_mode": "background",
+  "enable_continue": true,
   "max_concurrency": 5,
   "debug": true,
   "session_resources": "lean",
