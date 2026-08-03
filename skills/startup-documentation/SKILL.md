@@ -72,6 +72,25 @@ This is a domain-documentation router. It does not create a fourth Pi execution 
 
 Do not create the complete documentation tree eagerly, generate empty placeholder files, or use this skill to decide product scope, architecture, technology, sprint content, or validation thresholds.
 
+## Change Intake Routing
+
+For an MVP or application already being evolved, route only the first unresolved decision. Reuse approved documents and do not restart the lifecycle when existing contracts already answer the change.
+
+| Requested change | First canonical owner or action |
+|---|---|
+| Bug whose expected behavior and acceptance are already approved | Trace the existing requirement/acceptance IDs, select the applicable Pi workflow, and use Strict TDD; reopen product documentation only if evidence challenges it. |
+| Bug whose expected behavior is missing, ambiguous, or contradictory | `requirements-definition` before implementation. |
+| Feature inside approved product scope with clear behavior | `requirements-definition`. |
+| New capability, changed user journey, or product-scope expansion | `product-definition`. |
+| Feature whose problem, audience, or value remains uncertain | `product-discovery`, with `product-validation` for an approved bounded experiment when useful. |
+| New or changed architecture driver, responsibility, data/trust, or deployment boundary | `architecture-definition`. |
+| Significant technology, dependency, vendor, protocol, or integration choice | `technical-decisions`. |
+| Approved change ready to become an increment, sprint, or flow item | `delivery-planning`. |
+| Outcome evidence, conformance evidence, experiment result, or learning decision | `product-validation`. |
+| Existing codebase without a trustworthy modular documentation baseline | Principal-only `existing-project-onboarding`. |
+
+Documentation defines and traces the intended change; it does not authorize implementation. Code changes proceed only through Direct Orchestrator, Mini-SDD, or Formal SDD as selected by workflow triage and must follow Strict TDD. Do not run onboarding for an ordinary feature or bug, repeat discovery for an already supported problem, or regenerate unaffected documentation.
+
 ## Hard Rules
 
 - Load and follow `anti-overengineering` whenever this skill is active.
