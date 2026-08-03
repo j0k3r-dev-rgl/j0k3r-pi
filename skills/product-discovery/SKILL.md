@@ -60,7 +60,7 @@ Do not activate it merely because discovery is available. Do not use it when an 
 
 ## Hard Rules
 
-- Load and follow `startup-documentation`, its `references/document-contract.md`, and `anti-overengineering` whenever this skill is active.
+- Consume the `startup-documentation` and `references/document-contract.md` context already supplied by the router. If no router context was supplied, load them once for the shared contract without re-entering documentation routing. Load and follow `anti-overengineering` whenever this skill is active.
 - Ask the user before defining any user, stakeholder, problem, outcome, market claim, evidence threshold, priority, or product direction not already established by supplied evidence.
 - Start from the decision that discovery must inform. Do not conduct open-ended research or interviews without a decision purpose.
 - Separate confirmed evidence, supported evidence, inference, assumption, and unknown in every artifact.

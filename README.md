@@ -113,9 +113,9 @@ PI_CODING_AGENT_DIR="$TARGET_DIR" pi install npm:pi-subagents-j0k3r
 PI_CODING_AGENT_DIR="$TARGET_DIR" pi install npm:gentle-engram
 ```
 
-### Core workflow
+### Core operating model
 
-The agent is conservative, user-controlled, and limited to exactly three execution workflows:
+The agent follows these operating rules. Execution itself is limited to exactly three workflows: **Direct Orchestrator**, **Mini-SDD**, and **Formal SDD**.
 
 1. Answer advice-only questions directly without inspecting or changing the project.
 2. Route concrete software work through [`workflow-triage`](skills/workflow-triage/SKILL.md): **Direct Orchestrator**, **Mini-SDD**, or **Formal SDD**. A named workflow begins without redundant confirmation.
@@ -143,11 +143,14 @@ See [`AGENTS.md`](AGENTS.md) for the full authority, consent, TDD, verification,
 The global startup skills define a project without inventing product intent and then keep documentation aligned as the application evolves:
 
 ```text
-Discovery → Product Definition → Requirements
-          → Architecture → Technical Decisions
-          → Delivery Planning → Pi execution workflow + Strict TDD
-          → Product Validation → Change Request → next increment
+Discovery (when problem/evidence is unresolved)
+→ Product Definition → Requirements
+→ Architecture → Technical Decisions
+→ Delivery Planning → Pi execution workflow + Strict TDD
+→ Product Validation → Change Request → next increment
 ```
+
+Not every increment visits every step. Route only the first unresolved decision and preserve unaffected approved artifacts.
 
 For an existing codebase:
 
@@ -185,6 +188,8 @@ Post-MVP change intake reuses approved documentation instead of restarting the l
 
 A completed increment records TDD and acceptance/conformance evidence, broader checks, validation status, learning/change-request links, release authorization, and next-increment eligibility. Documentation defines and traces intended behavior; it never authorizes implementation or release by itself.
 
+Maintainers can use [`docs/pi-workflow-regression-scenarios.md`](docs/pi-workflow-regression-scenarios.md) as non-authoritative review guidance after changing workflow, routing, TDD, startup, or onboarding contracts.
+
 ### Skill registry
 
 [`extensions/skill-registry`](extensions/skill-registry/) generates `.pi/skill-registry.json` and `.pi/skill-registry.md` from both project-local and global/user skills.
@@ -219,7 +224,7 @@ See [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 | Agent Todo | [`extensions/agent-todo/README.md`](extensions/agent-todo/README.md) | Single active task checklist for the current conversation branch, plus widget/provider integration. |
 | API Tools | [`extensions/api-tools/README.md`](extensions/api-tools/README.md) | Project-local REST and GraphQL tools gated by exact `<ctx.cwd>/.pi/api.json`, with login/access-token persistence, per-request token use, bounded output, and secret-safe diagnostics. |
 | Browser Screenshot | [`extensions/browser-screenshot/README.md`](extensions/browser-screenshot/README.md) | Read-only Chrome DevTools Protocol status, tab listing, and screenshots without launching or navigating the browser. |
-| Code Research | [`extensions/code-research/README.md`](extensions/code-research/README.md) | Tree-sitter-backed TypeScript, JavaScript, and Java symbol lookup, references, function call trees, and reverse call trees, plus Python workspace graph indexing. |
+| Code Research | [`extensions/code-research/README.md`](extensions/code-research/README.md) | Tree-sitter-backed TypeScript, JavaScript, Java, and Go symbol lookup, references, function call trees, and reverse call trees, plus Python workspace graph indexing. |
 | Context7 | [`extensions/context7/README.md`](extensions/context7/README.md) | Safe, bounded Context7 library documentation tools without MCP. |
 | PDF Review | [`extensions/pdf-review/README.md`](extensions/pdf-review/README.md) | Local PDF extraction with optional OCR via OCRmyPDF/Tesseract. |
 | Permission Guard | [`extensions/permission-guard/README.md`](extensions/permission-guard/README.md) | In-process permission policy for supported tools and user bash commands. |
@@ -237,7 +242,7 @@ See [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 | Agent Todo | `agent_todo` | Maintains one active checklist for the current conversation branch, useful for multi-step implementation or validation work. | [Read more](extensions/agent-todo/README.md) |
 | API Tools | Project REST/GraphQL tools | Exposes project-local API calls from `.pi/api.json`, including login/token handling and bounded, secret-safe responses. | [Read more](extensions/api-tools/README.md) |
 | Browser Screenshot | `browser_cdp_status`, `browser_tabs_list`, `browser_page_screenshot` | Inspects existing Chrome CDP tabs and captures screenshots without navigation or focus changes. | [Read more](extensions/browser-screenshot/README.md) |
-| Code Research | `find_symbol`, `find_references`, `function_call_tree`, `reverse_function_call_tree`, `workspace_graph_status` | Provides code intelligence for TypeScript, JavaScript, and Java, with Python file/symbol indexing in the workspace graph. | [Read more](extensions/code-research/README.md) |
+| Code Research | `find_symbol`, `find_references`, `function_call_tree`, `reverse_function_call_tree`, `workspace_graph_status` | Provides code intelligence for TypeScript, JavaScript, Java, and Go, with Python file/symbol indexing in the workspace graph. | [Read more](extensions/code-research/README.md) |
 | Context7 | `context7_search_library`, `context7_get_context`, `context7_resolve_and_get_context` | Fetches focused library documentation through Context7 with bounded output and safe configuration. | [Read more](extensions/context7/README.md) |
 | PDF Review | `pdf_extract` | Extracts text and metadata from local PDFs, with optional OCR through OCRmyPDF/Tesseract. | [Read more](extensions/pdf-review/README.md) |
 | Permission Guard | Tool and bash policy enforcement | Applies in-process safety rules for supported tools, bash commands, protected paths, approvals, and secret handling. | [Read more](extensions/permission-guard/README.md) |
@@ -441,9 +446,9 @@ PI_CODING_AGENT_DIR="$TARGET_DIR" pi install npm:pi-subagents-j0k3r
 PI_CODING_AGENT_DIR="$TARGET_DIR" pi install npm:gentle-engram
 ```
 
-### Workflow principal
+### Modelo operativo principal
 
-El agente es conservador, controlado por el usuario y limitado exactamente a tres workflows de ejecución:
+El agente sigue estas reglas operativas. La ejecución está limitada exactamente a tres workflows: **Direct Orchestrator**, **Mini-SDD** y **Formal SDD**.
 
 1. Responder consultas de asesoramiento sin inspeccionar ni modificar el proyecto.
 2. Enrutar trabajo concreto mediante [`workflow-triage`](skills/workflow-triage/SKILL.md): **Direct Orchestrator**, **Mini-SDD** o **Formal SDD**. Si el usuario ya nombra el workflow, comienza sin confirmación redundante.
@@ -471,11 +476,14 @@ Ver [`AGENTS.md`](AGENTS.md) para la política completa de autoridad, consentimi
 Las skills globales definen el proyecto sin inventar intención de producto y mantienen la documentación alineada mientras evoluciona la aplicación:
 
 ```text
-Discovery → Product Definition → Requirements
-          → Architecture → Technical Decisions
-          → Delivery Planning → workflow Pi + Strict TDD
-          → Product Validation → Change Request → siguiente incremento
+Discovery (cuando problema/evidencia no están resueltos)
+→ Product Definition → Requirements
+→ Architecture → Technical Decisions
+→ Delivery Planning → workflow Pi + Strict TDD
+→ Product Validation → Change Request → siguiente incremento
 ```
+
+No todos los incrementos recorren cada paso. Se enruta solo la primera decisión sin resolver y se preservan los artefactos aprobados no afectados.
 
 Para un proyecto existente:
 
@@ -513,6 +521,8 @@ Después del MVP se reutiliza la documentación aprobada en vez de reiniciar el 
 
 Un incremento completo registra evidencia TDD y de aceptación/conformidad, checks adicionales, estado de Validation, enlaces de aprendizaje/change request, autorización de release y elegibilidad del siguiente incremento. La documentación define y traza el comportamiento previsto; nunca autoriza por sí sola implementación ni release.
 
+Los mantenedores pueden usar [`docs/pi-workflow-regression-scenarios.md`](docs/pi-workflow-regression-scenarios.md) como guía no autoritativa después de cambiar contratos de workflow, routing, TDD, startup u onboarding.
+
 ### Skill Registry
 
 [`extensions/skill-registry`](extensions/skill-registry/) genera `.pi/skill-registry.json` y `.pi/skill-registry.md` desde skills locales de proyecto y skills globales/de usuario.
@@ -547,7 +557,7 @@ Ver [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 | Agent Todo | [`extensions/agent-todo/README.md`](extensions/agent-todo/README.md) | Checklist de una sola tarea activa para la rama de conversación actual, más integración de widget/provider. |
 | API Tools | [`extensions/api-tools/README.md`](extensions/api-tools/README.md) | Herramientas REST y GraphQL por proyecto, activadas por `<ctx.cwd>/.pi/api.json`, con login/token, uso de token por request, salida acotada y diagnósticos seguros. |
 | Browser Screenshot | [`extensions/browser-screenshot/README.md`](extensions/browser-screenshot/README.md) | Estado, listado de pestañas y capturas de Chrome DevTools Protocol en modo de solo lectura, sin iniciar ni navegar el navegador. |
-| Code Research | [`extensions/code-research/README.md`](extensions/code-research/README.md) | Búsqueda de símbolos, referencias, call trees y reverse call trees para TypeScript, JavaScript y Java usando Tree-sitter, más indexado Python en el workspace graph. |
+| Code Research | [`extensions/code-research/README.md`](extensions/code-research/README.md) | Búsqueda de símbolos, referencias, call trees y reverse call trees para TypeScript, JavaScript, Java y Go usando Tree-sitter, más indexado Python en el workspace graph. |
 | Context7 | [`extensions/context7/README.md`](extensions/context7/README.md) | Herramientas seguras y acotadas para documentación de librerías con Context7, sin MCP. |
 | PDF Review | [`extensions/pdf-review/README.md`](extensions/pdf-review/README.md) | Extracción local de PDF con OCR opcional vía OCRmyPDF/Tesseract. |
 | Permission Guard | [`extensions/permission-guard/README.md`](extensions/permission-guard/README.md) | Política de permisos in-process para herramientas soportadas y comandos bash del usuario. |
@@ -565,7 +575,7 @@ Ver [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 | Agent Todo | `agent_todo` | Mantiene una checklist activa para la rama de conversación actual; útil en trabajos de implementación o validación con varios pasos. | [Ver más](extensions/agent-todo/README.md) |
 | API Tools | Herramientas REST/GraphQL del proyecto | Expone llamadas API locales definidas en `.pi/api.json`, con login/token, respuestas acotadas y diagnósticos seguros. | [Ver más](extensions/api-tools/README.md) |
 | Browser Screenshot | `browser_cdp_status`, `browser_tabs_list`, `browser_page_screenshot` | Inspecciona pestañas Chrome CDP existentes y obtiene capturas sin navegar ni cambiar el foco. | [Ver más](extensions/browser-screenshot/README.md) |
-| Code Research | `find_symbol`, `find_references`, `function_call_tree`, `reverse_function_call_tree`, `workspace_graph_status` | Aporta inteligencia de código para TypeScript, JavaScript y Java, con indexado de archivos/símbolos Python en el workspace graph. | [Ver más](extensions/code-research/README.md) |
+| Code Research | `find_symbol`, `find_references`, `function_call_tree`, `reverse_function_call_tree`, `workspace_graph_status` | Aporta inteligencia de código para TypeScript, JavaScript, Java y Go, con indexado de archivos/símbolos Python en el workspace graph. | [Ver más](extensions/code-research/README.md) |
 | Context7 | `context7_search_library`, `context7_get_context`, `context7_resolve_and_get_context` | Obtiene documentación enfocada de librerías con Context7, salida acotada y configuración segura. | [Ver más](extensions/context7/README.md) |
 | PDF Review | `pdf_extract` | Extrae texto y metadata de PDFs locales, con OCR opcional mediante OCRmyPDF/Tesseract. | [Ver más](extensions/pdf-review/README.md) |
 | Permission Guard | Políticas para tools y bash | Aplica reglas de seguridad in-process para tools soportadas, comandos bash, rutas protegidas, aprobaciones y secretos. | [Ver más](extensions/permission-guard/README.md) |

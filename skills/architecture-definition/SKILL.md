@@ -59,7 +59,7 @@ Do not use this skill to discover the product, expand MVP scope, invent quality 
 
 ## Hard Rules
 
-- Load and follow `startup-documentation`, `references/document-contract.md`, and `anti-overengineering` whenever this skill is active.
+- Consume the `startup-documentation` and `references/document-contract.md` context already supplied by the router. If no router context was supplied, load them once for the shared contract without re-entering documentation routing. Load and follow `anti-overengineering` whenever this skill is active.
 - Use approved product and requirements artifacts as drivers. Stop if the critical flow, applicable quality requirement, constraint, data class, or decision owner needed for the current view is unresolved.
 - Ask the user before choosing architecture boundaries, ownership, deployment shape, data placement, trust assumptions, security posture, availability approach, or trade-offs not already approved.
 - Express architecture drivers as measurable scenarios when applicable: source/stimulus, context, affected artifact, expected response, measure or unresolved target, evidence, priority, and owner.
@@ -67,12 +67,12 @@ Do not use this skill to discover the product, expand MVP scope, invent quality 
 - Prefer the smallest reversible architecture satisfying current drivers. A well-modularized single deployment is a valid baseline while boundaries are uncertain, but never prescribe it when an explicit constraint requires another shape.
 - Show the simpler viable alternative whenever proposing additional deployables, datastores, asynchronous infrastructure, caches, gateways, regions, or operational platforms.
 - Model functional responsibility boundaries, not speculative microservices. A diagram boundary does not authorize a separate deployment.
-- Classify data and identify trust boundaries before deciding sensitive storage or external data flows.
-- When a current requirement, data class, trust boundary, integration, or deployment exposure is security-relevant, perform a proportionate threat/risk assessment. Record material threats, affected assets/boundaries, evidence or assumptions, disposition (`MITIGATE | ACCEPT | TRANSFER | DEFER`), decision owner, linked requirement or ADR when needed, and expected security-verification evidence. For `ACCEPT` or `DEFER`, also record a review/expiry event, closure condition, and responsible owner. Do not require a separate document, branded method, score, or speculative control; unresolved risk acceptance belongs to the user.
+- Classify data and identify trust boundaries before deciding sensitive storage or external data flows. When the application includes AI/agent capabilities, include applicable tool permissions, prompt/instruction boundaries, model context—including retrieval/vector/embedding context when used—memory, human-approval gates, and external tool-execution boundaries without imposing them on conventional applications.
+- When a current requirement, data class, trust boundary, integration, or deployment exposure is security- or privacy-relevant, perform a proportionate threat/risk assessment. Record material threats, affected assets/boundaries, evidence or assumptions, disposition (`MITIGATE | ACCEPT | TRANSFER | DEFER`), decision owner, linked requirement or ADR when needed, and expected security/privacy-verification evidence. For `ACCEPT` or `DEFER`, also record a review/expiry event, closure condition, and responsible owner. Do not require a separate document, branded method, score, or speculative control; unresolved risk acceptance belongs to the user.
 - Keep diagrams text-reviewable using Markdown and Mermaid unless the user explicitly approves another durable format.
 - Describe deployment responsibilities and required operational capabilities without selecting a vendor unless a separate technical decision approves it.
 - Link approved quality and constraint IDs and add only architecture interpretation, priority, and trade-off implications. Never redefine the canonical target.
-- Record the risk-proportional security verification expectations and the owner or response path for discovered vulnerabilities or incidents; route tool and platform selection to `technical-decisions`.
+- Record risk-proportional security/privacy verification expectations and the owner or response path for discovered vulnerabilities, privacy incidents, or control failures; route tool and platform selection to `technical-decisions`.
 - Do not duplicate requirements or ADR rationale. Link stable IDs and summarize only what is necessary to understand the architecture view.
 - Create or update only the views needed for the current approved decision. Do not generate all five architecture files automatically.
 
@@ -83,7 +83,7 @@ Before defining an architecture view, resolve:
 - approved functional slices and applicable quality/constraint IDs;
 - critical user and operational flows;
 - system actors and external systems;
-- data classes, ownership, retention obligations, trust boundaries, material threats, and risk disposition relevant now;
+- data classes, ownership, retention obligations, trust boundaries, material security/privacy threats, and risk disposition relevant now, including applicable AI/agent tool, prompt, retrieval/vector/embedding context, memory, human-approval, and external-execution boundaries;
 - actual team, budget, environment, delivery, and operational constraints;
 - measurable or explicitly unresolved reliability, recovery, latency, throughput, security, privacy, accessibility, and interoperability needs;
 - architecture decision owner and acceptable risk.
@@ -114,8 +114,8 @@ docs/03-architecture/
 4. Use `00-architecture-drivers.md` as a concise prioritized index of functional drivers, linked quality/constraint IDs, architecture interpretation, knockout constraints, evidence/confidence, owners, and review triggers.
 5. Use `01-system-context.md` for users, external systems, responsibilities, data exchanges, trust relationships, and a context diagram.
 6. Use `02-system-boundaries.md` for current functional responsibility boundaries, ownership, permitted dependencies, invariants, and explicit non-boundaries; do not imply independent deployment unless approved.
-7. Use `03-data-and-trust-boundaries.md` for data classification, sources, owners, flows, trust zones, retention/deletion obligations, and any applicable proportionate threat/risk assessment and disposition without inventing controls.
-8. Use `04-deployment-view.md` for deployable units actually required now, environments, configuration/secrets responsibilities, build/deploy/rollback/restore expectations, observability baseline, applicable security verification, vulnerability/incident response ownership, and external runtime dependencies without unapproved vendor selection.
+7. Use `03-data-and-trust-boundaries.md` for data classification, sources, owners, flows, trust zones, retention/deletion obligations, applicable AI/agent trust surfaces, and any proportionate threat/risk assessment and disposition without inventing controls.
+8. Use `04-deployment-view.md` for deployable units actually required now, environments, configuration/secrets responsibilities, build/deploy/rollback/restore expectations, observability baseline, applicable security/privacy verification, vulnerability/privacy-incident response ownership, and external runtime dependencies without unapproved vendor selection.
 9. When a significant choice remains, request one numbered ADR from `technical-decisions` rather than hiding the choice in a diagram.
 10. Validate traceability, simplicity, diagram syntax when present, and absence of unsupported future architecture.
 
@@ -126,7 +126,7 @@ Return:
 - Skills applied: `architecture-definition`, `startup-documentation`, and `anti-overengineering`; `technical-decisions` only for a separately authorized decision.
 - Architecture question and approved requirement/constraint IDs used.
 - Architecture views created or updated.
-- Drivers, linked quality/constraint IDs, knockout constraints, assumptions, applicable threat/risk dispositions and `ACCEPT`/`DEFER` review conditions, security verification/response ownership, and unknown targets kept explicit.
+- Drivers, linked quality/constraint IDs, knockout constraints, assumptions, applicable security/privacy threat/risk dispositions and `ACCEPT`/`DEFER` review conditions, verification/response ownership, and unknown targets kept explicit.
 - User-owned boundary and trade-off decisions requested and resolved.
 - Simpler viable baseline considered.
 - Technology/vendor choices, migrations, sprint plans, and implementation performed: `None`.
@@ -144,3 +144,4 @@ Return:
 - `https://www.sei.cmu.edu/library/reasoning-about-software-quality-attributes` — quality attributes as architecture drivers and trade-offs.
 - `https://martinfowler.com/articles/evo-arch-forward.html` — evolutionary architecture through small changes and feedback.
 - `https://www.thoughtworks.com/radar/techniques/evolutionary-architecture` — driving requirements and latest responsible decisions.
+- `https://cheatsheetseries.owasp.org/cheatsheets/AI_Agent_Security_Cheat_Sheet.html` — conditional agent tool, instruction, memory/context, and human-approval security boundaries.

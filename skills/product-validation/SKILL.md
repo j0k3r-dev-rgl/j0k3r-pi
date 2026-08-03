@@ -64,7 +64,7 @@ Do not use it to invent success thresholds after results are known, collect unau
 
 ## Hard Rules
 
-- Load and follow `startup-documentation`, `references/document-contract.md`, and `anti-overengineering` whenever this skill is active.
+- Consume the `startup-documentation` and `references/document-contract.md` context already supplied by the router. If no router context was supplied, load them once for the shared contract without re-entering documentation routing. Load and follow `anti-overengineering` whenever this skill is active.
 - Begin with one user-approved discovery opportunity, assumption, or test hypothesis, or one approved product hypothesis or outcome, plus the named decision the evidence will inform. Discovery approval authorizes testing only and does not promote provisional content into product intent.
 - Ask the user before selecting metrics, thresholds, cohorts, observation periods, guardrails, experiment methods, data collection, confidence requirements, or final learning decisions.
 - Product owns outcome, success, and guardrail intent. Validation owns operational metric definitions, cohorts, collection and analysis methods, baselines, thresholds, observation periods, results, and learning decisions.

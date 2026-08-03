@@ -60,7 +60,7 @@ Do not use it to discover the problem, choose MVP scope, design architecture, se
 
 ## Hard Rules
 
-- Load and follow `startup-documentation`, `references/document-contract.md`, and `anti-overengineering` whenever this skill is active.
+- Consume the `startup-documentation` and `references/document-contract.md` context already supplied by the router. If no router context was supplied, load them once for the shared contract without re-entering documentation routing. Load and follow `anti-overengineering` whenever this skill is active.
 - Use approved product documents as parent contracts. Stop if the relevant product capability, scope decision, user, or outcome is not approved or is materially inconsistent.
 - Ask the user before defining behavior, business rules, data obligations, priorities, error handling, boundary conditions, quality targets, compatibility requirements, or acceptance criteria not established by approved inputs.
 - Assign stable identifiers to every requirement and acceptance criterion. Never renumber or reuse retired identifiers.

@@ -68,7 +68,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
 
 Use this skill when a user starts or reorganizes a software startup's project documentation, asks which numbered Markdown document owns a decision, or requests progression through the documented startup lifecycle.
 
-This is a domain-documentation router. It does not create a fourth Pi execution workflow and does not replace Direct Orchestrator, Mini-SDD, or Formal SDD. Load the specific domain skill that owns the requested decision. Use `existing-project-onboarding` when an existing implementation must be scanned and reconstructed into the modular documentation baseline. Use `product-discovery` when a new project's problem, users, evidence, assumptions, or product direction are not yet established.
+This is a domain-documentation router. It does not create a fourth Pi execution workflow and does not replace Direct Orchestrator, Mini-SDD, or Formal SDD. Registry `sdd_phases` indicate only where documentation routing may be useful; they do not make this skill an SDD phase owner or authorize workflow actions. Load the specific domain skill that owns the requested decision. Use `existing-project-onboarding` when an existing implementation must be scanned and reconstructed into the modular documentation baseline. Use `product-discovery` when a new project's problem, users, evidence, assumptions, or product direction are not yet established.
 
 Do not create the complete documentation tree eagerly, generate empty placeholder files, or use this skill to decide product scope, architecture, technology, sprint content, or validation thresholds.
 

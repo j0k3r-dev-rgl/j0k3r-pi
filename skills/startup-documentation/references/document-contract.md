@@ -15,7 +15,7 @@ docs/
 │   └── 05-existing-project/
 ├── 01-product/
 │   ├── 00-product-vision.md
-│   ├── 01-success-metrics.md
+│   ├── 01-success-metrics.md  # success/guardrail intent and metric links only; operational definitions belong to Validation
 │   ├── 02-mvp-hypothesis.md
 │   ├── 03-scope.md
 │   ├── 04-user-journeys/
@@ -182,6 +182,8 @@ The lifecycle is deterministic:
 4. Validation records the disposition and resulting status.
 5. The target owner applies an accepted semantic change only after required approval.
 6. Validation records closure evidence after impact review and closes the record when its closure condition is met.
+
+CR status tracks the Validation-owned record lifecycle; disposition tracks the target owner's semantic decision on the challenged canonical content. `APPROVED` status therefore records lifecycle processing of an accepted change and must not be inferred from, or substituted for, the target owner's `ACCEPTED` disposition.
 
 Each record contains:
 

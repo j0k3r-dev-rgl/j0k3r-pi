@@ -60,7 +60,7 @@ Do not use it to conduct customer research, invent market evidence, write detail
 
 ## Hard Rules
 
-- Load and follow `startup-documentation`, `references/document-contract.md`, and `anti-overengineering` whenever this skill is active.
+- Consume the `startup-documentation` and `references/document-contract.md` context already supplied by the router. If no router context was supplied, load them once for the shared contract without re-entering documentation routing. Load and follow `anti-overengineering` whenever this skill is active.
 - Read the minimum approved discovery artifacts required for the current product decision. Stop if the core problem, target audience, or decision owner is materially unresolved.
 - Ask the user before selecting product vision, business outcome, success intent, MVP hypothesis, included capability, exclusion, journey, priority, or trade-off.
 - The agent may recommend the smallest supported product slice, explain why broader items are premature, and present bounded alternatives. The user retains the final product decision.

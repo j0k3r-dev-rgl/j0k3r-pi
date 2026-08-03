@@ -58,7 +58,7 @@ Do not use it to discover the product, expand scope, invent capacity or dates, r
 
 ## Hard Rules
 
-- Load and follow `startup-documentation`, `references/document-contract.md`, and `anti-overengineering` whenever this skill is active. Load `tdd` when planning code changes.
+- Consume the `startup-documentation` and `references/document-contract.md` context already supplied by the router. If no router context was supplied, load them once for the shared contract without re-entering documentation routing. Load and follow `anti-overengineering` whenever this skill is active. Load `tdd` when planning code changes.
 - Use approved product, requirement, architecture, and technical-decision IDs as inputs. Stop if the functional slice, acceptance, applicable quality conditions, dependency, or decision owner needed for planning is unresolved.
 - Ask the user before selecting delivery model, cadence, sprint length, capacity assumption, priority, sequence, scope commitment, release boundary, quality policy, rollout, rollback, or date.
 - Choose Scrum only when a stable team benefits from a protected short-term outcome and recurring inspect/adapt boundary. Choose Kanban/continuous flow when arrivals are volatile, interrupt-driven, or better forecast through flow. Use a hybrid only when each retained mechanism solves a demonstrated problem. When Kanban/flow is selected, use `03-increments/` records as flow items and create `04-sprints/` records only when sprints are explicitly selected.
@@ -139,8 +139,8 @@ Return:
 - Roadmap, increment, sprint, or Definition of Done documents created or updated.
 - Sprint goal and small vertical module expected to be fully functional against its approved boundary.
 - Scope, exclusions, dependencies, capacity assumptions, provisional constraints, data-safe rollback/mitigation, and user-owned commitments.
-- RED → GREEN → REFACTOR plan and result evidence plus applicable acceptance/conformance, broader-quality, product-validation, learning-decision, and change-request links.
-- Result status, affected owner dispositions, next-increment eligibility, applicable data-change evidence, and release authorization.
+- Planned RED → GREEN → REFACTOR and acceptance/conformance evidence expectations, broader-quality and product-validation expectations, and anticipated learning-decision/change-request links.
+- Observed execution evidence only when already produced by a separately authorized Pi workflow: TDD/check results, result status, affected owner dispositions, next-increment eligibility, applicable data-change evidence, and release authorization; otherwise `None`.
 - Speculative dates, ceremonies, infrastructure, and future sprints added: `None`.
 - Implementation or release performed: `None` unless separately authorized.
 - Validation executed.
@@ -154,6 +154,6 @@ Return:
 - `~/.pi/agent/skills/architecture-definition/SKILL.md` — architecture input owner.
 - `~/.pi/agent/skills/tdd/SKILL.md` — Strict RED → GREEN → REFACTOR guidance.
 - `https://scrumguides.org/scrum-guide.html` — Product Goal, Sprint Goal, refinement, and Definition of Done.
-- `https://kanbanguides.org/the-kanban-guide/2020.12/` — workflow, WIP, flow measures, and service-level expectations.
+- `https://kanbanguides.org/the-kanban-guide/` — current workflow, WIP, flow measures, and service-level expectations guidance.
 - `https://continuousdelivery.com/implementing/patterns/` — small batches, automated validation, and continuous feedback.
 - `https://dora.dev/research/` — delivery metrics used for system learning rather than individual targets.
