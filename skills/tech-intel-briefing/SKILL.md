@@ -4,7 +4,7 @@ description: "Spanish-first orchestration for technology news briefings: gather 
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.0"
+  version: "1.1"
 ---
 
 # Tech Intel Briefing
@@ -53,7 +53,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "explicame esta noticia"
     ]
   },
-  "sdd_phases": ["explore"],
+  "sdd_phases": [],
   "related_skills": [],
   "priority": 72
 }

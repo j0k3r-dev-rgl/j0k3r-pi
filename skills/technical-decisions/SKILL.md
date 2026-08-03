@@ -4,7 +4,7 @@ description: "evaluate and record one significant startup architecture, language
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.0"
+  version: "1.4"
 ---
 
 # Technical Decisions
@@ -39,7 +39,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "evaluar integracion"
     ]
   },
-  "sdd_phases": ["proposal", "spec", "design", "task"],
+  "sdd_phases": [],
   "related_skills": [
     "startup-documentation",
     "architecture-definition",
@@ -69,7 +69,7 @@ Do not create an ADR for easily reversible local implementation details. Do not 
 - State the simplest viable option first and explain exactly why it fails before recommending a more complex option.
 - Select the lowest-complexity option that passes every knockout constraint and leaves explicitly accepted risk. Scores support judgment; they never make the decision automatically.
 - Record evidence and confidence for each material comparison. Do not use artificial numeric precision when evidence is qualitative.
-- Run a time-boxed spike only when its result can change the decision. Predeclare question, representative test, pass/fail criteria, cost/time cap, data restrictions, and resulting decision. A spike must not silently become production code. If it creates or changes code, require separately authorized code scope, load `tdd`, and follow Strict RED → GREEN → REFACTOR.
+- Run a time-boxed spike only when its result can change the decision. Predeclare question, representative test, pass/fail criteria, cost/time cap, data restrictions, and resulting decision. A spike must not silently become production code. If it creates or changes code, require separately authorized code scope, load `tdd`, and follow the applicable change-type validation path.
 - Count operational burden as product cost: deployment, testing, monitoring, rollback, restore, patching, incident ownership, upgrades, support, and hiring/training.
 - For dependencies, evaluate maintenance, documentation, release policy, compatibility, license, transitive dependencies, end-of-life, vulnerability response, update path, and team supportability.
 - When third-party code or release artifacts are introduced, define a risk-proportional lifecycle baseline: direct/transitive inventory or SBOM when warranted, source and version, integrity/provenance evidence, license posture, vulnerability monitoring, remediation owner and response expectation, exception review, and release-artifact integrity. When release integrity is material, include applicable build plugins, CI actions, base images, toolchains, generators, and generated artifacts—not only runtime libraries—and record source/build provenance or attestations sufficient to verify artifact origin and build integrity. Do not mandate SLSA, an attestation system, a tool, or a vendor.
@@ -126,12 +126,12 @@ docs/03-architecture/
 
 Return:
 
-- Skills applied: `technical-decisions`, `architecture-definition`, `startup-documentation`, and `anti-overengineering`.
+- Skills applied: `technical-decisions`, `startup-documentation`, and `anti-overengineering`; `architecture-definition` only when applicable architecture context was actually required and loaded.
 - Decision or integration record path and stable number.
 - Approved requirements, drivers, constraints, and any provisional delivery constraints used.
 - Viable alternatives and simplest baseline considered.
 - User-owned criteria, trade-offs, risk acceptance, and final decision.
-- Evidence/confidence and spike results, or `None`; authorized code scope and Strict TDD evidence when a spike changed code.
+- Evidence/confidence and spike results, or `None`; authorized code scope and applicable change-type validation evidence when a spike changed code.
 - Consequences, operational burden, reversibility, applicable dependency/release integrity and security-response ownership, and revisit trigger.
 - Implementation, migration, procurement, external contact, and delivery performed: `None` unless separately authorized.
 - Validation executed.
@@ -143,7 +143,7 @@ Return:
 - `~/.pi/agent/skills/startup-documentation/references/document-contract.md` — modular Markdown and supersession contract.
 - `~/.pi/agent/skills/architecture-definition/SKILL.md` — architecture view and driver owner.
 - `~/.pi/agent/skills/requirements-definition/SKILL.md` — requirement and constraint owner.
-- `~/.pi/agent/skills/tdd/SKILL.md` — mandatory Strict RED → GREEN → REFACTOR guidance when an approved spike changes code.
+- `~/.pi/agent/skills/tdd/SKILL.md` — applicable change-type validation guidance when an approved spike changes code.
 - `~/.pi/agent/skills/anti-overengineering/SKILL.md` — mandatory simplicity and decision controls.
 - `https://adr.github.io/` — architecturally significant decision records.
 - `https://martinfowler.com/bliki/ArchitectureDecisionRecord.html` — short, single-decision, superseded ADRs.

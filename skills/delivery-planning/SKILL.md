@@ -4,7 +4,7 @@ description: "turn approved startup requirements and architecture into outcome-o
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.0"
+  version: "1.3"
 ---
 
 # Delivery Planning
@@ -34,7 +34,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "corte vertical"
     ]
   },
-  "sdd_phases": ["design", "task", "apply", "verify"],
+  "sdd_phases": [],
   "related_skills": [
     "startup-documentation",
     "requirements-definition",
@@ -121,9 +121,9 @@ docs/04-delivery/
 
 4. Use `00-delivery-model.md` for chosen Scrum/Kanban/flow policies, rationale, cadence, planning/review triggers, WIP or sprint boundaries, interruption handling, and change conditions.
 5. Use `01-roadmap.md` as a concise `Now / Next / Later` outcome map with confidence, dependencies, measures, and explicit non-commitments.
-6. Use `02-definition-of-done.md` for the shared product-appropriate quality floor: review; Strict TDD evidence for code changes; acceptance/conformance verification; applicable integration, exploratory, usability, accessibility, security, performance, and operational checks; product-validation links when learning is required; documentation/telemetry; release-integrity and vulnerability-response evidence; rollback or data-safe mitigation; and potentially releasable status. Potentially releasable never implies release authorization.
+6. Use `02-definition-of-done.md` for the shared product-appropriate quality floor: review; applicable change-type validation evidence for code changes; acceptance/conformance verification; applicable integration, exploratory, usability, accessibility, security, performance, and operational checks; product-validation links when learning is required; documentation/telemetry; release-integrity and vulnerability-response evidence; rollback or data-safe mitigation; and potentially releasable status. Potentially releasable never implies release authorization.
 7. Store each small vertical, independently reviewable delivery unit under `03-increments/`, linking outcome, requirements, acceptance, architecture, dependencies, validation need, completion evidence, and status: `PLANNED | IN_PROGRESS | DONE | NOT_DONE | BLOCKED | CONDITIONAL_NOT_COMMITTABLE`.
-8. Store each explicitly selected sprint under `04-sprints/` with one goal, one small fully functional vertical module, any linked enabling work, scope/exclusions, increment/requirement IDs, dependencies, RED → GREEN → REFACTOR plan and result evidence, applicable broader validation, Definition of Done, capacity assumptions, risks, and result status.
+8. Store each explicitly selected sprint under `04-sprints/` with one goal, one small fully functional vertical module, any linked enabling work, scope/exclusions, increment/requirement IDs, dependencies, applicable change-type validation plan and result evidence, broader validation, Definition of Done, capacity assumptions, risks, and result status.
 9. When execution evidence exists, update the increment/sprint with outcome evidence; TDD and broader-check links; `DONE | NOT_DONE | BLOCKED`; product-validation status `NOT_REQUIRED | REQUIRED | COMPLETED | BLOCKED`; learning-decision and `CR-####` links; affected upstream owners and returned dispositions; data-change migration/version, compatibility, rollback/restore/containment/forward-fix evidence and owner when applicable; release authorization; and next-increment eligibility `ELIGIBLE | BLOCKED | CONDITIONAL`.
 10. Do not mark a next increment `ELIGIBLE` while it relies on an affected decision with incomplete required validation or an unresolved change request. `NOT_DONE` returns remaining behavior to bounded replanning; it never becomes hidden carry-over or value evidence.
 11. If an approved increment is larger than one credible sprint, return it to product/requirements owners for boundary splitting rather than creating technical-layer sprints.
@@ -140,7 +140,7 @@ Return:
 - Roadmap, increment, sprint, or Definition of Done documents created or updated.
 - Sprint goal and small vertical module expected to be fully functional against its approved boundary.
 - Scope, exclusions, dependencies, capacity assumptions, provisional constraints, data-safe rollback/mitigation, and user-owned commitments.
-- Planned RED → GREEN → REFACTOR and acceptance/conformance evidence expectations, broader-quality and product-validation expectations, and anticipated learning-decision/change-request links.
+- Planned change-type validation and acceptance/conformance evidence expectations, broader-quality and product-validation expectations, and anticipated learning-decision/change-request links.
 - Observed execution evidence only when already produced by a separately authorized Pi workflow: TDD/check results, result status, affected owner dispositions, next-increment eligibility, applicable data-change evidence, and release authorization; otherwise `None`.
 - Speculative dates, ceremonies, infrastructure, and future sprints added: `None`.
 - Implementation or release performed: `None` unless separately authorized.
@@ -153,7 +153,7 @@ Return:
 - `~/.pi/agent/skills/startup-documentation/references/document-contract.md` — modular Markdown contract.
 - `~/.pi/agent/skills/requirements-definition/SKILL.md` — functional and acceptance owner.
 - `~/.pi/agent/skills/architecture-definition/SKILL.md` — architecture input owner.
-- `~/.pi/agent/skills/tdd/SKILL.md` — Strict RED → GREEN → REFACTOR guidance.
+- `~/.pi/agent/skills/tdd/SKILL.md` — change-type validation guidance.
 - `https://scrumguides.org/scrum-guide.html` — Product Goal, Sprint Goal, refinement, and Definition of Done.
 - `https://kanbanguides.org/the-kanban-guide/` — current workflow, WIP, flow measures, and service-level expectations guidance.
 - `https://continuousdelivery.com/implementing/patterns/` — small batches, automated validation, and continuous feedback.

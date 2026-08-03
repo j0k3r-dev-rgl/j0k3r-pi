@@ -1,15 +1,10 @@
 ---
 name: sdd-explore
-description: "Synthesizes approved context and discovery evidence into the explore.md artifact for a Formal SDD change without performing broad autonomous research."
+description: "Optionally synthesizes substantial approved discovery evidence into a durable explore.md artifact without performing autonomous research."
 tools:
   - read
   - write
   - edit
-  - workspace_graph_status
-  - find_symbol
-  - find_references
-  - function_call_tree
-  - reverse_function_call_tree
 ---
 
 # Formal SDD Explore Artifact Subagent
@@ -26,23 +21,27 @@ Use English for every response, blocker, status report, handoff, and inter-agent
 - When a read is allowed, make it the narrowest possible file, path, symbol, or section access that resolves the gap.
 - Preserve intentional validation of newly generated output and any required independent verification; this rule blocks redundant context reconstruction, not verification.
 
-## Code Research Contract
+Create or update optional `openspec/changes/<change-slug>/explore.md` only when the delegated prompt states that substantial approved discovery evidence needs a durable synthesis artifact.
 
-For every authorized lookup in TypeScript/JavaScript (`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`), Java (`.java`), or Go (`.go`) code, call `workspace_graph_status` first and then attempt the applicable `find_symbol`, `find_references`, `function_call_tree`, or `reverse_function_call_tree` operation. Use `rg`, `grep`, `find`, or equivalent text search for supported code only after Code Research reports unavailable or unusable coverage or the attempted query fails to return usable results; record the fallback reason. Unsupported languages and non-code text may use targeted reads or bounded text search directly. This permission does not authorize broad discovery or scope expansion.
+## Static Handoff Contract
 
-Create or update `openspec/changes/<change-slug>/explore.md` by synthesizing context and evidence already approved by the user and curated by the orchestrator or `discovery`.
+The delegated prompt supplies only seven dynamic fields; do not request copies of stable contracts or read `AGENTS.md`. Return exactly:
 
-## Prompt-Supplied Contracts
+```markdown
+## Handoff
+- Status: READY | BLOCKED | FAILED
+- Outcome: <one-sentence result>
+- Scope: <completed or attempted scope>
+- Evidence: <artifact paths and checks, or “None”>
+- Blockers: None | <unresolved blockers>
+- Next action: <one permitted next action or “None”>
+```
 
-The orchestrator must include the required canonical excerpts in the delegated prompt. Consume those excerpts; do not read `AGENTS.md`.
-
-- `Delegated Handoff Contract`
-- `skills/sdd-workflow/SKILL.md` → `Artifact Contract`
-- `skills/sdd-workflow/SKILL.md` → `Dependency and Blocker Records`
+`READY` requires artifact `READY`, reviewable evidence, and `Blockers: None`. Artifact `BLOCKED` requires handoff `BLOCKED`; `FAILED` is handoff-only.
 
 ## Boundary
 
-- This phase authors the exploration artifact; it is not the default research executor.
+- This optional phase authors a durable evidence synthesis; it is not the default research executor and must not run when curated context can pass directly to `sdd-proposal`.
 - Read only provided evidence, assigned `SKILL.md` paths, prior artifacts, and explicitly approved source files.
 - Do not inventory the repository, scan `skills/`, or perform broad codebase exploration.
 - If required evidence is missing, mark `explore.md` blocked instead of researching or assuming.
@@ -58,18 +57,20 @@ Write `explore.md` with:
 - Blockers: None | <specific missing evidence or decisions>
 ```
 
-Then include:
+Then include only durable evidence items:
 
-1. **Exploration Summary**: Goal and approved scope.
-2. **Evidence Reused**: Discovery findings and known context.
-3. **Affected Files & Symbols**: Exact confirmed paths and symbols.
-4. **Call Flows & Dependencies**: Confirmed interactions from supplied evidence.
-5. **Constraints & Risks**.
-6. **Unknowns & Required Decisions**.
-7. **Assigned Skills & Relevant Constraints**.
+```markdown
+### EVID-001: <short finding>
+- Source: <path, symbol, URL, or delegated evidence>
+- Fact: <confirmed fact>
+- Relevance: <affected decision>
+- Confidence: HIGH | MEDIUM | LOW
+```
+
+Then add **Constraints**, **Unknowns & Required Decisions**, and **Assigned Skills** only when applicable. `EVID-###` identifiers are unique and zero-padded. Do not add a narrative summary or repeat discovery output.
 
 `READY` means `sdd-proposal` can define scope without inventing facts. When blocked, add dependency records for each required decision or evidence gap. Do not create metadata, leases, or lock files.
 
 ## Output Contract
 
-Return the six-field handoff schema supplied in the delegated prompt. Handoff status must match the artifact status and cite `explore.md` under evidence.
+Return the static six-field handoff schema above. Handoff status must match the artifact status and cite `explore.md` under evidence.

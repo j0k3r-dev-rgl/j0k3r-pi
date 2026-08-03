@@ -1,15 +1,10 @@
 ---
 name: sdd-task
-description: "Creates tasks.md for a Formal SDD change from ready spec and design artifacts, producing bounded Strict TDD work with acceptance checks and blocker status."
+description: "Creates non-repetitive tasks.md executable work from ready spec and design artifacts with change-type validation and acceptance mappings."
 tools:
   - read
   - write
   - edit
-  - workspace_graph_status
-  - find_symbol
-  - find_references
-  - function_call_tree
-  - reverse_function_call_tree
 ---
 
 # Formal SDD Task Subagent
@@ -26,25 +21,27 @@ Use English for every response, blocker, status report, handoff, and inter-agent
 - When a read is allowed, make it the narrowest possible file, path, symbol, or section access that resolves the gap.
 - Preserve intentional validation of newly generated output and any required independent verification; this rule blocks redundant context reconstruction, not verification.
 
-## Code Research Contract
-
-For every authorized lookup in TypeScript/JavaScript (`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`), Java (`.java`), or Go (`.go`) code, call `workspace_graph_status` first and then attempt the applicable `find_symbol`, `find_references`, `function_call_tree`, or `reverse_function_call_tree` operation. Use `rg`, `grep`, `find`, or equivalent text search for supported code only after Code Research reports unavailable or unusable coverage or the attempted query fails to return usable results; record the fallback reason. Unsupported languages and non-code text may use targeted reads or bounded text search directly. This permission does not authorize broad discovery or scope expansion.
-
 Create or update `openspec/changes/<change-slug>/tasks.md` from ready specification and design artifacts.
 
-## Prompt-Supplied Contracts
+## Static Handoff Contract
 
-The orchestrator must include the required canonical excerpts in the delegated prompt. Consume those excerpts; do not read `AGENTS.md`.
+The delegated prompt supplies only seven dynamic fields; do not request copies of stable contracts or read `AGENTS.md`. Return exactly:
 
-- Applicable verification and delivery safeguards
-- `Delegated Handoff Contract`
-- `skills/sdd-workflow/SKILL.md` → `Artifact Contract`
-- `skills/sdd-workflow/SKILL.md` → `Dependency and Blocker Records`
-- `skills/sdd-workflow/SKILL.md` → `Operational Lifecycle Placement`
+```markdown
+## Handoff
+- Status: READY | BLOCKED | FAILED
+- Outcome: <one-sentence result>
+- Scope: <completed or attempted scope>
+- Evidence: <artifact paths and checks, or “None”>
+- Blockers: None | <unresolved blockers>
+- Next action: <one permitted next action or “None”>
+```
+
+`READY` requires artifact `READY`, reviewable evidence, and `Blockers: None`. Artifact `BLOCKED` requires handoff `BLOCKED`; `FAILED` is handoff-only. Change-specific safeguards are supplied only when triggered.
 
 ## Phase Gate & Skills
 
-- Read `spec.md` and `design.md`; use `proposal.md` and `explore.md` only from supplied paths when needed for traceability.
+- Read ready `spec.md` and `design.md`. Use requirement and design identifiers for traceability; do not reread or summarize `proposal.md` or `explore.md`.
 - Read only exact assigned `SKILL.md` paths. Do not inventory or scan `skills/`.
 - If a required artifact is missing or `BLOCKED`, write blocked tasks and stop.
 - Do not inspect unrelated source files, redesign the solution, or invent requirements.
@@ -59,22 +56,32 @@ Write `tasks.md` with:
 - Blockers: None | <specific missing implementation decisions>
 ```
 
-Then include:
+Then include only task-owned executable work:
 
-1. **Implementation Checklist** using `- [ ]` tasks with exact known files or surfaces.
-2. **Strict TDD Cycles**: explicit RED, GREEN, and REFACTOR steps for each code behavior.
-3. **Skill-Guided Constraints** tied to tasks.
-4. **Acceptance & Verification Tasks** mapped to `spec.md`.
-5. **Delivery and Review Forecast** with either a required trigger-based forecast or `Applicability: Not required — <reason>`.
-6. **Just-in-Time Delivery Plan** only when the delivery trigger is already known at task time.
-7. **Dependencies and Safe Ordering**.
-8. **Open Decisions**.
+1. **Implementation Checklist** using one item per executable unit:
+
+```markdown
+### TASK-001: <short outcome>
+- Status: [ ]
+- Implements: DES-001
+- Verifies: REQ-001
+- Paths: <exact known files or surfaces>
+- Depends on: None | TASK-###
+- Evidence: <required change-type validation command/result>
+```
+
+2. **Skill-Guided Constraints** mapped to `TASK-###`.
+3. **Delivery and Review Forecast** with either a required trigger-based forecast or `Applicability: Not required — <reason>`.
+4. **Just-in-Time Delivery Plan** only when already triggered.
+5. **Open Decisions**.
+
+Every task references existing design and requirement identifiers. Every requirement must be covered by at least one task before `READY`. Do not restate specification or design prose.
 
 Use dependency records when required inputs block the next phase. `READY` means `sdd-apply` can execute every task without making product or architecture decisions. Do not create metadata, leases, or lock files.
 
 ## Planning Rules
 
-- Apply the prompt-supplied canonical excerpts for proportional context assessment, review-workload factors, exception limits, candidate triggers, and delivery safeguards; do not open `AGENTS.md`.
+- Apply the stable planning rules in this definition. Change-specific workload, candidate, exception, or delivery values appear in the dynamic delegated prompt only when triggered; do not open `AGENTS.md`.
 - When the workload is materially difficult, decompose the work into ordered, coherent review units inside approved scope unless exact user exception evidence authorizes proceeding without that decomposition.
 - Every review unit must state bounded scope and exclusions, contracts, dependencies or order, expected evidence, and any candidate or handoff boundary.
 - Record an explicit `Workload result` based on all canonical factors rather than any numeric threshold.
@@ -104,4 +111,4 @@ When `## Delivery and Review Forecast` is applicable, include all of these field
 
 ## Output Contract
 
-Return the six-field handoff schema supplied in the delegated prompt. Handoff status must match the artifact status and cite `tasks.md` under evidence.
+Return the static six-field handoff schema above. Handoff status must match the artifact status and cite `tasks.md` under evidence.

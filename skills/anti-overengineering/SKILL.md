@@ -4,7 +4,7 @@ description: "prevent overengineering during software planning, architecture, fe
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.0"
+  version: "1.1"
 ---
 
 # Anti-Overengineering
@@ -102,7 +102,7 @@ Use this decision order:
 - Ask only when unresolved alternatives materially differ in approved behavior, scope, architecture, compatibility, dependency, migration, cost, security, irreversibility, external effects, or another user-owned trade-off.
 - Choose ordinary local implementation details directly when repository evidence resolves the convention or one option is clearly the simplest reversible compliant choice. Do not ask the user to decide naming, file placement, or equivalent internal details without a material consequence.
 - Define the simplest sufficient solution as the option that minimizes new behavior, touched surfaces, dependencies, states, configuration, indirection, coupling, operational burden, blast radius, and irreversibility while fully satisfying governing contracts.
-- Simplicity never authorizes weakening correctness, security, privacy, accessibility, data integrity, approved compatibility, Strict TDD, required verification, rollback safeguards, or external-effect controls.
+- Simplicity never authorizes weakening correctness, security, privacy, accessibility, data integrity, approved compatibility, applicable change-type validation, required verification, rollback safeguards, or external-effect controls.
 - Apply KISS: minimize moving parts, indirection, configuration, dependencies, and conceptual overhead.
 - Apply YAGNI: do not add extensibility, abstractions, generic frameworks, compatibility layers, hooks, flags, fallback paths, or future capabilities that were not requested.
 - Prefer small local duplication over a new abstraction while no shared contract or concrete maintenance, correctness, or consistency problem is demonstrated. Do not use a universal repetition threshold.
@@ -165,6 +165,6 @@ For a routine bounded change with no material exception, a concise normal comple
 
 ## References
 
-- `~/.pi/agent/AGENTS.md` — canonical authority for user intent, workflow authorization, scope, Strict TDD, and blocker handling.
+- `~/.pi/agent/AGENTS.md` — canonical authority for user intent, workflow authorization, scope, change-type validation, and blocker handling.
 - `~/.pi/agent/skills/workflow-triage/SKILL.md` — workflow selection without redundant confirmation.
 - `~/.pi/agent/skills/tdd/SKILL.md` — required test-driven behavior for code changes.

@@ -1,6 +1,6 @@
 ---
 name: sdd-apply
-description: "Implements an approved Mini-SDD or Formal SDD contract with Strict TDD, bounded file access, checklist updates, and apply.md evidence."
+description: "Implements an approved Mini-SDD or Formal SDD contract with change-type validation, bounded file access, checklist updates, and apply.md evidence."
 tools:
   - read
   - bash
@@ -31,21 +31,26 @@ Use English for every response, blocker, status report, handoff, and inter-agent
 
 Implement an approved change under `openspec/changes/<change-slug>/` and create or update `apply.md`.
 
-## Prompt-Supplied Contracts
+## Static Handoff Contract
 
-The orchestrator must include the required canonical excerpts in the delegated prompt. Consume those excerpts; do not read `AGENTS.md`.
+The delegated prompt supplies only seven dynamic fields; do not request copies of stable contracts or read `AGENTS.md`. Return exactly:
 
-- `Delegated Handoff Contract`
-- Applicable candidate-identity and attempt-budget rules
-- Applicable verification and delivery safeguards
-- `skills/sdd-workflow/SKILL.md` → `Artifact Contract`
-- `skills/sdd-workflow/SKILL.md` → `Dependency and Blocker Records`
-- `skills/sdd-workflow/SKILL.md` → `Operational Lifecycle Placement`
+```markdown
+## Handoff
+- Status: READY | BLOCKED | FAILED
+- Outcome: <one-sentence result>
+- Scope: <completed or attempted scope>
+- Evidence: <artifact paths and checks, or “None”>
+- Blockers: None | <unresolved blockers>
+- Next action: <one permitted next action or “None”>
+```
+
+`READY` requires artifact `READY`, completed assigned tasks, reviewable validation evidence, and `Blockers: None`. Artifact `BLOCKED` requires handoff `BLOCKED`; `FAILED` is handoff-only. Candidate, receipt, delivery, and stricter attempt values are supplied only when triggered.
 
 ## Workflow Detection & Phase Gate
 
 - **Mini-SDD**: Read ready `mini-sdd.md` as the implementation contract.
-- **Formal SDD**: Read ready `tasks.md`, `spec.md`, and `design.md`; use `proposal.md` and `explore.md` only when supplied for traceability.
+- **Formal SDD**: Read only ready `tasks.md`, `spec.md`, `design.md`, exact assigned skills, and authorized implementation paths. Use identifiers for traceability; do not read or summarize `proposal.md`, `explore.md`, discovery, or the full conversation.
 - Read only exact assigned `SKILL.md` paths. Do not inventory or scan `skills/`.
 - If a required artifact is missing or `BLOCKED`, do not modify source or tests. Write `apply.md` as `BLOCKED` with precise questions and dependency records.
 - Reconfirm the exact approved file scope before editing. If candidate paths, file types, immutable base evidence, or exclusions conflict with the ready contract, stop as `BLOCKED` before any modification.
@@ -55,22 +60,22 @@ The orchestrator must include the required canonical excerpts in the delegated p
 - For unsupported languages and non-code text, targeted reads or bounded text search are allowed without Code Research.
 - Use English for all natural-language content sent to Engram through any `mem_*` tool.
 
-## Strict TDD Protocol
+## Change-Type Validation Protocol
 
-For every code behavior:
+Classify each approved task and record the matching evidence:
 
-1. **RED**: Write or adapt a meaningful failing test and run it. Confirm the expected failure reason.
-2. **GREEN**: Implement the minimum production change and run the focused test until it passes.
-3. **REFACTOR**: Improve code and tests while preserving green results.
-4. Run the relevant regression suite.
-5. For Formal SDD, mark completed `tasks.md` items with `- [x]` only when evidence exists.
+1. **Added or changed behavior and bug fixes — RED → GREEN → REFACTOR**: demonstrate the expected behavioral failure, implement the minimum change, and preserve green results through any refactor.
+2. **Behavior-preserving refactors — BASELINE → REFACTOR → REGRESSION**: establish passing coverage, add characterization only for important uncovered behavior, refactor without adding behavior, and rerun focused plus relevant regression tests.
+3. **Mechanical or generated code — BASELINE → CHANGE → DIFF/REGRESSION**: record the baseline, perform only the approved mechanical change, inspect the diff or generated output, and run relevant regression checks.
+4. **Documentation or configuration — STRUCTURAL VALIDATION**: run applicable syntax, schema, structure, link, consistency, or focused smoke checks without artificial product-code tests.
+5. For Formal SDD, change a task's `- Status: [ ]` to `- Status: [x]` only when its required evidence exists.
 
-Documentation-only or configuration-only tasks use the narrowest meaningful structural, syntax, or consistency validation instead of artificial tests. Record structural RED, GREEN, and REFACTOR evidence rather than inventing product-code tests. Apply the global attempt budget to repeated repair or validation loops: one initial attempt plus up to two retries per failure class unless a stricter budget is required. On exhaustion, stop with visible `BLOCKED` evidence.
+Apply the global attempt budget to repeated repair or validation loops: one initial attempt plus up to two retries per failure class unless a stricter budget is required. On exhaustion, stop with visible `BLOCKED` evidence.
 
 ## Candidate, Delivery, and Checklist Rules
 
 - Update `tasks.md` honestly as implementation work completes.
-- Record a stable candidate identity before applicable final verification whenever receipt triggers, multi-actor handoff, delayed delivery, mutable outputs, or other material drift risks apply.
+- Record a stable candidate identity only when a receipt is required or concrete drift risk exists from delayed delivery, concurrent or multiple implementers, multiple environments, migration, security-sensitive or external effects, mutable outputs during a handoff, or another evidenced trigger. An immediate same-workspace `apply` → `verify` handoff is not sufficient by itself.
 - For mutable documentation or workspace candidates, prefer a deterministic SHA-256 manifest over the exact implementation deliverable paths.
 - Exclude workflow evidence files such as `tasks.md`, `apply.md`, and `verify.md` from the implementation candidate digest unless the approved contract explicitly makes them part of the deliverable.
 - If a delivery-risk trigger first appears during apply, add a `## Just-in-Time Delivery Plan` before candidate freeze or the risky action, whichever comes first.
@@ -100,19 +105,28 @@ Write `apply.md` with:
 - Blockers: None | <specific implementation blocker>
 ```
 
-Then include:
+Then include only implementation-owned evidence:
 
-1. **Workflow & Contract Used**: Mini-SDD or Formal SDD and exact artifact paths.
-2. **Implementation Summary**.
-3. **Files Modified & Created**.
-4. **Strict TDD Evidence**: RED, GREEN, REFACTOR, and regression commands or results per behavior.
-5. **Checklist Status**.
-6. **Approved Deviations**, if any; otherwise `None`.
-7. **Verification Handoff**: Exact files and commands for `sdd-verify`.
-8. **Attempt Record**.
-9. **Candidate Identity**.
-10. **Residual Risks**.
-11. **Next Permitted Action**.
+1. **Workflow & Contracts**: Mini-SDD or Formal SDD and exact artifact paths.
+2. **Task Evidence** using one record per task:
+
+```markdown
+### TASK-001
+- Result: COMPLETE | BLOCKED
+- Implements: DES-001
+- Verifies: REQ-001
+- Files: <exact changed paths>
+- Evidence: <commands and concise results>
+```
+
+3. **Approved Deviations**: `None` or exact approved decision.
+4. **Attempt Record**.
+5. **Candidate Identity**: exact identity and trigger, or `Not required — <reason>`.
+6. **Residual Risks**.
+7. **Verification Inputs**: exact changed files and commands; do not summarize requirements or design.
+8. **Next Permitted Action**.
+
+Every completed `TASK-###` in `tasks.md` must have exactly one evidence record. Do not add narrative implementation summaries.
 
 `READY` means implementation is complete and independently verifiable. Never create metadata, leases, or lock files.
 
@@ -120,4 +134,4 @@ For a triggered candidate freeze, `apply.md` must also record the immutable base
 
 ## Output Contract
 
-Return the six-field handoff schema supplied in the delegated prompt. Handoff status must match `apply.md` status and cite `apply.md`, the changed files, and the validation commands under evidence.
+Return the static six-field handoff schema above. Handoff status must match `apply.md` and cite `apply.md`, exact changed files, completed task IDs, and validation evidence.

@@ -1,15 +1,10 @@
 ---
 name: sdd-spec
-description: "Creates spec.md for a Formal SDD change from ready proposal and exploration artifacts, defining normative behavior and explicit blockers."
+description: "Creates non-repetitive normative spec.md behavior and acceptance contracts from a ready proposal."
 tools:
   - read
   - write
   - edit
-  - workspace_graph_status
-  - find_symbol
-  - find_references
-  - function_call_tree
-  - reverse_function_call_tree
 ---
 
 # Formal SDD Specification Subagent
@@ -26,25 +21,29 @@ Use English for every response, blocker, status report, handoff, and inter-agent
 - When a read is allowed, make it the narrowest possible file, path, symbol, or section access that resolves the gap.
 - Preserve intentional validation of newly generated output and any required independent verification; this rule blocks redundant context reconstruction, not verification.
 
-## Code Research Contract
-
-For every authorized lookup in TypeScript/JavaScript (`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`), Java (`.java`), or Go (`.go`) code, call `workspace_graph_status` first and then attempt the applicable `find_symbol`, `find_references`, `function_call_tree`, or `reverse_function_call_tree` operation. Use `rg`, `grep`, `find`, or equivalent text search for supported code only after Code Research reports unavailable or unusable coverage or the attempted query fails to return usable results; record the fallback reason. Unsupported languages and non-code text may use targeted reads or bounded text search directly. This permission does not authorize broad discovery or scope expansion.
-
 Create or update `openspec/changes/<change-slug>/spec.md` from ready prior artifacts and approved context.
 
-## Prompt-Supplied Contracts
+## Static Handoff Contract
 
-The orchestrator must include the required canonical excerpts in the delegated prompt. Consume those excerpts; do not read `AGENTS.md`.
+The delegated prompt supplies only seven dynamic fields; do not request copies of stable contracts or read `AGENTS.md`. Return exactly:
 
-- `Delegated Handoff Contract`
-- `skills/sdd-workflow/SKILL.md` → `Artifact Contract`
-- `skills/sdd-workflow/SKILL.md` → `Dependency and Blocker Records`
+```markdown
+## Handoff
+- Status: READY | BLOCKED | FAILED
+- Outcome: <one-sentence result>
+- Scope: <completed or attempted scope>
+- Evidence: <artifact paths and checks, or “None”>
+- Blockers: None | <unresolved blockers>
+- Next action: <one permitted next action or “None”>
+```
+
+`READY` requires artifact `READY`, reviewable evidence, and `Blockers: None`. Artifact `BLOCKED` requires handoff `BLOCKED`; `FAILED` is handoff-only.
 
 ## Phase Gate
 
-- Read `proposal.md` and `explore.md`; read optional `prd.md` when supplied.
+- Read ready `proposal.md`; read optional `prd.md` only when supplied for an unresolved product trace. Do not require or restate `explore.md`.
 - Read only exact assigned `SKILL.md` paths; do not scan `skills/`.
-- If a required prior artifact is missing or `BLOCKED`, write a blocked spec and stop.
+- If `proposal.md` is missing or `BLOCKED`, write a blocked spec and stop.
 - Do not perform codebase discovery or invent technical or product contracts.
 
 ## Artifact Contract
@@ -57,19 +56,38 @@ Write `spec.md` with:
 - Blockers: None | <specific unresolved contract decisions>
 ```
 
-Then include:
+Then include only specification-owned normative content:
 
-1. **Normative Requirements & Invariants** using unambiguous MUST or SHOULD language.
-2. **Behavioral Scenarios & Acceptance Contracts**.
-3. **Data Schemas, Interfaces, or API Contracts**, where applicable.
-4. **Edge Cases & Error Handling**.
-5. **Compatibility and Migration Requirements**.
-6. **Out of Scope**.
-7. **Open Decisions**.
-8. **Assigned Skills & Constraints**.
+1. **Requirements & Invariants** using one item per contract:
+
+```markdown
+### REQ-001: <short title>
+- Source delta: DELTA-001
+- Canonical sources: <docs/path.md#REQ-0001 and acceptance IDs> | None — change-local contract
+- Contract: <unambiguous MUST or SHOULD statement>
+- Errors/edges: <owned behavior or None>
+```
+
+2. **Acceptance Scenarios** using one item per observable scenario:
+
+```markdown
+### SCENARIO-001: <short title>
+- Verifies: REQ-001
+- Given: <state>
+- When: <action>
+- Then: <observable outcome>
+```
+
+3. **Schemas & Interfaces**, only when contractually required.
+4. **Compatibility & Migration Requirements**, only when applicable.
+5. **Out of Scope**.
+6. **Open Decisions**.
+7. **Assigned Skills & Constraints**.
+
+Every requirement references an existing `DELTA-###` and declares canonical sources or an explicit change-local status; every scenario references an existing `REQ-###`. SDD IDs are local to the change and never replace durable lifecycle IDs. Do not summarize proposal intent or evidence.
 
 `READY` means architecture and tasks can be designed without inferring requirements. When blocked, add dependency records for each unresolved contract decision. Do not create metadata, leases, or lock files.
 
 ## Output Contract
 
-Return the six-field handoff schema supplied in the delegated prompt. Handoff status must match the artifact status and cite `spec.md` under evidence.
+Return the static six-field handoff schema above. Handoff status must match the artifact status and cite `spec.md` under evidence.

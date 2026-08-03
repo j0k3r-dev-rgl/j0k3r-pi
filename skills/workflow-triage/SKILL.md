@@ -4,7 +4,7 @@ description: "routes software requests among exactly three workflows—Direct Or
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "8.0"
+  version: "10.0"
 ---
 
 # Workflow Triage
@@ -92,6 +92,7 @@ This skill consumes the shared semantics in `AGENTS.md` for proportional context
 - Use the read-only `discovery` subagent for approved unknown research by default.
 - If the user asks the orchestrator to investigate or execute personally, honor that choice within the approved scope.
 - Task authorization covers directly relevant reads and expected phase work; do not request permission file by file or phase by phase.
+- For lifecycle-backed implementation, reuse the compact Implementation Readiness packet from `startup-documentation`; for projects without lifecycle docs, equivalent approved inline behavior, scope, required decisions, and validation evidence are sufficient. Never require non-applicable documentation groups merely to route work.
 - Never reread current context or completed discovery evidence without a concrete freshness or gap reason.
 - Do not silently broaden research or switch workflows.
 
@@ -100,8 +101,8 @@ This skill consumes the shared semantics in `AGENTS.md` for proportional context
 | Situation | Recommendation | Required User Decision |
 |---|---|---|
 | Context is complete and work is localized or explicitly assigned to the orchestrator | **Direct Orchestrator** | Begin if work was requested; otherwise provide advice only |
-| Medium multi-file change or targeted refactor needing a shared lightweight plan | **Mini-SDD** | Begin if work was requested; ask only if workflow trade-offs are material |
-| Large, cross-cutting, architectural, or contract-changing work | **Formal SDD** | Begin if work was requested; ask only if workflow trade-offs are material |
+| Non-trivial but bounded work inside one coherent product or technical boundary, including medium features, bugs, and targeted refactors | **Mini-SDD** — preferred default for planned work | Begin if work was requested; ask only if workflow trade-offs are material |
+| Work with materially coupled contracts or boundaries, unresolved architecture, migration/security consequences, or review that cannot remain coherent in one lightweight plan | **Formal SDD** | Begin if work was requested; ask only if workflow trade-offs are material |
 | Material implementation context is unknown | **Likely workflow plus bounded discovery** | Ask only for missing scope, depth, or executor decisions that materially matter |
 | Product intent is unclear | Keep the likely workflow; optionally add `prd.md` | Ask for the missing product decision or PRD choice |
 
@@ -109,8 +110,8 @@ This skill consumes the shared semantics in `AGENTS.md` for proportional context
 
 Record the observed signal and its routing consequence when any of these appear:
 
-- unfamiliar or weakly understood implementation surfaces;
-- multiple coupled policy, data, API, security, or delivery boundaries;
+- unfamiliar or weakly understood implementation surfaces that cannot be resolved by bounded discovery for Direct or Mini-SDD;
+- multiple materially coupled policy, data, API, security, architecture, migration, or delivery boundaries;
 - contradictory or equal-authority sources;
 - broad cross-file impact that is difficult to summarize coherently;
 - context quality is incomplete, stale, truncated, or otherwise unreliable for the next safe action;
@@ -144,7 +145,7 @@ Permitted outcomes only:
 2. Identify only material unknowns that prevent a safe recommendation.
 3. If context quality or reviewability concerns change the route, state the specific signal and the routing consequence.
 4. If research is needed, ask for depth and executor before running it.
-5. Select or recommend one of the three workflows with one concise reason.
+5. Select or recommend one of the three workflows with one concise reason. Prefer Mini-SDD for non-trivial bounded work and require a concrete escalation signal before choosing Formal SDD.
 6. Classify the request as `EXECUTION_AUTHORIZED` or `ADVICE_ONLY`.
 7. For `EXECUTION_AUTHORIZED`, hand the route directly to Direct Orchestrator execution or `sdd-workflow` without another start prompt.
 8. For `ADVICE_ONLY`, answer conversationally and wait for a concrete task request.

@@ -177,13 +177,13 @@ When evidence materially challenges approved canonical content, the initiating s
 The lifecycle is deterministic:
 
 1. The initiating skill asks `product-validation` to create or update the canonical record.
-2. Validation sets status and routes it to the target owner.
+2. Validation sets status to `OPEN | REVIEWING`, records disposition `PENDING_TARGET_REVIEW`, and routes it to the target owner.
 3. The target owner returns `ACCEPTED | DECLINED | DEFERRED | NEEDS_MORE_EVIDENCE` with rationale and affected IDs; it does not close the record itself.
-4. Validation records the disposition and resulting status.
+4. Validation replaces the pending disposition with the returned disposition and records the resulting status.
 5. The target owner applies an accepted semantic change only after required approval.
 6. Validation records closure evidence after impact review and closes the record when its closure condition is met.
 
-CR status tracks the Validation-owned record lifecycle; disposition tracks the target owner's semantic decision on the challenged canonical content. `APPROVED` status therefore records lifecycle processing of an accepted change and must not be inferred from, or substituted for, the target owner's `ACCEPTED` disposition.
+CR status tracks the Validation-owned record lifecycle; disposition tracks the target owner's semantic decision on the challenged canonical content. `PENDING_TARGET_REVIEW` is valid only while status is `OPEN | REVIEWING` and must be replaced when the target owner responds. `APPROVED` status therefore records lifecycle processing of an accepted change and must not be inferred from, or substituted for, the target owner's `ACCEPTED` disposition.
 
 Each record contains:
 
@@ -193,7 +193,7 @@ Each record contains:
 - proposed semantic change;
 - initiating skill, Validation record owner, and target semantic owner;
 - status: `OPEN | REVIEWING | APPROVED | REJECTED | WITHDRAWN | CLOSED`;
-- disposition: `ACCEPTED | DECLINED | DEFERRED | NEEDS_MORE_EVIDENCE`;
+- disposition: `PENDING_TARGET_REVIEW | ACCEPTED | DECLINED | DEFERRED | NEEDS_MORE_EVIDENCE`;
 - affected artifact IDs; and
 - target-owner disposition rationale and return date; and
 - closure evidence or next review condition.
@@ -204,6 +204,31 @@ Each record contains:
 - Existing implementation evidence must not become a `TO_BE` product or requirement decision without explicit user approval.
 - Validation or verification evidence must link requirement and acceptance IDs when it claims implementation or conformance validation.
 - Pre-requirement experiments may instead trace to opportunity, assumption, hypothesis, journey, capability, or outcome IDs.
+
+## SDD change-local trace bridge
+
+Durable lifecycle IDs under `docs/` and change-local SDD IDs under `openspec/changes/<change-slug>/` are separate namespaces:
+
+- durable IDs use their canonical path and stable ID, for example `docs/02-requirements/01-functional/0001-registration.md#REQ-0001`;
+- SDD IDs such as `DELTA-001`, `REQ-001`, `SCENARIO-001`, `DES-001`, and `TASK-001` are local to one change directory and are invalid outside that change without the change path;
+- every SDD delta or requirement derived from lifecycle documentation records `Canonical sources` using exact `<canonical-path>#<stable-id>` references;
+- when no durable source exists, record `Canonical sources: None — change-local contract`; never invent, copy, or renumber a durable ID;
+- an SDD-local requirement does not supersede or silently rewrite a durable requirement. A material semantic difference follows the canonical change-request lifecycle before the durable owner changes.
+
+Implementation and verification evidence links both namespaces when applicable: change-local SDD ID for execution continuity and canonical requirement/acceptance ID for durable conformance traceability.
+
+## Verification evidence promotion
+
+`verify.md` is execution evidence, not automatically product-validation evidence. Promote or link it into `docs/05-validation/` only when it informs a named product, learning, implementation-conformance, quality, or release decision.
+
+When promotion applies:
+
+1. reference the exact archived or active `verify.md` location and requirement-evidence row;
+2. retain the canonical requirement and acceptance IDs plus the change-local SDD ID;
+3. store only the decision-relevant summary and provenance, not a copy of the full verification artifact; and
+4. let `product-validation` own the durable validation record and any resulting change request.
+
+Ordinary technical verification with no durable validation decision remains only in the SDD change tree.
 
 ## Change impact
 

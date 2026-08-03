@@ -4,7 +4,7 @@ description: "initialize, route, and maintain a startup project's numbered modul
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.0"
+  version: "1.3"
 ---
 
 # Startup Documentation
@@ -53,7 +53,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "documentacion modular numerada"
     ]
   },
-  "sdd_phases": ["explore", "proposal", "spec", "design", "task", "apply", "verify"],
+  "sdd_phases": [],
   "related_skills": [
     "anti-overengineering",
     "cognitive-doc-design",
@@ -78,7 +78,7 @@ For an MVP or application already being evolved, route only the first unresolved
 
 | Requested change | First canonical owner or action |
 |---|---|
-| Bug whose expected behavior and acceptance are already approved | Trace the existing requirement/acceptance IDs, select the applicable Pi workflow, and use Strict TDD; reopen product documentation only if evidence challenges it. |
+| Bug whose expected behavior and acceptance are already approved | Trace the existing requirement/acceptance IDs, select the applicable Pi workflow, and use RED → GREEN → REFACTOR; reopen product documentation only if evidence challenges it. |
 | Bug whose expected behavior is missing, ambiguous, or contradictory | `requirements-definition` before implementation. |
 | Feature inside approved product scope with clear behavior | `requirements-definition`. |
 | New capability, changed user journey, or product-scope expansion | `product-definition`. |
@@ -89,7 +89,21 @@ For an MVP or application already being evolved, route only the first unresolved
 | Outcome evidence, conformance evidence, experiment result, or learning decision | `product-validation`. |
 | Existing codebase without a trustworthy modular documentation baseline | Principal-only `existing-project-onboarding`. |
 
-Documentation defines and traces the intended change; it does not authorize implementation. Code changes proceed only through Direct Orchestrator, Mini-SDD, or Formal SDD as selected by workflow triage and must follow Strict TDD. Do not run onboarding for an ordinary feature or bug, repeat discovery for an already supported problem, or regenerate unaffected documentation.
+Documentation defines and traces the intended change; it does not authorize implementation. Code changes proceed only through Direct Orchestrator, Mini-SDD, or Formal SDD as selected by workflow triage and must follow the applicable change-type validation protocol. Do not run onboarding for an ordinary feature or bug, repeat discovery for an already supported problem, or regenerate unaffected documentation.
+
+## Implementation Readiness Gate
+
+Before routing lifecycle-backed work into implementation, produce one compact readiness packet from existing approved context; do not create a new document solely for this gate. It contains:
+
+- approved behavior and acceptance IDs, or explicit inline contracts when no durable lifecycle documentation is applicable;
+- exact scope and exclusions for the current increment;
+- only architecture or ADR decisions required to implement safely now;
+- applicable change-type validation and broader acceptance expectations;
+- delivery or Definition of Done expectations only when relevant;
+- unresolved user-owned decisions and blockers: `None`; and
+- selected Direct, Mini-SDD, or Formal SDD route.
+
+Missing non-applicable lifecycle groups do not block readiness. Missing behavior, acceptance, required architecture/ADR, validation expectations, or user-owned decisions do. The readiness packet proves bounded inputs; it does not itself authorize implementation.
 
 ## Hard Rules
 

@@ -4,7 +4,7 @@ description: "create, review, or update Pi skills while preserving the canonical
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.0"
+  version: "1.1"
 ---
 
 # Skill Authoring
@@ -39,7 +39,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "registry contract"
     ]
   },
-  "sdd_phases": ["explore", "design", "task", "apply", "verify"],
+  "sdd_phases": [],
   "related_skills": [
     "sdd-workflow"
   ],
@@ -69,6 +69,7 @@ Use this skill when the user asks to create, modify, review, standardize, or doc
 - Always include an `Activation Contract` section with human-readable launchers: concrete user intents, touched surfaces, risks, and cases where the skill should not load.
 - Keep `description` trigger-focused: mention the surfaces, actions, or risks that should activate the skill.
 - Keep `triggers.paths`, `triggers.keywords`, `domains`, and `related_skills` concrete and useful for routing.
+- Reserve non-empty `sdd_phases` for SDD workflow owners or guardrails that are genuinely mandatory throughout those phases. Domain, documentation, configuration, and helper skills use `sdd_phases: []` and rely on intent/path routing because phase-only matches are returned as direct matches and can create unnecessary skill loading.
 - Trigger paths must cover the real surfaces agents edit: project-local paths, global/user paths, and repo-relative paths when the active workspace is the global agent directory (for example `skills/**/SKILL.md` under `~/.pi/agent`).
 - Trigger keywords should include canonical English terms plus common aliases users actually use when they ask for the skill, without adding broad words that steal unrelated routing.
 - Do not put secrets, credentials, private keys, or user-private data in skills.

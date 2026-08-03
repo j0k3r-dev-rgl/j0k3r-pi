@@ -4,7 +4,7 @@ description: "configure Pi Context7 Extension, including .pi/context7.json cache
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.0"
+  version: "1.1"
 ---
 
 # Context7 Configuration
@@ -42,9 +42,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
     ]
   },
   "sdd_phases": [],
-  "related_skills": [
-    "permission-guard-configuration"
-  ],
+  "related_skills": [],
   "priority": 70
 }
 ```

@@ -4,7 +4,7 @@ description: "define a startup product's vision, measurable outcomes, MVP hypoth
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.0"
+  version: "1.1"
 ---
 
 # Product Definition
@@ -38,7 +38,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "modulos funcionales del producto"
     ]
   },
-  "sdd_phases": ["explore", "proposal", "spec"],
+  "sdd_phases": [],
   "related_skills": [
     "startup-documentation",
     "product-discovery",

@@ -3,9 +3,8 @@
   "default_mode": "background",
   "enable_continue": true,
   "max_concurrency": 5,
-  "debug": true,
+  "debug": false,
   "session_resources": "lean",
-  "mode": "opencode",
   "default_tools": [
     "read"
   ],

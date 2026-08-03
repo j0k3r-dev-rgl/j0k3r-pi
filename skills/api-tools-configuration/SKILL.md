@@ -4,7 +4,7 @@ description: "configure Pi API Tools Extension, including project-local .pi/api.
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.0"
+  version: "1.1"
 ---
 
 # API Tools Configuration
@@ -45,9 +45,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
     ]
   },
   "sdd_phases": [],
-  "related_skills": [
-    "permission-guard-configuration"
-  ],
+  "related_skills": [],
   "priority": 70
 }
 ```

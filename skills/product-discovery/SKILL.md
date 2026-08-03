@@ -4,7 +4,7 @@ description: "guide evidence-based startup problem discovery and create numbered
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.0"
+  version: "1.1"
 ---
 
 # Product Discovery
@@ -39,7 +39,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "definir problema y usuarios"
     ]
   },
-  "sdd_phases": ["explore", "proposal", "spec"],
+  "sdd_phases": [],
   "related_skills": [
     "startup-documentation",
     "anti-overengineering",

@@ -4,7 +4,7 @@ description: "write or revise warm, direct PR feedback, issue replies, code-revi
 license: Apache-2.0
 metadata:
   author: gentleman-programming
-  version: "1.1"
+  version: "1.2"
 ---
 
 # Comment Writer
@@ -38,7 +38,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "reply to this thread"
     ]
   },
-  "sdd_phases": ["explore", "proposal", "spec", "design", "task", "apply", "verify"],
+  "sdd_phases": [],
   "related_skills": ["cognitive-doc-design"],
   "priority": 60
 }

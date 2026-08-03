@@ -1,10 +1,10 @@
 ---
 name: sdd-workflow
-description: "runs authorized Mini-SDD or Formal SDD execution requests without redundant start confirmation, with phase artifacts, assigned skills, blocker gates, Strict TDD evidence, and orchestrator review."
+description: "runs authorized Mini-SDD or Formal SDD execution requests with optional evidence synthesis, non-repetitive phase artifacts, change-type validation, blocker gates, and independent verification."
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "10.0"
+  version: "13.0"
 ---
 
 # OpenSpec SDD Workflow
@@ -112,18 +112,65 @@ When a material required dependency or blocker affects the next action, the arti
 
 `READY` requires every dependency necessary for the next phase to be satisfied. Optional follow-ups may be listed only when clearly labeled optional and when they do not affect next-phase validity.
 
+## Artifact Economy and Traceability Contract
+
+Each artifact contains only information owned by its phase and needed by its direct consumer. Do not add narrative introductions, repeat workflow rationale, copy upstream scope or risks, or reproduce prior requirements and decisions. Reference stable identifiers instead.
+
+Formal SDD uses this chain:
+
+```text
+DELTA-### → REQ-### / SCENARIO-### → DES-### → TASK-### → VERIFY MATRIX
+```
+
+Required relationships:
+
+- SDD identifiers are change-local three-digit IDs; durable lifecycle IDs remain canonical `<docs-path>#<stable-ID>` references and are never renumbered into SDD IDs.
+- Every `DELTA-###` and `REQ-###` records `Canonical sources` with one or more durable references, or `None — change-local contract`.
+- Every `REQ-###` names one or more source `DELTA-###` identifiers.
+- Every `SCENARIO-###` verifies one or more `REQ-###` identifiers.
+- Every `DES-###` satisfies one or more `REQ-###` identifiers.
+- Every `TASK-###` implements one or more `DES-###` identifiers and verifies one or more `REQ-###` identifiers.
+- Every requirement appears exactly once in the verification matrix with implementation evidence, a check command or result, and `PASS` or `ISSUES_FOUND`.
+
+Identifiers are uppercase, zero-padded three-digit values, unique within their type, and never renumbered merely for presentation. Missing, duplicate, malformed, or unresolved identifiers make the active artifact `BLOCKED`.
+
+## Minimal Phase Context
+
+- `sdd-proposal`: approved request, optional `prd.md`, and curated discovery or optional `explore.md` only.
+- `sdd-spec`: ready `proposal.md` and only unresolved approved product decisions.
+- `sdd-design`: ready `spec.md`, exact technical constraints, and specific evidence identifiers needed for decisions.
+- `sdd-task`: ready `spec.md` and `design.md` only.
+- `sdd-apply`: ready `tasks.md`, `spec.md`, `design.md`, and exact authorized implementation paths.
+- `sdd-verify`: `apply.md`, `tasks.md`, `spec.md`, `design.md`, and exact changed files.
+- `sdd-archive`: passing `verify.md`, workflow identity, source/destination, and only triggered continuity safeguards.
+
+Never pass the full conversation, discovery transcript, or all prior artifacts by default.
+
+## Structural Gate
+
+After each artifact is persisted, the orchestrator checks before delegating the next phase:
+
+1. valid `Workflow Status` and blocker consistency;
+2. required phase sections;
+3. unique and correctly formatted identifiers;
+4. references resolving to existing upstream identifiers;
+5. complete requirements-to-tasks coverage before apply; and
+6. complete requirement rows and evidence before verification may pass.
+
+A structural check is deterministic gate evidence, not a substitute for semantic review. Any failure blocks advancement and is reported with the exact missing or invalid item.
+
 ## Artifact Map
 
 ```text
 openspec/changes/<change-slug>/
 ├── prd.md         # Optional, user-approved product clarification by prd-review
 ├── mini-sdd.md    # Mini-SDD workflow plan maintained by the orchestrator
-├── explore.md     # Formal SDD evidence synthesis by sdd-explore
+├── explore.md     # Optional durable synthesis for substantial Formal SDD discovery evidence
 ├── proposal.md    # Formal SDD delta and scope by sdd-proposal
 ├── spec.md        # Formal SDD normative contracts by sdd-spec
 ├── design.md      # Formal SDD architecture by sdd-design
 ├── tasks.md       # Formal SDD implementation checklist by sdd-task
-├── apply.md       # Implementation and TDD evidence by sdd-apply
+├── apply.md       # Implementation and change-type validation evidence by sdd-apply
 └── verify.md      # Independent verification by sdd-verify
 
 openspec/archive/YYYY-MM-DD/<change-slug>/
@@ -138,12 +185,14 @@ openspec/archive/YYYY-MM-DD/<change-slug>/
 - Do not ask for a separate “start,” “go ahead,” or equivalent confirmation after receiving that request.
 - A request that only discusses, compares, or recommends an SDD workflow does not authorize project inspection or execution.
 - Use PRD only as an optional clarification artifact approved by the user.
-- Use `discovery` for approved unknown research; `sdd-explore` synthesizes known context and discovery evidence rather than performing broad research.
+- Use `discovery` for approved unknown research. Use `sdd-explore` only when substantial discovery evidence needs a durable synthesis artifact; otherwise pass curated discovery evidence directly to `sdd-proposal`.
+- Each phase writes only its owned decisions and evidence under `Artifact Economy and Traceability Contract`. Reference prior artifact identifiers instead of restating content; do not turn proposal, spec, design, and tasks into successive summaries.
 - Resolve relevant skills after workflow approval. Pass exact `SKILL.md` paths to lean-mode subagents.
 - Subagents read assigned skills only; they do not inventory or scan `skills/`.
 - Reuse current context and artifacts. Do not reread unchanged files or repeat discovery.
 - Keep all work bounded to the approved change slug and scope.
-- Apply Strict TDD to code changes and record RED → GREEN → REFACTOR evidence in `apply.md`.
+- Before apply, require the compact Implementation Readiness packet from `startup-documentation` when lifecycle documentation is active, or equivalent approved inline evidence when it is not. Missing non-applicable lifecycle groups never block implementation.
+- Apply the change-type validation protocol from `AGENTS.md`: RED → GREEN → REFACTOR for behavior changes and bug fixes; BASELINE → REFACTOR → REGRESSION for behavior-preserving refactors; BASELINE → CHANGE → DIFF/REGRESSION for mechanical or generated code; and structural validation for documentation or configuration.
 - `sdd-verify` independently reads `apply.md`, applicable contracts, and exact changed files before testing.
 - Never generate metadata bloat, lease IDs, phase locks, or hidden workflow state.
 
@@ -153,9 +202,9 @@ openspec/archive/YYYY-MM-DD/<change-slug>/
 
 - Use `AGENTS.md` as the canonical owner for proportional context assessment, workload factors, deterministic manifest grammar, and delivery safeguards.
 - `sdd-task` records `## Delivery and Review Forecast`, including workload factors, coherent review units or explicit user exception evidence, and any known `## Just-in-Time Delivery Plan`.
-- `sdd-apply` preserves Strict TDD for code work, uses structural validation for docs or configuration only, records attempt evidence, and freezes the candidate before applicable final verification.
+- `sdd-apply` records the applicable change-type validation evidence, attempt evidence, and a candidate identity only when a concrete trigger requires one before final verification.
 - `sdd-verify` independently derives the approved candidate set from the contracts, recomputes any triggered manifest, checks handoff and artifact consistency, and emits the canonical verification receipt when triggered.
-- `sdd-archive` runs only after ready passing verification on the same candidate identity, checks candidate or receipt continuity before publication, and requires any triggered just-in-time delivery plan before irreversible archive or retirement effects.
+- `sdd-archive` runs only after ready passing verification, preserves candidate or receipt continuity when triggered, and requires any triggered just-in-time delivery plan before irreversible archive or retirement effects.
 
 ### Mini-SDD
 
@@ -168,110 +217,103 @@ openspec/archive/YYYY-MM-DD/<change-slug>/
 7. The orchestrator reads `apply.md`; if `BLOCKED`, consult the user and resume `sdd-apply`.
 8. Run `sdd-verify`, reading `mini-sdd.md` and `apply.md`.
 9. If receipt triggers apply, `verify.md` includes the canonical verification receipt from `AGENTS.md`.
-10. The orchestrator reads `verify.md`; if verification is not ready and passing, resolve the result without archiving.
-11. Run `sdd-archive` when `verify.md` is ready, passing, and tied to the same candidate identity.
+10. The orchestrator reads `verify.md`; any result other than `PASS` stops the workflow and must be reported to the user with defects, evidence, affected files, failure class, attempts used, and the recommended next decision. Do not repair or rerun automatically.
+11. Run `sdd-archive` only when `verify.md` is ready and passing, preserving candidate continuity when identity was triggered.
 12. Report Mini-SDD completion only after archive reaches destination-only success under `openspec/archive/YYYY-MM-DD/<change-slug>/`.
 
 ### Formal SDD
 
 1. Optionally run `prd-review` only when product clarification was approved.
 2. If current context is insufficient, obtain approval and run `discovery` with a bounded research scope.
-3. Run `sdd-explore` to create `explore.md` from approved context and discovery evidence.
-4. Run `sdd-proposal` to create `proposal.md` from `explore.md` and optional `prd.md`.
-5. Run `sdd-spec` to create `spec.md` from ready prior artifacts.
-6. Run `sdd-design` to create `design.md` from ready contracts and assigned skills.
-7. Run `sdd-task` to create `tasks.md`, always including a `## Delivery and Review Forecast` applicability entry and adding a `## Just-in-Time Delivery Plan` there when the trigger is already known.
-8. Run `sdd-apply` to implement `tasks.md`, update its checklist, create `apply.md`, and record candidate identity before applicable final verification.
+3. Run `sdd-explore` only when substantial discovery evidence needs a durable synthesis artifact. Otherwise provide curated context or the discovery handoff directly to `sdd-proposal`.
+4. Run `sdd-proposal` to define only `DELTA-###` items, scope, non-goals, and risks from approved context, optional `explore.md`, and optional `prd.md`; then run the structural gate.
+5. Run `sdd-spec` to define only `REQ-###` requirements, `SCENARIO-###` acceptance contracts, and compatibility constraints linked to deltas; then run the structural gate.
+6. Run `sdd-design` to define only `DES-###` architecture, interfaces, and technical decisions linked to requirements; then run the structural gate.
+7. Run `sdd-task` to define only `TASK-###` executable work linked to designs and requirements, validation evidence, ordering, and acceptance mapping; then run the structural gate. Always include a `## Delivery and Review Forecast` applicability entry and add a `## Just-in-Time Delivery Plan` only when already triggered.
+8. Run `sdd-apply` to implement `tasks.md`, update its checklist, create `apply.md`, record change-type validation evidence, and capture candidate identity only when a concrete trigger applies.
 9. If attempt exhaustion occurs, the active artifact remains or becomes `BLOCKED` and records the failure class, attempts used, last evidence, and needed decision or dependency.
-10. Run `sdd-verify` to inspect `apply.md`, contracts, changed files, and tests, then create `verify.md`.
-11. If receipt triggers apply, `verify.md` includes the canonical verification receipt and repeats the exact candidate identity from `apply.md`.
-12. Run `sdd-archive` only when `verify.md` is ready, passing, and tied to the same candidate identity.
+10. Run `sdd-verify` to derive every `REQ-###` independently from `spec.md`, inspect `apply.md`, contracts, changed files, and checks, then create a complete requirement-evidence matrix in `verify.md`.
+11. If verification returns anything other than `PASS`, stop, notify the user with the exact evidence and recommended next decision, and wait. Do not return automatically to `sdd-apply` or rerun verification.
+12. If receipt triggers apply, `verify.md` includes the canonical verification receipt and repeats the exact candidate identity from `apply.md`.
+13. When verification evidence informs a named durable product, learning, implementation-conformance, quality, or release decision, hand exact requirement-row links and canonical IDs to `product-validation`; otherwise keep verification evidence only in the SDD tree.
+14. Run `sdd-archive` only when `verify.md` is ready and passing, preserving candidate continuity when identity was triggered.
 
 ## SDD Archive Convention
 
-Archive is mandatory after ready passing verification for every authorized Mini-SDD and Formal SDD change. It preserves the whole active `openspec/changes/<change-slug>/` tree at the canonical archive destination and retires the active source.
+Archive is mandatory after ready passing verification for every authorized Mini-SDD and Formal SDD change. It moves the complete active change tree to `openspec/archive/YYYY-MM-DD/<change-slug>/` and uses either the normal path or the defensive path according to observed risk.
 
-### Terminal invariant and immutable destination
+### Shared terminal invariant
 
-`READY` archive completion requires a destination-only final proof:
+`READY` requires destination-only proof:
 
-1. `openspec/archive/YYYY-MM-DD/<change-slug>/` exists as a complete supported tree with exact workflow bytes;
-2. the archived-workflow candidate identity and verification receipt remain continuous at that destination;
-3. `openspec/changes/<change-slug>/` is absent;
-4. no owned retirement-stage residue remains under `openspec/changes/`; and
-5. the archive handoff cites the final proof.
+1. the canonical archive destination exists as the complete workflow tree;
+2. `openspec/changes/<change-slug>/` is absent;
+3. no owned temporary or retirement residue remains; and
+4. any triggered candidate identity, receipt, or delivery-plan continuity remains valid.
 
-A valid destination with a present source is not terminal success. A valid destination with owned undeleted retirement-stage residue is preserved but remains `BLOCKED`. The destination is immutable after proof: do not overwrite, merge, repair, partially resume, delete, or roll back the destination.
+Capture the UTC date once, require a safe slug matching `^[a-z0-9]+(?:-[a-z0-9]+)*$`, require ready passing `verify.md`, preserve the complete tree, and never overwrite, merge, repair, delete, or roll back a proven destination. Archive never implies Git, release, or delivery authorization.
 
-### Fixed inputs and proof boundaries
+### Normal archive path
 
-- Capture the UTC calendar date once at archive-operation start and reuse that recorded date for the same operation.
-- Archive only to `openspec/archive/YYYY-MM-DD/<change-slug>/`.
-- Reject an empty or unsafe slug. The slug must match `^[a-z0-9]+(?:-[a-z0-9]+)*$` and must not resolve outside the canonical archive date directory.
-- Resolve the ready implementation contract by workflow: `mini-sdd.md` for Mini-SDD or `tasks.md` for Formal SDD. Preflight source resolution, destination resolution, that ready workflow-specific implementation contract, ready passing `verify.md`, verbatim candidate or receipt continuity, and any triggered just-in-time delivery plan before irreversible effects.
-- Preserve the complete source tree with the same repository-relative names and exact file bytes. Do not omit phase artifacts or supporting files under the change tree.
-- Whole-tree proof must fail closed on unsupported file types, including symlinks, or on missing, partial, mutated, ambiguous, or stale evidence.
+Use the normal path only when all of these are true:
 
-### State classifier and residue precedence
+- the valid source exists and the destination is absent;
+- no archive or retirement residue exists for the slug;
+- there is no prior failed archive attempt, concurrency concern, delayed or external delivery boundary, or other ambiguity;
+- no triggered candidate identity, verification receipt, or just-in-time delivery plan requires defensive continuity proof; and
+- source and destination support one atomic no-clobber rename.
 
-With no retirement-stage residue, classify exactly one base state:
+Procedure:
 
-- `SOURCE_ONLY`: valid source, absent destination. Eligible for publication, then mandatory retirement.
-- `DUPLICATE_IDENTICAL`: valid source and valid identical destination. Destination mutation is forbidden and source retirement is still mandatory.
-- `CONFLICTING_OR_PARTIAL`: both paths exist but differ or either path is invalid. `BLOCKED`.
-- `DESTINATION_ONLY_VALID`: source absent and destination has exact candidate or receipt continuity. `READY` only after final proof.
-- `DESTINATION_ONLY_INVALID`: source absent but destination is partial, invalid, or unverifiable. `BLOCKED`.
-- `NEITHER`: source and destination absent. `BLOCKED`.
+1. Validate the source, safe slug, fixed date, absent destination, absent residue, ready workflow-specific implementation contract, and ready passing verification.
+2. Create only the canonical archive date parent when needed; prove the final destination remains absent.
+3. Perform one atomic no-clobber rename from the exact active source to the exact archive destination.
+4. Prove the source is absent, the destination is present and complete, and no residue exists.
+5. Record archive result `NORMAL_COMPLETE` and return handoff `READY` only after that destination-only proof.
 
-Retirement-stage residue takes precedence over base-state success:
+A failed or ambiguous normal rename stops as `BLOCKED`; it does not automatically fall back to defensive archive or retry.
 
-- `RETIREMENT_DELETE_PENDING`: exactly one operation-owned `openspec/changes/__sdd-retirement-stage--<change-slug>--<operation-id>/`, source absent, valid destination, and exact equality with the frozen proof. `BLOCKED` unless a separately authorized delete attempt is in scope.
-- `SOURCE_REAPPEARED_OR_MIXED_RESIDUE`: source present with any stage residue. `BLOCKED`.
-- `UNSAFE_OR_ORPHAN_RESIDUE`: one stage residue exists but the destination is absent or invalid. `BLOCKED`.
-- `AMBIGUOUS_OR_CHANGED_RESIDUE`: one stage residue is unowned, changed, mismatched, or unexpectedly populated. `BLOCKED`.
-- `MULTIPLE_RESIDUES`: more than one stage-like residue matches the slug. `BLOCKED`.
+### Defensive archive path
 
-A stage name match alone does not prove ownership.
+Use the defensive path when the destination already exists, residue or a prior failure exists, concurrency or drift is plausible, candidate or receipt continuity was triggered, delivery is delayed or external, or any normal-path precondition is not trustworthy.
 
-### Publication to retirement sequence
+The defensive path must:
 
-For `SOURCE_ONLY` and `DUPLICATE_IDENTICAL`, archive follows this order and does not skip proof boundaries:
+1. classify source, destination, and every slug-matching residue before mutation;
+2. reject unsafe slugs, symlinks, unsupported file types, conflicting or partial destinations, ambiguous ownership, and changed residue;
+3. freeze a deterministic whole-tree proof plus any candidate, receipt, and delivery-plan continuity;
+4. publish with same-filesystem staging and atomic no-clobber semantics when the destination is absent, or prove an existing destination exactly identical without mutating it;
+5. revalidate the source immediately before retirement;
+6. retire through one uniquely owned same-parent stage, prove exact equality, then perform one separately evidenced delete attempt; and
+7. finish with destination-only proof and no residue.
 
-1. Freeze the complete source inventory, bytes, ready workflow-specific implementation contract (`mini-sdd.md` for Mini-SDD or `tasks.md` for Formal SDD), ready passing `verify.md`, and candidate or receipt continuity.
-2. Publish or prove the destination. For `SOURCE_ONLY`, use same-filesystem staging and atomic no-clobber publication. For `DUPLICATE_IDENTICAL`, mutate no destination and prove exact equality.
-3. Immediately revalidate the source against the frozen proof and destination before retirement.
-4. Create a destructive attempt context with the fixed date, safe slug, exact source, exact destination, planned retirement stage, frozen proof, candidate or receipt references, and remaining budget.
-5. Use one atomic same-parent no-clobber rename from `openspec/changes/<change-slug>/` to `openspec/changes/__sdd-retirement-stage--<change-slug>--<operation-id>/`, where `<operation-id>` is exactly 32 lowercase hexadecimal characters and the retirement stage is proven absent first.
-6. Prove the renamed state: source absent, retirement stage present, and exact equality among the retirement stage, frozen proof, and immutable destination.
-7. Create a separate delete attempt context, freshly prove ownership and equality again, and perform one delete attempt against the exact retirement stage only.
-8. Run final proof: source absent, retirement stage absent, destination complete, and continuity evidence intact.
+A proven destination is immutable. On collision, drift, mismatch, source reappearance, residue, or ambiguous postconditions, stop as `BLOCKED`, preserve all evidence, and notify the user.
 
-`DESTINATION_ONLY_VALID` enters directly at final proof and performs no filesystem mutation.
+### Attempt policy
 
-### Failure containment and attempt policy
-
-- Do not overwrite, merge, repair, restore, or otherwise mutate a previously proven destination.
-- If publication collision, source mutation, pre-rename drift, rename failure, post-rename mismatch, source reappearance, stage deletion failure, or final-proof drift appears, stop with `BLOCKED`, preserve the immutable destination, and report the exact last successful state plus any residue.
-- Cleanup is limited to the exact single owned retirement stage freshly proven equal to the frozen proof and destination. No partial subtree, ambiguous stage, extra child, sibling path, or multiply matched residue may be deleted.
-- Archive uses one initial attempt for each destructive rename or delete with zero automatic destructive retries. Any retry needs explicit user authorization, a new attempt context, and fresh ownership, equality, absence, candidate, receipt, and just-in-time proof.
-- Archive completion records workflow preservation only. It never implies Git, release, or delivery authorization.
+- Normal rename, defensive publication, retirement rename, and stage deletion each receive one initial destructive attempt and zero automatic destructive retries.
+- Any retry or cleanup requires explicit user authorization, a new attempt record, and fresh path, ownership, equality, absence, and continuity proof.
+- Never infer success from command exit status alone; use observed postconditions.
 
 ## Artifact and Handoff Consistency Gate
 
 After every artifact-producing phase:
 
 1. Read the persisted artifact once.
-2. Compare artifact status with the delegated handoff from `AGENTS.md`.
-3. Advance only when:
+2. Run the deterministic structural gate for status, sections, identifiers, references, and applicable coverage.
+3. Compare artifact status with the delegated handoff from `AGENTS.md`.
+4. Advance only when:
+   - structural checks pass;
    - artifact `READY` matches handoff `READY`;
    - handoff `Blockers` is `None` when the artifact is ready;
-   - evidence cites the artifact path and any required checks.
-4. Stop advancement when:
+   - evidence cites the artifact path and structural result.
+5. Stop advancement when:
+   - structural checks fail;
    - artifact `BLOCKED` or handoff `BLOCKED` appears;
    - handoff `FAILED` appears;
    - labels are invalid or required evidence is missing;
    - artifact and handoff statuses do not agree.
-5. Treat any mismatch as orchestration-level `BLOCKED` until corrected.
+6. Treat any structural or handoff mismatch as orchestration-level `BLOCKED` until corrected.
 
 ## Skill Resolution & Prompt Contract
 
@@ -279,9 +321,9 @@ Before delegating a phase:
 
 1. Resolve only skills relevant to the approved scope and current phase.
 2. Read selected `SKILL.md` files before relying on them.
-3. Provide the subagent with the ordered canonical delegation input contract from `AGENTS.md`, including approved goal, known evidence, missing facts, scope and paths, exclusions, governing contracts, prior decisions and ready artifacts, exact assigned skill paths, expected output and evidence, blocker criteria, and the one next permitted action.
-4. Include the exact canonical contract excerpts the assignment needs, such as the six-field handoff schema, attempt limits, candidate rules, workload factors, or receipt schema. Do not merely cite their location.
-5. Lean-mode subagents do not receive `AGENTS.md`, prior conversation, startup memory, or skills automatically. Do not instruct or expect them to read `AGENTS.md`; they consume the prompt-supplied excerpts and assigned artifacts or skills only.
+3. Provide only the seven dynamic fields from `AGENTS.md`: goal; known context and missing facts; scope, paths, and exclusions; governing contracts and ready artifacts; assigned skills; expected output and evidence; blockers and next permitted action.
+4. Stable status, blocker, handoff, phase-output, and validation rules live in the subagent definition. Do not repeat them in delegated prompts. Add a triggered candidate, receipt, delivery, or archive excerpt only when the role cannot act safely without exact change-specific values.
+5. Lean-mode subagents do not receive `AGENTS.md`, prior conversation, startup memory, or skills automatically. Pass exact assigned skill paths and only the minimal phase context listed above.
 
 ## Decision Gates
 
@@ -291,20 +333,20 @@ Before delegating a phase:
 - If the user explicitly asks the orchestrator to research personally, honor that choice and pass the curated result to the phase agent.
 - If any artifact is `BLOCKED`, do not delegate the next phase.
 - If scope changes, return to the user and confirm whether to update the current workflow or re-triage.
-- If verification finds implementation defects inside approved scope, return to `sdd-apply`; do not silently change product contracts.
+- If verification returns `ISSUES_FOUND` or `BLOCKED`, stop and notify the user with evidence. Do not return to `sdd-apply`, modify contracts, or rerun verification until the user explicitly chooses the next action.
 
 ## Execution Steps
 
 1. Confirm the selected workflow and change slug from current context without reading project files.
 2. Classify the request as concrete execution or discussion-only. Begin immediately for concrete execution; remain conversational for discussion-only.
 3. Identify existing artifacts already available in context; do not reread them without need.
-4. Resolve phase-relevant skills and prepare explicit lean-mode prompts with all required canonical excerpts.
+4. Resolve phase-relevant skills and prepare lean-mode prompts with only the seven dynamic fields, minimal phase context, exact assigned skill paths, and triggered change-specific values.
 5. Delegate one phase at a time.
 6. Read the produced artifact and enforce its status gate.
 7. Compare the artifact and handoff before advancing.
 8. Resolve blockers with the user and resume the same phase when needed.
-9. Continue through apply and independent verification.
-10. Archive every ready, passing Mini-SDD or Formal SDD change tied to the verified candidate, and report completion only after destination-only proof.
+9. Continue through apply and independent verification; a non-passing verification stops for user notification and decision rather than entering an automatic repair loop.
+10. Archive every ready, passing Mini-SDD or Formal SDD change, preserving verified candidate continuity when triggered, and report completion only after destination-only proof.
 
 ## Output Contract
 
@@ -324,6 +366,6 @@ Return:
 
 - `AGENTS.md` — authoritative consent, authority, context, workload, handoff, candidate, attempt-budget, and delivery-safeguard policy.
 - `skills/workflow-triage/SKILL.md` — request classification and workflow routing.
-- `skills/tdd/SKILL.md` — Strict TDD execution guidance.
+- `skills/tdd/SKILL.md` — change-type test and validation guidance.
 - `subagents/*.md` — lean-mode phase contracts and artifact responsibilities.
 - `docs/pi-workflow-regression-scenarios.md` — non-authoritative lifecycle and archive regression catalog for reviewer maintenance.

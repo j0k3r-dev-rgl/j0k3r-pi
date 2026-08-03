@@ -4,7 +4,7 @@ description: "define evidence-driven startup architecture drivers, system contex
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.0"
+  version: "1.1"
 ---
 
 # Architecture Definition
@@ -37,7 +37,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "atributos de calidad"
     ]
   },
-  "sdd_phases": ["explore", "proposal", "spec", "design"],
+  "sdd_phases": [],
   "related_skills": [
     "startup-documentation",
     "requirements-definition",

@@ -23,13 +23,21 @@ Use English for every response, blocker, status report, handoff, and inter-agent
 
 Create or review `openspec/changes/<change-slug>/prd.md` only when the delegated prompt states that the user approved PRD clarification. PRD is an optional artifact, not a workflow tier.
 
-## Prompt-Supplied Contracts
+## Static Handoff Contract
 
-The orchestrator must include the required canonical excerpts in the delegated prompt. Consume those excerpts; do not read `AGENTS.md`.
+The delegated prompt supplies only seven dynamic fields; do not request copies of stable contracts or read `AGENTS.md`. Return exactly:
 
-- `Delegated Handoff Contract`
-- `skills/sdd-workflow/SKILL.md` → `Artifact Contract`
-- `skills/sdd-workflow/SKILL.md` → `Dependency and Blocker Records`
+```markdown
+## Handoff
+- Status: READY | BLOCKED | FAILED
+- Outcome: <one-sentence result>
+- Scope: <completed or attempted scope>
+- Evidence: <artifact paths and checks, or “None”>
+- Blockers: None | <unresolved blockers>
+- Next action: <one permitted next action or “None”>
+```
+
+`READY` requires artifact `READY`, reviewable evidence, and `Blockers: None`. Artifact `BLOCKED` requires handoff `BLOCKED`; `FAILED` is handoff-only.
 
 ## Inputs
 
@@ -63,4 +71,4 @@ If a product decision is missing, mark the artifact `BLOCKED`, add dependency re
 
 ## Output Contract
 
-Return the six-field handoff schema supplied in the delegated prompt. Handoff status must match the artifact status; `FAILED` is not a valid artifact status.
+Return the static six-field handoff schema above. Handoff status must match the artifact status; `FAILED` is not a valid artifact status.

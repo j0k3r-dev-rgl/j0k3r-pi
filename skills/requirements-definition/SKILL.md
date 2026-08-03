@@ -4,7 +4,7 @@ description: "translate approved startup product capabilities into small traceab
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.0"
+  version: "1.1"
 ---
 
 # Requirements Definition
@@ -36,7 +36,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "requisitos de calidad"
     ]
   },
-  "sdd_phases": ["explore", "proposal", "spec"],
+  "sdd_phases": [],
   "related_skills": [
     "startup-documentation",
     "product-definition",

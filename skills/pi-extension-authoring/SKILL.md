@@ -4,7 +4,7 @@ description: "create, restructure, or review independent Pi extensions, custom t
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.1"
+  version: "1.2"
 ---
 
 # Pi Extension Authoring
@@ -63,7 +63,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "independent extension package"
     ]
   },
-  "sdd_phases": ["explore", "design", "task", "apply", "verify"],
+  "sdd_phases": [],
   "related_skills": [
     "workflow-triage",
     "tdd"

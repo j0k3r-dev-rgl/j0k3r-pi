@@ -4,7 +4,7 @@ description: "configure Pi Code Research project graph enablement only: .pi/code
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.0"
+  version: "1.1"
 ---
 
 # Code Research Configuration
@@ -37,7 +37,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "workspace_graph_status"
     ]
   },
-  "sdd_phases": ["explore", "task", "apply", "verify"],
+  "sdd_phases": [],
   "related_skills": ["workflow-triage"],
   "priority": 85
 }

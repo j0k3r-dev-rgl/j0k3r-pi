@@ -4,7 +4,7 @@ description: "design or revise guides, READMEs, RFCs, onboarding, architecture, 
 license: Apache-2.0
 metadata:
   author: gentleman-programming
-  version: "1.1"
+  version: "1.2"
 ---
 
 # Cognitive Doc Design
@@ -42,7 +42,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "make this easier to scan"
     ]
   },
-  "sdd_phases": ["explore", "proposal", "spec", "design", "task", "apply", "verify"],
+  "sdd_phases": [],
   "related_skills": ["comment-writer"],
   "priority": 60
 }

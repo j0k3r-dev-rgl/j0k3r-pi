@@ -1,10 +1,10 @@
 ---
 name: tdd
-description: "guide language-agnostic test-driven changes with existing-test discovery, safety baselines, meaningful assertions, appropriate test layers, feature-removal cleanup, and red-green-refactor evidence."
+description: "guide language-agnostic change validation with test-first behavior changes, refactor baselines, mechanical diff/regression evidence, existing-test discovery, and meaningful assertions."
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.4"
+  version: "1.6"
 ---
 
 # TDD
@@ -66,7 +66,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "organizar tests"
     ]
   },
-  "sdd_phases": ["explore", "design", "task", "apply", "verify"],
+  "sdd_phases": [],
   "related_skills": [
     "workflow-triage"
   ],
@@ -172,9 +172,13 @@ Do not load it for answer-only questions, read-only investigation with no test d
 - Test a feature's absence only when that absence is an observable product contract, such as a retired route returning the agreed status or a removed option being rejected. Do not test implementation trivia such as a deleted private symbol or file no longer existing.
 - After removing obsolete tests, run the relevant broader suite to detect retained behavior that depended unexpectedly on the removed feature.
 
-### Red, green, refactor
+### Change-type validation
 
-- Define the expected behavior before changing code and classify the change as adding, changing, or removing behavior.
+- Define the expected outcome before changing code and classify the change as adding behavior, changing behavior, fixing a bug, preserving behavior through refactoring, removing behavior, mechanical/generated code, or documentation/configuration.
+- Use RED → GREEN → REFACTOR for added or changed behavior, bug fixes, and observable absence contracts.
+- Use BASELINE → REFACTOR → REGRESSION for behavior-preserving refactors; do not manufacture a failing test when no behavior should change.
+- Use BASELINE → CHANGE → DIFF/REGRESSION for mechanical or generated code changes.
+- Use structural, syntax, schema, link, consistency, or focused smoke validation for documentation and configuration without artificial product-code tests.
 - For added or changed supported behavior, RED: add or adapt the narrowest relevant test, run it, and confirm that it fails for the expected behavioral reason.
 - If the test passes before the implementation change, it does not yet demonstrate the missing behavior. Improve the test or explain why the reported issue cannot be reproduced; do not claim RED.
 - For a pure feature removal with no meaningful observable absence contract, do not manufacture a new failing test. Use the existing feature tests to identify the removal boundary, delete obsolete tests with the production behavior, update shared tests, and validate the broader suite.
@@ -217,7 +221,7 @@ Stop and ask the user when:
 - relevant tests are colocated with production code and migration to a dedicated mirrored tree has not been decided;
 - the appropriate existing test file needs a structural split before it can accept the new scenario cleanly;
 - existing tests encode behavior that conflicts with the requested expectation, unless they exclusively own an explicitly approved feature removal;
-- RED is required for added, changed, or observable-absence behavior but cannot be demonstrated because the issue is not reproducible, the environment is unavailable, or required fixtures/dependencies are missing;
+- RED is required for added, changed, bug-fix, or observable-absence behavior but cannot be demonstrated because the issue is not reproducible, the environment is unavailable, or required fixtures/dependencies are missing;
 - satisfying the request would require installing dependencies, changing the framework, moving unrelated tests, or expanding scope.
 
 When asking about colocated tests, present both choices explicitly: migrate the agreed tests to the dedicated mirrored tree, or adapt them in place without treating that choice as a permanent convention.
@@ -232,8 +236,8 @@ When asking about colocated tests, present both choices explicitly: migrate the 
 6. For feature removal, inventory tests and test-only support artifacts owned exclusively by the removed behavior, shared tests that need narrowing, and any real observable absence contract.
 7. For behavior-preserving refactors, confirm existing coverage and add characterization only for important uncovered behavior.
 8. Resolve any baseline, framework, layer, colocation, migration, oversized-file, or conflicting-expectation decision gate with the user.
-9. RED for added, changed, or observable-absence behavior: adapt or create the approved test and confirm the expected failure with the narrowest relevant command. For a pure removal without such a contract, record why RED is not applicable rather than creating an artificial test.
-10. GREEN: make the smallest implementation change or approved removal, delete obsolete tests and support artifacts, update shared tests, and confirm the focused validation passes when applicable.
+9. Apply the classified evidence path: RED for added, changed, bug-fix, or observable-absence behavior; BASELINE for behavior-preserving refactors or mechanical/generated code; structural baseline for documentation/configuration; or a recorded non-applicability reason for pure removal without an absence contract.
+10. Complete the matching change step: GREEN for behavior changes, the approved REFACTOR for behavior preservation, the bounded mechanical/generated CHANGE, the structural documentation/configuration change, or the smallest approved removal.
 11. Triangulate only when another case is needed to defeat a trivial implementation, exercise a meaningful branch, or cover another approved scenario.
 12. REFACTOR only when useful, keeping responsibilities cohesive and removing duplication; rerun validation after meaningful steps.
 13. For safety/security behavior, run the required negative/adversarial cases and confirm they fail when the exact control is absent.
@@ -249,14 +253,14 @@ Return:
 - Existing test candidates inspected and the files selected for adaptation or deletion, or the reason a new file was necessary.
 - Detected framework, safety baseline, selected test layer, and repository evidence supporting those choices.
 - Location of retained or new tests and how they mirror the production source structure; include any user decision about colocated tests.
-- RED command/result and expected failure reason, or why RED correctly did not apply to a pure removal.
-- GREEN or removal command/result and post-refactor or broader validation.
+- The selected change type and evidence path: RED/GREEN/REFACTOR, BASELINE/REFACTOR/REGRESSION, BASELINE/CHANGE/DIFF-REGRESSION, structural validation, or justified pure-removal evidence.
+- Commands/results for each applicable step and the post-change broader validation.
 - For feature removals, obsolete tests and support artifacts deleted or updated, shared coverage preserved, and any observable absence contract retained.
 - Assertion quality, mock usage, triangulation, duplication, size, and obsolete-coverage review, with remaining risks, blocked checks, and decisions still needed.
 - Explicit confirmation that no framework, migration, or commit was performed without approval.
 
 ## References
 
-- `AGENTS.md` — approval boundaries, strict TDD, code inspection, review, and Git policy.
+- `AGENTS.md` — approval boundaries, change-type validation, code inspection, review, and Git policy.
 - `skills/workflow-triage/SKILL.md` — mandatory workflow selection before non-trivial implementation.
 - Project-local dependency manifests, test configuration, scripts, and existing tests — authoritative runtime evidence for framework and organization choices.

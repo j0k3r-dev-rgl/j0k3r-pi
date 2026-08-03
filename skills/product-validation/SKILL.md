@@ -4,7 +4,7 @@ description: "define and record startup measurement plans, bounded experiments, 
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.0"
+  version: "1.3"
 ---
 
 # Product Validation
@@ -41,7 +41,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "pivotar o continuar"
     ]
   },
-  "sdd_phases": ["explore", "proposal", "spec", "task", "apply", "verify"],
+  "sdd_phases": [],
   "related_skills": [
     "startup-documentation",
     "product-discovery",
@@ -76,12 +76,13 @@ Do not use it to invent success thresholds after results are known, collect unau
 - Treat material privacy harm, unauthorized personal-data processing, or a privacy guardrail breach as invalidating or weakening evidence as applicable. Route the user-owned learning decision to `ITERATE | PAUSE | STOP`, request a canonical change record when approved content is challenged, and do not interpret or close the result as successful while the material privacy condition remains unresolved.
 - Every metric must have a stable ID, definition, owner, decision, cohort/context, collection and analysis method, baseline or explicit unknown, threshold, observation period, review moment, guardrail, and retirement condition.
 - Every durable evidence record must follow the shared evidence-provenance contract.
-- Validation or verification evidence must link requirement and acceptance IDs when it claims implementation or conformance validation. Pre-requirement validation may instead trace to opportunity, assumption, hypothesis, journey, capability, or outcome IDs.
+- Validation or verification evidence must link requirement and acceptance IDs when it claims implementation or conformance validation. SDD verification is promoted only when it informs a named durable product, learning, implementation-conformance, quality, or release decision: link the exact `verify.md` requirement row, change-local SDD ID, and canonical requirement/acceptance IDs; store only the decision-relevant summary and provenance, never copy the full verification artifact. Ordinary technical verification remains in the SDD tree. Pre-requirement validation may instead trace to opportunity, assumption, hypothesis, journey, capability, or outcome IDs.
 - For comparative causal-effect claims only, require a comparator or control, eligibility and assignment method, primary metric, sample or duration rationale, analysis method, and stopping rule. Do not require these fields for qualitative, usability, or simple observational validation.
 - Reuse approved language, decision owners, scope, evidence references, and metadata unless they are absent, stale, contradicted, or specific to the current validation decision.
 - Do not use sign-ups, downloads, visits, compliments, velocity, coverage, story points, or deployment frequency alone as proof of sustained value.
 - Interpret results against the predeclared decision rule: persevere, iterate, pivot, pause, or stop. The agent recommends; the user owns the product decision.
 - A new result invalidates downstream artifacts only through explicit trace and impact review. Preserve unaffected approvals.
+- Initialize a newly routed material Change Request with status `OPEN | REVIEWING` and disposition `PENDING_TARGET_REVIEW`. That disposition is valid only until the target owner returns `ACCEPTED | DECLINED | DEFERRED | NEEDS_MORE_EVIDENCE`; replace it rather than retaining two dispositions.
 - Create only the measurement, experiment, and decision records needed now; do not generate speculative future experiments.
 
 ## Decision Gates
@@ -126,7 +127,7 @@ docs/05-validation/
 4. Use `00-measurement-plan.md` as a concise registry of decision-linked product, quality, and operational measures with definitions, owners, cohorts, baselines/unknowns, guardrails, review moments, and retirement conditions.
 5. Store each bounded experiment under `01-experiments/` with hypothesis, audience, method, evidence type and provenance, applicable trace IDs, predeclared signals/thresholds, guardrails, observation period, time/cost cap, privacy/ethical boundary, limitations, result, and linked decision ID. Add the conditional causal-effect fields only when that claim is made.
 6. Store each user-approved learning decision under `02-decisions/` with evidence used, comparison to predeclared criteria, confounders/limitations, outcome, rationale, affected trace links, material change-request IDs, owner, and next review condition.
-7. When evidence materially challenges another owner's approved content, create or update the single canonical `CR-####` record under `03-change-requests/`, route it to the target owner, record the returned disposition/rationale, and close it only after accepted changes and impact-review evidence satisfy the closure condition. Validation never applies the target semantic change.
+7. When evidence materially challenges another owner's approved content, create or update the single canonical `CR-####` record under `03-change-requests/`, initialize it with status `OPEN | REVIEWING` and disposition `PENDING_TARGET_REVIEW`, route it to the target owner, replace the pending value with the returned disposition/rationale, and close it only after accepted changes and impact-review evidence satisfy the closure condition. Validation never applies the target semantic change.
 8. Classify the result:
    - `PERSEVERE`: supported outcome and acceptable guardrails;
    - `ITERATE`: supported problem/value with a bounded correctable weakness;
