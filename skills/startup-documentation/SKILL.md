@@ -1,0 +1,141 @@
+---
+name: startup-documentation
+description: "initialize, route, and maintain a startup project's numbered modular Markdown documentation under docs/ without inventing product, architecture, technology, or delivery decisions."
+license: Apache-2.0
+metadata:
+  author: j0k3r
+  version: "1.0"
+---
+
+# Startup Documentation
+
+## Registry Contract
+
+Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
+
+```json
+{
+  "category": "product",
+  "domains": ["startup-lifecycle", "project-documentation", "decision-routing", "traceability"],
+  "triggers": {
+    "paths": [
+      "docs/00-discovery/**/*.md",
+      "docs/01-product/**/*.md",
+      "docs/02-requirements/**/*.md",
+      "docs/03-architecture/**/*.md",
+      "docs/04-delivery/**/*.md",
+      "docs/05-validation/**/*.md"
+    ],
+    "keywords": [
+      "startup documentation",
+      "initialize startup documentation",
+      "new software project",
+      "start new software project",
+      "startup project",
+      "start startup project",
+      "new application",
+      "new application project",
+      "guide project definition",
+      "project documentation flow",
+      "create project documentation flow",
+      "numbered modular documentation",
+      "numbered modular Markdown documentation",
+      "documentar proyecto startup",
+      "flujo documental startup",
+      "iniciar nuevo proyecto de software",
+      "definir nueva aplicacion",
+      "documentacion modular numerada"
+    ]
+  },
+  "sdd_phases": ["explore", "proposal", "spec", "design", "task", "apply", "verify"],
+  "related_skills": [
+    "anti-overengineering",
+    "cognitive-doc-design",
+    "product-discovery",
+    "product-definition",
+    "requirements-definition",
+    "architecture-definition",
+    "technical-decisions",
+    "delivery-planning",
+    "product-validation"
+  ],
+  "priority": 90
+}
+```
+
+## Activation Contract
+
+Use this skill when a user starts or reorganizes a software startup's project documentation, asks which numbered Markdown document owns a decision, or requests progression through the documented startup lifecycle.
+
+This is a domain-documentation router. It does not create a fourth Pi execution workflow and does not replace Direct Orchestrator, Mini-SDD, or Formal SDD. Load the specific domain skill that owns the requested decision. Use `product-discovery` when the problem, users, evidence, assumptions, or product direction are not yet established.
+
+Do not create the complete documentation tree eagerly, generate empty placeholder files, or use this skill to decide product scope, architecture, technology, sprint content, or validation thresholds.
+
+## Hard Rules
+
+- Load and follow `anti-overengineering` whenever this skill is active.
+- Store durable project documentation as Markdown under the approved numbered groups: `docs/00-discovery/`, `docs/01-product/`, `docs/02-requirements/`, `docs/03-architecture/`, `docs/04-delivery/`, and `docs/05-validation/`.
+- Create only the group, index, and document needed for the current approved decision. Never scaffold every possible document.
+- Each document owns one coherent subject or decision family. Split independent subjects into numbered child documents before a file becomes a mixed, review-heavy specification.
+- Treat summary documents as navigation and decision summaries; put repeated evidence, requirements, decisions, integrations, increments, sprints, and experiments in numbered child files.
+- Preserve creation-order numbers. Never renumber existing documents merely to improve appearance, and never reuse a retired identifier.
+- Use lowercase English kebab-case for paths while allowing document prose in the language explicitly selected by the user.
+- Ask only for unresolved decisions necessary for the next document. Group questions, put the simplest viable option first, explain material trade-offs, and never infer the user's product or technical choices.
+- Distinguish confirmed evidence, supported evidence, inference, assumption, and unknown. Never promote an assumption to a requirement silently.
+- One canonical owner must exist for each durable fact or decision. Other documents link to it rather than duplicate or overwrite it.
+- When upstream evidence or decisions change, identify affected links and request review only for materially affected descendants. If impact cannot be bounded safely, mark the uncertainty and ask the user.
+- Do not place architecture, technology, delivery, or implementation decisions inside discovery or product documents. Route them to their owning group and skill.
+- Follow `references/document-contract.md` for document metadata, status, numbering, links, size boundaries, and change handling.
+
+## Decision Gates
+
+Before creating or changing documentation, resolve only what is necessary now:
+
+- project and document language when no parent or existing convention establishes it;
+- the current decision or question the document must answer;
+- the canonical group and owning domain skill;
+- the user who owns any material product, architecture, cost, risk, or delivery decision;
+- whether current claims are evidence, inference, assumptions, or unknowns;
+- whether a new document is necessary or an existing canonical document should be updated.
+
+Stop and ask before:
+
+- selecting among materially different valid product or technical alternatives;
+- adding a new documentation group, cross-project convention, dependency, migration, or compatibility policy;
+- replacing an approved decision;
+- creating a document that would duplicate an existing canonical owner;
+- creating architecture or delivery artifacts before their approved inputs exist.
+
+## Execution Steps
+
+1. Identify the user's current decision and reuse all approved context already available.
+2. Select the one canonical numbered group and domain skill that owns the decision.
+3. Read the relevant existing parent/index document only when it is required and has not already been supplied.
+4. Ask a concise grouped questionnaire for unresolved facts and user-owned choices.
+5. Create or update only the smallest coherent Markdown artifact required now.
+6. Apply the shared document contract and add links instead of copying canonical content.
+7. Check that the document has a single responsibility, explicit exclusions, bounded size, evidence labels, decision ownership, and one valid next action.
+8. Run structural validation and relevant skill-registry routing checks after changing skill definitions.
+9. Stop when the requested document or routing decision is complete.
+
+## Output Contract
+
+Return:
+
+- Skills applied: `startup-documentation`, `anti-overengineering`, and the selected domain skill.
+- Current lifecycle group and canonical document path.
+- Decision or question documented.
+- User decisions requested and resolved, or `None`.
+- Evidence, inference, assumptions, and unknowns kept distinct.
+- Documents created or updated; empty or speculative documents created: `None`.
+- Trace links and materially affected descendants.
+- Validation executed.
+- One next permitted action, or `None`.
+
+## References
+
+- `references/document-contract.md` — canonical modular Markdown, metadata, numbering, ownership, and size contract.
+- `~/.pi/agent/skills/anti-overengineering/SKILL.md` — mandatory scope, simplicity, and decision controls.
+- `~/.pi/agent/skills/cognitive-doc-design/SKILL.md` — progressive disclosure and reviewability guidance.
+- `~/.pi/agent/skills/product-discovery/SKILL.md` — discovery-group owner for problem, users, evidence, assumptions, and initial direction.
+- `~/.pi/agent/AGENTS.md` — canonical Pi workflow, authority, and delegation policy.
