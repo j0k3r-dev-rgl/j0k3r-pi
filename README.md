@@ -115,17 +115,75 @@ PI_CODING_AGENT_DIR="$TARGET_DIR" pi install npm:gentle-engram
 
 ### Core workflow
 
-The agent is expected to be conservative and user-controlled:
+The agent is conservative, user-controlled, and limited to exactly three execution workflows:
 
-1. Answer simple questions directly.
-2. Treat investigation/review/diagnosis as read-only until the user approves a concrete implementation path.
-3. Use the lightest safe workflow: inline, simple TDD, discovery, or full SDD/OpenSpec.
-4. Treat policy-sensitive files (`AGENTS.md`, skills, subagents, permissions, memory/context config, workflow extensions) as higher-risk.
-5. Use strict TDD for non-trivial code changes.
-6. Never commit, branch, tag, rebase, or push unless the user explicitly asks in the current conversation.
-7. Use memory as a curated persistent brain, not as a transcript dump.
+1. Answer advice-only questions directly without inspecting or changing the project.
+2. Route concrete software work through [`workflow-triage`](skills/workflow-triage/SKILL.md): **Direct Orchestrator**, **Mini-SDD**, or **Formal SDD**. A named workflow begins without redundant confirmation.
+3. Use read-only [`discovery`](subagents/discovery.md) as a bounded research activity when authorized; it is not another workflow.
+4. Apply [`anti-overengineering`](skills/anti-overengineering/SKILL.md) as a transversal scope/complexity guardrail after the workflow and canonical owner are known. Ordinary local reversible choices remain agent decisions; material product, architecture, migration, dependency, risk, or external-effect choices remain user-owned.
+5. Apply strict [`tdd`](skills/tdd/SKILL.md) to code changes: establish a safety baseline, prove the expected **RED**, implement the minimum **GREEN**, then **REFACTOR** while green. Documentation/configuration-only changes use focused structural or syntax validation.
+6. Treat policy-sensitive files (`AGENTS.md`, skills, subagents, permissions, memory/context config, workflow extensions) as higher-risk.
+7. Never commit, branch, tag, rebase, or push unless the user explicitly asks in the current conversation.
+8. Use memory as a curated persistent brain, not as a transcript dump.
 
-See [`AGENTS.md`](AGENTS.md) for the full policy.
+Workflow artifacts:
+
+| Workflow | Use | Lifecycle |
+|---|---|---|
+| Direct Orchestrator | Small, explicit, bounded work with no broad investigation | Implement directly; use TDD for code and focused validation for docs/config. |
+| Mini-SDD | Medium multi-file work needing a lightweight shared contract | `mini-sdd.md` → `apply.md` → independent `verify.md` → archive. |
+| Formal SDD | Large, cross-cutting, architectural, security, migration, or contract work | `explore.md` → `proposal.md` → `spec.md` → `design.md` → `tasks.md` → `apply.md` → independent `verify.md` → archive. |
+
+[`sdd-workflow`](skills/sdd-workflow/SKILL.md) governs Mini-SDD/Formal phase gates, handoffs, candidate continuity, verification, and archive. Mini-SDD archive preflights `mini-sdd.md`; Formal SDD archive preflights `tasks.md`.
+
+See [`AGENTS.md`](AGENTS.md) for the full authority, consent, TDD, verification, delivery, and Git policy.
+
+### Startup documentation and application evolution
+
+The global startup skills define a project without inventing product intent and then keep documentation aligned as the application evolves:
+
+```text
+Discovery → Product Definition → Requirements
+          → Architecture → Technical Decisions
+          → Delivery Planning → Pi execution workflow + Strict TDD
+          → Product Validation → Change Request → next increment
+```
+
+For an existing codebase:
+
+```text
+explicit scan approval → reproducible AS_IS snapshot
+→ principal-selected parallel read-only research lanes
+→ deterministic evidence consolidation
+→ user decisions → canonical TO_BE documents
+→ normal delivery and validation loop
+```
+
+[`existing-project-onboarding`](skills/existing-project-onboarding/SKILL.md) is principal-only documentation guidance, not a workflow or subagent role. Research subagents receive isolated evidence assignments, never infer product intent, and never write canonical lifecycle documents.
+
+| Skill | Canonical responsibility |
+|---|---|
+| [`startup-documentation`](skills/startup-documentation/SKILL.md) | Route the first unresolved documentation/change decision and maintain the numbered Markdown contract. |
+| [`product-discovery`](skills/product-discovery/SKILL.md) | Problem, users, evidence, assumptions, and provisional direction. |
+| [`product-definition`](skills/product-definition/SKILL.md) | Vision, outcomes, success/guardrail intent, MVP hypothesis, scope, journeys, and capabilities. |
+| [`requirements-definition`](skills/requirements-definition/SKILL.md) | Verifiable functional/quality/constraint records and acceptance IDs. |
+| [`architecture-definition`](skills/architecture-definition/SKILL.md) | Drivers, context, responsibility boundaries, data/trust boundaries, and deployment views. |
+| [`technical-decisions`](skills/technical-decisions/SKILL.md) | ADRs, technology/dependency decisions, supply-chain posture, and integrations. |
+| [`delivery-planning`](skills/delivery-planning/SKILL.md) | Delivery model, roadmap, Definition of Done, vertical increments, sprints, and flow items. |
+| [`product-validation`](skills/product-validation/SKILL.md) | Operational metrics, experiments, evidence, learning decisions, and canonical change-request lifecycle. |
+| [`existing-project-onboarding`](skills/existing-project-onboarding/SKILL.md) | Sanitized snapshot-bound AS_IS evidence, gap map, and principal-controlled owner handoffs. |
+
+Post-MVP change intake reuses approved documentation instead of restarting the lifecycle:
+
+- approved-behavior bug → selected Pi workflow + Strict TDD using existing requirement/acceptance IDs;
+- ambiguous bug or clear in-scope feature → requirements first;
+- new capability or scope expansion → product definition;
+- uncertain problem/value → discovery and, when useful, a bounded validation experiment;
+- architecture boundary → architecture definition;
+- significant technology/dependency/integration choice → technical decisions;
+- approved change ready for implementation → delivery planning, then one of the three Pi workflows.
+
+A completed increment records TDD and acceptance/conformance evidence, broader checks, validation status, learning/change-request links, release authorization, and next-increment eligibility. Documentation defines and traces intended behavior; it never authorizes implementation or release by itself.
 
 ### Skill registry
 
@@ -385,17 +443,75 @@ PI_CODING_AGENT_DIR="$TARGET_DIR" pi install npm:gentle-engram
 
 ### Workflow principal
 
-El agente debe ser conservador y dejar al usuario en control:
+El agente es conservador, controlado por el usuario y limitado exactamente a tres workflows de ejecución:
 
-1. Responder preguntas simples directamente.
-2. Tratar investigación, revisión y diagnóstico como solo lectura hasta que el usuario apruebe una ruta concreta de implementación.
-3. Usar el workflow seguro más liviano: inline, simple TDD, discovery o SDD/OpenSpec completo.
-4. Tratar archivos sensibles de política (`AGENTS.md`, skills, subagentes, permisos, configuración de memoria/contexto y extensiones de workflow) como superficies de mayor riesgo.
-5. Usar TDD estricto para cambios de código no triviales.
-6. Nunca hacer commits, branches, tags, rebases o pushes salvo pedido explícito del usuario en la conversación actual.
-7. Usar la memoria como cerebro persistente curado, no como volcado de transcript.
+1. Responder consultas de asesoramiento sin inspeccionar ni modificar el proyecto.
+2. Enrutar trabajo concreto mediante [`workflow-triage`](skills/workflow-triage/SKILL.md): **Direct Orchestrator**, **Mini-SDD** o **Formal SDD**. Si el usuario ya nombra el workflow, comienza sin confirmación redundante.
+3. Usar [`discovery`](subagents/discovery.md) como actividad de investigación acotada y de solo lectura cuando esté autorizada; no es otro workflow.
+4. Aplicar [`anti-overengineering`](skills/anti-overengineering/SKILL.md) como guardrail transversal después de conocer workflow y owner. Los detalles locales, reversibles y ordinarios pertenecen al agente; producto, arquitectura, migraciones, dependencias, riesgo y efectos externos materiales pertenecen al usuario.
+5. Aplicar [`tdd`](skills/tdd/SKILL.md) estricto a cambios de código: baseline de seguridad, **RED** esperado, mínimo **GREEN** y **REFACTOR** manteniendo verde. Los cambios solo de documentación/configuración usan validación estructural o sintáctica enfocada.
+6. Tratar archivos sensibles de política (`AGENTS.md`, skills, subagentes, permisos, configuración de memoria/contexto y extensiones de workflow) como superficies de mayor riesgo.
+7. Nunca hacer commits, branches, tags, rebases o pushes salvo pedido explícito del usuario en la conversación actual.
+8. Usar la memoria como cerebro persistente curado, no como volcado de transcript.
 
-Ver [`AGENTS.md`](AGENTS.md) para la política completa.
+Artefactos de workflow:
+
+| Workflow | Uso | Ciclo |
+|---|---|---|
+| Direct Orchestrator | Trabajo pequeño, explícito y acotado sin investigación amplia | Implementación directa; TDD para código y validación enfocada para docs/config. |
+| Mini-SDD | Trabajo medio/multiarchivo que necesita un contrato ligero | `mini-sdd.md` → `apply.md` → `verify.md` independiente → archivo. |
+| Formal SDD | Trabajo grande, transversal, arquitectónico, de seguridad, migración o contratos | `explore.md` → `proposal.md` → `spec.md` → `design.md` → `tasks.md` → `apply.md` → `verify.md` independiente → archivo. |
+
+[`sdd-workflow`](skills/sdd-workflow/SKILL.md) gobierna gates, handoffs, continuidad del candidato, verificación y archivo de Mini/Formal. El archivado de Mini-SDD valida `mini-sdd.md`; Formal SDD valida `tasks.md`.
+
+Ver [`AGENTS.md`](AGENTS.md) para la política completa de autoridad, consentimiento, TDD, verificación, entrega y Git.
+
+### Documentación startup y evolución de la aplicación
+
+Las skills globales definen el proyecto sin inventar intención de producto y mantienen la documentación alineada mientras evoluciona la aplicación:
+
+```text
+Discovery → Product Definition → Requirements
+          → Architecture → Technical Decisions
+          → Delivery Planning → workflow Pi + Strict TDD
+          → Product Validation → Change Request → siguiente incremento
+```
+
+Para un proyecto existente:
+
+```text
+autorización explícita de escaneo → snapshot AS_IS reproducible
+→ lanes paralelos read-only seleccionados por el principal
+→ consolidación determinista de evidencia
+→ decisiones del usuario → documentos TO_BE canónicos
+→ ciclo normal de delivery y validation
+```
+
+[`existing-project-onboarding`](skills/existing-project-onboarding/SKILL.md) es orientación documental exclusiva del principal, no workflow ni rol de subagente. Los subagentes investigadores reciben tareas de evidencia aisladas, nunca infieren intención de producto y nunca escriben documentos canónicos.
+
+| Skill | Responsabilidad canónica |
+|---|---|
+| [`startup-documentation`](skills/startup-documentation/SKILL.md) | Enrutar la primera decisión documental/de cambio sin resolver y mantener el contrato Markdown numerado. |
+| [`product-discovery`](skills/product-discovery/SKILL.md) | Problema, usuarios, evidencia, supuestos y dirección provisional. |
+| [`product-definition`](skills/product-definition/SKILL.md) | Visión, outcomes, intención de éxito/guardrails, hipótesis MVP, scope, journeys y capabilities. |
+| [`requirements-definition`](skills/requirements-definition/SKILL.md) | Registros funcionales/de calidad/constraints verificables e IDs de aceptación. |
+| [`architecture-definition`](skills/architecture-definition/SKILL.md) | Drivers, contexto, límites de responsabilidad, datos/confianza y vistas de deployment. |
+| [`technical-decisions`](skills/technical-decisions/SKILL.md) | ADR, decisiones de tecnología/dependencias, supply chain e integraciones. |
+| [`delivery-planning`](skills/delivery-planning/SKILL.md) | Modelo de entrega, roadmap, Definition of Done, incrementos verticales, sprints y flow items. |
+| [`product-validation`](skills/product-validation/SKILL.md) | Métricas operacionales, experimentos, evidencia, decisiones de aprendizaje y lifecycle canónico de change requests. |
+| [`existing-project-onboarding`](skills/existing-project-onboarding/SKILL.md) | Evidencia AS_IS sanitizada y ligada al snapshot, gap map y handoffs controlados por el principal. |
+
+Después del MVP se reutiliza la documentación aprobada en vez de reiniciar el ciclo:
+
+- bug con comportamiento aprobado → workflow Pi seleccionado + Strict TDD usando IDs de requirement/acceptance existentes;
+- bug ambiguo o feature clara dentro del scope → primero Requirements;
+- nueva capability o ampliación de scope → Product Definition;
+- problema/valor incierto → Discovery y, cuando aporte valor, experimento acotado de Validation;
+- cambio de límites arquitectónicos → Architecture Definition;
+- decisión significativa de tecnología/dependencia/integración → Technical Decisions;
+- cambio aprobado listo para implementar → Delivery Planning y después uno de los tres workflows Pi.
+
+Un incremento completo registra evidencia TDD y de aceptación/conformidad, checks adicionales, estado de Validation, enlaces de aprendizaje/change request, autorización de release y elegibilidad del siguiente incremento. La documentación define y traza el comportamiento previsto; nunca autoriza por sí sola implementación ni release.
 
 ### Skill Registry
 

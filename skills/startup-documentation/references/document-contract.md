@@ -172,7 +172,7 @@ Never persist raw secrets, credentials, regulated data, sensitive personal value
 
 ## Material change requests
 
-When evidence materially challenges approved canonical content, the initiating skill creates or updates one record under `docs/05-validation/03-change-requests/`. `product-validation` owns record lifecycle and routing; the target canonical owner owns disposition of the proposed semantic change. Link the record from source and target artifacts rather than duplicating it.
+When evidence materially challenges approved canonical content, the initiating skill requests one canonical record under `docs/05-validation/03-change-requests/`; `product-validation` alone creates or updates that record and owns its lifecycle and routing. The target canonical owner owns disposition of the proposed semantic change. Link the record from source and target artifacts rather than duplicating it.
 
 The lifecycle is deterministic:
 

@@ -26,8 +26,14 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "skills/sdd-workflow/SKILL.md"
     ],
     "keywords": [
-      "mini-sdd",
-      "formal sdd",
+      "execute mini-sdd",
+      "run mini-sdd",
+      "start mini-sdd",
+      "execute formal sdd",
+      "run formal sdd",
+      "start formal sdd",
+      "ejecutar mini-sdd",
+      "ejecutar sdd formal",
       "openspec change",
       "sdd phase",
       "workflow status",
@@ -202,7 +208,7 @@ A valid destination with a present source is not terminal success. A valid desti
 - Capture the UTC calendar date once at archive-operation start and reuse that recorded date for the same operation.
 - Archive only to `openspec/archive/YYYY-MM-DD/<change-slug>/`.
 - Reject an empty or unsafe slug. The slug must match `^[a-z0-9]+(?:-[a-z0-9]+)*$` and must not resolve outside the canonical archive date directory.
-- Preflight source resolution, destination resolution, ready `tasks.md`, ready passing `verify.md`, verbatim candidate or receipt continuity, and any triggered just-in-time delivery plan before irreversible effects.
+- Resolve the ready implementation contract by workflow: `mini-sdd.md` for Mini-SDD or `tasks.md` for Formal SDD. Preflight source resolution, destination resolution, that ready workflow-specific implementation contract, ready passing `verify.md`, verbatim candidate or receipt continuity, and any triggered just-in-time delivery plan before irreversible effects.
 - Preserve the complete source tree with the same repository-relative names and exact file bytes. Do not omit phase artifacts or supporting files under the change tree.
 - Whole-tree proof must fail closed on unsupported file types, including symlinks, or on missing, partial, mutated, ambiguous, or stale evidence.
 
@@ -231,7 +237,7 @@ A stage name match alone does not prove ownership.
 
 For `SOURCE_ONLY` and `DUPLICATE_IDENTICAL`, archive follows this order and does not skip proof boundaries:
 
-1. Freeze the complete source inventory, bytes, ready `tasks.md`, ready passing `verify.md`, and candidate or receipt continuity.
+1. Freeze the complete source inventory, bytes, ready workflow-specific implementation contract (`mini-sdd.md` for Mini-SDD or `tasks.md` for Formal SDD), ready passing `verify.md`, and candidate or receipt continuity.
 2. Publish or prove the destination. For `SOURCE_ONLY`, use same-filesystem staging and atomic no-clobber publication. For `DUPLICATE_IDENTICAL`, mutate no destination and prove exact equality.
 3. Immediately revalidate the source against the frozen proof and destination before retirement.
 4. Create a destructive attempt context with the fixed date, safe slug, exact source, exact destination, planned retirement stage, frozen proof, candidate or receipt references, and remaining budget.

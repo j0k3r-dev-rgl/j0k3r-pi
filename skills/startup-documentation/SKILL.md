@@ -139,7 +139,7 @@ Stop and ask before:
 5. Create or update only the smallest coherent Markdown artifact required now.
 6. Apply the shared document contract, reuse approved metadata, and add links instead of copying canonical content.
 7. Run the shared structural-validation checklist and check that the document has a single responsibility, explicit exclusions, bounded size, evidence provenance when applicable, decision ownership, valid trace links, and one next permitted action.
-8. Run structural validation and relevant skill-registry routing checks after changing skill definitions.
+8. Run structural validation. Generate the skill registry and run relevant routing checks only when the approved scoped change modifies skill definitions or routing metadata.
 9. Stop when the requested document or routing decision is complete.
 
 ## Output Contract
