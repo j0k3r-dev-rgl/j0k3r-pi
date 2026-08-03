@@ -34,6 +34,7 @@ Related skills are handoff hints, not additional owners. A lower-ranked generic 
 | WF-09 | Formal SDD archive preflight | Require ready `tasks.md` and passing `verify.md`. |
 | WF-10 | Verified candidate changed before archive/delivery | Invalidate prior verification continuity and require a new applicable verification. |
 | WF-11 | Workflow-relevant delegation requires a canonical handoff | Include the exact six-field handoff envelope in the prompt; a reference to an unavailable contract is insufficient. |
+| WF-12 | User calls OpenSpec a separate workflow | Treat OpenSpec as the artifact namespace/convention for Mini-SDD and Formal SDD, never as a fourth workflow or external authority. |
 
 ## Anti-overengineering and TDD scenarios
 
@@ -70,6 +71,7 @@ Related skills are handoff hints, not additional owners. A lower-ranked generic 
 | NEW-12 | Registry resolves startup/onboarding for an SDD phase | Treat `sdd_phases` as relevance metadata only; it does not create a phase owner or fourth workflow. |
 | NEW-13 | CR record says `APPROVED` but no owner disposition exists | Do not infer acceptance; lifecycle status and target-owner semantic disposition are distinct. |
 | NEW-14 | English and Spanish README lifecycle summaries are reviewed after a contract change | Both describe the same three workflows, routing boundaries, and startup lifecycle without creating separate authority. |
+| NEW-15 | Registry owner selection could expand related skills by default | Resolve the canonical owner with `include_related:false`; related skills remain handoff hints and never become co-owners. |
 
 ## Existing-project onboarding scenarios
 
@@ -101,6 +103,7 @@ Related skills are handoff hints, not additional owners. A lower-ranked generic 
 | DEL-07 | Required validation or CR remains unresolved | Next increment remains `BLOCKED` or `CONDITIONAL`, not `ELIGIBLE`. |
 | DEL-08 | Increment is potentially releasable | Do not infer release authorization; record `NOT_REQUESTED | APPROVED | BLOCKED`. |
 | DEL-09 | Delivery plan exists before implementation | Record planned evidence expectations; observed TDD/results remain `None` until a separately authorized workflow produces them. |
+| DEL-10 | Increment has an unresolved material privacy incident or guardrail breach | Do not claim `DONE`, authorize release, or mark a dependent increment `ELIGIBLE`; require owner disposition and applicable Validation/CR evidence. |
 
 ## Conditional AI/agent architecture scenarios
 
@@ -114,6 +117,7 @@ Apply these only when the application itself contains AI/agent capabilities.
 | AI-04 | Agent-produced release artifact has material provenance risk | Technical decision records sufficient source/build provenance or attestation evidence without mandating a vendor or framework. |
 | AI-05 | RAG or embedding/vector context crosses trust boundaries | Record retrieval source/trust, data isolation, sensitivity, retention, and applicable injection/poisoning risks without imposing RAG controls elsewhere. |
 | AI-06 | Material AI model/provider or agent-tooling choice | Route to Technical Decisions when risk, data, cost, integration, operations, or reversibility is affected. |
+| AI-07 | Build plugin, CI action, base image, toolchain, generator, or generated artifact materially affects release integrity | Include it in risk-proportional dependency/provenance review; do not limit supply-chain evidence to runtime libraries. |
 
 ## Evidence to retain
 

@@ -63,7 +63,7 @@ Field conventions:
 
 ## Activation Contract
 
-Use this skill for a concrete request to execute Mini-SDD or Formal SDD, or when discussing an existing OpenSpec change. A concrete execution request begins the workflow without a second start instruction; discussion-only requests remain conversational. This skill governs active artifacts under `openspec/changes/<change-slug>/`, completed archives under `openspec/archive/YYYY-MM-DD/<change-slug>/`, and the handoff between SDD subagents.
+Use this skill for a concrete request to execute Mini-SDD or Formal SDD, or when discussing an existing OpenSpec change. OpenSpec is the artifact namespace and convention used by these two SDD workflows; it is not a fourth workflow or an external source of authority. A concrete execution request begins the workflow without a second start instruction; discussion-only requests remain conversational. This skill governs active artifacts under `openspec/changes/<change-slug>/`, completed archives under `openspec/archive/YYYY-MM-DD/<change-slug>/`, and the handoff between SDD subagents.
 
 Do not use it to select a workflow; use `workflow-triage`. Do not treat PRD or discovery as additional workflow tiers.
 

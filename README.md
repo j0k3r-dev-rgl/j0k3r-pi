@@ -113,6 +113,8 @@ PI_CODING_AGENT_DIR="$TARGET_DIR" pi install npm:pi-subagents-j0k3r
 PI_CODING_AGENT_DIR="$TARGET_DIR" pi install npm:gentle-engram
 ```
 
+Package-managed installs or updates without an explicit version follow the package resolver's current release. When dependency drift or runtime supply-chain integrity is material, review the resolved package/version and provenance, and pin an approved version when project policy requires it; the installer does not impose a universal pinning or attestation policy.
+
 ### Core operating model
 
 The agent follows these operating rules. Execution itself is limited to exactly three workflows: **Direct Orchestrator**, **Mini-SDD**, and **Formal SDD**.
@@ -445,6 +447,8 @@ done
 PI_CODING_AGENT_DIR="$TARGET_DIR" pi install npm:pi-subagents-j0k3r
 PI_CODING_AGENT_DIR="$TARGET_DIR" pi install npm:gentle-engram
 ```
+
+Las instalaciones o actualizaciones de paquetes sin versión explícita siguen la release vigente que resuelva el gestor. Cuando el drift de dependencias o la integridad de supply chain del runtime sea material, revisa el paquete/versión y su provenance, y fija una versión aprobada cuando lo exija la política del proyecto; el instalador no impone pinning ni attestations universales.
 
 ### Modelo operativo principal
 
