@@ -61,17 +61,21 @@ Do not use it to discover the product, expand scope, invent capacity or dates, r
 - Load and follow `startup-documentation`, `references/document-contract.md`, and `anti-overengineering` whenever this skill is active. Load `tdd` when planning code changes.
 - Use approved product, requirement, architecture, and technical-decision IDs as inputs. Stop if the functional slice, acceptance, applicable quality conditions, dependency, or decision owner needed for planning is unresolved.
 - Ask the user before selecting delivery model, cadence, sprint length, capacity assumption, priority, sequence, scope commitment, release boundary, quality policy, rollout, rollback, or date.
-- Choose Scrum only when a stable team benefits from a protected short-term outcome and recurring inspect/adapt boundary. Choose Kanban/continuous flow when arrivals are volatile, interrupt-driven, or better forecast through flow. Use a hybrid only when each retained mechanism solves a demonstrated problem.
+- Choose Scrum only when a stable team benefits from a protected short-term outcome and recurring inspect/adapt boundary. Choose Kanban/continuous flow when arrivals are volatile, interrupt-driven, or better forecast through flow. Use a hybrid only when each retained mechanism solves a demonstrated problem. When Kanban/flow is selected, use `03-increments/` records as flow items and create `04-sprints/` records only when sprints are explicitly selected.
 - Roadmaps communicate outcomes, hypotheses, confidence, dependencies, and horizons. They do not become detailed feature/date promises.
 - Plan at lower detail farther from execution: `Now` is concrete, `Next` is directional, and `Later` remains optional and low-confidence.
 - Slice by user journey, use case, segment, workflow step, outcome, or risk. Never call frontend-only, backend-only, database-only, or infrastructure-only work a complete functional module.
 - A sprint module is “fully functional” only when every requirement and acceptance criterion in its approved boundary passes, applicable quality constraints pass, the change is integrated, and the Definition of Done is met. Do not add unapproved future cases to claim completeness.
+- Permit explicitly linked enabling work within the same coherent Sprint Goal only when it is necessary to deliver or safely unlock the vertical increment, has its own acceptance/DoD evidence, and is not represented as user-complete value.
 - If a module cannot reasonably reach Done inside the selected sprint, split its product/requirement boundary before commitment. Do not plan an intentionally half-functional module as the sprint outcome.
 - Keep one sprint focused on one coherent goal. Add multiple items only when they directly support that goal and can all reach Done without hiding capacity risk.
-- Place RED → GREEN → REFACTOR inside each behavior change. TDD does not replace relevant integration, end-to-end, exploratory, usability, accessibility, security, performance, or operational validation.
+- Place RED → GREEN → REFACTOR inside each behavior change. Completion evidence must link the safety baseline, expected RED failure, GREEN result, refactor validation, and applicable broader checks. TDD does not replace relevant integration, end-to-end, exploratory, usability, accessibility, security, performance, operational, or product validation.
 - Use a Definition of Done as the shared quality floor. Do not create a bureaucratic Definition of Ready; ask only what is necessary for the next slice to be understood and completed.
 - Automate repeatable checks and scale assurance, release controls, observability, rollback, feature flags, canaries, SLOs, and operational documentation to actual risk.
-- Never use velocity, coverage, DORA, story points, or individual output as proof of product value or as individual performance quotas.
+- For data-affecting releases, state whether code rollback is safe. Otherwise record the approved compatibility, restore, containment, or forward-fix approach and its owner; do not design an unapproved migration.
+- Require the risk-proportional release evidence defined by applicable technical decisions, including security verification, release-artifact integrity, and vulnerability/incident response ownership when relevant.
+- Never use velocity, coverage, DORA, story points, or individual output as proof of product value or as individual performance quotas. Any delivery metric used must support system/process learning, not prove product value or evaluate individuals.
+- Delivery may create a conditional plan pending a named ADR and may provide explicit user-approved provisional constraints to `technical-decisions`; mark each affected increment or sprint `CONDITIONAL_NOT_COMMITTABLE` until the ADR is approved, while unrelated planning proceeds only through explicit unaffected trace links.
 - Create only the delivery documents needed now; do not generate future sprints or a complete roadmap speculatively.
 
 ## Decision Gates
@@ -83,8 +87,10 @@ Before planning delivery, resolve:
 - Scrum, Kanban/flow, or another explicitly chosen cadence with the reason it fits;
 - sprint or replenishment horizon without assuming two weeks;
 - one goal and smallest vertical module capable of reaching Done;
-- release exposure, data effects, blast radius, rollout, rollback/mitigation, support, and monitoring proportional to risk;
+- release exposure, data effects, blast radius, rollout, rollback/mitigation, data compatibility/restore/forward-fix needs, support, and monitoring proportional to risk;
+- applicable security verification, release-integrity evidence, vulnerability/incident response ownership, and justified change-specific checks;
 - Definition of Done and any justified change-specific checks;
+- release authorization state: `NOT_REQUESTED | APPROVED | BLOCKED`, its owner, and evidence when approved;
 - user who owns priority, scope, date, risk, and release decisions.
 
 Stop and ask when:
@@ -114,12 +120,14 @@ docs/04-delivery/
 
 4. Use `00-delivery-model.md` for chosen Scrum/Kanban/flow policies, rationale, cadence, planning/review triggers, WIP or sprint boundaries, interruption handling, and change conditions.
 5. Use `01-roadmap.md` as a concise `Now / Next / Later` outcome map with confidence, dependencies, measures, and explicit non-commitments.
-6. Use `02-definition-of-done.md` for the shared product-appropriate quality floor: review, Strict TDD for code changes, relevant automated and human validation, integration, security/privacy/accessibility/performance checks when applicable, documentation/telemetry/rollback when operationally needed, and potentially releasable status.
-7. Store each small vertical, independently reviewable delivery unit under `03-increments/`, linking outcome, requirements, acceptance, architecture, dependencies, validation need, and completion evidence.
-8. Store each approved sprint under `04-sprints/` with one goal, one small fully functional vertical module, scope/exclusions, linked increment and requirement IDs, dependencies, RED → GREEN → REFACTOR plan, applicable validation, Definition of Done, capacity assumptions, risks, and result status.
-9. If an approved increment is larger than one credible sprint, return it to product/requirements owners for boundary splitting rather than creating technical-layer sprints.
-10. Validate that planned work can be independently accepted, no date/capacity was invented, and no ceremony or release mechanism lacks a current purpose.
-11. Stop before implementation or external release unless separately authorized by the applicable Pi workflow and user request.
+6. Use `02-definition-of-done.md` for the shared product-appropriate quality floor: review; Strict TDD evidence for code changes; acceptance/conformance verification; applicable integration, exploratory, usability, accessibility, security, performance, and operational checks; product-validation links when learning is required; documentation/telemetry; release-integrity and vulnerability-response evidence; rollback or data-safe mitigation; and potentially releasable status. Potentially releasable never implies release authorization.
+7. Store each small vertical, independently reviewable delivery unit under `03-increments/`, linking outcome, requirements, acceptance, architecture, dependencies, validation need, completion evidence, and status: `PLANNED | IN_PROGRESS | DONE | NOT_DONE | BLOCKED | CONDITIONAL_NOT_COMMITTABLE`.
+8. Store each explicitly selected sprint under `04-sprints/` with one goal, one small fully functional vertical module, any linked enabling work, scope/exclusions, increment/requirement IDs, dependencies, RED → GREEN → REFACTOR plan and result evidence, applicable broader validation, Definition of Done, capacity assumptions, risks, and result status.
+9. When execution evidence exists, update the increment/sprint with outcome evidence; TDD and broader-check links; `DONE | NOT_DONE | BLOCKED`; product-validation status `NOT_REQUIRED | REQUIRED | COMPLETED | BLOCKED`; learning-decision and `CR-####` links; affected upstream owners and returned dispositions; data-change migration/version, compatibility, rollback/restore/containment/forward-fix evidence and owner when applicable; release authorization; and next-increment eligibility `ELIGIBLE | BLOCKED | CONDITIONAL`.
+10. Do not mark a next increment `ELIGIBLE` while it relies on an affected decision with incomplete required validation or an unresolved change request. `NOT_DONE` returns remaining behavior to bounded replanning; it never becomes hidden carry-over or value evidence.
+11. If an approved increment is larger than one credible sprint, return it to product/requirements owners for boundary splitting rather than creating technical-layer sprints.
+12. Validate that planned work can be independently accepted, completion claims link reproducible evidence, no date/capacity was invented, and no ceremony or release mechanism lacks a current purpose.
+13. Stop before implementation or external release unless separately authorized by the applicable Pi workflow and user request.
 
 ## Output Contract
 
@@ -130,8 +138,9 @@ Return:
 - Delivery model and reason selected.
 - Roadmap, increment, sprint, or Definition of Done documents created or updated.
 - Sprint goal and small vertical module expected to be fully functional against its approved boundary.
-- Scope, exclusions, dependencies, capacity assumptions, and user-owned commitments.
-- RED → GREEN → REFACTOR and applicable validation plan.
+- Scope, exclusions, dependencies, capacity assumptions, provisional constraints, data-safe rollback/mitigation, and user-owned commitments.
+- RED → GREEN → REFACTOR plan and result evidence plus applicable acceptance/conformance, broader-quality, product-validation, learning-decision, and change-request links.
+- Result status, affected owner dispositions, next-increment eligibility, applicable data-change evidence, and release authorization.
 - Speculative dates, ceremonies, infrastructure, and future sprints added: `None`.
 - Implementation or release performed: `None` unless separately authorized.
 - Validation executed.

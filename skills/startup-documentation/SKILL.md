@@ -40,6 +40,12 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "create project documentation flow",
       "numbered modular documentation",
       "numbered modular Markdown documentation",
+      "which document owns",
+      "document ownership",
+      "reconstruct modular documentation baseline",
+      "scan codebase for documentation",
+      "que documento corresponde",
+      "documentar codigo existente",
       "documentar proyecto startup",
       "flujo documental startup",
       "iniciar nuevo proyecto de software",
@@ -52,13 +58,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
     "anti-overengineering",
     "cognitive-doc-design",
     "existing-project-onboarding",
-    "product-discovery",
-    "product-definition",
-    "requirements-definition",
-    "architecture-definition",
-    "technical-decisions",
-    "delivery-planning",
-    "product-validation"
+    "product-discovery"
   ],
   "priority": 90
 }
@@ -75,18 +75,22 @@ Do not create the complete documentation tree eagerly, generate empty placeholde
 ## Hard Rules
 
 - Load and follow `anti-overengineering` whenever this skill is active.
-- Store durable project documentation as Markdown under the approved numbered groups: `docs/00-discovery/`, `docs/01-product/`, `docs/02-requirements/`, `docs/03-architecture/`, `docs/04-delivery/`, and `docs/05-validation/`.
+- Store durable project documentation as Markdown under the exact approved group and owner paths in `references/document-contract.md`.
 - Create only the group, index, and document needed for the current approved decision. Never scaffold every possible document.
-- Each document owns one coherent subject or decision family. Split independent subjects into numbered child documents before a file becomes a mixed, review-heavy specification.
+- Each document owns one coherent subject or decision family. Split it only when parts need independent review, value, risk, evidence, approval, or delivery handling now.
 - Treat summary documents as navigation and decision summaries; put repeated evidence, requirements, decisions, integrations, increments, sprints, and experiments in numbered child files.
 - Preserve creation-order numbers. Never renumber existing documents merely to improve appearance, and never reuse a retired identifier.
 - Use lowercase English kebab-case for paths while allowing document prose in the language explicitly selected by the user.
 - Ask only for unresolved decisions necessary for the next document. Group questions, put the simplest viable option first, explain material trade-offs, and never infer the user's product or technical choices.
+- Reuse approved language, decision owners, scope, evidence references, and metadata unless they are absent, stale, contradicted, or specific to the new decision.
 - Distinguish confirmed evidence, supported evidence, inference, assumption, and unknown. Never promote an assumption to a requirement silently.
 - One canonical owner must exist for each durable fact or decision. Other documents link to it rather than duplicate or overwrite it.
+- Route architecture drivers and views to `architecture-definition`; route ADRs, technology selections, dependency decisions, and integrations to `technical-decisions`.
+- Route product outcome and success/guardrail intent to `product-definition`; route operational metric definitions, thresholds, results, and learning decisions to `product-validation`.
 - When upstream evidence or decisions change, identify affected links and request review only for materially affected descendants. If impact cannot be bounded safely, mark the uncertainty and ask the user.
 - Do not place architecture, technology, delivery, or implementation decisions inside discovery or product documents. Route them to their owning group and skill.
-- Follow `references/document-contract.md` for document metadata, status, numbering, links, size boundaries, and change handling.
+- Follow `references/document-contract.md` for document metadata, status, numbering, ownership, evidence provenance, material change requests, trace promotion, links, boundaries, and change handling.
+- Load this router once for the current routing decision. Resolve direct matches without related-skill expansion, then select the exact canonical owner by path/decision contract. Generic documentation or supporting skills never co-own a lifecycle artifact and do not displace a matching owner even when also returned by routing. Load only the selected owner and its explicitly applicable mandatory dependencies. Related skills are handoff hints, not an instruction to load the lifecycle. The selected owner consumes the shared contract directly and must not recursively restart routing.
 
 ## Decision Gates
 
@@ -110,12 +114,12 @@ Stop and ask before:
 ## Execution Steps
 
 1. Identify the user's current decision and reuse all approved context already available.
-2. Select the one canonical numbered group and domain skill that owns the decision.
+2. Resolve direct registry matches without related expansion and load only the canonical domain skill that owns the decision plus mandatory dependencies applicable now; do not expand all lifecycle skills.
 3. Read the relevant existing parent/index document only when it is required and has not already been supplied.
 4. Ask a concise grouped questionnaire for unresolved facts and user-owned choices.
 5. Create or update only the smallest coherent Markdown artifact required now.
-6. Apply the shared document contract and add links instead of copying canonical content.
-7. Check that the document has a single responsibility, explicit exclusions, bounded size, evidence labels, decision ownership, and one valid next action.
+6. Apply the shared document contract, reuse approved metadata, and add links instead of copying canonical content.
+7. Run the shared structural-validation checklist and check that the document has a single responsibility, explicit exclusions, bounded size, evidence provenance when applicable, decision ownership, valid trace links, and one next permitted action.
 8. Run structural validation and relevant skill-registry routing checks after changing skill definitions.
 9. Stop when the requested document or routing decision is complete.
 
@@ -135,7 +139,7 @@ Return:
 
 ## References
 
-- `references/document-contract.md` — canonical modular Markdown, metadata, numbering, ownership, and size contract.
+- `references/document-contract.md` — canonical modular Markdown, metadata, numbering, ownership, evidence, traceability, and change contract.
 - `~/.pi/agent/skills/anti-overengineering/SKILL.md` — mandatory scope, simplicity, and decision controls.
 - `~/.pi/agent/skills/cognitive-doc-design/SKILL.md` — progressive disclosure and reviewability guidance.
 - `~/.pi/agent/skills/product-discovery/SKILL.md` — discovery-group owner for problem, users, evidence, assumptions, and initial direction.

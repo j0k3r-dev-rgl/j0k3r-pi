@@ -41,6 +41,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
     "startup-documentation",
     "product-definition",
     "architecture-definition",
+    "product-validation",
     "delivery-planning",
     "anti-overengineering",
     "cognitive-doc-design"
@@ -70,7 +71,9 @@ Do not use it to discover the problem, choose MVP scope, design architecture, se
 - Identify quality categories early but specify only those justified by user impact, risk, regulation, contract, or release level. Do not invent scale, latency, availability, security certification, or compatibility targets.
 - Use measurable quality scenarios when a quality requirement matters: context, stimulus, expected response, measure, and evidence source.
 - Distinguish acceptance criteria for one requirement from the shared Definition of Done owned by delivery documentation.
+- Require downstream evidence to link requirement and acceptance IDs when it claims implementation or conformance validation.
 - Keep migration strategy out of requirements. Record only approved data preservation, import/export, continuity, or compatibility outcomes; architecture and delivery own the mechanism.
+- Reuse approved language, decision owners, scope, evidence references, and metadata unless they are absent, stale, contradicted, or specific to the current requirement decision.
 - Do not create all possible functional, quality, and constraint documents. Create only what the current capability and risk require.
 
 ## Decision Gates
@@ -112,11 +115,11 @@ docs/02-requirements/
 
 4. Maintain `00-requirements-index.md` as a concise registry of stable IDs, titles, statuses, canonical paths, parent capability links, and dependency links—not as a duplicate specification.
 5. Store each small functional slice under `01-functional/` with stable requirement IDs, actors, preconditions, observable behavior, business rules, alternatives, errors, boundaries, data outcomes, acceptance IDs, exclusions, and trace links.
-6. Store each justified quality family under `02-quality/` with scenario, measure or unresolved target, evidence source, affected functional IDs, priority, and validation expectation.
+6. Store each justified quality family under `02-quality/` with scenario, measure or unresolved target, evidence source, affected functional IDs, priority, validation expectation, and the requirement or acceptance IDs that conformance evidence must reference.
 7. Store regulatory, contractual, platform, data-residency, retention, interoperability, accessibility, or compatibility constraints under `03-constraints/` only when explicitly applicable.
 8. Use concrete acceptance examples when they reduce ambiguity. Ensure each criterion is observable and does not prescribe implementation.
 9. Check completeness only against the approved slice and applicable risks; do not add speculative edge cases.
-10. Update the requirements index and present the next owner: product revision, architecture decisions, or another approved requirement slice.
+10. Update the requirements index and present the next owner: product revision, architecture decisions, product validation for implementation/conformance evidence, or another approved requirement slice.
 
 ## Output Contract
 
@@ -128,7 +131,7 @@ Return:
 - Documents created or updated under `docs/02-requirements/`.
 - User decisions requested and resolved.
 - Applicable quality areas included with justification; speculative quality targets added: `None`.
-- Traceability from requirement to product outcome, capability, journey, hypothesis, or mandatory constraint.
+- Traceability from requirement to product outcome, capability, journey, hypothesis, or mandatory constraint, plus requirement/acceptance links expected from conformance evidence.
 - Architecture, technology, migration mechanism, sprint planning, and implementation performed: `None`.
 - Validation executed.
 - One next permitted action.
@@ -138,6 +141,7 @@ Return:
 - `~/.pi/agent/skills/startup-documentation/SKILL.md` — startup documentation routing.
 - `~/.pi/agent/skills/startup-documentation/references/document-contract.md` — canonical modular Markdown contract.
 - `~/.pi/agent/skills/product-definition/SKILL.md` — upstream product scope, journey, and capability owner.
+- `~/.pi/agent/skills/product-validation/SKILL.md` — implementation and conformance evidence owner linking requirement and acceptance IDs.
 - `~/.pi/agent/skills/anti-overengineering/SKILL.md` — mandatory scope and simplicity controls.
 - `https://standards.ieee.org/standard/29148-2018.html` — lifecycle requirements-engineering principles and requirement quality.
 - `https://gojko.net/lists/specification-by-example.html` — concrete examples for shared, testable behavior.

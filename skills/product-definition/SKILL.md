@@ -62,16 +62,18 @@ Do not use it to conduct customer research, invent market evidence, write detail
 
 - Load and follow `startup-documentation`, `references/document-contract.md`, and `anti-overengineering` whenever this skill is active.
 - Read the minimum approved discovery artifacts required for the current product decision. Stop if the core problem, target audience, or decision owner is materially unresolved.
-- Ask the user before selecting product vision, business outcome, success metric, MVP hypothesis, included capability, exclusion, journey, priority, or trade-off.
+- Ask the user before selecting product vision, business outcome, success intent, MVP hypothesis, included capability, exclusion, journey, priority, or trade-off.
 - The agent may recommend the smallest supported product slice, explain why broader items are premature, and present bounded alternatives. The user retains the final product decision.
 - Define an MVP as the smallest credible experience that tests an explicit hypothesis or safely delivers the approved core outcome—not as an arbitrary reduced feature list.
 - Every included MVP capability must support at least one approved hypothesis, core outcome, trustworthy measurement need, or mandatory product constraint.
 - Keep experiment prototypes, pilots, and operational releases distinct. Ask which product level is intended because their quality and operational obligations differ.
-- Predeclare success, failure, and guardrail signals before execution. Never reinterpret success after results are observed.
+- Product owns outcome, success, and guardrail intent. `product-validation` owns operational metric definitions, cohorts, collection and analysis, baselines, thresholds, observation periods, results, and learning decisions; product documents link those metric IDs instead of redefining them.
+- Predeclare the decision rule and success, failure, and guardrail intent before execution. Never reinterpret success after results are observed.
 - Keep explicit exclusions beside scope. Do not hide deferred ideas in the current commitment.
 - Model journeys and capabilities as small vertical product behaviors, not frontend/backend/database layers or assumed technical modules.
-- Split capabilities when they have independent user outcomes, decision owners, evidence, acceptance, or delivery value. Do not create one giant capability such as “billing” when coherent sub-capabilities can be approved independently.
+- Split a capability only when its parts need independent review, value, risk, evidence, approval, or delivery handling now. Otherwise keep one cohesive vertical capability and list its sub-behaviors.
 - Do not specify languages, frameworks, libraries, storage, APIs, architecture patterns, migrations, sprint dates, or implementation tasks.
+- Reuse approved language, decision owners, scope, evidence references, and metadata unless they are absent, stale, contradicted, or specific to the current product decision.
 - Create only the documents needed for the current approved decision; never generate the whole product group automatically.
 
 ## Decision Gates
@@ -84,7 +86,7 @@ Before defining product documentation, resolve:
 - business outcome and why it matters now;
 - MVP type: prototype, experiment, pilot, or operational release;
 - critical hypothesis and decision it will inform;
-- success, failure, and guardrail signals;
+- success, failure, and guardrail intent plus the decision rule;
 - included scope, explicit exclusions, time/cost boundary, and mandatory constraints;
 - essential end-to-end journeys and small functional capability boundaries;
 - user who owns scope and trade-off decisions.
@@ -116,8 +118,8 @@ docs/01-product/
 ```
 
 4. Use `00-product-vision.md` for the approved target audience, problem link, desired future state, product outcome, strategic choices, and non-goals.
-5. Use `01-success-metrics.md` for decision-linked product signals, definitions, owners, baselines or unknowns, guardrails, review moments, and retirement conditions.
-6. Use `02-mvp-hypothesis.md` for audience, critical hypothesis, MVP type, current evidence/confidence, smallest credible experience, predeclared thresholds, time/cost boundary, and resulting decision.
+5. Despite its filename, use `01-success-metrics.md` only for product outcome, qualitative success/guardrail intent, decision intent, ownership, review moments, and links to operational metric IDs owned by validation. Operational definitions, cohorts, collection methods, baselines, thresholds, observation periods, and results belong only to `product-validation`.
+6. Use `02-mvp-hypothesis.md` for audience, critical hypothesis, MVP type, current evidence/confidence, smallest credible experience, predeclared decision rule, time/cost boundary, and resulting decision.
 7. Use `03-scope.md` for included capabilities, mandatory constraints, explicit exclusions, rationale, and unresolved trade-offs.
 8. Store each independently reviewable end-to-end journey in a numbered file under `04-user-journeys/`.
 9. Store each small, cohesive functional product capability in a numbered file under `05-capabilities/`, linking it to journeys, outcome, MVP hypothesis, and scope decision.

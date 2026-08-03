@@ -19,7 +19,11 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
   "domains": ["product-discovery", "startup-inception", "customer-evidence", "assumption-testing"],
   "triggers": {
     "paths": [
-      "docs/00-discovery/**/*.md"
+      "docs/00-discovery/00-opportunity.md",
+      "docs/00-discovery/01-users-and-stakeholders.md",
+      "docs/00-discovery/02-evidence/**/*.md",
+      "docs/00-discovery/03-assumptions/**/*.md",
+      "docs/00-discovery/04-product-direction.md"
     ],
     "keywords": [
       "product discovery",
@@ -48,7 +52,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
 
 ## Activation Contract
 
-Use this skill when a startup idea still needs a clear problem, target users or stakeholders, behavior-based evidence, explicit assumptions, or an evidence-backed initial product direction. It owns modular documents under `docs/00-discovery/`.
+Use this skill when a startup idea still needs a clear problem, target users or stakeholders, behavior-based evidence, explicit assumptions, or an evidence-backed initial product direction. It owns modular documents under `docs/00-discovery/` except snapshot-bound `AS_IS` evidence under `docs/00-discovery/05-existing-project/`, which is owned by `existing-project-onboarding`.
 
 Activate it when the request begins with a proposed feature or technology but lacks a demonstrated problem, when a critical product assumption needs validation before investment, or when new evidence may invalidate an approved product direction.
 
@@ -60,13 +64,17 @@ Do not activate it merely because discovery is available. Do not use it when an 
 - Ask the user before defining any user, stakeholder, problem, outcome, market claim, evidence threshold, priority, or product direction not already established by supplied evidence.
 - Start from the decision that discovery must inform. Do not conduct open-ended research or interviews without a decision purpose.
 - Separate confirmed evidence, supported evidence, inference, assumption, and unknown in every artifact.
+- Require every durable evidence record to follow the shared evidence-provenance contract.
 - Prefer observed behavior, current alternatives, commitments, costs, and consequences over praise or hypothetical feature interest.
 - Do not treat interview count as a universal validation threshold. Match evidence strength to the claim and risk.
 - Investigate only assumptions that are material and weakly evidenced. Put the least expensive ethical test that can change the decision first.
 - Do not require Jobs-to-be-Done, personas, Opportunity Solution Trees, Lean Canvas, or another branded method. Use a method only when it helps answer the current question.
 - Do not name a proposed feature as the problem statement.
 - Maintain explicit non-goals and research boundaries.
-- Predeclare experiment signals, guardrails, time/cost caps, and resulting decisions before collecting outcome evidence.
+- Before collecting personal data, require an approved purpose and, when applicable, lawful or consent basis, minimization, access, retention, deletion, and redaction boundaries. Do not turn this conditional gate into a general compliance program.
+- Treat discovery direction as provisional evidence-backed guidance. Only explicit user approval promotes selected elements into `product-definition` inputs.
+- Predeclare experiment signals, guardrails, time/cost caps, and resulting decisions before collecting outcome evidence; the user may approve an opportunity, assumption, or discovery-test hypothesis solely for testing by `product-validation`. That approval does not promote it into product intent or `product-definition`.
+- Reuse approved language, decision owners, scope, evidence references, and metadata unless they are absent, stale, contradicted, or specific to the current discovery decision.
 - Stop when evidence is sufficient for the current decision, a blocker requires the user, or the approved research boundary is reached.
 - Never generate all discovery documents automatically. Create only the modular artifacts required by the current discovery question.
 
@@ -78,7 +86,7 @@ Before creating discovery documentation, resolve:
 - the decision discovery must inform;
 - suspected users, buyers, operators, approvers, regulators, or other affected stakeholders;
 - the problem context and current alternatives, while preserving unverified claims as assumptions;
-- research scope, allowed sources or participants, depth, and ethical/privacy boundaries;
+- research scope, allowed sources or participants, depth, and ethical/privacy boundaries, including approved purpose and applicable lawful/consent basis, minimization, access, retention, deletion, and redaction for personal data;
 - evidence threshold or decision rule appropriate to the claim;
 - the user who owns proceed, investigate, pivot, pause, or stop decisions.
 
@@ -109,9 +117,9 @@ docs/00-discovery/
 
 4. Use `00-opportunity.md` for the problem context, affected segment, desired outcome, known constraints, non-goals, and open questions.
 5. Use `01-users-and-stakeholders.md` only when distinct users, buyers, operators, approvers, regulators, or partners materially affect decisions.
-6. Store each independently sourced or independently reviewable evidence set in one numbered file under `02-evidence/`.
+6. Store each independently sourced or independently reviewable evidence set in one numbered file under `02-evidence/`, following the shared evidence-provenance contract.
 7. Store each coherent assumption family under `03-assumptions/`, recording importance, evidence, confidence, smallest test, and decision impact.
-8. Create `04-product-direction.md` only when evidence is sufficient for the user to choose a direction; record explicit user approval and remaining uncertainty.
+8. Create `04-product-direction.md` only when evidence is sufficient to propose a direction. Keep it provisional until the user approves promotion of selected elements into `product-definition`, and preserve remaining uncertainty.
 9. Link artifacts using stable IDs rather than duplicating evidence or conclusions.
 10. Present the smallest supported next action: more bounded evidence, product-definition work, pivot, pause, or stop.
 
@@ -126,7 +134,7 @@ Return:
 - Confirmed evidence, supported evidence, inferences, assumptions, and unknowns kept distinct.
 - Research boundary and evidence limitations.
 - Explicit non-goals.
-- Outcome: investigate further, proceed to product definition, pivot, pause, or stop; final authority remains with the user.
+- Outcome: investigate further, propose a provisional direction, proceed to product definition after explicit approval, pivot, pause, or stop; final authority remains with the user.
 - Validation executed.
 - One next permitted action.
 

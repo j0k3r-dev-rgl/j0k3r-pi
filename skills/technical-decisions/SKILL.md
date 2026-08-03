@@ -45,6 +45,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
     "architecture-definition",
     "requirements-definition",
     "delivery-planning",
+    "tdd",
     "anti-overengineering"
   ],
   "priority": 93
@@ -64,14 +65,16 @@ Do not create an ADR for easily reversible local implementation details. Do not 
 - Load and follow `startup-documentation`, `references/document-contract.md`, `architecture-definition`, and `anti-overengineering` whenever this skill is active.
 - Evaluate one coherent decision at a time. Split decisions that have different drivers, owners, alternatives, or reversal boundaries.
 - Ask the user before selecting evaluation criteria, weights, knockout constraints, alternatives, risk acceptance, cost commitments, vendor lock-in, or final technology.
-- Begin with approved requirement IDs, architecture drivers, team capability, budget, data obligations, operating environment, and delivery constraints. Unknown facts remain unknown; do not convert forecasts into requirements.
+- Begin with approved requirement IDs, architecture drivers, team capability, budget, data obligations, operating environment, and delivery constraints. When a final delivery plan does not exist, use only explicit user-approved provisional delivery constraints and label them provisional. Unknown facts remain unknown; do not convert forecasts into requirements.
 - State the simplest viable option first and explain exactly why it fails before recommending a more complex option.
 - Select the lowest-complexity option that passes every knockout constraint and leaves explicitly accepted risk. Scores support judgment; they never make the decision automatically.
 - Record evidence and confidence for each material comparison. Do not use artificial numeric precision when evidence is qualitative.
-- Run a time-boxed spike only when its result can change the decision. Predeclare question, representative test, pass/fail criteria, cost/time cap, data restrictions, and resulting decision. A spike must not silently become production code.
+- Run a time-boxed spike only when its result can change the decision. Predeclare question, representative test, pass/fail criteria, cost/time cap, data restrictions, and resulting decision. A spike must not silently become production code. If it creates or changes code, require separately authorized code scope, load `tdd`, and follow Strict RED → GREEN → REFACTOR.
 - Count operational burden as product cost: deployment, testing, monitoring, rollback, restore, patching, incident ownership, upgrades, support, and hiring/training.
 - For dependencies, evaluate maintenance, documentation, release policy, compatibility, license, transitive dependencies, end-of-life, vulnerability response, update path, and team supportability.
-- For integrations, evaluate data purpose/classification, legal and privacy obligations, authentication/scopes, secrets, contracts/versioning, rate limits, timeouts, retries, idempotency, duplicates, ordering, partial failure, outage behavior, sandbox, SLA/support, export, termination, and fallback only when applicable.
+- When third-party code or release artifacts are introduced, define a risk-proportional lifecycle baseline: direct/transitive inventory or SBOM when warranted, source and version, integrity/provenance evidence, license posture, vulnerability monitoring, remediation owner and response expectation, exception review, and release-artifact integrity. When release integrity is material, include applicable build plugins, CI actions, base images, toolchains, generators, and generated artifacts—not only runtime libraries. Do not mandate a tool or vendor.
+- For security-impacting decisions, record applicable security verification, vulnerability/incident intake and response ownership, and required mitigation or rollback evidence without prescribing a platform.
+- For integrations, evaluate data purpose/classification, legal and privacy obligations, authentication/scopes, secrets, contracts/versioning, rate limits, timeouts, retries, idempotency, duplicates, ordering, partial failure, outage behavior, sandbox, SLA/support, export, termination, and fallback only when applicable. For data-bearing integrations, termination/exit includes retained-data deletion or approved retention plus access revocation evidence.
 - Do not prescribe microservices, queues, events, CQRS, event sourcing, caching, specialized datastores, Kubernetes, service mesh, multiregion, SLO programs, feature flags, or vendor adapters without a current driver that a simpler option cannot satisfy.
 - Supersede approved ADRs; do not rewrite their historical decision and rationale. Never renumber or reuse retired decision or integration IDs.
 - An ADR authorizes a decision, not implementation or migration. Route delivery and implementation separately.
@@ -81,7 +84,7 @@ Do not create an ADR for easily reversible local implementation details. Do not 
 Before creating a decision record, resolve:
 
 - exact decision and decision owner;
-- approved requirements, drivers, and constraints it must satisfy;
+- approved requirements, drivers, constraints, and any explicit provisional delivery constraints it must satisfy;
 - actual team skills, budget, operating environment, delivery horizon, and support ownership;
 - viable alternatives including the simplest option and retaining the current state where applicable;
 - knockout criteria and material trade-offs;
@@ -111,8 +114,8 @@ docs/03-architecture/
     └── 0001-<integration>.md
 ```
 
-4. For an ADR, record context, drivers, knockout constraints, viable alternatives, simpler baseline, evidence/confidence, decision, user approval, consequences, risks, validation, owner, and revisit trigger.
-5. For an integration, record business purpose, owner, data classification/flow, contract, authentication/scopes, failure semantics, limits, observability, cost, support, fallback, export/exit, evidence, and linked ADR when the selection is significant.
+4. For an ADR, record context, drivers, knockout constraints, viable alternatives, simpler baseline, evidence/confidence, decision, user approval, consequences, risks, validation, owner, revisit trigger, and any applicable dependency/release or security-operations baseline.
+5. For an integration, record business purpose, owner, data classification/flow, contract, authentication/scopes, failure semantics, limits, observability, cost, support, fallback, export/exit, applicable retained-data deletion/retention and access revocation, evidence, and linked ADR when the selection is significant.
 6. Create a spike record inside the relevant decision document only when approved; record adopt, reject, defer pending a named fact, or revise the requirement after the result.
 7. Use the next unused four-digit creation-order number. Preserve prior records and use `Supersedes` for replacements.
 8. Check that the chosen option passes every knockout constraint and that extra complexity has an explicit driver.
@@ -125,11 +128,11 @@ Return:
 
 - Skills applied: `technical-decisions`, `architecture-definition`, `startup-documentation`, and `anti-overengineering`.
 - Decision or integration record path and stable number.
-- Approved requirements, drivers, and constraints used.
+- Approved requirements, drivers, constraints, and any provisional delivery constraints used.
 - Viable alternatives and simplest baseline considered.
 - User-owned criteria, trade-offs, risk acceptance, and final decision.
-- Evidence/confidence and spike results, or `None`.
-- Consequences, operational burden, reversibility, and revisit trigger.
+- Evidence/confidence and spike results, or `None`; authorized code scope and Strict TDD evidence when a spike changed code.
+- Consequences, operational burden, reversibility, applicable dependency/release integrity and security-response ownership, and revisit trigger.
 - Implementation, migration, procurement, external contact, and delivery performed: `None` unless separately authorized.
 - Validation executed.
 - One next permitted action.
@@ -140,6 +143,7 @@ Return:
 - `~/.pi/agent/skills/startup-documentation/references/document-contract.md` — modular Markdown and supersession contract.
 - `~/.pi/agent/skills/architecture-definition/SKILL.md` — architecture view and driver owner.
 - `~/.pi/agent/skills/requirements-definition/SKILL.md` — requirement and constraint owner.
+- `~/.pi/agent/skills/tdd/SKILL.md` — mandatory Strict RED → GREEN → REFACTOR guidance when an approved spike changes code.
 - `~/.pi/agent/skills/anti-overengineering/SKILL.md` — mandatory simplicity and decision controls.
 - `https://adr.github.io/` — architecturally significant decision records.
 - `https://martinfowler.com/bliki/ArchitectureDecisionRecord.html` — short, single-decision, superseded ADRs.
