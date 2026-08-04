@@ -1,54 +1,20 @@
 ---
 name: product-discovery
-description: "guide evidence-based startup problem discovery and create numbered modular Markdown for opportunities, users, evidence, assumptions, and product direction without prematurely defining an MVP, architecture, or technology stack."
+description: "guide evidence-based discovery for a new app, startup idea, or proposed feature whose problem, users, evidence, or critical assumptions remain unclear. Use when a user has an idea, wants to create an app, validate a startup idea, or define the problem and users; do not prematurely define an MVP, architecture, or technology stack."
 license: Apache-2.0
 metadata:
   author: j0k3r
   version: "1.1"
+registry:
+  category: "product"
+  domains: "product-discovery, startup-inception, customer-evidence, assumption-testing"
+  paths: "docs/00-discovery/00-opportunity.md, docs/00-discovery/01-users-and-stakeholders.md, docs/00-discovery/02-evidence/**/*.md, docs/00-discovery/03-assumptions/**/*.md, docs/00-discovery/04-product-direction.md"
+  keywords: "product discovery, problem discovery, startup idea, new app idea, new software application, create an app, validate idea, validate startup idea, define product problem, unclear problem, identify users, early product idea, customer evidence, assumption mapping"
+  related: "startup-documentation, anti-overengineering, cognitive-doc-design, product-definition"
+  priority: 92
 ---
 
 # Product Discovery
-
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "product",
-  "domains": ["product-discovery", "startup-inception", "customer-evidence", "assumption-testing"],
-  "triggers": {
-    "paths": [
-      "docs/00-discovery/00-opportunity.md",
-      "docs/00-discovery/01-users-and-stakeholders.md",
-      "docs/00-discovery/02-evidence/**/*.md",
-      "docs/00-discovery/03-assumptions/**/*.md",
-      "docs/00-discovery/04-product-direction.md"
-    ],
-    "keywords": [
-      "product discovery",
-      "problem discovery",
-      "startup idea",
-      "validate idea",
-      "validate startup idea",
-      "define product problem",
-      "customer evidence",
-      "assumption mapping",
-      "descubrimiento de producto",
-      "validar idea de startup",
-      "definir problema y usuarios"
-    ]
-  },
-  "sdd_phases": [],
-  "related_skills": [
-    "startup-documentation",
-    "anti-overengineering",
-    "cognitive-doc-design",
-    "product-definition"
-  ],
-  "priority": 92
-}
-```
 
 ## Activation Contract
 

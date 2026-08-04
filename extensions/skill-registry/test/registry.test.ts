@@ -8,21 +8,30 @@ import { generateSkillRegistry, writeSkillRegistry } from '../src/registry.js';
 
 async function makeSkill(filePath: string, input: { name: string; description: string; contract?: Record<string, unknown> }) {
   await mkdir(path.dirname(filePath), { recursive: true });
+  const contract = input.contract ?? {};
+  const triggerRecord = contract.triggers && typeof contract.triggers === 'object' && !Array.isArray(contract.triggers)
+    ? contract.triggers as { paths?: string[]; keywords?: string[] }
+    : {};
   const body = [
     '---',
     `name: ${input.name}`,
     `description: ${JSON.stringify(input.description)}`,
     'metadata:',
     '  version: "1.0"',
-    '---',
-    '',
-    `# ${input.name}`,
-    '',
   ];
   if (input.contract) {
-    body.push('## Registry Contract', '', '```json', JSON.stringify(input.contract, null, 2), '```', '');
+    body.push(
+      'registry:',
+      `  category: ${String(contract.category ?? '')}`,
+      `  domains: ${Array.isArray(contract.domains) ? contract.domains.join(', ') : ''}`,
+      `  paths: ${Array.isArray(triggerRecord.paths) ? triggerRecord.paths.join(', ') : ''}`,
+      `  keywords: ${Array.isArray(triggerRecord.keywords) ? triggerRecord.keywords.join(', ') : ''}`,
+      `  phases: ${Array.isArray(contract.sdd_phases) ? contract.sdd_phases.join(', ') : ''}`,
+      `  related: ${Array.isArray(contract.related_skills) ? contract.related_skills.join(', ') : ''}`,
+      `  priority: ${String(contract.priority ?? '')}`,
+    );
   }
-  body.push('## Activation Contract', '', 'Use this skill when relevant.', '');
+  body.push('---', '', `# ${input.name}`, '', '## Activation Contract', '', 'Use this skill when relevant.', '');
   await writeFile(filePath, body.join('\n'), 'utf8');
 }
 
@@ -61,7 +70,26 @@ describe('skill registry core', () => {
 
     expect(registry.schema_version).toBe(1);
     expect(registry.skills.map((skill) => skill.name)).toEqual(['project-forms', 'global-testing']);
-    expect(registry.skills[0]).toMatchObject({ scope: 'project', path: '.agents/skills/base/forms/SKILL.md' });
+    expect(registry.skills[0]).toMatchObject({
+      scope: 'project',
+      path: '.agents/skills/base/forms/SKILL.md',
+      registry_contract: {
+        category: 'base',
+        domains: ['frontend', 'forms'],
+        triggers: { paths: ['front/app/routes/**/*.tsx'], keywords: ['useFetcher', 'fetcher.Form'] },
+        sdd_phases: ['explore', 'design', 'apply', 'verify'],
+        related_skills: ['project-testing'],
+        priority: 70,
+      },
+      routing: {
+        category: 'base',
+        domains: ['frontend', 'forms'],
+        triggers: { paths: ['front/app/routes/**/*.tsx'], keywords: ['useFetcher', 'fetcher.Form'] },
+        sdd_phases: ['explore', 'design', 'apply', 'verify'],
+        related_skills: ['project-testing'],
+        priority: 70,
+      },
+    });
     expect(registry.skills[1].path).toMatch(/^~\//);
     expect(registry.warnings).toEqual([]);
     expect(registry.content_hash).toMatch(/^[a-f0-9]{64}$/);
@@ -92,22 +120,20 @@ describe('skill registry core', () => {
     expect(registry.skills.map((skill) => skill.name)).toEqual(['root-pi-skill']);
   });
 
-  it('keeps skills without a registry contract but reports a warning', async () => {
+  it('ignores skills without registry metadata without warnings', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'skill-registry-'));
     const cwd = path.join(root, 'project');
     const homeDir = path.join(root, 'home');
 
     await makeSkill(path.join(cwd, '.pi/skills/basic/SKILL.md'), {
       name: 'basic-skill',
-      description: 'basic project skill without registry contract.',
+      description: 'basic project skill without registry metadata.',
     });
 
     const registry = await generateSkillRegistry({ cwd, homeDir });
 
-    expect(registry.skills[0].name).toBe('basic-skill');
-    expect(registry.skills[0].registry_contract).toEqual({});
-    expect(registry.warnings).toHaveLength(1);
-    expect(registry.warnings[0]).toMatch(/missing registry contract/i);
+    expect(registry.skills).toEqual([]);
+    expect(registry.warnings).toEqual([]);
   });
 
   it('writes json and markdown only when generated content changes', async () => {

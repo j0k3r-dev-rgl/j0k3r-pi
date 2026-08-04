@@ -1,64 +1,30 @@
 ---
 name: sdd-workflow
-description: "runs authorized Mini-SDD or Formal SDD execution requests with optional evidence synthesis, non-repetitive phase artifacts, change-type validation, blocker gates, and independent verification."
+description: "run an authorized Mini-SDD or Formal SDD workflow for a software change. Use when executing OpenSpec changes, creating or advancing proposal, specification, design, task, apply, verify, or archive artifacts, or enforcing SDD phase gates and independent verification; do not use to choose the workflow."
 license: Apache-2.0
 metadata:
   author: j0k3r
   version: "13.0"
+registry:
+  category: "workflow"
+  domains: "openspec, mini-sdd, formal-sdd, artifact-lifecycle, phase-gates"
+  paths: "openspec/changes/**/*.md, openspec/archive/**/*.md, subagents/sdd-*.md, subagents/prd-review.md, skills/sdd-workflow/SKILL.md"
+  keywords: "execute mini-sdd, run mini-sdd, start mini-sdd, execute formal sdd, run formal sdd, start formal sdd, ejecutar mini-sdd, ejecutar sdd formal, openspec change, sdd phase, workflow status, apply.md, verify.md, sdd archive, archivar mini-sdd, sdd completo, bloqueo sdd"
+  phases: "explore, proposal, spec, design, task, apply, verify, archive"
+  related: "workflow-triage, tdd"
+  priority: 92
 ---
 
 # OpenSpec SDD Workflow
-
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "workflow",
-  "domains": ["openspec", "mini-sdd", "formal-sdd", "artifact-lifecycle", "phase-gates"],
-  "triggers": {
-    "paths": [
-      "openspec/changes/**/*.md",
-      "openspec/archive/**/*.md",
-      "subagents/sdd-*.md",
-      "subagents/prd-review.md",
-      "skills/sdd-workflow/SKILL.md"
-    ],
-    "keywords": [
-      "execute mini-sdd",
-      "run mini-sdd",
-      "start mini-sdd",
-      "execute formal sdd",
-      "run formal sdd",
-      "start formal sdd",
-      "ejecutar mini-sdd",
-      "ejecutar sdd formal",
-      "openspec change",
-      "sdd phase",
-      "workflow status",
-      "apply.md",
-      "verify.md",
-      "sdd archive",
-      "archivar mini-sdd",
-      "sdd completo",
-      "bloqueo sdd"
-    ]
-  },
-  "sdd_phases": ["explore", "proposal", "spec", "design", "task", "apply", "verify", "archive"],
-  "related_skills": ["workflow-triage", "tdd", "skill-authoring"],
-  "priority": 92
-}
-```
 
 Field conventions:
 
 - `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
 - `domains`: stable domain tags used for routing.
-- `triggers.paths`: glob-like project paths that should activate this skill.
-- `triggers.keywords`: user/request terms that should activate this skill.
-- `sdd_phases`: phases governed by this skill.
-- `related_skills`: skills that should be considered one hop away.
+- `paths`: glob-like project paths that should activate this skill.
+- `keywords`: user/request terms that should activate this skill.
+- `phases`: phases governed by this skill.
+- `related`: skills that should be considered one hop away.
 - `priority`: routing priority from 0 to 100.
 
 ## Activation Contract
@@ -98,6 +64,29 @@ Rules:
 - The orchestrator reads the relevant artifact after each phase and before delegating the next one.
 - The flow never advances while a required prior artifact is `BLOCKED`.
 - `FAILED` is handoff-only and never a valid artifact status.
+
+### Mini-SDD Artifact Contract
+
+`mini-sdd.md` is a lightweight implementation contract, not an informal narrative plan. After the shared `Workflow Status` block, it contains only:
+
+1. **Goal, Scope & Exclusions**.
+2. **Contract Items** using one independently verifiable item per approved outcome:
+
+```markdown
+### MINI-001: <short outcome>
+- Contract: <observable behavior or documentation/configuration result>
+- Acceptance: <verifiable completion condition>
+- Paths: <exact authorized paths or bounded surfaces>
+- Validation: <required change-type evidence or structural check>
+- Depends on: None | MINI-###
+```
+
+3. **Implementation Order**, only when dependencies require it.
+4. **Assigned Skills & Constraints**.
+5. **Delivery and Review Forecast**, only when its trigger applies.
+6. **Open Decisions**, which must be empty for `READY`.
+
+`MINI-###` identifiers are change-local, uppercase, unique, and zero-padded to three digits. Every approved outcome has exactly one owning item; every item has acceptance, validation, and authorized paths. `sdd-apply` records implementation evidence for every item and `sdd-verify` independently produces exactly one evidence row per item. Mini-SDD does not invent or require the Formal SDD `DELTA`, `REQ`, `SCENARIO`, `DES`, or `TASK` chain.
 
 ## Dependency and Blocker Records
 
@@ -142,7 +131,7 @@ Identifiers are uppercase, zero-padded three-digit values, unique within their t
 - `sdd-task`: ready `spec.md` and `design.md` only.
 - `sdd-apply`: ready `tasks.md`, `spec.md`, `design.md`, and exact authorized implementation paths.
 - `sdd-verify`: `apply.md`, `tasks.md`, `spec.md`, `design.md`, and exact changed files.
-- `sdd-archive`: passing `verify.md`, workflow identity, source/destination, and only triggered continuity safeguards.
+- `sdd-archive`: passing `verify.md`, workflow identity, source/destination, ready `mini-sdd.md` or ready `tasks.md` plus the exact Formal contracts needed to derive deliverables, and only triggered stronger continuity safeguards.
 
 Never pass the full conversation, discovery transcript, or all prior artifacts by default.
 
@@ -154,8 +143,9 @@ After each artifact is persisted, the orchestrator checks before delegating the 
 2. required phase sections;
 3. unique and correctly formatted identifiers;
 4. references resolving to existing upstream identifiers;
-5. complete requirements-to-tasks coverage before apply; and
-6. complete requirement rows and evidence before verification may pass.
+5. for Formal SDD, complete requirements-to-tasks coverage before apply;
+6. for Mini-SDD, complete `MINI-###` ownership, acceptance, validation, dependency, and authorized-path coverage before apply; and
+7. complete Formal requirement rows or Mini contract-item rows, as applicable, before verification may pass.
 
 A structural check is deterministic gate evidence, not a substitute for semantic review. Any failure blocks advancement and is reported with the exact missing or invalid item.
 
@@ -203,20 +193,20 @@ openspec/archive/YYYY-MM-DD/<change-slug>/
 - Use `AGENTS.md` as the canonical owner for proportional context assessment, workload factors, deterministic manifest grammar, and delivery safeguards.
 - `sdd-task` records `## Delivery and Review Forecast`, including workload factors, coherent review units or explicit user exception evidence, and any known `## Just-in-Time Delivery Plan`.
 - `sdd-apply` records the applicable change-type validation evidence, attempt evidence, and a candidate identity only when a concrete trigger requires one before final verification.
-- `sdd-verify` independently derives the approved candidate set from the contracts, recomputes any triggered manifest, checks handoff and artifact consistency, and emits the canonical verification receipt when triggered.
-- `sdd-archive` runs only after ready passing verification, preserves candidate or receipt continuity when triggered, and requires any triggered just-in-time delivery plan before irreversible archive or retirement effects.
+- `sdd-verify` independently derives the approved candidate set from the contracts, recomputes any triggered manifest, checks handoff and artifact consistency, and emits the canonical verification receipt when triggered. Every passing verification also records the canonical post-verification continuity snapshot, reusing a triggered candidate manifest when it already covers the exact set.
+- `sdd-archive` runs only after ready passing verification, independently recomputes the recorded continuity snapshot immediately before mutation, preserves candidate or receipt continuity when triggered, and requires any triggered just-in-time delivery plan before irreversible archive or retirement effects.
 
 ### Mini-SDD
 
 1. Optionally run `prd-review` only when product clarification was approved.
-2. The orchestrator creates or updates `mini-sdd.md` from approved context, assigned skills, and optional discovery evidence.
+2. The orchestrator creates or updates `mini-sdd.md` from approved context, assigned skills, and optional discovery evidence, following the Mini-SDD Artifact Contract with complete `MINI-###` items.
 3. If a forecast trigger already applies, include `## Delivery and Review Forecast` in `mini-sdd.md`; otherwise omit it.
 4. The orchestrator checks `mini-sdd.md`; if `BLOCKED`, consult the user and update the plan before continuing.
 5. Run `sdd-apply`, using `mini-sdd.md` as the implementation contract and checklist.
 6. If candidate-freeze or delivery-plan triggers emerge, record them in the active implementation handoff or artifact before final verification or the risky boundary.
 7. The orchestrator reads `apply.md`; if `BLOCKED`, consult the user and resume `sdd-apply`.
-8. Run `sdd-verify`, reading `mini-sdd.md` and `apply.md`.
-9. If receipt triggers apply, `verify.md` includes the canonical verification receipt from `AGENTS.md`.
+8. Run `sdd-verify`, reading `mini-sdd.md` and `apply.md`, and require exactly one independent evidence row per `MINI-###` item plus acceptance coverage.
+9. `verify.md` records the post-verification continuity snapshot from `AGENTS.md`, reusing any exact triggered candidate manifest; then, if receipt triggers apply, it includes the canonical verification receipt.
 10. The orchestrator reads `verify.md`; any result other than `PASS` stops the workflow and must be reported to the user with defects, evidence, affected files, failure class, attempts used, and the recommended next decision. Do not repair or rerun automatically.
 11. Run `sdd-archive` only when `verify.md` is ready and passing, preserving candidate continuity when identity was triggered.
 12. Report Mini-SDD completion only after archive reaches destination-only success under `openspec/archive/YYYY-MM-DD/<change-slug>/`.
@@ -234,7 +224,7 @@ openspec/archive/YYYY-MM-DD/<change-slug>/
 9. If attempt exhaustion occurs, the active artifact remains or becomes `BLOCKED` and records the failure class, attempts used, last evidence, and needed decision or dependency.
 10. Run `sdd-verify` to derive every `REQ-###` independently from `spec.md`, inspect `apply.md`, contracts, changed files, and checks, then create a complete requirement-evidence matrix in `verify.md`.
 11. If verification returns anything other than `PASS`, stop, notify the user with the exact evidence and recommended next decision, and wait. Do not return automatically to `sdd-apply` or rerun verification.
-12. If receipt triggers apply, `verify.md` includes the canonical verification receipt and repeats the exact candidate identity from `apply.md`.
+12. `verify.md` records the post-verification continuity snapshot from `AGENTS.md`, reusing any exact triggered candidate manifest; if receipt triggers apply, it also includes the canonical verification receipt and repeats the exact candidate identity from `apply.md`.
 13. When verification evidence informs a named durable product, learning, implementation-conformance, quality, or release decision, hand exact requirement-row links and canonical IDs to `product-validation`; otherwise keep verification evidence only in the SDD tree.
 14. Run `sdd-archive` only when `verify.md` is ready and passing, preserving candidate continuity when identity was triggered.
 
@@ -249,7 +239,12 @@ Archive is mandatory after ready passing verification for every authorized Mini-
 1. the canonical archive destination exists as the complete workflow tree;
 2. `openspec/changes/<change-slug>/` is absent;
 3. no owned temporary or retirement residue remains; and
-4. any triggered candidate identity, receipt, or delivery-plan continuity remains valid.
+4. the post-verification continuity snapshot was recomputed immediately before mutation and matched verbatim; and
+5. any triggered candidate identity, receipt, or delivery-plan continuity remains valid.
+
+### Terminal archive evidence persistence
+
+The canonical terminal archive evidence is the exact `sdd-archive` delegated handoff preserved in subagent task history and the parent orchestrator session transcript. The orchestrator's completion response cites that handoff, final destination, archive result, and continuity check. Do not write or update an archive receipt inside the proven destination after publication, and do not create sidecar metadata, because either would mutate the immutable result or introduce a second source of truth. If a separately durable repository report is required, it needs explicit user authorization and is not part of archive success.
 
 Capture the UTC date once, require a safe slug matching `^[a-z0-9]+(?:-[a-z0-9]+)*$`, require ready passing `verify.md`, preserve the complete tree, and never overwrite, merge, repair, delete, or roll back a proven destination. Archive never implies Git, release, or delivery authorization.
 
@@ -265,7 +260,7 @@ Use the normal path only when all of these are true:
 
 Procedure:
 
-1. Validate the source, safe slug, fixed date, absent destination, absent residue, ready workflow-specific implementation contract, and ready passing verification.
+1. Validate the source, safe slug, fixed date, absent destination, absent residue, ready workflow-specific implementation contract, ready passing verification, and matching recomputed post-verification continuity snapshot.
 2. Create only the canonical archive date parent when needed; prove the final destination remains absent.
 3. Perform one atomic no-clobber rename from the exact active source to the exact archive destination.
 4. Prove the source is absent, the destination is present and complete, and no residue exists.
@@ -281,7 +276,7 @@ The defensive path must:
 
 1. classify source, destination, and every slug-matching residue before mutation;
 2. reject unsafe slugs, symlinks, unsupported file types, conflicting or partial destinations, ambiguous ownership, and changed residue;
-3. freeze a deterministic whole-tree proof plus any candidate, receipt, and delivery-plan continuity;
+3. recompute and match the post-verification continuity snapshot, then freeze a deterministic whole-tree proof plus any candidate, receipt, and delivery-plan continuity;
 4. publish with same-filesystem staging and atomic no-clobber semantics when the destination is absent, or prove an existing destination exactly identical without mutating it;
 5. revalidate the source immediately before retirement;
 6. retire through one uniquely owned same-parent stage, prove exact equality, then perform one separately evidenced delete attempt; and
@@ -367,5 +362,5 @@ Return:
 - `AGENTS.md` — authoritative consent, authority, context, workload, handoff, candidate, attempt-budget, and delivery-safeguard policy.
 - `skills/workflow-triage/SKILL.md` — request classification and workflow routing.
 - `skills/tdd/SKILL.md` — change-type test and validation guidance.
-- `subagents/*.md` — lean-mode phase contracts and artifact responsibilities.
+- `subagents/*.md` — lean-mode phase contracts, artifact responsibilities, and terminal archive handoff evidence.
 - `docs/pi-workflow-regression-scenarios.md` — non-authoritative lifecycle and archive regression catalog for reviewer maintenance.

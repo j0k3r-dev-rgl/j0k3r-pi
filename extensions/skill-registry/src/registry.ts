@@ -18,6 +18,16 @@ export type RegistryContract = Record<string, unknown> & {
   priority?: number;
 };
 
+type FrontmatterRegistry = Record<string, unknown> & {
+  category?: unknown;
+  domains?: unknown;
+  paths?: unknown;
+  keywords?: unknown;
+  phases?: unknown;
+  related?: unknown;
+  priority?: unknown;
+};
+
 export type SkillRegistryEntry = {
   name: string;
   description: string;
@@ -109,26 +119,41 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }
 
-function extractRegistryContract(body: string, skillName: string, skillPath: string, warnings: string[]): RegistryContract {
-  const heading = body.search(/^##\s+Registry Contract\s*$/mi);
-  if (heading === -1) {
-    warnings.push(`${skillName}: missing registry contract in ${skillPath}`);
-    return {};
+function parseCommaSeparatedStrings(value: unknown): string[] {
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
   }
-  const afterHeading = body.slice(heading);
-  const code = afterHeading.match(/```json\s*([\s\S]*?)```/i);
-  if (!code) {
-    warnings.push(`${skillName}: registry contract must contain a json code block in ${skillPath}`);
-    return {};
+  if (isStringArray(value)) {
+    return value
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
   }
-  try {
-    const parsed = JSON.parse(code[1]) as unknown;
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as RegistryContract : {};
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    warnings.push(`${skillName}: invalid registry contract json in ${skillPath}: ${message}`);
-    return {};
-  }
+  return [];
+}
+
+function extractRegistryContract(data: Record<string, unknown>): RegistryContract | undefined {
+  const registry = data.registry;
+  if (!registry || typeof registry !== 'object' || Array.isArray(registry)) return undefined;
+
+  const frontmatter = registry as FrontmatterRegistry;
+  const paths = parseCommaSeparatedStrings(frontmatter.paths);
+  const keywords = parseCommaSeparatedStrings(frontmatter.keywords);
+  const priority = Number(frontmatter.priority);
+
+  return {
+    ...(typeof frontmatter.category === 'string' ? { category: frontmatter.category.trim() } : {}),
+    domains: parseCommaSeparatedStrings(frontmatter.domains),
+    triggers: {
+      ...(paths.length ? { paths } : {}),
+      ...(keywords.length ? { keywords } : {}),
+    },
+    sdd_phases: parseCommaSeparatedStrings(frontmatter.phases),
+    related_skills: parseCommaSeparatedStrings(frontmatter.related),
+    ...(Number.isFinite(priority) ? { priority } : {}),
+  };
 }
 
 async function entriesOrUndefined(dir: string) {
@@ -159,12 +184,13 @@ function displayPath(filePath: string, cwd: string, homeDir: string, scope: Skil
   return slash(abs);
 }
 
-async function parseSkill(filePath: string, input: { cwd: string; homeDir: string; scope: SkillScope; warnings: string[] }): Promise<SkillRegistryEntry> {
+async function parseSkill(filePath: string, input: { cwd: string; homeDir: string; scope: SkillScope }): Promise<SkillRegistryEntry | undefined> {
   const text = await readFile(filePath, 'utf8');
   const { data, body } = parseFrontmatter(text);
   const name = data.name || path.basename(filePath, path.extname(filePath));
   const skillPath = displayPath(filePath, input.cwd, input.homeDir, input.scope);
-  const registryContract = extractRegistryContract(body, name, skillPath, input.warnings);
+  const registryContract = extractRegistryContract(data);
+  if (!registryContract) return undefined;
   const triggers = registryContract.triggers && typeof registryContract.triggers === 'object' && !Array.isArray(registryContract.triggers)
     ? registryContract.triggers as Record<string, unknown>
     : {};
@@ -211,7 +237,8 @@ export async function generateSkillRegistry(options: GenerateOptions = {}): Prom
 
   files.sort((a, b) => displayPath(a.file, cwd, homeDir, a.scope).localeCompare(displayPath(b.file, cwd, homeDir, b.scope)));
   for (const item of files) {
-    const skill = await parseSkill(item.file, { cwd, homeDir, scope: item.scope, warnings });
+    const skill = await parseSkill(item.file, { cwd, homeDir, scope: item.scope });
+    if (!skill) continue;
     if (seen.has(skill.name)) {
       warnings.push(`${skill.name}: duplicate skill name ignored from ${skill.path}`);
       continue;

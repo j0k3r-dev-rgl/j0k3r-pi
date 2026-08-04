@@ -1,6 +1,6 @@
 ---
 name: context7-configuration
-description: "configure Pi Context7 Extension, including .pi/context7.json cache/defaults, API-key handling, readiness checks, and safe documentation fetching."
+description: "configure the Pi Context7 extension for library documentation lookup. Use when enabling or changing .pi/context7.json, cache or default settings, API-key handling, readiness checks, library resolution, or safe focused documentation fetching."
 license: Apache-2.0
 metadata:
   author: j0k3r
@@ -9,52 +9,14 @@ metadata:
 
 # Context7 Configuration
 
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "runtime",
-  "domains": ["context7-configuration", "context7-cache-config", "context7-credentials"],
-  "triggers": {
-    "paths": [
-      ".pi/context7.json",
-      "context7.json"
-    ],
-    "keywords": [
-      "context7 configuration",
-      "configure context7",
-      "configurar context7",
-      "configuro context7",
-      "como configurar context7",
-      "cómo configurar context7",
-      "como configuro context7",
-      "cómo configuro context7",
-      "como se configura context7",
-      "cómo se configura context7",
-      "configuracion context7",
-      "configuración context7",
-      "context7 config",
-      "context7.json",
-      "context7 api key",
-      "context7 cache"
-    ]
-  },
-  "sdd_phases": [],
-  "related_skills": [],
-  "priority": 70
-}
-```
-
 Field conventions:
 
 - `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
 - `domains`: stable domain tags used for routing.
-- `triggers.paths`: glob-like project paths that should activate this skill.
-- `triggers.keywords`: configuration-only keywords that should activate this skill.
-- `sdd_phases`: keep empty for configuration-only skills so phase routing alone does not load them.
-- `related_skills`: configuration-adjacent skills only; do not add usage, implementation, or workflow skills.
+- `paths`: glob-like project paths that should activate this skill.
+- `keywords`: configuration-only keywords that should activate this skill.
+- `phases`: keep empty for configuration-only skills so phase routing alone does not load them.
+- `related`: configuration-adjacent skills only; do not add usage, implementation, or workflow skills.
 - `priority`: routing priority from 0 to 100. Higher means consider earlier when multiple skills match.
 
 ## Activation Contract

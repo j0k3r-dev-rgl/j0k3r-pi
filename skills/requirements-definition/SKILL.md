@@ -1,54 +1,20 @@
 ---
 name: requirements-definition
-description: "translate approved startup product capabilities into small traceable functional, quality, and constraint Markdown records with explicit user questions and verifiable acceptance, without choosing architecture or implementation."
+description: "translate approved product capabilities into small, traceable functional, quality, and constraint requirements. Use when defining requirements, acceptance criteria, user questions, quality attributes, or constraints as Markdown records; do not choose architecture, technology, or implementation."
 license: Apache-2.0
 metadata:
   author: j0k3r
   version: "1.1"
+registry:
+  category: "product"
+  domains: "requirements-engineering, functional-requirements, quality-requirements, requirements-traceability"
+  paths: "docs/02-requirements/**/*.md"
+  keywords: "requirements definition, product requirements, application requirements, functional module requirements, define functional requirements, quality requirements, acceptance criteria, requirements traceability, definir requisitos, requisitos funcionales, criterios de aceptacion, requisitos de calidad"
+  related: "startup-documentation, product-definition, architecture-definition, product-validation, delivery-planning, anti-overengineering, cognitive-doc-design"
+  priority: 92
 ---
 
 # Requirements Definition
-
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "product",
-  "domains": ["requirements-engineering", "functional-requirements", "quality-requirements", "requirements-traceability"],
-  "triggers": {
-    "paths": [
-      "docs/02-requirements/**/*.md"
-    ],
-    "keywords": [
-      "requirements definition",
-      "product requirements",
-      "application requirements",
-      "functional module requirements",
-      "define functional requirements",
-      "quality requirements",
-      "acceptance criteria",
-      "requirements traceability",
-      "definir requisitos",
-      "requisitos funcionales",
-      "criterios de aceptacion",
-      "requisitos de calidad"
-    ]
-  },
-  "sdd_phases": [],
-  "related_skills": [
-    "startup-documentation",
-    "product-definition",
-    "architecture-definition",
-    "product-validation",
-    "delivery-planning",
-    "anti-overengineering",
-    "cognitive-doc-design"
-  ],
-  "priority": 92
-}
-```
 
 ## Activation Contract
 

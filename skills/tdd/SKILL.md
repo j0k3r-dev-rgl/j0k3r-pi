@@ -1,87 +1,29 @@
 ---
 name: tdd
-description: "guide language-agnostic change validation with test-first behavior changes, refactor baselines, mechanical diff/regression evidence, existing-test discovery, and meaningful assertions."
+description: "guide change validation using the appropriate test and regression strategy. Use for behavior changes and bug fixes requiring RED-GREEN-REFACTOR, behavior-preserving refactors requiring baseline and regression evidence, mechanical changes requiring diff checks, existing-test discovery, or meaningful assertions."
 license: Apache-2.0
 metadata:
   author: j0k3r
   version: "1.6"
+registry:
+  category: "quality"
+  domains: "tdd, testing, regression-testing, test-organization"
+  paths: "src/**, lib/**, app/**, packages/*/src/**, tests/**, test/**, spec/**, **/__tests__/**, **/*.test.*, **/*.spec.*"
+  keywords: "tdd, test-driven development, red green refactor, write tests, add tests, update tests, adapt existing tests, remove obsolete tests, feature removal, delete functionality, regression test, failing test, test coverage, test baseline, assertion quality, test layer, mock hygiene, triangulation, characterization test, test organization, bug fix, fix a bug, fix bugs, fix this bug, bug in, bugfix, bug fix test"
+  related: "workflow-triage"
+  priority: 90
 ---
 
 # TDD
-
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "quality",
-  "domains": ["tdd", "testing", "regression-testing", "test-organization"],
-  "triggers": {
-    "paths": [
-      "src/**",
-      "lib/**",
-      "app/**",
-      "packages/*/src/**",
-      "tests/**",
-      "test/**",
-      "spec/**",
-      "**/__tests__/**",
-      "**/*.test.*",
-      "**/*.spec.*"
-    ],
-    "keywords": [
-      "tdd",
-      "test-driven development",
-      "red green refactor",
-      "write tests",
-      "add tests",
-      "update tests",
-      "adapt existing tests",
-      "remove obsolete tests",
-      "feature removal",
-      "delete functionality",
-      "eliminar funcionalidad",
-      "eliminar tests obsoletos",
-      "regression test",
-      "failing test",
-      "test coverage",
-      "test baseline",
-      "assertion quality",
-      "test layer",
-      "mock hygiene",
-      "triangulation",
-      "characterization test",
-      "test organization",
-      "bug fix",
-      "fix this bug",
-      "bugfix",
-      "bug fix test",
-      "corrige este bug",
-      "arregla este bug",
-      "pruebas",
-      "agregar test",
-      "adaptar tests",
-      "tests repetidos",
-      "organizar tests"
-    ]
-  },
-  "sdd_phases": [],
-  "related_skills": [
-    "workflow-triage"
-  ],
-  "priority": 90
-}
-```
 
 Field conventions:
 
 - `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
 - `domains`: stable domain tags used for routing.
-- `triggers.paths`: glob-like project paths that should activate this skill.
-- `triggers.keywords`: user/request/code keywords that should activate this skill.
-- `sdd_phases`: phases where this skill is usually useful: `explore`, `proposal`, `spec`, `design`, `task`, `apply`, `verify`, `archive`.
-- `related_skills`: skills that should be considered when this skill is active.
+- `paths`: glob-like project paths that should activate this skill.
+- `keywords`: user/request/code keywords that should activate this skill.
+- `phases`: phases where this skill is usually useful: `explore`, `proposal`, `spec`, `design`, `task`, `apply`, `verify`, `archive`.
+- `related`: skills that should be considered when this skill is active.
 - `priority`: choose from 0 to 100. Higher means consider earlier when multiple skills match.
 
 ## Activation Contract

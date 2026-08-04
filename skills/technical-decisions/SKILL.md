@@ -1,56 +1,20 @@
 ---
 name: technical-decisions
-description: "evaluate and record one significant startup architecture, language, framework, library, datastore, vendor, dependency, or integration decision at a time using numbered ADRs and explicit user-owned trade-offs."
+description: "evaluate and record one significant technical decision at a time using numbered ADRs. Use when choosing or documenting architecture, languages, frameworks, libraries, datastores, vendors, dependencies, protocols, or integrations; make trade-offs explicit and preserve user ownership of material decisions."
 license: Apache-2.0
 metadata:
   author: j0k3r
   version: "1.4"
+registry:
+  category: "architecture"
+  domains: "architecture-decisions, technology-selection, dependency-evaluation, external-integrations"
+  paths: "docs/03-architecture/decisions/**/*.md, docs/03-architecture/integrations/**/*.md"
+  keywords: "architecture decision, architecture decision record, database decision, technical decision, technology selection, choose programming language, choose framework, evaluate library, evaluate integration, ADR, decision tecnica, elegir lenguaje, elegir framework, evaluar integracion"
+  related: "startup-documentation, anti-overengineering"
+  priority: 93
 ---
 
 # Technical Decisions
-
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "architecture",
-  "domains": ["architecture-decisions", "technology-selection", "dependency-evaluation", "external-integrations"],
-  "triggers": {
-    "paths": [
-      "docs/03-architecture/decisions/**/*.md",
-      "docs/03-architecture/integrations/**/*.md"
-    ],
-    "keywords": [
-      "architecture decision",
-      "architecture decision record",
-      "database decision",
-      "technical decision",
-      "technology selection",
-      "choose programming language",
-      "choose framework",
-      "evaluate library",
-      "evaluate integration",
-      "ADR",
-      "decision tecnica",
-      "elegir lenguaje",
-      "elegir framework",
-      "evaluar integracion"
-    ]
-  },
-  "sdd_phases": [],
-  "related_skills": [
-    "startup-documentation",
-    "architecture-definition",
-    "requirements-definition",
-    "delivery-planning",
-    "tdd",
-    "anti-overengineering"
-  ],
-  "priority": 93
-}
-```
 
 ## Activation Contract
 
@@ -62,7 +26,7 @@ Do not create an ADR for easily reversible local implementation details. Do not 
 
 ## Hard Rules
 
-- Consume the `startup-documentation`, `references/document-contract.md`, and applicable `architecture-definition` context already supplied by the router. If no router context was supplied, load them once for the shared contract without re-entering documentation routing. Load and follow `anti-overengineering` whenever this skill is active.
+- Consume the `startup-documentation`, `references/document-contract.md`, and applicable `architecture-definition` context already supplied by the router. If no router context was supplied, load them once for the shared contract without re-entering documentation routing. Load and follow `anti-overengineering` whenever this skill is active. Resolve architecture, requirements, delivery, or TDD guidance explicitly only when the current decision actually needs it; do not encode those conditional dependencies as automatic registry fan-out.
 - Evaluate one coherent decision at a time. Split decisions that have different drivers, owners, alternatives, or reversal boundaries.
 - Ask the user before selecting evaluation criteria, weights, knockout constraints, alternatives, risk acceptance, cost commitments, vendor lock-in, or final technology.
 - Begin with approved requirement IDs, architecture drivers, team capability, budget, data obligations, operating environment, and delivery constraints. When a final delivery plan does not exist, use only explicit user-approved provisional delivery constraints and label them provisional. Unknown facts remain unknown; do not convert forecasts into requirements.

@@ -1,54 +1,20 @@
 ---
 name: product-definition
-description: "define a startup product's vision, measurable outcomes, MVP hypothesis, explicit scope, user journeys, and small functional capabilities as numbered modular Markdown after sufficient problem evidence exists."
+description: "define a startup product vision, measurable outcomes, MVP hypothesis, explicit scope, user journeys, and small functional capabilities after sufficient problem evidence exists. Use when the user asks to define the product, define the MVP, set MVP scope, clarify product scope, specify success outcomes, or map user journeys; do not use while the underlying problem or users remain unvalidated."
 license: Apache-2.0
 metadata:
   author: j0k3r
   version: "1.1"
+registry:
+  category: "product"
+  domains: "product-definition, mvp-scoping, product-outcomes, functional-capabilities"
+  paths: "docs/01-product/**/*.md"
+  keywords: "product definition, define product vision, MVP, define MVP, create MVP, define MVP hypothesis, scope the MVP, product scope, product success metrics, user journeys, functional capabilities, definir producto, definir alcance del MVP, modulos funcionales del producto"
+  related: "startup-documentation, product-discovery, anti-overengineering, requirements-definition, product-validation"
+  priority: 92
 ---
 
 # Product Definition
-
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "product",
-  "domains": ["product-definition", "mvp-scoping", "product-outcomes", "functional-capabilities"],
-  "triggers": {
-    "paths": [
-      "docs/01-product/**/*.md"
-    ],
-    "keywords": [
-      "product definition",
-      "define product vision",
-      "MVP",
-      "define MVP",
-      "create MVP",
-      "define MVP hypothesis",
-      "scope the MVP",
-      "product scope",
-      "product success metrics",
-      "user journeys",
-      "functional capabilities",
-      "definir producto",
-      "definir alcance del MVP",
-      "modulos funcionales del producto"
-    ]
-  },
-  "sdd_phases": [],
-  "related_skills": [
-    "startup-documentation",
-    "product-discovery",
-    "anti-overengineering",
-    "requirements-definition",
-    "product-validation"
-  ],
-  "priority": 92
-}
-```
 
 ## Activation Contract
 

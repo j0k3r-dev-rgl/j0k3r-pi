@@ -1,66 +1,30 @@
 ---
 name: workflow-triage
-description: "routes software requests among exactly three workflows—Direct Orchestrator, Mini-SDD, or Formal SDD—and begins concrete execution requests without redundant start confirmation."
+description: "route software requests among exactly three workflows: Direct Orchestrator, Mini-SDD, or Formal SDD. Use when choosing a workflow, classifying execution versus advice, assessing scope and risk, or deciding whether bounded discovery is required; begin authorized work without redundant confirmation."
 license: Apache-2.0
 metadata:
   author: j0k3r
   version: "10.0"
+registry:
+  category: "workflow"
+  domains: "workflow-routing, orchestration, openspec, user-consent"
+  paths: "AGENTS.md, openspec/changes/**/*.md, skills/workflow-triage/SKILL.md, skills/sdd-workflow/SKILL.md"
+  keywords: "choose workflow, which workflow, which workflow should I use, select a workflow, compare workflows, compare mini-sdd and formal sdd, direct orchestrator vs mini-sdd vs formal sdd, workflow comparison, workflow recommendation, direct orchestrator, direct vs mini-sdd, mini-sdd vs formal sdd, workflow triage, mini-sdd, formal sdd, openspec workflow"
+  phases: "explore, proposal, spec, design, task, apply, verify, archive"
+  related: "sdd-workflow, tdd"
+  priority: 95
 ---
 
 # Workflow Triage
-
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "workflow",
-  "domains": ["workflow-routing", "orchestration", "openspec", "user-consent"],
-  "triggers": {
-    "paths": [
-      "AGENTS.md",
-      "openspec/changes/**/*.md",
-      "skills/workflow-triage/SKILL.md",
-      "skills/sdd-workflow/SKILL.md"
-    ],
-    "keywords": [
-      "choose workflow",
-      "which workflow",
-      "which workflow should I use",
-      "compare workflows",
-      "compare mini-sdd and formal sdd",
-      "direct orchestrator vs mini-sdd vs formal sdd",
-      "workflow comparison",
-      "workflow recommendation",
-      "direct orchestrator",
-      "direct vs mini-sdd",
-      "mini-sdd vs formal sdd",
-      "workflow triage",
-      "mini-sdd",
-      "formal sdd",
-      "openspec workflow",
-      "elegir flujo",
-      "que flujo usar",
-      "comparar flujos",
-      "flujo directo",
-      "sdd completo"
-    ]
-  },
-  "sdd_phases": ["explore", "proposal", "spec", "design", "task", "apply", "verify", "archive"],
-  "related_skills": ["sdd-workflow", "tdd"],
-  "priority": 95
-}
-```
 
 Field conventions:
 
 - `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
 - `domains`: stable domain tags used for routing.
-- `triggers.paths`: glob-like project paths that should activate this skill.
-- `triggers.keywords`: user/request/code keywords that should activate this skill.
-- `sdd_phases`: phases where this skill is useful.
-- `related_skills`: skills that should be considered one hop away.
+- `paths`: glob-like project paths that should activate this skill.
+- `keywords`: user/request/code keywords that should activate this skill.
+- `phases`: phases where this skill is useful.
+- `related`: skills that should be considered one hop away.
 - `priority`: routing priority from 0 to 100.
 
 ## Activation Contract
@@ -144,7 +108,7 @@ Permitted outcomes only:
 1. Summarize what is already known without reading files.
 2. Identify only material unknowns that prevent a safe recommendation.
 3. If context quality or reviewability concerns change the route, state the specific signal and the routing consequence.
-4. If research is needed, ask for depth and executor before running it.
+4. If research is needed, reuse any depth, scope, sources, exclusions, and executor already supplied by the user. Ask only for values that remain materially missing or ambiguous; when the request already authorizes a bounded research packet, proceed without reconfirmation.
 5. Select or recommend one of the three workflows with one concise reason. Prefer Mini-SDD for non-trivial bounded work and require a concrete escalation signal before choosing Formal SDD.
 6. Classify the request as `EXECUTION_AUTHORIZED` or `ADVICE_ONLY`.
 7. For `EXECUTION_AUTHORIZED`, hand the route directly to Direct Orchestrator execution or `sdd-workflow` without another start prompt.

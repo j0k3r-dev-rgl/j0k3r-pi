@@ -1,68 +1,36 @@
 ---
 name: cognitive-doc-design
-description: "design or revise guides, READMEs, RFCs, onboarding, architecture, PR descriptions, and review-facing documentation to reduce cognitive load."
+description: "design or revise technical and product documentation to reduce cognitive load and improve reviewability. Use when creating or editing guides, READMEs, RFCs, onboarding docs, architecture docs, PR descriptions, decision records, or other review-facing documentation."
 license: Apache-2.0
 metadata:
   author: gentleman-programming
   version: "1.2"
+registry:
+  category: "quality"
+  domains: "documentation, cognitive-load, technical-writing, review-experience"
+  paths: "README*.md, docs/guides/**/*.md, docs/onboarding/**/*.md, docs/README*.md, rfcs/**/*.md, .github/pull_request_template*.md, .github/PULL_REQUEST_TEMPLATE/**/*.md"
+  keywords: "documentation, technical documentation, README, guide, RFC, onboarding, architecture document, PR description, review notes, cognitive load, progressive disclosure, make this easier to scan"
+  related: "comment-writer"
+  priority: 60
 ---
 
 # Cognitive Doc Design
-
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "quality",
-  "domains": ["documentation", "cognitive-load", "technical-writing", "review-experience"],
-  "triggers": {
-    "paths": [
-      "README*.md",
-      "docs/**/*.md",
-      "rfcs/**/*.md",
-      "adr/**/*.md",
-      ".github/pull_request_template*.md",
-      ".github/PULL_REQUEST_TEMPLATE/**/*.md"
-    ],
-    "keywords": [
-      "documentation",
-      "technical documentation",
-      "README",
-      "guide",
-      "RFC",
-      "ADR",
-      "onboarding",
-      "architecture document",
-      "PR description",
-      "review notes",
-      "cognitive load",
-      "progressive disclosure",
-      "make this easier to scan"
-    ]
-  },
-  "sdd_phases": [],
-  "related_skills": ["comment-writer"],
-  "priority": 60
-}
-```
 
 Field conventions:
 
 - `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
 - `domains`: stable domain tags used for routing.
-- `triggers.paths`: glob-like project paths that should activate this skill.
-- `triggers.keywords`: user/request/code keywords that should activate this skill.
-- `sdd_phases`: phases where this skill is usually useful: `explore`, `proposal`, `spec`, `design`, `task`, `apply`, `verify`, `archive`.
-- `related_skills`: skills that should be considered when this skill is active.
+- `paths`: glob-like project paths that should activate this skill.
+- `keywords`: user/request/code keywords that should activate this skill.
+- `phases`: phases where this skill is usually useful: `explore`, `proposal`, `spec`, `design`, `task`, `apply`, `verify`, `archive`.
+- `related`: skills that should be considered when this skill is active.
 - `priority`: routing priority from 0 to 100. Higher means consider earlier when multiple skills match.
 
 ## Activation Contract
 
 Use this skill when creating or revising documentation that readers must understand quickly, retain, follow, or verify. Typical surfaces include PR descriptions, review notes, contributor guides, maintainer guides, READMEs, RFCs, ADRs, architecture documents, workflows, and onboarding material.
 
-Load it especially when a document feels long, dense, difficult to scan, or forces reviewers to reconstruct intent. Do not load it for code-only changes, private scratch notes, or short conversational comments where `comment-writer` is the more specific skill.
+Load it especially when a document feels long, dense, difficult to scan, or forces reviewers to reconstruct intent. For lifecycle architecture decisions and ADR paths, the canonical owner resolves first; use this skill only when the request explicitly asks to improve presentation or when the owner assigns it as supporting guidance. Do not load it for code-only changes, private scratch notes, or short conversational comments where `comment-writer` is the more specific skill.
 
 ## Hard Rules
 
@@ -152,5 +120,5 @@ Return:
 
 ## References
 
-- `extensions/skill-registry/templates/skill-template.md` — canonical Pi skill structure and registry contract.
+- `extensions/skill-registry/templates/skill-template.md` — canonical Pi skill structure and registry metadata.
 - Repository-provided README, documentation, RFC, ADR, or pull-request templates — primary local formatting constraints when present.

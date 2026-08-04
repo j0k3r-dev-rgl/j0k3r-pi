@@ -162,31 +162,41 @@ Command behavior:
 ### Registry behavior
 
 - Registry output is ordered by priority descending, then skill name ascending.
-- Missing or invalid registry contracts do not exclude a skill; the skill remains present with empty routing metadata and a warning.
-- Duplicate skill names produce a warning; later duplicates are ignored.
-- The registry contract heading must be exactly `## Registry Contract` followed by a fenced `json` block.
+- A skill with valid `registry:` metadata is indexed for routing.
+- A skill without a valid `registry:` map is ignored silently; its native Pi frontmatter remains independent and valid.
+- Duplicate skill names among indexed skills produce a warning; later duplicates are ignored.
+- Registry source metadata lives in SKILL frontmatter under an optional one-level `registry:` map.
 
-### Registry Contract convention
+### Registry metadata convention
 
-Skills should include a valid JSON block:
+Skills should include compact frontmatter metadata:
 
-````md
-## Registry Contract
-
-```json
-{
-  "category": "base",
-  "domains": ["frontend", "forms"],
-  "triggers": {
-    "paths": ["front/app/routes/**/*.tsx"],
-    "keywords": ["useFetcher", "fetcher.Form"]
-  },
-  "sdd_phases": ["explore", "design", "task", "apply", "verify"],
-  "related_skills": ["project-testing"],
-  "priority": 50
-}
+```md
+---
+name: example-project-skill
+description: "specific trigger-focused description"
+license: Apache-2.0
+metadata:
+  author: your-name-or-team
+  version: "1.0"
+registry:
+  category: base
+  domains: frontend, forms
+  paths: front/app/routes/**/*.tsx
+  keywords: useFetcher, fetcher.Form
+  phases: explore, design, task, apply, verify
+  related: project-testing
+  priority: 50
+---
 ```
-````
+
+Registry normalization rules:
+
+- `category`: scalar string.
+- `domains`, `paths`, `keywords`, `phases`, `related`: comma-separated scalars normalized to trimmed string arrays.
+- `priority`: numeric scalar normalized to the existing routing priority number.
+- Omit empty optional fields instead of leaving blank values.
+- Omit the entire `registry:` map when the skill should not participate in Skill Registry routing.
 
 Use `templates/skill-template.md` from this extension while this is agent-dir local. Later this extension and its templates may move to global Pi agent configuration or a package.
 
@@ -357,31 +367,40 @@ Comportamiento del comando:
 ### Comportamiento del registry
 
 - La salida del registry se ordena por priority descendente y luego nombre de skill ascendente.
-- Contratos de registry faltantes o inválidos no excluyen una skill; la skill sigue presente con metadata de routing vacía y un warning.
-- Nombres de skill duplicados producen un warning; duplicados posteriores se ignoran.
-- El heading del contrato de registry debe ser exactamente `## Registry Contract` seguido por un fenced block `json`.
+- Una skill con metadata `registry:` válida se indexa para routing.
+- Una skill sin un mapa `registry:` válido se ignora silenciosamente; su frontmatter nativo de Pi sigue siendo válido e independiente.
+- Nombres de skill duplicados entre las skills indexadas producen un warning; duplicados posteriores se ignoran.
+- La metadata fuente del registry vive en el frontmatter del SKILL bajo un mapa opcional `registry:` de un nivel.
 
-### Convención Registry Contract
+### Convención de metadata de registry
 
-Las skills deben incluir un bloque JSON válido:
+Las skills deben incluir metadata compacta en frontmatter:
 
-````md
-## Registry Contract
-
-```json
-{
-  "category": "base",
-  "domains": ["frontend", "forms"],
-  "triggers": {
-    "paths": ["front/app/routes/**/*.tsx"],
-    "keywords": ["useFetcher", "fetcher.Form"]
-  },
-  "sdd_phases": ["explore", "design", "task", "apply", "verify"],
-  "related_skills": ["project-testing"],
-  "priority": 50
-}
+```md
+---
+name: example-project-skill
+description: "specific trigger-focused description"
+license: Apache-2.0
+metadata:
+  author: your-name-or-team
+  version: "1.0"
+registry:
+  category: base
+  domains: frontend, forms
+  paths: front/app/routes/**/*.tsx
+  keywords: useFetcher, fetcher.Form
+  phases: explore, design, task, apply, verify
+  related: project-testing
+  priority: 50
+---
 ```
-````
+
+Reglas de normalización del registry:
+
+- `category`: string escalar.
+- `domains`, `paths`, `keywords`, `phases`, `related`: escalares separados por comas que se normalizan a arrays de strings trimmeados.
+- `priority`: escalar numérico normalizado al número de prioridad de routing existente.
+- Omite campos opcionales vacíos en lugar de dejarlos en blanco.
 
 Usa `templates/skill-template.md` desde esta extensión mientras sea local al agent-dir. Más adelante esta extensión y sus templates pueden moverse a la configuración global del agente Pi o a un paquete.
 

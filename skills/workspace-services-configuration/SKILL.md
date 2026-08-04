@@ -1,6 +1,6 @@
 ---
 name: workspace-services-configuration
-description: "configure Pi Workspace Services Extension, including manual .pi/workspace-services.json services, env_file opt-in, service commands, local logs/state, gitignore, and safe reload guidance."
+description: "configure the Pi Workspace Services extension for manually managed local services. Use when defining .pi/workspace-services.json services, opting into env_file usage, setting service commands, checking logs or state, updating gitignore rules, or safely reloading Pi after configuration changes."
 license: Apache-2.0
 metadata:
   author: j0k3r
@@ -9,61 +9,14 @@ metadata:
 
 # Workspace Services Configuration
 
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "runtime",
-  "domains": ["workspace-services-configuration", "monorepo-service-config", "local-service-runtime"],
-  "triggers": {
-    "paths": [
-      ".pi/workspace-services.json",
-      ".pi/workspace-services/**",
-      "**/.pi/workspace-services.json",
-      "**/.pi/workspace-services/**",
-      "workspace-services.json",
-      "extensions/workspace-services/README.md",
-      "skills/workspace-services-configuration/SKILL.md",
-      "~/.pi/agent/skills/workspace-services-configuration/SKILL.md"
-    ],
-    "keywords": [
-      "workspace services configuration",
-      "workspace services config",
-      "workspace-services.json",
-      "configure workspace services",
-      "configurar workspace services",
-      "configurar servicios del workspace",
-      "configuracion workspace services",
-      "configuración workspace services",
-      "monorepo services",
-      "servicios del monorepo",
-      "workspace_services_list",
-      "workspace_service_start",
-      "workspace_service_restart",
-      "workspace_service_logs",
-      "workspace_services_status",
-      "workspace_service_stop",
-      "env_file",
-      ".pi/workspace-services",
-      "service logs"
-    ]
-  },
-  "sdd_phases": [],
-  "related_skills": [],
-  "priority": 70
-}
-```
-
 Field conventions:
 
 - `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
 - `domains`: stable domain tags used for routing.
-- `triggers.paths`: configuration and runtime paths that should activate this skill, including nested project workspaces outside the agent root.
-- `triggers.keywords`: configuration-only phrases, tool names, and field names that should activate this skill.
-- `sdd_phases`: keep empty for configuration-only skills so phase routing alone does not load it.
-- `related_skills`: configuration-adjacent skills only; do not add implementation or SDD skills for normal config help.
+- `paths`: configuration and runtime paths that should activate this skill, including nested project workspaces outside the agent root.
+- `keywords`: configuration-only phrases, tool names, and field names that should activate this skill.
+- `phases`: keep empty for configuration-only skills so phase routing alone does not load it.
+- `related`: configuration-adjacent skills only; do not add implementation or SDD skills for normal config help.
 - `priority`: route similarly to other extension configuration skills.
 
 ## Activation Contract

@@ -356,14 +356,19 @@ function resolveDirectMatches(liveRegistry: SkillRegistry, query: ReturnType<typ
       return {
         match: scored.match,
         score: scored.totalScore,
+        hasDirectSignal: scored.match.reasons.some((reason) =>
+          reason.signal === 'path' || reason.signal === 'keyword' || reason.signal === 'sdd_phase',
+        ),
       };
-    })
-    .filter((item): item is { match: ResolveSkillMatch; score: number } => {
-      if (!hasQuerySignals) return true;
-      return item.score > 0;
     });
+  const hasAnyDirectSignal = rankedScored.some((item) => item.hasDirectSignal);
+  const filteredScored = rankedScored.filter((item): item is { match: ResolveSkillMatch; score: number; hasDirectSignal: boolean } => {
+    if (!hasQuerySignals) return true;
+    if (hasAnyDirectSignal) return item.hasDirectSignal;
+    return item.score > 0;
+  });
 
-  return rankedScored
+  return filteredScored
     .map((item) => {
       if (!hasQuerySignals && item.score === 0) {
         return {

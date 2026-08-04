@@ -1,58 +1,20 @@
 ---
 name: product-validation
-description: "define and record startup measurement plans, bounded experiments, observed evidence, and explicit persevere, iterate, pivot, pause, or stop decisions as numbered modular Markdown."
+description: "define and record evidence-based product validation plans and decisions. Use when creating startup measurement plans, bounded experiments, success signals, guardrails, observed evidence, or explicit persevere, iterate, pivot, pause, and stop decisions as numbered modular Markdown."
 license: Apache-2.0
 metadata:
   author: j0k3r
   version: "1.3"
+registry:
+  category: "product"
+  domains: "product-validation, experiments, product-metrics, learning-decisions"
+  paths: "docs/05-validation/**/*.md"
+  keywords: "product validation, validate product, measurement plan, MVP validation, validate MVP, product experiment, pre-requirement experiment, conformance validation, acceptance verification, learning decision, persevere, pivot, persevere or pivot, validar producto, medir MVP, experimento de producto, pivotar o continuar"
+  related: "startup-documentation, product-discovery, product-definition, requirements-definition, delivery-planning, anti-overengineering"
+  priority: 92
 ---
 
 # Product Validation
-
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "product",
-  "domains": ["product-validation", "experiments", "product-metrics", "learning-decisions"],
-  "triggers": {
-    "paths": [
-      "docs/05-validation/**/*.md"
-    ],
-    "keywords": [
-      "product validation",
-      "validate product",
-      "measurement plan",
-      "MVP validation",
-      "validate MVP",
-      "product experiment",
-      "pre-requirement experiment",
-      "conformance validation",
-      "acceptance verification",
-      "learning decision",
-      "persevere",
-      "pivot",
-      "persevere or pivot",
-      "validar producto",
-      "medir MVP",
-      "experimento de producto",
-      "pivotar o continuar"
-    ]
-  },
-  "sdd_phases": [],
-  "related_skills": [
-    "startup-documentation",
-    "product-discovery",
-    "product-definition",
-    "requirements-definition",
-    "delivery-planning",
-    "anti-overengineering"
-  ],
-  "priority": 92
-}
-```
 
 ## Activation Contract
 

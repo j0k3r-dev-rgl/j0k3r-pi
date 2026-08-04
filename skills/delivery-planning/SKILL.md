@@ -1,52 +1,20 @@
 ---
 name: delivery-planning
-description: "turn approved startup requirements and architecture into outcome-oriented roadmaps, small vertical increments, fully functional sprint goals, delivery policies, and a proportional Definition of Done without imposing ceremonies or speculative dates."
+description: "turn approved product requirements and architecture into outcome-oriented delivery plans. Use when creating roadmaps, small vertical increments, functional sprint goals, delivery policies, release sequencing, or a proportional Definition of Done; do not impose ceremonies, speculative dates, or unapproved scope."
 license: Apache-2.0
 metadata:
   author: j0k3r
   version: "1.3"
+registry:
+  category: "delivery"
+  domains: "delivery-planning, roadmaps, sprint-planning, vertical-slicing, definition-of-done"
+  paths: "docs/04-delivery/**/*.md"
+  keywords: "delivery planning, outcome roadmap, plan sprint, sprint goal, vertical slice, Definition of Done, planificar entrega, planificar sprint, modulo funcional completo, corte vertical"
+  related: "startup-documentation, requirements-definition, architecture-definition, technical-decisions, product-validation, tdd, anti-overengineering"
+  priority: 92
 ---
 
 # Delivery Planning
-
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "delivery",
-  "domains": ["delivery-planning", "roadmaps", "sprint-planning", "vertical-slicing", "definition-of-done"],
-  "triggers": {
-    "paths": [
-      "docs/04-delivery/**/*.md"
-    ],
-    "keywords": [
-      "delivery planning",
-      "outcome roadmap",
-      "plan sprint",
-      "sprint goal",
-      "vertical slice",
-      "Definition of Done",
-      "planificar entrega",
-      "planificar sprint",
-      "modulo funcional completo",
-      "corte vertical"
-    ]
-  },
-  "sdd_phases": [],
-  "related_skills": [
-    "startup-documentation",
-    "requirements-definition",
-    "architecture-definition",
-    "technical-decisions",
-    "product-validation",
-    "tdd",
-    "anti-overengineering"
-  ],
-  "priority": 92
-}
-```
 
 ## Activation Contract
 

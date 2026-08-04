@@ -1,85 +1,29 @@
 ---
 name: pi-extension-authoring
-description: "create, restructure, or review independent Pi extensions, custom tools, lifecycle hooks, package dependencies, and TUI renderers with a consistent modular layout, native collapsed/expanded rendering, and lossless bounded model-facing output."
+description: "create, restructure, or review independent Pi extensions and custom tools. Use when authoring lifecycle hooks, extension package dependencies, custom tool contracts, TUI renderers, or model-facing output; preserve modular structure, native collapsed and expanded rendering, and lossless bounded output."
 license: Apache-2.0
 metadata:
   author: j0k3r
   version: "1.2"
+registry:
+  category: "workflow"
+  domains: "pi, extensions, custom-tools, typescript, tui, tool-rendering"
+  paths: "extensions/*.ts, extensions/*.js, extensions/**/index.ts, extensions/**/index.js, extensions/**/src/**/*.ts, extensions/**/src/**/*.js, extensions/**/package.json, extensions/**/README.md, .pi/extensions/*.ts, .pi/extensions/*.js, .pi/extensions/**/index.ts, .pi/extensions/**/index.js, .pi/extensions/**/src/**/*.ts, .pi/extensions/**/src/**/*.js, .pi/extensions/**/package.json, .pi/extensions/**/README.md, ~/.pi/agent/extensions/*.ts, ~/.pi/agent/extensions/*.js, ~/.pi/agent/extensions/**/index.ts, ~/.pi/agent/extensions/**/index.js, ~/.pi/agent/extensions/**/src/**/*.ts, ~/.pi/agent/extensions/**/src/**/*.js, ~/.pi/agent/extensions/**/package.json, ~/.pi/agent/extensions/**/README.md"
+  keywords: "create Pi extension, crear extensión de Pi, Pi extension, custom Pi tool, ExtensionAPI, registerTool, renderCall, renderResult, tool renderer, expand collapse, collapsible tool output, Pi TUI component, extension dependency independence, own node_modules, cross-extension dependency, independent extension package"
+  related: "workflow-triage, tdd"
+  priority: 88
 ---
 
 # Pi Extension Authoring
-
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "workflow",
-  "domains": ["pi", "extensions", "custom-tools", "typescript", "tui", "tool-rendering"],
-  "triggers": {
-    "paths": [
-      "extensions/*.ts",
-      "extensions/*.js",
-      "extensions/**/index.ts",
-      "extensions/**/index.js",
-      "extensions/**/src/**/*.ts",
-      "extensions/**/src/**/*.js",
-      "extensions/**/package.json",
-      "extensions/**/README.md",
-      ".pi/extensions/*.ts",
-      ".pi/extensions/*.js",
-      ".pi/extensions/**/index.ts",
-      ".pi/extensions/**/index.js",
-      ".pi/extensions/**/src/**/*.ts",
-      ".pi/extensions/**/src/**/*.js",
-      ".pi/extensions/**/package.json",
-      ".pi/extensions/**/README.md",
-      "~/.pi/agent/extensions/*.ts",
-      "~/.pi/agent/extensions/*.js",
-      "~/.pi/agent/extensions/**/index.ts",
-      "~/.pi/agent/extensions/**/index.js",
-      "~/.pi/agent/extensions/**/src/**/*.ts",
-      "~/.pi/agent/extensions/**/src/**/*.js",
-      "~/.pi/agent/extensions/**/package.json",
-      "~/.pi/agent/extensions/**/README.md"
-    ],
-    "keywords": [
-      "create Pi extension",
-      "crear extensión de Pi",
-      "Pi extension",
-      "custom Pi tool",
-      "ExtensionAPI",
-      "registerTool",
-      "renderCall",
-      "renderResult",
-      "tool renderer",
-      "expand collapse",
-      "collapsible tool output",
-      "Pi TUI component",
-      "extension dependency independence",
-      "own node_modules",
-      "cross-extension dependency",
-      "independent extension package"
-    ]
-  },
-  "sdd_phases": [],
-  "related_skills": [
-    "workflow-triage",
-    "tdd"
-  ],
-  "priority": 88
-}
-```
 
 Field conventions:
 
 - `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
 - `domains`: stable domain tags used for routing.
-- `triggers.paths`: glob-like project paths that should activate the skill.
-- `triggers.keywords`: canonical English terms plus common user aliases.
-- `sdd_phases`: phases where the skill is useful: `explore`, `proposal`, `spec`, `design`, `task`, `apply`, `verify`, or `archive`.
-- `related_skills`: skills a future agent should realistically consider one hop away.
+- `paths`: glob-like project paths that should activate the skill.
+- `keywords`: canonical English terms plus common user aliases.
+- `phases`: phases where the skill is useful: `explore`, `proposal`, `spec`, `design`, `task`, `apply`, `verify`, or `archive`.
+- `related`: skills a future agent should realistically consider one hop away.
 - `priority`: routing priority from 0 to 100. More specific skills should outrank generic helpers.
 
 ## Activation Contract

@@ -1,6 +1,6 @@
 ---
 name: websearch-configuration
-description: "configure the Pi websearch extension global settings, credentials, GitHub provider mode, and reload expectations only."
+description: "configure the Pi websearch extension and its global search providers. Use when changing websearch settings, credentials, GitHub provider mode, provider preferences, or reload expectations; do not perform unrelated web research or project configuration."
 license: Apache-2.0
 metadata:
   author: j0k3r
@@ -9,63 +9,14 @@ metadata:
 
 # Websearch Configuration
 
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "runtime",
-  "domains": ["websearch-configuration", "websearch-config", "websearch-credentials", "websearch-github-provider-config"],
-  "triggers": {
-    "paths": [
-      "websearch.json",
-      "~/.pi/agent/websearch.json"
-    ],
-    "keywords": [
-      "websearch configuration",
-      "configure websearch",
-      "configurar websearch",
-      "configuro websearch",
-      "como configurar websearch",
-      "cómo configurar websearch",
-      "como configuro websearch",
-      "cómo configuro websearch",
-      "como se configura websearch",
-      "cómo se configura websearch",
-      "configuracion websearch",
-      "configuración websearch",
-      "websearch config",
-      "websearch extension setup",
-      "websearch reload",
-      "~/.pi/agent/websearch.json",
-      "github provider",
-      "github provider api",
-      "github provider gh",
-      "github cli provider",
-      "websearch environment variables",
-      "websearch env vars",
-      "websearch credentials",
-      "websearch api keys",
-      "websearch variables de entorno",
-      "variables de entorno websearch",
-      "credenciales websearch"
-    ]
-  },
-  "sdd_phases": [],
-  "related_skills": [],
-  "priority": 82
-}
-```
-
 Field conventions:
 
 - `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
 - `domains`: stable domain tags used for routing.
-- `triggers.paths`: glob-like project paths that should activate this skill.
-- `triggers.keywords`: configuration-only setup terms, config paths, provider configuration terms, and environment variable names that should activate this skill.
-- `sdd_phases`: keep empty for configuration-only skills so phase routing alone does not load them.
-- `related_skills`: configuration-adjacent skills only; do not add usage, implementation, or workflow skills.
+- `paths`: glob-like project paths that should activate this skill.
+- `keywords`: configuration-only setup terms, config paths, provider configuration terms, and environment variable names that should activate this skill.
+- `phases`: keep empty for configuration-only skills so phase routing alone does not load them.
+- `related`: configuration-adjacent skills only; do not add usage, implementation, or workflow skills.
 - `priority`: routing priority from 0 to 100. Keep below workflow-router skills and above generic extension/config help.
 
 ## Activation Contract

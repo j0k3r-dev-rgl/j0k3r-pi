@@ -1,64 +1,21 @@
 ---
 name: anti-overengineering
-description: "prevent overengineering during software planning, architecture, feature implementation, bug fixing, refactoring, and other programming work. require the simplest explicitly requested solution, stop for unresolved decisions, and forbid implicit migrations or speculative scope."
+description: "control scope and prevent overengineering during software planning, architecture, feature implementation, bug fixing, refactoring, and code review. Use when work may introduce abstractions, dependencies, migrations, compatibility layers, speculative features, or scope creep; require the simplest explicitly requested solution and stop for material unresolved decisions."
 license: Apache-2.0
 metadata:
   author: j0k3r
   version: "1.1"
+registry:
+  category: "transversal"
+  domains: "software-engineering, planning, implementation, scope-control"
+  paths: "**/*.c, **/*.cpp, **/*.cs, **/*.go, **/*.java, **/*.js, **/*.jsx, **/*.kt, **/*.php, **/*.py, **/*.rb, **/*.rs, **/*.swift, **/*.ts, **/*.tsx, openspec/changes/**/*.md"
+  keywords: "anti-overengineering, avoid overengineering, evitar sobreingenieria, simplest sufficient solution, solucion suficiente mas simple, scope creep, KISS, YAGNI, unnecessary abstraction, implicit migration, migracion implicita"
+  phases: "explore, proposal, spec, design, task, apply, verify"
+  related: "workflow-triage, sdd-workflow, tdd"
+  priority: 75
 ---
 
 # Anti-Overengineering
-
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "transversal",
-  "domains": ["software-engineering", "planning", "implementation", "scope-control"],
-  "triggers": {
-    "paths": [
-      "**/*.c",
-      "**/*.cpp",
-      "**/*.cs",
-      "**/*.go",
-      "**/*.java",
-      "**/*.js",
-      "**/*.jsx",
-      "**/*.kt",
-      "**/*.php",
-      "**/*.py",
-      "**/*.rb",
-      "**/*.rs",
-      "**/*.swift",
-      "**/*.ts",
-      "**/*.tsx",
-      "openspec/changes/**/*.md"
-    ],
-    "keywords": [
-      "anti-overengineering",
-      "avoid overengineering",
-      "evitar sobreingenieria",
-      "simplest sufficient solution",
-      "solucion suficiente mas simple",
-      "scope creep",
-      "KISS",
-      "YAGNI",
-      "unnecessary abstraction",
-      "implicit migration",
-      "migracion implicita"
-    ]
-  },
-  "sdd_phases": ["explore", "proposal", "spec", "design", "task", "apply", "verify"],
-  "related_skills": [
-    "workflow-triage",
-    "sdd-workflow",
-    "tdd"
-  ],
-  "priority": 75
-}
-```
 
 ## Activation Contract
 

@@ -18,21 +18,30 @@ type Contract = Record<string, unknown>;
 
 async function makeSkill(filePath: string, input: { name: string; description: string; contract?: Contract }) {
   await mkdir(path.dirname(filePath), { recursive: true });
+  const contract = input.contract ?? {};
+  const triggerRecord = contract.triggers && typeof contract.triggers === 'object' && !Array.isArray(contract.triggers)
+    ? contract.triggers as { paths?: string[]; keywords?: string[] }
+    : {};
   const body = [
     '---',
     `name: ${input.name}`,
     `description: ${JSON.stringify(input.description)}`,
     'metadata:',
     '  version: "1.0"',
-    '---',
-    '',
-    `# ${input.name}`,
-    '',
   ];
   if (input.contract) {
-    body.push('## Registry Contract', '', '```json', JSON.stringify(input.contract, null, 2), '```', '');
+    body.push(
+      'registry:',
+      `  category: ${String(contract.category ?? '')}`,
+      `  domains: ${Array.isArray(contract.domains) ? contract.domains.join(', ') : ''}`,
+      `  paths: ${Array.isArray(triggerRecord.paths) ? triggerRecord.paths.join(', ') : ''}`,
+      `  keywords: ${Array.isArray(triggerRecord.keywords) ? triggerRecord.keywords.join(', ') : ''}`,
+      `  phases: ${Array.isArray(contract.sdd_phases) ? contract.sdd_phases.join(', ') : ''}`,
+      `  related: ${Array.isArray(contract.related_skills) ? contract.related_skills.join(', ') : ''}`,
+      `  priority: ${String(contract.priority ?? '')}`,
+    );
   }
-  body.push('## Activation Contract', '', 'Use this skill when relevant.', '');
+  body.push('---', '', `# ${input.name}`, '', '## Activation Contract', '', 'Use this skill when relevant.', '');
   await writeFile(filePath, body.join('\n'), 'utf8');
 }
 
@@ -116,6 +125,54 @@ describe('resolveSkillRegistry', () => {
     expect(result.matches.map((match) => match.name)).toEqual(['route-handler']);
     expect(result.matches[0].score).toBeGreaterThan(0);
     expect(pickFirstReason(result.matches[0], 'path')).toBeDefined();
+  });
+
+  it('excludes fallback-only skills when a direct intent match exists', async () => {
+    const { cwd, homeDir } = await createProject();
+
+    await makeSkill(path.join(cwd, '.pi/skills/direct/SKILL.md'), {
+      name: 'direct',
+      description: 'specific configuration',
+      contract: {
+        category: 'runtime',
+        domains: ['configuration'],
+        triggers: {
+          paths: ['direct/**'],
+          keywords: ['specific configuration'],
+        },
+        sdd_phases: [],
+        related_skills: [],
+        priority: 20,
+      },
+    });
+    await makeSkill(path.join(cwd, '.pi/skills/fallback/SKILL.md'), {
+      name: 'fallback',
+      description: 'runtime configuration helper',
+      contract: {
+        category: 'runtime',
+        domains: ['configuration'],
+        triggers: {
+          paths: ['other/**'],
+          keywords: ['unrelated'],
+        },
+        sdd_phases: [],
+        related_skills: [],
+        priority: 100,
+      },
+    });
+
+    const result = await resolveSkillRegistry({
+      cwd,
+      homeDir,
+      query: {
+        intent: 'specific configuration',
+        stale_check: false,
+        include_related: false,
+      },
+    });
+
+    expect(result.matches.map((match) => match.name)).toEqual(['direct']);
+    expect(result.matches[0].reasons.some((reason) => reason.signal === 'keyword')).toBe(true);
   });
 
   it('applies deterministic ordering by score, priority, then name', async () => {
@@ -404,8 +461,8 @@ describe('resolveSkillRegistry', () => {
       },
     });
 
-    expect(dedupeExpected.matches.map((match) => match.name)).toEqual(['helper', 'other', 'support']);
-    expect(dedupeExpected.related_matches.map((match) => match.name)).toEqual([]);
+    expect(dedupeExpected.matches.map((match) => match.name)).toEqual(['helper', 'other']);
+    expect(dedupeExpected.related_matches.map((match) => match.name)).toEqual(['support']);
   });
 
   it('reports cache status for missing, stale, fresh, invalid, and not_checked without writing files', async () => {

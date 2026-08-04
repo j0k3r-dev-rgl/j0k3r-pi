@@ -1,53 +1,20 @@
 ---
 name: architecture-definition
-description: "define evidence-driven startup architecture drivers, system context, boundaries, data and trust boundaries, and deployment view as modular Markdown without selecting unjustified technologies or speculative scale mechanisms."
+description: "define evidence-driven software or startup architecture documentation, including architecture drivers, system context, boundaries, data and trust boundaries, and deployment views. Use when defining architecture, system context, responsibilities, data flows, trust boundaries, or deployment structure; do not select unjustified technologies or speculative scale mechanisms."
 license: Apache-2.0
 metadata:
   author: j0k3r
   version: "1.1"
+registry:
+  category: "architecture"
+  domains: "software-architecture, architecture-drivers, system-boundaries, data-and-trust-boundaries"
+  paths: "docs/03-architecture/00-architecture-drivers.md, docs/03-architecture/01-system-context.md, docs/03-architecture/02-system-boundaries.md, docs/03-architecture/03-data-and-trust-boundaries.md, docs/03-architecture/04-deployment-view.md"
+  keywords: "define software architecture, architecture drivers, system context, system boundaries, data and trust boundaries, deployment view, definir arquitectura, limites del sistema, atributos de calidad"
+  related: "startup-documentation, requirements-definition, technical-decisions, delivery-planning, anti-overengineering"
+  priority: 92
 ---
 
 # Architecture Definition
-
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "architecture",
-  "domains": ["software-architecture", "architecture-drivers", "system-boundaries", "data-and-trust-boundaries"],
-  "triggers": {
-    "paths": [
-      "docs/03-architecture/00-architecture-drivers.md",
-      "docs/03-architecture/01-system-context.md",
-      "docs/03-architecture/02-system-boundaries.md",
-      "docs/03-architecture/03-data-and-trust-boundaries.md",
-      "docs/03-architecture/04-deployment-view.md"
-    ],
-    "keywords": [
-      "define software architecture",
-      "architecture drivers",
-      "system context",
-      "system boundaries",
-      "data and trust boundaries",
-      "deployment view",
-      "definir arquitectura",
-      "limites del sistema",
-      "atributos de calidad"
-    ]
-  },
-  "sdd_phases": [],
-  "related_skills": [
-    "startup-documentation",
-    "requirements-definition",
-    "technical-decisions",
-    "delivery-planning",
-    "anti-overengineering"
-  ],
-  "priority": 92
-}
-```
 
 ## Activation Contract
 

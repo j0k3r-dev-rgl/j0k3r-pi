@@ -1,6 +1,6 @@
 ---
 name: api-tools-configuration
-description: "configure Pi API Tools Extension, including project-local .pi/api.json enablement, localhost endpoints, login/access_token persistence, token usage flags, and safe reload guidance."
+description: "configure the Pi API Tools extension for project-local REST or GraphQL access. Use when enabling .pi/api.json, configuring localhost endpoints, logging in, persisting access tokens, setting token usage flags, inspecting API contracts, or safely reloading Pi after configuration changes."
 license: Apache-2.0
 metadata:
   author: j0k3r
@@ -9,55 +9,14 @@ metadata:
 
 # API Tools Configuration
 
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "runtime",
-  "domains": ["api-tools-configuration", "api-json-config", "rest-graphql-config", "login-token-config"],
-  "triggers": {
-    "paths": [
-      ".pi/api.json",
-      "api.json",
-      "extensions/api-tools/README.md"
-    ],
-    "keywords": [
-      "api tools configuration",
-      "configure api tools",
-      "configurar api tools",
-      "configuracion api tools",
-      "configuración api tools",
-      "como configurar api tools",
-      "cómo configurar api tools",
-      "como se configura api tools",
-      "cómo se configura api tools",
-      "api.json",
-      ".pi/api.json",
-      "api login config",
-      "access_token",
-      "graphql_url",
-      "use_token",
-      "api_status",
-      "api_login",
-      "api_auth_status"
-    ]
-  },
-  "sdd_phases": [],
-  "related_skills": [],
-  "priority": 70
-}
-```
-
 Field conventions:
 
 - `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
 - `domains`: stable domain tags used for routing.
-- `triggers.paths`: configuration paths or docs that should activate this skill.
-- `triggers.keywords`: configuration-only phrases and field names that should activate this skill.
-- `sdd_phases`: keep empty for configuration-only skills so phase routing alone does not load it.
-- `related_skills`: configuration-adjacent skills only; do not add implementation or SDD skills for normal config help.
+- `paths`: configuration paths or docs that should activate this skill.
+- `keywords`: configuration-only phrases and field names that should activate this skill.
+- `phases`: keep empty for configuration-only skills so phase routing alone does not load it.
+- `related`: configuration-adjacent skills only; do not add implementation or SDD skills for normal config help.
 - `priority`: route similarly to other extension configuration skills.
 
 ## Activation Contract

@@ -1,74 +1,26 @@
 ---
 name: startup-documentation
-description: "initialize, route, and maintain a startup project's numbered modular Markdown documentation under docs/ without inventing product, architecture, technology, or delivery decisions."
+description: "initialize and route a new software application or startup project through numbered modular Markdown documentation. Use when a user wants to create a new app, start a software project, develop an initial product idea, organize startup documentation, or determine which document owns a decision; route unresolved ideas without inventing product, architecture, technology, or delivery choices."
 license: Apache-2.0
 metadata:
   author: j0k3r
   version: "1.3"
+registry:
+  category: "product"
+  domains: "startup-lifecycle, project-documentation, decision-routing, traceability"
+  paths: "docs/00-discovery/**/*.md, docs/01-product/**/*.md, docs/02-requirements/**/*.md, docs/03-architecture/**/*.md, docs/04-delivery/**/*.md, docs/05-validation/**/*.md"
+  keywords: "startup documentation, initialize startup documentation, new software project, start new software project, startup project, start startup project, new software application, start a new software application, new application, new application project, new app, create an app, start a project, software idea, early product idea, guide project definition, project documentation flow, create project documentation flow, numbered modular documentation, numbered modular Markdown documentation, which document owns, document ownership, reconstruct modular documentation baseline, scan codebase for documentation"
+  related: "anti-overengineering"
+  priority: 90
 ---
 
 # Startup Documentation
-
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "product",
-  "domains": ["startup-lifecycle", "project-documentation", "decision-routing", "traceability"],
-  "triggers": {
-    "paths": [
-      "docs/00-discovery/**/*.md",
-      "docs/01-product/**/*.md",
-      "docs/02-requirements/**/*.md",
-      "docs/03-architecture/**/*.md",
-      "docs/04-delivery/**/*.md",
-      "docs/05-validation/**/*.md"
-    ],
-    "keywords": [
-      "startup documentation",
-      "initialize startup documentation",
-      "new software project",
-      "start new software project",
-      "startup project",
-      "start startup project",
-      "new application",
-      "new application project",
-      "guide project definition",
-      "project documentation flow",
-      "create project documentation flow",
-      "numbered modular documentation",
-      "numbered modular Markdown documentation",
-      "which document owns",
-      "document ownership",
-      "reconstruct modular documentation baseline",
-      "scan codebase for documentation",
-      "que documento corresponde",
-      "documentar codigo existente",
-      "documentar proyecto startup",
-      "flujo documental startup",
-      "iniciar nuevo proyecto de software",
-      "definir nueva aplicacion",
-      "documentacion modular numerada"
-    ]
-  },
-  "sdd_phases": [],
-  "related_skills": [
-    "anti-overengineering",
-    "cognitive-doc-design",
-    "existing-project-onboarding",
-    "product-discovery"
-  ],
-  "priority": 90
-}
-```
 
 ## Activation Contract
 
 Use this skill when a user starts or reorganizes a software startup's project documentation, asks which numbered Markdown document owns a decision, or requests progression through the documented startup lifecycle.
 
-This is a domain-documentation router. It does not create a fourth Pi execution workflow and does not replace Direct Orchestrator, Mini-SDD, or Formal SDD. Registry `sdd_phases` indicate only where documentation routing may be useful; they do not make this skill an SDD phase owner or authorize workflow actions. Load the specific domain skill that owns the requested decision. Use `existing-project-onboarding` when an existing implementation must be scanned and reconstructed into the modular documentation baseline. Use `product-discovery` when a new project's problem, users, evidence, assumptions, or product direction are not yet established.
+This is a domain-documentation router. It does not create a fourth Pi execution workflow and does not replace Direct Orchestrator, Mini-SDD, or Formal SDD. Registry `phases` is intentionally empty: this skill activates by documentation intent or owned paths, never by SDD phase alone, and it does not authorize workflow actions. Load the specific domain skill that owns the requested decision. Use `existing-project-onboarding` when an existing implementation must be scanned and reconstructed into the modular documentation baseline. Use `product-discovery` when a new project's problem, users, evidence, assumptions, or product direction are not yet established.
 
 Do not create the complete documentation tree eagerly, generate empty placeholder files, or use this skill to decide product scope, architecture, technology, sprint content, or validation thresholds.
 
@@ -123,7 +75,7 @@ Missing non-applicable lifecycle groups do not block readiness. Missing behavior
 - When upstream evidence or decisions change, identify affected links and request review only for materially affected descendants. If impact cannot be bounded safely, mark the uncertainty and ask the user.
 - Do not place architecture, technology, delivery, or implementation decisions inside discovery or product documents. Route them to their owning group and skill.
 - Follow `references/document-contract.md` for document metadata, status, numbering, ownership, evidence provenance, material change requests, trace promotion, links, boundaries, and change handling.
-- Load this router once for the current routing decision. Resolve direct matches without related-skill expansion, then select the exact canonical owner by path/decision contract. Generic documentation or supporting skills never co-own a lifecycle artifact and do not displace a matching owner even when also returned by routing. Load only the selected owner and its explicitly applicable mandatory dependencies. Related skills are handoff hints, not an instruction to load the lifecycle. The selected owner consumes the shared contract directly and must not recursively restart routing.
+- Load this router once for the current routing decision. Resolve direct matches without related-skill expansion, then select the exact canonical owner by path/decision contract. Generic documentation or supporting skills never co-own a lifecycle artifact and do not displace a matching owner even when also returned by routing. Load only the selected owner and its explicitly applicable mandatory dependencies. Related skills are handoff hints, not an instruction to load the lifecycle. Keep registry-level related expansion minimal for this umbrella router; owner-specific handoffs are selected explicitly from the routing table and must not be encoded as broad automatic fan-out. The selected owner consumes the shared contract directly and must not recursively restart routing.
 
 ## Decision Gates
 

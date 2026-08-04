@@ -1,72 +1,28 @@
 ---
 name: tech-intel-briefing
-description: "Spanish-first orchestration for technology news briefings: gather only the missing brief details, delegate deep research and Markdown artifact creation to the news-researcher subagent, and convert the resulting report.md to audio when requested."
+description: "orchestrate technology news briefings, with Spanish-first user delivery when requested. Use when gathering missing briefing details, delegating deep research and Markdown report creation to the news-researcher subagent, or converting report.md to audio."
 license: Apache-2.0
 metadata:
   author: j0k3r
   version: "1.1"
+registry:
+  category: "base"
+  domains: "news, technology, hardware, ai, analysis, briefing, audio, subagent-orchestration"
+  paths: "~/.pi/agent/skills/tech-intel-briefing/SKILL.md, skills/tech-intel-briefing/SKILL.md"
+  keywords: "tech news, technology news, hardware news, ai news, noticiero, noticiero personal, briefing tech, briefing tecnológico, news briefing, weekly roundup, news roundup, deep dive, resumen de noticias, boletín tecnológico, industry briefing, audio-ready news, guion de noticias, guion narrado, noticias para audio, convertir a audio, qué está pasando en tech, que esta pasando en tech, qué hay de nuevo en hardware, que hay de nuevo en hardware, hazme un resumen semanal, hazme un briefing, explícame esta noticia, explicame esta noticia"
+  priority: 72
 ---
 
 # Tech Intel Briefing
-
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "base",
-  "domains": ["news", "technology", "hardware", "ai", "analysis", "briefing", "audio", "subagent-orchestration"],
-  "triggers": {
-    "paths": [
-      "~/.pi/agent/skills/tech-intel-briefing/SKILL.md",
-      "skills/tech-intel-briefing/SKILL.md"
-    ],
-    "keywords": [
-      "tech news",
-      "technology news",
-      "hardware news",
-      "ai news",
-      "noticiero",
-      "noticiero personal",
-      "briefing tech",
-      "briefing tecnológico",
-      "news briefing",
-      "weekly roundup",
-      "news roundup",
-      "deep dive",
-      "resumen de noticias",
-      "boletín tecnológico",
-      "industry briefing",
-      "audio-ready news",
-      "guion de noticias",
-      "guion narrado",
-      "noticias para audio",
-      "convertir a audio",
-      "qué está pasando en tech",
-      "que esta pasando en tech",
-      "qué hay de nuevo en hardware",
-      "que hay de nuevo en hardware",
-      "hazme un resumen semanal",
-      "hazme un briefing",
-      "explícame esta noticia",
-      "explicame esta noticia"
-    ]
-  },
-  "sdd_phases": [],
-  "related_skills": [],
-  "priority": 72
-}
-```
 
 Field conventions:
 
 - `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
 - `domains`: stable domain tags used for routing.
-- `triggers.paths`: glob-like project paths that should activate this skill.
-- `triggers.keywords`: user/request/code keywords that should activate this skill.
-- `sdd_phases`: phases where this skill is usually useful: `explore`, `proposal`, `spec`, `design`, `task`, `apply`, `verify`, `archive`.
-- `related_skills`: skills that should be considered when this skill is active.
+- `paths`: glob-like project paths that should activate this skill.
+- `keywords`: user/request/code keywords that should activate this skill.
+- `phases`: phases where this skill is usually useful: `explore`, `proposal`, `spec`, `design`, `task`, `apply`, `verify`, `archive`.
+- `related`: skills that should be considered when this skill is active.
 - `priority`: routing priority from 0 to 100. Higher means consider earlier when multiple skills match.
 
 ## Activation Contract
@@ -100,7 +56,7 @@ Prefer this skill over ad hoc web research when the user wants a repeatable dele
 - Do not use `background` mode for this workflow: automatic completion notification does not guarantee deterministic report validation and audio conversion.
 - Keep this skill lightweight: the subagent owns detailed research methodology, source-evaluation rules, `report.md`, and `sources.md` authoring.
 - Do not duplicate the subagent’s detailed editorial or source-handling rules here.
-- The delegated subagent must receive the exact output directory, the requested text/audio intent, and enough brief context to work without more user questioning.
+- The delegated subagent must receive the seven labeled delegation fields in canonical order: Goal; Known context and missing facts; Scope, paths, and exclusions; Governing contracts and ready artifacts; Assigned skills; Expected output and evidence; Blockers and next permitted action. These fields must include the exact output directory, requested text/audio intent, bounded brief, explicit exclusions, and enough context to work without more user questioning.
 - The orchestrator must not ask the subagent to create audio.
 - After task-mode completion, verify that `report.md` and `sources.md` exist before continuing.
 - When audio was requested, convert the exact `report.md` to `report.mp3` in the same directory during the same orchestrator turn.
@@ -132,11 +88,15 @@ Prefer this skill over ad hoc web research when the user wants a repeatable dele
    - a report plus audio;
    - a recurring or themed briefing.
 4. When scope is sufficient, create or assign `/home/j0k3r/news/<topic-slug>-YYYY-MM-DD/`, adding a time or suffix only on collision.
-5. Launch `news-researcher` with `mode: "task"` and provide:
+5. Launch `news-researcher` with `mode: "task"` and provide the seven labeled delegation fields in canonical order. Populate them with:
    - the exact output directory;
-   - the Spanish-first brief;
+   - the Spanish-first brief and known context;
+   - missing facts, or `None`;
    - whether the final deliverable includes audio;
-   - any timeframe, audience, topic, and source constraints from the user.
+   - timeframe, audience, topic, source scope, paths, and explicit exclusions;
+   - governing contracts and assigned skills, or `None` where applicable;
+   - expected `report.md` and `sources.md` evidence and validation;
+   - blockers and exactly one next permitted action.
 6. Wait synchronously for the task result; do not launch this workflow in background mode.
 7. After completion, verify that `report.md` and `sources.md` exist in the assigned directory. Stop and report the failure if either is absent.
 8. If the user requested audio, call `markdown_to_audio` on that exact `report.md` with `outputPath` set to the same directory’s `report.mp3` and explicit defaults: `engine: "auto"`, `language: "es"`, `speed: 1`, `sentenceSilence: 0.3`, `noiseScale: 0.667`, `noiseW: 0.8`, `voiceQuality: "auto"`, and `mp3BitrateKbps: 64`.

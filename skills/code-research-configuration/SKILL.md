@@ -1,6 +1,6 @@
 ---
 name: code-research-configuration
-description: "configure Pi Code Research project graph enablement only: .pi/code-research.json graph.enable/addGitignore, workspace_graph_status verification, and generated .pi/workspace-code-graph handling."
+description: "configure Pi Code Research for a project's code graph. Use when enabling or changing .pi/code-research.json, graph.enable, addGitignore, workspace_graph_status verification, generated workspace code-graph handling, or troubleshooting code-research availability; do not perform unrelated code investigation."
 license: Apache-2.0
 metadata:
   author: j0k3r
@@ -8,40 +8,6 @@ metadata:
 ---
 
 # Code Research Configuration
-
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "workflow",
-  "domains": ["code-research-configuration", "workspace-graph", "code-research-json"],
-  "triggers": {
-    "paths": [
-      ".pi/code-research.json",
-      ".pi/workspace-code-graph/**",
-      "skills/code-research-configuration/SKILL.md",
-      "~/.pi/agent/skills/code-research-configuration/SKILL.md"
-    ],
-    "keywords": [
-      "code research configuration",
-      "code research config",
-      "code-research.json",
-      "workspace graph",
-      "workspace-code-graph",
-      "activate graph",
-      "enable graph",
-      "graph.enable",
-      "graph disabled",
-      "workspace_graph_status"
-    ]
-  },
-  "sdd_phases": [],
-  "related_skills": ["workflow-triage"],
-  "priority": 85
-}
-```
 
 ## Activation Contract
 

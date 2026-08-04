@@ -1,70 +1,26 @@
 ---
 name: existing-project-onboarding
-description: "scan an existing software project only after explicit approval, reconstruct language-agnostic AS_IS evidence, ask for unknown intent, and coordinate only currently applicable, evidence-supported, user-approved canonical Markdown documents."
+description: "onboard, inspect, and document an existing software project after explicit approval by reconstructing language-agnostic AS_IS evidence. Use when the user asks to scan an existing codebase, understand a legacy project, document existing code, document an existing project, or reconstruct its modular documentation baseline; ask for unknown intent and avoid unsupported documents."
 license: Apache-2.0
 metadata:
   author: j0k3r
   version: "1.3"
+registry:
+  category: "product"
+  domains: "existing-project-onboarding, project-reconstruction, as-is-documentation, documentation-orchestration"
+  paths: "docs/00-discovery/05-existing-project/**/*.md"
+  keywords: "existing project, existing project onboarding, document existing project, scan project, scan existing project, scan an existing project, document codebase, existing codebase, scan this existing codebase, scan codebase for documentation, modular documentation baseline, onboarding evidence, project documentation from code, generate all necessary modular documentation, reconstruct modular documentation baseline, reconstruct project documentation, generate documentation from codebase, legacy project documentation, proyecto existente, documentar codigo, documentar proyecto existente, escanear proyecto, escanear proyecto existente, generar documentacion del proyecto, reconstruir documentacion"
+  related: "startup-documentation, product-discovery, product-definition, anti-overengineering"
+  priority: 94
 ---
 
 # Existing Project Onboarding
-
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "product",
-  "domains": ["existing-project-onboarding", "project-reconstruction", "as-is-documentation", "documentation-orchestration"],
-  "triggers": {
-    "paths": [
-      "docs/00-discovery/05-existing-project/**/*.md"
-    ],
-    "keywords": [
-      "existing project",
-      "existing project onboarding",
-      "document existing project",
-      "scan project",
-      "scan existing project",
-      "scan an existing project",
-      "document codebase",
-      "existing codebase",
-      "scan this existing codebase",
-      "scan codebase for documentation",
-      "modular documentation baseline",
-      "onboarding evidence",
-      "project documentation from code",
-      "generate all necessary modular documentation",
-      "reconstruct modular documentation baseline",
-      "reconstruct project documentation",
-      "generate documentation from codebase",
-      "legacy project documentation",
-      "proyecto existente",
-      "documentar codigo",
-      "documentar proyecto existente",
-      "escanear proyecto",
-      "escanear proyecto existente",
-      "generar documentacion del proyecto",
-      "reconstruir documentacion"
-    ]
-  },
-  "sdd_phases": [],
-  "related_skills": [
-    "startup-documentation",
-    "product-discovery",
-    "product-definition",
-    "anti-overengineering"
-  ],
-  "priority": 94
-}
-```
 
 ## Activation Contract
 
 Use this skill when an existing software project lacks the modular startup documentation baseline, when its documentation is incomplete or stale, or when the user asks the principal to scan the current implementation and coordinate currently applicable, evidence-supported canonical documents after the necessary user decisions.
 
-This is a language-, framework-, architecture-, platform-, and repository-layout-agnostic, principal-agent-only documentation capability. It is not a Pi workflow, workflow phase, or subagent role, and it does not select, replace, or alter any execution workflow. Its registry `sdd_phases` remain empty so phase-only resolution cannot activate onboarding; intent or path routing must select it explicitly. The principal agent uses it only to coordinate bounded read-only research and generate the approved modular documentation baseline. Supporting subagents must not load or apply this skill; they receive isolated research assignments and return evidence to the principal.
+This is a language-, framework-, architecture-, platform-, and repository-layout-agnostic, principal-agent-only documentation capability. It is not a Pi workflow, workflow phase, or subagent role, and it does not select, replace, or alter any execution workflow. Its registry `phases` remain empty so phase-only resolution cannot activate onboarding; intent or path routing must select it explicitly. The principal agent uses it only to coordinate bounded read-only research and generate the approved modular documentation baseline. Supporting subagents must not load or apply this skill; they receive isolated research assignments and return evidence to the principal.
 
 The principal acquires one approved evidence snapshot, delegates only the necessary independent research lanes in parallel, consolidates their evidence and conflicts, then applies the canonical owner skills itself in dependency order. Subagents never generate canonical lifecycle documents or make user-owned decisions.
 
@@ -73,7 +29,7 @@ Do not activate it for a new project with no existing implementation, a single f
 ## Hard Rules
 
 - Consume the `startup-documentation` and `references/document-contract.md` context already supplied by the router. If no router context was supplied, load them once for the shared contract without re-entering documentation routing. Load and follow `anti-overengineering` whenever this skill is active.
-- Before any project inspection or delegation, present the exact scan goal, depth, included paths, exclusions, sensitive-data policy, expected evidence outputs, intended canonical-document generation, and proposed research lanes. Obtain explicit user approval.
+- Before any project inspection or delegation, ensure the exact scan goal, depth, included paths, exclusions, sensitive-data policy, expected evidence outputs, intended canonical-document generation, and proposed research lanes are explicitly authorized. When the user's concrete request already supplies all of them, that request is the approval: begin without restating the packet or asking for a second confirmation. Ask only for materially missing or contradictory values.
 - Offer bounded scan depths without selecting for the user:
   - `ORIENTATION`: public documentation, repository structure, manifests, and non-sensitive configuration;
   - `STANDARD`: orientation plus application code, tests, data boundaries, integrations, build/deploy configuration, and operational evidence;
@@ -114,7 +70,7 @@ Do not activate it for a new project with no existing implementation, a single f
 
 ## Decision Gates
 
-Before scanning, resolve and obtain explicit approval for:
+Before scanning, ensure the request explicitly authorizes each applicable item below; values already supplied in a concrete request are approved inputs and must not be reconfirmed:
 
 - repository/project root, one canonical product boundary, documentation root, and included paths;
 - scan goal and `ORIENTATION | STANDARD | DEEP` depth;
@@ -138,7 +94,7 @@ After scanning, stop and ask grouped questions when:
 
 ## Execution Steps
 
-1. Explain the documentation-only onboarding outcome and request explicit approval for scan root, one product/documentation boundary, depth, included/excluded paths, sensitive-data policy, optional evidence sources, proposed research lanes, document language, generation timing, and decision owners.
+1. Establish the documentation-only onboarding outcome and collect only missing authorization inputs for scan root, one product/documentation boundary, depth, included/excluded paths, sensitive-data policy, optional evidence sources, proposed research lanes, document language, generation timing, and decision owners. If the concrete request already supplies the complete packet, begin without a confirmation round.
 2. After approval, the principal inspects only the narrowest orientation surfaces needed to establish the shared snapshot, project-unit map, and non-overlapping research boundaries.
 3. Select the minimum useful lanes and delegate their bounded read-only investigations in parallel. Do not delegate canonical document generation or this skill itself.
 4. Collect all lane results against the same snapshot, reject invalid provenance or scope violations, apply the deterministic ordering and deduplication contract, and preserve unresolved disagreement as `CONFLICT`.

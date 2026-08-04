@@ -1,6 +1,6 @@
 ---
 name: skill-registry-configuration
-description: "configure Pi Skill Registry project settings, especially .pi/skill-registry.config.json opt-in enablement, generated registry outputs, and safe routing validation."
+description: "configure the Pi Skill Registry extension for project skill routing. Use when enabling or changing .pi/skill-registry.config.json, configuring opt-in behavior, generating registry outputs, checking cache freshness, or validating safe skill routing."
 license: Apache-2.0
 metadata:
   author: j0k3r
@@ -9,51 +9,14 @@ metadata:
 
 # Skill Registry Configuration
 
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "workflow",
-  "domains": ["skill-registry-configuration", "skill-registry-config"],
-  "triggers": {
-    "paths": [
-      ".pi/skill-registry.config.json"
-    ],
-    "keywords": [
-      "skill registry configuration",
-      "configure skill registry",
-      "configurar skill registry",
-      "configuro skill registry",
-      "como configurar skill registry",
-      "cómo configurar skill registry",
-      "como configuro skill registry",
-      "cómo configuro skill registry",
-      "como se configura skill registry",
-      "cómo se configura skill registry",
-      "configuracion skill registry",
-      "configuración skill registry",
-      "skill registry config",
-      "skill-registry.config.json",
-      "enable skill registry",
-      "disable skill registry"
-    ]
-  },
-  "sdd_phases": [],
-  "related_skills": [],
-  "priority": 84
-}
-```
-
 Field conventions:
 
 - `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
 - `domains`: stable domain tags used for routing.
-- `triggers.paths`: glob-like project paths that should activate this skill.
-- `triggers.keywords`: configuration-only keywords that should activate this skill.
-- `sdd_phases`: keep empty for configuration-only skills so phase routing alone does not load them.
-- `related_skills`: configuration-adjacent skills only; do not add usage, implementation, or workflow skills.
+- `paths`: glob-like project paths that should activate this skill.
+- `keywords`: configuration-only keywords that should activate this skill.
+- `phases`: keep empty for configuration-only skills so phase routing alone does not load them.
+- `related`: configuration-adjacent skills only; do not add usage, implementation, or workflow skills.
 - `priority`: routing priority from 0 to 100. Higher means consider earlier when multiple skills match.
 
 ## Activation Contract

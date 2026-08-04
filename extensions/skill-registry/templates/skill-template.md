@@ -5,47 +5,31 @@ license: Apache-2.0
 metadata:
   author: your-name-or-team
   version: "1.0"
+
+# Include the registry map only when this skill should participate in Skill Registry routing.
+registry:
+  category: "base"
+  domains: "frontend, forms"
+  paths: "front/app/routes/**/*.tsx, front/app/components/**/*.tsx"
+  keywords: "useFetcher, fetcher.Form, validation, loading state"
+  phases: "explore, design, task, apply, verify"
+  related: "example-testing-skill"
+  priority: 50
 ---
 
 # Example Project Skill
 
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "base",
-  "domains": ["frontend", "forms"],
-  "triggers": {
-    "paths": [
-      "front/app/routes/**/*.tsx",
-      "front/app/components/**/*.tsx"
-    ],
-    "keywords": [
-      "useFetcher",
-      "fetcher.Form",
-      "validation",
-      "loading state"
-    ]
-  },
-  "sdd_phases": ["explore", "design", "task", "apply", "verify"],
-  "related_skills": [
-    "example-testing-skill"
-  ],
-  "priority": 50
-}
-```
-
-Field conventions:
+Registry metadata conventions:
 
 - `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
 - `domains`: stable domain tags used for routing.
-- `triggers.paths`: glob-like project paths that should activate this skill.
-- `triggers.keywords`: user/request/code keywords that should activate this skill.
-- `sdd_phases`: phases where this skill is usually useful: `explore`, `proposal`, `spec`, `design`, `task`, `apply`, `verify`, `archive`.
-- `related_skills`: skills that should be considered when this skill is active.
+- `paths`: comma-separated glob-like project paths that should activate this skill.
+- `keywords`: comma-separated user/request/code keywords that should activate this skill.
+- `phases`: comma-separated phases where this skill is usually useful: `explore`, `proposal`, `spec`, `design`, `task`, `apply`, `verify`, `archive`.
+- `related`: comma-separated skills that should be considered when this skill is active.
 - `priority`: routing priority from 0 to 100. Higher means consider earlier when multiple skills match.
+- Omit empty optional fields instead of leaving blank values.
+- To exclude a skill from Skill Registry routing, omit the entire `registry:` map. Keep the native Pi fields such as `name` and `description`.
 
 ## Activation Contract
 

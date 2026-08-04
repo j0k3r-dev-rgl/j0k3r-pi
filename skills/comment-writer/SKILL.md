@@ -1,57 +1,29 @@
 ---
 name: comment-writer
-description: "write or revise warm, direct PR feedback, issue replies, code-review comments, GitHub comments, and Slack or Discord collaboration messages."
+description: "write or revise warm, direct, constructive collaboration messages. Use when drafting pull request feedback, issue replies, code-review comments, GitHub comments, or Slack and Discord messages; preserve the intended tone, context, and requested outcome."
 license: Apache-2.0
 metadata:
   author: gentleman-programming
   version: "1.2"
+registry:
+  category: "quality"
+  domains: "collaboration, code-review, comments, technical-communication"
+  paths: ".github/ISSUE_TEMPLATE/**/*.md, .github/pull_request_template*.md, .github/PULL_REQUEST_TEMPLATE/**/*.md"
+  keywords: "PR comment, pull request feedback, review comment, request changes, issue reply, GitHub comment, maintainer reply, Slack message, Discord message, collaboration comment, write a comment, reply to this thread"
+  related: "cognitive-doc-design"
+  priority: 60
 ---
 
 # Comment Writer
-
-## Registry Contract
-
-Use this block as the machine-readable source for `.pi/skill-registry.json` generation. Keep it valid JSON.
-
-```json
-{
-  "category": "quality",
-  "domains": ["collaboration", "code-review", "comments", "technical-communication"],
-  "triggers": {
-    "paths": [
-      ".github/ISSUE_TEMPLATE/**/*.md",
-      ".github/pull_request_template*.md",
-      ".github/PULL_REQUEST_TEMPLATE/**/*.md"
-    ],
-    "keywords": [
-      "PR comment",
-      "pull request feedback",
-      "review comment",
-      "request changes",
-      "issue reply",
-      "GitHub comment",
-      "maintainer reply",
-      "Slack message",
-      "Discord message",
-      "collaboration comment",
-      "write a comment",
-      "reply to this thread"
-    ]
-  },
-  "sdd_phases": [],
-  "related_skills": ["cognitive-doc-design"],
-  "priority": 60
-}
-```
 
 Field conventions:
 
 - `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
 - `domains`: stable domain tags used for routing.
-- `triggers.paths`: glob-like project paths that should activate this skill.
-- `triggers.keywords`: user/request/code keywords that should activate this skill.
-- `sdd_phases`: phases where this skill is usually useful: `explore`, `proposal`, `spec`, `design`, `task`, `apply`, `verify`, `archive`.
-- `related_skills`: skills that should be considered when this skill is active.
+- `paths`: glob-like project paths that should activate this skill.
+- `keywords`: user/request/code keywords that should activate this skill.
+- `phases`: phases where this skill is usually useful: `explore`, `proposal`, `spec`, `design`, `task`, `apply`, `verify`, `archive`.
+- `related`: skills that should be considered when this skill is active.
 - `priority`: routing priority from 0 to 100. Higher means consider earlier when multiple skills match.
 
 ## Activation Contract
@@ -143,5 +115,5 @@ Return:
 
 ## References
 
-- `extensions/skill-registry/templates/skill-template.md` — canonical Pi skill structure and registry contract.
+- `extensions/skill-registry/templates/skill-template.md` — canonical Pi skill structure and registry metadata.
 - The target PR, issue, review, or conversation thread — source of truth for facts, language, and tone.
