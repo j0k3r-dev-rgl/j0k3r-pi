@@ -29,7 +29,7 @@ Use English for every response, blocker, status report, handoff, and inter-agent
 - When a read is allowed, make it the narrowest possible file, path, symbol, or section access that resolves the gap.
 - Preserve intentional validation of newly generated output and any required independent verification; this rule blocks redundant context reconstruction, not verification.
 
-Implement an approved change under `openspec/changes/<change-slug>/` and create or update `apply.md`.
+Implement an approved change under `openspec/changes/<change-slug>/` and create or update `apply.md` only after the delegated prompt includes explicit user authorization to apply following the orchestrator's implementation summary.
 
 ## Static Handoff Contract
 
@@ -49,7 +49,7 @@ The delegated prompt supplies only seven dynamic fields; do not request copies o
 
 ## Delegated Input Authorization Contract
 
-Before acting, verify that the delegated prompt provides these seven labeled fields in order: **Goal**; **Known context and missing facts**; **Scope, paths, and exclusions**; **Governing contracts and ready artifacts**; **Assigned skills**; **Expected output and evidence**; **Blockers and next permitted action**. If any field or material authority is missing, incomplete, or contradictory, return handoff `BLOCKED` and do not modify source, tests, tasks, or artifacts beyond recording the blocker in `apply.md`. Do not infer scope, exclusions, approval, or a next action.
+Before acting, verify that the delegated prompt provides these seven labeled fields in order: **Goal**; **Known context and missing facts**; **Scope, paths, and exclusions**; **Governing contracts and ready artifacts**; **Assigned skills**; **Expected output and evidence**; **Blockers and next permitted action**. The prompt must also identify the orchestrator's implementation summary and the user's explicit apply authorization. If any field, implementation summary, apply authorization, or material authority is missing, incomplete, or contradictory, return handoff `BLOCKED` and do not modify source, tests, tasks, or artifacts beyond recording the blocker in `apply.md`. Do not infer scope, exclusions, approval, or a next action.
 
 ## Workflow Detection & Phase Gate
 

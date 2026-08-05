@@ -134,10 +134,10 @@ Use exactly one workflow for an execution request. Route and begin without a sec
 - **Artifacts and Agents**:
   1. Optional `prd.md` (`prd-review`) when approved.
   2. `mini-sdd.md` maintained by the orchestrator as the workflow plan; Mini-SDD is a workflow, not a subagent.
-  3. `apply.md` (`sdd-apply`).
+  3. `apply.md` (`sdd-apply`) only after the orchestrator summarizes the planned implementation and the user explicitly authorizes apply.
   4. `verify.md` (`sdd-verify`).
-  5. Archive the completed change with `sdd-archive` under `openspec/archive/YYYY-MM-DD/<change-slug>/`.
-- **Phase Gate**: The orchestrator reads each artifact once, checks `Workflow Status`, and does not start the next phase while blockers remain. Any verification result other than `PASS` stops for user notification and explicit decision; no repair or rerun starts automatically. A passing Mini-SDD is not complete until archive reaches destination-only success.
+  5. Archive the completed change with `sdd-archive` under `openspec/archive/YYYY-MM-DD/<change-slug>/` only after the user explicitly authorizes archive.
+- **Phase Gate**: The orchestrator reads each artifact once, checks `Workflow Status`, and does not start the next phase while blockers remain. Before apply, the orchestrator summarizes what will be implemented, validation expected, exact scope, exclusions, and known risks, then waits for explicit user authorization. Any verification result other than `PASS` stops for user notification and explicit decision; no repair or rerun starts automatically. A passing Mini-SDD is not complete until the user authorizes archive and archive reaches destination-only success.
 
 ### 3. Formal OpenSpec SDD
 
@@ -151,10 +151,10 @@ Use exactly one workflow for an execution request. Route and begin without a sec
   5. `spec.md` (`sdd-spec`) defines only `REQ-###` requirements and `SCENARIO-###` acceptance contracts linked to deltas.
   6. `design.md` (`sdd-design`) defines only `DES-###` technical decisions linked to requirements.
   7. `tasks.md` (`sdd-task`) defines only `TASK-###` executable work linked to designs and requirements.
-  8. `apply.md` (`sdd-apply`) records implementation and change-type validation evidence.
+  8. `apply.md` (`sdd-apply`) records implementation and change-type validation evidence, only after the orchestrator summarizes the planned implementation and the user explicitly authorizes apply.
   9. `verify.md` (`sdd-verify`) independently verifies the implementation.
-  10. Archive the completed change with `sdd-archive` under `openspec/archive/YYYY-MM-DD/<change-slug>/`.
-- **Phase Gate**: At every boundary, the orchestrator reads the relevant prior artifact, checks `Workflow Status`, and resolves blockers with the user before advancing. Any verification result other than `PASS` stops the workflow, is reported to the user with evidence, and requires an explicit user decision before repair or another verification attempt.
+  10. Archive the completed change with `sdd-archive` under `openspec/archive/YYYY-MM-DD/<change-slug>/` only after the user explicitly authorizes archive.
+- **Phase Gate**: At every boundary, the orchestrator reads the relevant prior artifact, checks `Workflow Status`, and resolves blockers with the user before advancing. Before apply, the orchestrator summarizes what will be implemented, validation expected, exact scope, exclusions, and known risks, then waits for explicit user authorization. Any verification result other than `PASS` stops the workflow, is reported to the user with evidence, and requires an explicit user decision before repair or another verification attempt. Passing verification permits an archive authorization request, not automatic archive.
 
 ---
 
@@ -163,7 +163,7 @@ Use exactly one workflow for an execution request. Route and begin without a sec
 - **Orchestrator Role**: Route each concrete execution request to the appropriate workflow, coordinate approved work, read phase artifacts, surface blockers, preserve the user's scope, and avoid broad direct project/source inspection except for explicitly authorized bounded file access. Ask for confirmation only when a material workflow or scope decision is unresolved.
 - **User Choice Wins**: If the user requests direct orchestrator execution for a small, concrete, explicitly scoped file set, the orchestrator may perform that bounded work immediately. If the request would require broad project/source inspection, code investigation, or expanding scope, explain the boundary and route the work through the approved delegated executor instead.
 - **Discovery Boundary**: Use `discovery` for approved unknown research. SDD phase agents consume curated context and artifacts; they do not perform broad exploratory research.
-- **Execution Authorization**: A concrete Mini-SDD or Formal SDD execution request authorizes expected phase subagents and directly required artifact reads within the agreed scope. Do not ask for a separate start instruction. Unexpected research or expansion still requires renewed confirmation.
+- **Execution Authorization**: A concrete Mini-SDD or Formal SDD execution request authorizes planning, expected pre-apply phase subagents, and directly required artifact reads within the agreed scope. Do not ask for a separate start instruction. `sdd-apply` and `sdd-archive` are separate mutation gates: apply requires an implementation summary followed by explicit user authorization, and archive requires explicit user authorization after passing verification. Unexpected research or expansion still requires renewed confirmation.
 - **Discovery Handoff Rule**: When workflow progress needs project or code investigation that is not already supplied in active context and not fully covered by an explicitly authorized small file set, delegate that bounded investigation to `discovery` after the applicable authorization instead of expanding direct inspection.
 
 ### Complete Delegation Input Contract
@@ -192,7 +192,7 @@ Rules:
 - **User Communication Boundary**: The orchestrator may translate or summarize subagent output when responding in the user's preferred language. Subagents must not switch their inter-agent communication language to match the user.
 - **Lean-Mode Awareness**: Subagents do not automatically receive `AGENTS.md`, skills, memory context, or prior conversation. Stable role, status, blocker, handoff, and output contracts live in each subagent definition so they remain cacheable. Delegated prompts contain only the seven dynamic input fields and exact task context; do not repeat stable contracts, full conversation, or unrelated upstream artifacts. Do not ask or expect subagents to read `AGENTS.md`.
 - **Blocker Contract**: Subagents mark artifacts `BLOCKED` and report precise questions instead of inventing requirements or silently expanding scope.
-- **Bounded Resolution**: Implementation subagents may test, fix, and refactor during their assigned apply task. After independent verification returns anything other than `PASS`, automation stops, the orchestrator notifies the user with evidence, and no repair or rerun begins without the user's explicit decision.
+- **Bounded Resolution**: After the user explicitly authorizes apply, implementation subagents may test, fix, and refactor during their assigned apply task. After independent verification returns anything other than `PASS`, automation stops, the orchestrator notifies the user with evidence, and no repair or rerun begins without the user's explicit decision. After independent verification passes, automation stops for an archive authorization request; archive must not run automatically.
 
 ---
 
@@ -207,7 +207,7 @@ Rules:
 | User intent, selected scope, workflow choice, task authorization, and user-owned product decisions | Latest applicable user request or decision | Cannot silently waive non-overridable safety or quality policy |
 | Global policy, allowed workflows, consent model, handoff semantics, candidate identity, attempt budgets, qualitative review-workload factors, manifest grammar, and delivery safeguards | `AGENTS.md` | Lower-level contracts must conform |
 | Workflow routing and qualitative re-triage signals | `skills/workflow-triage/SKILL.md` | Must preserve exactly three workflows |
-| SDD lifecycle, visible phase status, dependency record placement, forecast placement, receipt timing, candidate linkage, and artifact/handoff gating | `skills/sdd-workflow/SKILL.md` | Later phases cannot override blocked earlier phases |
+| SDD lifecycle, visible phase status, dependency record placement, forecast placement, receipt timing, candidate linkage, apply/archive authorization gates, and artifact/handoff gating | `skills/sdd-workflow/SKILL.md` | Later phases cannot override blocked earlier phases or bypass apply/archive user authorization |
 | Change-specific approved requirements and architecture | Latest applicable ready SDD artifact | Later phases refine but do not contradict earlier approved contracts |
 | Implementation facts | Exact candidate files and reproducible validation evidence | Plans and reports do not override observed facts |
 | Final verification and delivery claims | Independent verification evidence, tied to the same candidate identity when identity was triggered | Implementer self-report is not final verification evidence |

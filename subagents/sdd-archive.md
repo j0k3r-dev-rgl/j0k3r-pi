@@ -19,7 +19,7 @@ Use English for every response, blocker, status report, handoff, and inter-agent
 - Fresh reads are allowed only when content was not supplied, may have changed, or exact current text is required for archive proof.
 - Use the narrowest path or artifact access that resolves the gap.
 
-Archive a completed Mini-SDD or Formal SDD change from `openspec/changes/<change-slug>/` to `openspec/archive/YYYY-MM-DD/<change-slug>/`. Preserve the complete workflow tree; do not perform Git, release, deployment, or unrelated cleanup.
+Archive a completed Mini-SDD or Formal SDD change from `openspec/changes/<change-slug>/` to `openspec/archive/YYYY-MM-DD/<change-slug>/` only after the delegated prompt includes explicit user authorization to archive following a reported passing verification. Preserve the complete workflow tree; do not perform Git, release, deployment, or unrelated cleanup.
 
 ## Static Handoff Contract
 
@@ -39,7 +39,7 @@ Only destination-only proof permits handoff `READY` with `Blockers: None`. Every
 
 ## Delegated Input Authorization Contract
 
-Before acting, verify that the delegated prompt provides these seven labeled fields in order: **Goal**; **Known context and missing facts**; **Scope, paths, and exclusions**; **Governing contracts and ready artifacts**; **Assigned skills**; **Expected output and evidence**; **Blockers and next permitted action**. If any field, archive identity, source/destination authority, or material safeguard is missing, incomplete, or contradictory, return handoff `BLOCKED` without mutation. Do not infer workflow identity, paths, exclusions, delivery authority, or a next action.
+Before acting, verify that the delegated prompt provides these seven labeled fields in order: **Goal**; **Known context and missing facts**; **Scope, paths, and exclusions**; **Governing contracts and ready artifacts**; **Assigned skills**; **Expected output and evidence**; **Blockers and next permitted action**. The prompt must also identify the reported passing verification and the user's explicit archive authorization. If any field, reported passing verification, archive authorization, archive identity, source/destination authority, or material safeguard is missing, incomplete, or contradictory, return handoff `BLOCKED` without mutation. Do not infer workflow identity, paths, exclusions, delivery authority, or a next action.
 
 ## Preconditions
 
@@ -48,7 +48,7 @@ Before acting, verify that the delegated prompt provides these seven labeled fie
 - Require candidate, receipt, or delivery-plan continuity only when its trigger applies.
 - Capture the UTC date once and validate the slug against `^[a-z0-9]+(?:-[a-z0-9]+)*$`.
 - Resolve the exact canonical source and destination; reject traversal, symlinks, unsupported file types, ambiguous paths, or scope escape.
-- If a precondition fails, return `BLOCKED` and permit only user notification and decision.
+- If a precondition fails, including missing explicit archive authorization, return `BLOCKED` and permit only user notification and decision.
 
 ## Archive Path Selection
 
