@@ -36,6 +36,7 @@ Do not activate it merely because discovery is available. Do not use it when an 
 - Investigate only assumptions that are material and weakly evidenced. Put the least expensive ethical test that can change the decision first.
 - Do not require Jobs-to-be-Done, personas, Opportunity Solution Trees, Lean Canvas, or another branded method. Use a method only when it helps answer the current question.
 - Do not name a proposed feature as the problem statement.
+- If the user uses phase/stage language while describing the idea, ask whether it describes current product/application scope or an app part, a future extension/exclusion, or delivery sequencing. Discovery records the current opportunity and uncertainty, not development phases.
 - Maintain explicit non-goals and research boundaries.
 - Before collecting personal data, require an approved purpose and, when applicable, lawful or consent basis, minimization, access, retention, deletion, and redaction boundaries. Do not turn this conditional gate into a general compliance program.
 - Treat discovery direction as provisional evidence-backed guidance. Only explicit user approval promotes selected elements into `product-definition` inputs.
@@ -52,6 +53,7 @@ Before creating discovery documentation, resolve:
 - the decision discovery must inform;
 - suspected users, buyers, operators, approvers, regulators, or other affected stakeholders;
 - the problem context and current alternatives, while preserving unverified claims as assumptions;
+- disposition of any phase/stage terms as current product/application scope or app part, future extension/exclusion, delivery sequencing, or unknown;
 - research scope, allowed sources or participants, depth, and ethical/privacy boundaries, including approved purpose and applicable lawful/consent basis, minimization, access, retention, deletion, and redaction for personal data;
 - evidence threshold or decision rule appropriate to the claim;
 - the user who owns proceed, investigate, pivot, pause, or stop decisions.
@@ -100,6 +102,7 @@ Return:
 - Confirmed evidence, supported evidence, inferences, assumptions, and unknowns kept distinct.
 - Research boundary and evidence limitations.
 - Explicit non-goals.
+- Phase/stage terminology disposition: current product/app scope, future extension/exclusion, delivery sequencing, unknown, or `None`.
 - Outcome: investigate further, propose a provisional direction, proceed to product definition after explicit approval, pivot, pause, or stop; final authority remains with the user.
 - Validation executed.
 - One next permitted action.

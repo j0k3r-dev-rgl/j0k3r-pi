@@ -22,7 +22,7 @@ Use this skill when a user starts or reorganizes a software startup's project do
 
 This is a domain-documentation router. It does not create a fourth Pi execution workflow and does not replace Direct Orchestrator, Mini-SDD, or Formal SDD. Registry `phases` is intentionally empty: this skill activates by documentation intent or owned paths, never by SDD phase alone, and it does not authorize workflow actions. Load the specific domain skill that owns the requested decision. Use `existing-project-onboarding` when an existing implementation must be scanned and reconstructed into the modular documentation baseline. Use `product-discovery` when a new project's problem, users, evidence, assumptions, or product direction are not yet established.
 
-Do not create the complete documentation tree eagerly, generate empty placeholder files, or use this skill to decide product scope, architecture, technology, sprint content, or validation thresholds.
+Do not create the complete documentation tree eagerly, generate empty placeholder files, split the official project narrative into development phases, or use this skill to decide product scope, architecture, technology, sprint content, or validation thresholds.
 
 ## Change Intake Routing
 
@@ -61,6 +61,10 @@ Missing non-applicable lifecycle groups do not block readiness. Missing behavior
 
 - Load and follow `anti-overengineering` whenever this skill is active.
 - Store durable project documentation as Markdown under the exact approved group and owner paths in `references/document-contract.md`.
+- Treat new-project documentation as one coherent product/application. Product, requirement, architecture, and validation documents must describe current app decisions without development phase labels.
+- If the user says phase, stage, etapa, milestone, sprint, or similar, ask whether it is a real product/application part or a development/delivery slice. If it is product scope for the MVP/current app, document it as ordinary app scope, journeys, capabilities, requirements, or architecture. If it is not part of the current product work, record it as a future improvement, possible extension, exclusion, or Delivery `Later` item. If it is delivery sequencing, route it to `delivery-planning` rather than product/architecture docs.
+- Document development as traceable product evolution, not as a chronological diary or hidden rewrite of the base product. A post-base feature that was not in approved documentation must be classified as current-scope refinement, product extension, changed decision, future improvement, or out of scope before any downstream document or implementation route.
+- When an approved extension or changed decision enters the product, update only the canonical owner documents and link back to the original product, requirement, architecture, delivery, validation, or change-request records that it extends or supersedes. Preserve the original decision context instead of editing history to make the extension look preexisting.
 - Create only the group, index, and document needed for the current approved decision. Never scaffold every possible document.
 - Each document owns one coherent subject or decision family. Split it only when parts need independent review, value, risk, evidence, approval, or delivery handling now.
 - Treat summary documents as navigation and decision summaries; put repeated evidence, requirements, decisions, integrations, increments, sprints, and experiments in numbered child files.
@@ -73,7 +77,7 @@ Missing non-applicable lifecycle groups do not block readiness. Missing behavior
 - Route architecture drivers and views to `architecture-definition`; route ADRs, technology selections, dependency decisions, and integrations to `technical-decisions`.
 - Route product outcome and success/guardrail intent to `product-definition`; route operational metric definitions, thresholds, results, and learning decisions to `product-validation`.
 - When upstream evidence or decisions change, identify affected links and request review only for materially affected descendants. If impact cannot be bounded safely, mark the uncertainty and ask the user.
-- Do not place architecture, technology, delivery, or implementation decisions inside discovery or product documents. Route them to their owning group and skill.
+- Do not place architecture, technology, delivery, implementation decisions, or development-phase sequencing inside discovery or product documents. Route them to their owning group and skill.
 - Follow `references/document-contract.md` for document metadata, status, numbering, ownership, evidence provenance, material change requests, trace promotion, links, boundaries, and change handling.
 - Load this router once for the current routing decision. Resolve direct matches without related-skill expansion, then select the exact canonical owner by path/decision contract. Generic documentation or supporting skills never co-own a lifecycle artifact and do not displace a matching owner even when also returned by routing. Load only the selected owner and its explicitly applicable mandatory dependencies. Related skills are handoff hints, not an instruction to load the lifecycle. Keep registry-level related expansion minimal for this umbrella router; owner-specific handoffs are selected explicitly from the routing table and must not be encoded as broad automatic fan-out. The selected owner consumes the shared contract directly and must not recursively restart routing.
 
@@ -83,6 +87,7 @@ Before creating or changing documentation, resolve only what is necessary now:
 
 - project and document language when no parent or existing convention establishes it;
 - the current decision or question the document must answer;
+- when phase/stage language appears, whether it names a real product part, future extension, or delivery sequencing;
 - the canonical group and owning domain skill;
 - the user who owns any material product, architecture, cost, risk, or delivery decision;
 - whether current claims are evidence, inference, assumptions, or unknowns;
@@ -117,7 +122,8 @@ Return:
 - Decision or question documented.
 - User decisions requested and resolved, or `None`.
 - Evidence, inference, assumptions, and unknowns kept distinct.
-- Documents created or updated; empty or speculative documents created: `None`.
+- Phase/stage terminology disposition: product part, future extension/exclusion, delivery sequencing, or `None`.
+- Documents created or updated; empty, speculative, or phase-scaffold documents created: `None`.
 - Trace links and materially affected descendants.
 - Validation executed.
 - One next permitted action, or `None`.

@@ -22,7 +22,7 @@ Use this skill when an evidence-backed opportunity or an explicitly accepted pro
 
 Activate it after product discovery has produced sufficient evidence for the current decision, or when the user explicitly supplies and accepts the problem, target audience, assumptions, and uncertainty as the starting contract.
 
-Do not use it to conduct customer research, invent market evidence, write detailed functional requirements, design architecture, select technology, plan sprints, or implement software. Do not redefine discovery evidence; issue a linked change request when new product reasoning challenges it.
+Do not use it to conduct customer research, invent market evidence, write detailed functional requirements, design architecture, select technology, plan sprints, define development phases, or implement software. Do not redefine discovery evidence; issue a linked change request when new product reasoning challenges it.
 
 ## Hard Rules
 
@@ -36,9 +36,11 @@ Do not use it to conduct customer research, invent market evidence, write detail
 - Product owns outcome, success, and guardrail intent. `product-validation` owns operational metric definitions, cohorts, collection and analysis, baselines, thresholds, observation periods, results, and learning decisions; product documents link those metric IDs instead of redefining them.
 - Predeclare the decision rule and success, failure, and guardrail intent before execution. Never reinterpret success after results are observed.
 - Keep explicit exclusions beside scope. Do not hide deferred ideas in the current commitment.
-- Model journeys and capabilities as small vertical product behaviors, not frontend/backend/database layers or assumed technical modules.
+- Treat MVP and current product scope as one coherent app experience, not as phase 1/phase 2 or staged official product documentation.
+- If the user describes product scope using phase/stage language, ask whether each named phase is a real part of the user-facing product now, a future improvement/possible extension, or delivery sequencing. Current MVP parts become normal scope, journeys, and capabilities without phase labels. Future items stay in exclusions or possible extensions. Delivery sequencing belongs to `delivery-planning`.
+- Model journeys and capabilities as small vertical product behaviors, not frontend/backend/database layers, assumed technical modules, or delivery phases.
 - Split a capability only when its parts need independent review, value, risk, evidence, approval, or delivery handling now. Otherwise keep one cohesive vertical capability and list its sub-behaviors.
-- Do not specify languages, frameworks, libraries, storage, APIs, architecture patterns, migrations, sprint dates, or implementation tasks.
+- Do not specify languages, frameworks, libraries, storage, APIs, architecture patterns, migrations, sprint dates, delivery phases, or implementation tasks.
 - Reuse approved language, decision owners, scope, evidence references, and metadata unless they are absent, stale, contradicted, or specific to the current product decision.
 - Create only the documents needed for the current approved decision; never generate the whole product group automatically.
 
@@ -55,6 +57,7 @@ Before defining product documentation, resolve:
 - success, failure, and guardrail intent plus the decision rule;
 - included scope, explicit exclusions, time/cost boundary, and mandatory constraints;
 - essential end-to-end journeys and small functional capability boundaries;
+- disposition of any phase/stage terms as current product parts, future extensions/exclusions, or delivery sequencing;
 - user who owns scope and trade-off decisions.
 
 Stop and ask when:
@@ -103,6 +106,7 @@ Return:
 - User-owned choices requested and resolved.
 - Capabilities included with their value, learning, measurement, or mandatory-constraint links.
 - Assumptions and unknowns preserved.
+- Phase/stage terminology disposition: product part, future extension/exclusion, delivery sequencing, or `None`.
 - Architecture, technology, sprint planning, and implementation performed: `None`.
 - Validation executed.
 - One next permitted action.

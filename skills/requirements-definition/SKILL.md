@@ -22,7 +22,7 @@ Use this skill when approved product scope, journeys, and capabilities must beco
 
 Activate it for one small functional capability or one coherent quality/constraint family at a time. Prefer vertical, user-observable behavior that can be implemented and accepted independently.
 
-Do not use it to discover the problem, choose MVP scope, design architecture, select languages/frameworks/libraries/vendors, plan sprints, prescribe migrations, or implement software. Requirements state what must be true and how it is verified; downstream design decides how.
+Do not use it to discover the problem, choose MVP scope, design architecture, select languages/frameworks/libraries/vendors, plan sprints, define development phases, prescribe migrations, or implement software. Requirements state what must be true and how it is verified; downstream design decides how.
 
 ## Hard Rules
 
@@ -31,7 +31,7 @@ Do not use it to discover the problem, choose MVP scope, design architecture, se
 - Ask the user before defining behavior, business rules, data obligations, priorities, error handling, boundary conditions, quality targets, compatibility requirements, or acceptance criteria not established by approved inputs.
 - Assign stable identifiers to every requirement and acceptance criterion. Never renumber or reuse retired identifiers.
 - Link each functional requirement to an approved product capability, user journey, outcome, MVP hypothesis, or mandatory constraint. A requirement without a current parent reason is blocked or excluded.
-- Write requirements as observable capabilities or constraints. Do not prescribe internal components, frameworks, tables, queues, services, patterns, or deployment mechanisms.
+- Write requirements as observable capabilities or constraints. Do not prescribe internal components, frameworks, tables, queues, services, patterns, deployment mechanisms, or development/delivery phases.
 - Keep one functional record focused on one small, cohesive, independently reviewable capability slice. Split it when behaviors have independent outcomes, rules, acceptance, or risk.
 - Include normal behavior, relevant alternatives, errors, boundaries, permissions, and data effects needed for complete functional behavior. “Fully functional” means the approved slice satisfies all of its applicable acceptance and quality conditions, not that speculative future cases are added.
 - Identify quality categories early but specify only those justified by user impact, risk, regulation, contract, or release level. Do not invent scale, latency, availability, security certification, or compatibility targets.
@@ -52,7 +52,8 @@ Before writing requirements, resolve:
 - expected behavior, alternatives, errors, boundaries, and data outcomes;
 - applicable privacy, security, accessibility, reliability, performance, regulatory, contractual, interoperability, retention, or compatibility obligations;
 - measurable acceptance examples and decision owner;
-- dependencies on other approved capabilities without assuming implementation order.
+- dependencies on other approved capabilities without assuming implementation order or phase labels.
+- disposition of any user-supplied phase/stage term as current app behavior, future extension/exclusion, or delivery sequencing.
 
 Stop and ask when:
 
@@ -98,6 +99,7 @@ Return:
 - User decisions requested and resolved.
 - Applicable quality areas included with justification; speculative quality targets added: `None`.
 - Traceability from requirement to product outcome, capability, journey, hypothesis, or mandatory constraint, plus requirement/acceptance links expected from conformance evidence.
+- Phase/stage terminology disposition: app behavior, future extension/exclusion, delivery sequencing, or `None`.
 - Architecture, technology, migration mechanism, sprint planning, and implementation performed: `None`.
 - Validation executed.
 - One next permitted action.

@@ -1,6 +1,6 @@
 # Numbered Modular Documentation Contract
 
-This contract governs startup lifecycle documents created under `docs/`. It defines documentation structure, not product or technical decisions.
+This contract governs startup lifecycle documents created under `docs/`. It defines documentation structure, not product or technical decisions. Official project documentation describes one coherent product/application; it must not split the product narrative into development phases or stages. If the user confirms a named phase is real product scope, document it as an ordinary app part rather than as a phase.
 
 ## Approved groups
 
@@ -78,7 +78,9 @@ docs/05-validation/01-experiments/0001-registration-activation.md
 
 ## Document boundary
 
-A document must answer one coherent question or own one decision family. Split it when independent parts:
+A document must answer one coherent question or own one decision family. Treat the project as a single coherent product/application across discovery, product, requirements, architecture, and validation documents. MVP documentation is valid as the current app hypothesis and scope, but not as a separate official product phase. Do not document MVP, launch, later, phase 1, phase 2, sprint, or roadmap slices as separate official product phases. If the user uses phase/stage language, first clarify whether it means a real part of the product experience or only a development/delivery slice. Product-experience parts are documented as normal scope, journeys, capabilities, requirements, or architecture decisions without phase labels. Development/delivery slices belong only in Delivery roadmap, increments, or sprints. Work not included now is recorded as an exclusion, future improvement, possible extension, or `Later` roadmap item rather than as an official product phase.
+
+Split it when independent parts:
 
 - have different decision owners;
 - can be approved or superseded independently;
@@ -150,10 +152,18 @@ Do not copy full parent content into child documents. Link to stable document or
 - Requirements owns verifiable functional requirements, applicable quality requirements, product constraints, and acceptance criteria.
 - Architecture owns architecture drivers, system context, system boundaries, data/trust boundaries, and deployment views.
 - Technical Decisions owns architecture decision records, technology selections, dependency decisions, and integrations.
-- Delivery owns delivery model, roadmap, Definition of Done, increments, and sprint commitments.
+- Delivery owns delivery model, roadmap, Definition of Done, increments, and sprint commitments. Delivery may modularize work into roadmap horizons, increments, and sprints; upstream official product, requirements, architecture, and validation documentation must remain a single coherent project view rather than being organized as development phases. Delivery records must recommend Git as the trace boundary between increments/sprints and link the authorized commit hash when one exists; this does not authorize commits or pushes by itself.
 - Validation owns operational metric definitions, cohorts, collection and analysis methods, baselines, thresholds, observation periods, experiments, observed outcomes, learning decisions, and the lifecycle of cross-owner material change-request records. The target domain owner alone decides and applies the proposed semantic change.
 
 A downstream document may challenge an upstream decision with new evidence, but it must emit a material change request or trace link rather than silently rewriting the upstream fact.
+
+## Development evolution trace
+
+Document development as traceable evolution of one coherent product, not as a chronological diary, phase narrative, or silent rewrite of the original approved scope and design. When a capability, behavior, integration, constraint, or delivery item is proposed after the base product documentation, first classify it as one of: current-scope refinement, product extension, changed approved decision, future improvement, or out of scope.
+
+Approved refinements, extensions, and changed decisions are recorded in the canonical owner document for the decision they affect and link to the original approved artifact they extend, refine, supersede, or challenge. Use material change requests when the new work changes or conflicts with approved semantics. Delivery increments/sprints and authorized commits provide implementation trace; they do not replace product, requirement, architecture, technical-decision, or validation ownership.
+
+Do not duplicate a long development history inside product descriptions. The development record is reconstructed from stable document IDs, trace links, change requests, delivery increment/sprint records, validation evidence, and authorized commit hashes.
 
 ## Evidence provenance
 
@@ -252,7 +262,11 @@ Before reporting `Validation executed`, run and report the applicable checks:
 - evidence provenance and sensitive-data sanitization are complete when evidence is recorded;
 - parent, requirement, acceptance, decision, and change-request links required by the artifact resolve;
 - no canonical fact is duplicated or silently rewritten across owners;
+- post-base refinements, extensions, or changed decisions link to the original approved artifact they extend, refine, supersede, or challenge;
 - no empty, speculative, or unsupported artifact was created; and
+- no official product, requirements, architecture, or validation document uses phase/stage labels for development sequencing;
+- delivery increment/sprint records include evidence of focused questions, mini-summary, and explicit user confirmation before creation or update;
+- delivery increment/sprint records include Git trace guidance and link an authorized commit hash when one exists, or state why no commit exists; and
 - exactly one next permitted action is stated, or `None` when complete.
 
 Use focused syntax or registry checks when the changed artifact defines Mermaid or skill routing. Record `NOT_APPLICABLE` with a reason for checks that do not apply; never report a bare validation claim.
