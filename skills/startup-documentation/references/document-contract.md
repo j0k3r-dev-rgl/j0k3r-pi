@@ -265,7 +265,7 @@ Before reporting `Validation executed`, run and report the applicable checks:
 - post-base refinements, extensions, or changed decisions link to the original approved artifact they extend, refine, supersede, or challenge;
 - no empty, speculative, or unsupported artifact was created; and
 - no official product, requirements, architecture, or validation document uses phase/stage labels for development sequencing;
-- delivery increment/sprint records include evidence of focused questions, mini-summary, and explicit user confirmation before creation or update;
+- delivery increment/sprint records include evidence of focused questions, recommendations kept separate from assumptions, unresolved choices blocked until user decision, mini-summary, and explicit user confirmation before creation or update;
 - delivery increment/sprint records include Git trace guidance and link an authorized commit hash when one exists, or state why no commit exists; and
 - exactly one next permitted action is stated, or `None` when complete.
 

@@ -29,7 +29,7 @@ Do not use it to discover the product, expand scope, invent capacity or dates, r
 - Consume the `startup-documentation` and `references/document-contract.md` context already supplied by the router. If no router context was supplied, load them once for the shared contract without re-entering documentation routing. Load and follow `anti-overengineering` whenever this skill is active. Load `tdd` when planning code changes.
 - Use approved product, requirement, architecture, and technical-decision IDs as inputs. Stop if the functional slice, acceptance, applicable quality conditions, dependency, or decision owner needed for planning is unresolved.
 - Ask the user before selecting delivery model, cadence, sprint length, capacity assumption, priority, sequence, scope commitment, release boundary, quality policy, rollout, rollback, or date.
-- Always ask a focused question set before defining an increment or sprint. Then present a mini-summary of the proposed increment/sprint goal, included app behavior, exclusions, validation/DoD, dependencies, risks, and delivery model assumptions, and request explicit user confirmation before writing or updating the increment/sprint document.
+- Always ask a focused question set before defining each increment or sprint. Never assume the goal, scope, sequence, cadence, capacity, dependencies, validation, Definition of Done, release boundary, Git trace preference, or commit intent for an increment/sprint. The agent may recommend the simplest coherent option and explain trade-offs, but the user must decide. Then present a mini-summary of the proposed increment/sprint goal, included app behavior, exclusions, validation/DoD, dependencies, risks, and delivery model assumptions, and request explicit user confirmation before writing or updating the increment/sprint document.
 - Choose Scrum only when a stable team benefits from a protected short-term outcome and recurring inspect/adapt boundary. Choose Kanban/continuous flow when arrivals are volatile, interrupt-driven, or better forecast through flow. Use a hybrid only when each retained mechanism solves a demonstrated problem. When Kanban/flow is selected, use `03-increments/` records as flow items and create `04-sprints/` records only when sprints are explicitly selected.
 - Roadmaps communicate outcomes, hypotheses, confidence, dependencies, and horizons. They do not become detailed feature/date promises, and they do not redefine official product scope as phases.
 - Plan at lower detail farther from execution: `Now` is concrete, `Next` is directional, and `Later` remains optional and low-confidence. If a user-supplied phase is not part of the current MVP/app work, place it in `Later`, exclusions, or possible extensions instead of treating it as current scope.
@@ -58,7 +58,7 @@ Before planning delivery, resolve:
 - team composition, demonstrated capacity evidence, dependencies, interruptions, and operational ownership;
 - Scrum, Kanban/flow, or another explicitly chosen cadence with the reason it fits;
 - sprint or replenishment horizon without assuming two weeks;
-- one goal and smallest vertical module capable of reaching Done;
+- one user-confirmed goal and smallest vertical module capable of reaching Done, without assuming scope or sequence;
 - whether any user-supplied phase/stage term is product scope, future extension, or delivery sequencing;
 - release exposure, data effects, blast radius, rollout, rollback/mitigation, data compatibility/restore/forward-fix needs, support, and monitoring proportional to risk;
 - applicable security verification, release-integrity evidence, vulnerability/incident response ownership, and justified change-specific checks;
@@ -79,7 +79,7 @@ Stop and ask when:
 
 1. Identify the bounded delivery decision and trace it to approved product, requirement, architecture, and technical-decision IDs.
 2. Ask one concise grouped questionnaire for cadence, capacity, priority, dependencies, quality, release risk, and decision ownership.
-3. When defining or changing any increment or sprint, ask the required focused questions first, then provide a mini-summary and wait for explicit user confirmation before creating or updating that increment/sprint artifact.
+3. When defining or changing any increment or sprint, ask the required focused questions first and do not infer unanswered choices. Recommend options when useful, but mark unresolved choices as blockers until the user decides. Then provide a mini-summary and wait for explicit user confirmation before creating or updating that increment/sprint artifact.
 4. Create only the required delivery paths:
 
 ```text
@@ -101,7 +101,7 @@ docs/04-delivery/
 10. When execution evidence exists, update the increment/sprint with outcome evidence; TDD and broader-check links; linked commit hash or `Not created — <reason>`; `DONE | NOT_DONE | BLOCKED`; product-validation status `NOT_REQUIRED | REQUIRED | COMPLETED | BLOCKED`; learning-decision and `CR-####` links; affected upstream owners and returned dispositions; data-change migration/version, compatibility, rollback/restore/containment/forward-fix evidence and owner when applicable; release authorization; and next-increment eligibility `ELIGIBLE | BLOCKED | CONDITIONAL`.
 11. Do not mark a next increment `ELIGIBLE` while it relies on an affected decision with incomplete required validation or an unresolved change request. `NOT_DONE` returns remaining behavior to bounded replanning; it never becomes hidden carry-over or value evidence.
 12. If an approved increment is larger than one credible sprint, return it to product/requirements owners for boundary splitting rather than creating technical-layer sprints.
-13. Validate that planned work can be independently accepted, completion claims link reproducible evidence and any authorized commit hash, no date/capacity was invented, every increment/sprint has user confirmation evidence, Git trace guidance is present, and no ceremony or release mechanism lacks a current purpose.
+13. Validate that planned work can be independently accepted, completion claims link reproducible evidence and any authorized commit hash, no goal/scope/sequence/date/capacity/dependency/DoD/release or Git decision was invented, every increment/sprint has user confirmation evidence, Git trace guidance is present, and no ceremony or release mechanism lacks a current purpose.
 14. Stop before implementation or external release unless separately authorized by the applicable Pi workflow and user request.
 
 ## Output Contract
@@ -113,7 +113,7 @@ Return:
 - Delivery model and reason selected.
 - Roadmap, increment, sprint, or Definition of Done documents created or updated.
 - Sprint goal and small vertical module expected to be fully functional against its approved boundary.
-- Questions asked and mini-summary confirmation evidence for each increment or sprint defined.
+- Questions asked, recommendations offered without assumptions, unresolved choices blocked, and mini-summary confirmation evidence for each increment or sprint defined.
 - Scope, exclusions, dependencies, capacity assumptions, provisional constraints, data-safe rollback/mitigation, and user-owned commitments.
 - Git trace recommendation and linked authorized commit hash for completed increments/sprints, or `Not authorized — <reason>` / `Not created — <reason>` when no commit hash exists.
 - Planned change-type validation and acceptance/conformance evidence expectations, broader-quality and product-validation expectations, and anticipated learning-decision/change-request links.
