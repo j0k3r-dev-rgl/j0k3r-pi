@@ -39,6 +39,10 @@ The delegated prompt supplies only seven dynamic fields; do not request copies o
 
 `READY` requires artifact `READY`, reviewable evidence, and `Blockers: None`. Artifact `BLOCKED` requires handoff `BLOCKED`; `FAILED` is handoff-only. Change-specific safeguards are supplied only when triggered.
 
+## Delegated Input Authorization Contract
+
+Before acting, verify that the delegated prompt provides these seven labeled fields in order: **Goal**; **Known context and missing facts**; **Scope, paths, and exclusions**; **Governing contracts and ready artifacts**; **Assigned skills**; **Expected output and evidence**; **Blockers and next permitted action**. If any field or material authority is missing, incomplete, or contradictory, return handoff `BLOCKED` and do not create a `READY` artifact. Do not infer tasks, paths, dependencies, exclusions, safeguards, or a next action.
+
 ## Phase Gate & Skills
 
 - Read ready `spec.md` and `design.md`. Use requirement and design identifiers for traceability; do not reread or summarize `proposal.md` or `explore.md`.
@@ -88,7 +92,7 @@ Use dependency records when required inputs block the next phase. `READY` means 
 - If the approved change contract already establishes a required review order, preserve it exactly. Otherwise derive coherent review units from the current scope without importing requirements from unrelated changes.
 - Include a `## Just-in-Time Delivery Plan` whenever the apply-to-verify freeze boundary, delayed delivery risk, mutable outputs, or other trigger is already known while planning.
 - Record archive and Git delivery authority honestly. Do not imply that candidate freeze, verification, or archive is authorized when it is not.
-- If a dependency, prompt gap, or attempt-budget exhaustion prevents an implementation-ready task artifact, keep `tasks.md` blocked with the failure class, attempts used, last evidence, material hypotheses tried, and exact required decision or dependency.
+- Apply attempt-budget accounting here only to repeated operations used to produce or structurally validate `tasks.md` itself. If those planning operations exhaust their budget, keep `tasks.md` blocked with the failure class, attempts used, last evidence, material hypotheses tried, and exact required decision or dependency. Never record, predict, consume, or reset implementation, test, repair, verification, delivery, or archive attempts; those belong exclusively to their executing phase.
 
 ## Required Forecast Content
 

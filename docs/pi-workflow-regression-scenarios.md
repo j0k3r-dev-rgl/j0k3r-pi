@@ -32,7 +32,7 @@ Related skills are handoff hints, not additional owners. A lower-ranked generic 
 | WF-07 | SDD artifact is `BLOCKED` | Do not advance; request only the missing material decision/dependency. |
 | WF-08 | Mini-SDD archive preflight | Require ready `mini-sdd.md` and passing `verify.md`; do not require `tasks.md`. |
 | WF-09 | Formal SDD archive preflight | Require ready `tasks.md` and passing `verify.md`. |
-| WF-10 | Verified candidate changed before archive/delivery | Invalidate prior verification continuity and require a new applicable verification. |
+| WF-10 | Verified candidate changed before archive/delivery | Recompute the verified continuity manifest immediately before the boundary; any record or aggregate SHA-256 mismatch blocks mutation/delivery, invalidates prior verification continuity, and requires a new applicable verification decision. |
 | WF-11 | Workflow-relevant delegation requires a canonical handoff | Include the exact six-field handoff envelope in the prompt; a reference to an unavailable contract is insufficient. |
 | WF-12 | User calls OpenSpec a separate workflow | Treat OpenSpec as the artifact namespace/convention for Mini-SDD and Formal SDD, never as a fourth workflow or external authority. |
 

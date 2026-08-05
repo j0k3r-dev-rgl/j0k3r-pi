@@ -39,6 +39,10 @@ The delegated prompt supplies only seven dynamic fields; do not request copies o
 
 `READY` requires artifact `READY`, reviewable evidence, and `Blockers: None`. Artifact `BLOCKED` requires handoff `BLOCKED`; `FAILED` is handoff-only.
 
+## Delegated Input Authorization Contract
+
+Before acting, verify that the delegated prompt provides these seven labeled fields in order: **Goal**; **Known context and missing facts**; **Scope, paths, and exclusions**; **Governing contracts and ready artifacts**; **Assigned skills**; **Expected output and evidence**; **Blockers and next permitted action**. If any field, PRD approval, output path, or material authority is missing, incomplete, or contradictory, return handoff `BLOCKED` and do not create a `READY` artifact. Do not infer product decisions, scope, exclusions, or approval.
+
 ## Inputs
 
 - Approved product goal and current context.

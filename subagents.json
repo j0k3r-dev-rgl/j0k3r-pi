@@ -2,6 +2,8 @@
   "default_model": null,
   "default_mode": "background",
   "enable_continue": true,
+  "timeout_ms": 2400000,
+  "stall_timeout_ms": 300000,
   "max_concurrency": 5,
   "debug": false,
   "session_resources": "lean",

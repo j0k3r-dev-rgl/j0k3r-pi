@@ -76,6 +76,9 @@ Never label a command as RED when it does not fail for the expected missing or i
 
 - Use skills only when they match the approved task or SDD phase.
 - Read each selected `SKILL.md` before relying on its guidance.
+- When the user proposes creating a new app, starting a software project, or developing a startup idea, read `skills/startup-documentation/SKILL.md` before asking product questions or defining scope.
+- When the problem, users, evidence, assumptions, or product direction are not yet established, also read `skills/product-discovery/SKILL.md` before responding with product guidance.
+- When the user asks to inspect or document an existing codebase, read `skills/existing-project-onboarding/SKILL.md` before investigating or proposing documentation.
 - In Formal SDD, generate fresh registry context before planning or delegation when skill routing can affect the result.
 - Pass explicit skill paths to lean-mode subagents. Subagents read only assigned skills and do not scan `skills/` blindly.
 - Skill resolution does not authorize scope expansion.
@@ -272,6 +275,19 @@ Acceptable identities:
 Invalid identities include branch names, mutable tags, workspace paths, timestamps alone, task numbers, or prose labels.
 
 The same identifier must appear verbatim in `apply.md`, any triggered verification receipt, and any archive or delivery claim. If candidate contents change after final verification, prior final-verification and delivery-readiness claims are invalid until a new identity and applicable verification exist.
+
+#### Post-verification continuity snapshot
+
+Every passing Mini-SDD or Formal SDD verification must leave reproducible SHA-256 continuity evidence for the exact verified deliverable set before archive or later delivery, even when the stronger candidate-identity trigger does not apply.
+
+- When a triggered candidate manifest already covers the exact verified deliverable set, reuse that manifest and identifier; do not create a second snapshot.
+- Otherwise, `verify.md` records a lightweight continuity manifest derived independently from the approved contracts: exact approved inputs, any recursive expansion, `F<TAB><digest><TAB><path>` records for existing regular files, and `D<TAB>-<TAB><path>` records for approved deletions confirmed absent during verification.
+- Apply the same UTF-8 POSIX path validation, unsupported-file rejection, byte-order sorting, LF joining, and aggregate `sha256:<digest>` construction defined below for deterministic manifests. A base record is not required solely for continuity because verification already establishes the approved deletion contract and observed absence.
+- Immediately before archive mutation, `sdd-archive` independently re-derives the approved set from the ready contracts and `verify.md`, re-expands approved directories, recomputes every record and aggregate digest, and compares it verbatim with the verified snapshot.
+- Any added, removed, replaced, type-changed, or byte-changed covered path is drift. Archive stops `BLOCKED` without mutation and permits only user notification and a new applicable verification decision.
+- Any later delivery actor relying on the verification claim must perform the same comparison immediately before delivery unless an immutable candidate identity already guarantees exact continuity.
+
+This continuity snapshot detects post-verification drift; it does not by itself trigger a verification receipt, delivery plan, or the stronger base-evidenced candidate identity.
 
 #### Deterministic SHA-256 manifest for mutable candidates
 

@@ -47,9 +47,13 @@ The delegated prompt supplies only seven dynamic fields; do not request copies o
 
 `READY` requires artifact `READY`, completed assigned tasks, reviewable validation evidence, and `Blockers: None`. Artifact `BLOCKED` requires handoff `BLOCKED`; `FAILED` is handoff-only. Candidate, receipt, delivery, and stricter attempt values are supplied only when triggered.
 
+## Delegated Input Authorization Contract
+
+Before acting, verify that the delegated prompt provides these seven labeled fields in order: **Goal**; **Known context and missing facts**; **Scope, paths, and exclusions**; **Governing contracts and ready artifacts**; **Assigned skills**; **Expected output and evidence**; **Blockers and next permitted action**. If any field or material authority is missing, incomplete, or contradictory, return handoff `BLOCKED` and do not modify source, tests, tasks, or artifacts beyond recording the blocker in `apply.md`. Do not infer scope, exclusions, approval, or a next action.
+
 ## Workflow Detection & Phase Gate
 
-- **Mini-SDD**: Read ready `mini-sdd.md` as the implementation contract.
+- **Mini-SDD**: Read ready `mini-sdd.md` as the implementation contract. Require complete, unique `MINI-###` items with acceptance, validation, dependencies, and authorized paths; block before implementation if any item is incomplete or unresolved.
 - **Formal SDD**: Read only ready `tasks.md`, `spec.md`, `design.md`, exact assigned skills, and authorized implementation paths. Use identifiers for traceability; do not read or summarize `proposal.md`, `explore.md`, discovery, or the full conversation.
 - Read only exact assigned `SKILL.md` paths. Do not inventory or scan `skills/`.
 - If a required artifact is missing or `BLOCKED`, do not modify source or tests. Write `apply.md` as `BLOCKED` with precise questions and dependency records.
@@ -74,7 +78,7 @@ Apply the global attempt budget to repeated repair or validation loops: one init
 
 ## Candidate, Delivery, and Checklist Rules
 
-- Update `tasks.md` honestly as implementation work completes.
+- For Formal SDD, update `tasks.md` honestly as implementation work completes. For Mini-SDD, keep `mini-sdd.md` as the approved contract and record item completion only in `apply.md`; do not rewrite acceptance after implementation.
 - Record a stable candidate identity only when a receipt is required or concrete drift risk exists from delayed delivery, concurrent or multiple implementers, multiple environments, migration, security-sensitive or external effects, mutable outputs during a handoff, or another evidenced trigger. An immediate same-workspace `apply` → `verify` handoff is not sufficient by itself.
 - For mutable documentation or workspace candidates, prefer a deterministic SHA-256 manifest over the exact implementation deliverable paths.
 - Exclude workflow evidence files such as `tasks.md`, `apply.md`, and `verify.md` from the implementation candidate digest unless the approved contract explicitly makes them part of the deliverable.
@@ -108,7 +112,20 @@ Write `apply.md` with:
 Then include only implementation-owned evidence:
 
 1. **Workflow & Contracts**: Mini-SDD or Formal SDD and exact artifact paths.
-2. **Task Evidence** using one record per task:
+2. **Implementation Evidence** using the applicable workflow record.
+
+For Mini-SDD, write exactly one record per `MINI-###` item:
+
+```markdown
+### MINI-001
+- Result: COMPLETE | BLOCKED
+- Contract: <observable contract from mini-sdd.md>
+- Acceptance: <acceptance condition checked>
+- Files: <exact changed paths>
+- Evidence: <commands and concise results>
+```
+
+For Formal SDD, write exactly one record per `TASK-###`:
 
 ```markdown
 ### TASK-001
@@ -126,11 +143,13 @@ Then include only implementation-owned evidence:
 7. **Verification Inputs**: exact changed files and commands; do not summarize requirements or design.
 8. **Next Permitted Action**.
 
-Every completed `TASK-###` in `tasks.md` must have exactly one evidence record. Do not add narrative implementation summaries.
+For Mini-SDD, every `MINI-###` in `mini-sdd.md` must have exactly one evidence record and all items must be `COMPLETE` for `READY`. For Formal SDD, every completed `TASK-###` in `tasks.md` must have exactly one evidence record. Do not add narrative implementation summaries.
 
 `READY` means implementation is complete and independently verifiable. Never create metadata, leases, or lock files.
 
 For a triggered candidate freeze, `apply.md` must also record the immutable base identity, exact B or F or D manifest records, final `sha256:` identifier, freeze point, candidate inventory, registry-preservation evidence when applicable, structural and fixture command outputs, and any drift invalidation or retry evidence.
+
+When `tdd` is assigned, `apply.md` must also cite the TDD-owned evidence required by the assigned skill: existing test candidates inspected and the selected owner file; detected framework and test layer; applicable baseline and RED/GREEN/REFACTOR or other classified path; assertion-quality, mock, duplication, and obsolete-coverage review; and focused plus relevant broader results. Reference that evidence per `MINI-###` or `TASK-###` instead of duplicating the full TDD contract. Missing applicable TDD evidence prevents `READY`.
 
 ## Output Contract
 
