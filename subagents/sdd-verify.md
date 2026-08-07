@@ -70,6 +70,15 @@ Before acting, verify that the delegated prompt provides these seven labeled fie
 - For Formal SDD, derive the complete `REQ-###` set from `spec.md`, not from `apply.md`, and compare implementation plus checks against every requirement and linked `SCENARIO-###`.
 - For Mini-SDD, derive the complete `MINI-###` set from `mini-sdd.md`, not from `apply.md`, and compare implementation plus checks against every item and its acceptance condition. Never invent Formal SDD identifiers for Mini-SDD.
 - Validate the recorded change-type evidence: RED → GREEN → REFACTOR for behavior changes and bug fixes; BASELINE → REFACTOR → REGRESSION for behavior-preserving refactors; BASELINE → CHANGE → DIFF/REGRESSION for mechanical or generated code; or structural validation for documentation and configuration.
+- **UI/UX verification**: When `apply.md` records `Impeccable:` usage on any task or item, independently verify the UI quality of the changed surfaces:
+  - Confirm impeccable prerequisites were met: PRODUCT.md must exist (it is an interactive prerequisite resolved by the orchestrator before apply); DESIGN.md must exist if claimed.
+  - Confirm only autonomous impeccable commands were used by the apply subagent (`distill`, `layout`, `adapt`, `clarify`, `typeset`, `colorize`, `bolder`, `quieter`, `harden`, `onboard`, `polish`, `extract`, `audit`). Flag if `init` or `shape` were attempted by the subagent — these are interactive-only and indicate a protocol violation.
+  - Confirm commands were executed in the correct order (structural → content → visual → hardening; no `bolder`/`colorize` before `distill`/`layout`).
+  - Confirm the detector ran after final edits (`detect.mjs --json`) and its output is clean or findings were addressed.
+  - Confirm the craft-floor absolute bans are not violated (no nested cards, no gradient text, no emoji icons, no kicker/eyebrow text, etc.).
+  - Confirm the identified mode (Operate/Persuade/Read/Experience) is correct for the surface.
+  - Record UI verification evidence under a `## UI/UX Quality` section in `verify.md`. Mark `PASS` only when all checks above are satisfied. Mark `ISSUES_FOUND` with specific violations otherwise.
+  - When `apply.md` records `Impeccable: Not applicable` or does not mention impeccable and the changed files include frontend UI, flag this as a finding: UI was modified without impeccable when it was available.
 - Run focused tests and the relevant regression suite independently.
 - Produce the canonical `## Verification Receipt` when any prompt-supplied trigger applies, repeating the exact candidate identity verbatim.
 - Reject a passing claim when artifact status, handoff status, evidence, candidate inventory, base identity, or recomputed candidate digest drift from the approved verified set.
