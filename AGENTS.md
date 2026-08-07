@@ -182,6 +182,7 @@ Rules:
 
 - Missing facts and exclusions must never be silently omitted; use `None` inside their combined field when applicable.
 - Each field contains only information needed by that role. Reference ready artifacts and stable identifiers instead of restating their full content; include exact excerpts only for canonical rules the lean subagent cannot otherwise receive.
+- **Durable Lifecycle Documentation Pass-Through**: When delegating any SDD phase, the orchestrator must inspect `docs/` for relevant durable lifecycle documentation (product, requirements, architecture, ADRs, delivery, validation) and include exact canonical paths and stable IDs under field 4 (**Governing contracts and ready artifacts**). Before delegating `sdd-apply`, the orchestrator must also produce and pass the compact Implementation Readiness Packet (or approved inline contract when `docs/` do not exist) under field 4 so implementers and verifiers validate against both local SDD artifacts and durable project documentation.
 - The delegating agent must complete any missing input from approved current context before invocation when it can do so without new authority or research.
 - If completing a required field would need a product decision, unauthorized research, scope growth, or an unavailable governing contract, do not start delegation; return `BLOCKED` with the precise missing input.
 - A delegated agent that receives materially incomplete input must return `BLOCKED`; it must not infer authority, broaden scope, or perform unrelated discovery.

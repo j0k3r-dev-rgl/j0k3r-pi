@@ -77,6 +77,7 @@ Rules:
 ### MINI-001: <short outcome>
 - Contract: <observable behavior or documentation/configuration result>
 - Acceptance: <verifiable completion condition>
+- Canonical sources: <docs/path.md#STABLE-ID> | None — change-local contract
 - Paths: <exact authorized paths or bounded surfaces>
 - Validation: <required change-type evidence or structural check>
 - Depends on: None | MINI-###
@@ -126,12 +127,12 @@ Identifiers are uppercase, zero-padded three-digit values, unique within their t
 
 ## Minimal Phase Context
 
-- `sdd-proposal`: approved request, optional `prd.md`, and curated discovery or optional `explore.md` only.
-- `sdd-spec`: ready `proposal.md` and only unresolved approved product decisions.
-- `sdd-design`: ready `spec.md`, exact technical constraints, and specific evidence identifiers needed for decisions.
-- `sdd-task`: ready `spec.md` and `design.md` only.
-- `sdd-apply`: ready `mini-sdd.md` or ready `tasks.md`/`spec.md`/`design.md`, exact authorized implementation paths, the orchestrator's implementation summary, and the user's explicit apply authorization.
-- `sdd-verify`: `apply.md`, `tasks.md`, `spec.md`, `design.md`, and exact changed files.
+- `sdd-proposal`: approved request, optional `prd.md`, relevant discovery/product docs (`docs/00-discovery/`, `docs/01-product/`), and curated discovery or optional `explore.md` only.
+- `sdd-spec`: ready `proposal.md`, relevant requirement docs (`docs/02-requirements/`), and only unresolved approved product decisions.
+- `sdd-design`: ready `spec.md`, relevant architecture docs and ADRs (`docs/03-architecture/`), exact technical constraints, and specific evidence identifiers needed for decisions.
+- `sdd-task`: ready `spec.md`, `design.md`, and relevant delivery docs (`docs/04-delivery/`) only.
+- `sdd-apply`: ready `mini-sdd.md` or ready `tasks.md`/`spec.md`/`design.md`, compact Implementation Readiness Packet from `startup-documentation` (citing canonical `docs/` sources when present), exact authorized implementation paths, the orchestrator's implementation summary, and the user's explicit apply authorization.
+- `sdd-verify`: `apply.md`, `tasks.md`, `spec.md`, `design.md`, referenced canonical `docs/` lifecycle documentation sources, and exact changed files.
 - `sdd-archive`: passing `verify.md`, workflow identity, source/destination, ready `mini-sdd.md` or ready `tasks.md` plus the exact Formal contracts needed to derive deliverables, the user's explicit archive authorization, and only triggered stronger continuity safeguards.
 
 Never pass the full conversation, discovery transcript, or all prior artifacts by default.
