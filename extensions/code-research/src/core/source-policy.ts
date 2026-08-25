@@ -18,6 +18,7 @@ export const EXCLUDED_DIRECTORY_NAMES = new Set([
   '.cache',
   'out',
   'vendor',
+  'target',
   'venv',
   'env',
   'virtualenv',
@@ -72,12 +73,21 @@ export function isExcludedPath(projectRoot: string, candidatePath: string): bool
   });
 }
 
+export function isMissingFileError(error: unknown): error is NodeJS.ErrnoException {
+  return typeof error === 'object' && error !== null && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
 export async function shouldIndexSourceFile(projectRoot: string, filePath: string): Promise<boolean> {
   if (!isSupportedGraphSourceFile(filePath)) return false;
   if (isExcludedPath(projectRoot, filePath)) return false;
-  const fileStat = await stat(filePath);
-  if (!fileStat.isFile()) return false;
-  return fileStat.size <= MAX_GRAPH_SOURCE_BYTES;
+  try {
+    const fileStat = await stat(filePath);
+    if (!fileStat.isFile()) return false;
+    return fileStat.size <= MAX_GRAPH_SOURCE_BYTES;
+  } catch (error) {
+    if (isMissingFileError(error)) return false;
+    throw error;
+  }
 }
 
 export async function collectWorkspaceSourceFiles(

@@ -1,7 +1,6 @@
 {
   "default_model": null,
   "default_mode": "background",
-  "enable_continue": true,
   "timeout_ms": 2400000,
   "stall_timeout_ms": 300000,
   "max_concurrency": 5,
@@ -12,7 +11,7 @@
   ],
   "model_profiles": {
     "discovery": {
-      "model": "openai-codex/gpt-5.5",
+      "model": "openai-codex/gpt-5.4",
       "effort": "medium"
     },
     "news-researcher": {
@@ -52,7 +51,7 @@
       "effort": "medium"
     },
     "sdd-verify": {
-      "model": "openai-codex/gpt-5.5",
+      "model": "openai-codex/gpt-5.4",
       "effort": "medium"
     },
     "tool-smoke": {

@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { extractJavaSymbolRecords } from '../languages/java/symbol-extractor.js';
 import type { CanonicalJavaSymbolRecord, JavaDeclarationKind, JavaExtractionResult } from '../types.js';
 import { getParser, parseSource } from './parser.js';
-import { collectWorkspaceSourceFiles } from './source-policy.js';
+import { collectWorkspaceSourceFiles, isMissingFileError } from './source-policy.js';
 
 export interface IndexedMethod {
   file: string;
@@ -89,7 +89,13 @@ export async function buildProjectIndex(rootDir: string): Promise<ProjectIndex> 
   const javaFiles = (await collectWorkspaceSourceFiles(rootDir)).filter((file) => file.endsWith('.java'));
 
   for (const file of javaFiles) {
-    const source = await readFile(file, 'utf8');
+    let source: string;
+    try {
+      source = await readFile(file, 'utf8');
+    } catch (error) {
+      if (isMissingFileError(error)) continue;
+      throw error;
+    }
     const parser = getParser('java');
     const tree = parseSource(parser, source);
     const extraction = extractJavaSymbolRecords({ filePath: file, source, rootNode: tree.rootNode });

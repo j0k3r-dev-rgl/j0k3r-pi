@@ -106,7 +106,7 @@ export async function buildWorkspaceGraph(projectRoot: string): Promise<{ state:
     indexedFiles: 0,
     skippedLargeFiles: 0,
     skippedUnsupportedFiles: 0,
-    excludedDirectories: ['node_modules', 'build', 'dist', 'coverage', '.next', '.nuxt', '.svelte-kit', '.react-router', '.turbo', '.vite', '.cache', 'out', 'vendor'],
+    excludedDirectories: ['node_modules', 'build', 'dist', 'coverage', '.next', '.nuxt', '.svelte-kit', '.react-router', '.turbo', '.vite', '.cache', 'out', 'vendor', 'target'],
     unreadableDirectories: [] as string[],
   };
   let workspaceStatus: WorkspaceGraphState['status'] = 'fresh';

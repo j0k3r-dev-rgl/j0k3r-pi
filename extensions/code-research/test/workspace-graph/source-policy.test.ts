@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -35,12 +35,14 @@ describe('workspace graph source policy', () => {
       'node_modules/pkg/index.js': 'export const bad = true;\n',
       '.next/server/index.js': 'export const bad = true;\n',
       'dist/bundle.js': 'export const bad = true;\n',
+      'target/generated-sources/app.java': 'class Generated {}\n',
       'src/large.ts': `export const big = "${'x'.repeat(MAX_GRAPH_SOURCE_BYTES + 64)}";\n`,
     });
 
     expect(isExcludedPath(rootDir, join(rootDir, 'node_modules/pkg/index.js'))).toBe(true);
     expect(isExcludedPath(rootDir, join(rootDir, '.next/server/index.js'))).toBe(true);
     expect(isExcludedPath(rootDir, join(rootDir, 'dist/bundle.js'))).toBe(true);
+    expect(isExcludedPath(rootDir, join(rootDir, 'target/generated-sources/app.java'))).toBe(true);
     expect(await shouldIndexSourceFile(rootDir, join(rootDir, 'src/app.ts'))).toBe(true);
     expect(await shouldIndexSourceFile(rootDir, join(rootDir, 'src/large.ts'))).toBe(false);
   });
@@ -52,6 +54,7 @@ describe('workspace graph source policy', () => {
       'src/util.js': 'export const util = () => {};\n',
       '.cache/temp.ts': 'export const skipped = true;\n',
       'coverage/index.js': 'export const skipped = true;\n',
+      'target/generated-sources/app.java': 'class Generated {}\n',
     });
 
     const files = await collectWorkspaceSourceFiles(rootDir);
@@ -60,5 +63,15 @@ describe('workspace graph source policy', () => {
       'src/feature.java',
       'src/util.js',
     ]);
+  });
+
+  it('treats files deleted during indexing as non-indexable', async () => {
+    const rootDir = await createProject({
+      'src/app.ts': 'export const ok = true;\n',
+    });
+    const file = join(rootDir, 'src/app.ts');
+    await rm(file);
+
+    await expect(shouldIndexSourceFile(rootDir, file)).resolves.toBe(false);
   });
 });

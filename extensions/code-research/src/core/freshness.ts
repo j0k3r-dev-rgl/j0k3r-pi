@@ -1,18 +1,23 @@
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import type { SubprojectSnapshot } from '../types.js';
-import { toProjectRelativePath } from './source-policy.js';
+import { isMissingFileError, toProjectRelativePath } from './source-policy.js';
 
 export async function createSubprojectSnapshot(projectRoot: string, files: string[]): Promise<SubprojectSnapshot> {
   const snapshot: SubprojectSnapshot = {};
   for (const file of files) {
-    const fileStat = await stat(file);
-    const raw = await readFile(file);
-    snapshot[toProjectRelativePath(projectRoot, file)] = {
-      mtimeMs: fileStat.mtimeMs,
-      size: fileStat.size,
-      hash: createHash('sha256').update(raw).digest('hex'),
-    };
+    try {
+      const fileStat = await stat(file);
+      const raw = await readFile(file);
+      snapshot[toProjectRelativePath(projectRoot, file)] = {
+        mtimeMs: fileStat.mtimeMs,
+        size: fileStat.size,
+        hash: createHash('sha256').update(raw).digest('hex'),
+      };
+    } catch (error) {
+      if (isMissingFileError(error)) continue;
+      throw error;
+    }
   }
   return snapshot;
 }

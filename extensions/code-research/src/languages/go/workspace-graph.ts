@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { collectWorkspaceSourceFiles } from '../../core/source-policy.js';
+import { collectWorkspaceSourceFiles, isMissingFileError } from '../../core/source-policy.js';
 import { getParserForFile, parseSource } from '../../core/parser.js';
 import { normalizeGoTypeName, packagePathToName, unquoteGoString } from './shared.js';
 import { extractGoSymbolRecords } from './symbol-extractor.js';
@@ -64,7 +64,13 @@ export async function buildGoProjectIndex(rootDir: string): Promise<GoProjectInd
   const index: GoProjectIndex = { rootDir, files: [], callables: [], types: [], explicitAssertions: [] };
 
   for (const file of files) {
-    const source = await readFile(file, 'utf8');
+    let source: string;
+    try {
+      source = await readFile(file, 'utf8');
+    } catch (error) {
+      if (isMissingFileError(error)) continue;
+      throw error;
+    }
     const parser = getParserForFile(file, 'go');
     let tree: any;
     try {

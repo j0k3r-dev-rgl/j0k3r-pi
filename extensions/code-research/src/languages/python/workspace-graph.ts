@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { getParser, parseSource } from '../../core/parser.js';
-import { collectWorkspaceSourceFiles } from '../../core/source-policy.js';
+import { collectWorkspaceSourceFiles, isMissingFileError } from '../../core/source-policy.js';
 import type { OwnerKind, SymbolKind } from '../../types.js';
 
 export interface IndexedPythonSymbol {
@@ -39,7 +39,13 @@ export async function buildPythonProjectIndex(rootDir: string): Promise<PythonPr
   const parser = getParser('py');
 
   for (const file of pythonFiles) {
-    const source = await readFile(file, 'utf8');
+    let source: string;
+    try {
+      source = await readFile(file, 'utf8');
+    } catch (error) {
+      if (isMissingFileError(error)) continue;
+      throw error;
+    }
     const tree = parseSource(parser, source);
     indexPythonFile(file, tree.rootNode, index);
   }

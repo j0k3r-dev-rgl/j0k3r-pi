@@ -9,7 +9,7 @@ import type {
   OwnerKind,
   SupportedLanguage,
 } from '../../types.js';
-import { collectWorkspaceSourceFiles } from '../../core/source-policy.js';
+import { collectWorkspaceSourceFiles, isMissingFileError } from '../../core/source-policy.js';
 import {
   detectLanguage,
   extractSignature,
@@ -232,7 +232,13 @@ export async function buildTypeScriptProjectIndex(rootDir: string): Promise<Type
 
   const files = await collectSupportedFiles(rootDir);
   for (const file of files) {
-    const source = await readFile(file, 'utf8');
+    let source: string;
+    try {
+      source = await readFile(file, 'utf8');
+    } catch (error) {
+      if (isMissingFileError(error)) continue;
+      throw error;
+    }
     const language = detectLanguage(file, 'auto');
     const parser = getParserForFile(file, language);
 
