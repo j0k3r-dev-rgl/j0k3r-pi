@@ -353,18 +353,25 @@ function resolveDirectMatches(liveRegistry: SkillRegistry, query: ReturnType<typ
   const rankedScored = liveRegistry.skills
     .map((skill) => {
       const scored = scoreSkill(skill, query);
+      const directSignals = new Set(scored.match.reasons.map((reason) => reason.signal).filter((signal) =>
+        signal === 'path' || signal === 'keyword' || signal === 'sdd_phase',
+      ));
       return {
         match: scored.match,
         score: scored.totalScore,
-        hasDirectSignal: scored.match.reasons.some((reason) =>
-          reason.signal === 'path' || reason.signal === 'keyword' || reason.signal === 'sdd_phase',
-        ),
+        hasDirectSignal: directSignals.size > 0,
+        hasPathOrKeywordSignal: directSignals.has('path') || directSignals.has('keyword'),
+        hasPhaseOnlySignal: directSignals.size === 1 && directSignals.has('sdd_phase'),
       };
     });
   const hasAnyDirectSignal = rankedScored.some((item) => item.hasDirectSignal);
-  const filteredScored = rankedScored.filter((item): item is { match: ResolveSkillMatch; score: number; hasDirectSignal: boolean } => {
+  const hasAnyPathOrKeywordSignal = rankedScored.some((item) => item.hasPathOrKeywordSignal);
+  const filteredScored = rankedScored.filter((item): item is { match: ResolveSkillMatch; score: number; hasDirectSignal: boolean; hasPathOrKeywordSignal: boolean; hasPhaseOnlySignal: boolean } => {
     if (!hasQuerySignals) return true;
-    if (hasAnyDirectSignal) return item.hasDirectSignal;
+    if (hasAnyDirectSignal) {
+      if (hasAnyPathOrKeywordSignal && item.hasPhaseOnlySignal) return false;
+      return item.hasDirectSignal;
+    }
     return item.score > 0;
   });
 

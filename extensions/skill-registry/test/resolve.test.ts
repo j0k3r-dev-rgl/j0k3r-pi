@@ -366,6 +366,50 @@ describe('resolveSkillRegistry', () => {
     expect(result.matches[0].name).toBe('alpha');
   });
 
+  it('suppresses phase-only workflow matches when stronger path or keyword matches exist', async () => {
+    const { cwd, homeDir } = await createProject();
+
+    await makeSkill(path.join(cwd, '.pi/skills/domain-test/SKILL.md'), {
+      name: 'domain-test',
+      description: 'testing skill',
+      contract: {
+        category: 'quality',
+        domains: ['testing'],
+        triggers: { paths: ['src/**'], keywords: ['bug fix'] },
+        sdd_phases: ['apply'],
+        related_skills: [],
+        priority: 90,
+      },
+    });
+
+    await makeSkill(path.join(cwd, '.pi/skills/workflow-owner/SKILL.md'), {
+      name: 'workflow-owner',
+      description: 'workflow routing skill',
+      contract: {
+        category: 'workflow',
+        domains: ['workflow'],
+        triggers: { paths: [], keywords: [] },
+        sdd_phases: ['apply'],
+        related_skills: [],
+        priority: 95,
+      },
+    });
+
+    const result = await resolveSkillRegistry({
+      cwd,
+      homeDir,
+      query: {
+        intent: 'bug fix',
+        paths: ['src/example.ts'],
+        sdd_phase: 'apply',
+        stale_check: false,
+        include_related: false,
+      },
+    });
+
+    expect(result.matches.map((match) => match.name)).toEqual(['domain-test']);
+  });
+
   it('adds one-hop related matches, dedupes direct duplicates, and reports unresolved relation warnings', async () => {
     const { cwd, homeDir } = await createProject();
 
