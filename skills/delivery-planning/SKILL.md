@@ -6,7 +6,7 @@ metadata:
   author: j0k3r
   version: "1.3"
 registry:
-  category: "delivery"
+  category: "domain"
   domains: "delivery-planning, roadmaps, sprint-planning, vertical-slicing, definition-of-done"
   paths: "docs/04-delivery/**/*.md"
   keywords: "delivery planning, outcome roadmap, roadmap, create roadmap, delivery roadmap, increment, delivery increment, plan increment, delivery model, release sequencing, plan sprint, sprint goal, vertical slice, Definition of Done, planificar entrega, planificar sprint, modulo funcional completo, corte vertical"

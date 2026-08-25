@@ -6,7 +6,7 @@ metadata:
   author: j0k3r
   version: "1.4"
 registry:
-  category: "architecture"
+  category: "domain"
   domains: "architecture-decisions, technology-selection, dependency-evaluation, external-integrations"
   paths: "docs/03-architecture/decisions/**/*.md, docs/03-architecture/integrations/**/*.md"
   keywords: "architecture decision, architecture decision record, database decision, technical decision, technology selection, choose programming language, choose framework, evaluate library, evaluate integration, ADR, decision tecnica, elegir lenguaje, elegir framework, evaluar integracion"

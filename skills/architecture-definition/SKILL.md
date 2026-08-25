@@ -6,7 +6,7 @@ metadata:
   author: j0k3r
   version: "1.1"
 registry:
-  category: "architecture"
+  category: "domain"
   domains: "software-architecture, architecture-drivers, system-boundaries, data-and-trust-boundaries"
   paths: "docs/03-architecture/00-architecture-drivers.md, docs/03-architecture/01-system-context.md, docs/03-architecture/02-system-boundaries.md, docs/03-architecture/03-data-and-trust-boundaries.md, docs/03-architecture/04-deployment-view.md"
   keywords: "define software architecture, architecture drivers, system context, system boundaries, data and trust boundaries, deployment view, definir arquitectura, limites del sistema, atributos de calidad"
