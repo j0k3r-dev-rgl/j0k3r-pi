@@ -91,7 +91,7 @@ describe('skill registry core', () => {
       },
     });
     expect(registry.skills[1].path).toMatch(/^~\//);
-    expect(registry.warnings).toEqual([]);
+    expect(registry.warnings).toContain('project-forms: non-empty registry.phases should be reserved for workflow or transversal/guardrail skills');
     expect(registry.content_hash).toMatch(/^[a-f0-9]{64}$/);
   });
 
@@ -134,6 +134,44 @@ describe('skill registry core', () => {
 
     expect(registry.skills).toEqual([]);
     expect(registry.warnings).toEqual([]);
+  });
+
+  it('warns about weak or inconsistent registry metadata', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'skill-registry-'));
+    const cwd = path.join(root, 'project');
+    const homeDir = path.join(root, 'home');
+
+    await makeSkill(path.join(cwd, '.pi/skills/phase-only/SKILL.md'), {
+      name: 'phase-only',
+      description: 'domain skill with phases only.',
+      contract: {
+        category: 'product',
+        domains: ['product'],
+        triggers: { paths: [], keywords: [] },
+        sdd_phases: ['apply'],
+        related_skills: ['phase-only'],
+        priority: 20,
+      },
+    });
+
+    await makeSkill(path.join(cwd, '.pi/skills/unknown-category/SKILL.md'), {
+      name: 'unknown-category',
+      description: 'unknown category skill.',
+      contract: {
+        category: 'mystery',
+        domains: ['misc'],
+        triggers: { paths: ['docs/**/*.md'], keywords: ['misc'] },
+        sdd_phases: [],
+        related_skills: [],
+        priority: 10,
+      },
+    });
+
+    const registry = await generateSkillRegistry({ cwd, homeDir });
+
+    expect(registry.warnings).toContain('phase-only: non-empty registry.phases should be reserved for workflow or transversal/guardrail skills');
+    expect(registry.warnings).toContain('phase-only: related skill list contains self-reference');
+    expect(registry.warnings).toContain('unknown-category: unknown registry category "mystery"');
   });
 
   it('writes json and markdown only when generated content changes', async () => {

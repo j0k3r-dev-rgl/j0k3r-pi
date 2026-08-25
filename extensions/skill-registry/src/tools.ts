@@ -31,9 +31,10 @@ function formatResultLines(result: ResolveSkillRegistryResult): string[] {
 
   if (result.matches.length) {
     lines.push('direct matches:');
-    for (const match of result.matches) {
+    for (const [index, match] of result.matches.entries()) {
+      const role = index === 0 ? 'primary' : index <= 2 ? 'secondary' : 'direct';
       lines.push(
-        `${match.score.toString().padStart(3, ' ')} · ${match.priority.toString().padStart(2, ' ')} · ${match.name} · ${match.path}`,
+        `${match.score.toString().padStart(3, ' ')} · ${match.priority.toString().padStart(2, ' ')} · ${match.name} · ${match.path} · ${role}`,
       );
       const topReasons = match.reasons.slice(0, 3).map((reason: ResolveMatchReason) => reason.detail);
       lines.push(`  - reasons: ${topReasons.join(', ')}`);

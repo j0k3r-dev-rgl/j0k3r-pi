@@ -543,6 +543,9 @@ export async function resolveSkillRegistry(options: { cwd?: string; homeDir?: st
   const guidance = [
     `Registry resolved from live sources (source: ${registryStatus.source}) with cache status ${registryStatus.cache}.`,
     'Read each returned SKILL.md path before applying skill instructions.',
+    directMatches.length > 0
+      ? `Use ${directMatches[0].name} as the primary skill. Consider at most ${Math.min(2, Math.max(0, directMatches.length - 1))} additional direct matches as secondary context.`
+      : 'No direct skill matched; refine intent or paths before loading additional skills.',
     `Matched ${directMatches.length} direct skill(s), ${relatedMatches.length} related skill(s).`,
   ];
 

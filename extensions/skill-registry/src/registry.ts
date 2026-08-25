@@ -6,6 +6,9 @@ import path from 'node:path';
 export const SCHEMA_VERSION = 1;
 export const PROJECT_SKILL_ROOTS = ['.pi/skills', '.agents/skills'] as const;
 export const GLOBAL_SKILL_ROOTS = ['.pi/agent/skills', '.agents/skills'] as const;
+export const KNOWN_SKILL_CATEGORIES = ['base', 'transversal', 'workflow', 'quality', 'security', 'runtime', 'product', 'domain', 'helper'] as const;
+
+const PHASE_ALLOWED_CATEGORIES = new Set<string>(['workflow', 'transversal', 'quality', 'security']);
 
 export type SkillScope = 'project' | 'global';
 
@@ -184,6 +187,33 @@ function displayPath(filePath: string, cwd: string, homeDir: string, scope: Skil
   return slash(abs);
 }
 
+function collectSkillWarnings(skill: SkillRegistryEntry): string[] {
+  const warnings: string[] = [];
+  const category = skill.routing.category?.trim().toLowerCase() ?? null;
+  const triggerPaths = isStringArray(skill.routing.triggers.paths) ? skill.routing.triggers.paths : [];
+  const triggerKeywords = isStringArray(skill.routing.triggers.keywords) ? skill.routing.triggers.keywords : [];
+  const hasTriggers = triggerPaths.length > 0 || triggerKeywords.length > 0;
+  const hasPhases = skill.routing.sdd_phases.length > 0;
+
+  if (category && !KNOWN_SKILL_CATEGORIES.includes(category as (typeof KNOWN_SKILL_CATEGORIES)[number])) {
+    warnings.push(`${skill.name}: unknown registry category "${skill.routing.category}"`);
+  }
+
+  if (hasPhases && (!category || !PHASE_ALLOWED_CATEGORIES.has(category))) {
+    warnings.push(`${skill.name}: non-empty registry.phases should be reserved for workflow or transversal/guardrail skills`);
+  }
+
+  if (!hasTriggers && !hasPhases) {
+    warnings.push(`${skill.name}: indexed skill has no path triggers, no keyword triggers, and no phases; it will only appear in default priority listings`);
+  }
+
+  if (skill.routing.related_skills.includes(skill.name)) {
+    warnings.push(`${skill.name}: related skill list contains self-reference`);
+  }
+
+  return warnings;
+}
+
 async function parseSkill(filePath: string, input: { cwd: string; homeDir: string; scope: SkillScope }): Promise<SkillRegistryEntry | undefined> {
   const text = await readFile(filePath, 'utf8');
   const { data, body } = parseFrontmatter(text);
@@ -244,6 +274,7 @@ export async function generateSkillRegistry(options: GenerateOptions = {}): Prom
       continue;
     }
     seen.add(skill.name);
+    warnings.push(...collectSkillWarnings(skill));
     skills.push(skill);
   }
 

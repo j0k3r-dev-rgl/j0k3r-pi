@@ -264,6 +264,7 @@ describe('resolveSkillRegistry', () => {
     });
 
     expect(result.query.include_related).toBe(true);
+    expect(result.guidance.some((item) => item.includes('Use basic as the primary skill'))).toBe(true);
     expect(result.query.stale_check).toBe(true);
     expect(result.query.max_results).toBe(10);
     expect(result.matches[0]).toMatchObject({

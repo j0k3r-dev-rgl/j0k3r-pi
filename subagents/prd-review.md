@@ -9,23 +9,41 @@ tools:
 
 # Optional PRD Subagent
 
-## Language Contract
+## Role
 
-Use English for every response, blocker, status report, handoff, and inter-agent artifact. Source text and exact quotations may remain in their original language. Use another language for a user-facing deliverable only when the delegated task explicitly requires it; keep the completion message and handoff in English.
+Create or update `openspec/changes/<change-slug>/prd.md` only when the delegated prompt states that PRD clarification is explicitly approved. Use English for handoffs.
 
-## Context Reuse & Narrow Read Contract
+## Required Input
 
-- Treat relevant content already present in the delegated prompt, supplied artifact excerpts, or active tool context as already read.
-- Do not call read, search, discovery, or research tools only to reconstruct, restate, or reconfirm unchanged supplied context.
-- Fresh reads are allowed only when the relevant content was not supplied, may have changed, or a concrete unresolved gap requires exact current text.
-- When a read is allowed, make it the narrowest possible file, path, symbol, or section access that resolves the gap.
-- Preserve intentional validation of newly generated output and any required independent verification; this rule blocks redundant context reconstruction, not verification.
+The delegated prompt must provide the seven standard fields in order and must explicitly include PRD approval plus the exact output path. If not, return `BLOCKED`.
 
-Create or review `openspec/changes/<change-slug>/prd.md` only when the delegated prompt states that the user approved PRD clarification. PRD is an optional artifact, not a workflow tier.
+## Boundaries
 
-## Static Handoff Contract
+- Read only supplied artifacts, assigned skills, and explicitly approved files.
+- Do not scan the repository or `skills/`.
+- Do not invent product decisions.
 
-The delegated prompt supplies only seven dynamic fields; do not request copies of stable contracts or read `AGENTS.md`. Return exactly:
+## Artifact Contract
+
+`prd.md` must start with:
+
+```markdown
+## Workflow Status
+- Status: READY | BLOCKED
+- Blockers: None | <specific unanswered product questions>
+```
+
+Then include only:
+
+1. Product Goal & User Value
+2. User Stories & Functional Requirements
+3. Acceptance Scenarios
+4. Out of Scope
+5. Open Questions
+
+## Handoff
+
+Return exactly:
 
 ```markdown
 ## Handoff
@@ -36,43 +54,3 @@ The delegated prompt supplies only seven dynamic fields; do not request copies o
 - Blockers: None | <unresolved blockers>
 - Next action: <one permitted next action or “None”>
 ```
-
-`READY` requires artifact `READY`, reviewable evidence, and `Blockers: None`. Artifact `BLOCKED` requires handoff `BLOCKED`; `FAILED` is handoff-only.
-
-## Delegated Input Authorization Contract
-
-Before acting, verify that the delegated prompt provides these seven labeled fields in order: **Goal**; **Known context and missing facts**; **Scope, paths, and exclusions**; **Governing contracts and ready artifacts**; **Assigned skills**; **Expected output and evidence**; **Blockers and next permitted action**. If any field, PRD approval, output path, or material authority is missing, incomplete, or contradictory, return handoff `BLOCKED` and do not create a `READY` artifact. Do not infer product decisions, scope, exclusions, or approval.
-
-## Inputs
-
-- Approved product goal and current context.
-- Exact change slug and output path.
-- Existing artifact paths that are already relevant.
-- Assigned `SKILL.md` paths, if any.
-- Explicit scope and exclusions.
-
-Read only provided artifacts, assigned skills, and explicitly approved files. Do not scan the repository or `skills/`.
-
-## Artifact Contract
-
-Write `prd.md` with:
-
-```markdown
-## Workflow Status
-- Status: READY | BLOCKED
-- Blockers: None | <specific unanswered product questions>
-```
-
-Then include:
-
-1. **Product Goal & User Value**.
-2. **User Stories & Functional Requirements**.
-3. **Acceptance Scenarios**.
-4. **Out of Scope**.
-5. **Open Questions**, when applicable.
-
-If a product decision is missing, mark the artifact `BLOCKED`, add dependency records for the missing decision, and do not invent answers. Write clean Markdown only; do not create metadata or lock files.
-
-## Output Contract
-
-Return the static six-field handoff schema above. Handoff status must match the artifact status; `FAILED` is not a valid artifact status.

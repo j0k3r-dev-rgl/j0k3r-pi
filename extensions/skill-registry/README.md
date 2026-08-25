@@ -77,6 +77,7 @@ Parameters:
 Behavior:
 
 - Resolves against a **live in-memory registry** generated for the call (no writes).
+- Treat the first direct match as the **primary** skill. Consider at most two more direct matches as secondary context; related matches stay advisory.
 - If `stale_check` is enabled:
   - compares live `content_hash` against `.pi/skill-registry.json`,
   - reports `fresh`, `stale`, `missing`, or `invalid` cache state,
@@ -165,6 +166,7 @@ Command behavior:
 - A skill with valid `registry:` metadata is indexed for routing.
 - A skill without a valid `registry:` map is ignored silently; its native Pi frontmatter remains independent and valid.
 - Duplicate skill names among indexed skills produce a warning; later duplicates are ignored.
+- The generator also warns about weak routing metadata such as unknown categories, self-referential `related` entries, and non-empty `phases` on skills that are not workflow owners or transversal/guardrail skills.
 - Registry source metadata lives in SKILL frontmatter under an optional one-level `registry:` map.
 
 ### Registry metadata convention
@@ -194,6 +196,8 @@ Registry normalization rules:
 
 - `category`: scalar string.
 - `domains`, `paths`, `keywords`, `phases`, `related`: comma-separated scalars normalized to trimmed string arrays.
+- Prefer `category` values from: `workflow`, `transversal`, `quality`, `security`, `base`, `runtime`, `product`, `domain`, `helper`.
+- Reserve non-empty `phases` for workflow owners and true transversal guardrails. Most domain/helper skills should leave `phases` empty and rely on intent + path routing.
 - `priority`: numeric scalar normalized to the existing routing priority number.
 - Omit empty optional fields instead of leaving blank values.
 - Omit the entire `registry:` map when the skill should not participate in Skill Registry routing.
