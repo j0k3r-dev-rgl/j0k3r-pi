@@ -24,9 +24,9 @@ Related skills are handoff hints, not additional owners. A lower-ranked generic 
 | ID | Request | Expected result |
 |---|---|---|
 | WF-01 | “Which workflow should I use?” | `workflow-triage`; `ADVICE_ONLY`; no project inspection or execution. |
-| WF-02 | Small explicit bounded code fix | Direct Orchestrator; no second start confirmation; load TDD and anti-overengineering. |
-| WF-03 | Medium multi-file feature with shared plan | Mini-SDD: `mini-sdd.md` → `apply.md` → independent `verify.md` → archive. |
-| WF-04 | Large cross-contract/security/migration change | Formal SDD phases through `tasks.md`, apply, independent verify, and archive. |
+| WF-02 | Small explicit bounded code fix | Direct Orchestrator only when exact files/symbols and trivial patch are already known; otherwise delegated `discovery` first, then TDD and anti-overengineering. |
+| WF-03 | Medium multi-file feature with shared plan | Mini-SDD with mandatory matching-subagent delegation for phase artifacts/execution: `mini-sdd.md` → `apply.md` → independent `verify.md` → archive. |
+| WF-04 | Large cross-contract/security/migration change | Formal SDD with mandatory matching-subagent delegation through `tasks.md`, apply, independent verify, and archive. |
 | WF-05 | User explicitly selects Mini-SDD or Formal SDD | Begin selected workflow without reopening triage unless scope materially changes. |
 | WF-06 | Advice-only architecture or workflow comparison | Explain without execution; comparison does not authorize reads or changes. |
 | WF-07 | SDD artifact is `BLOCKED` | Do not advance; request only the missing material decision/dependency. |

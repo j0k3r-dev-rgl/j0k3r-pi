@@ -33,12 +33,14 @@ If equal-authority sources conflict, stop and surface the exact conflict.
 - Treat relevant supplied context as already read.
 - Do not reread files or rerun discovery only to restate unchanged context.
 - When a fresh read is justified, use the narrowest file, path, symbol, or section that resolves the next action.
-- Direct orchestrator execution is allowed for bounded, explicitly authorized files. If the task expands into open-ended discovery or broad implementation, stop and ask or delegate.
+- The orchestrator coordinates by default. It may inspect implementation code directly only when the user names exact files or symbols and the task is trivial.
+- For unknown code, behavior, dependencies, tests, or project structure, delegate bounded read-only `discovery` before implementation.
+- Direct orchestrator execution is limited to routing, answers, exact known reads, trivial localized edits, and lightweight validation.
 - Unexpected scope growth, new repositories, new services, or new product/architecture decisions require renewed approval.
 
 ## Research and Code Inspection
 
-- Prefer delegated read-only `discovery` for unknown project or external research.
+- Use delegated read-only `discovery` for unknown project, implementation-code, behavior, dependency, test, or external research.
 - Do not duplicate a completed discovery report unless freshness or an unresolved gap requires it.
 - For TypeScript/JavaScript, Java, and Go code lookups, call `workspace_graph_status` first and then use `find_symbol`, `find_references`, `function_call_tree`, or `reverse_function_call_tree` before any text search.
 - Use `rg`, `grep`, or `find` on supported-language code only after graph-backed lookup is unavailable, unusable, or failed for the exact query.
@@ -48,8 +50,8 @@ If equal-authority sources conflict, stop and surface the exact conflict.
 
 Pi supports exactly three workflows:
 
-1. **Direct Orchestrator** — bounded coordination or small authorized edits.
-2. **Mini-SDD** — medium, bounded, multi-file work with a lightweight plan.
+1. **Direct Orchestrator** — coordination, answers, exact known reads, trivial localized edits, and lightweight validation.
+2. **Mini-SDD** — bounded implementation that needs investigation or a shared plan.
 3. **Formal SDD** — larger or more coupled work needing explicit proposal/spec/design/tasks lifecycle.
 
 PRD and discovery are optional artifacts or activities, not workflows.
@@ -101,6 +103,9 @@ Never label a step RED unless it fails for the expected reason.
 - Blockers: None | <specific unresolved decisions or dependencies>
 ```
 
+- In Mini-SDD and Formal SDD, delegation is mandatory for every phase.
+- If the required phase subagent is unavailable, stop and report the configuration blocker instead of doing the phase directly.
+- The orchestrator coordinates, prepares bounded prompts, reads handoffs/artifacts, runs structural gates, summarizes, and asks user decisions; it does not author phase artifacts.
 - The orchestrator reads the relevant artifact before advancing phases.
 - `BLOCKED` stops advancement.
 - `sdd-apply` requires an implementation summary plus explicit user authorization.

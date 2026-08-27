@@ -41,15 +41,17 @@ Global authorization, access, and delegation rules live in `AGENTS.md`.
 - Do not ask for a second start confirmation.
 - Prefer Mini-SDD for non-trivial but bounded work.
 - Choose Formal SDD only when there is a concrete escalation signal: materially coupled contracts, unresolved architecture, migration/security consequences, or review that cannot stay coherent in one lightweight plan.
-- Use bounded `discovery` only when a material unknown blocks safe routing or execution.
-- If Direct Orchestrator execution would require broad investigation, stop and ask whether to delegate research or change workflows.
+- Use bounded `discovery` whenever safe execution requires unknown implementation-code, behavior, dependency, test, project-structure, or external research.
+- Direct Orchestrator must not inspect implementation code unless the user names exact files or symbols and the task is trivial.
+- If implementation is non-trivial after discovery, choose Mini-SDD or Formal SDD instead of continuing as Direct Orchestrator.
 
 ## Routing Table
 
 | Situation | Workflow |
 |---|---|
-| Localized work or explicitly bounded orchestrator edit | Direct Orchestrator |
-| Medium multi-file work inside one coherent boundary | Mini-SDD |
+| Answer, routing, exact known read, trivial localized edit, or lightweight validation | Direct Orchestrator |
+| Work needing unknown code/behavior/test/dependency research | Likely workflow + delegated `discovery` first |
+| Medium implementation inside one coherent boundary | Mini-SDD |
 | Large, cross-cutting, migration-heavy, or architecture-heavy work | Formal SDD |
 | Material unknown blocks the route | Likely workflow + bounded discovery |
 
@@ -57,10 +59,11 @@ Global authorization, access, and delegation rules live in `AGENTS.md`.
 
 1. Reuse current context without reading files.
 2. Identify only material unknowns.
-3. Select one workflow with one concise reason.
-4. Classify the request as `EXECUTION_AUTHORIZED` or `ADVICE_ONLY`.
-5. For `EXECUTION_AUTHORIZED`, proceed immediately with the selected workflow.
-6. Re-triage only if scope changes materially.
+3. If unknown code, behavior, tests, dependencies, project structure, or external facts are needed, delegate bounded `discovery` before implementation.
+4. Select one workflow with one concise reason.
+5. Classify the request as `EXECUTION_AUTHORIZED` or `ADVICE_ONLY`.
+6. For `EXECUTION_AUTHORIZED`, proceed immediately with the selected workflow.
+7. Re-triage only if scope changes materially.
 
 ## Output Contract
 

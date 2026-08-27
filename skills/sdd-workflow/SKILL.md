@@ -28,6 +28,7 @@ Do not use it to choose the workflow.
 This skill owns:
 
 - the SDD artifact map;
+- mandatory phase delegation;
 - one-phase-at-a-time lifecycle rules;
 - the required `Workflow Status` block;
 - pre-apply, verify, and archive gates; and
@@ -58,7 +59,7 @@ Files under `openspec/changes/<change-slug>/`:
 
 Rules:
 
-1. `mini-sdd.md` is the implementation contract.
+1. `mini-sdd.md` is delegated to `mini-sdd` and is the implementation contract.
 2. The orchestrator checks it before apply.
 3. `sdd-apply` requires an implementation summary plus explicit user authorization.
 4. `sdd-verify` independently verifies every `MINI-###` item.
@@ -112,6 +113,10 @@ Before advancing, the orchestrator checks:
 ## Hard Rules
 
 - Use exactly one active phase at a time.
+- Delegate every Mini-SDD or Formal SDD phase to the required phase subagent.
+- If the required phase subagent is unavailable, stop as `BLOCKED` and report the configuration problem.
+- The orchestrator may only coordinate, prepare bounded prompts, read returned handoffs/artifacts, run structural gates, summarize, and ask user decisions.
+- The orchestrator must not author or materially rewrite phase artifacts.
 - Do not advance from a `BLOCKED` artifact.
 - Do not restate upstream artifacts; reference IDs instead.
 - Use `discovery` only for approved unknown research.
@@ -123,13 +128,15 @@ Before advancing, the orchestrator checks:
 
 ## Execution Steps
 
-1. Create or update the next owned artifact only.
-2. Run the structural gate.
-3. Stop on `BLOCKED` and ask the user only for the missing decision.
-4. Before apply, summarize planned implementation, scope, exclusions, validation, and risks.
-5. Delegate apply only after explicit authorization.
-6. Delegate verify independently.
-7. Ask for archive authorization only after passing verification.
+1. Identify the next active phase and matching subagent.
+2. Delegate artifact creation or phase execution to that subagent with the seven-field prompt.
+3. Read the returned handoff and produced artifact.
+4. Run the structural gate.
+5. Stop on `BLOCKED` and ask the user only for the missing decision.
+6. Before apply, summarize planned implementation, scope, exclusions, validation, and risks.
+7. Delegate apply only after explicit authorization.
+8. Delegate verify independently.
+9. Ask for archive authorization only after passing verification.
 
 ## Output Contract
 
@@ -146,6 +153,7 @@ Return:
 
 - `AGENTS.md`
 - `subagents/prd-review.md`
+- `subagents/mini-sdd.md`
 - `subagents/sdd-explore.md`
 - `subagents/sdd-proposal.md`
 - `subagents/sdd-spec.md`
