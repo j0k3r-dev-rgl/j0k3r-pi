@@ -1204,6 +1204,11 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
     name: 'youtube_search',
     label: 'YouTube Search',
     description: 'Search videos, channels, and playlists on YouTube, with optional enriched video metadata for choosing what to inspect next.',
+    promptSnippet: 'Search YouTube videos, channels, and playlists with optional enriched metadata.',
+    promptGuidelines: [
+      'Use youtube_search when the user asks to find YouTube videos, channels, or playlists before choosing a specific item to inspect.',
+      'Use youtube_search results with youtube_video_get, youtube_channel_search, or youtube_playlist_get when deeper YouTube metadata is needed.',
+    ],
     parameters: searchParameters,
     renderResult: renderYoutubeToolResult,
     async execute(_id: string, params: YoutubeSearchInput) {
@@ -1219,6 +1224,11 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
     name: 'youtube_video_get',
     label: 'YouTube Video Details',
     description: 'Fetch detailed video metadata, description preview, caption signals, and optional bounded comments for one YouTube video.',
+    promptSnippet: 'Fetch detailed metadata and optional bounded comments for one YouTube video.',
+    promptGuidelines: [
+      'Use youtube_video_get when you have a YouTube video URL or ID and need metadata, description preview, captions signals, or bounded comments.',
+      'Use youtube_video_get before youtube_transcript_get when you need to confirm video identity or transcript availability signals.',
+    ],
     parameters: videoParameters,
     renderResult: renderYoutubeToolResult,
     async execute(_id: string, params: VideoRefInput) {
@@ -1234,6 +1244,11 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
     name: 'youtube_transcript_get',
     label: 'YouTube Transcript',
     description: 'Fetch transcript text for one YouTube video with explicit source modes and staged best-effort fallback semantics.',
+    promptSnippet: 'Fetch transcript text for one YouTube video with explicit source modes.',
+    promptGuidelines: [
+      'Use youtube_transcript_get when the user needs spoken content, quotes, summaries, or timestamped transcript text from a YouTube video.',
+      'Use youtube_transcript_get with the requested transcript mode rather than youtube_video_get when transcript text is the main need.',
+    ],
     parameters: transcriptParameters,
     renderResult: renderYoutubeToolResult,
     async execute(_id: string, params: YoutubeTranscriptInput) {
@@ -1249,6 +1264,10 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
     name: 'youtube_channel_search',
     label: 'YouTube Channel Search',
     description: 'Search or inspect YouTube channels by query, channel ID, handle, or URL, with optional recent videos and playlists for recurring research sources.',
+    promptSnippet: 'Search or inspect YouTube channels and optional recent videos or playlists.',
+    promptGuidelines: [
+      'Use youtube_channel_search when the user asks about a YouTube channel, creator, handle, channel URL, or recent uploads/playlists from a recurring source.',
+    ],
     parameters: channelSearchParameters,
     renderResult: renderYoutubeToolResult,
     async execute(_id: string, params: YoutubeChannelSearchInput) {
@@ -1264,6 +1283,10 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
     name: 'youtube_playlist_get',
     label: 'YouTube Playlist',
     description: 'Fetch rich YouTube playlist metadata with offset/limit pagination and optional enriched video entries by URL or playlist ID.',
+    promptSnippet: 'Fetch paginated YouTube playlist metadata and optional enriched video entries.',
+    promptGuidelines: [
+      'Use youtube_playlist_get when the user provides or selects a YouTube playlist URL or ID and needs playlist metadata or paginated entries.',
+    ],
     parameters: playlistParameters,
     renderResult: renderYoutubeToolResult,
     async execute(_id: string, params: PlaylistRefInput) {

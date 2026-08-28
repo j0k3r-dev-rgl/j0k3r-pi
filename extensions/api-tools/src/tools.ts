@@ -337,7 +337,12 @@ export async function registerApiTools(pi: any, options: RegisterApiToolsOptions
 
   pi.registerTool({
     name: 'api_status',
+    label: 'API Status',
     description: 'Show safe project-local API tools configuration status without exposing secrets.',
+    promptSnippet: 'Inspect whether project-local API tools are enabled and safely configured.',
+    promptGuidelines: [
+      'Use api_status before API calls when you need to confirm the project-local API tools configuration, limits, and enabled providers without exposing secrets.',
+    ],
     parameters: EMPTY_PARAMETERS,
     execute: async () => continuation.finalize({ tool: 'api_rest_request', action: 'status', document: buildStatusDocument(config), secretValues: config.secretValues, limits: { ...config.limits, maxRecordsPerPage: continuationPageLimit('api_rest_request', 'status') } }),
     ...buildRenderers('api_status'),
@@ -345,7 +350,12 @@ export async function registerApiTools(pi: any, options: RegisterApiToolsOptions
 
   pi.registerTool({
     name: 'api_auth_status',
+    label: 'API Auth Status',
     description: 'Inspect local API auth metadata without contacting the backend.',
+    promptSnippet: 'Inspect local API authentication metadata without contacting the backend.',
+    promptGuidelines: [
+      'Use api_auth_status when you need to check configured auth mode, token presence, or expiry metadata before deciding whether api_login or an API request is appropriate.',
+    ],
     parameters: EMPTY_PARAMETERS,
     execute: async () => continuation.finalize({ tool: 'api_rest_request', action: 'auth_status', document: buildAuthStatusDocument(config, options.now), secretValues: config.secretValues, limits: { ...config.limits, maxRecordsPerPage: continuationPageLimit('api_rest_request', 'auth_status') } }),
     ...buildRenderers('api_auth_status'),
@@ -353,7 +363,12 @@ export async function registerApiTools(pi: any, options: RegisterApiToolsOptions
 
   pi.registerTool({
     name: 'api_login',
+    label: 'API Login',
     description: 'Login with configured project credentials and persist access_token into .pi/api.json.',
+    promptSnippet: 'Authenticate against the configured project API and persist the access token.',
+    promptGuidelines: [
+      'Use api_login only when the user asks to authenticate or api_auth_status shows a configured login flow is needed for the project API.',
+    ],
     parameters: EMPTY_PARAMETERS,
     execute: async (_id: string, _params: Record<string, unknown>, signal?: AbortSignal) => continuation.finalize({ tool: 'api_rest_request', action: 'login', document: await executeLoginTool(signal, config, client), secretValues: config.secretValues, limits: { ...config.limits, maxRecordsPerPage: continuationPageLimit('api_rest_request', 'login') } }),
     ...buildRenderers('api_login'),
@@ -361,7 +376,13 @@ export async function registerApiTools(pi: any, options: RegisterApiToolsOptions
 
   pi.registerTool({
     name: 'api_rest_request',
+    label: 'API REST Request',
     description: 'Execute a REST request against the configured project API with safe bounded outputs.',
+    promptSnippet: 'Call the configured project REST API with safe bounded output and continuation.',
+    promptGuidelines: [
+      'Use api_rest_request for direct requests to the project-local REST API when the endpoint and method are known or supplied by api_swagger.',
+      'Use api_rest_request with cursor only to continue a previous api_rest_request result; do not mix cursor with a new request action.',
+    ],
     parameters: REST_PARAMETERS,
     execute: async (_id: string, params: Record<string, unknown>, signal?: AbortSignal) => {
       const cursorConflict = rejectCursorExecutionInputs(params);
@@ -376,7 +397,13 @@ export async function registerApiTools(pi: any, options: RegisterApiToolsOptions
   if (config.swagger.enabled && config.swagger.valid) {
     pi.registerTool({
       name: 'api_swagger',
+      label: 'API Swagger',
       description: 'Inspect Swagger/OpenAPI contracts with discover, detail, schema, request, and same-tool cursor continuation.',
+      promptSnippet: 'Discover and inspect configured Swagger/OpenAPI operations for the project API.',
+      promptGuidelines: [
+        'Use api_swagger to discover REST operations, inspect request schemas, or choose endpoint details before calling api_rest_request.',
+        'Use api_swagger with cursor only to continue a previous api_swagger result; do not mix cursor with a new Swagger action.',
+      ],
       parameters: SWAGGER_PARAMETERS,
       execute: async (_id: string, params: Record<string, unknown>, signal?: AbortSignal) => {
         const cursorConflict = rejectCursorExecutionInputs(params);
@@ -393,7 +420,13 @@ export async function registerApiTools(pi: any, options: RegisterApiToolsOptions
   if (config.graphql.enabled && config.graphql.valid) {
     pi.registerTool({
       name: 'api_graphql',
+      label: 'API GraphQL',
       description: 'Inspect GraphQL contracts with discover, detail, schema, execute, and same-tool cursor continuation.',
+      promptSnippet: 'Discover, inspect, and execute against the configured project GraphQL API.',
+      promptGuidelines: [
+        'Use api_graphql for configured project GraphQL schema discovery, operation details, or GraphQL execution instead of api_rest_request.',
+        'Use api_graphql with cursor only to continue a previous api_graphql result; do not mix cursor with a new GraphQL action.',
+      ],
       parameters: GRAPHQL_PARAMETERS,
       execute: async (_id: string, params: Record<string, unknown>, signal?: AbortSignal) => {
         const cursorConflict = rejectCursorExecutionInputs(params);

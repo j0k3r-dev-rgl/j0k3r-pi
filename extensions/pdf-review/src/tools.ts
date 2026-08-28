@@ -38,6 +38,11 @@ export function registerPdfReviewTools(pi: any): void {
     name: 'pdf_extract',
     label: 'PDF Extract',
     description: 'Extract text, metadata, sha256 hash, warnings, and optional rendered page metadata from a local PDF file.',
+    promptSnippet: 'Extract text, metadata, hashes, warnings, and optional page render metadata from a local PDF.',
+    promptGuidelines: [
+      'Use pdf_extract when the user asks to inspect, summarize, verify, or extract content from a local PDF file.',
+      'Use pdf_extract renderPages or OCR options only when the user needs page-render metadata or the PDF text layer may be empty.',
+    ],
     parameters: pdfExtractParameters,
     async execute(_id: string, params: PdfExtractParams, _signal?: AbortSignal, _onUpdate?: unknown, ctx?: { cwd?: string }) {
       try {

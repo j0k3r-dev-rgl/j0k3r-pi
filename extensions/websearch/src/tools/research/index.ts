@@ -99,7 +99,13 @@ export const researchTools: WebsearchToolModule<typeof researchToolNames[number]
   register(pi: any, deps: RegisterWebsearchToolsDeps = {}) {
     registerTool(pi, {
       name: 'research_search',
+      label: 'Research Search',
       description: 'Search academic/research sources with unified bounded read-only results. Supports fan-out across OpenAlex, arXiv, Crossref, Europe PMC, and Semantic Scholar or a single source filter.',
+      promptSnippet: 'Search academic sources such as OpenAlex, arXiv, Crossref, Europe PMC, and Semantic Scholar.',
+      promptGuidelines: [
+        'Use research_search for scholarly literature discovery instead of web_search when the user asks for papers, articles, citations, authors, DOIs, or academic sources.',
+        'Use research_search source filters when the user names a specific academic index or repository.',
+      ],
       parameters: researchSearchParameters,
       async execute(_id: string, params: unknown, _unused1?: unknown, _unused2?: unknown, context?: ExecuteContext): Promise<PiToolResult<ResearchSearchResult>> {
         try {

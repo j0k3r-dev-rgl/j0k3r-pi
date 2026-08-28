@@ -10,7 +10,10 @@ export type WebsearchToolModule<Name extends string = string> = {
 
 type ToolDefinition = {
   name: string;
+  label?: string;
   description: string;
+  promptSnippet?: string;
+  promptGuidelines?: string[];
   parameters: unknown;
   execute: (...args: any[]) => Promise<unknown>;
   renderResult?: (...args: any[]) => unknown;

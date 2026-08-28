@@ -257,7 +257,13 @@ export const webTools: WebsearchToolModule<typeof webToolNames[number]> = {
   register(pi: any, deps: RegisterWebsearchToolsDeps = {}) {
     registerTool(pi, {
       name: 'web_search',
+      label: 'Web Search',
       description: 'Search the general web using the V1 hosted provider chain: Exa primary with Parallel fallback. Supports optional normalized filters; providers apply them natively when possible or as query hints. Returns bounded normalized results with provider errors when fallback is needed.',
+      promptSnippet: 'Search the general web with hosted providers and bounded normalized results.',
+      promptGuidelines: [
+        'Use web_search for current general web discovery when a targeted documentation, research, GitHub, or discussion tool is not a better fit.',
+        'Use web_search filters to narrow recency, domains, or result type when the user asks for current web sources.',
+      ],
       parameters: webSearchParameters,
       async execute(_id: string, params: unknown, _unused1?: unknown, _unused2?: unknown, context?: ExecuteContext): Promise<PiToolResult<WebSearchResult>> {
         try {
@@ -273,7 +279,13 @@ export const webTools: WebsearchToolModule<typeof webToolNames[number]> = {
 
     registerTool(pi, {
       name: 'web_fetch',
+      label: 'Web Fetch',
       description: 'Fetch one HTTPS page safely for agent reading. Enforces SSRF protections, bounded bytes, redirects, and text-like content extraction without JavaScript or subresources.',
+      promptSnippet: 'Fetch one HTTPS page safely for bounded text extraction.',
+      promptGuidelines: [
+        'Use web_fetch when you already have a specific HTTPS URL and need its readable page text or metadata.',
+        'Do not use web_fetch for broad discovery; use web_search, discussion_search, research_search, or github_code_search first when you need to find candidate URLs.',
+      ],
       parameters: webFetchParameters,
       async execute(_id: string, params: unknown, _unused1?: unknown, _unused2?: unknown, context?: ExecuteContext): Promise<PiToolResult<WebFetchResult>> {
         try {

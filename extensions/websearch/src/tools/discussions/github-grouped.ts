@@ -133,7 +133,13 @@ export const githubGroupedTools: WebsearchToolModule<typeof githubGroupedToolNam
 
     registerTool(pi, {
       name: 'github_get',
+      label: 'GitHub Get',
       description: 'Fetch GitHub repository metadata, one file, one release, or recent releases. Use github_code_search separately for code search.',
+      promptSnippet: 'Fetch GitHub repository metadata, files, releases, or release details.',
+      promptGuidelines: [
+        'Use github_get when you have a specific GitHub repository, file ref, release tag, or release listing to inspect.',
+        'Use github_get after github_code_search when a selected code result needs file contents; use github_code_search separately for code discovery.',
+      ],
       parameters: githubGetParameters,
       async execute(id: string, params: unknown, _unused1?: unknown, _unused2?: unknown, context?: unknown): Promise<PiToolResult<unknown>> {
         try {

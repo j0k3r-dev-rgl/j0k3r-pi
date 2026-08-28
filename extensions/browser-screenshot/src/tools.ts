@@ -67,6 +67,10 @@ export function registerBrowserScreenshotTools(pi: any): void {
     name: 'browser_cdp_status',
     label: 'Browser CDP Status',
     description: 'Check whether the local Chrome DevTools Protocol endpoint is reachable without exposing sensitive target websocket URLs.',
+    promptSnippet: 'Check whether the local Chrome DevTools Protocol endpoint is reachable.',
+    promptGuidelines: [
+      'Use browser_cdp_status before browser tab or screenshot actions when you need to verify local Chrome DevTools Protocol connectivity without exposing debugger URLs.',
+    ],
     parameters: statusParameters,
     async execute(_id: string, params: BrowserCdpStatusParams, _signal?: AbortSignal, _onUpdate?: unknown, ctx?: ToolExecutionContext): Promise<PiToolResult> {
       try {
@@ -82,6 +86,10 @@ export function registerBrowserScreenshotTools(pi: any): void {
     name: 'browser_tabs_list',
     label: 'Browser Tabs List',
     description: 'List current Chrome page tabs from CDP with bounded text-friendly output and without exposing websocket debugger URLs.',
+    promptSnippet: 'List current Chrome page tabs available through CDP.',
+    promptGuidelines: [
+      'Use browser_tabs_list when you need to choose an existing Chrome page target before go_to_page or browser_page_screenshot.',
+    ],
     parameters: listParameters,
     async execute(_id: string, params: BrowserTabsListParams, _signal?: AbortSignal, _onUpdate?: unknown, _ctx?: ToolExecutionContext): Promise<PiToolResult<BrowserTabsListResult>> {
       try {
@@ -111,6 +119,11 @@ export function registerBrowserScreenshotTools(pi: any): void {
     name: 'go_to_page',
     label: 'Go To Page',
     description: 'Navigate one existing Chrome page target through CDP and wait for its document load event; use the returned target id with browser_page_screenshot.',
+    promptSnippet: 'Navigate one existing Chrome tab through CDP and return its target id.',
+    promptGuidelines: [
+      'Use go_to_page when the user wants an existing Chrome tab navigated to a URL before capture; use browser_tabs_list first if the target tab is ambiguous.',
+      'Use go_to_page results with browser_page_screenshot when the user needs visual confirmation after navigation.',
+    ],
     parameters: goToPageParameters,
     async execute(_id: string, params: GoToPageParams, signal?: AbortSignal): Promise<PiToolResult<BrowserGoToPageResult>> {
       const navigation = await navigateBrowserPage({ ...params, signal });
@@ -123,6 +136,11 @@ export function registerBrowserScreenshotTools(pi: any): void {
     name: 'browser_page_screenshot',
     label: 'Browser Page Screenshot',
     description: 'Capture the current content of an existing Chrome page tab through CDP without navigation, scrolling, focus changes, or other page mutation.',
+    promptSnippet: 'Capture a PNG screenshot of an existing Chrome tab through CDP.',
+    promptGuidelines: [
+      'Use browser_page_screenshot when the user asks to inspect the current visual content of an existing Chrome tab without navigating or mutating the page.',
+      'Use browser_page_screenshot with targetId from browser_tabs_list or go_to_page when multiple tabs may match.',
+    ],
     parameters: screenshotParameters,
     async execute(_id: string, params: BrowserPageScreenshotParams, signal?: AbortSignal, _onUpdate?: unknown, ctx?: ToolExecutionContext): Promise<PiToolResult<BrowserPageScreenshotResult>> {
       try {

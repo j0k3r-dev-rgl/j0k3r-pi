@@ -436,6 +436,10 @@ export function registerContext7Tools(pi: any, deps: RegisterContext7ToolsOption
     name: 'context7_status',
     label: 'Context7 Status',
     description: 'Report Context7 extension readiness without exposing secrets.',
+    promptSnippet: 'Check whether Context7 documentation lookup is ready and configured.',
+    promptGuidelines: [
+      'Use context7_status when you need to confirm Context7 readiness, cache settings, or API key presence before using Context7 documentation tools.',
+    ],
     parameters: emptyParameters,
     ...context7ToolRenderers('context7_status'),
     async execute(_id: string, _params: unknown, _signal: unknown, _onUpdate: unknown, ctx: any) {
@@ -457,6 +461,11 @@ export function registerContext7Tools(pi: any, deps: RegisterContext7ToolsOption
     name: 'context7_search_library',
     label: 'Context7 Search Library',
     description: 'Search Context7 libraries and return compact candidates.',
+    promptSnippet: 'Search Context7 for library IDs before fetching focused documentation.',
+    promptGuidelines: [
+      'Use context7_search_library when you need current library documentation candidates from Context7 and do not already know the exact Context7 library ID.',
+      'Prefer context7_search_library over generic web search for resolving package or framework documentation available in Context7.',
+    ],
     parameters: searchParameters,
     ...context7ToolRenderers('context7_search_library'),
     async execute(_id: string, params: unknown, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: any) {
@@ -468,6 +477,11 @@ export function registerContext7Tools(pi: any, deps: RegisterContext7ToolsOption
     name: 'context7_get_context',
     label: 'Context7 Get Context',
     description: 'Fetch focused Context7 documentation for a known library ID.',
+    promptSnippet: 'Fetch focused Context7 documentation for a known library ID and topic.',
+    promptGuidelines: [
+      'Use context7_get_context when you already have a Context7 library ID and need focused, current library documentation for implementation details.',
+      'Prefer context7_get_context over generic web search for framework or package API guidance when the Context7 library ID is known.',
+    ],
     parameters: getContextParameters,
     ...context7ToolRenderers('context7_get_context'),
     async execute(_id: string, params: unknown, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: any) {
@@ -479,6 +493,11 @@ export function registerContext7Tools(pi: any, deps: RegisterContext7ToolsOption
     name: 'context7_resolve_and_get_context',
     label: 'Context7 Resolve And Get Context',
     description: 'Resolve a library and fetch focused Context7 documentation when unambiguous.',
+    promptSnippet: 'Resolve a library name and fetch focused Context7 documentation in one step.',
+    promptGuidelines: [
+      'Use context7_resolve_and_get_context when the user names a library or framework and you need current Context7 documentation without a known library ID.',
+      'Prefer context7_resolve_and_get_context over generic web search for package or framework usage questions when Context7 can resolve the library unambiguously.',
+    ],
     parameters: resolveAndGetParameters,
     ...context7ToolRenderers('context7_resolve_and_get_context'),
     async execute(_id: string, params: unknown, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: any) {

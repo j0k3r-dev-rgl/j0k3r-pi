@@ -415,7 +415,13 @@ export const discussionTools: WebsearchToolModule<typeof discussionToolNames[num
   register(pi: any, deps: RegisterWebsearchToolsDeps = {}) {
     registerTool(pi, {
       name: 'discussion_search',
+      label: 'Discussion Search',
       description: 'Search community and human discussion sources with unified bounded read-only results. Supports fan-out or a single source filter.',
+      promptSnippet: 'Search community discussions across Stack Exchange, GitHub, Dev.to, and Hacker News.',
+      promptGuidelines: [
+        'Use discussion_search when the user asks for community experience, troubleshooting discussions, Q&A, issues, pull requests, articles, or social proof instead of generic web results.',
+        'Use discussion_search source filters when the user specifically wants Stack Exchange, GitHub, Dev.to, or Hacker News discussions.',
+      ],
       parameters: discussionSearchParameters,
       async execute(_id: string, params: unknown, _unused1?: unknown, _unused2?: unknown, context?: ExecuteContext): Promise<PiToolResult<DiscussionSearchResult>> {
         try {

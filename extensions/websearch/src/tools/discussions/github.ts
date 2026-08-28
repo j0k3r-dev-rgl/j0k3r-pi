@@ -302,7 +302,13 @@ export const githubTools: WebsearchToolModule<typeof githubToolNames[number]> = 
 
     registerTool(pi, {
       name: 'github_code_search',
+      label: 'GitHub Code Search',
       description: 'Search GitHub code with bounded read-only results and github_get file follow-up refs.',
+      promptSnippet: 'Search GitHub code and return refs suitable for github_get file follow-up.',
+      promptGuidelines: [
+        'Use github_code_search when the user asks to find code examples or files across GitHub repositories rather than general discussion or web results.',
+        'Use github_code_search results with github_get kind=file when you need the content of a selected matched file.',
+      ],
       parameters: githubCodeSearchParameters,
       async execute(_id: string, params: unknown, _unused1?: unknown, _unused2?: unknown, context?: ExecuteContext): Promise<PiToolResult<GitHubCodeSearchResult>> {
         try {

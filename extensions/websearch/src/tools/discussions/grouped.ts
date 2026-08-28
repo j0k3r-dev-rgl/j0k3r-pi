@@ -375,7 +375,13 @@ export const discussionGroupedTools: WebsearchToolModule<typeof discussionGroupe
 
     registerTool(pi, {
       name: 'discussion_get',
+      label: 'Discussion Get',
       description: 'Open one selected discussion/community entity from Stack Exchange, GitHub discussions/issues/pull requests, or Hacker News.',
+      promptSnippet: 'Open one selected discussion, issue, pull request, question, or story.',
+      promptGuidelines: [
+        'Use discussion_get after discussion_search when you need full details for one selected Stack Exchange, GitHub, or Hacker News discussion item.',
+        'Use discussion_get only with source-specific refs or identifiers from discussion_search results.',
+      ],
       parameters: discussionGetParameters,
       async execute(id: string, params: unknown, _unused1?: unknown, _unused2?: unknown, context?: unknown): Promise<PiToolResult<unknown>> {
         try {
@@ -391,7 +397,13 @@ export const discussionGroupedTools: WebsearchToolModule<typeof discussionGroupe
 
     registerTool(pi, {
       name: 'discussion_answers_get',
+      label: 'Discussion Answers Get',
       description: 'Fetch bounded Stack Exchange answers for a selected Stack Overflow or Stack Exchange network question.',
+      promptSnippet: 'Fetch bounded answers for a selected Stack Exchange question.',
+      promptGuidelines: [
+        'Use discussion_answers_get when a Stack Overflow or Stack Exchange question from discussion_search or discussion_get needs its answer set.',
+        'Use discussion_answers_get only for Stack Exchange questions; use discussion_comments_get for comments or replies.',
+      ],
       parameters: discussionAnswersParameters,
       async execute(id: string, params: unknown, _unused1?: unknown, _unused2?: unknown, context?: unknown): Promise<PiToolResult<unknown>> {
         try {
@@ -407,7 +419,13 @@ export const discussionGroupedTools: WebsearchToolModule<typeof discussionGroupe
 
     registerTool(pi, {
       name: 'discussion_comments_get',
+      label: 'Discussion Comments Get',
       description: 'Fetch bounded comments or replies for Stack Exchange questions, GitHub issues/pull requests/discussions, Dev.to articles, or Hacker News stories where supported.',
+      promptSnippet: 'Fetch bounded comments or replies for a selected community item.',
+      promptGuidelines: [
+        'Use discussion_comments_get when a selected Stack Exchange, GitHub, Dev.to, or Hacker News item needs its comment or reply thread.',
+        'Use discussion_comments_get after discussion_get when the main item details are known but comments were not included or need separate retrieval.',
+      ],
       parameters: discussionCommentsParameters,
       async execute(id: string, params: unknown, _unused1?: unknown, _unused2?: unknown, context?: unknown): Promise<PiToolResult<unknown>> {
         try {

@@ -182,7 +182,13 @@ export const researchGroupedTools: WebsearchToolModule<typeof researchGroupedToo
 
     registerTool(pi, {
       name: 'research_get',
+      label: 'Research Get',
       description: 'Fetch one selected paper/work/article from OpenAlex, arXiv, Crossref, Europe PMC, or Semantic Scholar.',
+      promptSnippet: 'Fetch one selected research paper, work, or article by source-specific reference.',
+      promptGuidelines: [
+        'Use research_get after research_search when you need full details for one selected OpenAlex, arXiv, Crossref, Europe PMC, or Semantic Scholar item.',
+        'Use research_get only with source-specific identifiers or refs from research_search results.',
+      ],
       parameters: researchGetParameters,
       async execute(id: string, params: unknown, _unused1?: unknown, _unused2?: unknown, context?: unknown): Promise<PiToolResult<unknown>> {
         try {
@@ -198,7 +204,13 @@ export const researchGroupedTools: WebsearchToolModule<typeof researchGroupedToo
 
     registerTool(pi, {
       name: 'research_graph_get',
+      label: 'Research Graph Get',
       description: 'Fetch citations or references for a selected research item when the source has verified graph/reference support.',
+      promptSnippet: 'Fetch citations or references for a selected supported research item.',
+      promptGuidelines: [
+        'Use research_graph_get when the user needs citation or reference links for a known research item from a supported source.',
+        'Use research_graph_get only after identifying the item and graph kind; use research_get first if item details are missing.',
+      ],
       parameters: researchGraphParameters,
       async execute(id: string, params: unknown, _unused1?: unknown, _unused2?: unknown, context?: unknown): Promise<PiToolResult<unknown>> {
         try {
