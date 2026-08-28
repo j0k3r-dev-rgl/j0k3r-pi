@@ -1,7 +1,7 @@
-import { mkdtemp, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, mkdir, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { syncActiveWorkflows } from '../src/core/state.js';
 
 async function workspace() {
@@ -56,5 +56,31 @@ describe('workflow state derivation', () => {
     expect(bySlug.blocked.blockers[0]).toContain('needs decision');
     expect(bySlug['missing-status'].status).toBe('BLOCKED');
     expect(bySlug['missing-status'].warnings[0]).toContain('Workflow Status');
+  });
+
+  it('serializes concurrent syncs so derived json writes do not race on temp renames', async () => {
+    const root = await workspace();
+    await change(root, 'mini', { 'mini-sdd.md': ready + '# Contract\n# MINI-001 Work\n' });
+    const now = vi.spyOn(Date, 'now').mockReturnValue(12345);
+    try {
+      await expect(Promise.all(Array.from({ length: 8 }, () => syncActiveWorkflows(root)))).resolves.toHaveLength(8);
+    } finally {
+      now.mockRestore();
+    }
+    expect(JSON.parse(await readFile(join(root, 'openspec', 'workflows.json'), 'utf8')).active.mini).toBeTruthy();
+  });
+
+  it('does not follow OpenSpec artifact symlinks outside the workspace', async () => {
+    const root = await workspace();
+    const outside = await mkdtemp(join(tmpdir(), 'workflow-guard-outside-'));
+    await writeFile(join(outside, 'mini-sdd.md'), ready + '# MINI-999 Escaped\n', 'utf8');
+    await mkdir(join(root, 'openspec', 'changes', 'escaped'), { recursive: true });
+    await symlink(join(outside, 'mini-sdd.md'), join(root, 'openspec', 'changes', 'escaped', 'mini-sdd.md'));
+
+    const result = await syncActiveWorkflows(root);
+    const escaped = result.states.find((state) => state.slug === 'escaped');
+    expect(escaped?.workflow).not.toBe('mini-sdd');
+    expect(escaped?.artifacts['mini-sdd.md']).toMatchObject({ exists: false, status: 'UNKNOWN' });
+    expect(escaped?.artifacts['mini-sdd.md'].blockers[0]).toContain('Refusing to follow symlink');
   });
 });

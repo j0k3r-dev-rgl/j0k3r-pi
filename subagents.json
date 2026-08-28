@@ -23,7 +23,7 @@
       "effort": "medium"
     },
     "sdd-apply": {
-      "model": "openai-codex/gpt-5.4",
+      "model": "openai-codex/gpt-5.5",
       "effort": "medium"
     },
     "sdd-archive": {
@@ -51,12 +51,15 @@
       "effort": "medium"
     },
     "sdd-verify": {
-      "model": "openai-codex/gpt-5.4",
+      "model": "openai-codex/gpt-5.5",
       "effort": "medium"
     },
     "tool-smoke": {
       "model": "openai-codex/gpt-5.4-mini",
       "effort": "low"
+    },
+    "mini-sdd": {
+      "model": "openai-codex/gpt-5.4"
     }
   }
 }

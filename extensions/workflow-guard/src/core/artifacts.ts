@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { join, resolve, relative } from 'node:path';
 import { sha256 } from './hashes.js';
 import { parseMarkdownStatus } from './parseMarkdown.js';
@@ -17,6 +17,27 @@ export function assertInside(base: string, target: string): void {
   }
 }
 
+export async function assertRealPathInside(base: string, target: string): Promise<void> {
+  const [realBase, realTarget] = await Promise.all([realpath(base), realpath(target)]);
+  assertInside(realBase, realTarget);
+}
+
+async function readRegularArtifact(changeDir: string, name: string): Promise<{ content: string; updatedAt: string }> {
+  const path = join(changeDir, name);
+  assertInside(changeDir, path);
+  const linkInfo = await lstat(path);
+  if (linkInfo.isSymbolicLink()) {
+    throw new Error(`Refusing to follow symlink artifact ${name}`);
+  }
+  if (!linkInfo.isFile()) {
+    throw new Error(`Refusing to read non-file artifact ${name}`);
+  }
+  await assertRealPathInside(changeDir, path);
+  const content = await readFile(path, 'utf8');
+  const info = await stat(path);
+  return { content, updatedAt: info.mtime.toISOString() };
+}
+
 export async function discoverActiveSlugs(cwd: string): Promise<string[]> {
   const changesDir = resolve(cwd, 'openspec', 'changes');
   try {
@@ -32,12 +53,11 @@ export async function readArtifacts(cwd: string, slug: string, generatedAt: stri
   const base = resolve(cwd, 'openspec');
   const changeDir = resolve(cwd, 'openspec', 'changes', slug);
   assertInside(base, changeDir);
+  await assertRealPathInside(base, changeDir);
   const result: Record<string, ArtifactState> = {};
   for (const name of ARTIFACT_NAMES) {
-    const path = join(changeDir, name);
-    assertInside(changeDir, path);
     try {
-      const [content, info] = await Promise.all([readFile(path, 'utf8'), stat(path)]);
+      const { content, updatedAt } = await readRegularArtifact(changeDir, name);
       const parsed = parseMarkdownStatus(content);
       result[name] = {
         exists: true,
@@ -46,7 +66,7 @@ export async function readArtifacts(cwd: string, slug: string, generatedAt: stri
         warnings: parsed.warnings,
         sha256: sha256(content),
         ids: parsed.ids,
-        updated_at: info.mtime.toISOString(),
+        updated_at: updatedAt,
         verification_result: parsed.verification_result,
       };
     } catch (error: any) {

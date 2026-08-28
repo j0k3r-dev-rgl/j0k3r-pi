@@ -1,6 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { discoverActiveSlugs, readArtifacts, assertInside } from './artifacts.js';
+import { discoverActiveSlugs, readArtifacts, assertInside, assertRealPathInside } from './artifacts.js';
 import { detectWorkflow, deriveStateFields } from './workflowRules.js';
 import type { ChangeWorkflowState, SyncResult, WorkflowIndex } from '../types.js';
 
@@ -9,10 +10,13 @@ async function atomicWriteJson(cwd: string, relPath: string, value: unknown): Pr
   const dest = resolve(cwd, relPath);
   assertInside(openspec, dest);
   await mkdir(dirname(dest), { recursive: true });
-  const temp = `${dest}.${process.pid}.${Date.now()}.tmp`;
+  await assertRealPathInside(openspec, dirname(dest));
+  const temp = `${dest}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
   await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
   await rename(temp, dest);
 }
+
+const syncQueues = new Map<string, Promise<SyncResult>>();
 
 export async function deriveChangeState(cwd: string, slug: string, generatedAt = new Date().toISOString()): Promise<ChangeWorkflowState> {
   const artifacts = await readArtifacts(cwd, slug, generatedAt);
@@ -44,7 +48,7 @@ export async function deriveActiveWorkflows(cwd: string, generatedAt = new Date(
   return { states, index, warnings: [] };
 }
 
-export async function syncActiveWorkflows(cwd: string, options: { slug?: string } = {}): Promise<SyncResult> {
+async function performSyncActiveWorkflows(cwd: string, options: { slug?: string } = {}): Promise<SyncResult> {
   const generatedAt = new Date().toISOString();
   const all = await deriveActiveWorkflows(cwd, generatedAt);
   const selected = options.slug ? all.states.filter((state) => state.slug === options.slug) : all.states;
@@ -57,4 +61,16 @@ export async function syncActiveWorkflows(cwd: string, options: { slug?: string 
   await atomicWriteJson(cwd, 'openspec/workflows.json', all.index);
   regenerated_files.push('openspec/workflows.json');
   return { ...all, regenerated_files };
+}
+
+export async function syncActiveWorkflows(cwd: string, options: { slug?: string } = {}): Promise<SyncResult> {
+  const key = resolve(cwd);
+  const previous = syncQueues.get(key) ?? Promise.resolve({ states: [], index: { schema_version: 1, kind: 'workflow-index', generated_at: '', active: {}, warnings: [] }, warnings: [], regenerated_files: [] });
+  const next = previous.catch(() => undefined).then(() => performSyncActiveWorkflows(cwd, options));
+  syncQueues.set(key, next);
+  try {
+    return await next;
+  } finally {
+    if (syncQueues.get(key) === next) syncQueues.delete(key);
+  }
 }
