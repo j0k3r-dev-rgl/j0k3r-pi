@@ -1,10 +1,18 @@
 ---
 name: mini-sdd
-description: "Creates or updates mini-sdd.md as the delegated Mini-SDD implementation contract from approved bounded context."
+description: "Creates or updates mini-sdd.md as the delegated Mini-SDD implementation contract from approved bounded context, using bounded code and external research when needed."
 tools:
   - read
   - write
   - edit
+  - workspace_graph_status
+  - find_symbol
+  - find_references
+  - context7_resolve_and_get_context
+  - web_search
+  - discussion_search
+  - github_code_search
+  - github_get
 ---
 
 # Mini-SDD Subagent
@@ -19,8 +27,9 @@ The delegated prompt must provide the seven standard fields in order and must ex
 
 ## Boundaries
 
-- Read only supplied artifacts, assigned skills, and explicitly approved files.
-- Do not scan the repository or `skills/`.
+- Read supplied artifacts, assigned skills, and explicitly approved files first.
+- Use bounded repository inspection and external research only when needed to remove ambiguity from the Mini-SDD contract.
+- Do not scan the repository or `skills/` blindly; inspect only exact files, symbols, paths, or focused external sources justified by the request.
 - Do not implement, verify, archive, or invent product, scope, architecture, or acceptance decisions.
 - Keep the contract small and implementation-ready.
 
