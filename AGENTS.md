@@ -14,9 +14,10 @@ Use this order whenever instructions overlap:
 4. the selected workflow owner:
    - `skills/workflow-triage/SKILL.md` for routing;
    - `skills/sdd-workflow/SKILL.md` for Mini-SDD and Formal SDD lifecycle;
-5. the selected domain or guardrail skills;
-6. ready change-local artifacts;
-7. repository evidence.
+5. `skills/subagent-artifact-contracts/SKILL.md` for subagent-produced Markdown artifact and handoff formats;
+6. the selected domain or guardrail skills;
+7. ready change-local artifacts;
+8. repository evidence.
 
 If equal-authority sources conflict, stop and surface the exact conflict.
 
@@ -95,14 +96,7 @@ Never label a step RED unless it fails for the expected reason.
 ## SDD Rules
 
 - Store active changes under `openspec/changes/<change-slug>/`.
-- Every SDD artifact must start with:
-
-```markdown
-## Workflow Status
-- Status: READY | BLOCKED
-- Blockers: None | <specific unresolved decisions or dependencies>
-```
-
+- SDD artifact and handoff formats live in `skills/subagent-artifact-contracts/SKILL.md`.
 - In Mini-SDD and Formal SDD, delegation is mandatory for every phase.
 - If the required phase subagent is unavailable, stop and report the configuration blocker instead of doing the phase directly.
 - The orchestrator coordinates, prepares bounded prompts, reads handoffs/artifacts, runs structural gates, summarizes, and asks user decisions; it does not author phase artifacts.
@@ -125,26 +119,15 @@ Every workflow-relevant delegated prompt must supply these seven fields in order
 6. Expected output and evidence
 7. Blockers and next permitted action
 
-Every workflow-relevant delegated result must return exactly:
-
-```markdown
-## Handoff
-- Status: READY | BLOCKED | FAILED
-- Outcome: <one-sentence result>
-- Scope: <completed or attempted scope>
-- Evidence: <artifact paths, checks, or “None”>
-- Blockers: None | <unresolved blockers or dependencies>
-- Next action: <one permitted next action or “None”>
-```
-
 Rules:
 
-- `READY` requires reviewable evidence and `Blockers: None`.
-- `BLOCKED` means a specific decision, dependency, or missing authority is required.
-- `FAILED` means the task terminated without a valid completion and not as a simple missing-input blocker.
-- Handoff status must match artifact status when an artifact exists.
+- Workflow-relevant delegated results must use the compact canonical handoff in `skills/subagent-artifact-contracts/SKILL.md`.
+- Successful SDD/Mini-SDD handoffs must not repeat artifact content, edited files, scanned files, or validation details; the orchestrator reads the generated `.md`.
+- `READY`, `BLOCKED`, and `FAILED` semantics live in `skills/subagent-artifact-contracts/SKILL.md`.
 - Inter-agent communication is always in English.
-- For SDD delegation, pass compact exact references before launching the subagent: change slug, phase, output artifact path, authority artifact path(s), scope-source artifact, assigned `SKILL.md` path(s) or `None`, user decision when required, and one expected outcome. Do not copy full OpenSpec contracts or expanded scope into prompts; subagents must read referenced artifacts.
+- For SDD delegation, pass compact exact references before launching the subagent: change slug, phase, output artifact path, authority artifact path(s), scope-source artifact, assigned `SKILL.md` path(s), user decision when required, and one expected outcome.
+- Include `skills/subagent-artifact-contracts/SKILL.md` in Assigned skills for any subagent that writes, updates, validates, archives, or returns a workflow artifact.
+- Do not copy full OpenSpec contracts, expanded execution-scope path lists, validation matrices, or stable artifact templates into prompts; subagents must read referenced artifacts and the canonical contract skill.
 
 ## Subagent Rules
 

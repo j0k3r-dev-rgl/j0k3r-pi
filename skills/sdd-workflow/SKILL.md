@@ -30,21 +30,15 @@ This skill owns:
 - the SDD artifact map;
 - mandatory phase delegation;
 - one-phase-at-a-time lifecycle rules;
-- the required `Workflow Status` block;
 - pre-apply, verify, and archive gates; and
 - structural checks between phases.
 
 Global authorization, delegation, and validation policy live in `AGENTS.md`.
+Subagent-produced artifact and handoff formats live in `skills/subagent-artifact-contracts/SKILL.md`.
 
 ## Shared Artifact Rule
 
-Every SDD artifact starts with:
-
-```markdown
-## Workflow Status
-- Status: READY | BLOCKED
-- Blockers: None | <specific unresolved decisions or dependencies>
-```
+Every SDD artifact and workflow-relevant handoff must follow `skills/subagent-artifact-contracts/SKILL.md`.
 
 `READY` means the next phase can proceed without guessing. `BLOCKED` stops advancement.
 
@@ -67,14 +61,7 @@ Rules:
 
 ### Mini-SDD contract shape
 
-Each approved outcome is one `MINI-###` item with:
-
-- Contract
-- Acceptance
-- Canonical sources
-- Paths
-- Validation
-- Depends on
+The complete `mini-sdd.md` format, including `Workflow Status`, `Execution Scope`, `MINI-###` fields, and next action, is defined in `skills/subagent-artifact-contracts/SKILL.md`.
 
 ## Formal SDD Lifecycle
 
@@ -122,8 +109,9 @@ Before advancing, the orchestrator checks:
 - Use `discovery` only for approved unknown research.
 - Use `sdd-explore` only when discovery needs a durable synthesis artifact.
 - Read only exact assigned skills; subagents do not scan `skills/`.
-- Every delegated SDD prompt must be compact and reference-driven: include change slug, phase, exact authority artifact path(s), exact expected output artifact path(s), scope-source artifact path, exact assigned `SKILL.md` paths or `None`, required user decision when applicable, and one expected outcome.
-- Do not copy full OpenSpec contracts, expanded execution-scope path lists, validation matrices, or stable subagent rules into delegated prompts; subagents must read referenced artifacts and their own Markdown contract.
+- Every delegated SDD prompt must be compact and reference-driven: include change slug, phase, exact authority artifact path(s), exact expected output artifact path(s), scope-source artifact path, exact assigned `SKILL.md` paths, required user decision when applicable, and one expected outcome.
+- Include `skills/subagent-artifact-contracts/SKILL.md` in Assigned skills for every SDD subagent that writes, updates, verifies, archives, or reports a workflow artifact.
+- Do not copy full OpenSpec contracts, expanded execution-scope path lists, validation matrices, or stable artifact templates into delegated prompts; subagents must read referenced artifacts, their own Markdown contract, and `skills/subagent-artifact-contracts/SKILL.md`.
 - Do not use placeholders such as `<change-slug>`, `<artifact>`, or “as needed” for required phase paths; resolve concrete reference paths before delegation.
 - `apply.md` records implementation evidence only.
 - `verify.md` records independent verification evidence only.
@@ -156,6 +144,7 @@ Return:
 ## References
 
 - `AGENTS.md`
+- `skills/subagent-artifact-contracts/SKILL.md`
 - `subagents/prd-review.md`
 - `subagents/mini-sdd.md`
 - `subagents/sdd-explore.md`

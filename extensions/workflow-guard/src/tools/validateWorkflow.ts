@@ -1,10 +1,11 @@
 import { Type, type Static } from 'typebox';
 import { validateWorkflows } from '../core/validate.js';
-import { boundedJson } from '../render/index.js';
+import { boundedJson, validationSummary } from '../render/index.js';
 
 export const validateWorkflowSchema = Type.Object({
   slug: Type.Optional(Type.String({ description: 'OpenSpec active change slug to validate.' })),
   repairDerivedJson: Type.Optional(Type.Boolean({ default: false, description: 'Regenerate only derived workflow JSON under openspec/.' })),
+  verbose: Type.Optional(Type.Boolean({ default: false, description: 'Include the full bounded validation JSON in the text response.' })),
 });
 export type ValidateWorkflowInput = Static<typeof validateWorkflowSchema>;
 
@@ -18,8 +19,9 @@ export function createValidateWorkflowTool() {
     parameters: validateWorkflowSchema,
     async execute(_toolCallId: string, params: ValidateWorkflowInput, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: { cwd: string }) {
       const validation = await validateWorkflows(ctx.cwd, params);
-      const summary = validation.pass ? 'workflow validation passed' : `workflow validation failed: ${validation.violations.length} violation(s), ${validation.conflicts.length} conflict(s)`;
-      return { content: [{ type: 'text', text: `${summary}\nDerived JSON regenerated: ${validation.regenerated_files.length}\n${boundedJson(validation)}` }], details: validation };
+      const summary = validationSummary(validation);
+      const text = params.verbose ? `${summary}\n${boundedJson(validation)}` : summary;
+      return { content: [{ type: 'text', text }], details: validation };
     },
   };
 }

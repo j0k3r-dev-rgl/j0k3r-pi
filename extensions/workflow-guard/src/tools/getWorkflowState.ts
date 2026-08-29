@@ -1,11 +1,12 @@
 import { Type, type Static } from 'typebox';
 import { deriveActiveWorkflows } from '../core/state.js';
-import { boundedJson, stateSummary } from '../render/index.js';
+import { boundedJson, stateSummary, workspaceSummary } from '../render/index.js';
 
 export const getWorkflowStateSchema = Type.Object({
   slug: Type.Optional(Type.String({ description: 'OpenSpec active change slug to inspect.' })),
   includeArtifacts: Type.Optional(Type.Boolean({ default: true })),
   includeNextAction: Type.Optional(Type.Boolean({ default: true })),
+  verbose: Type.Optional(Type.Boolean({ default: false, description: 'Include the full bounded JSON detail in the text response.' })),
 });
 export type GetWorkflowStateInput = Static<typeof getWorkflowStateSchema>;
 
@@ -25,9 +26,11 @@ export function createGetWorkflowStateTool() {
         const view: any = { ...state };
         if (params.includeArtifacts === false) delete view.artifacts;
         if (params.includeNextAction === false) delete view.next_allowed;
-        return { content: [{ type: 'text', text: `${stateSummary(state)}\n${boundedJson(view)}` }], details: { state: view } };
+        const text = params.verbose ? `${stateSummary(state)}\n${boundedJson(view)}` : stateSummary(state);
+        return { content: [{ type: 'text', text }], details: { state: view } };
       }
-      return { content: [{ type: 'text', text: `Active OpenSpec changes: ${result.states.length}\n${boundedJson(result.index)}` }], details: { index: result.index, states: result.states } };
+      const text = params.verbose ? `${workspaceSummary(result.states)}\n${boundedJson(result.index)}` : workspaceSummary(result.states);
+      return { content: [{ type: 'text', text }], details: { index: result.index, states: result.states } };
     },
   };
 }

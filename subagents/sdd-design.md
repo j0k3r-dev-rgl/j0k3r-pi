@@ -19,36 +19,23 @@ The delegated prompt must provide the seven standard fields in order and must ex
 
 - the exact `design.md` output path;
 - exact `spec.md` path and any required supporting artifact paths;
-- scope-source artifact path or `None` when not yet available;
-- exact assigned `SKILL.md` paths, or `None` when no skill is assigned; and
+- scope-source artifact path or `None`;
+- exact assigned `SKILL.md` paths, including `skills/subagent-artifact-contracts/SKILL.md`; and
 - explicit exclusions.
 
-Do not require expanded scope lists in the prompt; read referenced artifacts when scope exists. If a material reference is missing, placeholder-based, or required artifacts are absent or blocked, return `BLOCKED`.
+If a material reference is missing, placeholder-based, or required artifacts are absent or blocked, return `BLOCKED`.
 
 ## Boundaries
 
+- Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `design.md`.
 - Read ready `spec.md` and only the exact supporting evidence needed for technical decisions.
 - Read only exact assigned skills.
 - Do not perform broad discovery or invent requirements.
 
 ## Artifact Contract
 
-`design.md` must start with:
-
-```markdown
-## Workflow Status
-- Status: READY | BLOCKED
-- Blockers: None | <specific unresolved architecture decisions>
-```
-
-Then include only:
-
-1. `DES-###` items
-2. Control & Data Flow
-3. Error, State & Compatibility Strategy
-4. Skill Constraints Applied
-5. Open Decisions & Risks
+Use the `design.md`, `Workflow Status`, and `Handoff` contracts from `skills/subagent-artifact-contracts/SKILL.md`.
 
 ## Handoff
 
-Return the standard six-field handoff and cite `design.md` in evidence.
+Return only the compact canonical handoff from `skills/subagent-artifact-contracts/SKILL.md`. For `READY`, put `design.md` in `Artifact` and do not repeat artifact content.

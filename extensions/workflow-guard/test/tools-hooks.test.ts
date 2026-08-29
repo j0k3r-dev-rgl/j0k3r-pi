@@ -30,27 +30,46 @@ describe('workflow guard tools and hooks', () => {
     expect(Object.keys(pi.handlers).sort()).toEqual(['agent_settled', 'session_start', 'tool_call', 'tool_result']);
   });
 
-  it('returns slug and workspace summary views', async () => {
+  it('returns compact state text by default and verbose state JSON on opt-in', async () => {
     const cwd = await setup();
     const pi = createPi();
     workflowGuardExtension(pi as any);
     const get = pi.tools.find((tool) => tool.name === 'workflow_state_get');
     const single = await get.execute('1', { slug: 'x', includeArtifacts: true }, undefined, undefined, { cwd });
     expect(single.details.state.slug).toBe('x');
-    expect(single.content[0].text).toContain('x: mini-sdd ready-for-apply READY');
-    const summary = await get.execute('2', {}, undefined, undefined, { cwd });
+    expect(single.content[0].text).toBe('x: mini-sdd ready-for-apply READY');
+    expect(single.content[0].text).not.toContain('"artifacts"');
+    expect(single.content[0].text).not.toContain('"execution_scope"');
+    const singleVerbose = await get.execute('2', { slug: 'x', includeArtifacts: true, verbose: true }, undefined, undefined, { cwd });
+    expect(singleVerbose.content[0].text).toContain('x: mini-sdd ready-for-apply READY');
+    expect(singleVerbose.content[0].text).toContain('"artifacts"');
+    expect(singleVerbose.content[0].text).toContain('"execution_scope"');
+    const summary = await get.execute('3', {}, undefined, undefined, { cwd });
     expect(summary.details.index.active.x.workflow).toBe('mini-sdd');
+    expect(summary.content[0].text).toContain('Active OpenSpec changes: 1');
+    expect(summary.content[0].text).toContain('x: mini-sdd ready-for-apply READY');
+    expect(summary.content[0].text).not.toContain('"active"');
+    const summaryVerbose = await get.execute('4', { verbose: true }, undefined, undefined, { cwd });
+    expect(summaryVerbose.content[0].text).toContain('Active OpenSpec changes: 1');
+    expect(summaryVerbose.content[0].text).toContain('"active"');
   });
 
-  it('validates and repairs only derived json', async () => {
+  it('validates with compact text by default and verbose validation JSON on opt-in', async () => {
     const cwd = await setup();
     const pi = createPi();
     workflowGuardExtension(pi as any);
     const validate = pi.tools.find((tool) => tool.name === 'workflow_validate');
     const dry = await validate.execute('1', { slug: 'x', repairDerivedJson: false }, undefined, undefined, { cwd });
     expect(dry.details.regenerated_files).toEqual([]);
-    const repaired = await validate.execute('2', { slug: 'x', repairDerivedJson: true }, undefined, undefined, { cwd });
+    expect(dry.content[0].text).toBe('workflow validation passed\nDerived JSON regenerated: 0');
+    expect(dry.content[0].text).not.toContain('"states"');
+    const dryVerbose = await validate.execute('2', { slug: 'x', repairDerivedJson: false, verbose: true }, undefined, undefined, { cwd });
+    expect(dryVerbose.content[0].text).toContain('workflow validation passed\nDerived JSON regenerated: 0');
+    expect(dryVerbose.content[0].text).toContain('"states"');
+    const repaired = await validate.execute('3', { slug: 'x', repairDerivedJson: true }, undefined, undefined, { cwd });
     expect(repaired.details.regenerated_files).toContain('openspec/changes/x/workflow.json');
+    expect(repaired.content[0].text).toContain('Derived JSON regenerated: 2');
+    expect(repaired.content[0].text).not.toContain('"states"');
     expect(await readFile(join(cwd, 'openspec', 'changes', 'x', 'mini-sdd.md'), 'utf8')).toContain('MINI-001');
   });
 

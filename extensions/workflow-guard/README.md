@@ -15,12 +15,12 @@ Global Pi extension for OpenSpec workflow state and declared execution-scope enf
 
 | Tool | Purpose |
 |---|---|
-| `workflow_state_get` | Return bounded state for one slug or a workspace summary when no slug is supplied, including `execution_scope` when available. |
-| `workflow_validate` | Validate derived state and execution scope; with `repairDerivedJson: true`, regenerate only derived JSON. |
+| `workflow_state_get` | Return a compact state summary by default for one slug or the workspace; pass `verbose: true` to include full bounded JSON detail, including `execution_scope` when available. |
+| `workflow_validate` | Return a compact validation summary by default; pass `verbose: true` to include full bounded validation JSON, and use `repairDerivedJson: true` to regenerate only derived JSON. |
 | `workflow_scope_get` | Return normalized execution scope, authority artifact, readiness, blockers, and compact examples for one slug. |
 | `workflow_scope_check` | Preflight a proposed `read`, `write`, `edit`, or `bash` action against the declared scope without executing it. |
 
-Tool output is bounded by compact summaries plus JSON capped for model context. For large workspaces, call with a specific `slug`.
+Tool output is compact by default for model context. For full bounded details, call `workflow_state_get` or `workflow_validate` with `verbose: true`; for large workspaces, prefer a specific `slug`.
 
 ## Hooks
 

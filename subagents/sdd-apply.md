@@ -28,66 +28,34 @@ The delegated prompt must provide the seven standard fields in order and must ex
 - the orchestrator's implementation summary;
 - the user's explicit apply authorization;
 - the exact `apply.md` output path;
-- exact authority artifact path(s) (`mini-sdd.md` for Mini-SDD, or `tasks.md` plus required Formal SDD artifacts);
+- exact authority artifact path or paths;
 - the scope-source artifact path that contains `## Execution Scope`;
-- exact assigned `SKILL.md` paths, or `None` when no skill is assigned; and
+- exact assigned `SKILL.md` paths, including `skills/subagent-artifact-contracts/SKILL.md`; and
 - exact implementation target paths or path globs when not already specified by the authority artifact.
 
-Do not require expanded scope lists in the prompt; read the scope-source artifact. If any required reference is missing, placeholder-based, or contradictory, return `BLOCKED`.
+If any required reference is missing, placeholder-based, contradictory, or outside scope, return `BLOCKED`.
 
 ## Boundaries
 
+- Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `apply.md`.
 - Mini-SDD: use ready `mini-sdd.md` as the full implementation contract.
 - Formal SDD: use ready `tasks.md`, `spec.md`, `design.md`, exact assigned skills, and authorized paths only.
 - Read only exact assigned skills.
 - Stay inside approved paths and behaviors.
 - If a material scope, product, architecture, or authority gap appears, stop as `BLOCKED`.
 - For TS/JS, Java, and Go implementation lookups, call `workspace_graph_status` first and then use graph-backed code research before text search.
-- Use text search on supported-language code only after graph-backed lookup is unavailable or fails for the exact need.
 - Do not commit or push without explicit user approval.
 
 ## Validation Rules
 
-Use the change type required by the contract:
-
-- behavior change or bug fix → RED → GREEN → REFACTOR;
-- behavior-preserving refactor → BASELINE → REFACTOR → REGRESSION;
-- mechanical/generated change → BASELINE → CHANGE → DIFF/REGRESSION;
-- docs/config → structural validation.
+Use the change type required by the authority artifact and record the evidence in `apply.md`. Do not invent a validation path that the contract does not require.
 
 ## Artifact Contract
 
-`apply.md` must start with:
-
-```markdown
-## Workflow Status
-- Status: READY | BLOCKED
-- Blockers: None | <specific implementation blocker>
-```
-
-Then include only:
-
-1. Workflow & Contracts
-2. one evidence record per `MINI-###` or `TASK-###`
-3. Approved Deviations
-4. Attempt Record
-5. Candidate Identity
-6. Residual Risks
-7. Verification Inputs
-8. Next Permitted Action
+Use the `apply.md`, `Workflow Status`, and `Handoff` contracts from `skills/subagent-artifact-contracts/SKILL.md`.
 
 `READY` means implementation is complete and independently verifiable.
 
 ## Handoff
 
-Return exactly:
-
-```markdown
-## Handoff
-- Status: READY | BLOCKED | FAILED
-- Outcome: <one-sentence result>
-- Scope: <completed or attempted scope>
-- Evidence: <artifact paths and checks, or “None”>
-- Blockers: None | <unresolved blockers>
-- Next action: <one permitted next action or “None”>
-```
+Return only the compact canonical handoff from `skills/subagent-artifact-contracts/SKILL.md`. For `READY`, put `apply.md` in `Artifact` and do not repeat validation evidence from the artifact.

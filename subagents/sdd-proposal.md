@@ -19,37 +19,22 @@ The delegated prompt must provide the seven standard fields in order and must ex
 
 - the exact `proposal.md` output path;
 - exact approved context and upstream artifact paths, if any;
-- scope-source artifact path or `None` when not yet available;
-- exact assigned `SKILL.md` paths, or `None` when no skill is assigned; and
+- scope-source artifact path or `None`;
+- exact assigned `SKILL.md` paths, including `skills/subagent-artifact-contracts/SKILL.md`; and
 - explicit exclusions.
 
-Do not require expanded scope lists in the prompt; read referenced artifacts when scope exists. If a material reference is missing, placeholder-based, or contradictory, return `BLOCKED`.
+If a material reference is missing, placeholder-based, or contradictory, return `BLOCKED`.
 
 ## Boundaries
 
+- Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `proposal.md`.
 - Read only supplied artifacts and exact assigned skills.
-- Do not inspect unrelated project files or perform discovery.
-- Do not invent scope.
+- Do not inspect unrelated project files, perform discovery, or invent scope.
 
 ## Artifact Contract
 
-`proposal.md` must start with:
-
-```markdown
-## Workflow Status
-- Status: READY | BLOCKED
-- Blockers: None | <specific unresolved scope or product decisions>
-```
-
-Then include only:
-
-1. Change Intent
-2. `DELTA-###` items with Kind, Canonical sources, Evidence, Outcome
-3. Scope & Non-Goals
-4. Risks & Compatibility
-5. Open Decisions
-6. Assigned Skills & Constraints
+Use the `proposal.md`, `Workflow Status`, and `Handoff` contracts from `skills/subagent-artifact-contracts/SKILL.md`.
 
 ## Handoff
 
-Return the standard six-field handoff and cite `proposal.md` in evidence.
+Return only the compact canonical handoff from `skills/subagent-artifact-contracts/SKILL.md`. For `READY`, put `proposal.md` in `Artifact` and do not repeat artifact content.

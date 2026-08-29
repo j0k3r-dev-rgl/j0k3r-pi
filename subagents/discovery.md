@@ -67,17 +67,7 @@ If a material field is missing or contradictory, return `BLOCKED`.
 
 ## Handoff
 
-Return exactly:
-
-```markdown
-## Handoff
-- Status: READY | BLOCKED | FAILED
-- Outcome: <one-sentence result>
-- Scope: <completed or attempted scope>
-- Evidence: <sources, paths, checks, or “None”>
-- Blockers: None | <unresolved blockers>
-- Next action: <one permitted next action or “None”>
-```
+Return the canonical handoff from `skills/subagent-artifact-contracts/SKILL.md`.
 
 ## Required Content
 

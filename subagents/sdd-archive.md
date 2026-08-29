@@ -22,12 +22,13 @@ The delegated prompt must provide the seven standard fields in order and must ex
 - exact archive destination directory path;
 - exact `verify.md` path with passing result;
 - scope-source artifact path; and
-- exact assigned `SKILL.md` paths, or `None` when no skill is assigned.
+- exact assigned `SKILL.md` paths, including `skills/subagent-artifact-contracts/SKILL.md`.
 
-Do not require expanded scope lists in the prompt; read referenced artifacts. If any required reference is missing, placeholder-based, or contradictory, return `BLOCKED` without mutation.
+If any required reference is missing, placeholder-based, or contradictory, return `BLOCKED` without mutation.
 
 ## Boundaries
 
+- Read `skills/subagent-artifact-contracts/SKILL.md` before returning the handoff.
 - Preserve the complete workflow tree.
 - Do not perform Git, release, deployment, or unrelated cleanup.
 - Require ready `verify.md` with a passing result.
@@ -47,14 +48,4 @@ Return `READY` only with destination-only proof:
 
 ## Handoff
 
-Return exactly:
-
-```markdown
-## Handoff
-- Status: READY | BLOCKED | FAILED
-- Outcome: <one-sentence result>
-- Scope: <completed or attempted scope>
-- Evidence: <paths, archive result, and checks, or “None”>
-- Blockers: None | <unresolved blockers>
-- Next action: <one permitted next action or “None”>
-```
+Return only the compact canonical handoff from `skills/subagent-artifact-contracts/SKILL.md`. For `READY`, put the archive destination in `Artifact` and do not repeat archive proof details.

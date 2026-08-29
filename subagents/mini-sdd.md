@@ -25,54 +25,31 @@ Create or update `openspec/changes/<change-slug>/mini-sdd.md` from approved boun
 
 The delegated prompt must provide the seven standard fields in order and must explicitly include:
 
-- the exact `mini-sdd.md` output path;
 - the exact change slug;
-- exact authority and context artifact paths supplied by the orchestrator;
-- scope-source artifact path or `None` for a new first artifact;
-- exact assigned `SKILL.md` paths, or `None` when no skill is assigned; and
-- explicit exclusions.
+- the exact `mini-sdd.md` output path;
+- exact authority and context artifact paths, or `None`;
+- scope-source artifact path, or `None` for a new first artifact;
+- exact assigned `SKILL.md` paths, including `skills/subagent-artifact-contracts/SKILL.md`;
+- explicit scope and exclusions; and
+- the expected next action.
 
-Do not require expanded scope lists in the prompt; read referenced artifacts when scope exists. If a material reference is missing, placeholder-based, or contradictory, return `BLOCKED`.
+If any material reference is missing, placeholder-based, contradictory, or outside scope, return `BLOCKED`.
 
 ## Boundaries
 
+- Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `mini-sdd.md`.
 - Read supplied artifacts, assigned skills, and explicitly approved files first.
-- Use bounded repository inspection and external research only when needed to remove ambiguity from the Mini-SDD contract.
-- Do not scan the repository or `skills/` blindly; inspect only exact files, symbols, paths, or focused external sources justified by the request.
+- Use bounded repository inspection or external research only when needed to remove ambiguity from the Mini-SDD contract.
+- Do not scan the repository or `skills/` blindly.
 - Do not implement, verify, archive, or invent product, scope, architecture, or acceptance decisions.
 - Keep the contract small and implementation-ready.
 
 ## Artifact Contract
 
-`mini-sdd.md` must start with:
+Use the `mini-sdd.md`, `Workflow Status`, `Execution Scope`, and `Handoff` contracts from `skills/subagent-artifact-contracts/SKILL.md`.
 
-```markdown
-## Workflow Status
-- Status: READY | BLOCKED
-- Blockers: None | <specific unresolved decisions or dependencies>
-```
-
-Then include only:
-
-1. Goal
-2. Scope & Exclusions
-3. `MINI-###` items with Contract, Acceptance, Canonical sources, Paths, Validation, Depends on
-4. Risks & Constraints
-5. Open Decisions
-6. Next Permitted Action
-
-`READY` requires every `MINI-###` item to have acceptance, paths, and validation without guessing.
+`READY` requires every `MINI-###` item, execution-scope value, validation command, path, dependency, blocker field, and next action to be concrete and parseable.
 
 ## Handoff
 
-Return exactly:
-
-```markdown
-## Handoff
-- Status: READY | BLOCKED | FAILED
-- Outcome: <one-sentence result>
-- Scope: <completed or attempted scope>
-- Evidence: <artifact paths and checks, or “None”>
-- Blockers: None | <unresolved blockers>
-- Next action: <one permitted next action or “None”>
-```
+Return only the compact canonical handoff from `skills/subagent-artifact-contracts/SKILL.md`. For `READY`, put `mini-sdd.md` in `Artifact` and do not repeat artifact content.

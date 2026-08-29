@@ -19,37 +19,25 @@ The delegated prompt must provide the seven standard fields in order and must ex
 
 - the exact `tasks.md` output path;
 - exact `spec.md` and `design.md` paths;
-- scope-source artifact path or `None` when not yet available;
-- exact assigned `SKILL.md` paths, or `None` when no skill is assigned; and
-- explicit exclusions.
+- scope-source artifact path, or `None` when not yet available;
+- exact assigned `SKILL.md` paths, including `skills/subagent-artifact-contracts/SKILL.md`;
+- explicit scope and exclusions; and
+- the expected next action.
 
-Do not require expanded scope lists in the prompt; read referenced artifacts when scope exists. If a material reference is missing, placeholder-based, or required artifacts are absent or blocked, return `BLOCKED`.
+If a material reference is missing, placeholder-based, contradictory, or required artifacts are absent or blocked, return `BLOCKED`.
 
 ## Boundaries
 
+- Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `tasks.md`.
 - Read ready `spec.md`, `design.md`, and exact assigned skills only.
 - Do not inspect unrelated source files, redesign the solution, or invent requirements.
 
 ## Artifact Contract
 
-`tasks.md` must start with:
+Use the `tasks.md`, `Workflow Status`, `Execution Scope`, and `Handoff` contracts from `skills/subagent-artifact-contracts/SKILL.md`.
 
-```markdown
-## Workflow Status
-- Status: READY | BLOCKED
-- Blockers: None | <specific missing implementation decisions>
-```
-
-Then include only:
-
-1. `TASK-###` checklist items with `Status`, `Implements`, `Verifies`, `Paths`, `Depends on`, `Evidence`
-2. Skill-Guided Constraints mapped to tasks
-3. Delivery and Review Forecast
-4. Just-in-Time Delivery Plan only when already triggered
-5. Open Decisions
-
-Every requirement must be covered before `READY`.
+`READY` requires every requirement to be covered by concrete tasks and a parseable execution scope.
 
 ## Handoff
 
-Return the standard six-field handoff and cite `tasks.md` in evidence.
+Return only the compact canonical handoff from `skills/subagent-artifact-contracts/SKILL.md`. For `READY`, put `tasks.md` in `Artifact` and do not repeat artifact content.

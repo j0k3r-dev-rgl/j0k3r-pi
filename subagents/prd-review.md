@@ -15,42 +15,27 @@ Create or update `openspec/changes/<change-slug>/prd.md` only when the delegated
 
 ## Required Input
 
-The delegated prompt must provide the seven standard fields in order and must explicitly include PRD approval plus the exact output path. If not, return `BLOCKED`.
+The delegated prompt must provide the seven standard fields in order and must explicitly include:
+
+- explicit PRD approval;
+- the exact `prd.md` output path;
+- exact assigned `SKILL.md` paths, including `skills/subagent-artifact-contracts/SKILL.md`;
+- exact source artifacts or context references; and
+- explicit exclusions.
+
+If required input is missing, placeholder-based, or contradictory, return `BLOCKED`.
 
 ## Boundaries
 
+- Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `prd.md`.
 - Read only supplied artifacts, assigned skills, and explicitly approved files.
 - Do not scan the repository or `skills/`.
 - Do not invent product decisions.
 
 ## Artifact Contract
 
-`prd.md` must start with:
-
-```markdown
-## Workflow Status
-- Status: READY | BLOCKED
-- Blockers: None | <specific unanswered product questions>
-```
-
-Then include only:
-
-1. Product Goal & User Value
-2. User Stories & Functional Requirements
-3. Acceptance Scenarios
-4. Out of Scope
-5. Open Questions
+Use the `prd.md`, `Workflow Status`, and `Handoff` contracts from `skills/subagent-artifact-contracts/SKILL.md`.
 
 ## Handoff
 
-Return exactly:
-
-```markdown
-## Handoff
-- Status: READY | BLOCKED | FAILED
-- Outcome: <one-sentence result>
-- Scope: <completed or attempted scope>
-- Evidence: <artifact paths and checks, or “None”>
-- Blockers: None | <unresolved blockers>
-- Next action: <one permitted next action or “None”>
-```
+Return only the compact canonical handoff from `skills/subagent-artifact-contracts/SKILL.md`. For `READY`, put `prd.md` in `Artifact` and do not repeat artifact content.
