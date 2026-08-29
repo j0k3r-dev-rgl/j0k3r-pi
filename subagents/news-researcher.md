@@ -87,4 +87,4 @@ Before returning, confirm:
 
 ## Handoff
 
-Return the canonical handoff from `skills/subagent-artifact-contracts/SKILL.md` and cite `report.md`, `sources.md`, and validation checks in evidence.
+Return only the compact canonical handoff from `skills/subagent-artifact-contracts/SKILL.md`. For `READY`, put `report.md` and `sources.md` in `Artifact`; do not repeat report contents or validation details.

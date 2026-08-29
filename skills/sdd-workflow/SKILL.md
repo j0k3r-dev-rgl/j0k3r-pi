@@ -130,16 +130,20 @@ Before advancing, the orchestrator checks:
 9. Delegate verify independently.
 10. Ask for archive authorization only after passing verification.
 
+## Orchestrator Response Contract
+
+When reporting SDD progress to the user, return a short coherent summary containing only the context needed to understand the outcome:
+
+- current workflow and phase when relevant;
+- result or blocker;
+- artifact path when relevant; and
+- next permitted action or user decision.
+
+Do not reproduce artifact contents, file inventories, validation matrices, tool payloads, or delegated handoffs. Point to the artifact and expand only when the user asks or a blocker requires explanation.
+
 ## Output Contract
 
-Return:
-
-- active workflow: Mini-SDD or Formal SDD;
-- current phase;
-- artifact(s) read or written;
-- structural-gate result;
-- blocker status; and
-- next permitted phase.
+Return the concise user-facing summary defined above.
 
 ## References
 

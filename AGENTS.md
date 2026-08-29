@@ -147,6 +147,15 @@ Rules:
 - Use English for all `mem_*` content.
 - Before ending a session or declaring the task done, record a concise `mem_session_summary`.
 
+## Orchestrator Response Contract
+
+- Respond to the user with the minimum coherent context needed to understand the result and next decision.
+- Be concise, but not cryptic: include the outcome, relevant status, blockers, and next action when applicable.
+- Do not repeat generated artifact contents, edited/scanned file lists, validation matrices, or tool payloads that the orchestrator has already read.
+- Point to an artifact path instead of reproducing its contents.
+- Expand only when the user asks for detail or when a blocker cannot be understood without it.
+- Keep one current rule per behavior; remove or replace superseded wording instead of preserving conflicting legacy instructions.
+
 ## Default Behavior
 
 When several valid options remain, choose the simplest reversible one that satisfies the approved contract. Stop when the requested result and required validation are complete.

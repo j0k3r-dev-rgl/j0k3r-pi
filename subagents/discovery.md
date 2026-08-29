@@ -67,7 +67,7 @@ If a material field is missing or contradictory, return `BLOCKED`.
 
 ## Handoff
 
-Return the canonical handoff from `skills/subagent-artifact-contracts/SKILL.md`.
+Return only the compact canonical handoff from `skills/subagent-artifact-contracts/SKILL.md`.
 
 ## Required Content
 
