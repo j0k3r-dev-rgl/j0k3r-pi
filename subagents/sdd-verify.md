@@ -26,12 +26,12 @@ The delegated prompt must provide the seven standard fields in order and must ex
 - the exact `verify.md` output path;
 - exact authority artifact path(s) to verify against;
 - exact `apply.md` path;
-- exact changed file paths or path globs to inspect;
-- execution-scope context, including allowed paths, writable paths if `verify.md` may be updated, allowed commands, and exclusions;
+- exact changed file paths or path globs to inspect when not already specified by `apply.md`;
+- the scope-source artifact path that contains `## Execution Scope`;
 - exact assigned `SKILL.md` paths, or `None` when no skill is assigned; and
-- exact validation commands permitted for independent verification.
+- exact validation command references from the authority artifact, not a copied validation matrix.
 
-If a material field is missing, placeholder-based, or required verification authority is absent, return `BLOCKED`.
+Do not require expanded scope lists in the prompt; read `apply.md` and the scope-source artifact. If a material reference is missing, placeholder-based, or required verification authority is absent, return `BLOCKED`.
 
 ## Boundaries
 

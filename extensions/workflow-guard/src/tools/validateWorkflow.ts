@@ -12,9 +12,9 @@ export function createValidateWorkflowTool() {
   return {
     name: 'workflow_validate',
     label: 'Validate Workflow',
-    description: 'Validate OpenSpec workflow state and optionally repair only derived workflow JSON files.',
-    promptSnippet: 'Validate OpenSpec workflow state and regenerate derived JSON when requested.',
-    promptGuidelines: ['Use workflow_validate before advancing SDD phases or when workflow JSON may be stale; it never edits semantic Markdown artifacts.'],
+    description: 'Validate OpenSpec workflow state and normalized execution_scope, and optionally repair only derived workflow JSON files.',
+    promptSnippet: 'Validate OpenSpec workflow state, execution scope, and regenerate derived JSON when requested.',
+    promptGuidelines: ['Use workflow_validate before advancing SDD phases or when workflow JSON or execution-scope state may be stale; it never edits semantic Markdown artifacts.'],
     parameters: validateWorkflowSchema,
     async execute(_toolCallId: string, params: ValidateWorkflowInput, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: { cwd: string }) {
       const validation = await validateWorkflows(ctx.cwd, params);

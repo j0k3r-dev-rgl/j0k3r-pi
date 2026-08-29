@@ -13,6 +13,18 @@ export interface ArtifactState {
   verification_result?: string;
 }
 
+export interface ExecutionScopeState {
+  authority_artifact: string;
+  root: string;
+  allowed_paths: string[];
+  writable_paths: string[];
+  allowed_bash: string[];
+  tmp_always_allowed: true;
+  status: 'READY' | 'BLOCKED';
+  blockers: string[];
+  warnings: string[];
+}
+
 export interface ChangeWorkflowState {
   schema_version: 1;
   kind: 'change-workflow-state';
@@ -23,6 +35,7 @@ export interface ChangeWorkflowState {
   status: WorkflowStatus;
   freshness: Freshness;
   artifacts: Record<string, ArtifactState>;
+  execution_scope?: ExecutionScopeState;
   next_allowed: string[];
   blockers: string[];
   warnings: string[];

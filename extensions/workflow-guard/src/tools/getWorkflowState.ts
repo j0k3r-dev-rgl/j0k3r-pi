@@ -13,9 +13,9 @@ export function createGetWorkflowStateTool() {
   return {
     name: 'workflow_state_get',
     label: 'Workflow State',
-    description: 'Read bounded derived OpenSpec workflow state for one active change slug or for all active changes.',
-    promptSnippet: 'Read OpenSpec Mini-SDD/Formal SDD workflow state for active changes.',
-    promptGuidelines: ['Use workflow_state_get when the user asks about OpenSpec change status, readiness, blockers, or next permitted SDD action.'],
+    description: 'Read bounded derived OpenSpec workflow state, including normalized execution_scope when a slug is available, for one active change slug or all active changes.',
+    promptSnippet: 'Read OpenSpec Mini-SDD/Formal SDD workflow state and execution-scope readiness for active changes.',
+    promptGuidelines: ['Use workflow_state_get when the user asks about OpenSpec change status, readiness, blockers, execution scope, or next permitted SDD action.'],
     parameters: getWorkflowStateSchema,
     async execute(_toolCallId: string, params: GetWorkflowStateInput, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: { cwd: string }) {
       const result = await deriveActiveWorkflows(ctx.cwd);

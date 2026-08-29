@@ -29,11 +29,11 @@ The delegated prompt must provide the seven standard fields in order and must ex
 - the user's explicit apply authorization;
 - the exact `apply.md` output path;
 - exact authority artifact path(s) (`mini-sdd.md` for Mini-SDD, or `tasks.md` plus required Formal SDD artifacts);
-- execution-scope context, including allowed paths, writable paths, allowed commands, and exclusions;
+- the scope-source artifact path that contains `## Execution Scope`;
 - exact assigned `SKILL.md` paths, or `None` when no skill is assigned; and
-- exact implementation target paths or path globs.
+- exact implementation target paths or path globs when not already specified by the authority artifact.
 
-If any of that is missing, placeholder-based, or contradictory, return `BLOCKED`.
+Do not require expanded scope lists in the prompt; read the scope-source artifact. If any required reference is missing, placeholder-based, or contradictory, return `BLOCKED`.
 
 ## Boundaries
 

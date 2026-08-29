@@ -21,10 +21,10 @@ The delegated prompt must provide the seven standard fields in order and must ex
 - exact active source directory path;
 - exact archive destination directory path;
 - exact `verify.md` path with passing result;
-- execution-scope context and exclusions; and
+- scope-source artifact path; and
 - exact assigned `SKILL.md` paths, or `None` when no skill is assigned.
 
-If any of that is missing, placeholder-based, or contradictory, return `BLOCKED` without mutation.
+Do not require expanded scope lists in the prompt; read referenced artifacts. If any required reference is missing, placeholder-based, or contradictory, return `BLOCKED` without mutation.
 
 ## Boundaries
 

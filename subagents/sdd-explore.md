@@ -20,11 +20,11 @@ The delegated prompt must provide the seven standard fields in order and must ex
 - durable-synthesis approval;
 - the exact `explore.md` output path;
 - exact source evidence artifact paths or references to synthesize;
-- execution-scope context, including allowed paths and writable paths for artifact creation;
+- scope-source artifact path or `None` when not yet available;
 - exact assigned `SKILL.md` paths, or `None` when no skill is assigned; and
 - explicit exclusions.
 
-If any of that is missing, placeholder-based, or contradictory, return `BLOCKED`.
+Do not require expanded scope lists in the prompt; read referenced artifacts when scope exists. If any required reference is missing, placeholder-based, or contradictory, return `BLOCKED`.
 
 ## Boundaries
 

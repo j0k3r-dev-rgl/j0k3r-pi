@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { discoverActiveSlugs, readArtifacts, assertInside, assertRealPathInside } from './artifacts.js';
+import { parseExecutionScope } from './scope.js';
 import { detectWorkflow, deriveStateFields } from './workflowRules.js';
 import type { ChangeWorkflowState, SyncResult, WorkflowIndex } from '../types.js';
 
@@ -22,6 +23,27 @@ export async function deriveChangeState(cwd: string, slug: string, generatedAt =
   const artifacts = await readArtifacts(cwd, slug, generatedAt);
   const workflow = detectWorkflow(artifacts);
   const fields = deriveStateFields(workflow, artifacts);
+  let execution_scope;
+  const authorityName = workflow === 'mini-sdd' ? 'mini-sdd.md' : workflow === 'formal-sdd' ? 'tasks.md' : undefined;
+  if (authorityName && artifacts[authorityName]?.exists) {
+    const authorityPath = join(cwd, 'openspec', 'changes', slug, authorityName);
+    const markdown = await readFile(authorityPath, 'utf8');
+    execution_scope = parseExecutionScope(markdown, join('openspec', 'changes', slug, authorityName).replaceAll('\\', '/'), cwd);
+  } else if (workflow === 'conflict' || workflow === 'unknown') {
+    execution_scope = {
+      authority_artifact: 'unavailable',
+      root: resolve(cwd),
+      allowed_paths: [],
+      writable_paths: [],
+      allowed_bash: [],
+      tmp_always_allowed: true as const,
+      status: 'BLOCKED' as const,
+      blockers: [workflow === 'conflict' ? 'Execution scope unavailable because workflow signatures conflict.' : 'Execution scope unavailable because workflow is unknown.'],
+      warnings: [],
+    };
+  }
+  const scopeBlockers = execution_scope?.blockers.map((blocker) => `execution_scope: ${blocker}`) ?? [];
+  const scopeWarnings = execution_scope?.warnings.map((warning) => `execution_scope: ${warning}`) ?? [];
   return {
     schema_version: 1,
     kind: 'change-workflow-state',
@@ -29,7 +51,11 @@ export async function deriveChangeState(cwd: string, slug: string, generatedAt =
     location: 'active',
     workflow,
     ...fields,
+    status: fields.status === 'READY' && execution_scope?.status === 'BLOCKED' ? 'BLOCKED' : fields.status,
+    blockers: [...fields.blockers, ...scopeBlockers],
+    warnings: [...fields.warnings, ...scopeWarnings],
     artifacts,
+    execution_scope,
     derived_from: { source: 'markdown-artifacts', generated_at: generatedAt },
   };
 }

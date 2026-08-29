@@ -19,11 +19,11 @@ The delegated prompt must provide the seven standard fields in order and must ex
 
 - the exact `tasks.md` output path;
 - exact `spec.md` and `design.md` paths;
-- execution-scope context, including allowed paths and writable paths for artifact creation;
+- scope-source artifact path or `None` when not yet available;
 - exact assigned `SKILL.md` paths, or `None` when no skill is assigned; and
 - explicit exclusions.
 
-If a material field is missing, placeholder-based, or required artifacts are absent or blocked, return `BLOCKED`.
+Do not require expanded scope lists in the prompt; read referenced artifacts when scope exists. If a material reference is missing, placeholder-based, or required artifacts are absent or blocked, return `BLOCKED`.
 
 ## Boundaries
 

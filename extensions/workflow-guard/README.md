@@ -1,31 +1,35 @@
 # Pi Workflow Guard Extension
 
-MVP 1 global Pi extension for OpenSpec workflow state. It keeps Markdown artifacts as the semantic source of truth and writes only derived JSON under `openspec/`.
+Global Pi extension for OpenSpec workflow state and declared execution-scope enforcement. It keeps Markdown artifacts as the semantic source of truth and writes only derived JSON under `openspec/`.
 
 ## Scope
 
 - Detect active changes under `openspec/changes/<slug>/`.
 - Classify Mini-SDD, Formal SDD, unknown, and mixed-signature conflict states.
 - Parse the required `## Workflow Status` block from present workflow Markdown.
-- Derive phase, status, blockers, warnings, next permitted action, artifact hashes, and freshness metadata.
+- Parse `## Execution Scope` from Mini-SDD `mini-sdd.md` or Formal SDD `tasks.md`.
+- Derive phase, status, blockers, warnings, next permitted action, artifact hashes, freshness metadata, and normalized execution scope.
 - Generate `openspec/changes/<slug>/workflow.json` and `openspec/workflows.json`.
 
 ## Public tools
 
 | Tool | Purpose |
 |---|---|
-| `workflow_state_get` | Return bounded state for one slug or a workspace summary when no slug is supplied. |
-| `workflow_validate` | Validate derived state; with `repairDerivedJson: true`, regenerate only derived JSON. |
+| `workflow_state_get` | Return bounded state for one slug or a workspace summary when no slug is supplied, including `execution_scope` when available. |
+| `workflow_validate` | Validate derived state and execution scope; with `repairDerivedJson: true`, regenerate only derived JSON. |
+| `workflow_scope_get` | Return normalized execution scope, authority artifact, readiness, blockers, and compact examples for one slug. |
+| `workflow_scope_check` | Preflight a proposed `read`, `write`, `edit`, or `bash` action against the declared scope without executing it. |
 
 Tool output is bounded by compact summaries plus JSON capped for model context. For large workspaces, call with a specific `slug`.
 
-## Sync hooks
+## Hooks
 
 - `session_start`: sync active changes when `openspec/changes/` exists.
+- `tool_call`: for subagent calls, check `read`, `write`, `edit`, and `bash` against the active change execution scope before execution when a unique scope is resolvable. The main orchestrator agent is not execution-scope limited by this hook. `/tmp/**` is always allowed for scoped subagent checks. Read-only access to Pi runtime guidance is also always allowed, limited to `/home/j0k3r/.pi/agent/AGENTS.md` and `/home/j0k3r/.pi/agent/skills/**/SKILL.md`; this does not exempt writes, edits, or bash. Python-related bash (`python`, `python3`, `uv run python`, `pytest`, `pip`, `poetry`, `tox`) is risky and must match an explicit `Allowed Bash` pattern.
 - `tool_result`: sync only when a completed tool result mentions relevant `openspec/` content.
 - `agent_settled`: final low-noise sync.
 
-No `tool_call` blocking is implemented in this MVP.
+Block messages use the workflow-guard format with reason, evidence, and next permitted action.
 
 ## Generated files
 

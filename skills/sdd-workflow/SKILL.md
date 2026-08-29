@@ -122,9 +122,9 @@ Before advancing, the orchestrator checks:
 - Use `discovery` only for approved unknown research.
 - Use `sdd-explore` only when discovery needs a durable synthesis artifact.
 - Read only exact assigned skills; subagents do not scan `skills/`.
-- Every delegated SDD prompt must include exact assigned `SKILL.md` paths, even when no domain skill is assigned (`None`).
-- Every delegated SDD prompt must include exact authority artifact path(s), exact expected output artifact path(s), execution-scope context, allowed paths, writable paths when mutation is expected, allowed validation commands, and exclusions.
-- Do not use placeholders such as `<change-slug>`, `<artifact>`, or “as needed” for required phase paths; resolve them before delegation.
+- Every delegated SDD prompt must be compact and reference-driven: include change slug, phase, exact authority artifact path(s), exact expected output artifact path(s), scope-source artifact path, exact assigned `SKILL.md` paths or `None`, required user decision when applicable, and one expected outcome.
+- Do not copy full OpenSpec contracts, expanded execution-scope path lists, validation matrices, or stable subagent rules into delegated prompts; subagents must read referenced artifacts and their own Markdown contract.
+- Do not use placeholders such as `<change-slug>`, `<artifact>`, or “as needed” for required phase paths; resolve concrete reference paths before delegation.
 - `apply.md` records implementation evidence only.
 - `verify.md` records independent verification evidence only.
 - Archive moves the complete finished tree to `openspec/archive/YYYY-MM-DD/<change-slug>/`.
@@ -132,8 +132,8 @@ Before advancing, the orchestrator checks:
 ## Execution Steps
 
 1. Identify the next active phase and matching subagent.
-2. Resolve concrete paths before delegation: change slug, authority artifacts, output artifact, allowed/writable paths, allowed commands, and exact assigned `SKILL.md` files.
-3. Delegate artifact creation or phase execution to that subagent with the seven-field prompt and the concrete path set from step 2.
+2. Resolve concrete references before delegation: change slug, phase, authority artifacts, output artifact, scope-source artifact, exact assigned `SKILL.md` files or `None`, and required user decision when applicable.
+3. Delegate artifact creation or phase execution to that subagent with the seven-field prompt using only the compact references from step 2 plus phase-specific context that is not already in the referenced artifacts.
 4. Read the returned handoff and produced artifact.
 5. Run the structural gate.
 6. Stop on `BLOCKED` and ask the user only for the missing decision.
