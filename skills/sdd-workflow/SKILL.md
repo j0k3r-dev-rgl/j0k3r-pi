@@ -122,6 +122,9 @@ Before advancing, the orchestrator checks:
 - Use `discovery` only for approved unknown research.
 - Use `sdd-explore` only when discovery needs a durable synthesis artifact.
 - Read only exact assigned skills; subagents do not scan `skills/`.
+- Every delegated SDD prompt must include exact assigned `SKILL.md` paths, even when no domain skill is assigned (`None`).
+- Every delegated SDD prompt must include exact authority artifact path(s), exact expected output artifact path(s), execution-scope context, allowed paths, writable paths when mutation is expected, allowed validation commands, and exclusions.
+- Do not use placeholders such as `<change-slug>`, `<artifact>`, or “as needed” for required phase paths; resolve them before delegation.
 - `apply.md` records implementation evidence only.
 - `verify.md` records independent verification evidence only.
 - Archive moves the complete finished tree to `openspec/archive/YYYY-MM-DD/<change-slug>/`.
@@ -129,14 +132,15 @@ Before advancing, the orchestrator checks:
 ## Execution Steps
 
 1. Identify the next active phase and matching subagent.
-2. Delegate artifact creation or phase execution to that subagent with the seven-field prompt.
-3. Read the returned handoff and produced artifact.
-4. Run the structural gate.
-5. Stop on `BLOCKED` and ask the user only for the missing decision.
-6. Before apply, summarize planned implementation, scope, exclusions, validation, and risks.
-7. Delegate apply only after explicit authorization.
-8. Delegate verify independently.
-9. Ask for archive authorization only after passing verification.
+2. Resolve concrete paths before delegation: change slug, authority artifacts, output artifact, allowed/writable paths, allowed commands, and exact assigned `SKILL.md` files.
+3. Delegate artifact creation or phase execution to that subagent with the seven-field prompt and the concrete path set from step 2.
+4. Read the returned handoff and produced artifact.
+5. Run the structural gate.
+6. Stop on `BLOCKED` and ask the user only for the missing decision.
+7. Before apply, summarize planned implementation, scope, exclusions, validation, and risks.
+8. Delegate apply only after explicit authorization.
+9. Delegate verify independently.
+10. Ask for archive authorization only after passing verification.
 
 ## Output Contract
 

@@ -16,10 +16,15 @@ Archive a completed Mini-SDD or Formal SDD change from `openspec/changes/<change
 
 The delegated prompt must provide the seven standard fields in order and must explicitly include:
 
-- reported passing verification; and
-- explicit archive authorization.
+- reported passing verification;
+- explicit archive authorization;
+- exact active source directory path;
+- exact archive destination directory path;
+- exact `verify.md` path with passing result;
+- execution-scope context and exclusions; and
+- exact assigned `SKILL.md` paths, or `None` when no skill is assigned.
 
-If any of that is missing or contradictory, return `BLOCKED` without mutation.
+If any of that is missing, placeholder-based, or contradictory, return `BLOCKED` without mutation.
 
 ## Boundaries
 

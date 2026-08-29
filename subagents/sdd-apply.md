@@ -25,10 +25,15 @@ Implement an approved change under `openspec/changes/<change-slug>/` and create 
 
 The delegated prompt must provide the seven standard fields in order and must explicitly include:
 
-- the orchestrator's implementation summary; and
-- the user's explicit apply authorization.
+- the orchestrator's implementation summary;
+- the user's explicit apply authorization;
+- the exact `apply.md` output path;
+- exact authority artifact path(s) (`mini-sdd.md` for Mini-SDD, or `tasks.md` plus required Formal SDD artifacts);
+- execution-scope context, including allowed paths, writable paths, allowed commands, and exclusions;
+- exact assigned `SKILL.md` paths, or `None` when no skill is assigned; and
+- exact implementation target paths or path globs.
 
-If any of that is missing or contradictory, return `BLOCKED`.
+If any of that is missing, placeholder-based, or contradictory, return `BLOCKED`.
 
 ## Boundaries
 

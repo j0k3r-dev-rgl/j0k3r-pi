@@ -15,7 +15,16 @@ Create or update `openspec/changes/<change-slug>/explore.md` only when the deleg
 
 ## Required Input
 
-The delegated prompt must provide the seven standard fields in order and must explicitly include durable-synthesis approval. If not, return `BLOCKED`.
+The delegated prompt must provide the seven standard fields in order and must explicitly include:
+
+- durable-synthesis approval;
+- the exact `explore.md` output path;
+- exact source evidence artifact paths or references to synthesize;
+- execution-scope context, including allowed paths and writable paths for artifact creation;
+- exact assigned `SKILL.md` paths, or `None` when no skill is assigned; and
+- explicit exclusions.
+
+If any of that is missing, placeholder-based, or contradictory, return `BLOCKED`.
 
 ## Boundaries
 

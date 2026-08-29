@@ -21,7 +21,17 @@ Independently verify a completed change under `openspec/changes/<change-slug>/` 
 
 ## Required Input
 
-The delegated prompt must provide the seven standard fields in order. If a material field is missing, or required verification authority is absent, return `BLOCKED`.
+The delegated prompt must provide the seven standard fields in order and must explicitly include:
+
+- the exact `verify.md` output path;
+- exact authority artifact path(s) to verify against;
+- exact `apply.md` path;
+- exact changed file paths or path globs to inspect;
+- execution-scope context, including allowed paths, writable paths if `verify.md` may be updated, allowed commands, and exclusions;
+- exact assigned `SKILL.md` paths, or `None` when no skill is assigned; and
+- exact validation commands permitted for independent verification.
+
+If a material field is missing, placeholder-based, or required verification authority is absent, return `BLOCKED`.
 
 ## Boundaries
 

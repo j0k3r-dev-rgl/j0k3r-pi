@@ -15,7 +15,15 @@ Create or update `openspec/changes/<change-slug>/spec.md` from ready prior artif
 
 ## Required Input
 
-The delegated prompt must provide the seven standard fields in order. If a material field is missing or `proposal.md` is absent or blocked, return `BLOCKED`.
+The delegated prompt must provide the seven standard fields in order and must explicitly include:
+
+- the exact `spec.md` output path;
+- exact `proposal.md` path and any optional supporting artifact paths;
+- execution-scope context, including allowed paths and writable paths for artifact creation;
+- exact assigned `SKILL.md` paths, or `None` when no skill is assigned; and
+- explicit exclusions.
+
+If a material field is missing, placeholder-based, or `proposal.md` is absent or blocked, return `BLOCKED`.
 
 ## Boundaries
 

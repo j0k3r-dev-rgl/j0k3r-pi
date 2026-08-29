@@ -144,6 +144,7 @@ Rules:
 - `FAILED` means the task terminated without a valid completion and not as a simple missing-input blocker.
 - Handoff status must match artifact status when an artifact exists.
 - Inter-agent communication is always in English.
+- For SDD delegation, resolve and pass exact artifact paths before launching the subagent: output artifact, authority artifacts, execution-scope context, allowed/writable paths, allowed commands, exclusions, and exact assigned `SKILL.md` paths. Do not delegate SDD phases with placeholders for required paths.
 
 ## Subagent Rules
 

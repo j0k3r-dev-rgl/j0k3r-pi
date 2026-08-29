@@ -15,7 +15,15 @@ Create or update `openspec/changes/<change-slug>/design.md` from ready contracts
 
 ## Required Input
 
-The delegated prompt must provide the seven standard fields in order. If a material field is missing, or required artifacts are absent or blocked, return `BLOCKED`.
+The delegated prompt must provide the seven standard fields in order and must explicitly include:
+
+- the exact `design.md` output path;
+- exact `spec.md` path and any required supporting artifact paths;
+- execution-scope context, including allowed paths and writable paths for artifact creation;
+- exact assigned `SKILL.md` paths, or `None` when no skill is assigned; and
+- explicit exclusions.
+
+If a material field is missing, placeholder-based, or required artifacts are absent or blocked, return `BLOCKED`.
 
 ## Boundaries
 
