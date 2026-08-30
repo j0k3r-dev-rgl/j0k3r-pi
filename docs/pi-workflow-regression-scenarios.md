@@ -1,10 +1,10 @@
-# Pi Workflow and Startup Lifecycle Regression Scenarios
+# Pi Workflow and Project Documentation Regression Scenarios
 
 This document is non-authoritative maintainer and reviewer guidance. It does not create a workflow, consent gate, phase, runtime check, or acceptance rule. Canonical behavior remains in `AGENTS.md`, the applicable `SKILL.md` files, and approved change artifacts.
 
 ## Purpose
 
-Use these scenarios after changing workflow, routing, TDD, startup-documentation, onboarding, ownership, or handoff contracts. Run only the cases affected by the change plus representative neighboring boundaries. Record actual routing and clause evidence; do not turn this catalog into mandatory ceremony for ordinary project work.
+Use these scenarios after changing workflow, routing, TDD, project-documentation, onboarding, ownership, or handoff contracts. Run only the cases affected by the change plus representative neighboring boundaries. Record actual routing and clause evidence; do not turn this catalog into mandatory ceremony for ordinary project work.
 
 ## Validation method
 
@@ -57,18 +57,18 @@ Related skills are handoff hints, not additional owners. A lower-ranked generic 
 
 | ID | Request | Expected owner/result |
 |---|---|---|
-| NEW-01 | Proposed solution with unresolved problem/users/evidence | `product-discovery`; no MVP, architecture, or implementation invented. |
-| NEW-02 | User explicitly supplies and accepts premise/audience/uncertainty | `product-definition` may begin without ceremonial discovery. |
-| NEW-03 | MVP scope or new capability decision | `product-definition`; user owns scope and trade-offs. |
-| NEW-04 | Approved capability needs observable behavior | `requirements-definition` with requirement and acceptance IDs. |
+| NEW-01 | Proposed solution with unresolved problem/users/evidence | `project-documentation` routes to `references/owners/product-discovery.md`; no MVP, architecture, or implementation invented. |
+| NEW-02 | User explicitly supplies and accepts premise/audience/uncertainty | `project-documentation` routes to `references/owners/product-definition.md` without ceremonial discovery. |
+| NEW-03 | MVP scope or new capability decision | `project-documentation` routes to product-definition owner module; user owns scope and trade-offs. |
+| NEW-04 | Approved capability needs observable behavior | `project-documentation` routes to requirements owner module with requirement and acceptance IDs. |
 | NEW-05 | Unsupported scale/security/availability target | Stop for justified target/evidence; do not invent it. |
-| NEW-06 | Architecture driver or trust boundary | `architecture-definition`; no hidden technology/vendor selection. |
-| NEW-07 | Significant technology/dependency/integration choice | `technical-decisions`; simplest baseline, evidence, consequences, and user decision. |
-| NEW-08 | Approved change ready for implementation planning | `delivery-planning`; one small vertical increment/sprint/flow item. |
-| NEW-09 | Experiment or conformance evidence | `product-validation`; predeclared criteria and correct trace IDs. |
+| NEW-06 | Architecture driver or trust boundary | `project-documentation` routes to architecture owner module; no hidden technology/vendor selection. |
+| NEW-07 | Significant technology/dependency/integration choice | `project-documentation` routes to technical-decisions owner module; simplest baseline, evidence, consequences, and user decision. |
+| NEW-08 | Approved change ready for implementation planning | `project-documentation` routes to delivery-planning owner module; one small vertical increment/sprint/flow item. |
+| NEW-09 | Experiment or conformance evidence | `project-documentation` routes to product-validation owner module; predeclared criteria and correct trace IDs. |
 | NEW-10 | Evidence challenges approved canonical content | Initiator requests CR; Validation creates/routes it; target owner returns disposition; Validation closes with evidence. |
-| NEW-11 | Router loads one canonical domain owner | Owner consumes the supplied shared contract and does not recursively re-enter startup routing. |
-| NEW-12 | Registry resolves startup/onboarding for an SDD phase | Treat `sdd_phases` as relevance metadata only; it does not create a phase owner or fourth workflow. |
+| NEW-11 | Router loads one canonical domain owner module | `project-documentation` reads only the selected internal owner module and shared contract; owner modules are not separate skills. |
+| NEW-12 | Registry resolves project-documentation for an SDD phase | Treat phase relevance as routing metadata only; it does not create a phase owner or fourth workflow. |
 | NEW-13 | CR record says `APPROVED` but no owner disposition exists | Do not infer acceptance; lifecycle status and target-owner semantic disposition are distinct. |
 | NEW-14 | English and Spanish README lifecycle summaries are reviewed after a contract change | Both describe the same three workflows, routing boundaries, and startup lifecycle without creating separate authority. |
 | NEW-15 | Registry owner selection could expand related skills by default | Resolve the canonical owner with `include_related:false`; related skills remain handoff hints and never become co-owners. |

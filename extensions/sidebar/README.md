@@ -91,7 +91,7 @@ git status --porcelain=v1 -z --untracked-files=all
 
 ```text
 render.ts                         +178 -0
-permissions.json                   +26 -26
+subagents.json                     +26 -26
 ```
 
 - For new/untracked files where Git numstat has no data yet, the sidebar reads the file and counts its lines as additions.
@@ -204,7 +204,7 @@ git status --porcelain=v1 -z --untracked-files=all
 
 ```text
 render.ts                         +178 -0
-permissions.json                   +26 -26
+subagents.json                     +26 -26
 ```
 
 - Para archivos nuevos/untracked donde Git numstat todavía no tiene datos, la sidebar lee el archivo y cuenta sus líneas como additions.

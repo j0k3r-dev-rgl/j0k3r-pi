@@ -1,5 +1,7 @@
 # Auditoría del orquestador, subagentes y skills
 
+> Historical snapshot: this report predates the later consolidation of documentation/configuration skills into `project-documentation` and `pi-configuration` router skills with internal modules. Treat old skill names in this file as audit evidence from that moment, not current routing guidance.
+
 ## Resumen ejecutivo
 
 La arquitectura contractual es sólida en sus fundamentos: existen exactamente tres workflows, las responsabilidades principales están separadas, Formal SDD mantiene trazabilidad completa, la verificación es independiente y el archivo aplica controles defensivos fuertes.

@@ -77,7 +77,6 @@ ITEMS=(
   "skills"
   "subagents"
   "AGENTS.md"
-  "permissions.json"
   "subagents.json"
 )
 

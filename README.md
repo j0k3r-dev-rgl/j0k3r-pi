@@ -11,12 +11,12 @@ Personal/global Pi agent configuration used from `~/.pi/agent`. It contains the 
 | Path | Purpose |
 |---|---|
 | [`AGENTS.md`](AGENTS.md) | Primary orchestrator instructions, workflow gates, TDD/commit policy, memory behavior, and safety rules. |
-| [`skills/`](skills/) | Global/user skills used by the skill registry. These are routing-aware `SKILL.md` files for SDD, TDD, permissions, subagents, extension configuration, documentation, and skill authoring. |
-| [`subagents/`](subagents/) | Markdown-defined global/user subagents. SDD phase agents live here along with the read-only `discovery` agent. |
+| [`skills/`](skills/) | Global/user skills used by the skill registry. Broad domains such as project documentation and Pi configuration are exposed as one router skill with internal reference modules, not many separate `SKILL.md` files. |
+| [`subagents/`](subagents/) | Markdown-defined global/user subagents. SDD phase agents live here along with local-only `discovery`, durable `deep-researcher`, and news briefing agents. |
 | [`extensions/`](extensions/) | Agent-dir extension implementations and their READMEs. In project-local installs these map to `.pi/extensions/*`. |
 | [`docs/`](docs/) | Supporting docs for this agent configuration, such as [keyboard shortcuts](docs/keyboard-shortcuts.md). |
 | [`subagents.json`](subagents.json) | Global/user subagent configuration and model profile defaults. |
-| [`permissions.json`](permissions.json) | Global/user Permission Guard configuration. Project-local config may also live at `.pi/permissions.json`. |
+| [`trust.json`](trust.json) / [`auth.json`](auth.json) | Local runtime identity/trust files. They are excluded from installer backups and should not be committed with secrets. |
 | [`install.sh`](install.sh) | First-time installer for copying the managed configuration into a separate Pi agent directory. |
 | [`update.sh`](update.sh) | Git-free, non-destructive updater for an existing Pi agent directory, with backup and package refresh. |
 | [`.pi/`](.pi/) | Project-local runtime/config data for this repository, including Code Research and Skill Registry configuration. |
@@ -35,7 +35,7 @@ bash install.sh
 
 The default target is `~/.pi/agent`. The installer:
 
-1. Copies `extensions/`, `skills/`, `subagents/`, `AGENTS.md`, `permissions.json`, and `subagents.json`.
+1. Copies managed `extensions/`, `skills/`, `subagents/`, `AGENTS.md`, and `subagents.json`.
 2. Runs `npm install` in every copied extension that has a `package.json`.
 3. Runs Pi's package manager for the following unversioned packages:
 
@@ -81,7 +81,7 @@ The updater does not use Git. Before changing anything, it creates a compressed 
 - `.env` and `.env.*`;
 - `*.key` and `*.pem`.
 
-These excluded files remain untouched in the live target; they are omitted only from the backup archive. The updater then merges the managed `extensions/`, `skills/`, `subagents/`, `AGENTS.md`, `permissions.json`, and `subagents.json` into the target. Only missing or byte-different regular files are copied. Identical files are not rewritten, and the merge never deletes target-only files. Finally, it runs `npm install` for each managed extension and updates package-managed Pi extensions with `pi update --extensions`; those package managers may independently manage files inside their own dependency/package directories.
+These excluded files remain untouched in the live target; they are omitted only from the backup archive. The updater then merges the managed `extensions/`, `skills/`, `subagents/`, `AGENTS.md`, and `subagents.json` into the target. Only missing or byte-different regular files are copied. Identical files are not rewritten, and the merge never deletes target-only files. Finally, it runs `npm install` for each managed extension and updates package-managed Pi extensions with `pi update --extensions`; those package managers may independently manage files inside their own dependency/package directories.
 
 Useful options:
 
@@ -121,7 +121,7 @@ The agent follows these operating rules. Execution itself is limited to exactly 
 
 1. Answer advice-only questions directly without inspecting or changing the project.
 2. Route concrete software work through [`workflow-triage`](skills/workflow-triage/SKILL.md): **Direct Orchestrator**, **Mini-SDD**, or **Formal SDD**. A named workflow begins without redundant confirmation.
-3. Use read-only [`discovery`](subagents/discovery.md) as a bounded research activity when authorized; it is not another workflow.
+3. Use read-only local [`discovery`](subagents/discovery.md) as bounded codebase/context exploration when authorized; use [`deep-researcher`](subagents/deep-researcher.md) for internet-backed research reports. Neither is another workflow.
 4. Apply [`anti-overengineering`](skills/anti-overengineering/SKILL.md) as a transversal scope/complexity guardrail after the workflow and canonical owner are known. Ordinary local reversible choices remain agent decisions; material product, architecture, migration, dependency, risk, or external-effect choices remain user-owned.
 5. Apply strict [`tdd`](skills/tdd/SKILL.md) to code changes: establish a safety baseline, prove the expected **RED**, implement the minimum **GREEN**, then **REFACTOR** while green. Documentation/configuration-only changes use focused structural or syntax validation.
 6. Treat policy-sensitive files (`AGENTS.md`, skills, subagents, permissions, memory/context config, workflow extensions) as higher-risk.
@@ -140,16 +140,15 @@ Workflow artifacts:
 
 See [`AGENTS.md`](AGENTS.md) for the full authority, consent, TDD, verification, delivery, and Git policy.
 
-### Startup documentation and application evolution
+### Project documentation and application evolution
 
-The global startup skills define a project without inventing product intent and then keep documentation aligned as the application evolves:
+Project documentation is routed through one skill: [`project-documentation`](skills/project-documentation/SKILL.md). The detailed lifecycle owners are internal reference modules under [`skills/project-documentation/references/owners/`](skills/project-documentation/references/owners/), not separate skills loaded by the registry.
 
 ```text
-Discovery (when problem/evidence is unresolved)
-→ Product Definition → Requirements
-→ Architecture → Technical Decisions
-→ Delivery Planning → Pi execution workflow + Strict TDD
-→ Product Validation → Change Request → next increment
+project-documentation router
+→ one owner module for the first unresolved decision
+→ optional Pi execution workflow + Strict TDD
+→ validation/change request when evidence changes the product contract
 ```
 
 Not every increment visits every step. Route only the first unresolved decision and preserve unaffected approved artifacts.
@@ -158,43 +157,38 @@ For an existing codebase:
 
 ```text
 explicit scan approval → reproducible AS_IS snapshot
-→ principal-selected parallel read-only research lanes
+→ bounded read-only local discovery lanes
 → deterministic evidence consolidation
 → user decisions → canonical TO_BE documents
 → normal delivery and validation loop
 ```
 
-[`existing-project-onboarding`](skills/existing-project-onboarding/SKILL.md) is principal-only documentation guidance, not a workflow or subagent role. Research subagents receive isolated evidence assignments, never infer product intent, and never write canonical lifecycle documents.
-
-| Skill | Canonical responsibility |
-|---|---|
-| [`startup-documentation`](skills/startup-documentation/SKILL.md) | Route the first unresolved documentation/change decision and maintain the numbered Markdown contract. |
-| [`product-discovery`](skills/product-discovery/SKILL.md) | Problem, users, evidence, assumptions, and provisional direction. |
-| [`product-definition`](skills/product-definition/SKILL.md) | Vision, outcomes, success/guardrail intent, MVP hypothesis, scope, journeys, and capabilities. |
-| [`requirements-definition`](skills/requirements-definition/SKILL.md) | Verifiable functional/quality/constraint records and acceptance IDs. |
-| [`architecture-definition`](skills/architecture-definition/SKILL.md) | Drivers, context, responsibility boundaries, data/trust boundaries, and deployment views. |
-| [`technical-decisions`](skills/technical-decisions/SKILL.md) | ADRs, technology/dependency decisions, supply-chain posture, and integrations. |
-| [`delivery-planning`](skills/delivery-planning/SKILL.md) | Delivery model, roadmap, Definition of Done, vertical increments, sprints, and flow items. |
-| [`product-validation`](skills/product-validation/SKILL.md) | Operational metrics, experiments, evidence, learning decisions, and canonical change-request lifecycle. |
-| [`existing-project-onboarding`](skills/existing-project-onboarding/SKILL.md) | Sanitized snapshot-bound AS_IS evidence, gap map, and principal-controlled owner handoffs. |
+Owner modules include new-project setup, existing-project onboarding, product discovery/definition, requirements, architecture, technical decisions, delivery planning, and product validation. They share the modular Markdown contract in [`skills/project-documentation/references/document-contract.md`](skills/project-documentation/references/document-contract.md).
 
 Post-MVP change intake reuses approved documentation instead of restarting the lifecycle:
 
 - approved-behavior bug → selected Pi workflow + Strict TDD using existing requirement/acceptance IDs;
-- ambiguous bug or clear in-scope feature → requirements first;
-- new capability or scope expansion → product definition;
-- uncertain problem/value → discovery and, when useful, a bounded validation experiment;
-- architecture boundary → architecture definition;
-- significant technology/dependency/integration choice → technical decisions;
-- approved change ready for implementation → delivery planning, then one of the three Pi workflows.
+- ambiguous bug or clear in-scope feature → requirements owner module first;
+- new capability or scope expansion → product-definition owner module;
+- uncertain problem/value → product-discovery owner module and, when useful, bounded validation;
+- architecture boundary → architecture-definition owner module;
+- significant technology/dependency/integration choice → technical-decisions owner module;
+- approved change ready for implementation → delivery-planning owner module, then one of the three Pi workflows.
 
 A completed increment records TDD and acceptance/conformance evidence, broader checks, validation status, learning/change-request links, release authorization, and next-increment eligibility. Documentation defines and traces intended behavior; it never authorizes implementation or release by itself.
 
-Maintainers can use [`docs/pi-workflow-regression-scenarios.md`](docs/pi-workflow-regression-scenarios.md) as non-authoritative review guidance after changing workflow, routing, TDD, startup, or onboarding contracts.
+Maintainers can use [`docs/pi-workflow-regression-scenarios.md`](docs/pi-workflow-regression-scenarios.md) as non-authoritative review guidance after changing workflow, routing, TDD, documentation, or onboarding contracts.
 
 ### Skill registry
 
 [`extensions/skill-registry`](extensions/skill-registry/) generates `.pi/skill-registry.json` and `.pi/skill-registry.md` from both project-local and global/user skills.
+
+This configuration intentionally keeps the registered skill list small. Broad topic families route through one skill and internal modules:
+
+| Router skill | Internal modules |
+|---|---|
+| [`project-documentation`](skills/project-documentation/SKILL.md) | [`skills/project-documentation/references/owners/`](skills/project-documentation/references/owners/) |
+| [`pi-configuration`](skills/pi-configuration/SKILL.md) | [`skills/pi-configuration/references/modules/`](skills/pi-configuration/references/modules/) |
 
 The extension is opt-in at project scope: it only registers when `.pi/skill-registry.config.json` exists with `{"enabled": true}`. Missing or invalid config keeps it disabled. It has no dedicated environment variables; the config file is the project enable gate.
 
@@ -229,7 +223,7 @@ See [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 | Code Research | [`extensions/code-research/README.md`](extensions/code-research/README.md) | Tree-sitter-backed TypeScript, JavaScript, Java, and Go symbol lookup, references, function call trees, and reverse call trees, plus Python workspace graph indexing. |
 | Context7 | [`extensions/context7/README.md`](extensions/context7/README.md) | Safe, bounded Context7 library documentation tools without MCP. |
 | PDF Review | [`extensions/pdf-review/README.md`](extensions/pdf-review/README.md) | Local PDF extraction with optional OCR via OCRmyPDF/Tesseract. |
-| Permission Guard | [`extensions/permission-guard/README.md`](extensions/permission-guard/README.md) | In-process permission policy for supported tools and user bash commands. |
+| Workflow Guard | [`extensions/workflow-guard/README.md`](extensions/workflow-guard/README.md) | OpenSpec workflow-state derivation and execution-scope preflight/enforcement for scoped subagent tool calls. |
 | Sidebar | [`extensions/sidebar/README.md`](extensions/sidebar/README.md) | HUD-style sidebar with chat, subagents, todo, and git status. |
 | Skill Registry | [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md) | Routing index generator for global and project skills. Opt-in via `.pi/skill-registry.config.json` with `enabled: true`; no dedicated environment variables. |
 | Utils | [`extensions/utils/README.md`](extensions/utils/README.md) | General utility tools, currently Markdown-to-audio conversion using local Piper/eSpeak engines with Piper voice-model, MP3, bitrate, and progress-status support. |
@@ -247,7 +241,7 @@ See [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 | Code Research | `find_symbol`, `find_references`, `function_call_tree`, `reverse_function_call_tree`, `workspace_graph_status` | Provides code intelligence for TypeScript, JavaScript, Java, and Go, with Python file/symbol indexing in the workspace graph. | [Read more](extensions/code-research/README.md) |
 | Context7 | `context7_search_library`, `context7_get_context`, `context7_resolve_and_get_context` | Fetches focused library documentation through Context7 with bounded output and safe configuration. | [Read more](extensions/context7/README.md) |
 | PDF Review | `pdf_extract` | Extracts text and metadata from local PDFs, with optional OCR through OCRmyPDF/Tesseract. | [Read more](extensions/pdf-review/README.md) |
-| Permission Guard | Tool and bash policy enforcement | Applies in-process safety rules for supported tools, bash commands, protected paths, approvals, and secret handling. | [Read more](extensions/permission-guard/README.md) |
+| Workflow Guard | `workflow_state_get`, `workflow_validate`, `workflow_scope_get`, `workflow_scope_check` | Derives OpenSpec workflow state and preflights scoped read/write/edit/bash actions for active SDD changes. | [Read more](extensions/workflow-guard/README.md) |
 | Sidebar | TUI sidebar/HUD | Adds a sidebar view for chat, subagents, todo state, and git status. | [Read more](extensions/sidebar/README.md) |
 | Skill Registry | `skill_registry_generate`, `skill_registry_resolve` | Builds and queries the routing index for global and project skills. | [Read more](extensions/skill-registry/README.md) |
 | Utils | `markdown_to_audio` | Converts Markdown into local audio using Piper or eSpeak NG, with MP3 bitrate control and concise progress status. | [Read more](extensions/utils/README.md) |
@@ -309,8 +303,8 @@ Runtime notes:
 - Live Context7 calls require `CONTEXT7_API_KEY` in the Pi process environment, not in repository files.
 - Skill Registry has no dedicated environment variables; project opt-in is controlled by `.pi/skill-registry.config.json` with `enabled: true`.
 - Websearch credentials such as `EXA_API_KEY`, `PARALLEL_API_KEY`, `GITHUB_TOKEN`, `STACK_EXCHANGE_KEY`, `OPENALEX_MAILTO`, `CROSSREF_MAILTO`, and `SEMANTIC_SCHOLAR_API_KEY` belong in the process environment, not repository files.
-- Permission Guard is an in-process guard, not an OS sandbox.
-- Emergency `bypassAll` settings disable normal guard behavior; inspect active config before enforcement validation.
+- Workflow Guard is an OpenSpec-aware preflight/enforcement helper for scoped subagent tool calls, not an OS sandbox.
+- `Allowed Bash` currently requires explicit patterns for Python-related risky commands; full Bash deny-by-default allowlisting is a known pending hardening item.
 
 ### Subagents
 
@@ -318,7 +312,8 @@ The Subagents extension is maintained as the independent [`pi-subagents-j0k3r`](
 
 Current global/user subagents are under [`subagents/*.md`](subagents/):
 
-- [`discovery`](subagents/discovery.md) — read-only standalone/pre-SDD research.
+- [`discovery`](subagents/discovery.md) — read-only local codebase/context discovery; no internet or artifact writes.
+- [`deep-researcher`](subagents/deep-researcher.md) — internet-capable deep research that writes `report.md` and `sources.md` in an assigned directory.
 - [`prd-review`](subagents/prd-review.md) — PRD readiness, ambiguity, and requirement debt review.
 - [`sdd-explore`](subagents/sdd-explore.md) — formal SDD exploration.
 - [`sdd-proposal`](subagents/sdd-proposal.md) — PRD/product proposal.
@@ -346,12 +341,12 @@ Configuración global/personal de Pi usada desde `~/.pi/agent`. Contiene la guí
 | Ruta | Propósito |
 |---|---|
 | [`AGENTS.md`](AGENTS.md) | Instrucciones principales del orquestador, gates de workflow, política de TDD/commits, memoria y seguridad. |
-| [`skills/`](skills/) | Skills globales/de usuario usadas por el Skill Registry. Son archivos `SKILL.md` con reglas de routing para SDD, TDD, permisos, subagentes, configuración de extensiones, documentación y autoría de skills. |
-| [`subagents/`](subagents/) | Subagentes globales/de usuario definidos en Markdown. Aquí viven los agentes de fases SDD y el agente `discovery` de solo lectura. |
+| [`skills/`](skills/) | Skills globales/de usuario usadas por el Skill Registry. Dominios amplios como documentación de proyecto y configuración de Pi se exponen como una skill router con módulos internos de referencia, no como muchos `SKILL.md` separados. |
+| [`subagents/`](subagents/) | Subagentes globales/de usuario definidos en Markdown. Aquí viven los agentes de fases SDD junto con `discovery` local-only, `deep-researcher` durable y agentes de briefing. |
 | [`extensions/`](extensions/) | Implementaciones de extensiones del directorio de agente y sus READMEs. En instalaciones por proyecto equivalen a `.pi/extensions/*`. |
 | [`docs/`](docs/) | Documentos de apoyo para esta configuración, como [atajos de teclado](docs/keyboard-shortcuts.md). |
 | [`subagents.json`](subagents.json) | Configuración global/de usuario para subagentes y perfiles de modelo. |
-| [`permissions.json`](permissions.json) | Configuración global/de usuario de Permission Guard. También puede existir configuración por proyecto en `.pi/permissions.json`. |
+| [`trust.json`](trust.json) / [`auth.json`](auth.json) | Archivos locales runtime de identidad/confianza. Se excluyen de backups del instalador y no deben commitearse con secretos. |
 | [`install.sh`](install.sh) | Instalador inicial que copia la configuración gestionada a un directorio de agente Pi separado. |
 | [`update.sh`](update.sh) | Actualizador sin Git y no destructivo para una instalación existente, con backup y actualización de paquetes. |
 | [`.pi/`](.pi/) | Datos runtime/config locales de este repositorio, incluyendo configuración de Code Research y Skill Registry. |
@@ -370,7 +365,7 @@ bash install.sh
 
 El destino predeterminado es `~/.pi/agent`. El instalador:
 
-1. Copia `extensions/`, `skills/`, `subagents/`, `AGENTS.md`, `permissions.json` y `subagents.json`.
+1. Copia `extensions/`, `skills/`, `subagents/`, `AGENTS.md` y `subagents.json` gestionados.
 2. Ejecuta `npm install` en cada extensión copiada que contenga un `package.json`.
 3. Ejecuta el gestor de paquetes de Pi para estos paquetes sin versión fijada:
 
@@ -416,7 +411,7 @@ El actualizador no usa Git. Antes de cambiar nada, crea una copia comprimida en 
 - `.env` y `.env.*`;
 - `*.key` y `*.pem`.
 
-Estos archivos excluidos permanecen intactos en el destino activo; solo se omiten del backup. Después, el actualizador fusiona `extensions/`, `skills/`, `subagents/`, `AGENTS.md`, `permissions.json` y `subagents.json` con el destino. Solo copia archivos regulares ausentes o cuyo contenido sea distinto. No reescribe archivos idénticos y el merge nunca elimina archivos que existan únicamente en el destino. Finalmente, ejecuta `npm install` para cada extensión gestionada y actualiza los paquetes de Pi mediante `pi update --extensions`; esos gestores pueden administrar por separado los archivos dentro de sus propios directorios de dependencias o paquetes.
+Estos archivos excluidos permanecen intactos en el destino activo; solo se omiten del backup. Después, el actualizador fusiona `extensions/`, `skills/`, `subagents/`, `AGENTS.md` y `subagents.json` gestionados con el destino. Solo copia archivos regulares ausentes o cuyo contenido sea distinto. No reescribe archivos idénticos y el merge nunca elimina archivos que existan únicamente en el destino. Finalmente, ejecuta `npm install` para cada extensión gestionada y actualiza los paquetes de Pi mediante `pi update --extensions`; esos gestores pueden administrar por separado los archivos dentro de sus propios directorios de dependencias o paquetes.
 
 Opciones útiles:
 
@@ -456,7 +451,7 @@ El agente sigue estas reglas operativas. La ejecución está limitada exactament
 
 1. Responder consultas de asesoramiento sin inspeccionar ni modificar el proyecto.
 2. Enrutar trabajo concreto mediante [`workflow-triage`](skills/workflow-triage/SKILL.md): **Direct Orchestrator**, **Mini-SDD** o **Formal SDD**. Si el usuario ya nombra el workflow, comienza sin confirmación redundante.
-3. Usar [`discovery`](subagents/discovery.md) como actividad de investigación acotada y de solo lectura cuando esté autorizada; no es otro workflow.
+3. Usar [`discovery`](subagents/discovery.md) local y de solo lectura como exploración acotada de código/contexto cuando esté autorizada; usar [`deep-researcher`](subagents/deep-researcher.md) para reportes con investigación en internet. Ninguno es otro workflow.
 4. Aplicar [`anti-overengineering`](skills/anti-overengineering/SKILL.md) como guardrail transversal después de conocer workflow y owner. Los detalles locales, reversibles y ordinarios pertenecen al agente; producto, arquitectura, migraciones, dependencias, riesgo y efectos externos materiales pertenecen al usuario.
 5. Aplicar [`tdd`](skills/tdd/SKILL.md) estricto a cambios de código: baseline de seguridad, **RED** esperado, mínimo **GREEN** y **REFACTOR** manteniendo verde. Los cambios solo de documentación/configuración usan validación estructural o sintáctica enfocada.
 6. Tratar archivos sensibles de política (`AGENTS.md`, skills, subagentes, permisos, configuración de memoria/contexto y extensiones de workflow) como superficies de mayor riesgo.
@@ -475,16 +470,15 @@ Artefactos de workflow:
 
 Ver [`AGENTS.md`](AGENTS.md) para la política completa de autoridad, consentimiento, TDD, verificación, entrega y Git.
 
-### Documentación startup y evolución de la aplicación
+### Documentación de proyecto y evolución de la aplicación
 
-Las skills globales definen el proyecto sin inventar intención de producto y mantienen la documentación alineada mientras evoluciona la aplicación:
+La documentación de proyecto se enruta mediante una sola skill: [`project-documentation`](skills/project-documentation/SKILL.md). Los owners detallados del lifecycle son módulos internos bajo [`skills/project-documentation/references/owners/`](skills/project-documentation/references/owners/), no skills separadas cargadas por el registry.
 
 ```text
-Discovery (cuando problema/evidencia no están resueltos)
-→ Product Definition → Requirements
-→ Architecture → Technical Decisions
-→ Delivery Planning → workflow Pi + Strict TDD
-→ Product Validation → Change Request → siguiente incremento
+router project-documentation
+→ un módulo owner para la primera decisión sin resolver
+→ workflow Pi opcional + Strict TDD
+→ validación/change request cuando la evidencia cambia el contrato de producto
 ```
 
 No todos los incrementos recorren cada paso. Se enruta solo la primera decisión sin resolver y se preservan los artefactos aprobados no afectados.
@@ -493,43 +487,38 @@ Para un proyecto existente:
 
 ```text
 autorización explícita de escaneo → snapshot AS_IS reproducible
-→ lanes paralelos read-only seleccionados por el principal
+→ lanes locales read-only acotados
 → consolidación determinista de evidencia
 → decisiones del usuario → documentos TO_BE canónicos
 → ciclo normal de delivery y validation
 ```
 
-[`existing-project-onboarding`](skills/existing-project-onboarding/SKILL.md) es orientación documental exclusiva del principal, no workflow ni rol de subagente. Los subagentes investigadores reciben tareas de evidencia aisladas, nunca infieren intención de producto y nunca escriben documentos canónicos.
-
-| Skill | Responsabilidad canónica |
-|---|---|
-| [`startup-documentation`](skills/startup-documentation/SKILL.md) | Enrutar la primera decisión documental/de cambio sin resolver y mantener el contrato Markdown numerado. |
-| [`product-discovery`](skills/product-discovery/SKILL.md) | Problema, usuarios, evidencia, supuestos y dirección provisional. |
-| [`product-definition`](skills/product-definition/SKILL.md) | Visión, outcomes, intención de éxito/guardrails, hipótesis MVP, scope, journeys y capabilities. |
-| [`requirements-definition`](skills/requirements-definition/SKILL.md) | Registros funcionales/de calidad/constraints verificables e IDs de aceptación. |
-| [`architecture-definition`](skills/architecture-definition/SKILL.md) | Drivers, contexto, límites de responsabilidad, datos/confianza y vistas de deployment. |
-| [`technical-decisions`](skills/technical-decisions/SKILL.md) | ADR, decisiones de tecnología/dependencias, supply chain e integraciones. |
-| [`delivery-planning`](skills/delivery-planning/SKILL.md) | Modelo de entrega, roadmap, Definition of Done, incrementos verticales, sprints y flow items. |
-| [`product-validation`](skills/product-validation/SKILL.md) | Métricas operacionales, experimentos, evidencia, decisiones de aprendizaje y lifecycle canónico de change requests. |
-| [`existing-project-onboarding`](skills/existing-project-onboarding/SKILL.md) | Evidencia AS_IS sanitizada y ligada al snapshot, gap map y handoffs controlados por el principal. |
+Los módulos owner incluyen setup de proyecto nuevo, onboarding de proyecto existente, discovery/definition de producto, requisitos, arquitectura, decisiones técnicas, planificación de entrega y validación de producto. Comparten el contrato Markdown modular en [`skills/project-documentation/references/document-contract.md`](skills/project-documentation/references/document-contract.md).
 
 Después del MVP se reutiliza la documentación aprobada en vez de reiniciar el ciclo:
 
 - bug con comportamiento aprobado → workflow Pi seleccionado + Strict TDD usando IDs de requirement/acceptance existentes;
-- bug ambiguo o feature clara dentro del scope → primero Requirements;
-- nueva capability o ampliación de scope → Product Definition;
-- problema/valor incierto → Discovery y, cuando aporte valor, experimento acotado de Validation;
-- cambio de límites arquitectónicos → Architecture Definition;
-- decisión significativa de tecnología/dependencia/integración → Technical Decisions;
-- cambio aprobado listo para implementar → Delivery Planning y después uno de los tres workflows Pi.
+- bug ambiguo o feature clara dentro del scope → primero el módulo de requisitos;
+- nueva capability o ampliación de scope → módulo de product-definition;
+- problema/valor incierto → módulo de product-discovery y, cuando aporte valor, validación acotada;
+- cambio de límites arquitectónicos → módulo de architecture-definition;
+- decisión significativa de tecnología/dependencia/integración → módulo de technical-decisions;
+- cambio aprobado listo para implementar → módulo de delivery-planning y después uno de los tres workflows Pi.
 
 Un incremento completo registra evidencia TDD y de aceptación/conformidad, checks adicionales, estado de Validation, enlaces de aprendizaje/change request, autorización de release y elegibilidad del siguiente incremento. La documentación define y traza el comportamiento previsto; nunca autoriza por sí sola implementación ni release.
 
-Los mantenedores pueden usar [`docs/pi-workflow-regression-scenarios.md`](docs/pi-workflow-regression-scenarios.md) como guía no autoritativa después de cambiar contratos de workflow, routing, TDD, startup u onboarding.
+Los mantenedores pueden usar [`docs/pi-workflow-regression-scenarios.md`](docs/pi-workflow-regression-scenarios.md) como guía no autoritativa después de cambiar contratos de workflow, routing, TDD, documentación u onboarding.
 
 ### Skill Registry
 
 [`extensions/skill-registry`](extensions/skill-registry/) genera `.pi/skill-registry.json` y `.pi/skill-registry.md` desde skills locales de proyecto y skills globales/de usuario.
+
+Esta configuración mantiene intencionalmente chica la lista de skills registradas. Las familias amplias enrutan mediante una skill y módulos internos:
+
+| Skill router | Módulos internos |
+|---|---|
+| [`project-documentation`](skills/project-documentation/SKILL.md) | [`skills/project-documentation/references/owners/`](skills/project-documentation/references/owners/) |
+| [`pi-configuration`](skills/pi-configuration/SKILL.md) | [`skills/pi-configuration/references/modules/`](skills/pi-configuration/references/modules/) |
 
 La extensión es opt-in por proyecto: solo se registra cuando existe `.pi/skill-registry.config.json` con `{"enabled": true}`. Si falta o es inválido, permanece deshabilitada. No tiene variables de entorno dedicadas; el archivo de configuración es la compuerta de activación.
 
@@ -564,7 +553,7 @@ Ver [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 | Code Research | [`extensions/code-research/README.md`](extensions/code-research/README.md) | Búsqueda de símbolos, referencias, call trees y reverse call trees para TypeScript, JavaScript, Java y Go usando Tree-sitter, más indexado Python en el workspace graph. |
 | Context7 | [`extensions/context7/README.md`](extensions/context7/README.md) | Herramientas seguras y acotadas para documentación de librerías con Context7, sin MCP. |
 | PDF Review | [`extensions/pdf-review/README.md`](extensions/pdf-review/README.md) | Extracción local de PDF con OCR opcional vía OCRmyPDF/Tesseract. |
-| Permission Guard | [`extensions/permission-guard/README.md`](extensions/permission-guard/README.md) | Política de permisos in-process para herramientas soportadas y comandos bash del usuario. |
+| Workflow Guard | [`extensions/workflow-guard/README.md`](extensions/workflow-guard/README.md) | Derivación de estado OpenSpec y preflight/enforcement de Execution Scope para llamadas scoped de subagentes. |
 | Sidebar | [`extensions/sidebar/README.md`](extensions/sidebar/README.md) | Sidebar tipo HUD con chat, subagentes, todo y estado de git. |
 | Skill Registry | [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md) | Generador de índice de routing para skills globales y de proyecto. Opt-in vía `.pi/skill-registry.config.json` con `enabled: true`; sin variables de entorno dedicadas. |
 | Utils | [`extensions/utils/README.md`](extensions/utils/README.md) | Utilidades generales; actualmente conversión de Markdown a audio con Piper/eSpeak local, voces Piper, MP3, bitrate y progreso en status bar. |
@@ -582,7 +571,7 @@ Ver [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 | Code Research | `find_symbol`, `find_references`, `function_call_tree`, `reverse_function_call_tree`, `workspace_graph_status` | Aporta inteligencia de código para TypeScript, JavaScript, Java y Go, con indexado de archivos/símbolos Python en el workspace graph. | [Ver más](extensions/code-research/README.md) |
 | Context7 | `context7_search_library`, `context7_get_context`, `context7_resolve_and_get_context` | Obtiene documentación enfocada de librerías con Context7, salida acotada y configuración segura. | [Ver más](extensions/context7/README.md) |
 | PDF Review | `pdf_extract` | Extrae texto y metadata de PDFs locales, con OCR opcional mediante OCRmyPDF/Tesseract. | [Ver más](extensions/pdf-review/README.md) |
-| Permission Guard | Políticas para tools y bash | Aplica reglas de seguridad in-process para tools soportadas, comandos bash, rutas protegidas, aprobaciones y secretos. | [Ver más](extensions/permission-guard/README.md) |
+| Workflow Guard | `workflow_state_get`, `workflow_validate`, `workflow_scope_get`, `workflow_scope_check` | Deriva estado OpenSpec y preflight de acciones read/write/edit/bash scoped para cambios SDD activos. | [Ver más](extensions/workflow-guard/README.md) |
 | Sidebar | Sidebar/HUD de TUI | Agrega una vista lateral para chat, subagentes, estado de todo y estado de git. | [Ver más](extensions/sidebar/README.md) |
 | Skill Registry | `skill_registry_generate`, `skill_registry_resolve` | Construye y consulta el índice de routing para skills globales y de proyecto. | [Ver más](extensions/skill-registry/README.md) |
 | Utils | `markdown_to_audio` | Convierte Markdown a audio local con Piper o eSpeak NG, control de bitrate MP3 y progreso compacto en status bar. | [Ver más](extensions/utils/README.md) |
@@ -644,8 +633,8 @@ Notas runtime:
 - Las llamadas live de Context7 requieren `CONTEXT7_API_KEY` en el entorno del proceso Pi, no en archivos del repositorio.
 - Skill Registry no tiene variables de entorno dedicadas; el opt-in por proyecto se controla con `.pi/skill-registry.config.json` y `enabled: true`.
 - Credenciales de Websearch como `EXA_API_KEY`, `PARALLEL_API_KEY`, `GITHUB_TOKEN`, `STACK_EXCHANGE_KEY`, `OPENALEX_MAILTO`, `CROSSREF_MAILTO` y `SEMANTIC_SCHOLAR_API_KEY` deben vivir en el entorno del proceso, no en archivos del repositorio.
-- Permission Guard es una protección in-process, no un sandbox de sistema operativo.
-- Configuraciones de emergencia como `bypassAll` deshabilitan el comportamiento normal del guard; inspecciona la configuración activa antes de validar enforcement.
+- Workflow Guard es un helper de preflight/enforcement para llamadas scoped de subagentes, no un sandbox de sistema operativo.
+- `Allowed Bash` hoy exige patrones explícitos para comandos Python riesgosos; la allowlist deny-by-default para todo Bash queda como hardening pendiente conocido.
 
 ### Subagentes
 
@@ -653,7 +642,8 @@ La extensión Subagents se mantiene como el paquete independiente [`pi-subagents
 
 Los subagentes globales/de usuario actuales están en [`subagents/*.md`](subagents/):
 
-- [`discovery`](subagents/discovery.md) — investigación standalone/pre-SDD de solo lectura.
+- [`discovery`](subagents/discovery.md) — discovery local de código/contexto, solo lectura, sin internet ni escritura de artefactos.
+- [`deep-researcher`](subagents/deep-researcher.md) — investigación profunda con internet que escribe `report.md` y `sources.md` en un directorio asignado.
 - [`prd-review`](subagents/prd-review.md) — revisión de preparación de PRD, ambigüedad y deuda de requisitos.
 - [`sdd-explore`](subagents/sdd-explore.md) — exploración formal SDD.
 - [`sdd-proposal`](subagents/sdd-proposal.md) — propuesta de producto/PRD.

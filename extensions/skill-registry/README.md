@@ -38,7 +38,7 @@ Example config:
 
 The registry is an index for routing. The source of truth remains each `SKILL.md`.
 
-A dedicated agent skill for configuring this extension is available as `skill-registry-configuration`.
+Agent-facing configuration guidance is routed through `pi-configuration`, which loads the internal `skill-registry-configuration` module on demand.
 
 ### Tool
 
@@ -248,7 +248,7 @@ Ejemplo de config:
 
 El registry es un índice para routing. La fuente de verdad sigue siendo cada `SKILL.md`.
 
-Hay una skill dedicada para configurar esta extensión: `skill-registry-configuration`.
+La guía de configuración para agentes se enruta mediante `pi-configuration`, que carga bajo demanda el módulo interno `skill-registry-configuration`.
 
 ### Tool
 

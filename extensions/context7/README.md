@@ -267,7 +267,7 @@ The test suite is designed to run without live Context7 network access or a real
 
 ### Related project docs
 
-- `skills/context7-configuration/SKILL.md` — agent-facing Context7 configuration and usage policy.
+- `skills/pi-configuration/SKILL.md` — agent-facing configuration router; loads the internal Context7 configuration module on demand.
 - `extensions/context7/src/config.ts` — config parsing and defaults.
 - `extensions/context7/src/tools.ts` — tool schemas and output shaping.
 - `extensions/context7/src/cache.ts` — cache location and safety behavior.
@@ -540,7 +540,7 @@ La suite de tests está diseñada para correr sin acceso live a Context7 ni API 
 
 ### Docs relacionadas del proyecto
 
-- `skills/context7-configuration/SKILL.md` — política de configuración y uso de Context7 para agentes.
+- `skills/pi-configuration/SKILL.md` — router de configuración para agentes; carga bajo demanda el módulo interno de configuración Context7.
 - `extensions/context7/src/config.ts` — parsing de config y defaults.
 - `extensions/context7/src/tools.ts` — schemas de tools y shaping de salida.
 - `extensions/context7/src/cache.ts` — ubicación de caché y comportamiento de seguridad.
