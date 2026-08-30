@@ -25,6 +25,7 @@ Implement an approved change under `openspec/changes/<change-slug>/` and create 
 
 The delegated prompt must provide the seven standard fields in order and must explicitly include:
 
+- the exact change slug;
 - the orchestrator's implementation summary;
 - the user's explicit apply authorization;
 - the exact `apply.md` output path;

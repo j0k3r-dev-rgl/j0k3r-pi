@@ -17,6 +17,7 @@ Create or update `openspec/changes/<change-slug>/explore.md` only when the deleg
 
 The delegated prompt must provide the seven standard fields in order and must explicitly include:
 
+- the exact change slug;
 - durable-synthesis approval;
 - the exact `explore.md` output path;
 - exact source evidence artifact paths or references to synthesize;

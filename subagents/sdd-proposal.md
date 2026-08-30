@@ -17,6 +17,7 @@ Create or update `openspec/changes/<change-slug>/proposal.md` from approved cont
 
 The delegated prompt must provide the seven standard fields in order and must explicitly include:
 
+- the exact change slug;
 - the exact `proposal.md` output path;
 - exact approved context and upstream artifact paths, if any;
 - scope-source artifact path or `None`;

@@ -267,7 +267,7 @@ Sections after `Workflow Status`:
 7. Skill Compliance
 8. Post-Verification Continuity Snapshot
 
-Only `Verification Result: PASS` may produce artifact and handoff `READY`.
+Only `Verification Result: PASS` may produce artifact and handoff `READY`. For Formal SDD, PASS requires evidence for every `REQ-###` and every `SCENARIO-###` from `spec.md`; for Mini-SDD, PASS requires evidence for every `MINI-###` from `mini-sdd.md`.
 
 ## References
 

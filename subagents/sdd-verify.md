@@ -23,6 +23,7 @@ Independently verify a completed change under `openspec/changes/<change-slug>/` 
 
 The delegated prompt must provide the seven standard fields in order and must explicitly include:
 
+- the exact change slug;
 - the exact `verify.md` output path;
 - exact authority artifact paths to verify against;
 - exact `apply.md` path;
@@ -38,7 +39,7 @@ If a material reference is missing, placeholder-based, or required verification 
 - Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `verify.md`.
 - Read `apply.md` first.
 - Mini-SDD: derive the full `MINI-###` set from `mini-sdd.md`.
-- Formal SDD: derive the full `REQ-###` set from `spec.md` and use `tasks.md`, `design.md`, `apply.md`, assigned skills, and exact changed files only.
+- Formal SDD: derive the full `REQ-###` and `SCENARIO-###` sets from `spec.md` and use `tasks.md`, `design.md`, `apply.md`, assigned skills, and exact changed files only.
 - Read only exact assigned skills.
 - Do not read unrelated artifacts or the full conversation unless explicitly required.
 - Do not modify implementation files or tests.
@@ -46,8 +47,8 @@ If a material reference is missing, placeholder-based, or required verification 
 
 ## Verification Rules
 
-- Derive the approved deliverable set independently from the contracts.
-- Validate the claimed implementation evidence.
+- Derive the approved deliverable and acceptance set independently from the contracts.
+- Validate the claimed implementation evidence for every `MINI-###` item or every Formal SDD `REQ-###` and `SCENARIO-###` item.
 - Run focused checks and relevant regression checks independently.
 - A passing verification requires the continuity snapshot required by the artifact contract.
 - Any non-passing result remains `BLOCKED`.

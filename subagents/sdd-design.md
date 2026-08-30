@@ -17,6 +17,7 @@ Create or update `openspec/changes/<change-slug>/design.md` from ready contracts
 
 The delegated prompt must provide the seven standard fields in order and must explicitly include:
 
+- the exact change slug;
 - the exact `design.md` output path;
 - exact `spec.md` path and any required supporting artifact paths;
 - scope-source artifact path or `None`;

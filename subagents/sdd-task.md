@@ -17,6 +17,7 @@ Create or update `openspec/changes/<change-slug>/tasks.md` from ready `spec.md` 
 
 The delegated prompt must provide the seven standard fields in order and must explicitly include:
 
+- the exact change slug;
 - the exact `tasks.md` output path;
 - exact `spec.md` and `design.md` paths;
 - scope-source artifact path, or `None` when not yet available;

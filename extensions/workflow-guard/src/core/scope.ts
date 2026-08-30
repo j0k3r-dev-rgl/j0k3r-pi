@@ -76,6 +76,19 @@ function parseList(lines: string[], index: number): { values: string[]; next: nu
   return { values, next: i };
 }
 
+function isConcretePlainValue(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === 'None') return false;
+  if (/^`.*`$/.test(trimmed) || /^['"].*['"]$/.test(trimmed)) return false;
+  if (/[`]/.test(trimmed)) return false;
+  if (/[<>]/.test(trimmed)) return false;
+  return !/\b(?:as needed|tbd|todo|placeholder)\b/i.test(trimmed);
+}
+
+function invalidPlainValues(values: string[] | undefined): string[] {
+  return (values ?? []).filter((value) => !isConcretePlainValue(value));
+}
+
 export function parseExecutionScope(markdown: string, authorityArtifact: string, workspaceRoot: string): ExecutionScopeState {
   const blockers: string[] = [];
   const warnings: string[] = [];
@@ -113,17 +126,26 @@ export function parseExecutionScope(markdown: string, authorityArtifact: string,
     else if (trimmed === '- Allowed Paths:') { const parsed = parseList(block, i); allowedRaw = parsed.values; if (parsed.error) blockers.push(parsed.error); i = parsed.next - 1; }
     else if (trimmed === '- Writable Paths:') { const parsed = parseList(block, i); writableRaw = parsed.values; if (parsed.error) blockers.push(parsed.error); i = parsed.next - 1; }
     else if (trimmed === '- Allowed Bash:') { const parsed = parseList(block, i); bashRaw = parsed.values.filter((value) => value !== 'None'); if (parsed.error) blockers.push(parsed.error); i = parsed.next - 1; }
-    else if (trimmed.startsWith('- Notes:')) notesSeen = true;
+    else if (trimmed.startsWith('- Notes:')) {
+      const noteValue = trimmed.slice('- Notes:'.length).trim();
+      notesSeen = true;
+      if (!isConcretePlainValue(noteValue)) blockers.push('Execution Scope Notes must be concrete plain text.');
+    }
     else if (trimmed !== '') blockers.push(`Unexpected Execution Scope line: ${trimmed}`);
   }
 
   if (!rootValue || !isAbsolute(rootValue)) blockers.push('Execution Scope Root must be an absolute path.');
+  if (rootValue && !isConcretePlainValue(rootValue)) blockers.push('Execution Scope Root must be concrete plain text.');
   const root = resolve(rootValue || workspaceRoot);
   if (root !== resolve(workspaceRoot)) blockers.push(`Execution Scope Root must equal workspace root ${resolve(workspaceRoot)}.`);
   if (!allowedRaw || allowedRaw.length === 0) blockers.push('Execution Scope Allowed Paths must contain at least one path.');
   if (!writableRaw || writableRaw.length === 0) blockers.push('Execution Scope Writable Paths must contain at least one path.');
   if (!bashRaw) blockers.push('Execution Scope Allowed Bash is missing.');
+  else if (bashRaw.length === 0) blockers.push('Execution Scope Allowed Bash must contain at least one concrete command.');
   if (!notesSeen) blockers.push('Execution Scope Notes is missing.');
+  if (invalidPlainValues(allowedRaw).length) blockers.push('Execution Scope Allowed Paths must contain only concrete plain-text paths.');
+  if (invalidPlainValues(writableRaw).length) blockers.push('Execution Scope Writable Paths must contain only concrete plain-text paths.');
+  if (invalidPlainValues(bashRaw).length) blockers.push('Execution Scope Allowed Bash must contain only concrete plain-text commands.');
 
   const allowed_paths = (allowedRaw ?? []).map((value) => normalizePattern(root, value));
   const writable_paths = (writableRaw ?? []).map((value) => normalizePattern(root, value));

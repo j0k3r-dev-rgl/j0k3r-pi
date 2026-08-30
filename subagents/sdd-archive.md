@@ -16,6 +16,7 @@ Archive a completed Mini-SDD or Formal SDD change from `openspec/changes/<change
 
 The delegated prompt must provide the seven standard fields in order and must explicitly include:
 
+- the exact change slug;
 - reported passing verification;
 - explicit archive authorization;
 - exact active source directory path;

@@ -83,7 +83,7 @@ Rules:
 3. `design.md` defines `DES-###` only.
 4. `tasks.md` defines `TASK-###` only.
 5. `sdd-apply` requires an implementation summary plus explicit user authorization.
-6. `sdd-verify` independently verifies requirements from `spec.md`.
+6. `sdd-verify` independently verifies every `REQ-###` and `SCENARIO-###` from `spec.md`.
 7. `sdd-archive` requires passing verification plus explicit user authorization.
 
 ## Structural Gate
@@ -94,8 +94,8 @@ Before advancing, the orchestrator checks:
 2. required sections for the current artifact;
 3. unique and correctly formatted IDs;
 4. references resolving to upstream IDs;
-5. complete coverage before apply;
-6. complete evidence rows before a verify pass.
+5. complete `REQ-###` and `SCENARIO-###` coverage before apply;
+6. complete evidence rows for every verified requirement and scenario before a verify pass.
 
 ## Hard Rules
 

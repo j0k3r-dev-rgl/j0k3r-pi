@@ -17,7 +17,7 @@ async function change(root: string, slug: string, files: Record<string, string>)
 
 const ready = '## Workflow Status\n- Status: READY\n- Blockers: None\n\n';
 const blocked = '## Workflow Status\n- Status: BLOCKED\n- Blockers: needs decision\n\n';
-const scope = (root: string, bash = '  - None') => `## Execution Scope\n- Root: ${root}\n- Allowed Paths:\n  - openspec/changes/**\n  - extensions/workflow-guard/**\n- Writable Paths:\n  - openspec/changes/**\n  - extensions/workflow-guard/**\n- Allowed Bash:\n${bash}\n- Notes: test scope; /tmp/** is implicitly allowed.\n\n`;
+const scope = (root: string, bash = '  - npm test') => `## Execution Scope\n- Root: ${root}\n- Allowed Paths:\n  - openspec/changes/**\n  - extensions/workflow-guard/**\n- Writable Paths:\n  - openspec/changes/**\n  - extensions/workflow-guard/**\n- Allowed Bash:\n${bash}\n- Notes: test scope; /tmp/** is implicitly allowed.\n\n`;
 
 describe('workflow state derivation', () => {
   it('detects mini-sdd and writes per-change and global json', async () => {
@@ -88,16 +88,20 @@ describe('workflow state derivation', () => {
     expect(result.states[0].execution_scope).toMatchObject({ authority_artifact: 'openspec/changes/formal/tasks.md', status: 'READY' });
   });
 
-  it('blocks missing or writable-outside-allowed execution scope and conflict/unknown scopes', async () => {
+  it('blocks missing, invalid, conflict, and unknown execution scopes', async () => {
     const root = await workspace();
     await change(root, 'missing-scope', { 'mini-sdd.md': ready + '# MINI-001 Work\n' });
-    await change(root, 'bad-scope', { 'mini-sdd.md': ready + `## Execution Scope\n- Root: ${root}\n- Allowed Paths:\n  - openspec/changes/**\n- Writable Paths:\n  - extensions/workflow-guard/**\n- Allowed Bash:\n  - None\n- Notes: bad\n\n` });
+    await change(root, 'bad-scope', { 'mini-sdd.md': ready + `## Execution Scope\n- Root: ${root}\n- Allowed Paths:\n  - openspec/changes/**\n- Writable Paths:\n  - extensions/workflow-guard/**\n- Allowed Bash:\n  - npm test\n- Notes: bad\n\n` });
+    await change(root, 'empty-bash-scope', { 'mini-sdd.md': ready + `## Execution Scope\n- Root: ${root}\n- Allowed Paths:\n  - openspec/changes/**\n- Writable Paths:\n  - openspec/changes/**\n- Allowed Bash:\n  - None\n- Notes: bad\n\n` });
+    await change(root, 'backtick-scope', { 'mini-sdd.md': ready + `## Execution Scope\n- Root: ${root}\n- Allowed Paths:\n  - \`openspec/changes/**\`\n- Writable Paths:\n  - openspec/changes/**\n- Allowed Bash:\n  - npm test\n- Notes: bad\n\n` });
     await change(root, 'mixed-scope', { 'mini-sdd.md': ready, 'tasks.md': ready });
     await change(root, 'unknown-scope', { 'apply.md': ready });
     const result = await syncActiveWorkflows(root);
     const bySlug = Object.fromEntries(result.states.map((state) => [state.slug, state]));
     expect(bySlug['missing-scope'].execution_scope?.blockers[0]).toContain('Missing Execution Scope');
     expect(bySlug['bad-scope'].execution_scope?.blockers[0]).toContain('Writable path is outside Allowed Paths');
+    expect(bySlug['empty-bash-scope'].execution_scope?.blockers[0]).toContain('Allowed Bash must contain at least one concrete command');
+    expect(bySlug['backtick-scope'].execution_scope?.blockers[0]).toContain('Allowed Paths must contain only concrete plain-text paths');
     expect(bySlug['mixed-scope'].execution_scope?.blockers[0]).toContain('conflict');
     expect(bySlug['unknown-scope'].execution_scope?.blockers[0]).toContain('unknown');
   });

@@ -17,6 +17,7 @@ Create or update `openspec/changes/<change-slug>/prd.md` only when the delegated
 
 The delegated prompt must provide the seven standard fields in order and must explicitly include:
 
+- the exact change slug;
 - explicit PRD approval;
 - the exact `prd.md` output path;
 - exact assigned `SKILL.md` paths, including `skills/subagent-artifact-contracts/SKILL.md`;

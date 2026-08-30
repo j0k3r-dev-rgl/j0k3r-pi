@@ -17,6 +17,7 @@ Create or update `openspec/changes/<change-slug>/spec.md` from ready prior artif
 
 The delegated prompt must provide the seven standard fields in order and must explicitly include:
 
+- the exact change slug;
 - the exact `spec.md` output path;
 - exact `proposal.md` path and any optional supporting artifact paths;
 - scope-source artifact path or `None`;
