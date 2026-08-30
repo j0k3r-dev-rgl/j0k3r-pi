@@ -10,7 +10,7 @@ registry:
   domains: "product-definition, mvp-scoping, product-outcomes, functional-capabilities"
   paths: "docs/01-product/**/*.md"
   keywords: "product definition, define product vision, MVP, define MVP, create MVP, define MVP hypothesis, scope the MVP, product scope, product success metrics, user journeys, functional capabilities, definir producto, definir alcance del MVP, modulos funcionales del producto"
-  related: "startup-documentation, product-discovery, anti-overengineering, requirements-definition, product-validation"
+  related: "project-documentation, anti-overengineering"
   priority: 92
 ---
 
@@ -26,7 +26,7 @@ Do not use it to conduct customer research, invent market evidence, write detail
 
 ## Hard Rules
 
-- Consume the `startup-documentation` and `references/document-contract.md` context already supplied by the router. If no router context was supplied, load them once for the shared contract without re-entering documentation routing. Load and follow `anti-overengineering` whenever this skill is active.
+- Consume the `project-documentation` routing decision and shared `project-documentation/references/document-contract.md` context already supplied by the router. If no router context was supplied, load `project-documentation` once for owner selection and the shared contract without expanding the full lifecycle. Load and follow `anti-overengineering` whenever this skill is active.
 - Read the minimum approved discovery artifacts required for the current product decision. Stop if the core problem, target audience, or decision owner is materially unresolved.
 - Ask the user before selecting product vision, business outcome, success intent, MVP hypothesis, included capability, exclusion, journey, priority, or trade-off.
 - The agent may recommend the smallest supported product slice, explain why broader items are premature, and present bounded alternatives. The user retains the final product decision.
@@ -113,9 +113,10 @@ Return:
 
 ## References
 
-- `~/.pi/agent/skills/startup-documentation/SKILL.md` — startup documentation routing.
-- `~/.pi/agent/skills/startup-documentation/references/document-contract.md` — canonical modular Markdown contract.
-- `~/.pi/agent/skills/product-discovery/SKILL.md` — upstream evidence and assumption owner.
+- `~/.pi/agent/skills/project-documentation/SKILL.md` — lightweight project documentation routing.
+- `~/.pi/agent/skills/project-documentation/references/owners/startup-documentation.md` — new-project lifecycle initialization and shared documentation contract.
+- `~/.pi/agent/skills/project-documentation/references/document-contract.md` — canonical modular Markdown contract.
+- `~/.pi/agent/skills/project-documentation/references/owners/product-discovery.md` — upstream evidence and assumption owner.
 - `~/.pi/agent/skills/anti-overengineering/SKILL.md` — mandatory simplicity and scope controls.
 - `https://leanstartup.co/resources/articles/what-is-an-mvp/` — MVP as validated learning rather than arbitrary feature reduction.
 - `https://www.svpg.com/product-strategy-overview/` — product strategy as explicit problem and outcome choices.

@@ -13,17 +13,17 @@ Field conventions:
 
 - `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
 - `domains`: stable domain tags used for routing.
-- `paths`: configuration paths or docs that should activate this skill.
-- `keywords`: configuration-only phrases and field names that should activate this skill.
+- `paths`: configuration paths or docs that should route to this module.
+- `keywords`: configuration-only phrases and field names that should route to this module.
 - `phases`: keep empty for configuration-only skills so phase routing alone does not load it.
 - `related`: configuration-adjacent skills only; do not add implementation or SDD skills for normal config help.
 - `priority`: route similarly to other extension configuration skills.
 
 ## Activation Contract
 
-Use this skill only when the user asks how to configure, enable, troubleshoot, or explain the Pi API Tools Extension configuration, especially project-local `.pi/api.json`, localhost REST/GraphQL endpoints, login credentials, `access_token` persistence, `use_token` request behavior, or safe readiness checks.
+Use this module only when the user asks how to configure, enable, troubleshoot, or explain the Pi API Tools Extension configuration, especially project-local `.pi/api.json`, localhost REST/GraphQL endpoints, login credentials, `access_token` persistence, `use_token` request behavior, or safe readiness checks.
 
-Do not load this skill for implementation work under `extensions/api-tools/**`, adding new API tools, changing runtime behavior, or broad SDD planning. Those are code/change tasks, not configuration-only help.
+Do not read this module for implementation work under `extensions/api-tools/**`, adding new API tools, changing runtime behavior, or broad SDD planning. Those are code/change tasks, not configuration-only help.
 
 ## Hard Rules
 
@@ -96,7 +96,7 @@ Configuration field notes:
 
 Return:
 
-- Skill applied: `api-tools-configuration`.
+- Configuration module applied: `api-tools-configuration`.
 - Config path reviewed or changed.
 - Enablement, endpoint, auth mode, and token-handling guidance.
 - Secret handling confirmation.

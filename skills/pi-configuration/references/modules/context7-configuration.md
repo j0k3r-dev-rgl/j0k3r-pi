@@ -13,17 +13,17 @@ Field conventions:
 
 - `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
 - `domains`: stable domain tags used for routing.
-- `paths`: glob-like project paths that should activate this skill.
-- `keywords`: configuration-only keywords that should activate this skill.
+- `paths`: glob-like project paths that should route to this module.
+- `keywords`: configuration-only keywords that should route to this module.
 - `phases`: keep empty for configuration-only skills so phase routing alone does not load them.
 - `related`: configuration-adjacent skills only; do not add usage, implementation, or workflow skills.
 - `priority`: routing priority from 0 to 100. Higher means consider earlier when multiple skills match.
 
 ## Activation Contract
 
-Use this skill only when the user asks how to configure Context7 in Pi or when editing/reviewing Context7 configuration files such as `.pi/context7.json` or agent-root `context7.json`. Cover cache settings, output defaults, and API-key readiness as configuration topics only.
+Use this module only when the user asks how to configure Context7 in Pi or when editing/reviewing Context7 configuration files such as `.pi/context7.json` or agent-root `context7.json`. Cover cache settings, output defaults, and API-key readiness as configuration topics only.
 
-Do not load this skill for ordinary library documentation lookup, tool usage, implementation work under `extensions/context7/**`, or editing this skill file; those are not configuration questions.
+Do not read this module for ordinary library documentation lookup, tool usage, implementation work under `extensions/context7/**`, or editing this module file; those are not configuration questions.
 
 ## Hard Rules
 
@@ -68,7 +68,7 @@ Recommended project config:
 
 Return:
 
-- Skill applied: `context7-configuration`.
+- Configuration module applied: `context7-configuration`.
 - Config path reviewed or changed.
 - Cache/default values set or preserved.
 - Secret handling confirmation.

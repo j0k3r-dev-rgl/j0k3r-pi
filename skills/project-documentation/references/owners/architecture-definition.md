@@ -10,7 +10,7 @@ registry:
   domains: "software-architecture, architecture-drivers, system-boundaries, data-and-trust-boundaries"
   paths: "docs/03-architecture/00-architecture-drivers.md, docs/03-architecture/01-system-context.md, docs/03-architecture/02-system-boundaries.md, docs/03-architecture/03-data-and-trust-boundaries.md, docs/03-architecture/04-deployment-view.md"
   keywords: "define software architecture, architecture drivers, system context, system boundaries, data and trust boundaries, deployment view, definir arquitectura, limites del sistema, atributos de calidad"
-  related: "startup-documentation, requirements-definition, technical-decisions, delivery-planning, anti-overengineering"
+  related: "project-documentation, anti-overengineering"
   priority: 92
 ---
 
@@ -26,7 +26,7 @@ Do not use this skill to discover the product, expand MVP scope, invent quality 
 
 ## Hard Rules
 
-- Consume the `startup-documentation` and `references/document-contract.md` context already supplied by the router. If no router context was supplied, load them once for the shared contract without re-entering documentation routing. Load and follow `anti-overengineering` whenever this skill is active.
+- Consume the `project-documentation` routing decision and shared `project-documentation/references/document-contract.md` context already supplied by the router. If no router context was supplied, load `project-documentation` once for owner selection and the shared contract without expanding the full lifecycle. Load and follow `anti-overengineering` whenever this skill is active.
 - Use approved product and requirements artifacts as drivers. Stop if the critical flow, applicable quality requirement, constraint, data class, or decision owner needed for the current view is unresolved.
 - Ask the user before choosing architecture boundaries, ownership, deployment shape, data placement, trust assumptions, security posture, availability approach, or trade-offs not already approved.
 - Express architecture drivers as measurable scenarios when applicable: source/stimulus, context, affected artifact, expected response, measure or unresolved target, evidence, priority, and owner.
@@ -104,10 +104,11 @@ Return:
 
 ## References
 
-- `~/.pi/agent/skills/startup-documentation/SKILL.md` — documentation routing.
-- `~/.pi/agent/skills/startup-documentation/references/document-contract.md` — modular Markdown contract.
-- `~/.pi/agent/skills/requirements-definition/SKILL.md` — upstream functional, quality, and constraint owner.
-- `~/.pi/agent/skills/technical-decisions/SKILL.md` — significant architecture and technology decision owner.
+- `~/.pi/agent/skills/project-documentation/SKILL.md` — lightweight project documentation routing.
+- `~/.pi/agent/skills/project-documentation/references/owners/startup-documentation.md` — new-project lifecycle initialization and shared documentation contract.
+- `~/.pi/agent/skills/project-documentation/references/document-contract.md` — modular Markdown contract.
+- `~/.pi/agent/skills/project-documentation/references/owners/requirements-definition.md` — upstream functional, quality, and constraint owner.
+- `~/.pi/agent/skills/project-documentation/references/owners/technical-decisions.md` — significant architecture and technology decision owner.
 - `~/.pi/agent/skills/anti-overengineering/SKILL.md` — mandatory simplicity and scope controls.
 - `https://www.sei.cmu.edu/library/reasoning-about-software-quality-attributes` — quality attributes as architecture drivers and trade-offs.
 - `https://martinfowler.com/articles/evo-arch-forward.html` — evolutionary architecture through small changes and feedback.

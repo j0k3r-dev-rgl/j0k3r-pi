@@ -76,11 +76,6 @@ Use the smallest useful skill set.
 6. Reserve non-empty `registry.phases` for workflow owners and true transversal guardrails.
 7. Treat Skill Registry outputs as derived routing hints, not source-of-truth policy.
 
-Read these skills before acting when their trigger applies:
-
-- `skills/startup-documentation/SKILL.md` for a new app/startup/project idea.
-- `skills/product-discovery/SKILL.md` when the problem, users, or evidence are still unclear.
-- `skills/existing-project-onboarding/SKILL.md` when the user wants to scan or document an existing codebase.
 
 ## Change Validation Policy
 

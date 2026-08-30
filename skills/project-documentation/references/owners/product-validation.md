@@ -10,7 +10,7 @@ registry:
   domains: "product-validation, experiments, product-metrics, learning-decisions"
   paths: "docs/05-validation/**/*.md"
   keywords: "product validation, validate product, measurement plan, MVP validation, validate MVP, product experiment, pre-requirement experiment, conformance validation, acceptance verification, learning decision, persevere, pivot, persevere or pivot, validar producto, medir MVP, experimento de producto, pivotar o continuar"
-  related: "startup-documentation, product-discovery, product-definition, requirements-definition, delivery-planning, anti-overengineering"
+  related: "project-documentation, anti-overengineering"
   priority: 92
 ---
 
@@ -26,7 +26,7 @@ Do not use it to invent success thresholds after results are known, collect unau
 
 ## Hard Rules
 
-- Consume the `startup-documentation` and `references/document-contract.md` context already supplied by the router. If no router context was supplied, load them once for the shared contract without re-entering documentation routing. Load and follow `anti-overengineering` whenever this skill is active.
+- Consume the `project-documentation` routing decision and shared `project-documentation/references/document-contract.md` context already supplied by the router. If no router context was supplied, load `project-documentation` once for owner selection and the shared contract without expanding the full lifecycle. Load and follow `anti-overengineering` whenever this skill is active.
 - Begin with one user-approved discovery opportunity, assumption, or test hypothesis, or one approved product hypothesis or outcome, plus the named decision the evidence will inform. Discovery approval authorizes testing only and does not promote provisional content into product intent.
 - Ask the user before selecting metrics, thresholds, cohorts, observation periods, guardrails, experiment methods, data collection, confidence requirements, or final learning decisions.
 - Product owns outcome, success, and guardrail intent. Validation owns operational metric definitions, cohorts, collection and analysis methods, baselines, thresholds, observation periods, results, and learning decisions.
@@ -117,11 +117,12 @@ Return:
 
 ## References
 
-- `~/.pi/agent/skills/startup-documentation/SKILL.md` — documentation routing.
-- `~/.pi/agent/skills/startup-documentation/references/document-contract.md` — modular Markdown and change-impact contract.
-- `~/.pi/agent/skills/product-definition/SKILL.md` — product hypothesis, scope, outcome, and success/guardrail intent owner.
-- `~/.pi/agent/skills/requirements-definition/SKILL.md` — requirement and acceptance owner for implementation or conformance validation.
-- `~/.pi/agent/skills/delivery-planning/SKILL.md` — increment, sprint, and release-planning owner.
+- `~/.pi/agent/skills/project-documentation/SKILL.md` — lightweight project documentation routing.
+- `~/.pi/agent/skills/project-documentation/references/owners/startup-documentation.md` — new-project lifecycle initialization and shared documentation contract.
+- `~/.pi/agent/skills/project-documentation/references/document-contract.md` — modular Markdown and change-impact contract.
+- `~/.pi/agent/skills/project-documentation/references/owners/product-definition.md` — product hypothesis, scope, outcome, and success/guardrail intent owner.
+- `~/.pi/agent/skills/project-documentation/references/owners/requirements-definition.md` — requirement and acceptance owner for implementation or conformance validation.
+- `~/.pi/agent/skills/project-documentation/references/owners/delivery-planning.md` — increment, sprint, and release-planning owner.
 - `~/.pi/agent/skills/anti-overengineering/SKILL.md` — mandatory scope and evidence proportionality.
 - `https://theleanstartup.com/` — Build–Measure–Learn and explicit learning decisions.
 - `https://research.google.com/pubs/archive/36299.pdf` — Goals–Signals–Metrics and user-centered measurement.

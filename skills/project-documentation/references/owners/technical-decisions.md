@@ -10,7 +10,7 @@ registry:
   domains: "architecture-decisions, technology-selection, dependency-evaluation, external-integrations"
   paths: "docs/03-architecture/decisions/**/*.md, docs/03-architecture/integrations/**/*.md"
   keywords: "architecture decision, architecture decision record, database decision, technical decision, technology selection, choose programming language, choose framework, evaluate library, evaluate integration, ADR, decision tecnica, elegir lenguaje, elegir framework, evaluar integracion"
-  related: "startup-documentation, anti-overengineering"
+  related: "project-documentation, anti-overengineering"
   priority: 93
 ---
 
@@ -26,7 +26,7 @@ Do not create an ADR for easily reversible local implementation details. Do not 
 
 ## Hard Rules
 
-- Consume the `startup-documentation`, `references/document-contract.md`, and applicable `architecture-definition` context already supplied by the router. If no router context was supplied, load them once for the shared contract without re-entering documentation routing. Load and follow `anti-overengineering` whenever this skill is active. Resolve architecture, requirements, delivery, or TDD guidance explicitly only when the current decision actually needs it; do not encode those conditional dependencies as automatic registry fan-out.
+- Consume the `project-documentation` routing decision, shared `project-documentation/references/document-contract.md` context, and applicable `architecture-definition` context already supplied by the router. If no router context was supplied, load `project-documentation` once for owner selection and the shared contract without expanding the full lifecycle. Load and follow `anti-overengineering` whenever this skill is active. Resolve architecture, requirements, delivery, or TDD guidance explicitly only when the current decision actually needs it; do not encode those conditional dependencies as automatic registry fan-out.
 - Evaluate one coherent decision at a time. Split decisions that have different drivers, owners, alternatives, or reversal boundaries.
 - Ask the user before selecting evaluation criteria, weights, knockout constraints, alternatives, risk acceptance, cost commitments, vendor lock-in, or final technology.
 - Begin with approved requirement IDs, architecture drivers, team capability, budget, data obligations, operating environment, and delivery constraints. When a final delivery plan does not exist, use only explicit user-approved provisional delivery constraints and label them provisional. Unknown facts remain unknown; do not convert forecasts into requirements.
@@ -103,10 +103,11 @@ Return:
 
 ## References
 
-- `~/.pi/agent/skills/startup-documentation/SKILL.md` — documentation routing.
-- `~/.pi/agent/skills/startup-documentation/references/document-contract.md` — modular Markdown and supersession contract.
-- `~/.pi/agent/skills/architecture-definition/SKILL.md` — architecture view and driver owner.
-- `~/.pi/agent/skills/requirements-definition/SKILL.md` — requirement and constraint owner.
+- `~/.pi/agent/skills/project-documentation/SKILL.md` — lightweight project documentation routing.
+- `~/.pi/agent/skills/project-documentation/references/owners/startup-documentation.md` — new-project lifecycle initialization and shared documentation contract.
+- `~/.pi/agent/skills/project-documentation/references/document-contract.md` — modular Markdown and supersession contract.
+- `~/.pi/agent/skills/project-documentation/references/owners/architecture-definition.md` — architecture view and driver owner.
+- `~/.pi/agent/skills/project-documentation/references/owners/requirements-definition.md` — requirement and constraint owner.
 - `~/.pi/agent/skills/tdd/SKILL.md` — applicable change-type validation guidance when an approved spike changes code.
 - `~/.pi/agent/skills/anti-overengineering/SKILL.md` — mandatory simplicity and decision controls.
 - `https://adr.github.io/` — architecturally significant decision records.

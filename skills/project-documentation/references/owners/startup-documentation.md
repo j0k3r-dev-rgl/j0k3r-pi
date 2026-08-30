@@ -1,26 +1,19 @@
 ---
 name: startup-documentation
-description: "initialize and route a new software application or startup project through numbered modular Markdown documentation. Use when a user wants to create a new app, start a software project, develop an initial product idea, organize startup documentation, or determine which document owns a decision; route unresolved ideas without inventing product, architecture, technology, or delivery choices."
+description: "initialize numbered modular Markdown documentation for a new software application or startup project after project-documentation routes the request. Use for new-project lifecycle setup; do not use as the broad documentation router."
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.3"
-registry:
-  category: "product"
-  domains: "startup-lifecycle, project-documentation, decision-routing, traceability"
-  paths: "docs/00-discovery/**/*.md, docs/01-product/**/*.md, docs/02-requirements/**/*.md, docs/03-architecture/**/*.md, docs/04-delivery/**/*.md, docs/05-validation/**/*.md"
-  keywords: "startup documentation, initialize startup documentation, new software project, start new software project, startup project, start startup project, new software application, start a new software application, new application, new application project, new app, create an app, start a project, software idea, early product idea, guide project definition, project documentation flow, create project documentation flow, numbered modular documentation, numbered modular Markdown documentation, which document owns, document ownership, reconstruct modular documentation baseline, scan codebase for documentation"
-  related: "anti-overengineering"
-  priority: 90
+  version: "1.4"
 ---
 
 # Startup Documentation
 
 ## Activation Contract
 
-Use this skill when a user starts or reorganizes a software startup's project documentation, asks which numbered Markdown document owns a decision, or requests progression through the documented startup lifecycle.
+Use this skill after `project-documentation` routes a new software application or startup-project documentation request to new-project lifecycle setup.
 
-This is a domain-documentation router. It does not create a fourth Pi execution workflow and does not replace Direct Orchestrator, Mini-SDD, or Formal SDD. Registry `phases` is intentionally empty: this skill activates by documentation intent or owned paths, never by SDD phase alone, and it does not authorize workflow actions. Load the specific domain skill that owns the requested decision. Use `existing-project-onboarding` when an existing implementation must be scanned and reconstructed into the modular documentation baseline. Use `product-discovery` when a new project's problem, users, evidence, assumptions, or product direction are not yet established.
+This is a new-project documentation lifecycle skill, not the broad documentation router. Broad routing belongs to `project-documentation`. It does not create a fourth Pi execution workflow and does not replace Direct Orchestrator, Mini-SDD, or Formal SDD. This skill intentionally has no registry metadata, so direct registry resolution does not select it or fan out from it; the router loads it explicitly when needed. Use `existing-project-onboarding` when an existing implementation must be scanned and reconstructed into the modular documentation baseline. Use `product-discovery` when a new project's problem, users, evidence, assumptions, or product direction are not yet established.
 
 Do not create the complete documentation tree eagerly, generate empty placeholder files, split the official project narrative into development phases, or use this skill to decide product scope, architecture, technology, sprint content, or validation thresholds.
 
@@ -104,7 +97,7 @@ Stop and ask before:
 ## Execution Steps
 
 1. Identify the user's current decision and reuse all approved context already available.
-2. Resolve direct registry matches without related expansion and load only the canonical domain skill that owns the decision plus mandatory dependencies applicable now; do not expand all lifecycle skills.
+2. If routing has not already been done, defer broad owner selection to `project-documentation`; otherwise load only the canonical domain skill that owns the decision plus mandatory dependencies applicable now; do not expand all lifecycle skills.
 3. Read the relevant existing parent/index document only when it is required and has not already been supplied.
 4. Ask a concise grouped questionnaire for unresolved facts and user-owned choices.
 5. Create or update only the smallest coherent Markdown artifact required now.
@@ -133,5 +126,5 @@ Return:
 - `references/document-contract.md` — canonical modular Markdown, metadata, numbering, ownership, evidence, traceability, and change contract.
 - `~/.pi/agent/skills/anti-overengineering/SKILL.md` — mandatory scope, simplicity, and decision controls.
 - `~/.pi/agent/skills/cognitive-doc-design/SKILL.md` — progressive disclosure and reviewability guidance.
-- `~/.pi/agent/skills/product-discovery/SKILL.md` — discovery-group owner for problem, users, evidence, assumptions, and initial direction.
+- `~/.pi/agent/skills/project-documentation/references/owners/product-discovery.md` — discovery-group owner for problem, users, evidence, assumptions, and initial direction.
 - `~/.pi/agent/AGENTS.md` — canonical Pi workflow, authority, and delegation policy.

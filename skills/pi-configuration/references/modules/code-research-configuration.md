@@ -11,7 +11,7 @@ metadata:
 
 ## Activation Contract
 
-Use this skill only when the user asks to configure the Pi Code Research workspace graph for a project.
+Use this module only when the user asks to configure the Pi Code Research workspace graph for a project.
 
 Use cases:
 
@@ -21,7 +21,7 @@ Use cases:
 - verify graph configuration with `workspace_graph_status`;
 - decide what to do with generated `.pi/workspace-code-graph` artifacts.
 
-Do not use this skill for source-code research, symbol lookup, references, call trees, implementation, refactors, or debugging application behavior.
+Do not use this module for source-code research, symbol lookup, references, call trees, implementation, refactors, or debugging application behavior.
 
 ## Hard Rules
 
@@ -63,7 +63,7 @@ Do not use this skill for source-code research, symbol lookup, references, call 
 
 Return:
 
-- Skill applied: `code-research-configuration`.
+- Configuration module applied: `code-research-configuration`.
 - Project config path changed or inspected.
 - Final `graph.enable` and `graph.addGitignore` values.
 - Whether `.pi/workspace-code-graph` was touched.

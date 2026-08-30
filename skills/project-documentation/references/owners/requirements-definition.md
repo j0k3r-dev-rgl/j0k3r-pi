@@ -10,7 +10,7 @@ registry:
   domains: "requirements-engineering, functional-requirements, quality-requirements, requirements-traceability"
   paths: "docs/02-requirements/**/*.md"
   keywords: "requirements definition, product requirements, application requirements, functional module requirements, define functional requirements, quality requirements, acceptance criteria, requirements traceability, definir requisitos, requisitos funcionales, criterios de aceptacion, requisitos de calidad"
-  related: "startup-documentation, product-definition, architecture-definition, product-validation, delivery-planning, anti-overengineering, cognitive-doc-design"
+  related: "project-documentation, anti-overengineering"
   priority: 92
 ---
 
@@ -26,7 +26,7 @@ Do not use it to discover the problem, choose MVP scope, design architecture, se
 
 ## Hard Rules
 
-- Consume the `startup-documentation` and `references/document-contract.md` context already supplied by the router. If no router context was supplied, load them once for the shared contract without re-entering documentation routing. Load and follow `anti-overengineering` whenever this skill is active.
+- Consume the `project-documentation` routing decision and shared `project-documentation/references/document-contract.md` context already supplied by the router. If no router context was supplied, load `project-documentation` once for owner selection and the shared contract without expanding the full lifecycle. Load and follow `anti-overengineering` whenever this skill is active.
 - Use approved product documents as parent contracts. Stop if the relevant product capability, scope decision, user, or outcome is not approved or is materially inconsistent.
 - Ask the user before defining behavior, business rules, data obligations, priorities, error handling, boundary conditions, quality targets, compatibility requirements, or acceptance criteria not established by approved inputs.
 - Assign stable identifiers to every requirement and acceptance criterion. Never renumber or reuse retired identifiers.
@@ -106,10 +106,11 @@ Return:
 
 ## References
 
-- `~/.pi/agent/skills/startup-documentation/SKILL.md` — startup documentation routing.
-- `~/.pi/agent/skills/startup-documentation/references/document-contract.md` — canonical modular Markdown contract.
-- `~/.pi/agent/skills/product-definition/SKILL.md` — upstream product scope, journey, and capability owner.
-- `~/.pi/agent/skills/product-validation/SKILL.md` — implementation and conformance evidence owner linking requirement and acceptance IDs.
+- `~/.pi/agent/skills/project-documentation/SKILL.md` — lightweight project documentation routing.
+- `~/.pi/agent/skills/project-documentation/references/owners/startup-documentation.md` — new-project lifecycle initialization and shared documentation contract.
+- `~/.pi/agent/skills/project-documentation/references/document-contract.md` — canonical modular Markdown contract.
+- `~/.pi/agent/skills/project-documentation/references/owners/product-definition.md` — upstream product scope, journey, and capability owner.
+- `~/.pi/agent/skills/project-documentation/references/owners/product-validation.md` — implementation and conformance evidence owner linking requirement and acceptance IDs.
 - `~/.pi/agent/skills/anti-overengineering/SKILL.md` — mandatory scope and simplicity controls.
 - `https://standards.ieee.org/standard/29148-2018.html` — lifecycle requirements-engineering principles and requirement quality.
 - `https://gojko.net/lists/specification-by-example.html` — concrete examples for shared, testable behavior.

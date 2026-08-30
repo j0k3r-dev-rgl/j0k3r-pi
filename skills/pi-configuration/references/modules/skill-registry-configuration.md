@@ -13,17 +13,17 @@ Field conventions:
 
 - `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
 - `domains`: stable domain tags used for routing.
-- `paths`: glob-like project paths that should activate this skill.
-- `keywords`: configuration-only keywords that should activate this skill.
+- `paths`: glob-like project paths that should route to this module.
+- `keywords`: configuration-only keywords that should route to this module.
 - `phases`: keep empty for configuration-only skills so phase routing alone does not load them.
 - `related`: configuration-adjacent skills only; do not add usage, implementation, or workflow skills.
 - `priority`: routing priority from 0 to 100. Higher means consider earlier when multiple skills match.
 
 ## Activation Contract
 
-Use this skill only when the user asks how to configure Pi Skill Registry for a project or when editing/reviewing `.pi/skill-registry.config.json`. Cover opt-in enablement and generated-cache expectations as configuration topics only.
+Use this module only when the user asks how to configure Pi Skill Registry for a project or when editing/reviewing `.pi/skill-registry.config.json`. Cover opt-in enablement and generated-cache expectations as configuration topics only.
 
-Do not load this skill for ordinary skill routing, registry generation/resolution usage, generated `.pi/skill-registry.json` / `.pi/skill-registry.md` cache edits, extension implementation work, or editing this skill file; those are not configuration questions.
+Do not read this module for ordinary skill routing, registry generation/resolution usage, generated `.pi/skill-registry.json` / `.pi/skill-registry.md` cache edits, extension implementation work, or editing this module file; those are not configuration questions.
 
 ## Hard Rules
 
@@ -66,7 +66,7 @@ Field rules:
 
 Return:
 
-- Skill applied: `skill-registry-configuration`.
+- Configuration module applied: `skill-registry-configuration`.
 - Target project/path configured or reviewed.
 - Whether the registry is enabled and why.
 - Reload/validation performed, or the concrete reason it was not run.

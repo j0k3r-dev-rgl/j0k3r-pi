@@ -13,15 +13,15 @@ Field conventions:
 
 - `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
 - `domains`: stable domain tags used for routing.
-- `paths`: glob-like project paths that should activate this skill.
-- `keywords`: configuration-only setup terms, config paths, provider configuration terms, and environment variable names that should activate this skill.
+- `paths`: glob-like project paths that should route to this module.
+- `keywords`: configuration-only setup terms, config paths, provider configuration terms, and environment variable names that should route to this module.
 - `phases`: keep empty for configuration-only skills so phase routing alone does not load them.
 - `related`: configuration-adjacent skills only; do not add usage, implementation, or workflow skills.
 - `priority`: routing priority from 0 to 100. Keep below workflow-router skills and above generic extension/config help.
 
 ## Activation Contract
 
-Use this skill only when the user asks how to configure, enable, reload, or troubleshoot configuration for the Pi `websearch` extension, especially questions like:
+Use this module only when the user asks how to configure, enable, reload, or troubleshoot configuration for the Pi `websearch` extension, especially questions like:
 
 - "What do I need to configure websearch?"
 - "Where is the websearch config file?"
@@ -29,9 +29,9 @@ Use this skill only when the user asks how to configure, enable, reload, or trou
 - "Do I need `GITHUB_TOKEN`, `STACK_EXCHANGE_KEY`, or `gh auth login`?"
 - "Why do config changes not affect the running tools?"
 
-Also use this skill when editing/reviewing `~/.pi/agent/websearch.json` or repo-root `websearch.json` in an agent-root checkout.
+Also use this module when editing/reviewing `~/.pi/agent/websearch.json` or repo-root `websearch.json` in an agent-root checkout.
 
-Do not load this skill for ordinary web search, individual websearch tool usage, public tool parameter questions, research workflows, extension implementation work under `extensions/websearch/**`, package validation, Context7 documentation lookup, YouTube research, generic networking questions, or editing this skill file; those are not configuration questions.
+Do not read this module for ordinary web search, individual websearch tool usage, public tool parameter questions, research workflows, extension implementation work under `extensions/websearch/**`, package validation, Context7 documentation lookup, YouTube research, generic networking questions, or editing this module file; those are not configuration questions.
 
 ## Hard Rules
 
@@ -80,7 +80,7 @@ Do not load this skill for ordinary web search, individual websearch tool usage,
 
 - If the user wants to add another provider, change auth handling, add write operations, or loosen output bounds, route through `workflow-triage` because this can change the extension trust boundary.
 - If the user asks to install or store tokens, clarify that credentials must use environment variables or provider-native auth (`gh auth login`), never repo files or tool parameters.
-- If the user asks for tool usage, research workflows, package validation, or source-code changes, stop using this skill and route to the appropriate non-configuration workflow.
+- If the user asks for tool usage, research workflows, package validation, or source-code changes, stop using this module and route to the appropriate non-configuration workflow.
 
 ## Execution Steps
 
@@ -105,7 +105,7 @@ Do not load this skill for ordinary web search, individual websearch tool usage,
 
 Return:
 
-- Skill applied: `websearch-configuration`.
+- Configuration module applied: `websearch-configuration`.
 - Whether the default configuration needs required setup: normally "none".
 - Global config path, repo-root equivalent when applicable, effective GitHub provider behavior, timeout, and retry behavior.
 - Optional environment variables/auth setup relevant to the selected provider or feature, explicitly noting when no variable is required.

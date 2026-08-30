@@ -10,7 +10,7 @@ registry:
   domains: "product-discovery, startup-inception, customer-evidence, assumption-testing"
   paths: "docs/00-discovery/00-opportunity.md, docs/00-discovery/01-users-and-stakeholders.md, docs/00-discovery/02-evidence/**/*.md, docs/00-discovery/03-assumptions/**/*.md, docs/00-discovery/04-product-direction.md"
   keywords: "product discovery, problem discovery, startup idea, new app idea, new software application, create an app, validate idea, validate startup idea, define product problem, unclear problem, identify users, early product idea, customer evidence, assumption mapping"
-  related: "startup-documentation, anti-overengineering, cognitive-doc-design, product-definition"
+  related: "project-documentation, anti-overengineering"
   priority: 92
 ---
 
@@ -26,7 +26,7 @@ Do not activate it merely because discovery is available. Do not use it when an 
 
 ## Hard Rules
 
-- Consume the `startup-documentation` and `references/document-contract.md` context already supplied by the router. If no router context was supplied, load them once for the shared contract without re-entering documentation routing. Load and follow `anti-overengineering` whenever this skill is active.
+- Consume the `project-documentation` routing decision and shared `project-documentation/references/document-contract.md` context already supplied by the router. If no router context was supplied, load `project-documentation` once for owner selection and the shared contract without expanding the full lifecycle. Load and follow `anti-overengineering` whenever this skill is active.
 - Ask the user before defining any user, stakeholder, problem, outcome, market claim, evidence threshold, priority, or product direction not already established by supplied evidence.
 - Start from the decision that discovery must inform. Do not conduct open-ended research or interviews without a decision purpose.
 - Separate confirmed evidence, supported evidence, inference, assumption, and unknown in every artifact.
@@ -109,8 +109,9 @@ Return:
 
 ## References
 
-- `~/.pi/agent/skills/startup-documentation/SKILL.md` — startup documentation routing and modular ownership contract.
-- `~/.pi/agent/skills/startup-documentation/references/document-contract.md` — canonical numbered Markdown structure and status contract.
+- `~/.pi/agent/skills/project-documentation/SKILL.md` — lightweight project documentation routing.
+- `~/.pi/agent/skills/project-documentation/references/owners/startup-documentation.md` — new-project lifecycle initialization and modular ownership contract.
+- `~/.pi/agent/skills/project-documentation/references/document-contract.md` — canonical numbered Markdown structure and status contract.
 - `~/.pi/agent/skills/anti-overengineering/SKILL.md` — mandatory simplicity and decision controls.
 - `~/.pi/agent/skills/cognitive-doc-design/SKILL.md` — progressive disclosure and reviewability.
 - `https://steveblank.com/tag/customer-development` — customer discovery and validation loops.

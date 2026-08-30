@@ -10,7 +10,7 @@ registry:
   domains: "delivery-planning, roadmaps, sprint-planning, vertical-slicing, definition-of-done"
   paths: "docs/04-delivery/**/*.md"
   keywords: "delivery planning, outcome roadmap, roadmap, create roadmap, delivery roadmap, increment, delivery increment, plan increment, delivery model, release sequencing, plan sprint, sprint goal, vertical slice, Definition of Done, planificar entrega, planificar sprint, modulo funcional completo, corte vertical"
-  related: "startup-documentation, requirements-definition, architecture-definition, technical-decisions, product-validation, tdd, anti-overengineering"
+  related: "project-documentation, anti-overengineering, tdd"
   priority: 92
 ---
 
@@ -26,7 +26,7 @@ Do not use it to discover the product, expand scope, invent capacity or dates, r
 
 ## Hard Rules
 
-- Consume the `startup-documentation` and `references/document-contract.md` context already supplied by the router. If no router context was supplied, load them once for the shared contract without re-entering documentation routing. Load and follow `anti-overengineering` whenever this skill is active. Load `tdd` when planning code changes.
+- Consume the `project-documentation` routing decision and shared `project-documentation/references/document-contract.md` context already supplied by the router. If no router context was supplied, load `project-documentation` once for owner selection and the shared contract without expanding the full lifecycle. Load and follow `anti-overengineering` whenever this skill is active. Load `tdd` only when planning code changes.
 - Use approved product, requirement, architecture, and technical-decision IDs as inputs. Stop if the functional slice, acceptance, applicable quality conditions, dependency, or decision owner needed for planning is unresolved.
 - Ask the user before selecting delivery model, cadence, sprint length, capacity assumption, priority, sequence, scope commitment, release boundary, quality policy, rollout, rollback, or date.
 - Always ask a focused question set before defining each increment or sprint. Never assume the goal, scope, sequence, cadence, capacity, dependencies, validation, Definition of Done, release boundary, Git trace preference, or commit intent for an increment/sprint. The agent may recommend the simplest coherent option and explain trade-offs, but the user must decide. Then present a mini-summary of the proposed increment/sprint goal, included app behavior, exclusions, validation/DoD, dependencies, risks, and delivery model assumptions, and request explicit user confirmation before writing or updating the increment/sprint document.
@@ -125,10 +125,11 @@ Return:
 
 ## References
 
-- `~/.pi/agent/skills/startup-documentation/SKILL.md` — documentation routing.
-- `~/.pi/agent/skills/startup-documentation/references/document-contract.md` — modular Markdown contract.
-- `~/.pi/agent/skills/requirements-definition/SKILL.md` — functional and acceptance owner.
-- `~/.pi/agent/skills/architecture-definition/SKILL.md` — architecture input owner.
+- `~/.pi/agent/skills/project-documentation/SKILL.md` — lightweight project documentation routing.
+- `~/.pi/agent/skills/project-documentation/references/owners/startup-documentation.md` — new-project lifecycle initialization and shared documentation contract.
+- `~/.pi/agent/skills/project-documentation/references/document-contract.md` — modular Markdown contract.
+- `~/.pi/agent/skills/project-documentation/references/owners/requirements-definition.md` — functional and acceptance owner.
+- `~/.pi/agent/skills/project-documentation/references/owners/architecture-definition.md` — architecture input owner.
 - `~/.pi/agent/skills/tdd/SKILL.md` — change-type validation guidance.
 - `https://scrumguides.org/scrum-guide.html` — Product Goal, Sprint Goal, refinement, and Definition of Done.
 - `https://kanbanguides.org/the-kanban-guide/` — current workflow, WIP, flow measures, and service-level expectations guidance.

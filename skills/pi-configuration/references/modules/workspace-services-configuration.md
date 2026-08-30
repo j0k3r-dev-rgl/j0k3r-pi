@@ -13,19 +13,19 @@ Field conventions:
 
 - `category`: short grouping such as `base`, `transversal`, `workflow`, `quality`, `security`, or `runtime`.
 - `domains`: stable domain tags used for routing.
-- `paths`: configuration and runtime paths that should activate this skill, including nested project workspaces outside the agent root.
-- `keywords`: configuration-only phrases, tool names, and field names that should activate this skill.
+- `paths`: configuration and runtime paths that should route to this module, including nested project workspaces outside the agent root.
+- `keywords`: configuration-only phrases, tool names, and field names that should route to this module.
 - `phases`: keep empty for configuration-only skills so phase routing alone does not load it.
 - `related`: configuration-adjacent skills only; do not add implementation or SDD skills for normal config help.
 - `priority`: route similarly to other extension configuration skills.
 
 ## Activation Contract
 
-Use this skill only when the user asks how to configure, enable, review, troubleshoot, or explain the Pi Workspace Services Extension configuration for a workspace, especially `.pi/workspace-services.json`, configured service names, `env_file`, service commands, local logs/state under `.pi/workspace-services/`, or Git ignore handling for local runtime files.
+Use this module only when the user asks how to configure, enable, review, troubleshoot, or explain the Pi Workspace Services Extension configuration for a workspace, especially `.pi/workspace-services.json`, configured service names, `env_file`, service commands, local logs/state under `.pi/workspace-services/`, or Git ignore handling for local runtime files.
 
-Use this skill when editing or creating a project-local `.pi/workspace-services.json` file for a monorepo.
+Use this module when editing or creating a project-local `.pi/workspace-services.json` file for a monorepo.
 
-Do not load this skill for implementation work under `extensions/workspace-services/**`, adding new tools, changing process-management behavior, or broad workflow planning. Those are code/change tasks and must route through `workflow-triage`.
+Do not read this module for implementation work under `extensions/workspace-services/**`, adding new tools, changing process-management behavior, or broad workflow planning. Those are code/change tasks and must route through `workflow-triage`.
 
 ## Hard Rules
 
@@ -104,7 +104,7 @@ Recommended `.gitignore` entry:
 
 Return:
 
-- Skill applied: `workspace-services-configuration`.
+- Configuration module applied: `workspace-services-configuration`.
 - Workspace root and config path reviewed or changed.
 - Services added, updated, or preserved, with commands and `env_file` booleans but no secret values.
 - Git ignore handling for `.pi/workspace-services/`.

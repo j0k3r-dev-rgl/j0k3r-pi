@@ -10,7 +10,7 @@ registry:
   domains: "existing-project-onboarding, project-reconstruction, as-is-documentation, documentation-orchestration"
   paths: "docs/00-discovery/05-existing-project/**/*.md"
   keywords: "existing project, existing project onboarding, document existing project, scan project, scan existing project, scan an existing project, document codebase, existing codebase, scan this existing codebase, scan codebase for documentation, modular documentation baseline, onboarding evidence, project documentation from code, generate all necessary modular documentation, reconstruct modular documentation baseline, reconstruct project documentation, generate documentation from codebase, legacy project documentation, proyecto existente, documentar codigo, documentar proyecto existente, escanear proyecto, escanear proyecto existente, generar documentacion del proyecto, reconstruir documentacion"
-  related: "startup-documentation, product-discovery, product-definition, anti-overengineering"
+  related: "project-documentation, anti-overengineering"
   priority: 94
 ---
 
@@ -28,7 +28,7 @@ Do not activate it for a new project with no existing implementation, a single f
 
 ## Hard Rules
 
-- Consume the `startup-documentation` and `references/document-contract.md` context already supplied by the router. If no router context was supplied, load them once for the shared contract without re-entering documentation routing. Load and follow `anti-overengineering` whenever this skill is active.
+- Consume the `project-documentation` routing decision and shared `project-documentation/references/document-contract.md` context already supplied by the router. If no router context was supplied, load `project-documentation` once for owner selection and the shared contract without expanding the full lifecycle. Load and follow `anti-overengineering` whenever this skill is active.
 - Before any project inspection or delegation, ensure the exact scan goal, depth, included paths, exclusions, sensitive-data policy, expected evidence outputs, intended canonical-document generation, and proposed research lanes are explicitly authorized. When the user's concrete request already supplies all of them, that request is the approval: begin without restating the packet or asking for a second confirmation. Ask only for materially missing or contradictory values.
 - Offer bounded scan depths without selecting for the user:
   - `ORIENTATION`: public documentation, repository structure, manifests, and non-sensitive configuration;
@@ -155,14 +155,15 @@ Return:
 
 ## References
 
-- `~/.pi/agent/skills/startup-documentation/SKILL.md` — lifecycle documentation routing and canonical group ownership.
-- `~/.pi/agent/skills/startup-documentation/references/document-contract.md` — numbering, metadata, modularity, traceability, and change-impact contract.
-- `~/.pi/agent/skills/product-discovery/SKILL.md` — problem evidence and assumption owner.
-- `~/.pi/agent/skills/product-definition/SKILL.md` — product vision, outcome, MVP, scope, journey, and capability owner.
-- `~/.pi/agent/skills/requirements-definition/SKILL.md` — functional, quality, constraint, and acceptance owner.
-- `~/.pi/agent/skills/architecture-definition/SKILL.md` — architecture view and driver owner.
-- `~/.pi/agent/skills/technical-decisions/SKILL.md` — ADR, technology, dependency, and integration owner.
-- `~/.pi/agent/skills/delivery-planning/SKILL.md` — delivery model, roadmap, increment, sprint, and Definition of Done owner.
-- `~/.pi/agent/skills/product-validation/SKILL.md` — measurement, experiment, and learning-decision owner.
+- `~/.pi/agent/skills/project-documentation/SKILL.md` — lightweight project documentation routing.
+- `~/.pi/agent/skills/project-documentation/references/owners/startup-documentation.md` — new-project lifecycle initialization and canonical group ownership.
+- `~/.pi/agent/skills/project-documentation/references/document-contract.md` — numbering, metadata, modularity, traceability, and change-impact contract.
+- `~/.pi/agent/skills/project-documentation/references/owners/product-discovery.md` — problem evidence and assumption owner.
+- `~/.pi/agent/skills/project-documentation/references/owners/product-definition.md` — product vision, outcome, MVP, scope, journey, and capability owner.
+- `~/.pi/agent/skills/project-documentation/references/owners/requirements-definition.md` — functional, quality, constraint, and acceptance owner.
+- `~/.pi/agent/skills/project-documentation/references/owners/architecture-definition.md` — architecture view and driver owner.
+- `~/.pi/agent/skills/project-documentation/references/owners/technical-decisions.md` — ADR, technology, dependency, and integration owner.
+- `~/.pi/agent/skills/project-documentation/references/owners/delivery-planning.md` — delivery model, roadmap, increment, sprint, and Definition of Done owner.
+- `~/.pi/agent/skills/project-documentation/references/owners/product-validation.md` — measurement, experiment, and learning-decision owner.
 - `~/.pi/agent/skills/anti-overengineering/SKILL.md` — mandatory scope, evidence, simplicity, and decision controls.
 - `~/.pi/agent/AGENTS.md` — canonical consent, proportional access, Code Research, and workflow boundaries.
