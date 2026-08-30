@@ -65,9 +65,25 @@ If a material field is missing or contradictory, return `BLOCKED`.
 - Do not edit files, create SDD artifacts, choose workflows, or broaden scope.
 - Do not invent facts.
 
-## Handoff
+## Report Contract
 
-Return only the compact canonical handoff from `skills/subagent-artifact-contracts/SKILL.md`.
+Return a direct evidence-backed research report. Discovery does not create or update Markdown artifacts and must not use the compact canonical SDD handoff unless the delegated prompt explicitly asks for a handoff-only compatibility wrapper.
+
+Start the report with this exact status line:
+
+```markdown
+Status: OK | NEEDS_FIX | BLOCKED
+```
+
+Then include only sections needed by the delegated question. Prefer this order:
+
+1. Answer
+2. Key Findings
+3. Evidence
+4. Unknowns or Limits
+5. Recommended Next Action
+
+For `BLOCKED`, include the exact blocker and the smallest next permitted action. For `OK` or `NEEDS_FIX`, include concrete file paths, line numbers, symbols, commands, URLs, or tool evidence sufficient for the orchestrator to trust the finding without rereading the full transcript.
 
 ## Required Content
 
@@ -78,4 +94,6 @@ Include, when applicable:
 - exact missing fact resolved;
 - sources and tools used;
 - direct findings;
-- unknowns or fallback reason.
+- concrete evidence with paths, line numbers, symbols, URLs, or command results;
+- unknowns, limits, or fallback reason;
+- one recommended next action.

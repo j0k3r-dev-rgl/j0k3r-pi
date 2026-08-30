@@ -116,7 +116,8 @@ Every workflow-relevant delegated prompt must supply these seven fields in order
 
 Rules:
 
-- Workflow-relevant delegated results must use the compact canonical handoff in `skills/subagent-artifact-contracts/SKILL.md`.
+- Workflow-artifact delegated results must use the compact canonical handoff in `skills/subagent-artifact-contracts/SKILL.md`.
+- Read-only `discovery` returns a direct evidence-backed report, not the compact SDD handoff, unless explicitly delegated as a handoff-only compatibility wrapper.
 - Successful SDD/Mini-SDD handoffs must not repeat artifact content, edited files, scanned files, or validation details; the orchestrator reads the generated `.md`.
 - `READY`, `BLOCKED`, and `FAILED` semantics live in `skills/subagent-artifact-contracts/SKILL.md`.
 - Inter-agent communication is always in English.
