@@ -119,14 +119,20 @@ export function parseExecutionScope(markdown: string, authorityArtifact: string,
   let writableRaw: string[] | undefined;
   let bashRaw: string[] | undefined;
   let notesSeen = false;
+  const seenLabels = new Set<string>();
+  const markLabel = (label: string) => {
+    if (seenLabels.has(label)) blockers.push(`Duplicate Execution Scope label: ${label}`);
+    seenLabels.add(label);
+  };
   for (let i = 0; i < block.length; i += 1) {
     const line = block[i];
     const trimmed = line.trim();
-    if (trimmed.startsWith('- Root:')) rootValue = trimmed.slice('- Root:'.length).trim();
-    else if (trimmed === '- Allowed Paths:') { const parsed = parseList(block, i); allowedRaw = parsed.values; if (parsed.error) blockers.push(parsed.error); i = parsed.next - 1; }
-    else if (trimmed === '- Writable Paths:') { const parsed = parseList(block, i); writableRaw = parsed.values; if (parsed.error) blockers.push(parsed.error); i = parsed.next - 1; }
-    else if (trimmed === '- Allowed Bash:') { const parsed = parseList(block, i); bashRaw = parsed.values.filter((value) => value !== 'None'); if (parsed.error) blockers.push(parsed.error); i = parsed.next - 1; }
+    if (trimmed.startsWith('- Root:')) { markLabel('Root'); rootValue = trimmed.slice('- Root:'.length).trim(); }
+    else if (trimmed === '- Allowed Paths:') { markLabel('Allowed Paths'); const parsed = parseList(block, i); allowedRaw = parsed.values; if (parsed.error) blockers.push(parsed.error); i = parsed.next - 1; }
+    else if (trimmed === '- Writable Paths:') { markLabel('Writable Paths'); const parsed = parseList(block, i); writableRaw = parsed.values; if (parsed.error) blockers.push(parsed.error); i = parsed.next - 1; }
+    else if (trimmed === '- Allowed Bash:') { markLabel('Allowed Bash'); const parsed = parseList(block, i); bashRaw = parsed.values.filter((value) => value !== 'None'); if (parsed.error) blockers.push(parsed.error); i = parsed.next - 1; }
     else if (trimmed.startsWith('- Notes:')) {
+      markLabel('Notes');
       const noteValue = trimmed.slice('- Notes:'.length).trim();
       notesSeen = true;
       if (!isConcretePlainValue(noteValue)) blockers.push('Execution Scope Notes must be concrete plain text.');

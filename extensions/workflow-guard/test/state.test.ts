@@ -94,6 +94,7 @@ describe('workflow state derivation', () => {
     await change(root, 'bad-scope', { 'mini-sdd.md': ready + `## Execution Scope\n- Root: ${root}\n- Allowed Paths:\n  - openspec/changes/**\n- Writable Paths:\n  - extensions/workflow-guard/**\n- Allowed Bash:\n  - npm test\n- Notes: bad\n\n` });
     await change(root, 'empty-bash-scope', { 'mini-sdd.md': ready + `## Execution Scope\n- Root: ${root}\n- Allowed Paths:\n  - openspec/changes/**\n- Writable Paths:\n  - openspec/changes/**\n- Allowed Bash:\n  - None\n- Notes: bad\n\n` });
     await change(root, 'backtick-scope', { 'mini-sdd.md': ready + `## Execution Scope\n- Root: ${root}\n- Allowed Paths:\n  - \`openspec/changes/**\`\n- Writable Paths:\n  - openspec/changes/**\n- Allowed Bash:\n  - npm test\n- Notes: bad\n\n` });
+    await change(root, 'duplicate-label-scope', { 'mini-sdd.md': ready + `## Execution Scope\n- Root: ${root}\n- Root: ${root}\n- Allowed Paths:\n  - openspec/changes/**\n- Writable Paths:\n  - openspec/changes/**\n- Allowed Bash:\n  - npm test\n- Notes: bad\n\n` });
     await change(root, 'mixed-scope', { 'mini-sdd.md': ready, 'tasks.md': ready });
     await change(root, 'unknown-scope', { 'apply.md': ready });
     const result = await syncActiveWorkflows(root);
@@ -102,6 +103,7 @@ describe('workflow state derivation', () => {
     expect(bySlug['bad-scope'].execution_scope?.blockers[0]).toContain('Writable path is outside Allowed Paths');
     expect(bySlug['empty-bash-scope'].execution_scope?.blockers[0]).toContain('Allowed Bash must contain at least one concrete command');
     expect(bySlug['backtick-scope'].execution_scope?.blockers[0]).toContain('Allowed Paths must contain only concrete plain-text paths');
+    expect(bySlug['duplicate-label-scope'].execution_scope?.blockers[0]).toContain('Duplicate Execution Scope label: Root');
     expect(bySlug['mixed-scope'].execution_scope?.blockers[0]).toContain('conflict');
     expect(bySlug['unknown-scope'].execution_scope?.blockers[0]).toContain('unknown');
   });

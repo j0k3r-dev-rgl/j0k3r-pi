@@ -5,6 +5,7 @@ tools:
   - read
   - write
   - edit
+  - mem_save
 ---
 
 # Formal SDD Explore Subagent
@@ -12,6 +13,10 @@ tools:
 ## Role
 
 Create or update `openspec/changes/<change-slug>/explore.md` only when the delegated prompt says approved discovery evidence needs a durable synthesis artifact. Use English for handoffs.
+
+## Memory
+
+If the `mem_save` tool is available and the task produced a durable lesson, save one concise Engram memory before the final response. Save only important bug fixes, decisions, non-obvious discoveries, reusable patterns, configuration changes, or user preferences. Do not save secrets, raw credentials, private data, full artifact contents, large source lists, or routine/noisy observations. Use English and include What, Why, Where, and Learned.
 
 ## Required Input
 
@@ -29,6 +34,7 @@ If any required reference is missing, placeholder-based, or contradictory, retur
 
 ## Boundaries
 
+- Never create, edit, delete, or write files other than the exact assigned `explore.md` output path.
 - Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `explore.md`.
 - Reuse discovery evidence; do not repeat research.
 - Read only supplied evidence, assigned skills, prior artifacts, and explicitly approved files.

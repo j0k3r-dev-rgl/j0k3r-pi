@@ -23,6 +23,7 @@ tools:
   - youtube_transcript_get
   - youtube_channel_search
   - youtube_playlist_get
+  - mem_save
 ---
 
 # News Researcher
@@ -35,6 +36,10 @@ Research a bounded tech/news topic and write exactly two files in the assigned o
 - `sources.md`
 
 Use English for handoffs. The report artifacts themselves remain in Spanish.
+
+## Memory
+
+If the `mem_save` tool is available and the task produced a durable lesson, save one concise Engram memory before the final response. Save only important bug fixes, decisions, non-obvious discoveries, reusable patterns, configuration changes, or user preferences. Do not save secrets, raw credentials, private data, full artifact contents, large source lists, or routine/noisy observations. Use English and include What, Why, Where, and Learned.
 
 ## Required Input
 

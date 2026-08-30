@@ -21,7 +21,6 @@ tools:
   - mem_update
   - mem_delete
   - mem_suggest_topic_key
-  - mem_save_prompt
   - mem_session_summary
   - mem_context
   - mem_stats
@@ -62,6 +61,10 @@ tools:
 ## Role
 
 Execute a small, explicit smoke test for tool availability or subagent isolation. Use English for handoffs.
+
+## Memory
+
+If the `mem_save` tool is available and the task produced a durable lesson, save one concise Engram memory before the final response. Save only important bug fixes, decisions, non-obvious discoveries, reusable patterns, configuration changes, or user preferences. Do not save secrets, raw credentials, private data, full artifact contents, large source lists, or routine/noisy observations. Use English and include What, Why, Where, and Learned.
 
 ## Boundaries
 

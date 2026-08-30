@@ -48,6 +48,9 @@ It does not own:
 - A `READY` artifact must contain concrete paths, commands, IDs, and evidence required by its artifact type.
 - If required content is missing, contradictory, placeholder-based, or outside scope, write or return `BLOCKED` instead of guessing.
 - Handoff status must match the produced artifact status when an artifact exists.
+- Artifact-producing workflow subagents must write only their assigned artifact unless this contract explicitly grants an exception.
+- `sdd-apply` is the only SDD subagent allowed to modify implementation files, and only inside the approved `Execution Scope`; it also writes `apply.md`.
+- `sdd-archive` does not create Markdown artifacts; it only moves the verified change tree to the approved archive destination.
 - Successful SDD and Mini-SDD handoffs must be compact: status, generated artifact path, and next action only.
 - Do not repeat artifact content, edited files, scanned files, validation matrices, or implementation details in a successful handoff; the orchestrator reads the generated `.md`.
 - Parseable values in `Execution Scope` must be plain text: no Markdown code spans, quotes, bullets with alternative labels, or placeholder wrappers.
@@ -223,7 +226,7 @@ Sections after `Workflow Status`:
 7. Open Decisions
 8. Next Permitted Action
 
-Every requirement must be covered before `READY`.
+Every `REQ-###` and every `SCENARIO-###` must be covered before `READY`. Each `TASK-###` must name the exact upstream IDs it implements and verifies; no orphan requirement or scenario may remain.
 
 ### `mini-sdd.md`
 
@@ -244,15 +247,16 @@ Every `MINI-###` item must have acceptance, paths, validation, and dependencies 
 Sections after `Workflow Status`:
 
 1. Workflow & Contracts
-2. One evidence record per `MINI-###` or `TASK-###`
-3. Approved Deviations
-4. Attempt Record
-5. Candidate Identity
-6. Residual Risks
-7. Verification Inputs
-8. Next Permitted Action
+2. Authorization Record
+3. One evidence record per `MINI-###` or `TASK-###`
+4. Approved Deviations
+5. Attempt Record
+6. Candidate Identity
+7. Residual Risks
+8. Verification Inputs
+9. Next Permitted Action
 
-`READY` means implementation is complete and independently verifiable.
+`Authorization Record` must include who authorized apply, when or by which session/message reference, authorized action, authorized scope, authority artifact, and candidate/change slug. `READY` means implementation is complete and independently verifiable.
 
 ### `verify.md`
 
@@ -267,7 +271,7 @@ Sections after `Workflow Status`:
 7. Skill Compliance
 8. Post-Verification Continuity Snapshot
 
-Only `Verification Result: PASS` may produce artifact and handoff `READY`. For Formal SDD, PASS requires evidence for every `REQ-###` and every `SCENARIO-###` from `spec.md`; for Mini-SDD, PASS requires evidence for every `MINI-###` from `mini-sdd.md`.
+Only `Verification Result: PASS` may produce artifact and handoff `READY`. For Formal SDD, PASS requires evidence for every `REQ-###` and every `SCENARIO-###` from `spec.md`, linked through `TASK-###` and `apply.md` evidence where applicable; for Mini-SDD, PASS requires evidence for every `MINI-###` from `mini-sdd.md`.
 
 ## References
 

@@ -18,6 +18,10 @@
       "model": "openai-codex/gpt-5.6-terra",
       "effort": "medium"
     },
+    "deep-researcher": {
+      "model": "openai-codex/gpt-5.6-terra",
+      "effort": "high"
+    },
     "prd-review": {
       "model": "openai-codex/gpt-5.4",
       "effort": "medium"

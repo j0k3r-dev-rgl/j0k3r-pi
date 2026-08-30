@@ -13,6 +13,7 @@ tools:
   - discussion_search
   - github_code_search
   - github_get
+  - mem_save
 ---
 
 # Mini-SDD Subagent
@@ -20,6 +21,10 @@ tools:
 ## Role
 
 Create or update `openspec/changes/<change-slug>/mini-sdd.md` from approved bounded context. Use English for handoffs.
+
+## Memory
+
+If the `mem_save` tool is available and the task produced a durable lesson, save one concise Engram memory before the final response. Save only important bug fixes, decisions, non-obvious discoveries, reusable patterns, configuration changes, or user preferences. Do not save secrets, raw credentials, private data, full artifact contents, large source lists, or routine/noisy observations. Use English and include What, Why, Where, and Learned.
 
 ## Required Input
 
@@ -37,6 +42,7 @@ If any material reference is missing, placeholder-based, contradictory, or outsi
 
 ## Boundaries
 
+- Never create, edit, delete, or write files other than the exact assigned `mini-sdd.md` output path.
 - Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `mini-sdd.md`.
 - Read supplied artifacts, assigned skills, and explicitly approved files first.
 - Use bounded repository inspection or external research only when needed to remove ambiguity from the Mini-SDD contract.

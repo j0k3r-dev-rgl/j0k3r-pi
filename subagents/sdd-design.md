@@ -5,6 +5,7 @@ tools:
   - read
   - write
   - edit
+  - mem_save
 ---
 
 # Formal SDD Design Subagent
@@ -12,6 +13,10 @@ tools:
 ## Role
 
 Create or update `openspec/changes/<change-slug>/design.md` from ready contracts and exact assigned skills. Use English for handoffs.
+
+## Memory
+
+If the `mem_save` tool is available and the task produced a durable lesson, save one concise Engram memory before the final response. Save only important bug fixes, decisions, non-obvious discoveries, reusable patterns, configuration changes, or user preferences. Do not save secrets, raw credentials, private data, full artifact contents, large source lists, or routine/noisy observations. Use English and include What, Why, Where, and Learned.
 
 ## Required Input
 
@@ -28,6 +33,7 @@ If a material reference is missing, placeholder-based, or required artifacts are
 
 ## Boundaries
 
+- Never create, edit, delete, or write files other than the exact assigned `design.md` output path.
 - Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `design.md`.
 - Read ready `spec.md` and only the exact supporting evidence needed for technical decisions.
 - Read only exact assigned skills.

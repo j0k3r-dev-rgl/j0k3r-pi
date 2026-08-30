@@ -5,6 +5,7 @@ tools:
   - read
   - write
   - edit
+  - mem_save
 ---
 
 # Formal SDD Task Subagent
@@ -12,6 +13,10 @@ tools:
 ## Role
 
 Create or update `openspec/changes/<change-slug>/tasks.md` from ready `spec.md` and `design.md`. Use English for handoffs.
+
+## Memory
+
+If the `mem_save` tool is available and the task produced a durable lesson, save one concise Engram memory before the final response. Save only important bug fixes, decisions, non-obvious discoveries, reusable patterns, configuration changes, or user preferences. Do not save secrets, raw credentials, private data, full artifact contents, large source lists, or routine/noisy observations. Use English and include What, Why, Where, and Learned.
 
 ## Required Input
 
@@ -29,6 +34,7 @@ If a material reference is missing, placeholder-based, contradictory, or require
 
 ## Boundaries
 
+- Never create, edit, delete, or write files other than the exact assigned `tasks.md` output path.
 - Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `tasks.md`.
 - Read ready `spec.md`, `design.md`, and exact assigned skills only.
 - Do not inspect unrelated source files, redesign the solution, or invent requirements.
@@ -37,7 +43,7 @@ If a material reference is missing, placeholder-based, contradictory, or require
 
 Use the `tasks.md`, `Workflow Status`, `Execution Scope`, and `Handoff` contracts from `skills/subagent-artifact-contracts/SKILL.md`.
 
-`READY` requires every requirement to be covered by concrete tasks and a parseable execution scope.
+`READY` requires every `REQ-###` and every `SCENARIO-###` from `spec.md` to be covered by concrete tasks and a parseable execution scope. Each `TASK-###` must list exact upstream IDs in `Implements` and `Verifies` so apply and verify can trace `REQ/SCENARIO → TASK → evidence`.
 
 ## Handoff
 

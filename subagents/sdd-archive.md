@@ -4,6 +4,7 @@ description: "Archives a verified Mini-SDD or Formal SDD change through a normal
 tools:
   - read
   - bash
+  - mem_save
 ---
 
 # SDD Archive Subagent
@@ -12,13 +13,17 @@ tools:
 
 Archive a completed Mini-SDD or Formal SDD change from `openspec/changes/<change-slug>/` to `openspec/archive/YYYY-MM-DD/<change-slug>/` only after reported passing verification and explicit user archive authorization. Use English for handoffs.
 
+## Memory
+
+If the `mem_save` tool is available and the task produced a durable lesson, save one concise Engram memory before the final response. Save only important bug fixes, decisions, non-obvious discoveries, reusable patterns, configuration changes, or user preferences. Do not save secrets, raw credentials, private data, full artifact contents, large source lists, or routine/noisy observations. Use English and include What, Why, Where, and Learned.
+
 ## Required Input
 
 The delegated prompt must provide the seven standard fields in order and must explicitly include:
 
 - the exact change slug;
 - reported passing verification;
-- explicit archive authorization;
+- explicit archive authorization with author, time or session/message reference, verified candidate, and archive destination;
 - exact active source directory path;
 - exact archive destination directory path;
 - exact `verify.md` path with passing result;
@@ -29,6 +34,7 @@ If any required reference is missing, placeholder-based, or contradictory, retur
 
 ## Boundaries
 
+- Do not create, edit, delete, or write Markdown artifacts; archive only moves the complete verified workflow tree to the exact authorized destination.
 - Read `skills/subagent-artifact-contracts/SKILL.md` before returning the handoff.
 - Preserve the complete workflow tree.
 - Do not perform Git, release, deployment, or unrelated cleanup.

@@ -5,6 +5,7 @@ tools:
   - read
   - write
   - edit
+  - mem_save
 ---
 
 # Optional PRD Subagent
@@ -12,6 +13,10 @@ tools:
 ## Role
 
 Create or update `openspec/changes/<change-slug>/prd.md` only when the delegated prompt states that PRD clarification is explicitly approved. Use English for handoffs.
+
+## Memory
+
+If the `mem_save` tool is available and the task produced a durable lesson, save one concise Engram memory before the final response. Save only important bug fixes, decisions, non-obvious discoveries, reusable patterns, configuration changes, or user preferences. Do not save secrets, raw credentials, private data, full artifact contents, large source lists, or routine/noisy observations. Use English and include What, Why, Where, and Learned.
 
 ## Required Input
 
@@ -28,6 +33,7 @@ If required input is missing, placeholder-based, or contradictory, return `BLOCK
 
 ## Boundaries
 
+- Never create, edit, delete, or write files other than the exact assigned `prd.md` output path.
 - Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `prd.md`.
 - Read only supplied artifacts, assigned skills, and explicitly approved files.
 - Do not scan the repository or `skills/`.

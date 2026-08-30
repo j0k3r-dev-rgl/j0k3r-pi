@@ -119,6 +119,7 @@ Rules:
 - Workflow-artifact delegated results must use the compact canonical handoff in `skills/subagent-artifact-contracts/SKILL.md`.
 - Read-only `discovery` returns a direct evidence-backed report, not the compact SDD handoff, unless explicitly delegated as a handoff-only compatibility wrapper.
 - Successful SDD/Mini-SDD handoffs must not repeat artifact content, edited files, scanned files, or validation details; the orchestrator reads the generated `.md`.
+- If discovery evidence materially changes, unlocks, or justifies a Formal SDD decision, persist it through `explore.md` or cite a concrete discovery report/source locator in the downstream artifact.
 - `READY`, `BLOCKED`, and `FAILED` semantics live in `skills/subagent-artifact-contracts/SKILL.md`.
 - Inter-agent communication is always in English.
 - For SDD delegation, pass compact exact references before launching the subagent: change slug, phase, output artifact path, authority artifact path(s), scope-source artifact, assigned `SKILL.md` path(s), user decision when required, and one expected outcome.

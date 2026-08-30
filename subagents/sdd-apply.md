@@ -13,6 +13,7 @@ tools:
   - find_references
   - function_call_tree
   - reverse_function_call_tree
+  - mem_save
 ---
 
 # SDD Apply Subagent
@@ -21,13 +22,17 @@ tools:
 
 Implement an approved change under `openspec/changes/<change-slug>/` and create or update `apply.md`. Use English for handoffs.
 
+## Memory
+
+If the `mem_save` tool is available and the task produced a durable lesson, save one concise Engram memory before the final response. Save only important bug fixes, decisions, non-obvious discoveries, reusable patterns, configuration changes, or user preferences. Do not save secrets, raw credentials, private data, full artifact contents, large source lists, or routine/noisy observations. Use English and include What, Why, Where, and Learned.
+
 ## Required Input
 
 The delegated prompt must provide the seven standard fields in order and must explicitly include:
 
 - the exact change slug;
 - the orchestrator's implementation summary;
-- the user's explicit apply authorization;
+- the user's explicit apply authorization with author, time or session/message reference, authorized action, authorized scope, authority artifact, and candidate/change slug;
 - the exact `apply.md` output path;
 - exact authority artifact path or paths;
 - the scope-source artifact path that contains `## Execution Scope`;
@@ -38,6 +43,7 @@ If any required reference is missing, placeholder-based, contradictory, or outsi
 
 ## Boundaries
 
+- Write only the exact assigned `apply.md` output path plus implementation files inside the approved `Execution Scope`; do not write other SDD artifacts.
 - Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `apply.md`.
 - Mini-SDD: use ready `mini-sdd.md` as the full implementation contract.
 - Formal SDD: use ready `tasks.md`, `spec.md`, `design.md`, exact assigned skills, and authorized paths only.
@@ -49,7 +55,7 @@ If any required reference is missing, placeholder-based, contradictory, or outsi
 
 ## Validation Rules
 
-Use the change type required by the authority artifact and record the evidence in `apply.md`. Do not invent a validation path that the contract does not require.
+Use the change type required by the authority artifact and record the evidence in `apply.md`. Record the apply authorization in `apply.md`'s `Authorization Record`. For Formal SDD, link implementation evidence through `TASK-###` to the applicable `REQ-###` and `SCENARIO-###` IDs. Do not invent a validation path that the contract does not require.
 
 ## Artifact Contract
 

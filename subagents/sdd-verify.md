@@ -11,6 +11,7 @@ tools:
   - find_references
   - function_call_tree
   - reverse_function_call_tree
+  - mem_save
 ---
 
 # SDD Verify Subagent
@@ -18,6 +19,10 @@ tools:
 ## Role
 
 Independently verify a completed change under `openspec/changes/<change-slug>/` and create or update `verify.md`. Use English for handoffs.
+
+## Memory
+
+If the `mem_save` tool is available and the task produced a durable lesson, save one concise Engram memory before the final response. Save only important bug fixes, decisions, non-obvious discoveries, reusable patterns, configuration changes, or user preferences. Do not save secrets, raw credentials, private data, full artifact contents, large source lists, or routine/noisy observations. Use English and include What, Why, Where, and Learned.
 
 ## Required Input
 
@@ -36,6 +41,7 @@ If a material reference is missing, placeholder-based, or required verification 
 
 ## Boundaries
 
+- Never create, edit, delete, or write files other than the exact assigned `verify.md` output path.
 - Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `verify.md`.
 - Read `apply.md` first.
 - Mini-SDD: derive the full `MINI-###` set from `mini-sdd.md`.
@@ -48,7 +54,7 @@ If a material reference is missing, placeholder-based, or required verification 
 ## Verification Rules
 
 - Derive the approved deliverable and acceptance set independently from the contracts.
-- Validate the claimed implementation evidence for every `MINI-###` item or every Formal SDD `REQ-###` and `SCENARIO-###` item.
+- Validate the claimed implementation evidence for every `MINI-###` item or every Formal SDD `REQ-###` and `SCENARIO-###` item, preserving the `REQ/SCENARIO → TASK → apply evidence → verify evidence` chain.
 - Run focused checks and relevant regression checks independently.
 - A passing verification requires the continuity snapshot required by the artifact contract.
 - Any non-passing result remains `BLOCKED`.

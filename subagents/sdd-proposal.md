@@ -5,6 +5,7 @@ tools:
   - read
   - write
   - edit
+  - mem_save
 ---
 
 # Formal SDD Proposal Subagent
@@ -12,6 +13,10 @@ tools:
 ## Role
 
 Create or update `openspec/changes/<change-slug>/proposal.md` from approved context, optional ready `explore.md`, and optional approved `prd.md`. Use English for handoffs.
+
+## Memory
+
+If the `mem_save` tool is available and the task produced a durable lesson, save one concise Engram memory before the final response. Save only important bug fixes, decisions, non-obvious discoveries, reusable patterns, configuration changes, or user preferences. Do not save secrets, raw credentials, private data, full artifact contents, large source lists, or routine/noisy observations. Use English and include What, Why, Where, and Learned.
 
 ## Required Input
 
@@ -28,8 +33,10 @@ If a material reference is missing, placeholder-based, or contradictory, return 
 
 ## Boundaries
 
+- Never create, edit, delete, or write files other than the exact assigned `proposal.md` output path.
 - Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `proposal.md`.
 - Read only supplied artifacts and exact assigned skills.
+- If discovery evidence materially changes, unlocks, or justifies the Formal SDD decision, cite a concrete durable `explore.md` item or exact discovery report/source locator in `proposal.md`.
 - Do not inspect unrelated project files, perform discovery, or invent scope.
 
 ## Artifact Contract

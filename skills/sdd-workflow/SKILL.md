@@ -84,7 +84,7 @@ Rules:
 4. `tasks.md` defines `TASK-###` only.
 5. `sdd-apply` requires an implementation summary plus explicit user authorization.
 6. `sdd-verify` independently verifies every `REQ-###` and `SCENARIO-###` from `spec.md`.
-7. `sdd-archive` requires passing verification plus explicit user authorization.
+7. `sdd-archive` requires passing verification plus explicit user authorization and must preserve the complete verified tree.
 
 ## Structural Gate
 
@@ -107,14 +107,15 @@ Before advancing, the orchestrator checks:
 - Do not advance from a `BLOCKED` artifact.
 - Do not restate upstream artifacts; reference IDs instead.
 - Use `discovery` only for approved unknown research.
-- Use `sdd-explore` only when discovery needs a durable synthesis artifact.
+- Use `sdd-explore` when discovery evidence materially changes, unlocks, or justifies a Formal SDD decision and needs durable synthesis; otherwise the downstream artifact must cite a concrete discovery report/source locator.
 - Read only exact assigned skills; subagents do not scan `skills/`.
 - Every delegated SDD prompt must be compact and reference-driven: include change slug, phase, exact authority artifact path(s), exact expected output artifact path(s), scope-source artifact path, exact assigned `SKILL.md` paths, required user decision when applicable, and one expected outcome.
 - Include `skills/subagent-artifact-contracts/SKILL.md` in Assigned skills for every SDD subagent that writes, updates, verifies, archives, or reports a workflow artifact.
 - Do not copy full OpenSpec contracts, expanded execution-scope path lists, validation matrices, or stable artifact templates into delegated prompts; subagents must read referenced artifacts, their own Markdown contract, and `skills/subagent-artifact-contracts/SKILL.md`.
 - Do not use placeholders such as `<change-slug>`, `<artifact>`, or “as needed” for required phase paths; resolve concrete reference paths before delegation.
-- `apply.md` records implementation evidence only.
+- `apply.md` records apply authorization, implementation evidence, candidate identity, and verification inputs only.
 - `verify.md` records independent verification evidence only.
+- Except for `sdd-apply`, each SDD artifact-producing subagent writes only its assigned artifact. `sdd-archive` writes no Markdown artifact and only moves the verified tree to the authorized destination.
 - Archive moves the complete finished tree to `openspec/archive/YYYY-MM-DD/<change-slug>/`.
 
 ## Execution Steps
@@ -126,7 +127,7 @@ Before advancing, the orchestrator checks:
 5. Run the structural gate.
 6. Stop on `BLOCKED` and ask the user only for the missing decision.
 7. Before apply, summarize planned implementation, scope, exclusions, validation, and risks.
-8. Delegate apply only after explicit authorization.
+8. Delegate apply only after explicit authorization, passing the authorization evidence needed for `apply.md`'s `Authorization Record`.
 9. Delegate verify independently.
 10. Ask for archive authorization only after passing verification.
 
