@@ -4,17 +4,24 @@
 
 ## English
 
-Global Pi extension for code navigation and codebase impact analysis. It provides symbol lookup, reference lookup, forward and reverse call trees, and workspace graph health reporting for TypeScript, JavaScript, Java, and Go tools. The workspace graph also indexes Python files and symbols as a foundation for future Python-specific query tools.
+Global Pi extension for code navigation and codebase impact analysis across the languages intentionally supported by this workspace: **TypeScript, JavaScript, Java, and Go**.
+
+The public surface is intentionally small:
+
+- `code_find` — universal symbol-aware finder for declarations, implementations, and references.
+- `code_call_hierarchy` — incoming/outgoing call hierarchy in one directional tool.
+- `workspace_graph_status` — graph/monorepo health and coverage status for agents that need to know whether indexed graph data is usable.
 
 ### Supported languages
 
-| Capability | TypeScript | JavaScript | Java | Go | Python |
-|------------|------------|------------|------|----|--------|
-| `find_symbol` public tool | ✅ `ts` / `auto` | ✅ `js` / `auto` | ✅ `java` / `auto` | ✅ `go` / `auto` | 🚧 indexed in graph only; no public `py` option yet |
-| `find_references` public tool | ✅ `ts` | ✅ `js` | ✅ `java` | ✅ `go` | 🚧 not exposed yet |
-| `function_call_tree` public tool | ✅ `ts` | ✅ `js` | ✅ `java` | ✅ `go` | 🚧 graph indexes symbols/entrypoints, but call-tree queries are not exposed yet |
-| `reverse_function_call_tree` public tool | ✅ `ts` | ✅ `js` | ✅ `java` | ✅ `go` | 🚧 not exposed yet |
-| Workspace graph indexing | ✅ files/symbols/calls | ✅ files/symbols/calls | ✅ files/symbols/calls | ✅ files/symbols/calls | ✅ files/symbols/entrypoints; no Python call edges yet |
+| Capability | TypeScript | JavaScript | Java | Go |
+|------------|------------|------------|------|----|
+| `code_find` declarations/implementations | ✅ `ts` / `auto` | ✅ `js` / `auto` | ✅ `java` / `auto` | ✅ `go` / `auto` |
+| `code_find` references | ✅ `ts` / `auto` | ✅ `js` / `auto` | ✅ `java` / `auto` | ✅ `go` / `auto` |
+| `code_call_hierarchy` outgoing/incoming | ✅ `ts` / `auto` | ✅ `js` / `auto` | ✅ `java` / `auto` | ✅ `go` / `auto` |
+| Workspace graph indexing/status | ✅ | ✅ | ✅ | ✅ |
+
+No public tool supports Python or other languages.
 
 ### Workspace graph and fallback behavior
 
@@ -29,134 +36,63 @@ The extension can persist a workspace graph under `.pi/workspace-code-graph` whe
 }
 ```
 
-- `graph.enable` defaults to `false` and currently gates both graph refresh scheduling and graph-backed query usage.
+- `graph.enable` defaults to `false` and gates graph refresh scheduling plus graph-backed query usage.
 - `graph.addGitignore` defaults to `true` and lets the graph writer maintain ignore entries for generated graph artifacts.
-- Graph-backed tools use the persisted graph only when it is enabled, readable, schema-compatible, `fresh`, language-supported, and sufficient for the requested query.
-- Tools automatically fall back to direct source inspection when the graph is disabled, missing, stale, partial, errored, incompatible, refreshing, unreadable, language-unsupported, or insufficient for the query.
-- `find_references` has richer direct analyzers than the current graph edge model. The graph currently covers only `call`, `implements`, and `extends` relationships, while public `find_references` needs complete semantic references such as imports, instantiation, reads/writes, type references, callbacks, and method references. Public calls therefore fall back conservatively to avoid incomplete graph-only results.
-- `find_symbol` exposes structured graph/direct/fallback diagnostics in tool `details`; other tools keep fallback decisions internal.
-- Python graph data is indexed for future use, but public query tools do not expose `py` parameters yet.
+- Graph-backed queries use the persisted graph only when it is enabled, readable, schema-compatible, fresh enough, language-supported, and sufficient for the requested query.
+- Tools automatically fall back to direct source inspection when the graph is disabled, missing, stale, partial, errored, incompatible, refreshing, unreadable, language-unsupported, or insufficient.
+- Query results include concise provenance/diagnostics in `details` so the agent can distinguish graph, direct, and fallback behavior.
+- `workspace_graph_status` remains public because monorepos often contain multiple subprojects/languages and agents need a quick health/coverage summary before relying on graph-backed analysis.
 
 ### Registered tools
 
-#### `find_symbol`
+#### `code_find`
 
-Finds the definition and/or implementation of a TypeScript, JavaScript, Java, or Go symbol in a file or directory.
+Universal symbol-aware finder for TypeScript, JavaScript, Java, and Go. Use it for declarations, implementations, or references of variables, functions, methods, classes, interfaces, fields, enums, and related symbols.
 
-##### Parameters
-
-- `path` *(string, required)*: file or directory to search. Relative paths resolve against the current working directory.
-- `symbol` *(string, required)*: symbol name.
-- `language` *(string, optional)*: `ts`, `js`, `java`, `go`, or `auto` (default).
-- `kind` *(string, optional)*: filters by compatibility kind `function`, `class`, `method`, `interface`, or `variable`.
-- `declaration_kind` *(string, optional)*: granular TypeScript/Java declaration filter; see the [TypeScript v1 symbol contract](docs/typescript-symbol-contract-v1.md) and [Java coverage v1](docs/java-symbol-coverage-v1.md).
-- `include_signature` *(boolean, optional)*: when `true`, includes the symbol signature without the body.
-- `include_code` *(boolean, optional)*: when `true`, includes source only for each actual executable declaration kind; it is never enabled by a broad query kind alone.
-- `scope` *(string, optional)*: `file` or `directory`. When omitted, it is inferred from `path`.
-- `glob` *(string, optional)*: glob pattern for filtering files while scanning a directory.
-- `search_mode` *(string, optional)*: `exact`, `prefix`, or `contains`. Default: `exact`. Non-exact searches disable `include_code`.
-
-##### Result
-
-Array of locations with:
-
-- `file`, `symbol`, `kind`
-- `start_line`, `start_column`, `end_line`, `end_column`
-- `is_definition`, `is_implementation`
-- `definition_location` when applicable
-- `implementation_locations` for interfaces
-- `signature` when `include_signature=true`
-- `code` when `include_code=true` and the declaration is executable
-- additive canonical symbol metadata such as `declaration_kind`, `symbol_id`, `owner`, `qualified_name`, naming metadata, and `relationship_id`
-- structured `source_mode`, graph status, completeness, fallback, and count diagnostics in tool `details`, including empty results
-
-See [TypeScript symbol contract v1](docs/typescript-symbol-contract-v1.md), [TypeScript coverage v1](docs/typescript-symbol-coverage-v1.md), and [Java coverage v1](docs/java-symbol-coverage-v1.md). The Java document owns Java-specific declaration coverage, unsupported-form policy, graph authority diagnostics, and benchmark evidence requirements; generic graph/tool behavior stays in this README.
-
-#### `find_references`
-
-Finds where a TypeScript, JavaScript, Java, or Go symbol is used. The direct analyzers cover semantic usages such as calls, imports, instantiation, inheritance, variable reads/writes, callbacks, method references, and type references.
-
-##### Parameters
+Parameters:
 
 - `path` *(string, required)*: file or directory to search. Relative paths resolve against the current working directory.
-- `symbol` *(string, required)*: target symbol name.
-- `language` *(string, optional)*: `ts`, `js`, `java`, or `go`. Default: `java`.
-- `kind` *(string, optional)*: filters by `function`, `class`, `method`, `interface`, or `variable`.
-- `scope` *(string, optional)*: `file` or `directory`. When omitted, it is inferred from `path`.
-- `glob` *(string, optional)*: glob pattern for filtering files while scanning a directory.
+- `query` *(string, required)*: symbol name to find.
+- `relation` *(string, optional)*: `declaration`, `implementation`, or `references`. Default: `declaration`.
+- `language` *(string, optional)*: `auto`, `ts`, `js`, `java`, or `go`. Default: `auto`.
+- `kind` *(string, optional)*: `function`, `class`, `method`, `interface`, or `variable`.
+- `declaration_kind` *(string, optional)*: granular declaration filter for declaration/implementation lookup.
+- `match` *(string, optional)*: `exact`, `prefix`, or `contains`. Default: `exact`.
+- `include_signature` *(boolean, optional)*: include symbol signatures where supported.
+- `include_code` *(boolean, optional)*: include source for exact executable declarations where supported.
+- `scope` *(string, optional)*: `file` or `directory`; inferred when omitted.
+- `glob` *(string, optional)*: glob filter for directory scans.
+- `reference_kinds` *(array, optional)*: for `relation=references`, filter to graph-fast-path kinds such as `call`, `read`, `implements`, or `extends`.
+- `limit` *(number, optional)*: maximum results in this page. Default `50`, max `100`.
+- `cursor` *(string, optional)*: continuation cursor from a previous `code_find` response.
 
-##### Result
+Result:
 
-Array of reference locations with:
+- `content`: bounded human/model-readable summary for the current page.
+- `details.items` / `details.results`: current page of symbol or reference records.
+- `details.summary`: `returned`, `total`, `has_more`, `next_cursor`, `offset`, and `limit`.
+- `details.provenance`: graph/direct/fallback diagnostics.
 
-- `file`, `line`, `column`, optional `end_line`, `end_column`
-- `symbol`, `kind`
-- `context_symbol`, `context_kind`, `context_class` when available
-- `reference_kind`: `call`, `import`, `instantiate`, `implements`, `extends`, `read`, `write`, `type_reference`, `callback`, or `method_reference`
-- receiver/call metadata when available
-- `is_application`, `source`, and optional `reason`
+#### `code_call_hierarchy`
 
-#### `function_call_tree`
+Directional call hierarchy tool for TypeScript, JavaScript, Java, and Go.
 
-Builds a recursive forward call tree for a Java, Go, TypeScript, or JavaScript function/method, expanding application-internal calls and optionally showing external framework/library/language calls as leaves.
+Parameters:
 
-##### Parameters
+- `path` *(string, required)*: file containing the root/target function or method, or a directory to scan for project context.
+- `symbol` *(string, required)*: root or target function/method/class symbol name.
+- `direction` *(string, required)*: `outgoing` for callees or `incoming` for callers.
+- `language` *(string, optional)*: `auto`, `ts`, `js`, `java`, or `go`. Default: `auto`.
+- `kind` *(string, optional)*: `method`, `function`, or `class`.
+- `max_depth` *(number, optional)*: maximum recursive depth. Default `10`, max `10`.
+- `include_external` *(boolean, optional)*: outgoing only; include framework/library/language calls as leaves.
+- `compacted` *(boolean, optional)*: outgoing only; compact trivial data-access siblings where supported.
 
-- `path` *(string, required)*: Java or Go file containing the root method/function, or a directory to scan for TypeScript/JavaScript/Java/Go project context.
-- `symbol` *(string, required)*: root function or method name.
-- `language` *(string, optional)*: `java`, `go`, `ts`, or `js`. Default: `java`.
-- `kind` *(string, optional)*: `function`, `method`, or `class`.
-- `max_depth` *(number, optional)*: maximum recursive depth. Default: `10`.
-- `include_external` *(boolean, optional)*: when `true`, includes framework/library/language calls as external leaves. Default: `false`.
-- `compacted` *(boolean, optional)*: when `true`, compacts trivial data-access sibling nodes where supported.
-
-##### Result
-
-Object with:
-
-- `root`: root tree node
-- `stats.total_nodes`
-- `stats.application_nodes`
-- `stats.external_nodes`
-- `stats.max_depth_reached`
-
-#### `reverse_function_call_tree`
-
-Builds a reverse call tree for Java, Go, TypeScript, or JavaScript code. It starts at a target function/method and recursively returns application callers to support impact analysis.
-
-##### Parameters
-
-- `path` *(string, required)*: Java or Go file containing the target method/function, or a directory to scan for TypeScript/JavaScript/Java/Go project context.
-- `symbol` *(string, required)*: target function or method name.
-- `language` *(string, optional)*: `java`, `go`, `ts`, or `js`. Default: `java`.
-- `kind` *(string, optional)*: `function`, `method`, or `class`.
-- `max_depth` *(number, optional)*: maximum caller expansion depth. Default: `10`.
-- `include_external` *(boolean, optional)*: reserved for API parity with `function_call_tree`; reverse caller expansion returns application callers only.
-- `compacted` *(boolean, optional)*: reserved for API parity with `function_call_tree`.
-
-##### Result
-
-Object with the same call-tree shape as `function_call_tree`, but caller relationships are attached through reverse expansion.
+Result shape matches the existing call-tree contract with `root` and `stats`, plus `details.direction`.
 
 #### `workspace_graph_status`
 
-Reports whether persisted workspace graph data is available, fresh, stale, partial, missing, disabled, errored, or incompatible. Use it when an agent needs graph health, coverage, and monorepo/subproject signals before relying on graph-backed inspection.
-
-##### Parameters
-
-No parameters.
-
-##### Result
-
-Object with:
-
-- `status`: `disabled`, `missing`, `fresh`, `stale`, `partial`, `errored`, `incompatible`, or `refreshing`
-- graph configuration and warnings when disabled
-- graph root, manifest path, generation, updated time, and freshness age when available
-- monorepo/subproject layout
-- coverage counts for indexed/skipped/excluded/unreadable files and directories
-- language coverage counts for `java`, `go`, `ts`, `js`, and `py`, including per-language file and symbol counts from persisted graph shards
-- subproject details and errors when available
+Reports whether persisted workspace graph data is available, fresh, stale, partial, missing, disabled, errored, incompatible, or refreshing. It also reports monorepo/subproject layout and language coverage counts so the agent can decide whether graph-backed inspection is trustworthy.
 
 ### Installation
 
@@ -166,62 +102,54 @@ The extension lives at `~/.pi/agent/extensions/code-research/`. Pi auto-discover
 cd ~/.pi/agent/extensions/code-research
 npm test
 npm run typecheck
-npm run benchmark:typescript-symbols -- --size medium
-npm run benchmark:java-symbols -- --size medium
 ```
 
 ### Structure
 
-```
+```text
 code-research/
-├── index.ts                 # entry point: registers all tools and graph lifecycle hooks
+├── index.ts                 # entry point: registers public tools and graph lifecycle hooks
 ├── src/
 │   ├── config.ts            # .pi/code-research.json loading
 │   ├── types.ts             # shared public/internal types
-│   ├── core/
-│   │   ├── parser.ts        # Tree-sitter parser cache
-│   │   ├── graph-policy.ts  # shared graph usability/fallback policy
-│   │   ├── *resolver.ts     # tool resolvers and graph/direct fallback routing
-│   │   └── workspace-*.ts   # workspace graph build/status/persistence helpers
-│   ├── languages/
-│   │   ├── typescript/      # TS/JS symbol, references, and call-tree extraction
-│   │   ├── java/            # Java symbol, references, and call-tree extraction
-│   │   └── python/          # Python workspace graph indexing foundation
+│   ├── core/                # resolver, graph, parser, policy, and workspace helpers
+│   ├── languages/           # TypeScript/JavaScript, Java, Go analyzers
 │   └── tools/               # Pi tool registrations
 ├── test/                    # unit and integration tests
-├── scripts/                 # manual verification scripts
-└── examples/                # fixtures for testing the extension
-    ├── typescript/
-    ├── javascript/
-    └── java/
+└── scripts/                 # manual verification and benchmarks
 ```
 
 ### Notes
 
 - Uses native `tree-sitter` with pinned parsers and exact versions.
-- Implementation detection is syntactic (based on `implements Name` in TS/Java).
-- TS/JS call-tree support prioritizes local/imported calls and methods on locally constructed instances.
-- Java call-tree support includes Java-specific class/method resolution and interface/implementation relationships where available.
-- Workspace graph indexing supports TypeScript, JavaScript, Java, Go, and Python file/symbol nodes.
-- Python graph support currently indexes `.py` files, classes, functions, methods, top-level assignments, and obvious entrypoints such as `__main__.py` and `if __name__ == "__main__"`; Python-specific query/call-tree tools will be added separately.
+- Resolution is syntax/graph based, not a full compiler or LSP server. Results include provenance and may be incomplete for dynamic dispatch, reflection, generated code, build tags, or unsupported language constructs.
+- Symbol coverage details live in `docs/typescript-symbol-contract-v1.md`, `docs/typescript-symbol-coverage-v1.md`, `docs/java-symbol-coverage-v1.md`, and `docs/go-symbol-coverage-v1.md`.
+- Text/regex search is intentionally not part of this extension; use Pi's built-in grep/bash tools for that.
 
 ## Español
 
-Extensión global de Pi para navegación de código y análisis de impacto en codebases. Provee búsqueda de símbolos, búsqueda de referencias, call trees directos e inversos, y estado del workspace graph para tools TypeScript, JavaScript, Java y Go. El workspace graph también indexa archivos y símbolos Python como base para futuras tools específicas de Python.
+Extensión global de Pi para navegación de código y análisis de impacto en los lenguajes que este workspace soporta intencionalmente: **TypeScript, JavaScript, Java y Go**.
+
+La superficie pública es pequeña a propósito:
+
+- `code_find` — buscador universal de símbolos para declaraciones, implementaciones y referencias.
+- `code_call_hierarchy` — jerarquía de llamadas entrantes/salientes en una sola tool direccional.
+- `workspace_graph_status` — salud/cobertura del graph y monorepo para que el agente sepa si puede confiar en datos indexados.
 
 ### Lenguajes soportados
 
-| Capacidad | TypeScript | JavaScript | Java | Go | Python |
-|-----------|------------|------------|------|----|--------|
-| Tool pública `find_symbol` | ✅ `ts` / `auto` | ✅ `js` / `auto` | ✅ `java` / `auto` | ✅ `go` / `auto` | 🚧 indexado solo en graph; todavía sin opción pública `py` |
-| Tool pública `find_references` | ✅ `ts` | ✅ `js` | ✅ `java` | ✅ `go` | 🚧 todavía no expuesto |
-| Tool pública `function_call_tree` | ✅ `ts` | ✅ `js` | ✅ `java` | ✅ `go` | 🚧 el graph indexa símbolos/entrypoints, pero las consultas call-tree no están expuestas todavía |
-| Tool pública `reverse_function_call_tree` | ✅ `ts` | ✅ `js` | ✅ `java` | ✅ `go` | 🚧 todavía no expuesto |
-| Indexado del workspace graph | ✅ archivos/símbolos/llamadas | ✅ archivos/símbolos/llamadas | ✅ archivos/símbolos/llamadas | ✅ archivos/símbolos/llamadas | ✅ archivos/símbolos/entrypoints; aún sin call edges Python |
+| Capacidad | TypeScript | JavaScript | Java | Go |
+|-----------|------------|------------|------|----|
+| `code_find` declaraciones/implementaciones | ✅ `ts` / `auto` | ✅ `js` / `auto` | ✅ `java` / `auto` | ✅ `go` / `auto` |
+| `code_find` referencias | ✅ `ts` / `auto` | ✅ `js` / `auto` | ✅ `java` / `auto` | ✅ `go` / `auto` |
+| `code_call_hierarchy` incoming/outgoing | ✅ `ts` / `auto` | ✅ `js` / `auto` | ✅ `java` / `auto` | ✅ `go` / `auto` |
+| Indexado/status del workspace graph | ✅ | ✅ | ✅ | ✅ |
 
-### Workspace graph y comportamiento de fallback
+Ninguna tool pública soporta Python u otros lenguajes.
 
-La extensión puede persistir un workspace graph en `.pi/workspace-code-graph` cuando el soporte de graph está habilitado en `.pi/code-research.json`:
+### Workspace graph y fallback
+
+La extensión puede persistir un workspace graph en `.pi/workspace-code-graph` cuando `.pi/code-research.json` habilita el graph:
 
 ```json
 {
@@ -232,176 +160,34 @@ La extensión puede persistir un workspace graph en `.pi/workspace-code-graph` c
 }
 ```
 
-- `graph.enable` es `false` por defecto y actualmente controla tanto el scheduling/refresco del graph como el uso del graph en consultas.
-- `graph.addGitignore` es `true` por defecto y permite mantener entradas de ignore para los artefactos generados del graph.
-- Las tools graph-backed usan el graph persistido solo cuando está habilitado, es legible, compatible con el schema, está `fresh`, soporta el lenguaje y tiene cobertura suficiente para la consulta.
-- Las tools hacen fallback automático a inspección directa de código cuando el graph está deshabilitado, ausente, stale, partial, errored, incompatible, refreshing, ilegible, no soporta el lenguaje o no tiene cobertura suficiente.
-- `find_references` tiene analizadores directos más ricos que el modelo actual de edges del graph. El graph cubre actualmente solo relaciones `call`, `implements` y `extends`, mientras que la tool pública necesita referencias semánticas completas como imports, instanciación, reads/writes, type references, callbacks y method references. Por eso las llamadas públicas hacen fallback conservador para evitar resultados incompletos solo desde el graph.
-- `find_symbol` expone diagnósticos estructurados de graph/direct/fallback en `details`; las demás tools mantienen internas las decisiones de fallback.
-- Los datos Python se indexan en el graph para uso futuro, pero las tools públicas todavía no exponen parámetros `py`.
+- `graph.enable` es `false` por defecto.
+- Las consultas usan graph solo cuando está habilitado, legible, compatible, fresco, soporta el lenguaje y tiene cobertura suficiente.
+- Si no, hacen fallback automático a inspección directa.
+- Los resultados incluyen provenance/diagnósticos en `details`.
+- `workspace_graph_status` sigue pública porque en monorepos el agente necesita saber qué subproyectos/lenguajes están indexados.
 
 ### Tools registradas
 
-#### `find_symbol`
+#### `code_find`
 
-Busca la definición y/o implementación de un símbolo TypeScript, JavaScript, Java o Go en un archivo o directorio.
+Busca símbolos y referencias en TypeScript, JavaScript, Java y Go.
 
-##### Parámetros
+Parámetros principales: `path`, `query`, `relation`, `language`, `kind`, `match`, `include_signature`, `include_code`, `scope`, `glob`, `reference_kinds`, `limit`, `cursor`.
 
-- `path` *(string, requerido)*: archivo o directorio a buscar. Las rutas relativas se resuelven contra el working directory actual.
-- `symbol` *(string, requerido)*: nombre del símbolo.
-- `language` *(string, opcional)*: `ts`, `js`, `java`, `go` o `auto` (por defecto).
-- `kind` *(string, opcional)*: filtra por el kind de compatibilidad `function`, `class`, `method`, `interface` o `variable`.
-- `declaration_kind` *(string, opcional)*: filtro granular de declaración TypeScript/Java; consulta el [contrato TypeScript v1](docs/typescript-symbol-contract-v1.md) y la [cobertura Java v1](docs/java-symbol-coverage-v1.md).
-- `include_signature` *(boolean, opcional)*: si es `true`, incluye la firma del símbolo sin el cuerpo.
-- `include_code` *(boolean, opcional)*: si es `true`, incluye fuente solo para cada declaración ejecutable real; un kind amplio no lo habilita por sí solo.
-- `scope` *(string, opcional)*: `file` o `directory`. Si se omite, se infiere desde `path`.
-- `glob` *(string, opcional)*: patrón glob para filtrar archivos al escanear un directorio.
-- `search_mode` *(string, opcional)*: `exact`, `prefix` o `contains`. Por defecto: `exact`. Las búsquedas no exactas deshabilitan `include_code`.
+#### `code_call_hierarchy`
 
-##### Resultado
+Traza llamadas entrantes o salientes con `direction: "incoming" | "outgoing"`.
 
-Array de ubicaciones con:
-
-- `file`, `symbol`, `kind`
-- `start_line`, `start_column`, `end_line`, `end_column`
-- `is_definition`, `is_implementation`
-- `definition_location` si aplica
-- `implementation_locations` para interfaces
-- `signature` si `include_signature=true`
-- `code` si `include_code=true` y la declaración es ejecutable
-- metadata canónica aditiva como `declaration_kind`, `symbol_id`, `owner`, `qualified_name`, metadata de nombres y `relationship_id`
-- diagnósticos estructurados de modo, estado del graph, completitud, fallback y contadores en `details`, incluso sin resultados
-
-Consulta [TypeScript symbol contract v1](docs/typescript-symbol-contract-v1.md), [TypeScript coverage v1](docs/typescript-symbol-coverage-v1.md) y [Java coverage v1](docs/java-symbol-coverage-v1.md) para migración, naming, sintaxis, seguridad y benchmarks.
-
-#### `find_references`
-
-Encuentra dónde se usa un símbolo TypeScript, JavaScript, Java o Go. Los analizadores directos cubren usos semánticos como calls, imports, instanciación, herencia, reads/writes de variables, callbacks, method references y type references.
-
-##### Parámetros
-
-- `path` *(string, requerido)*: archivo o directorio a buscar. Las rutas relativas se resuelven contra el working directory actual.
-- `symbol` *(string, requerido)*: nombre del símbolo objetivo.
-- `language` *(string, opcional)*: `ts`, `js`, `java` o `go`. Por defecto: `java`.
-- `kind` *(string, opcional)*: filtra por `function`, `class`, `method`, `interface` o `variable`.
-- `scope` *(string, opcional)*: `file` o `directory`. Si se omite, se infiere desde `path`.
-- `glob` *(string, opcional)*: patrón glob para filtrar archivos al escanear un directorio.
-
-##### Resultado
-
-Array de ubicaciones de referencia con:
-
-- `file`, `line`, `column`, y opcionalmente `end_line`, `end_column`
-- `symbol`, `kind`
-- `context_symbol`, `context_kind`, `context_class` cuando están disponibles
-- `reference_kind`: `call`, `import`, `instantiate`, `implements`, `extends`, `read`, `write`, `type_reference`, `callback` o `method_reference`
-- metadata de receiver/call cuando está disponible
-- `is_application`, `source` y `reason` opcional
-
-#### `function_call_tree`
-
-Construye un call tree directo recursivo para una función o método Java, Go, TypeScript o JavaScript, expandiendo llamadas internas de la aplicación y opcionalmente mostrando llamadas externas de framework/librería/lenguaje como hojas.
-
-##### Parámetros
-
-- `path` *(string, requerido)*: archivo Java o Go que contiene el método/función raíz, o directorio para escanear contexto TypeScript/JavaScript/Java/Go.
-- `symbol` *(string, requerido)*: nombre de la función o método raíz.
-- `language` *(string, opcional)*: `java`, `go`, `ts` o `js`. Por defecto: `java`.
-- `kind` *(string, opcional)*: `function`, `method` o `class`.
-- `max_depth` *(number, opcional)*: profundidad recursiva máxima. Por defecto: `10`.
-- `include_external` *(boolean, opcional)*: si es `true`, incluye llamadas de framework/librería/lenguaje como hojas externas. Por defecto: `false`.
-- `compacted` *(boolean, opcional)*: si es `true`, compacta nodos triviales de data-access donde esté soportado.
-
-##### Resultado
-
-Objeto con:
-
-- `root`: nodo raíz del árbol
-- `stats.total_nodes`
-- `stats.application_nodes`
-- `stats.external_nodes`
-- `stats.max_depth_reached`
-
-#### `reverse_function_call_tree`
-
-Construye un call tree inverso para código Java, Go, TypeScript o JavaScript. Empieza en una función/método objetivo y devuelve recursivamente callers de la aplicación para análisis de impacto.
-
-##### Parámetros
-
-- `path` *(string, requerido)*: archivo Java o Go que contiene el método/función objetivo, o directorio para escanear contexto TypeScript/JavaScript/Java/Go.
-- `symbol` *(string, requerido)*: nombre de la función o método objetivo.
-- `language` *(string, opcional)*: `java`, `go`, `ts` o `js`. Por defecto: `java`.
-- `kind` *(string, opcional)*: `function`, `method` o `class`.
-- `max_depth` *(number, opcional)*: profundidad máxima de expansión de callers. Por defecto: `10`.
-- `include_external` *(boolean, opcional)*: reservado por paridad de API con `function_call_tree`; la expansión inversa devuelve callers de aplicación.
-- `compacted` *(boolean, opcional)*: reservado por paridad de API con `function_call_tree`.
-
-##### Resultado
-
-Objeto con la misma forma de call-tree que `function_call_tree`, pero las relaciones de caller se adjuntan mediante expansión inversa.
+Parámetros principales: `path`, `symbol`, `direction`, `language`, `kind`, `max_depth`, `include_external`, `compacted`.
 
 #### `workspace_graph_status`
 
-Reporta si los datos persistidos del workspace graph están disponibles, fresh, stale, partial, missing, disabled, errored o incompatible. Úsala cuando un agente necesita salud del graph, cobertura y señales de monorepo/subproyectos antes de depender de inspección graph-backed.
+Reporta estado del graph, monorepo/subproyectos y cobertura por lenguaje.
 
-##### Parámetros
-
-Sin parámetros.
-
-##### Resultado
-
-Objeto con:
-
-- `status`: `disabled`, `missing`, `fresh`, `stale`, `partial`, `errored`, `incompatible` o `refreshing`
-- configuración del graph y warnings cuando está disabled
-- graph root, manifest path, generation, updated time y edad de freshness cuando están disponibles
-- layout de monorepo/subproyectos
-- contadores de cobertura para archivos/directorios indexados, omitidos, excluidos e ilegibles
-- conteo de lenguajes para `java`, `go`, `ts`, `js` y `py`, incluyendo conteos por lenguaje de archivos y símbolos desde shards persistidos del graph
-- detalles de subproyectos y errores cuando están disponibles
-
-### Instalación
-
-La extensión está en `~/.pi/agent/extensions/code-research/`. Pi la auto-descubre al arrancar.
+### Desarrollo
 
 ```bash
 cd ~/.pi/agent/extensions/code-research
 npm test
 npm run typecheck
 ```
-
-### Estructura
-
-```
-code-research/
-├── index.ts                 # entry point: registra todas las tools y hooks de graph
-├── src/
-│   ├── config.ts            # carga de .pi/code-research.json
-│   ├── types.ts             # tipos públicos/internos compartidos
-│   ├── core/
-│   │   ├── parser.ts        # caché de parsers Tree-sitter
-│   │   ├── graph-policy.ts  # política compartida de uso/fallback del graph
-│   │   ├── *resolver.ts     # resolvers de tools y ruteo graph/direct fallback
-│   │   └── workspace-*.ts   # build/status/persistence del workspace graph
-│   ├── languages/
-│   │   ├── typescript/      # extracción TS/JS de símbolos, referencias y call trees
-│   │   ├── java/            # extracción Java de símbolos, referencias y call trees
-│   │   └── python/          # base de indexado Python para workspace graph
-│   └── tools/               # registros de tools Pi
-├── test/                    # tests unitarios e integración
-├── scripts/                 # scripts de verificación manual
-└── examples/                # fixtures para probar la extensión
-    ├── typescript/
-    ├── javascript/
-    └── java/
-```
-
-### Notas
-
-- Usa `tree-sitter` nativo con parsers fijos y versiones exactas.
-- La detección de implementaciones es sintáctica (basada en `implements Nombre` en TS/Java).
-- El soporte TS/JS de call-tree prioriza llamadas locales/importadas y métodos de instancias construidas localmente.
-- El soporte Java de call-tree incluye resolución específica de clases/métodos Java y relaciones interfaz/implementación donde estén disponibles.
-- El indexado de workspace graph soporta nodos de archivo/símbolo para TypeScript, JavaScript, Java, Go y Python.
-- El soporte Python del graph actualmente indexa archivos `.py`, clases, funciones, métodos, asignaciones top-level y entrypoints obvios como `__main__.py` e `if __name__ == "__main__"`; las tools específicas de consulta/call-tree Python se agregarán por separado.

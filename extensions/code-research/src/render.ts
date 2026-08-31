@@ -75,6 +75,10 @@ function dim(text: string, theme: any): string {
   return theme?.fg?.('dim', text) ?? text;
 }
 
+function expandHint(description: 'expand' | 'collapse'): string {
+  return `ctrl+o ${description}`;
+}
+
 function relativeFile(file: string | undefined): string {
   if (!file) return '<unknown>';
   const cwd = process.cwd().replace(/\\/g, '/');
@@ -82,10 +86,12 @@ function relativeFile(file: string | undefined): string {
   return normalized.startsWith(`${cwd}/`) ? normalized.slice(cwd.length + 1) : normalized;
 }
 
-function compactFindSymbol(result: any, theme: any): string[] {
-  const found = Number(result?.details?.found ?? result?.details?.results?.length ?? 0);
-  const rows = Array.isArray(result?.details?.results) ? result.details.results : [];
-  const lines = [`${titleFor('find_symbol', theme)} · ${found} match(es)`, `mode ${result?.details?.source_mode ?? 'direct'} · graph ${result?.details?.graph_status ?? 'disabled'} · ${result?.details?.completeness ?? 'fallback'}`, dim('ctrl+o expand', theme)];
+function compactFindSymbol(result: any, theme: any, toolName = 'find_symbol'): string[] {
+  const found = Number(result?.details?.found ?? result?.details?.results?.length ?? result?.details?.items?.length ?? 0);
+  const rows = Array.isArray(result?.details?.results) ? result.details.results : Array.isArray(result?.details?.items) ? result.details.items : [];
+  const summary = result?.details?.summary;
+  const countText = summary?.total ? `${found}/${summary.total}` : `${found}`;
+  const lines = [`${titleFor(toolName, theme)} · ${countText} match(es)`, `mode ${result?.details?.source_mode ?? result?.details?.provenance?.source_mode ?? 'direct'} · graph ${result?.details?.graph_status ?? result?.details?.provenance?.graph_status ?? 'disabled'} · ${result?.details?.completeness ?? result?.details?.provenance?.completeness ?? 'fallback'}`, dim(expandHint('expand'), theme)];
   for (const row of rows.slice(0, 5)) {
     const loc = `${relativeFile(row.file)}:${row.start_line ?? '?'}:${row.start_column ?? '?'}`;
     lines.push(`- ${row.symbol ?? '<unknown>'} (${row.kind ?? 'unknown'}) ${loc}`);
@@ -94,10 +100,12 @@ function compactFindSymbol(result: any, theme: any): string[] {
   return lines;
 }
 
-function compactFindReferences(result: any, theme: any): string[] {
-  const found = Number(result?.details?.found ?? result?.details?.results?.length ?? 0);
-  const rows = Array.isArray(result?.details?.results) ? result.details.results : [];
-  const lines = [`${titleFor('find_references', theme)} · ${found} reference(s)`, dim('ctrl+o expand', theme)];
+function compactFindReferences(result: any, theme: any, toolName = 'find_references'): string[] {
+  const found = Number(result?.details?.found ?? result?.details?.results?.length ?? result?.details?.items?.length ?? 0);
+  const rows = Array.isArray(result?.details?.results) ? result.details.results : Array.isArray(result?.details?.items) ? result.details.items : [];
+  const summary = result?.details?.summary;
+  const countText = summary?.total ? `${found}/${summary.total}` : `${found}`;
+  const lines = [`${titleFor(toolName, theme)} · ${countText} reference(s)`, dim(expandHint('expand'), theme)];
   for (const row of rows.slice(0, 7)) {
     const loc = `${relativeFile(row.file)}:${row.line ?? '?'}:${row.column ?? '?'}`;
     const context = row.context_symbol ? ` in ${row.context_symbol}` : '';
@@ -117,13 +125,13 @@ function childSummary(child: any): string {
 function compactCallTree(toolName: string, result: any, theme: any): string[] {
   const root = result?.details?.root;
   const stats = result?.details?.stats;
-  if (!root) return [`${titleFor(toolName, theme)} · result`, dim('ctrl+o expand', theme), clip(resultText(result), 220)];
+  if (!root) return [`${titleFor(toolName, theme)} · result`, dim(expandHint('expand'), theme), clip(resultText(result), 220)];
 
   const owner = root.class ? `${root.class}.` : '';
   const lines = [
     `${titleFor(toolName, theme)} · ${owner}${root.symbol ?? '<unknown>'}`,
     stats ? `nodes ${stats.total_nodes ?? '?'} · app ${stats.application_nodes ?? '?'} · external ${stats.external_nodes ?? '?'} · depth ${stats.max_depth_reached ?? '?'}` : 'call tree result',
-    dim('ctrl+o expand', theme),
+    dim(expandHint('expand'), theme),
   ];
 
   const children = Array.isArray(root.children) ? root.children : Array.isArray(root.callers) ? root.callers : [];
@@ -135,8 +143,9 @@ function compactCallTree(toolName: string, result: any, theme: any): string[] {
 function compactResult(toolName: string, result: any, theme: any): string[] {
   if (toolName === 'find_symbol') return compactFindSymbol(result, theme);
   if (toolName === 'find_references') return compactFindReferences(result, theme);
-  if (toolName === 'function_call_tree' || toolName === 'reverse_function_call_tree') return compactCallTree(toolName, result, theme);
-  return [`${titleFor(toolName, theme)} · result`, dim('ctrl+o expand', theme), clip(resultText(result), 220)];
+  if (toolName === 'code_find') return result?.details?.relation === 'references' ? compactFindReferences(result, theme, toolName) : compactFindSymbol(result, theme, toolName);
+  if (toolName === 'function_call_tree' || toolName === 'reverse_function_call_tree' || toolName === 'code_call_hierarchy') return compactCallTree(toolName, result, theme);
+  return [`${titleFor(toolName, theme)} · result`, dim(expandHint('expand'), theme), clip(resultText(result), 220)];
 }
 
 export function renderCodeResearchToolResult(toolName: string, result: any, options: CodeResearchRenderOptions = {}, theme: any = {}): Component {
@@ -145,7 +154,7 @@ export function renderCodeResearchToolResult(toolName: string, result: any, opti
     if (!options.expanded) return compactResult(toolName, result, theme);
     return wrapLines([
       `${titleFor(toolName, theme)} · expanded`,
-      dim('ctrl+o collapse', theme),
+      dim(expandHint('collapse'), theme),
       '',
       ...resultText(result).split('\n'),
     ], width);

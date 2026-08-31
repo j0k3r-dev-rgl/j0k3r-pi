@@ -43,7 +43,7 @@ If equal-authority sources conflict, stop and surface the exact conflict.
 
 - Use delegated read-only `discovery` for unknown project, implementation-code, behavior, dependency, test, or external research.
 - Do not duplicate a completed discovery report unless freshness or an unresolved gap requires it.
-- For TypeScript/JavaScript, Java, and Go code lookups, call `workspace_graph_status` first and then use `find_symbol`, `find_references`, `function_call_tree`, or `reverse_function_call_tree` before any text search.
+- For TypeScript/JavaScript, Java, and Go code lookups, call `workspace_graph_status` first and then use `code_find` or `code_call_hierarchy` before any text search.
 - Use `rg`, `grep`, or `find` on supported-language code only after graph-backed lookup is unavailable, unusable, or failed for the exact query.
 - For documentation, config, generated data, and unsupported languages, targeted reads or bounded text search are fine.
 
