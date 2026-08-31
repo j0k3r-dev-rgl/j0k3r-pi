@@ -11,7 +11,9 @@ export const STOP_PARAMETERS = Type.Object({
 }, { additionalProperties: false });
 export const LOGS_PARAMETERS = Type.Object({
   service: Type.String({ description: 'Configured service name from .pi/workspace-services.json.' }),
-  lines: Type.Optional(Type.Number({ description: 'Maximum log lines to return. Default 200, max 2000.' })),
+  lines: Type.Optional(Type.Number({ description: 'Maximum log lines to return. Default 100, max 2000.' })),
+  offset: Type.Optional(Type.Number({ description: 'Number of newest log lines to skip before returning logs. Default 0; use 100 for the previous page.' })),
+  until: Type.Optional(Type.Number({ description: 'Oldest line offset from the newest log line for range reads. Example: offset=100, until=200 returns the previous 100-line window.' })),
   max_bytes: Type.Optional(Type.Number({ description: 'Maximum log bytes to inspect. Default 51200, max 204800.' })),
 }, { additionalProperties: false });
 

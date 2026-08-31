@@ -20,7 +20,7 @@ import { withLifecycleTransaction } from './transaction.js';
 
 const DEFAULT_STOP_TIMEOUT_MS = 5_000;
 const START_HEALTH_DELAY_MS = 120;
-const DEFAULT_LOG_LINES = 200;
+const DEFAULT_LOG_LINES = 100;
 const MAX_LOG_LINES = 2000;
 const DEFAULT_LOG_BYTES = 50 * 1024;
 const MAX_LOG_BYTES = 200 * 1024;
@@ -44,6 +44,8 @@ export interface ServicesStatusResult {
 export interface LogsOptions {
   lines?: number;
   maxBytes?: number;
+  offset?: number;
+  until?: number;
 }
 
 export interface StartOptions {
@@ -433,25 +435,32 @@ export async function getServiceLogs(cwd: string, serviceName: string, options: 
   const service = getService(config, serviceName);
   const lines = clampInteger(options.lines, DEFAULT_LOG_LINES, 1, MAX_LOG_LINES);
   const maxBytes = clampInteger(options.maxBytes, DEFAULT_LOG_BYTES, 1024, MAX_LOG_BYTES);
+  const offset = clampInteger(options.offset, 0, 0, MAX_LOG_LINES);
+  const until = typeof options.until === 'number' && Number.isFinite(options.until)
+    ? clampInteger(options.until, offset + lines, offset + 1, offset + MAX_LOG_LINES)
+    : undefined;
   if (!(await pathExists(service.logPath))) {
     return { ok: true, status: 'not_running', summary: `No log file found for ${service.name}.`, data: { service: service.name, logPath: service.logPath, text: '' }, truncation: { returned: 0, total: 0, hasMore: false } };
   }
   const secrets = Object.values(await loadServiceEnv(service, config.workspaceRealRoot)).filter((value) => value.length > 0);
   const tail = await readTail(service.logPath, maxBytes);
   const allLines = tail.text.split(/\r?\n/);
-  const selectedLines = allLines.length > lines ? allLines.slice(-lines) : allLines;
+  if (allLines.at(-1) === '') allLines.pop();
+  const windowEnd = Math.max(0, allLines.length - offset);
+  const windowStart = Math.max(0, until === undefined ? windowEnd - lines : allLines.length - until);
+  const selectedLines = allLines.slice(windowStart, windowEnd);
   const text = redactText(selectedLines.join('\n'), secrets);
-  const hasMore = tail.truncated || allLines.length > lines;
+  const hasMore = tail.truncated || windowStart > 0 || offset > 0;
   return {
     ok: true,
     status: 'running',
     summary: `Retrieved bounded logs for ${service.name}.`,
-    data: { service: service.name, logPath: service.logPath, text, lines: selectedLines.filter(Boolean).length, bytesRead: tail.bytesRead, totalBytes: tail.totalBytes },
+    data: { service: service.name, logPath: service.logPath, text, lines: selectedLines.filter(Boolean).length, offset, until, bytesRead: tail.bytesRead, totalBytes: tail.totalBytes },
     truncation: {
       returned: selectedLines.filter(Boolean).length,
       total: allLines.filter(Boolean).length,
       hasMore,
-      continuation: hasMore ? `Call workspace_service_logs with service=${service.name} and larger lines/max_bytes within bounds.` : undefined,
+      continuation: hasMore ? `Call workspace_service_logs with service=${service.name}, lines=${lines}, and offset=${offset + selectedLines.length} for older logs; increase max_bytes if older lines are outside the bounded read.` : undefined,
     },
   };
 }

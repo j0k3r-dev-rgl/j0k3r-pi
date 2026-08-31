@@ -47,7 +47,8 @@ When any service is started, the extension ensures `.gitignore` contains `.pi/wo
 - Runtime state is schema-versioned, atomically replaced, and recovered from `state.last-good.json` when possible.
 - Invalid state is quarantined and never silently treated as empty state.
 - Non-empty `.env` values are treated as secrets and redacted from managed logs, results, details, errors, and rendering.
-- Log output remains bounded and includes continuation metadata when more data exists.
+- Log output defaults to the latest 100 lines, remains bounded, and includes continuation metadata when more data exists.
+- `workspace_service_logs` supports older windows with `offset` and `until`, counted backward from the newest log line. Example: `offset=100, until=200` reads the previous 100-line window.
 
 ## Tools
 

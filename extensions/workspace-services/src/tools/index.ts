@@ -112,7 +112,7 @@ export function registerWorkspaceServicesTools(pi: ExtensionAPI, options: Regist
   pi.registerTool({
     name: 'workspace_service_logs',
     label: 'Workspace Service Logs',
-    description: 'Read a bounded tail of one configured service log from .pi/workspace-services/logs/<service>.log.',
+    description: 'Read the latest 100 lines of one configured service log by default, or a bounded older window with offset/until.',
     promptSnippet: 'Read bounded logs for one configured workspace service.',
     promptGuidelines: ['Use workspace_service_logs instead of bash tail for managed service logs.'],
     parameters: LOGS_PARAMETERS,
@@ -120,6 +120,8 @@ export function registerWorkspaceServicesTools(pi: ExtensionAPI, options: Regist
       if (!(await ensureTrusted(ctx))) return textResult(trustFailure(), trustFailure().summary);
       const outcome = await getServiceLogs(cwdFrom(ctx, options), serviceName(params), {
         lines: typeof params.lines === 'number' ? params.lines : undefined,
+        offset: typeof params.offset === 'number' ? params.offset : undefined,
+        until: typeof params.until === 'number' ? params.until : undefined,
         maxBytes: typeof params.max_bytes === 'number' ? params.max_bytes : undefined,
       });
       return textResult(outcome, `workspace_service_logs: ${outcome.summary}`);

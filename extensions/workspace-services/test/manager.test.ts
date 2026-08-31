@@ -51,6 +51,27 @@ describe('workspace service manager', () => {
     expect(stopped.status).toBe('stopped');
   });
 
+  it('defaults to the latest 100 log lines and supports older offset ranges', async () => {
+    const cwd = await configuredWorkspace();
+    const logDir = join(cwd, '.pi', 'workspace-services', 'logs');
+    await mkdir(logDir, { recursive: true });
+    await writeFile(join(logDir, 'svc.log'), Array.from({ length: 150 }, (_, index) => `line-${index + 1}`).join('\n') + '\n', 'utf8');
+
+    const latest = await getServiceLogs(cwd, 'svc');
+    const latestText = String((latest.data as any).text);
+    expect(latestText).toContain('line-51');
+    expect(latestText).toContain('line-150');
+    expect(latestText).not.toContain('line-50\n');
+    expect((latest.data as any).lines).toBe(100);
+
+    const previous = await getServiceLogs(cwd, 'svc', { offset: 100, until: 150 });
+    const previousText = String((previous.data as any).text);
+    expect(previousText).toContain('line-1');
+    expect(previousText).toContain('line-50');
+    expect(previousText).not.toContain('line-51');
+    expect((previous.data as any).lines).toBe(50);
+  });
+
   it('does not persist env secrets in runtime artifacts and re-redacts existing log content when reading logs', async () => {
     const cwd = await configuredWorkspace();
     const started = await startService(cwd, 'svc');
