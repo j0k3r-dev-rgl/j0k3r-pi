@@ -1,5 +1,5 @@
 import { readFile, stat } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { dirname, resolve, sep } from 'node:path';
 import type { CallNodeType, CallSource, CallTreeNode, FunctionCallTreeInput, FunctionCallTreeResult, OwnerKind } from '../../types.js';
 import { buildProjectIndex } from '../../core/project-index.js';
 import { extractSignature } from './shared.js';
@@ -71,6 +71,9 @@ interface JavaArgumentInfo {
 
 export async function resolveJavaIndexRoot(filePath: string): Promise<string> {
   const fileDir = dirname(filePath);
+  const conventionalProjectRoot = findConventionalJavaProjectRoot(fileDir);
+  if (conventionalProjectRoot) return conventionalProjectRoot;
+
   const source = await readFile(filePath, 'utf8').catch(() => '');
   const packageMatch = source.match(/^\s*package\s+([\w.]+)\s*;/m);
   if (!packageMatch) {
@@ -83,6 +86,16 @@ export async function resolveJavaIndexRoot(filePath: string): Promise<string> {
     current = dirname(current);
   }
   return current;
+}
+
+function findConventionalJavaProjectRoot(fileDir: string): string | undefined {
+  const normalized = fileDir.split(sep).join('/');
+  const markers = ['/src/main/java', '/src/test/java'];
+  for (const marker of markers) {
+    const index = normalized.indexOf(marker);
+    if (index !== -1) return normalized.slice(0, index) || sep;
+  }
+  return undefined;
 }
 
 export async function executeJavaFunctionCallTree(
@@ -593,7 +606,7 @@ function findLocalVariableType(methodNode: any, variableName: string): string | 
         if (child.type !== 'variable_declarator') continue;
         const nameNode = child.childForFieldName('name');
         if (nameNode?.text === variableName) {
-          found = typeName;
+          found = typeName === 'var' ? inferLocalVariableTypeFromInitializer(child) : typeName;
           return;
         }
       }
@@ -606,6 +619,16 @@ function findLocalVariableType(methodNode: any, variableName: string): string | 
 
   visit(body);
   return found;
+}
+
+function inferLocalVariableTypeFromInitializer(variableDeclarator: any): string | undefined {
+  const valueNode = variableDeclarator.childForFieldName('value');
+  if (!valueNode) return undefined;
+  if (valueNode.type === 'object_creation_expression') {
+    const typeNode = valueNode.childForFieldName('type');
+    return normalizeScopedTypeName(typeNode?.text) ?? normalizeScopedTypeName(valueNode.text.match(/^new\s+([A-Za-z_$][\w$.]*)/)?.[1]);
+  }
+  return normalizeScopedTypeName(valueNode.text.match(/^new\s+([A-Za-z_$][\w$.]*)/)?.[1]);
 }
 
 function resolveTypeToCallTarget(

@@ -72,10 +72,11 @@ async function findMethodReferences(index: ProjectIndex, rootFile: string, isDir
 
       const callbackMatch = line.match(new RegExp(`->[^\n]*\\b${escapeRegExp(target.symbol)}\\s*\\(`));
       if (callbackMatch) {
+        const callText = extractJavaCallText(line, target.symbol, callbackMatch.index ?? 0);
         results.push({
           file: caller.file,
           line: lineNumber,
-          column: callbackMatch.index ?? 0,
+          column: callText.column,
           end_line: caller.node.endPosition.row + 1,
           end_column: caller.node.endPosition.column,
           symbol: target.symbol,
@@ -85,7 +86,7 @@ async function findMethodReferences(index: ProjectIndex, rootFile: string, isDir
           context_class: caller.className,
           owner_kind: 'class',
           reference_kind: 'callback',
-          called_as: callbackMatch[0],
+          called_as: callText.text,
           is_application: true,
           source: 'application',
         });
@@ -234,6 +235,53 @@ function buildJavaTypeRelationshipMetadata(
 
 function sameMethod(a: IndexedMethod, b: IndexedMethod): boolean {
   return a.file === b.file && a.className === b.className && a.symbol === b.symbol;
+}
+
+function extractJavaCallText(line: string, symbol: string, searchStart: number): { text: string; column: number } {
+  const pattern = new RegExp(`\\b(?:[A-Za-z_$][\\w$]*\\s*\\.\\s*)?${escapeRegExp(symbol)}\\s*\\(`, 'g');
+  pattern.lastIndex = searchStart;
+  const match = pattern.exec(line) ?? line.match(pattern);
+  const column = match?.index ?? searchStart;
+  const tail = line.slice(column);
+  const openIndex = tail.indexOf('(');
+  if (openIndex === -1) return { text: tail.trim(), column };
+
+  let depth = 0;
+  let inString: 'single' | 'double' | undefined;
+  let escaped = false;
+  for (let index = openIndex; index < tail.length; index++) {
+    const char = tail[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (inString) {
+      if ((inString === 'single' && char === '\'') || (inString === 'double' && char === '"')) inString = undefined;
+      continue;
+    }
+    if (char === '\'') {
+      inString = 'single';
+      continue;
+    }
+    if (char === '"') {
+      inString = 'double';
+      continue;
+    }
+    if (char === '(') {
+      depth++;
+      continue;
+    }
+    if (char === ')') {
+      depth--;
+      if (depth === 0) return { text: tail.slice(0, index + 1).trim(), column };
+    }
+  }
+
+  return { text: tail.trim(), column };
 }
 
 function findRegexPosition(source: string, pattern: RegExp) {

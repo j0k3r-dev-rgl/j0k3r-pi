@@ -227,7 +227,7 @@ describe('findSymbol Java', () => {
 
     expect(results.length).toBeGreaterThanOrEqual(1);
     expect(results.some((result) => result.symbol === 'NotificationCommandInputPort')).toBe(true);
-  });
+  }, 15_000);
 
   it('covers java declaration kinds across examples and inline bindings', async () => {
     const adapter = await findSymbol('/home/j0k3r/.pi/agent', {

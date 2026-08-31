@@ -50,6 +50,9 @@ export async function findReferences(cwd: string, input: FindReferencesInput): P
 function filterReferenceKinds(results: ReferenceLocation[], input: FindReferencesInput): ReferenceLocation[] {
   if (!Array.isArray(input.reference_kinds) || input.reference_kinds.length === 0) return results;
   const requestedKinds = new Set(input.reference_kinds);
+  if (input.language === 'java' && requestedKinds.has('call')) {
+    requestedKinds.add('callback');
+  }
   return results.filter((result) => requestedKinds.has(result.reference_kind));
 }
 
@@ -124,7 +127,8 @@ function shouldCompareDirectResults(input: FindReferencesInput): boolean {
   if (!Array.isArray(input.reference_kinds) || input.reference_kinds.length === 0) return true;
   const requestedKinds = new Set(input.reference_kinds ?? []);
   if (requestedKinds.has('read')) return true;
-  if ((input.language === 'ts' || input.language === 'js') && requestedKinds.has('call')) return true;
+  if (requestedKinds.has('call')) return true;
+  if ((input.language === 'ts' || input.language === 'js') && (requestedKinds.has('implements') || requestedKinds.has('extends'))) return true;
   return input.language === 'java' && input.kind === 'interface' && requestedKinds.has('implements');
 }
 

@@ -782,4 +782,65 @@ describe('find_references', () => {
       called_as: 'extends WorkerBase',
     });
   });
+
+  it('includes Java test-source concrete calls when querying a main-source method', async () => {
+    const rootDir = await createProject('pi-find-references-java-main-test-sources', {
+      'src/main/java/app/ExportUseCase.java': `package app;\n\npublic class ExportUseCase {\n  public void export(String reviewId) {}\n}\n`,
+      'src/test/java/app/ExportUseCaseTest.java': `package app;\n\npublic class ExportUseCaseTest {\n  void exportsReview() {\n    var useCase = new ExportUseCase();\n    useCase.export("review-1");\n  }\n\n  void exportsAgain() {\n    var useCase = new ExportUseCase();\n    useCase.export("review-2");\n  }\n\n  void rejectsTraversal() {\n    var useCase = new ExportUseCase();\n    assertThrows(() -> useCase.export("../escape"));\n  }\n\n  private void assertThrows(Runnable runnable) {}\n}\n`,
+    });
+
+    const results = await findReferences(rootDir, {
+      path: 'src/main/java/app/ExportUseCase.java',
+      symbol: 'export',
+      language: 'java',
+      kind: 'method',
+      reference_kinds: ['call'],
+    });
+
+    expect(results.map((item) => item.called_as).sort()).toEqual([
+      'useCase.export("../escape")',
+      'useCase.export("review-1")',
+      'useCase.export("review-2")',
+    ]);
+  });
+
+  it('falls back to direct TypeScript interface relationships when graph edges do not cover them', async () => {
+    const rootDir = await createProject('pi-find-references-ts-interface-graph-fallback', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/repository.ts': `export interface ReviewAnalysisRepository {}\n`,
+      'src/noop.ts': `import { ReviewAnalysisRepository } from './repository.js';\nexport class NoopReviewAnalysisRepository implements ReviewAnalysisRepository {}\n`,
+      'test/repository.test.ts': `import { ReviewAnalysisRepository } from '../src/repository.js';\nclass InMemoryReviewAnalysisRepository implements ReviewAnalysisRepository {}\n`,
+    });
+    await buildWorkspaceGraph(rootDir);
+
+    const results = await findReferences(rootDir, {
+      path: 'src',
+      symbol: 'ReviewAnalysisRepository',
+      language: 'ts',
+      kind: 'interface',
+      reference_kinds: ['implements'],
+    });
+
+    expect(new Set(results.map((item) => item.context_symbol))).toEqual(new Set([
+      'NoopReviewAnalysisRepository',
+      'InMemoryReviewAnalysisRepository',
+    ]));
+  });
+
+  it('does not return a TypeScript false negative when reference kind is omitted', async () => {
+    const rootDir = await createProject('pi-find-references-ts-no-kind', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/query.server.ts': `export function getReviewAnalysisStatus(): string {\n  return 'ready';\n}\n`,
+      'src/resenia.tsx': `import { getReviewAnalysisStatus } from './query.server.js';\nexport async function loader() {\n  return getReviewAnalysisStatus();\n}\n`,
+    });
+    await buildWorkspaceGraph(rootDir);
+
+    const results = await findReferences(rootDir, {
+      path: 'src',
+      symbol: 'getReviewAnalysisStatus',
+      language: 'ts',
+    });
+
+    expect(results.map((item) => item.called_as)).toContain('getReviewAnalysisStatus()');
+  });
 });

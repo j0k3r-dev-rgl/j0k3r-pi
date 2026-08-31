@@ -416,7 +416,7 @@ function indexTopLevelDeclarations(file: IndexedFile, index: TypeScriptProjectIn
       continue;
     }
 
-    if (node.type === 'class_declaration' || node.type === 'abstract_class_declaration') {
+    if (node.type === 'class_declaration' || node.type === 'abstract_class_declaration' || node.type === 'interface_declaration') {
       const classNameNode = node.childForFieldName('name');
       if (!classNameNode) continue;
       const className = classNameNode.text;
@@ -429,7 +429,7 @@ function indexTopLevelDeclarations(file: IndexedFile, index: TypeScriptProjectIn
         node,
         exportedName: exportInfo.exported ? exportInfo.exportName ?? className : undefined,
       });
-      indexClassMembers(file, index, node, className);
+      if (node.type !== 'interface_declaration') indexClassMembers(file, index, node, className);
     }
   }
 

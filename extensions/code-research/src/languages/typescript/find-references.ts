@@ -30,7 +30,14 @@ export async function findTypeScriptReferences(cwd: string, input: FindReference
     return findVariableReferences(index, rootPath, rootStat?.isDirectory() ?? false, input);
   }
 
-  return [];
+  const isDirectory = rootStat?.isDirectory() ?? false;
+  const results: ReferenceLocation[] = [];
+  results.push(...await findCallableReferences(index, rootPath, isDirectory, { ...input, kind: 'function' }));
+  results.push(...await findCallableReferences(index, rootPath, isDirectory, { ...input, kind: 'method' }));
+  results.push(...await findTypeLikeReferences(index, rootPath, isDirectory, { ...input, kind: 'class' }));
+  results.push(...await findTypeLikeReferences(index, rootPath, isDirectory, { ...input, kind: 'interface' }));
+  results.push(...await findVariableReferences(index, rootPath, isDirectory, { ...input, kind: 'variable' }));
+  return dedupeReferences(results);
 }
 
 async function findCallableReferences(
