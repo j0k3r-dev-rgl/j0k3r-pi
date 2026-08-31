@@ -47,6 +47,7 @@ export async function queryReverseFunctionCallTreeFromGraph(options: {
 
   const target = targetCandidates[0];
   if (!target) return undefined;
+  const rootTargetIds = new Set(targetCandidates.map((candidate) => candidate.id));
 
   const nodeById = new Map<string, GraphNode>(symbols.map((node) => [node.id, node]));
   for (const shard of allShards) {
@@ -54,7 +55,7 @@ export async function queryReverseFunctionCallTreeFromGraph(options: {
   }
   const allEdges = allShards.flatMap((shard) => shard.edges);
 
-  const root = buildReverseTree(target.id, nodeById, allEdges, input.max_depth ?? 10, 0, new Set());
+  const root = buildReverseTree(target.id, nodeById, allEdges, input.max_depth ?? 10, 0, new Set(), rootTargetIds);
   if (!root) return undefined;
   const resultRoot = input.compacted ? compactTree(root) : root;
   const stats = { total_nodes: 0, application_nodes: 0, external_nodes: 0, max_depth_reached: 0 };
@@ -72,7 +73,8 @@ function buildReverseTree(
   edges: SubprojectGraphShard['edges'],
   maxDepth: number,
   depth: number,
-  visited: Set<string>
+  visited: Set<string>,
+  rootTargetIds?: Set<string>
 ): CallTreeNode | undefined {
   const node = nodeById.get(nodeId);
   if (!node || node.kind !== 'symbol') return undefined;
@@ -100,7 +102,8 @@ function buildReverseTree(
   if (visited.has(visitKey) || depth >= maxDepth) return result;
   visited.add(visitKey);
 
-  const callerEdges = edges.filter((edge) => edge.kind === 'calls' && edge.to === node.id);
+  const targetIds = rootTargetIds ?? new Set([node.id]);
+  const callerEdges = edges.filter((edge) => (edge.kind === 'calls' || edge.kind === 'reads') && targetIds.has(edge.to));
   const callers: CallTreeNode[] = [];
   for (const edge of callerEdges) {
     const caller = nodeById.get(edge.from);

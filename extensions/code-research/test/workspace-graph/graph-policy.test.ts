@@ -84,8 +84,8 @@ describe('graph policy', () => {
     expect([...GRAPH_REFERENCE_KINDS].sort()).toEqual(['call', 'extends', 'implements', 'read']);
 
     expect(getFindReferencesGraphCoverage({ path: 'src/a.ts', symbol: 'helper', language: 'ts', kind: 'function' })).toEqual({
-      requiredReferenceKinds: undefined,
-      graphCoverageMode: 'conservative-fallback',
+      requiredReferenceKinds: ['call', 'read', 'implements', 'extends'],
+      graphCoverageMode: 'supported-subset',
     });
 
     expect(

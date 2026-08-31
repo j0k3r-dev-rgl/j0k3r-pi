@@ -54,7 +54,8 @@ function formatSymbolItems(cwd: string, query: string, items: SymbolLocation[], 
     const file = relative(cwd, item.file) || item.file;
     const qualified = item.qualified_name && item.qualified_name !== item.symbol ? ` (${item.qualified_name})` : '';
     const signature = item.signature ? ` · ${item.signature}` : '';
-    return `${file}:${item.start_line}:${item.start_column}: ${item.symbol}${qualified} [${item.kind}]${signature}`;
+    const header = `${file}:${item.start_line}:${item.start_column}: ${item.symbol}${qualified} [${item.kind}]${signature}`;
+    return item.code ? `${header}\n\n\`\`\`\n${item.code}\n\`\`\`` : header;
   });
   const more = nextCursor ? `\n\nMore results available. Re-run code_find with cursor=${nextCursor}.` : '';
   return `Found ${items.length} of ${total} symbol match(es) for '${query}':\n\n${rows.join('\n')}${more}`;
@@ -118,27 +119,31 @@ export function registerCodeFindTool(pi: any) {
   pi.registerTool({
     name: 'code_find',
     label: 'Code Find',
-    description: 'Universal symbol-aware code finder for TypeScript, JavaScript, Java, and Go. Locate declarations/implementations or references for functions, methods, classes, interfaces, variables, fields, and related symbols.',
-    promptSnippet: 'Find declarations, implementations, or references for supported-language symbols across TS/JS/Java/Go code.',
+    description: 'Primary symbol search tool for TypeScript/JavaScript, Java, and Go. Use it to find declarations, concrete implementations, and reference/call sites before using text search. For impact analysis, use relation=references; omit reference_kinds to search all supported reference kinds, or pass call/read/implements/extends to narrow. Use relation=implementation on an interface/base type to return implementers, not the interface itself.',
+    promptSnippet: 'Find declarations, implementations, or references for supported-language symbols across TS/JS/Java/Go code. Prefer this before rg for supported languages, then use rg only to cross-check suspicious or missing results.',
     promptGuidelines: [
-      'Use code_find as the default code research entry point for supported-language symbol lookup or references.',
-      'Use relation=declaration or relation=implementation to locate symbols; use relation=references for usages and impact analysis.',
-      'Use language=auto unless a specific supported language is known; supported languages are ts, js, java, and go only.',
+      'Use code_find as the default entry point for supported-language symbol lookup. Use rg only as a validation fallback or for unsupported text/config/doc searches.',
+      'Choose relation deliberately: declaration finds where a symbol is defined; implementation finds implementers of an interface/base type; references finds usages/call sites for impact analysis.',
+      'For references, omit reference_kinds when you want all supported usages. Use reference_kinds=["call"] only for function/method invocations, ["read"] for value/JSX/type-like reads, and ["implements"|"extends"] for inheritance relationships.',
+      'For methods with common names such as execute, run, stop, or handle, provide the declaring file path plus kind=method and language when known to avoid unrelated same-name results.',
+      'Use include_code=true only with declaration/implementation and exact matching when you need a bounded source snippet; otherwise prefer include_signature=true for lower noise.',
+      'Use match=contains only for broad discovery; it is substring-based and may match unrelated names such as main inside remainder. Prefer exact by default.',
+      'Use language=auto for unknown code, but pass ts/js/java/go when known, especially in monorepos.',
       'Use cursor from a previous code_find result when has_more is true instead of broadening the search unnecessarily.',
     ],
     parameters: Type.Object({
-      path: Type.String({ description: 'File or directory to search. Relative paths resolve against the current working directory.' }),
-      query: Type.String({ description: 'Symbol name to find, such as a variable, function, method, class, interface, field, or enum.' }),
-      relation: Type.Optional(Type.Union([Type.Literal('declaration'), Type.Literal('implementation'), Type.Literal('references')], { description: 'What relationship to find. Default: declaration.' })),
-      language: Type.Optional(Type.Union([Type.Literal('auto'), Type.Literal('ts'), Type.Literal('js'), Type.Literal('java'), Type.Literal('go')], { description: 'Language filter or auto-detection. Default: auto.' })),
-      kind: Type.Optional(Type.Union([Type.Literal('function'), Type.Literal('class'), Type.Literal('method'), Type.Literal('interface'), Type.Literal('variable')], { description: 'Optional coarse symbol kind filter.' })),
-      declaration_kind: Type.Optional(Type.Union(declarationKinds.map((kind) => Type.Literal(kind)), { description: 'Optional granular declaration-kind filter for declaration/implementation lookups.' })),
-      match: Type.Optional(Type.Union([Type.Literal('exact'), Type.Literal('prefix'), Type.Literal('contains')], { description: 'Symbol-name match mode. Default: exact.' })),
-      include_signature: Type.Optional(Type.Boolean({ description: 'For declarations/implementations, include signatures without bodies.' })),
-      include_code: Type.Optional(Type.Boolean({ description: 'For exact declaration/implementation lookups, include bounded executable source where supported.' })),
-      scope: Type.Optional(Type.Union([Type.Literal('file'), Type.Literal('directory')], { description: 'Override whether path is treated as a file or directory.' })),
-      glob: Type.Optional(Type.String({ description: 'Optional glob pattern to filter files while scanning a directory.' })),
-      reference_kinds: Type.Optional(Type.Array(Type.Union([Type.Literal('call'), Type.Literal('read'), Type.Literal('implements'), Type.Literal('extends')]), { description: 'Optional reference kind filter for relation=references.' })),
+      path: Type.String({ description: 'File or directory to search. In monorepos, pass the smallest relevant project/file path when known. Relative paths resolve against the current working directory.' }),
+      query: Type.String({ description: 'Exact symbol name to find, such as a function, method, class, interface, variable, field, or enum. Do not include receiver/class prefixes; use kind/path/language to disambiguate.' }),
+      relation: Type.Optional(Type.Union([Type.Literal('declaration'), Type.Literal('implementation'), Type.Literal('references')], { description: 'Relationship to find. Default: declaration. Use references for usages/callers; use implementation for implementers of an interface/base type.' })),
+      language: Type.Optional(Type.Union([Type.Literal('auto'), Type.Literal('ts'), Type.Literal('js'), Type.Literal('java'), Type.Literal('go')], { description: 'Language filter or auto-detection. Default: auto. Pass a concrete language when known to avoid monorepo same-name noise.' })),
+      kind: Type.Optional(Type.Union([Type.Literal('function'), Type.Literal('class'), Type.Literal('method'), Type.Literal('interface'), Type.Literal('variable')], { description: 'Coarse symbol kind. Strongly recommended for common names and references.' })),
+      declaration_kind: Type.Optional(Type.Union(declarationKinds.map((kind) => Type.Literal(kind)), { description: 'Granular declaration-kind filter for declaration/implementation lookups. Leave unset unless you need a specific AST-level kind.' })),
+      match: Type.Optional(Type.Union([Type.Literal('exact'), Type.Literal('prefix'), Type.Literal('contains')], { description: 'Symbol-name match mode. Default: exact. contains is substring/noisy and should be used only for exploratory search.' })),
+      include_signature: Type.Optional(Type.Boolean({ description: 'For declarations/implementations, include signatures without full bodies. Prefer this before include_code.' })),
+      include_code: Type.Optional(Type.Boolean({ description: 'For exact declaration/implementation lookups, include bounded source snippets where supported. Not intended for broad reference searches.' })),
+      scope: Type.Optional(Type.Union([Type.Literal('file'), Type.Literal('directory')], { description: 'Override whether path is treated as a file or directory. Use file to disambiguate one declaration; use directory/project for cross-file references.' })),
+      glob: Type.Optional(Type.String({ description: 'Optional glob to restrict files while scanning a directory. Use to limit tests/generated areas when needed.' })),
+      reference_kinds: Type.Optional(Type.Array(Type.Union([Type.Literal('call'), Type.Literal('read'), Type.Literal('implements'), Type.Literal('extends')]), { description: 'Only for relation=references. Omit to search all supported reference kinds. Use call for invocations, read for JSX/value/type-like usages, implements/extends for type relationships.' })),
       limit: Type.Optional(Type.Number({ description: 'Maximum items to return in this page. Default 50, max 100.' })),
       cursor: Type.Optional(Type.String({ description: 'Continuation cursor returned by a previous code_find result.' })),
     }, { additionalProperties: false }),
@@ -167,11 +172,11 @@ export function registerCodeFindTool(pi: any) {
         const allResults = await addSourceLines(resolution.results);
         const page = boundedWindow(allResults, params.limit, params.cursor);
         if (allResults.length === 0) {
-          return { content: [{ type: 'text', text: `No references found for '${input.symbol}'.` }], details: { query: input.symbol, path: input.path, language: input.language, kind: input.kind, relation, found: 0, items: [], results: [], summary: { returned: 0, total: 0, has_more: false }, provenance: resolution.diagnostics, ...resolution.diagnostics } };
+          return { content: [{ type: 'text', text: `No references found for '${input.symbol}'.` }], details: { query: input.symbol, path: input.path, language: input.language, kind: input.kind, match: params.match, relation, found: 0, items: [], results: [], summary: { returned: 0, total: 0, has_more: false }, provenance: resolution.diagnostics, ...resolution.diagnostics } };
         }
         return {
           content: [{ type: 'text', text: formatReferenceItems(ctx.cwd, input.symbol, page.items, allResults.length, page.nextCursor) }],
-          details: { query: input.symbol, path: input.path, language: input.language, kind: input.kind, relation, found: page.items.length, items: page.items, results: page.items, summary: { returned: page.items.length, total: allResults.length, has_more: Boolean(page.nextCursor), next_cursor: page.nextCursor, offset: page.offset, limit: page.limit }, provenance: resolution.diagnostics, ...resolution.diagnostics },
+          details: { query: input.symbol, path: input.path, language: input.language, kind: input.kind, match: params.match, relation, found: page.items.length, items: page.items, results: page.items, summary: { returned: page.items.length, total: allResults.length, has_more: Boolean(page.nextCursor), next_cursor: page.nextCursor, offset: page.offset, limit: page.limit }, provenance: resolution.diagnostics, ...resolution.diagnostics },
         };
       }
 
@@ -193,11 +198,11 @@ export function registerCodeFindTool(pi: any) {
         : resolution.results;
       const page = boundedWindow(filtered, params.limit, params.cursor);
       if (filtered.length === 0) {
-        return { content: [{ type: 'text', text: `No symbol '${input.symbol}' found.` }], details: { query: input.symbol, path: input.path, language: input.language, kind: input.kind, declaration_kind: input.declaration_kind, relation, found: 0, items: [], results: [], summary: { returned: 0, total: 0, has_more: false }, provenance: resolution.diagnostics, ...resolution.diagnostics } };
+        return { content: [{ type: 'text', text: `No symbol '${input.symbol}' found.` }], details: { query: input.symbol, path: input.path, language: input.language, kind: input.kind, declaration_kind: input.declaration_kind, match: params.match, relation, found: 0, items: [], results: [], summary: { returned: 0, total: 0, has_more: false }, provenance: resolution.diagnostics, ...resolution.diagnostics } };
       }
       return {
         content: [{ type: 'text', text: formatSymbolItems(ctx.cwd, input.symbol, page.items, filtered.length, page.nextCursor) }],
-        details: { query: input.symbol, path: input.path, language: input.language, kind: input.kind, declaration_kind: input.declaration_kind, relation, found: page.items.length, items: page.items, results: page.items, summary: { returned: page.items.length, total: filtered.length, has_more: Boolean(page.nextCursor), next_cursor: page.nextCursor, offset: page.offset, limit: page.limit }, provenance: resolution.diagnostics, ...resolution.diagnostics },
+        details: { query: input.symbol, path: input.path, language: input.language, kind: input.kind, declaration_kind: input.declaration_kind, match: params.match, relation, found: page.items.length, items: page.items, results: page.items, summary: { returned: page.items.length, total: filtered.length, has_more: Boolean(page.nextCursor), next_cursor: page.nextCursor, offset: page.offset, limit: page.limit }, provenance: resolution.diagnostics, ...resolution.diagnostics },
       };
     },
   });

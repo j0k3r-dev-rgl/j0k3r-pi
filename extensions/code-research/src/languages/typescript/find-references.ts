@@ -76,6 +76,16 @@ async function findCallableReferences(
     }
   }
 
+  for (const topLevelReference of findTopLevelCallableReferences(index, target, input)) {
+    results.push(topLevelReference);
+  }
+
+  if (target.kind === 'method' && target.ownerName) {
+    for (const receiverReference of findMethodReferencesByReceiverHeuristic(index, target, input)) {
+      results.push(receiverReference);
+    }
+  }
+
   for (const caller of index.callables) {
     if (!matchesRequestedLanguage(caller.language, input.language)) continue;
     const aliasNames = collectCallableAliases(caller, target.symbol);
@@ -114,6 +124,127 @@ async function findCallableReferences(
   }
 
   return dedupeReferences(results);
+}
+
+function findTopLevelCallableReferences(index: TypeScriptProjectIndex, target: IndexedCallable, input: FindReferencesInput): ReferenceLocation[] {
+  if (target.kind !== 'function') return [];
+  const results: ReferenceLocation[] = [];
+  for (const file of index.files.values()) {
+    if (!matchesRequestedLanguage(file.language, input.language)) continue;
+    const localNames = collectCallableAliasesForFile(index, file, target);
+    if (file.file === target.file) localNames.add(target.symbol);
+    for (const localName of localNames) {
+      const pattern = new RegExp(`\\b${escapeRegExp(localName)}\\s*\\(`, 'g');
+      for (const match of findAllRegexPositions(file.source, pattern)) {
+        if (findContext(index, file.file, match.line)) continue;
+        results.push({
+          file: file.file,
+          line: match.line,
+          column: match.column,
+          symbol: target.symbol,
+          kind: target.kind,
+          context_symbol: '<top-level>',
+          context_kind: 'function',
+          owner_kind: 'module',
+          reference_kind: 'call',
+          called_as: extractCallText(file.source, match.line, match.column),
+          is_application: true,
+          source: 'application',
+        });
+      }
+    }
+  }
+  return results;
+}
+
+function findMethodReferencesByReceiverHeuristic(index: TypeScriptProjectIndex, target: IndexedCallable, input: FindReferencesInput): ReferenceLocation[] {
+  const ownerName = target.ownerName;
+  if (!ownerName) return [];
+  const results: ReferenceLocation[] = [];
+  for (const file of index.files.values()) {
+    if (!matchesRequestedLanguage(file.language, input.language)) continue;
+    const receiverNames = collectReceiversForClass(index, file, ownerName);
+    if (receiverNames.size === 0) continue;
+    for (const receiver of receiverNames) {
+      const pattern = new RegExp(`\\b${escapeRegExp(receiver)}\\s*\\.\\s*${escapeRegExp(target.symbol)}\\s*\\(`, 'g');
+      for (const match of findAllRegexPositions(file.source, pattern)) {
+        const context = findContext(index, file.file, match.line);
+        results.push({
+          file: file.file,
+          line: match.line,
+          column: match.column,
+          end_line: context?.endLine,
+          end_column: context?.endColumn,
+          symbol: target.symbol,
+          kind: 'method',
+          context_symbol: context?.symbol ?? '<top-level>',
+          context_kind: context?.kind ?? 'function',
+          context_class: context?.className,
+          owner_kind: context?.ownerKind ?? 'module',
+          reference_kind: 'call',
+          called_as: extractCallText(file.source, match.line, match.column),
+          receiver_name: receiver,
+          receiver_type: ownerName,
+          is_application: true,
+          source: 'application',
+        });
+      }
+    }
+  }
+  return results;
+}
+
+function collectCallableAliasesForFile(index: TypeScriptProjectIndex, file: { file: string; imports: Map<string, any> }, target: IndexedCallable): Set<string> {
+  const localNames = new Set<string>();
+  for (const binding of file.imports.values()) {
+    const resolved = binding.importedName === 'default'
+      ? resolveImportedCallable(index, file.file, binding)
+      : resolveImportedCallable(index, file.file, binding) ?? undefined;
+    if (resolved && sameCallable(resolved, target)) localNames.add(binding.localName);
+  }
+  return localNames;
+}
+
+function resolveImportedCallable(index: TypeScriptProjectIndex, currentFile: string, binding: any): IndexedCallable | undefined {
+  if (binding.kind === 'namespace') return undefined;
+  const targetFile = resolveTypeScriptImportCandidates(currentFile, binding.source, index.projectConfig).find((candidate) => index.files.has(candidate));
+  if (!targetFile) return undefined;
+  return resolveExportedCallable(index, targetFile, binding.importedName);
+}
+
+function resolveImportedClass(index: TypeScriptProjectIndex, currentFile: string, binding: any): IndexedClass | undefined {
+  if (binding.kind === 'namespace') return undefined;
+  const targetFile = resolveTypeScriptImportCandidates(currentFile, binding.source, index.projectConfig).find((candidate) => index.files.has(candidate));
+  if (!targetFile) return undefined;
+  return index.classes.find((item) => item.file === targetFile && item.exportedName === binding.importedName);
+}
+
+function collectReceiversForClass(index: TypeScriptProjectIndex, file: { file: string; source: string; imports: Map<string, any> }, className: string): Set<string> {
+  const receivers = new Set<string>();
+  const localClassNames = new Set<string>([className]);
+  for (const binding of file.imports.values()) {
+    const resolved = resolveImportedClass(index, file.file, binding);
+    if (resolved?.className === className) localClassNames.add(binding.localName);
+  }
+  for (const localClassName of localClassNames) {
+    for (const match of file.source.matchAll(new RegExp(`\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*(?::\\s*${escapeRegExp(localClassName)}\\b)?\\s*=\\s*[^;\n]*new\\s+${escapeRegExp(localClassName)}\\s*\\(`, 'g'))) {
+      if (match[1]) receivers.add(match[1]);
+    }
+    for (const match of file.source.matchAll(new RegExp(`\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*:\\s*${escapeRegExp(localClassName)}\\b`, 'g'))) {
+      if (match[1]) receivers.add(match[1]);
+    }
+    for (const match of file.source.matchAll(new RegExp(`\\b([A-Za-z_$][\\w$]*)\\??\\s*:\\s*${escapeRegExp(localClassName)}\\b`, 'g'))) {
+      if (match[1] && !['const', 'let', 'var'].includes(match[1])) receivers.add(match[1]);
+    }
+  }
+  return receivers;
+}
+
+function extractCallText(source: string, line: number, column: number): string {
+  const lineText = source.split('\n')[line - 1] ?? '';
+  const tail = lineText.slice(column);
+  const match = tail.match(/^[^;\n]+/);
+  return (match?.[0] ?? tail).trim();
 }
 
 async function findTypeLikeReferences(

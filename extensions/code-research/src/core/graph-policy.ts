@@ -70,8 +70,8 @@ export function getFindReferencesGraphCoverage(input: FindReferencesInput): Find
   }
 
   return {
-    requiredReferenceKinds: undefined,
-    graphCoverageMode: 'conservative-fallback',
+    requiredReferenceKinds: [...GRAPH_REFERENCE_KINDS],
+    graphCoverageMode: 'supported-subset',
   };
 }
 

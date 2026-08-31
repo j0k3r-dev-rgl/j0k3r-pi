@@ -86,6 +86,41 @@ describe('find_references', () => {
     expect(results.every((item) => item.reference_kind === 'call')).toBe(true);
   });
 
+  it('finds TypeScript class and method references through .js imports and constructed receivers', async () => {
+    const rootDir = await createProject('pi-find-references-ts-class-method-js-import', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'tsconfig.json': `{}\n`,
+      'src/application/review-analysis/review-analysis-processor.ts': `export class ReviewAnalysisProcessor {\n  stop(): void {}\n}\n`,
+      'src/server.ts': `import { ReviewAnalysisProcessor } from "./application/review-analysis/review-analysis-processor.js";\nlet injected?: ReviewAnalysisProcessor;\nconst reviewAnalysisProcessor = injected ?? new ReviewAnalysisProcessor();\nreviewAnalysisProcessor.stop();\n`,
+      'test/unit/review-analysis-processor.test.ts': `import { ReviewAnalysisProcessor } from "../../src/application/review-analysis/review-analysis-processor.js";\nconst processor = new ReviewAnalysisProcessor();\nprocessor.stop();\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+
+    const classRefs = await findReferences(rootDir, {
+      path: 'src/application/review-analysis/review-analysis-processor.ts',
+      symbol: 'ReviewAnalysisProcessor',
+      language: 'ts',
+      kind: 'class',
+    });
+    expect(classRefs.map((item) => `${item.reference_kind}:${item.line}`).sort()).toEqual([
+      'import:1',
+      'import:1',
+      'instantiate:2',
+      'instantiate:3',
+      'type_reference:2',
+    ]);
+
+    const methodRefs = await findReferences(rootDir, {
+      path: 'src/application/review-analysis/review-analysis-processor.ts',
+      symbol: 'stop',
+      language: 'ts',
+      kind: 'method',
+      reference_kinds: ['call'],
+    });
+    expect(methodRefs.map((item) => item.called_as).sort()).toEqual(['processor.stop()', 'reviewAnalysisProcessor.stop()']);
+  });
+
   it('finds JavaScript call references for a function across multiple files', async () => {
     const rootDir = await createProject('pi-find-references-js', {
       'src/service.js': `export function helper() {}\n\nexport function runService() {\n  helper();\n}\n\nexport function warmupService() {\n  helper();\n}\n`,

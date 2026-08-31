@@ -382,6 +382,7 @@ export type GraphNode =
       name: string;
       file: string;
       range: SourceRange;
+      codeRange?: SourceRange;
       owner?: string;
       ownerKind?: OwnerKind;
       exported: boolean;

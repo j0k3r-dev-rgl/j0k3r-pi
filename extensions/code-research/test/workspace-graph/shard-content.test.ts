@@ -53,6 +53,7 @@ describe('workspace graph shard content', () => {
       isImplementation: true,
       qualifiedName: 'Vault.secret',
     });
+    expect(secret?.codeRange).toEqual(secret?.range);
     expect(secret?.symbolId).toMatch(/^[a-f0-9]{64}$/);
     expect(secret?.logicalSymbolKey).toContain('ts::');
     expect(secret?.snapshotSymbolId).toMatch(/^[a-f0-9]{64}$/);

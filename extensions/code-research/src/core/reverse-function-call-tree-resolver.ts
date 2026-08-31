@@ -1,4 +1,4 @@
-import type { FunctionCallTreeInput, FunctionCallTreeResult } from '../types.js';
+import type { CallTreeNode, FunctionCallTreeInput, FunctionCallTreeResult, ReferenceLocation } from '../types.js';
 import { executeJavaReverseFunctionCallTree } from '../languages/java/reverse-function-call-tree.js';
 import { executeGoReverseFunctionCallTree } from '../languages/go/reverse-function-call-tree.js';
 import { executeTypeScriptReverseFunctionCallTree } from '../languages/typescript/reverse-function-call-tree.js';
@@ -6,6 +6,7 @@ import { loadCodeResearchConfig } from '../config.js';
 import { readWorkspaceGraphManifest, readWorkspaceGraphState } from './graph-persistence.js';
 import { evaluateGraphUsability } from './graph-policy.js';
 import { queryReverseFunctionCallTreeFromGraph } from './reverse-graph-queries.js';
+import { resolveFindReferences } from './find-references-resolver.js';
 
 export type ReverseFunctionCallTreeExecutionResult =
   | {
@@ -29,7 +30,14 @@ export async function executeReverseFunctionCallTree(
   input: FunctionCallTreeInput
 ): Promise<ReverseFunctionCallTreeExecutionResult> {
   const graphResult = await tryGraphBackedReverseFunctionCallTree(cwd, input);
-  if (graphResult) return { status: 'ok', ...graphResult };
+  if (graphResult) {
+    if (hasIncomingCallers(graphResult.result) || (input.language !== 'ts' && input.language !== 'js')) {
+      return { status: 'ok', ...graphResult };
+    }
+    const referenceBacked = await tryReferenceBackedReverseFunctionCallTree(cwd, input, graphResult.result);
+    if (referenceBacked) return { status: 'ok', rootClassName: graphResult.rootClassName, result: referenceBacked };
+    return { status: 'ok', ...graphResult };
+  }
 
   const language = input.language ?? 'java';
 
@@ -37,8 +45,12 @@ export async function executeReverseFunctionCallTree(
     case 'java':
       return executeJavaReverseFunctionCallTree(cwd, input);
     case 'ts':
-    case 'js':
-      return executeTypeScriptReverseFunctionCallTree(cwd, input);
+    case 'js': {
+      const direct = await executeTypeScriptReverseFunctionCallTree(cwd, input);
+      if (direct.status !== 'ok' || hasIncomingCallers(direct.result)) return direct;
+      const referenceBacked = await tryReferenceBackedReverseFunctionCallTree(cwd, input, direct.result);
+      return referenceBacked ? { ...direct, result: referenceBacked } : direct;
+    }
     case 'go':
       return executeGoReverseFunctionCallTree(cwd, input as any);
     case 'auto':
@@ -46,6 +58,53 @@ export async function executeReverseFunctionCallTree(
     default:
       throw new Error(`Unsupported language: ${language}`);
   }
+}
+
+function hasIncomingCallers(result: FunctionCallTreeResult): boolean {
+  return Array.isArray(result.root.callers) && result.root.callers.length > 0;
+}
+
+async function tryReferenceBackedReverseFunctionCallTree(cwd: string, input: FunctionCallTreeInput, graphResult: FunctionCallTreeResult): Promise<FunctionCallTreeResult | undefined> {
+  const references = await resolveFindReferences(cwd, {
+    path: input.path,
+    symbol: input.symbol,
+    language: input.language,
+    kind: input.kind as any,
+    reference_kinds: ['call'],
+  }).then((result) => result.results).catch(() => [] as ReferenceLocation[]);
+  if (references.length === 0) return undefined;
+
+  const callers = references.map(referenceToCallerNode);
+  const result: FunctionCallTreeResult = {
+    root: { ...graphResult.root, callers },
+    stats: { total_nodes: 1 + callers.length, application_nodes: 1 + callers.length, external_nodes: 0, max_depth_reached: callers.length > 0 ? 1 : 0 },
+  };
+  return result;
+}
+
+function referenceToCallerNode(reference: ReferenceLocation): CallTreeNode {
+  return {
+    file: reference.file,
+    symbol: reference.context_symbol ?? '<top-level>',
+    kind: reference.context_kind ?? 'function',
+    node_type: 'application',
+    class: reference.context_class,
+    owner_kind: reference.owner_kind ?? 'module',
+    line: reference.line,
+    column: reference.column,
+    start_line: reference.line,
+    start_column: reference.column,
+    end_line: reference.end_line ?? reference.line,
+    end_column: reference.end_column ?? reference.column,
+    called_as: reference.called_as,
+    receiver_name: reference.receiver_name,
+    receiver_type: reference.receiver_type,
+    call_line: reference.line,
+    call_column: reference.column,
+    is_application: true,
+    is_external: false,
+    source: 'application',
+  };
 }
 
 async function tryGraphBackedReverseFunctionCallTree(cwd: string, input: FunctionCallTreeInput) {

@@ -538,7 +538,7 @@ function graphNodeToCanonicalRecord(node: Extract<GraphNode, { kind: 'symbol' }>
     dynamicName: node.dynamicName,
     modifiers: node.modifiers ?? [],
     declarationRange: node.range,
-    codeRange: node.range,
+    codeRange: node.codeRange ?? node.range,
     isDefinition: node.isDefinition ?? true,
     isImplementation: node.isImplementation ?? node.symbolKind !== 'interface',
     discriminator: `${node.declarationKind ?? node.symbolKind}:${node.range.startLine}:${node.range.startColumn}`,

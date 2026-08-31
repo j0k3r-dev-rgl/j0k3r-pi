@@ -89,6 +89,24 @@ describe('reverse_function_call_tree', () => {
     expect(execution.result.stats.application_nodes).toBe(9);
   });
 
+  it('returns JavaScript top-level callers for module entrypoint invocations', async () => {
+    const rootDir = await createProject('pi-reverse-call-tree-js-top-level', {
+      'src/main.mjs': `export async function main() {\n  return 1;\n}\n\nmain().catch((error) => {\n  console.error(error);\n});\n`,
+    });
+
+    const execution = await executeReverseFunctionCallTree(rootDir, {
+      path: 'src/main.mjs',
+      symbol: 'main',
+      language: 'js',
+      kind: 'function',
+      max_depth: 3,
+    });
+
+    expect(execution.status).toBe('ok');
+    if (execution.status !== 'ok') return;
+    expect(execution.result.root.callers?.[0]).toMatchObject({ symbol: '<top-level>', call_line: 5 });
+  });
+
   it('returns JavaScript callers recursively with callers arrays and multiple incoming branches across higher levels', async () => {
     const rootDir = await createProject('pi-reverse-call-tree-js', {
       'src/service.js': `export function helper() {}\n\nexport function runService() {\n  helper();\n}\n\nexport function warmupService() {\n  helper();\n}\n`,
@@ -150,6 +168,29 @@ describe('reverse_function_call_tree', () => {
     expect(execution.result.root.symbol).toBe('helper');
     expect(execution.result.root.callers?.map((node: any) => node.symbol).sort()).toEqual(['runService', 'warmupService']);
     expect(execution.result.root.callers?.find((node: any) => node.symbol === 'runService')?.callers?.[0].symbol).toBe('handleRequest');
+  });
+
+  it('uses persisted JSX read edges as incoming component callers', async () => {
+    const rootDir = await createProject('pi-reverse-call-tree-jsx-read', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'tsconfig.json': `{"compilerOptions":{"jsx":"react-jsx","module":"ESNext","target":"ES2022"}}\n`,
+      'src/ReseniaPDFPreview.tsx': `export default function ReseniaPDFPreview(): JSX.Element {\n  return <section />;\n}\n`,
+      'src/route.tsx': `import ReseniaPDFPreview from './ReseniaPDFPreview';\n\nexport function ReviewRoute(): JSX.Element {\n  return <ReseniaPDFPreview />;\n}\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+
+    const execution = await executeReverseFunctionCallTree(rootDir, {
+      path: 'src/ReseniaPDFPreview.tsx',
+      symbol: 'ReseniaPDFPreview',
+      language: 'ts',
+      kind: 'function',
+      max_depth: 3,
+    });
+
+    expect(execution.status).toBe('ok');
+    if (execution.status !== 'ok') return;
+    expect(execution.result.root.callers?.[0]).toMatchObject({ symbol: 'ReviewRoute', call_line: 4 });
   });
 
   it('falls back to direct parsing when reverse graph state is stale', async () => {
@@ -268,6 +309,26 @@ describe('reverse_function_call_tree', () => {
     expect(intResult.root.callers?.[0].called_as).toBe('process(1)');
     expect(stringResult.root.callers?.map((node) => node.symbol)).toEqual(['runString']);
     expect(stringResult.root.callers?.[0].called_as).toBe('process("x")');
+  });
+
+  it('aggregates graph-backed Java overload callers when the input does not disambiguate signature', async () => {
+    const rootDir = await createProject('pi-reverse-call-tree-java-overloads-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/main/java/app/Example.java': `package app;\n\npublic class Example {\n  public void runInt() {\n    process(1);\n  }\n\n  public void runString() {\n    process("x");\n  }\n\n  private void process(int value) {}\n\n  private void process(String value) {}\n}\n`,
+    });
+    await buildWorkspaceGraph(rootDir);
+
+    const execution = await executeReverseFunctionCallTree(rootDir, {
+      path: 'src/main/java/app/Example.java',
+      symbol: 'process',
+      language: 'java',
+      kind: 'method',
+      max_depth: 3,
+    });
+
+    expect(execution.status).toBe('ok');
+    if (execution.status !== 'ok') return;
+    expect(execution.result.root.callers?.map((node: any) => node.symbol).sort()).toEqual(['runInt', 'runString']);
   });
 
   it('keeps graph-backed locally constructed instance reverse call trees aligned with direct mode', async () => {

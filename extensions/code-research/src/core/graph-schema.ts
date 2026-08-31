@@ -153,6 +153,7 @@ export function isGraphNode(value: any): value is GraphNode {
       typeof value.name === 'string' &&
       typeof value.file === 'string' &&
       isSourceRange(value.range) &&
+      (value.codeRange === undefined || isSourceRange(value.codeRange)) &&
       typeof value.exported === 'boolean' &&
       (value.owner === undefined || typeof value.owner === 'string') &&
       (value.ownerKind === undefined || typeof value.ownerKind === 'string') &&

@@ -77,6 +77,32 @@ describe('code-research extension entry integration', () => {
     expect(result.details.summary).toMatchObject({ returned: 1, total: 1, has_more: false });
   });
 
+  it('includes bounded source code in declaration output when include_code is requested', async () => {
+    const tools = registerTools();
+    const codeFind = tools.find((tool) => tool.name === 'code_find');
+    expect(codeFind).toBeDefined();
+
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/main/java/app/Worker.java': `package app;\n\npublic class Worker {\n  public void run() {\n    helper();\n  }\n\n  private void helper() {}\n}\n`,
+    });
+    await buildWorkspaceGraph(rootDir);
+
+    const result = await codeFind!.execute('test-call-code', {
+      path: 'src/main/java/app/Worker.java',
+      query: 'run',
+      relation: 'declaration',
+      language: 'java',
+      kind: 'method',
+      include_code: true,
+      include_signature: true,
+    }, undefined, undefined, { cwd: rootDir });
+
+    expect(result.details.items[0].code).toContain('public void run()');
+    expect(result.content[0].text).toContain('public void run()');
+    expect(result.content[0].text).toContain('```');
+  });
+
   it('executes code_find references lookup with auto language and bounded cursor metadata', async () => {
     const tools = registerTools();
     const codeFind = tools.find((tool) => tool.name === 'code_find');
@@ -163,9 +189,12 @@ describe('code-research extension entry integration', () => {
     const expanded = renderToolResult(hierarchy!, result, true);
 
     expect(compact).toContain('code_call_hierarchy');
+    expect(compact).toContain('search direction=outgoing');
+    expect(compact).toContain('query=root');
     expect(compact).toContain('root');
     expect(compact).not.toContain('CODE_RESEARCH_RENDER_FULL_CONTENT_MARKER');
     expect(expanded).toContain('code_call_hierarchy');
+    expect(expanded).toContain('search direction=outgoing');
     expect(expanded).toContain('CODE_RESEARCH_RENDER_FULL_CONTENT_MARKER');
   });
 

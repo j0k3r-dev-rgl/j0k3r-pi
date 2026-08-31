@@ -93,12 +93,14 @@ function querySummary(result: any): string | undefined {
   const relation = details.relation;
   const direction = details.direction;
   const language = details.language;
+  const match = details.match;
   const parts = [
     relation ? `relation=${relation}` : undefined,
     direction ? `direction=${direction}` : undefined,
     query ? `query=${query}` : undefined,
     path ? `path=${path}` : undefined,
     language ? `lang=${language}` : undefined,
+    match && match !== 'exact' ? `match=${match}${match === 'contains' ? ' (substring/noisy)' : ''}` : undefined,
   ].filter(Boolean);
   return parts.length > 0 ? `search ${parts.join(' · ')}` : undefined;
 }

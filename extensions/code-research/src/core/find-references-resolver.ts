@@ -121,8 +121,10 @@ function mapGraphStatus(stateStatus: string, manifestStatus: string, graphState?
 }
 
 function shouldCompareDirectResults(input: FindReferencesInput): boolean {
+  if (!Array.isArray(input.reference_kinds) || input.reference_kinds.length === 0) return true;
   const requestedKinds = new Set(input.reference_kinds ?? []);
   if (requestedKinds.has('read')) return true;
+  if ((input.language === 'ts' || input.language === 'js') && requestedKinds.has('call')) return true;
   return input.language === 'java' && input.kind === 'interface' && requestedKinds.has('implements');
 }
 
