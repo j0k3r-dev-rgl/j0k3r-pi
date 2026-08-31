@@ -12,15 +12,6 @@ export const SUBPROJECT_MARKERS = [
   'settings.gradle',
   'go.mod',
   'go.work',
-  'pyproject.toml',
-  'uv.lock',
-  'setup.py',
-  'setup.cfg',
-  'requirements.txt',
-  'requirements-dev.txt',
-  'requirements-test.txt',
-  'Pipfile',
-  'poetry.lock',
 ] as const;
 
 export interface DetectedSubproject {

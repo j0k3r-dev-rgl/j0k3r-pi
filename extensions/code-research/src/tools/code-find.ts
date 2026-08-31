@@ -71,6 +71,24 @@ function formatReferenceItems(cwd: string, query: string, items: ReferenceLocati
   return `Found ${items.length} of ${total} reference(s) for '${query}':\n\n${rows.join('\n')}${more}`;
 }
 
+function flattenImplementationResults(results: SymbolLocation[]): SymbolLocation[] {
+  const flattened = new Map<string, SymbolLocation>();
+  for (const item of results) {
+    const implementations = item.implementation_locations ?? [];
+    const candidates = implementations.length > 0 ? implementations : item.is_implementation ? [item] : [];
+    for (const candidate of candidates) {
+      const key = `${candidate.file}:${candidate.symbol}:${candidate.kind}:${candidate.start_line}:${candidate.start_column}`;
+      flattened.set(key, candidate);
+    }
+  }
+  return [...flattened.values()].sort((a, b) =>
+    a.file.localeCompare(b.file) ||
+    a.start_line - b.start_line ||
+    a.start_column - b.start_column ||
+    a.symbol.localeCompare(b.symbol)
+  );
+}
+
 async function resolveReferencesAcrossLanguages(cwd: string, input: FindReferencesInput) {
   if (input.language && input.language !== 'auto') return resolveFindReferences(cwd, input);
   const results: ReferenceLocation[] = [];
@@ -149,11 +167,11 @@ export function registerCodeFindTool(pi: any) {
         const allResults = await addSourceLines(resolution.results);
         const page = boundedWindow(allResults, params.limit, params.cursor);
         if (allResults.length === 0) {
-          return { content: [{ type: 'text', text: `No references found for '${input.symbol}'.` }], details: { relation, found: 0, items: [], results: [], summary: { returned: 0, total: 0, has_more: false }, provenance: resolution.diagnostics, ...resolution.diagnostics } };
+          return { content: [{ type: 'text', text: `No references found for '${input.symbol}'.` }], details: { query: input.symbol, path: input.path, language: input.language, kind: input.kind, relation, found: 0, items: [], results: [], summary: { returned: 0, total: 0, has_more: false }, provenance: resolution.diagnostics, ...resolution.diagnostics } };
         }
         return {
           content: [{ type: 'text', text: formatReferenceItems(ctx.cwd, input.symbol, page.items, allResults.length, page.nextCursor) }],
-          details: { relation, found: page.items.length, items: page.items, results: page.items, summary: { returned: page.items.length, total: allResults.length, has_more: Boolean(page.nextCursor), next_cursor: page.nextCursor, offset: page.offset, limit: page.limit }, provenance: resolution.diagnostics, ...resolution.diagnostics },
+          details: { query: input.symbol, path: input.path, language: input.language, kind: input.kind, relation, found: page.items.length, items: page.items, results: page.items, summary: { returned: page.items.length, total: allResults.length, has_more: Boolean(page.nextCursor), next_cursor: page.nextCursor, offset: page.offset, limit: page.limit }, provenance: resolution.diagnostics, ...resolution.diagnostics },
         };
       }
 
@@ -171,15 +189,15 @@ export function registerCodeFindTool(pi: any) {
       };
       const resolution = await resolveFindSymbol(ctx.cwd, input);
       const filtered = relation === 'implementation'
-        ? resolution.results.filter((item) => item.is_implementation || (item.implementation_locations?.length ?? 0) > 0)
+        ? flattenImplementationResults(resolution.results)
         : resolution.results;
       const page = boundedWindow(filtered, params.limit, params.cursor);
       if (filtered.length === 0) {
-        return { content: [{ type: 'text', text: `No symbol '${input.symbol}' found.` }], details: { relation, found: 0, items: [], results: [], summary: { returned: 0, total: 0, has_more: false }, provenance: resolution.diagnostics, ...resolution.diagnostics } };
+        return { content: [{ type: 'text', text: `No symbol '${input.symbol}' found.` }], details: { query: input.symbol, path: input.path, language: input.language, kind: input.kind, declaration_kind: input.declaration_kind, relation, found: 0, items: [], results: [], summary: { returned: 0, total: 0, has_more: false }, provenance: resolution.diagnostics, ...resolution.diagnostics } };
       }
       return {
         content: [{ type: 'text', text: formatSymbolItems(ctx.cwd, input.symbol, page.items, filtered.length, page.nextCursor) }],
-        details: { relation, found: page.items.length, items: page.items, results: page.items, summary: { returned: page.items.length, total: filtered.length, has_more: Boolean(page.nextCursor), next_cursor: page.nextCursor, offset: page.offset, limit: page.limit }, provenance: resolution.diagnostics, ...resolution.diagnostics },
+        details: { query: input.symbol, path: input.path, language: input.language, kind: input.kind, declaration_kind: input.declaration_kind, relation, found: page.items.length, items: page.items, results: page.items, summary: { returned: page.items.length, total: filtered.length, has_more: Boolean(page.nextCursor), next_cursor: page.nextCursor, offset: page.offset, limit: page.limit }, provenance: resolution.diagnostics, ...resolution.diagnostics },
       };
     },
   });

@@ -1,10 +1,10 @@
-export type SupportedLanguage = 'ts' | 'js' | 'java' | 'go' | 'py' | 'auto';
+export type SupportedLanguage = 'ts' | 'js' | 'java' | 'go' | 'auto';
 export type SymbolKind = 'function' | 'class' | 'method' | 'interface' | 'variable' | 'unknown';
 export type SearchScope = 'file' | 'directory';
 export type SearchMode = 'exact' | 'prefix' | 'contains';
 export type WorkspaceGraphStatusKind = 'missing' | 'fresh' | 'stale' | 'refreshing' | 'partial' | 'errored' | 'incompatible';
 export type GraphNodeKind = 'workspace' | 'subproject' | 'file' | 'symbol';
-export type GraphEdgeKind = 'contains' | 'imports' | 'calls' | 'reads' | 'implements' | 'extends' | 'permits' | 'entrypoint';
+export type GraphEdgeKind = 'contains' | 'imports' | 'calls' | 'reads' | 'implements' | 'extends' | 'permits';
 
 export type TypeScriptDeclarationKindValues =
   | 'function'
@@ -331,7 +331,7 @@ export interface SubprojectGraphState {
   id: string;
   root: string;
   status: WorkspaceGraphStatusKind;
-  languageHints: Array<'java' | 'go' | 'ts' | 'js' | 'py'>;
+  languageHints: Array<'java' | 'go' | 'ts' | 'js'>;
   shardPath: string;
   snapshot: SubprojectSnapshot;
   generation: number;
@@ -340,6 +340,8 @@ export interface SubprojectGraphState {
 
 export interface WorkspaceGraphState {
   schemaVersion: number;
+  builderModelVersion: number;
+  builderFingerprint: string;
   createdBy: 'pi-code-research-extension';
   projectRoot: string;
   status: WorkspaceGraphStatusKind;
@@ -359,6 +361,8 @@ export interface WorkspaceGraphState {
 
 export interface GraphManifest {
   schemaVersion: number;
+  builderModelVersion: number;
+  builderFingerprint: string;
   createdBy: 'pi-code-research-extension';
   projectRoot: string;
   generation: number;
@@ -369,11 +373,11 @@ export interface GraphManifest {
 export type GraphNode =
   | { id: string; kind: 'workspace'; name: string; root: string }
   | { id: string; kind: 'subproject'; name: string; root: string; markers: string[]; languages: string[] }
-  | { id: string; kind: 'file'; path: string; language: 'java' | 'go' | 'ts' | 'js' | 'py'; size: number; entrypoint?: boolean }
+  | { id: string; kind: 'file'; path: string; language: 'java' | 'go' | 'ts' | 'js'; size: number; entrypoint?: boolean }
   | {
       id: string;
       kind: 'symbol';
-      language: 'java' | 'go' | 'ts' | 'js' | 'py';
+      language: 'java' | 'go' | 'ts' | 'js';
       symbolKind: SymbolKind;
       name: string;
       file: string;
@@ -385,6 +389,8 @@ export type GraphNode =
       entrypoint?: boolean;
       declarationKind?: DeclarationKind;
       symbolId?: string;
+      logicalSymbolKey?: string;
+      snapshotSymbolId?: string;
       qualifiedName?: string;
       relationshipId?: string;
       sourceName?: string;
@@ -402,7 +408,10 @@ export interface GraphEdge {
   kind: GraphEdgeKind;
   from: string;
   to: string;
-  callsite?: { line: number; column: number; text?: string; receiverName?: string; receiverType?: string };
+  occurrenceRange?: SourceRange;
+  targetStatus?: 'resolved' | 'ambiguous' | 'external' | 'unresolved';
+  resolution?: 'exact' | 'heuristic' | 'ambiguous' | 'unresolved';
+  callsite?: { line: number; column: number; receiverName?: string; receiverType?: string };
   importSource?: string;
   external?: boolean;
   externalName?: string;
@@ -481,6 +490,8 @@ export interface GoSymbolCoverage {
 
 export interface SubprojectGraphShard {
   schemaVersion: number;
+  builderModelVersion: number;
+  builderFingerprint: string;
   createdBy: 'pi-code-research-extension';
   subprojectId: string;
   generation: number;

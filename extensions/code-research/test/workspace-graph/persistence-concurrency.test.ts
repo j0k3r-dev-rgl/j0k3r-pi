@@ -8,7 +8,7 @@ import {
   writeSubprojectGraphShard,
   writeWorkspaceGraphManifest,
 } from '../../src/core/graph-persistence.js';
-import { WORKSPACE_GRAPH_SCHEMA_VERSION, createWorkspaceNodeId } from '../../src/core/graph-schema.js';
+import { WORKSPACE_GRAPH_BUILDER_FINGERPRINT, WORKSPACE_GRAPH_BUILDER_MODEL_VERSION, WORKSPACE_GRAPH_SCHEMA_VERSION, createWorkspaceNodeId } from '../../src/core/graph-schema.js';
 
 describe('workspace graph persistence', () => {
   it('rejects incompatible schema versions and corrupt json safely', async () => {
@@ -22,6 +22,10 @@ describe('workspace graph persistence', () => {
     const incompatible = await readGraphArtifactJson(incompatiblePath);
     expect(incompatible.status).toBe('incompatible');
 
+    await writeFile(incompatiblePath, JSON.stringify({ schemaVersion: WORKSPACE_GRAPH_SCHEMA_VERSION, builderModelVersion: 1, builderFingerprint: WORKSPACE_GRAPH_BUILDER_FINGERPRINT, createdBy: 'pi-code-research-extension' }), 'utf8');
+    const incompatibleBuilder = await readGraphArtifactJson(incompatiblePath);
+    expect(incompatibleBuilder.status).toBe('incompatible');
+
     const corruptPath = join(graphDir, 'workspace-state.json');
     await writeFile(corruptPath, '{bad json', 'utf8');
     const corrupt = await readGraphArtifactJson(corruptPath);
@@ -34,6 +38,8 @@ describe('workspace graph persistence', () => {
 
     const manifestPath = await writeWorkspaceGraphManifest(rootDir, {
       schemaVersion: WORKSPACE_GRAPH_SCHEMA_VERSION,
+      builderModelVersion: WORKSPACE_GRAPH_BUILDER_MODEL_VERSION,
+      builderFingerprint: WORKSPACE_GRAPH_BUILDER_FINGERPRINT,
       createdBy: 'pi-code-research-extension',
       projectRoot: rootDir,
       generation: 1,
@@ -43,6 +49,8 @@ describe('workspace graph persistence', () => {
 
     const shardPath = await writeSubprojectGraphShard(rootDir, 'app', {
       schemaVersion: WORKSPACE_GRAPH_SCHEMA_VERSION,
+      builderModelVersion: WORKSPACE_GRAPH_BUILDER_MODEL_VERSION,
+      builderFingerprint: WORKSPACE_GRAPH_BUILDER_FINGERPRINT,
       createdBy: 'pi-code-research-extension',
       subprojectId: 'app',
       generation: 1,
@@ -77,6 +85,8 @@ describe('workspace graph persistence', () => {
 
     await writeWorkspaceGraphManifest(rootDir, {
       schemaVersion: WORKSPACE_GRAPH_SCHEMA_VERSION,
+      builderModelVersion: WORKSPACE_GRAPH_BUILDER_MODEL_VERSION,
+      builderFingerprint: WORKSPACE_GRAPH_BUILDER_FINGERPRINT,
       createdBy: 'pi-code-research-extension',
       projectRoot: rootDir,
       generation: 1,
@@ -97,6 +107,8 @@ describe('workspace graph persistence', () => {
 
     await writeWorkspaceGraphManifest(rootDir, {
       schemaVersion: WORKSPACE_GRAPH_SCHEMA_VERSION,
+      builderModelVersion: WORKSPACE_GRAPH_BUILDER_MODEL_VERSION,
+      builderFingerprint: WORKSPACE_GRAPH_BUILDER_FINGERPRINT,
       createdBy: 'pi-code-research-extension',
       projectRoot: rootDir,
       generation: 1,
@@ -114,6 +126,8 @@ describe('workspace graph persistence', () => {
 
     await writeWorkspaceGraphManifest(rootDir, {
       schemaVersion: WORKSPACE_GRAPH_SCHEMA_VERSION,
+      builderModelVersion: WORKSPACE_GRAPH_BUILDER_MODEL_VERSION,
+      builderFingerprint: WORKSPACE_GRAPH_BUILDER_FINGERPRINT,
       createdBy: 'pi-code-research-extension',
       projectRoot: rootDir,
       generation: 1,

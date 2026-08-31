@@ -126,7 +126,6 @@ describe('findReferences graph fallback', () => {
       column: 2,
       context_symbol: 'handle',
       reference_kind: 'call',
-      called_as: 'runService()',
     });
   });
 
@@ -149,7 +148,7 @@ describe('findReferences graph fallback', () => {
     });
 
     expect(results).toHaveLength(1);
-    expect(results[0].called_as).toBe('runService()');
+    expect(results[0].called_as).toBeUndefined();
     expect(results[0].context_symbol).toBe('handle');
   });
 

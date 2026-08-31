@@ -74,15 +74,15 @@ export function registerCodeCallHierarchyTool(pi: any) {
       if (config.graph.enable) void ensureWorkspaceGraphFreshness(ctx.cwd).catch(() => undefined);
 
       if (execution.status === 'not_found') {
-        return { content: [{ type: 'text', text: execution.message }], details: { direction, ...execution.details } };
+        return { content: [{ type: 'text', text: execution.message }], details: { query: input.symbol, path: input.path, language: input.language, kind: input.kind, direction, ...execution.details } };
       }
       if (execution.status === 'ambiguous') {
-        return { content: [{ type: 'text', text: execution.message }], details: { direction, ...execution.details } };
+        return { content: [{ type: 'text', text: execution.message }], details: { query: input.symbol, path: input.path, language: input.language, kind: input.kind, direction, ...execution.details } };
       }
 
       return {
         content: [{ type: 'text', text: `${direction === 'incoming' ? 'Incoming' : 'Outgoing'} call hierarchy for ${execution.rootClassName}.${input.symbol}:\n\n${JSON.stringify(execution.result, null, 2)}` }],
-        details: { direction, ...execution.result },
+        details: { query: input.symbol, path: input.path, language: input.language, kind: input.kind, direction, ...execution.result },
       };
     },
   });

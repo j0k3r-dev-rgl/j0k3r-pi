@@ -9,13 +9,12 @@ async function summarizeWorkspaceGraphState(
   manifestStatus: 'ok' | 'missing' | 'incompatible' | 'corrupt' | 'oversized' | 'errored',
   manifest?: GraphManifest
 ) {
-  const languages = { java: 0, go: 0, ts: 0, js: 0, py: 0 };
+  const languages = { java: 0, go: 0, ts: 0, js: 0 };
   const languageCoverage = {
     java: { subprojects: 0, fileCount: 0, symbolCount: 0 },
     go: { subprojects: 0, fileCount: 0, symbolCount: 0 },
     ts: { subprojects: 0, fileCount: 0, symbolCount: 0 },
     js: { subprojects: 0, fileCount: 0, symbolCount: 0 },
-    py: { subprojects: 0, fileCount: 0, symbolCount: 0 },
   };
   const now = Date.now();
   const updatedAtMs = Date.parse(state.updatedAt);

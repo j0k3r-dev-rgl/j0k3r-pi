@@ -1,3 +1,4 @@
+import { stat } from 'node:fs/promises';
 import { basename, extname, resolve } from 'node:path';
 import type {
   CallTreeNode,
@@ -33,16 +34,18 @@ export async function queryFunctionCallTreeFromGraph(options: {
 
   const allShards = shards.filter(Boolean) as SubprojectGraphShard[];
   const targetPath = resolve(cwd, input.path);
-  const relativeTarget = targetPath.startsWith(cwd) ? targetPath.slice(cwd.length + 1).replace(/\\/g, '/') : input.path.replace(/\\/g, '/');
+  const targetStat = await stat(targetPath).catch(() => undefined);
+  const targetIsDirectory = targetStat?.isDirectory() === true;
+  const relativeTarget = (targetPath.startsWith(cwd) ? targetPath.slice(cwd.length + 1).replace(/\\/g, '/') : input.path.replace(/\\/g, '/')).replace(/\/$/, '');
 
-  const symbols = allShards.flatMap((shard) => shard.nodes.filter((node): node is Extract<GraphNode, { kind: 'symbol' }> => node.kind === 'symbol'));
+  const symbols = allShards.flatMap((shard) => shard.nodes.filter((node): node is Extract<GraphNode, { kind: 'symbol' }> => node.kind === 'symbol' && matchesLanguage(node.language, input.language)));
   const targetCandidates = symbols.filter((node) => {
     if (node.name !== input.symbol) return false;
     if (input.kind && node.symbolKind !== input.kind) return false;
-    return node.file === relativeTarget || node.file.endsWith(`/${relativeTarget}`) || relativeTarget.endsWith(node.file);
+    return matchesTargetFile(node.file, relativeTarget, targetIsDirectory);
   });
 
-  const target = targetCandidates[0] ?? symbols.find((node) => node.name === input.symbol && (!input.kind || node.symbolKind === input.kind));
+  const target = targetCandidates[0];
   if (!target) return undefined;
 
   const nodeById = new Map<string, GraphNode>(symbols.map((node) => [node.id, node]));
@@ -105,7 +108,6 @@ function buildTree(
     if (target?.kind === 'symbol') {
       const child = buildTree(edge.to, nodeById, edges, maxDepth, includeExternal, depth + 1, visited);
       if (child) {
-        child.called_as = edge.callsite?.text;
         child.receiver_name = edge.callsite?.receiverName;
         child.receiver_type = edge.callsite?.receiverType;
         child.call_line = edge.callsite?.line;
@@ -122,7 +124,6 @@ function buildTree(
         node_type: edge.externalSource === 'framework' ? 'framework' : 'external',
         class: edge.externalOwner,
         owner_kind: edge.externalOwnerKind ?? 'unknown',
-        called_as: edge.callsite?.text,
         receiver_name: edge.callsite?.receiverName,
         receiver_type: edge.callsite?.receiverType,
         call_line: edge.callsite?.line,
@@ -150,4 +151,15 @@ function countNodes(node: CallTreeNode, depth: number, stats: FunctionCallTreeRe
   if (node.is_external) stats.external_nodes += 1;
   stats.max_depth_reached = Math.max(stats.max_depth_reached, depth);
   for (const child of node.children ?? []) countNodes(child, depth + 1, stats);
+}
+
+function matchesLanguage(nodeLanguage: string, inputLanguage: FunctionCallTreeInput['language']): boolean {
+  return !inputLanguage || inputLanguage === 'auto' || nodeLanguage === inputLanguage;
+}
+
+function matchesTargetFile(nodeFile: string, relativeTarget: string, targetIsDirectory: boolean): boolean {
+  const normalizedNodeFile = nodeFile.replace(/\\/g, '/');
+  const normalizedTarget = relativeTarget.replace(/\\/g, '/').replace(/\/$/, '');
+  if (targetIsDirectory) return normalizedNodeFile === normalizedTarget || normalizedNodeFile.startsWith(`${normalizedTarget}/`);
+  return normalizedNodeFile === normalizedTarget || normalizedNodeFile.endsWith(`/${normalizedTarget}`) || normalizedTarget.endsWith(normalizedNodeFile);
 }

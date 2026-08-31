@@ -356,10 +356,11 @@ describe('find_references', () => {
     };
     const direct = await findReferences(directRoot, query);
     const graph = await findReferences(graphRoot, query);
-    const normalize = (results: typeof direct) => results.map((item) => `${item.context_symbol}:${item.called_as}`).sort();
+    const normalizeDirect = (results: typeof direct) => results.map((item) => `${item.context_symbol}:${item.called_as}`).sort();
+    const normalizeGraph = (results: typeof graph) => results.map((item) => `${item.context_symbol}:${item.line}:${item.column}`).sort();
 
-    expect(normalize(direct)).toEqual(['runInt:process(1)', 'runString:process("x")']);
-    expect(normalize(graph)).toEqual(normalize(direct));
+    expect(normalizeDirect(direct)).toEqual(['runInt:process(1)', 'runString:process("x")']);
+    expect(normalizeGraph(graph)).toEqual(['runInt:4:25', 'runString:5:28']);
   });
 
   it('does not leak ambiguous overload-group graph edges across canonical Java owners', async () => {
@@ -496,8 +497,8 @@ describe('find_references', () => {
     const direct = await findReferences(directRoot, { path: 'src/service.ts', symbol: 'run', language: 'ts', kind: 'method', reference_kinds: ['call'] });
     const graph = await findReferences(graphRoot, { path: 'src/service.ts', symbol: 'run', language: 'ts', kind: 'method', reference_kinds: ['call'] });
 
-    expect(graph.map((item) => `${item.context_symbol}:${item.called_as}:${item.receiver_name}:${item.receiver_type}`)).toEqual(
-      direct.map((item) => `${item.context_symbol}:${item.called_as}:${item.receiver_name}:${item.receiver_type}`)
+    expect(graph.map((item) => `${item.context_symbol}:${item.line}:${item.column}:${item.receiver_name}:${item.receiver_type}`)).toEqual(
+      direct.map((item) => `${item.context_symbol}:${item.line}:${item.column}:${item.receiver_name}:${item.receiver_type}`)
     );
   });
 
@@ -517,8 +518,8 @@ describe('find_references', () => {
     const direct = await findReferences(directRoot, { path: 'src/forms.js', symbol: 'declared', language: 'js', kind: 'function', reference_kinds: ['call'] });
     const graph = await findReferences(graphRoot, { path: 'src/forms.js', symbol: 'declared', language: 'js', kind: 'function', reference_kinds: ['call'] });
 
-    expect(graph.map((item) => `${item.context_symbol}:${item.called_as}:${item.receiver_name}`)).toEqual(
-      direct.map((item) => `${item.context_symbol}:${item.called_as}:${item.receiver_name}`)
+    expect(graph.map((item) => `${item.context_symbol}:${item.line}:${item.column}:${item.receiver_name}`)).toEqual(
+      direct.map((item) => `${item.context_symbol}:${item.line}:${item.column}:${item.receiver_name}`)
     );
   });
 
@@ -537,7 +538,7 @@ describe('find_references', () => {
     const direct = await findReferences(directRoot, { path: 'src/forms.js', symbol: 'declared', language: 'js', kind: 'function', reference_kinds: ['call'] });
     const graph = await findReferences(graphRoot, { path: 'src/forms.js', symbol: 'declared', language: 'js', kind: 'function', reference_kinds: ['call'] });
 
-    expect(graph.map((item) => `${item.context_symbol}:${item.called_as}`)).toEqual(direct.map((item) => `${item.context_symbol}:${item.called_as}`));
+    expect(graph.map((item) => `${item.context_symbol}:${item.line}:${item.column}`)).toEqual(direct.map((item) => `${item.context_symbol}:${item.line}:${item.column}`));
     expect(direct.map((item) => item.context_symbol)).toContain('arrow');
   });
 
@@ -556,7 +557,7 @@ describe('find_references', () => {
     const direct = await findReferences(directRoot, { path: 'src/forms.js', symbol: 'helper', language: 'js', kind: 'function', reference_kinds: ['call'] });
     const graph = await findReferences(graphRoot, { path: 'src/forms.js', symbol: 'helper', language: 'js', kind: 'function', reference_kinds: ['call'] });
 
-    expect(graph.map((item) => `${item.context_symbol}:${item.called_as}`)).toEqual(direct.map((item) => `${item.context_symbol}:${item.called_as}`));
+    expect(graph.map((item) => `${item.context_symbol}:${item.line}:${item.column}`)).toEqual(direct.map((item) => `${item.context_symbol}:${item.line}:${item.column}`));
     expect(new Set(direct.map((item) => item.context_symbol))).toEqual(new Set(['Wrapped', 'user']));
   });
 

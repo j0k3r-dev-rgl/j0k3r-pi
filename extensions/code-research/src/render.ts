@@ -86,12 +86,32 @@ function relativeFile(file: string | undefined): string {
   return normalized.startsWith(`${cwd}/`) ? normalized.slice(cwd.length + 1) : normalized;
 }
 
+function querySummary(result: any): string | undefined {
+  const details = result?.details ?? {};
+  const query = details.query ?? details.symbol;
+  const path = details.path;
+  const relation = details.relation;
+  const direction = details.direction;
+  const language = details.language;
+  const parts = [
+    relation ? `relation=${relation}` : undefined,
+    direction ? `direction=${direction}` : undefined,
+    query ? `query=${query}` : undefined,
+    path ? `path=${path}` : undefined,
+    language ? `lang=${language}` : undefined,
+  ].filter(Boolean);
+  return parts.length > 0 ? `search ${parts.join(' · ')}` : undefined;
+}
+
 function compactFindSymbol(result: any, theme: any, toolName = 'find_symbol'): string[] {
   const found = Number(result?.details?.found ?? result?.details?.results?.length ?? result?.details?.items?.length ?? 0);
   const rows = Array.isArray(result?.details?.results) ? result.details.results : Array.isArray(result?.details?.items) ? result.details.items : [];
   const summary = result?.details?.summary;
   const countText = summary?.total ? `${found}/${summary.total}` : `${found}`;
-  const lines = [`${titleFor(toolName, theme)} · ${countText} match(es)`, `mode ${result?.details?.source_mode ?? result?.details?.provenance?.source_mode ?? 'direct'} · graph ${result?.details?.graph_status ?? result?.details?.provenance?.graph_status ?? 'disabled'} · ${result?.details?.completeness ?? result?.details?.provenance?.completeness ?? 'fallback'}`, dim(expandHint('expand'), theme)];
+  const lines = [`${titleFor(toolName, theme)} · ${countText} match(es)`];
+  const search = querySummary(result);
+  if (search) lines.push(search);
+  lines.push(`mode ${result?.details?.source_mode ?? result?.details?.provenance?.source_mode ?? 'direct'} · graph ${result?.details?.graph_status ?? result?.details?.provenance?.graph_status ?? 'disabled'} · ${result?.details?.completeness ?? result?.details?.provenance?.completeness ?? 'fallback'}`, dim(expandHint('expand'), theme));
   for (const row of rows.slice(0, 5)) {
     const loc = `${relativeFile(row.file)}:${row.start_line ?? '?'}:${row.start_column ?? '?'}`;
     lines.push(`- ${row.symbol ?? '<unknown>'} (${row.kind ?? 'unknown'}) ${loc}`);
@@ -105,7 +125,10 @@ function compactFindReferences(result: any, theme: any, toolName = 'find_referen
   const rows = Array.isArray(result?.details?.results) ? result.details.results : Array.isArray(result?.details?.items) ? result.details.items : [];
   const summary = result?.details?.summary;
   const countText = summary?.total ? `${found}/${summary.total}` : `${found}`;
-  const lines = [`${titleFor(toolName, theme)} · ${countText} reference(s)`, dim(expandHint('expand'), theme)];
+  const lines = [`${titleFor(toolName, theme)} · ${countText} reference(s)`];
+  const search = querySummary(result);
+  if (search) lines.push(search);
+  lines.push(dim(expandHint('expand'), theme));
   for (const row of rows.slice(0, 7)) {
     const loc = `${relativeFile(row.file)}:${row.line ?? '?'}:${row.column ?? '?'}`;
     const context = row.context_symbol ? ` in ${row.context_symbol}` : '';
@@ -130,9 +153,13 @@ function compactCallTree(toolName: string, result: any, theme: any): string[] {
   const owner = root.class ? `${root.class}.` : '';
   const lines = [
     `${titleFor(toolName, theme)} · ${owner}${root.symbol ?? '<unknown>'}`,
+  ];
+  const search = querySummary(result);
+  if (search) lines.push(search);
+  lines.push(
     stats ? `nodes ${stats.total_nodes ?? '?'} · app ${stats.application_nodes ?? '?'} · external ${stats.external_nodes ?? '?'} · depth ${stats.max_depth_reached ?? '?'}` : 'call tree result',
     dim(expandHint('expand'), theme),
-  ];
+  );
 
   const children = Array.isArray(root.children) ? root.children : Array.isArray(root.callers) ? root.callers : [];
   for (const child of children.slice(0, 5)) lines.push(childSummary(child));
@@ -152,8 +179,10 @@ export function renderCodeResearchToolResult(toolName: string, result: any, opti
   return textComponent((width) => {
     if (options.isPartial) return [`${toolName} · running…`];
     if (!options.expanded) return compactResult(toolName, result, theme);
+    const search = querySummary(result);
     return wrapLines([
       `${titleFor(toolName, theme)} · expanded`,
+      ...(search ? [search] : []),
       dim(expandHint('collapse'), theme),
       '',
       ...resultText(result).split('\n'),

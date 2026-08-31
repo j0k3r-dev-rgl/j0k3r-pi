@@ -12,10 +12,13 @@ import {
   writeGraphArtifactJson,
   writeSubprojectGraphShard,
 } from '../../src/core/graph-persistence.js';
+import { WORKSPACE_GRAPH_BUILDER_FINGERPRINT, WORKSPACE_GRAPH_BUILDER_MODEL_VERSION } from '../../src/core/graph-schema.js';
 
 function createRepresentativeShard(generation = 7): SubprojectGraphShard {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
+    builderModelVersion: WORKSPACE_GRAPH_BUILDER_MODEL_VERSION,
+    builderFingerprint: WORKSPACE_GRAPH_BUILDER_FINGERPRINT,
     createdBy: 'pi-code-research-extension',
     subprojectId: 'fixture-subproject',
     generation,
@@ -40,6 +43,8 @@ function createRepresentativeShard(generation = 7): SubprojectGraphShard {
         ownerKind: 'class',
         declarationKind: 'method',
         symbolId: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        logicalSymbolKey: 'ts::fixture-subproject::src/service.ts::Service::Service.run::method::run(): void',
+        snapshotSymbolId: '1111111111111111111111111111111111111111111111111111111111111111',
         qualifiedName: 'Service.run',
         modifiers: ['public'],
         isDefinition: true,
@@ -110,6 +115,8 @@ describe('graph persistence', () => {
       exported: false,
       declarationKind: 'function',
       symbolId: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+      logicalSymbolKey: 'ts::fixture-subproject::src/service.ts::<root>::helper::function::helper(): void',
+      snapshotSymbolId: '2222222222222222222222222222222222222222222222222222222222222222',
       qualifiedName: 'helper',
       modifiers: [],
       isDefinition: true,

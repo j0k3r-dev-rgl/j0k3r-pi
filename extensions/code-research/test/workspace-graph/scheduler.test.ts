@@ -5,7 +5,14 @@ import { tmpdir } from 'node:os';
 import { createWorkspaceGraphScheduler, registerWorkspaceGraphLifecycle } from '../../src/core/graph-scheduler.js';
 
 describe('workspace graph scheduler', () => {
-  it('single-flights refresh requests and supports debounce', async () => {
+  it('single-flights immediate refresh requests', async () => {
+    const refresh = vi.fn(async () => undefined);
+    const scheduler = createWorkspaceGraphScheduler({ refresh, debounceMs: 5 });
+    await Promise.all([scheduler.refresh('/tmp/project'), scheduler.refresh('/tmp/project')]);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('still supports debounced background refresh requests', async () => {
     const refresh = vi.fn(async () => undefined);
     const scheduler = createWorkspaceGraphScheduler({ refresh, debounceMs: 5 });
     scheduler.schedule('/tmp/project');
@@ -22,13 +29,13 @@ describe('workspace graph scheduler', () => {
       },
     };
 
-    registerWorkspaceGraphLifecycle(pi, { schedule: () => undefined });
+    registerWorkspaceGraphLifecycle(pi, { refresh: async () => undefined });
     expect(Object.keys(handlers)).toEqual(expect.arrayContaining(['session_start', 'turn_end']));
   });
 
-  it('schedules a refresh on session start using cwd context when graph is enabled', async () => {
+  it('awaits a refresh on session start using cwd context when graph is enabled', async () => {
     const handlers: Record<string, Function> = {};
-    const schedule = vi.fn();
+    const refresh = vi.fn(async () => undefined);
     const pi = {
       on(event: string, handler: Function) {
         handlers[event] = handler;
@@ -39,15 +46,15 @@ describe('workspace graph scheduler', () => {
     await mkdir(join(rootDir, '.pi'), { recursive: true });
     await writeFile(join(rootDir, '.pi', 'code-research.json'), '{"graph":{"enable":true}}\n', 'utf8');
 
-    registerWorkspaceGraphLifecycle(pi, { schedule });
+    registerWorkspaceGraphLifecycle(pi, { refresh });
     await handlers.session_start?.({ reason: 'startup' }, { cwd: rootDir });
 
-    expect(schedule).toHaveBeenCalledWith(rootDir);
+    expect(refresh).toHaveBeenCalledWith(rootDir);
   });
 
-  it('does not schedule a refresh on turn end when graph is disabled by default', async () => {
+  it('does not refresh on turn end when graph is disabled by default', async () => {
     const handlers: Record<string, Function> = {};
-    const schedule = vi.fn();
+    const refresh = vi.fn(async () => undefined);
     const pi = {
       on(event: string, handler: Function) {
         handlers[event] = handler;
@@ -57,9 +64,9 @@ describe('workspace graph scheduler', () => {
     const rootDir = join(tmpdir(), `pi-graph-scheduler-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     await mkdir(rootDir, { recursive: true });
 
-    registerWorkspaceGraphLifecycle(pi, { schedule });
+    registerWorkspaceGraphLifecycle(pi, { refresh });
     await handlers.turn_end?.({ turnIndex: 1 }, { cwd: rootDir });
 
-    expect(schedule).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
   });
 });

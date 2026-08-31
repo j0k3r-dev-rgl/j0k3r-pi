@@ -13,6 +13,9 @@ export function createWorkspaceGraphScheduler(options: { refresh: (projectRoot: 
   };
 
   return {
+    async refresh(projectRoot: string) {
+      return run(projectRoot);
+    },
     schedule(projectRoot: string) {
       const existing = timers.get(projectRoot);
       if (existing) clearTimeout(existing);
@@ -28,14 +31,14 @@ export function createWorkspaceGraphScheduler(options: { refresh: (projectRoot: 
   };
 }
 
-export function registerWorkspaceGraphLifecycle(pi: any, scheduler: { schedule: (projectRoot: string) => void }) {
+export function registerWorkspaceGraphLifecycle(pi: any, scheduler: { refresh: (projectRoot: string) => Promise<void> }) {
   if (typeof pi?.on !== 'function') return false;
 
   const scheduleFromContext = async (_payload: any, ctx: any) => {
     const cwd = ctx?.cwd ?? ctx?.projectRoot ?? process.cwd();
     const config = await loadCodeResearchConfig(cwd);
     if (!config.graph.enable) return;
-    scheduler.schedule(cwd);
+    await scheduler.refresh(cwd);
   };
 
   pi.on('session_start', scheduleFromContext);

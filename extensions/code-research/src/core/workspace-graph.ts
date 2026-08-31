@@ -43,7 +43,6 @@ import { resolveJavaCallsForGraph } from '../languages/java/function-call-tree.j
 import { buildGoProjectIndex, extractCalls as extractGoCalls, findGoImplementations, resolveGoCall, type GoProjectIndex } from '../languages/go/workspace-graph.js';
 import { extractGoSymbolRecords } from '../languages/go/symbol-extractor.js';
 import { packagePathToName } from '../languages/go/shared.js';
-import { buildPythonProjectIndex, type PythonProjectIndex } from '../languages/python/workspace-graph.js';
 
 export async function ensureWorkspaceGraphFreshness(projectRoot: string): Promise<{ state: WorkspaceGraphState; manifest?: GraphManifest; changed: boolean }> {
   await ensureWorkspaceGraphGitignore(projectRoot);
@@ -210,13 +209,6 @@ async function buildSubprojectShard(
     goSymbolCoverage = buildGoGraph(projectRoot, subprojectId, goIndex, nodes, edges, pendingFileStats, generation);
   }
 
-  const pythonFiles = files.filter((file) => detectGraphLanguage(file) === 'py');
-  if (pythonFiles.length > 0) {
-    languages.add('py');
-    const pythonIndex = await buildPythonProjectIndex(subprojectRoot);
-    buildPythonGraph(projectRoot, subprojectId, pythonIndex, nodes, edges, pendingFileStats);
-  }
-
   await Promise.all(pendingFileStats);
 
   const subprojectNode = nodes.find((node) => node.id === subprojectNodeId && node.kind === 'subproject');
@@ -231,6 +223,18 @@ async function buildSubprojectShard(
     javaSymbolCoverage,
     goSymbolCoverage,
   });
+}
+
+function createLogicalSymbolKey(language: 'ts' | 'js' | 'java' | 'go', subprojectId: string, file: string, owner: string | undefined, qualifiedName: string | undefined, declarationKind: string | undefined, signature: string | undefined): string {
+  return [language, subprojectId, file, owner ?? '<root>', qualifiedName ?? '<anonymous>', declarationKind ?? 'unknown', sanitizePersistedSignature(signature) ?? ''].join('::');
+}
+
+function createSnapshotSymbolId(symbolId: string, sourceHash: string, range: { startLine: number; startColumn: number; endLine: number; endColumn: number }): string {
+  return createHash('sha256').update(`${symbolId}:${sourceHash}:${range.startLine}:${range.startColumn}:${range.endLine}:${range.endColumn}`).digest('hex');
+}
+
+function pointOccurrenceRange(line: number, column: number) {
+  return { startLine: line, startColumn: column, endLine: line, endColumn: column };
 }
 
 function buildJavaGraph(
@@ -278,6 +282,8 @@ function buildJavaGraph(
         signature: sanitizePersistedSignature(record.signature),
         declarationKind: record.declarationKind,
         symbolId: record.symbolId,
+        logicalSymbolKey: createLogicalSymbolKey('java', subprojectId, relFile, record.owner, record.qualifiedName, record.declarationKind, record.signature),
+        snapshotSymbolId: createSnapshotSymbolId(record.symbolId, record.sourceHash, record.declarationRange),
         qualifiedName: record.qualifiedName,
         relationshipId: record.relationshipId,
         sourceName: record.sourceName,
@@ -298,17 +304,17 @@ function buildJavaGraph(
     for (const implemented of classRecord.implements ?? []) {
       const target = index.classes.find((candidate) => candidate.fullName === implemented || candidate.className === implemented);
       const to = target ? symbolIds.get(target.symbolId) ?? `external:java:${implemented}` : `external:java:${implemented}`;
-      edges.push({ id: createEdgeId('implements', fromId, to), kind: 'implements', from: fromId, to });
+      edges.push({ id: createEdgeId('implements', fromId, to), kind: 'implements', from: fromId, to, targetStatus: to.startsWith('external:') ? 'external' : 'resolved', resolution: to.startsWith('external:') ? 'heuristic' : 'exact' });
     }
     for (const extended of classRecord.extends ?? []) {
       const target = index.classes.find((candidate) => candidate.fullName === extended || candidate.className === extended);
       const to = target ? symbolIds.get(target.symbolId) ?? `external:java:${extended}` : `external:java:${extended}`;
-      edges.push({ id: createEdgeId('extends', fromId, to), kind: 'extends', from: fromId, to });
+      edges.push({ id: createEdgeId('extends', fromId, to), kind: 'extends', from: fromId, to, targetStatus: to.startsWith('external:') ? 'external' : 'resolved', resolution: to.startsWith('external:') ? 'heuristic' : 'exact' });
     }
     for (const permitted of classRecord.permits ?? []) {
       const target = index.classes.find((candidate) => candidate.fullName === permitted || candidate.className === permitted);
       const to = target ? symbolIds.get(target.symbolId) ?? `external:java:${permitted}` : `external:java:${permitted}`;
-      edges.push({ id: createEdgeId('permits', fromId, to), kind: 'permits', from: fromId, to });
+      edges.push({ id: createEdgeId('permits', fromId, to), kind: 'permits', from: fromId, to, targetStatus: to.startsWith('external:') ? 'external' : 'resolved', resolution: to.startsWith('external:') ? 'heuristic' : 'exact' });
     }
   }
 
@@ -323,7 +329,10 @@ function buildJavaGraph(
         kind: 'calls',
         from: fromId,
         to: toId,
-        callsite: { line: call.line, column: call.column, text: call.callText, receiverName: call.object, receiverType: resolved?.receiverType },
+        occurrenceRange: pointOccurrenceRange(call.line, call.column),
+        targetStatus: resolvedTargetId ? 'resolved' : 'external',
+        resolution: resolvedTargetId ? 'exact' : 'heuristic',
+        callsite: { line: call.line, column: call.column, receiverName: call.object, receiverType: resolved?.receiverType },
         external: !resolvedTargetId,
         externalName: !resolvedTargetId ? call.methodName : undefined,
         externalKind: 'method',
@@ -404,6 +413,8 @@ function buildTypeScriptGraph(
         signature: sanitizePersistedSignature(record.signature),
         declarationKind: record.declarationKind,
         symbolId: record.symbolId,
+        logicalSymbolKey: createLogicalSymbolKey(file.language, subprojectId, relFile, record.owner, record.qualifiedName, record.declarationKind, record.signature),
+        snapshotSymbolId: createSnapshotSymbolId(record.symbolId, record.sourceHash, record.declarationRange),
         qualifiedName: record.qualifiedName,
         relationshipId: record.relationshipId,
         sourceName: record.sourceName,
@@ -442,7 +453,10 @@ function buildTypeScriptGraph(
         kind: 'calls',
         from: fromId,
         to: toId ?? `external:${callable.language}:${call.symbol}`,
-        callsite: { line: call.line, column: call.column, text: call.text, receiverName: call.receiver, receiverType: resolved.receiverType ?? (resolved.ownerKind === 'class' ? resolved.owner : undefined) },
+        occurrenceRange: pointOccurrenceRange(call.line, call.column),
+        targetStatus: toId ? 'resolved' : 'external',
+        resolution: toId ? 'exact' : 'heuristic',
+        callsite: { line: call.line, column: call.column, receiverName: call.receiver, receiverType: resolved.receiverType ?? (resolved.ownerKind === 'class' ? resolved.owner : undefined) },
         external: !toId,
         externalName: !toId ? call.symbol : undefined,
         externalKind: call.receiver ? 'method' : 'function',
@@ -465,7 +479,10 @@ function buildTypeScriptGraph(
         kind: 'reads',
         from: fromId,
         to: toId,
-        callsite: { line: read.line, column: read.column, text: read.text },
+        occurrenceRange: pointOccurrenceRange(read.line, read.column),
+        targetStatus: 'resolved',
+        resolution: 'heuristic',
+        callsite: { line: read.line, column: read.column },
       });
     }
   }
@@ -533,6 +550,8 @@ function buildGoGraph(
         signature: sanitizePersistedSignature(record.signature),
         declarationKind: record.declarationKind,
         symbolId: record.symbolId,
+        logicalSymbolKey: createLogicalSymbolKey('go', subprojectId, relFile, record.owner, record.qualifiedName, record.declarationKind, record.signature),
+        snapshotSymbolId: createSnapshotSymbolId(record.symbolId, record.sourceHash, record.declarationRange),
         qualifiedName: record.qualifiedName,
         relationshipId: record.relationshipId,
         sourceName: record.sourceName,
@@ -571,7 +590,10 @@ function buildGoGraph(
         kind: 'calls',
         from: fromId,
         to: toId ?? `external:go:${call.symbol}`,
-        callsite: { line: call.line, column: call.column, text: call.text, receiverName: call.receiver, receiverType: resolved.receiverType },
+        occurrenceRange: pointOccurrenceRange(call.line, call.column),
+        targetStatus: toId ? 'resolved' : 'external',
+        resolution: toId ? 'exact' : 'heuristic',
+        callsite: { line: call.line, column: call.column, receiverName: call.receiver, receiverType: resolved.receiverType },
         external: !toId,
         externalName: !toId ? call.symbol : undefined,
         externalKind: call.receiver ? 'method' : 'function',
@@ -588,7 +610,7 @@ function buildGoGraph(
     for (const implementation of implementations) {
       const fromId = symbolIds.get(implementation.record.symbolId);
       if (!fromId) continue;
-      edges.push({ id: createEdgeId('implements', fromId, targetId), kind: 'implements', from: fromId, to: targetId });
+      edges.push({ id: createEdgeId('implements', fromId, targetId), kind: 'implements', from: fromId, to: targetId, targetStatus: 'resolved', resolution: 'heuristic' });
     }
   }
 
@@ -602,67 +624,6 @@ function buildGoGraph(
   };
 }
 
-function buildPythonGraph(
-  projectRoot: string,
-  subprojectId: string,
-  index: PythonProjectIndex,
-  nodes: GraphNode[],
-  edges: GraphEdge[],
-  pendingFileStats: Array<Promise<void>>
-) {
-  const fileNodeIds = new Map<string, string>();
-  const fileNodes = new Map<string, Extract<GraphNode, { kind: 'file' }>>();
-  const symbolIds = new Map<string, string>();
-  const subprojectNodeId = createSubprojectNodeId(subprojectId);
-
-  for (const file of index.files) {
-    const relFile = toProjectRelativePath(projectRoot, file);
-    ensureFileNode(nodes, edges, fileNodeIds, fileNodes, pendingFileStats, subprojectNodeId, subprojectId, relFile, 'py', file, index.entrypointFiles.has(file));
-  }
-
-  for (const symbol of index.symbols) {
-    const relFile = toProjectRelativePath(projectRoot, symbol.file);
-    const fileNodeId = ensureFileNode(nodes, edges, fileNodeIds, fileNodes, pendingFileStats, subprojectNodeId, subprojectId, relFile, 'py', symbol.file, index.entrypointFiles.has(symbol.file));
-    const symbolId = createSymbolNodeId(subprojectId, relFile, symbol.ownerName, symbol.symbol, symbol.line, symbol.column);
-    symbolIds.set(`${symbol.file}:${symbol.symbol}`, symbolId);
-    nodes.push({
-      id: symbolId,
-      kind: 'symbol',
-      language: 'py',
-      symbolKind: symbol.kind,
-      name: symbol.symbol,
-      file: relFile,
-      range: {
-        startLine: symbol.line,
-        startColumn: symbol.column,
-        endLine: symbol.node.endPosition.row + 1,
-        endColumn: symbol.node.endPosition.column,
-      },
-      owner: symbol.ownerName,
-      ownerKind: symbol.ownerKind,
-      exported: symbol.exported,
-      signature: symbol.signature,
-      entrypoint: symbol.entrypoint,
-    });
-    edges.push({ id: createEdgeId('contains', fileNodeId, symbolId), kind: 'contains', from: fileNodeId, to: symbolId });
-  }
-
-  for (const entrypoint of index.entrypoints) {
-    const relFile = toProjectRelativePath(projectRoot, entrypoint.file);
-    const fileNodeId = ensureFileNode(nodes, edges, fileNodeIds, fileNodes, pendingFileStats, subprojectNodeId, subprojectId, relFile, 'py', entrypoint.file, true);
-    const targetId = symbolIds.get(`${entrypoint.file}:${entrypoint.symbol}`);
-    if (!targetId) continue;
-    edges.push({
-      id: createEdgeId('entrypoint', fileNodeId, targetId, `${entrypoint.line}:${entrypoint.column}:${entrypoint.symbol}`),
-      kind: 'entrypoint',
-      from: fileNodeId,
-      to: targetId,
-      callsite: { line: entrypoint.line, column: entrypoint.column, text: entrypoint.text },
-      reason: entrypoint.reason,
-    });
-  }
-}
-
 function ensureFileNode(
   nodes: GraphNode[],
   edges: GraphEdge[],
@@ -672,7 +633,7 @@ function ensureFileNode(
   subprojectNodeId: string,
   subprojectId: string,
   relativeFile: string,
-  language: 'ts' | 'js' | 'java' | 'go' | 'py',
+  language: 'ts' | 'js' | 'java' | 'go',
   absoluteFile: string,
   entrypoint = false
 ): string {

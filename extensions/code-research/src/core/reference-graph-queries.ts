@@ -31,7 +31,7 @@ export async function queryReferencesFromGraph(options: {
   const relativeTarget = (targetPath.startsWith(cwd) ? targetPath.slice(cwd.length + 1).replace(/\\/g, '/') : input.path.replace(/\\/g, '/')).replace(/\/$/, '');
   const allNodes = allShards.flatMap((shard) => shard!.nodes);
   const allEdges = allShards.flatMap((shard) => shard!.edges);
-  const symbolNodes = allNodes.filter((node): node is Extract<(typeof allNodes)[number], { kind: 'symbol' }> => node.kind === 'symbol');
+  const symbolNodes = allNodes.filter((node): node is Extract<(typeof allNodes)[number], { kind: 'symbol' }> => node.kind === 'symbol' && matchesLanguage(node.language, input.language));
 
   const targets = symbolNodes.filter((node) => {
     if (node.name !== input.symbol) return false;
@@ -78,7 +78,7 @@ export async function queryReferencesFromGraph(options: {
       context_class: isTypeRelationship ? fromNode.name : fromNode.owner,
       owner_kind: isTypeRelationship ? (fromNode.symbolKind === 'interface' ? 'interface' : 'class') : fromNode.ownerKind ?? 'unknown',
       reference_kind: referenceKind,
-      called_as: isTypeRelationship ? relationshipMetadata?.called_as : edge.callsite?.text,
+      called_as: isTypeRelationship ? relationshipMetadata?.called_as : undefined,
       receiver_name: edge.callsite?.receiverName,
       receiver_type: edge.callsite?.receiverType,
       is_application: true,
@@ -120,4 +120,8 @@ function matchesTargetFile(nodeFile: string, relativeTarget: string, targetIsDir
     return normalizedNodeFile === normalizedTarget || normalizedNodeFile.startsWith(`${normalizedTarget}/`);
   }
   return normalizedNodeFile === normalizedTarget || normalizedNodeFile.endsWith(`/${normalizedTarget}`) || normalizedTarget.endsWith(normalizedNodeFile);
+}
+
+function matchesLanguage(nodeLanguage: string, inputLanguage: FindReferencesInput['language']): boolean {
+  return !inputLanguage || inputLanguage === 'auto' || nodeLanguage === inputLanguage;
 }

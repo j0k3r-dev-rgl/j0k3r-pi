@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type {
   DeclarationKind,
   GraphEdge,
@@ -13,17 +16,50 @@ import type {
 } from '../types.js';
 import { compareCanonicalPathStrings } from './shared.js';
 
-export const WORKSPACE_GRAPH_SCHEMA_VERSION = 3;
+export const WORKSPACE_GRAPH_SCHEMA_VERSION = 4;
+export const WORKSPACE_GRAPH_BUILDER_MODEL_VERSION = 2;
+export const WORKSPACE_GRAPH_BUILDER_FINGERPRINT = createWorkspaceGraphBuilderFingerprint();
 export const WORKSPACE_GRAPH_CREATED_BY = 'pi-code-research-extension' as const;
 export const TYPESCRIPT_SYMBOL_COVERAGE_MODEL_VERSION = 1 as const;
 export const TYPESCRIPT_GRAMMAR_VERSION = '0.23.2' as const;
 export const TYPESCRIPT_COMPILER_MODEL_VERSION = 'typescript@6.0.3' as const;
 const MAX_SOURCE_COORDINATE = 10_000_000;
 const MAX_PERSISTED_SIGNATURE_LENGTH = 64 * 1024;
-const GRAPH_EDGE_KINDS = new Set(['contains', 'imports', 'calls', 'reads', 'implements', 'extends', 'permits', 'entrypoint']);
+const GRAPH_EDGE_KINDS = new Set(['contains', 'imports', 'calls', 'reads', 'implements', 'extends', 'permits']);
 
 function shortHash(value: string): string {
   return createHash('sha1').update(value).digest('hex').slice(0, 12);
+}
+
+function createWorkspaceGraphBuilderFingerprint(): string {
+  const hash = createHash('sha256');
+  const extensionRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+  for (const path of listBuilderFiles(extensionRoot)) {
+    hash.update(relative(extensionRoot, path));
+    hash.update('\0');
+    hash.update(readFileSync(path));
+    hash.update('\0');
+  }
+  return hash.digest('hex');
+}
+
+function listBuilderFiles(root: string): string[] {
+  const result: string[] = [];
+  const visit = (dir: string) => {
+    for (const entry of readdirSync(dir).sort()) {
+      const path = join(dir, entry);
+      const stats = statSync(path);
+      if (stats.isDirectory()) {
+        if (entry === 'tools' || entry === 'render' || entry === 'test' || entry === 'node_modules') continue;
+        visit(path);
+        continue;
+      }
+      if (stats.isFile() && /\.(ts|js)$/.test(entry)) result.push(path);
+    }
+  };
+  visit(join(root, 'core'));
+  visit(join(root, 'languages'));
+  return result.sort();
 }
 
 export function createWorkspaceNodeId(projectRoot: string): string {
@@ -62,6 +98,8 @@ export function isCompatibleGraphArtifact(value: any): boolean {
     value &&
       typeof value === 'object' &&
       value.schemaVersion === WORKSPACE_GRAPH_SCHEMA_VERSION &&
+      value.builderModelVersion === WORKSPACE_GRAPH_BUILDER_MODEL_VERSION &&
+      value.builderFingerprint === WORKSPACE_GRAPH_BUILDER_FINGERPRINT &&
       value.createdBy === WORKSPACE_GRAPH_CREATED_BY
   );
 }
@@ -93,9 +131,11 @@ export function validateSubprojectGraphShard(value: any): value is SubprojectGra
   return validateTypeScriptSymbolCoverage(value.typescriptSymbolCoverage, value) && validateJavaSymbolCoverage(value.javaSymbolCoverage, value) && validateGoSymbolCoverage(value.goSymbolCoverage, value);
 }
 
-export function createBaseArtifact<T extends object>(artifact: T): T & { schemaVersion: number; createdBy: 'pi-code-research-extension' } {
+export function createBaseArtifact<T extends object>(artifact: T): T & { schemaVersion: number; builderModelVersion: number; builderFingerprint: string; createdBy: 'pi-code-research-extension' } {
   return {
     schemaVersion: WORKSPACE_GRAPH_SCHEMA_VERSION,
+    builderModelVersion: WORKSPACE_GRAPH_BUILDER_MODEL_VERSION,
+    builderFingerprint: WORKSPACE_GRAPH_BUILDER_FINGERPRINT,
     createdBy: WORKSPACE_GRAPH_CREATED_BY,
     ...artifact,
   };
@@ -105,7 +145,7 @@ export function isGraphNode(value: any): value is GraphNode {
   if (!value || typeof value.id !== 'string' || typeof value.kind !== 'string') return false;
   if (value.kind === 'workspace') return typeof value.name === 'string' && typeof value.root === 'string';
   if (value.kind === 'subproject') return typeof value.name === 'string' && typeof value.root === 'string' && Array.isArray(value.markers) && Array.isArray(value.languages);
-  if (value.kind === 'file') return typeof value.path === 'string' && value.path.length > 0 && (value.language === 'java' || value.language === 'go' || value.language === 'ts' || value.language === 'js' || value.language === 'py') && Number.isSafeInteger(value.size) && value.size >= 0;
+  if (value.kind === 'file') return typeof value.path === 'string' && value.path.length > 0 && (value.language === 'java' || value.language === 'go' || value.language === 'ts' || value.language === 'js') && Number.isSafeInteger(value.size) && value.size >= 0;
   if (value.kind !== 'symbol') return false;
   return Boolean(
     typeof value.language === 'string' &&
@@ -119,6 +159,8 @@ export function isGraphNode(value: any): value is GraphNode {
       (value.signature === undefined || (typeof value.signature === 'string' && value.signature.length <= MAX_PERSISTED_SIGNATURE_LENGTH)) &&
       (value.declarationKind === undefined || isDeclarationKind(value.declarationKind)) &&
       (value.symbolId === undefined || isSha256(value.symbolId)) &&
+      (value.logicalSymbolKey === undefined || (typeof value.logicalSymbolKey === 'string' && value.logicalSymbolKey.length > 0)) &&
+      (value.snapshotSymbolId === undefined || isSha256(value.snapshotSymbolId)) &&
       (value.qualifiedName === undefined || (typeof value.qualifiedName === 'string' && value.qualifiedName.length > 0)) &&
       (value.relationshipId === undefined || typeof value.relationshipId === 'string') &&
       (value.sourceName === undefined || typeof value.sourceName === 'string') &&
@@ -132,6 +174,8 @@ export function isGraphNode(value: any): value is GraphNode {
       ((value.language !== 'ts' && value.language !== 'js' && value.language !== 'go') || (
         isDeclarationKind(value.declarationKind) &&
         isSha256(value.symbolId) &&
+        typeof value.logicalSymbolKey === 'string' && value.logicalSymbolKey.length > 0 &&
+        isSha256(value.snapshotSymbolId) &&
         typeof value.qualifiedName === 'string' && value.qualifiedName.length > 0 &&
         Array.isArray(value.modifiers) && value.modifiers.every((modifier: unknown) => typeof modifier === 'string') &&
         typeof value.isDefinition === 'boolean' &&
@@ -148,6 +192,9 @@ export function isGraphEdge(value: any): value is GraphEdge {
       GRAPH_EDGE_KINDS.has(value.kind) &&
       typeof value.from === 'string' && value.from.length > 0 &&
       typeof value.to === 'string' && value.to.length > 0 &&
+      (value.occurrenceRange === undefined || isSourceRange(value.occurrenceRange)) &&
+      (value.targetStatus === undefined || ['resolved', 'ambiguous', 'external', 'unresolved'].includes(value.targetStatus)) &&
+      (value.resolution === undefined || ['exact', 'heuristic', 'ambiguous', 'unresolved'].includes(value.resolution)) &&
       (value.callsite === undefined || isCallsite(value.callsite)) &&
       (value.importSource === undefined || typeof value.importSource === 'string') &&
       (value.external === undefined || typeof value.external === 'boolean') &&
@@ -312,7 +359,7 @@ function isSourceRange(value: any): boolean {
 }
 
 function isCallsite(value: any): boolean {
-  return Boolean(value && Number.isSafeInteger(value.line) && value.line > 0 && value.line <= MAX_SOURCE_COORDINATE && Number.isSafeInteger(value.column) && value.column >= 0 && value.column <= MAX_SOURCE_COORDINATE && (value.text === undefined || (typeof value.text === 'string' && value.text.length <= MAX_PERSISTED_SIGNATURE_LENGTH)) && (value.receiverName === undefined || typeof value.receiverName === 'string') && (value.receiverType === undefined || typeof value.receiverType === 'string'));
+  return Boolean(value && Number.isSafeInteger(value.line) && value.line > 0 && value.line <= MAX_SOURCE_COORDINATE && Number.isSafeInteger(value.column) && value.column >= 0 && value.column <= MAX_SOURCE_COORDINATE && value.text === undefined && (value.receiverName === undefined || typeof value.receiverName === 'string') && (value.receiverType === undefined || typeof value.receiverType === 'string'));
 }
 
 function isSha256(value: unknown): boolean {

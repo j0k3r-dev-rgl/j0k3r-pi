@@ -9,6 +9,7 @@ import {
   readSubprojectGraphShard,
   writeSubprojectGraphShard,
 } from '../../src/core/graph-persistence.js';
+import { WORKSPACE_GRAPH_BUILDER_FINGERPRINT, WORKSPACE_GRAPH_BUILDER_MODEL_VERSION } from '../../src/core/graph-schema.js';
 
 async function createProject(files: Record<string, string>) {
   const rootDir = join(tmpdir(), `pi-graph-shard-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -53,6 +54,8 @@ describe('workspace graph shard content', () => {
       qualifiedName: 'Vault.secret',
     });
     expect(secret?.symbolId).toMatch(/^[a-f0-9]{64}$/);
+    expect(secret?.logicalSymbolKey).toContain('ts::');
+    expect(secret?.snapshotSymbolId).toMatch(/^[a-f0-9]{64}$/);
     expect(secret?.sourceHash).toMatch(/^[a-f0-9]{64}$/);
   });
 
@@ -117,15 +120,15 @@ describe('workspace graph shard content', () => {
     const rootDir = await createProject({ '.pi/code-research.json': `{"graph":{"enable":true}}\n` });
 
     clearSubprojectGraphShardCache();
-    await writeSubprojectGraphShard(rootDir, 'cache-a', { schemaVersion: 3, createdBy: 'pi-code-research-extension', subprojectId: 'cache-a', generation: 1, nodes: [], edges: [] });
-    await writeSubprojectGraphShard(rootDir, 'cache-b', { schemaVersion: 3, createdBy: 'pi-code-research-extension', subprojectId: 'cache-b', generation: 1, nodes: [], edges: [] });
-    await writeSubprojectGraphShard(rootDir, 'cache-c', { schemaVersion: 3, createdBy: 'pi-code-research-extension', subprojectId: 'cache-c', generation: 1, nodes: [], edges: [] });
-    await writeSubprojectGraphShard(rootDir, 'cache-d', { schemaVersion: 3, createdBy: 'pi-code-research-extension', subprojectId: 'cache-d', generation: 1, nodes: [], edges: [] });
-    await writeSubprojectGraphShard(rootDir, 'cache-e', { schemaVersion: 3, createdBy: 'pi-code-research-extension', subprojectId: 'cache-e', generation: 1, nodes: [], edges: [] });
-    await writeSubprojectGraphShard(rootDir, 'cache-f', { schemaVersion: 3, createdBy: 'pi-code-research-extension', subprojectId: 'cache-f', generation: 1, nodes: [], edges: [] });
-    await writeSubprojectGraphShard(rootDir, 'cache-g', { schemaVersion: 3, createdBy: 'pi-code-research-extension', subprojectId: 'cache-g', generation: 1, nodes: [], edges: [] });
-    await writeSubprojectGraphShard(rootDir, 'cache-h', { schemaVersion: 3, createdBy: 'pi-code-research-extension', subprojectId: 'cache-h', generation: 1, nodes: [], edges: [] });
-    await writeSubprojectGraphShard(rootDir, 'cache-i', { schemaVersion: 3, createdBy: 'pi-code-research-extension', subprojectId: 'cache-i', generation: 1, nodes: [], edges: [] });
+    await writeSubprojectGraphShard(rootDir, 'cache-a', { schemaVersion: 4, builderModelVersion: WORKSPACE_GRAPH_BUILDER_MODEL_VERSION, builderFingerprint: WORKSPACE_GRAPH_BUILDER_FINGERPRINT, createdBy: 'pi-code-research-extension', subprojectId: 'cache-a', generation: 1, nodes: [], edges: [] });
+    await writeSubprojectGraphShard(rootDir, 'cache-b', { schemaVersion: 4, builderModelVersion: WORKSPACE_GRAPH_BUILDER_MODEL_VERSION, builderFingerprint: WORKSPACE_GRAPH_BUILDER_FINGERPRINT, createdBy: 'pi-code-research-extension', subprojectId: 'cache-b', generation: 1, nodes: [], edges: [] });
+    await writeSubprojectGraphShard(rootDir, 'cache-c', { schemaVersion: 4, builderModelVersion: WORKSPACE_GRAPH_BUILDER_MODEL_VERSION, builderFingerprint: WORKSPACE_GRAPH_BUILDER_FINGERPRINT, createdBy: 'pi-code-research-extension', subprojectId: 'cache-c', generation: 1, nodes: [], edges: [] });
+    await writeSubprojectGraphShard(rootDir, 'cache-d', { schemaVersion: 4, builderModelVersion: WORKSPACE_GRAPH_BUILDER_MODEL_VERSION, builderFingerprint: WORKSPACE_GRAPH_BUILDER_FINGERPRINT, createdBy: 'pi-code-research-extension', subprojectId: 'cache-d', generation: 1, nodes: [], edges: [] });
+    await writeSubprojectGraphShard(rootDir, 'cache-e', { schemaVersion: 4, builderModelVersion: WORKSPACE_GRAPH_BUILDER_MODEL_VERSION, builderFingerprint: WORKSPACE_GRAPH_BUILDER_FINGERPRINT, createdBy: 'pi-code-research-extension', subprojectId: 'cache-e', generation: 1, nodes: [], edges: [] });
+    await writeSubprojectGraphShard(rootDir, 'cache-f', { schemaVersion: 4, builderModelVersion: WORKSPACE_GRAPH_BUILDER_MODEL_VERSION, builderFingerprint: WORKSPACE_GRAPH_BUILDER_FINGERPRINT, createdBy: 'pi-code-research-extension', subprojectId: 'cache-f', generation: 1, nodes: [], edges: [] });
+    await writeSubprojectGraphShard(rootDir, 'cache-g', { schemaVersion: 4, builderModelVersion: WORKSPACE_GRAPH_BUILDER_MODEL_VERSION, builderFingerprint: WORKSPACE_GRAPH_BUILDER_FINGERPRINT, createdBy: 'pi-code-research-extension', subprojectId: 'cache-g', generation: 1, nodes: [], edges: [] });
+    await writeSubprojectGraphShard(rootDir, 'cache-h', { schemaVersion: 4, builderModelVersion: WORKSPACE_GRAPH_BUILDER_MODEL_VERSION, builderFingerprint: WORKSPACE_GRAPH_BUILDER_FINGERPRINT, createdBy: 'pi-code-research-extension', subprojectId: 'cache-h', generation: 1, nodes: [], edges: [] });
+    await writeSubprojectGraphShard(rootDir, 'cache-i', { schemaVersion: 4, builderModelVersion: WORKSPACE_GRAPH_BUILDER_MODEL_VERSION, builderFingerprint: WORKSPACE_GRAPH_BUILDER_FINGERPRINT, createdBy: 'pi-code-research-extension', subprojectId: 'cache-i', generation: 1, nodes: [], edges: [] });
 
     for (const subprojectId of ['cache-a', 'cache-b', 'cache-c', 'cache-d', 'cache-e', 'cache-f', 'cache-g', 'cache-h', 'cache-i']) {
       const shard = await readSubprojectGraphShard(rootDir, subprojectId, { generation: 1 });
@@ -216,10 +219,14 @@ describe('workspace graph shard content', () => {
     });
   });
 
-  it('stores python file and symbol nodes without enabling python tool queries yet', async () => {
+  it('excludes python files and project markers from schema v4 graph indexing', async () => {
     const rootDir = await createProject({
-      'pyproject.toml': `[project]\nname = "python-fixture"\n`,
-      'src/app.py': `class Greeter:\n    def greet(self, name: str) -> str:\n        return format_name(name)\n\n\ndef format_name(name: str) -> str:\n    return name.title()\n`,
+      'pyproject.toml': `[project]
+name = "python-fixture"
+`,
+      'src/app.py': `def run():
+    return True
+`,
     });
 
     const built = await buildWorkspaceGraph(rootDir);
@@ -227,113 +234,16 @@ describe('workspace graph shard content', () => {
     expect(subprojectId).toBeTruthy();
     if (!subprojectId) return;
 
-    expect(built.state.subprojects[0]?.languageHints).toContain('py');
+    expect(built.state.coverage.indexedFiles).toBe(0);
+    expect(built.state.subprojects[0]?.languageHints).not.toContain('py');
 
     const shardResult = await readSubprojectGraphShard(rootDir, subprojectId);
     expect(shardResult.status).toBe('ok');
     if (shardResult.status !== 'ok') return;
 
-    const shard = shardResult.data;
-    const fileNode = shard.nodes.find(
-      (node) => node.kind === 'file' && node.path === 'src/app.py'
-    );
-    const greeter = shard.nodes.find(
-      (node) =>
-        node.kind === 'symbol' &&
-        node.file === 'src/app.py' &&
-        node.name === 'Greeter'
-    );
-    const greet = shard.nodes.find(
-      (node) =>
-        node.kind === 'symbol' &&
-        node.file === 'src/app.py' &&
-        node.name === 'greet'
-    );
-    const formatName = shard.nodes.find(
-      (node) =>
-        node.kind === 'symbol' &&
-        node.file === 'src/app.py' &&
-        node.name === 'format_name'
-    );
-
-    expect(fileNode).toMatchObject({ kind: 'file', language: 'py', path: 'src/app.py' });
-    expect(greeter).toMatchObject({
-      kind: 'symbol',
-      language: 'py',
-      symbolKind: 'class',
-      file: 'src/app.py',
-      range: { startLine: 1, startColumn: 0, endLine: 3, endColumn: 32 },
-      ownerKind: 'unknown',
-      exported: true,
-    });
-    expect(greet).toMatchObject({
-      kind: 'symbol',
-      language: 'py',
-      symbolKind: 'method',
-      file: 'src/app.py',
-      owner: 'Greeter',
-      ownerKind: 'class',
-      range: { startLine: 2, startColumn: 4, endLine: 3, endColumn: 32 },
-    });
-    expect(formatName).toMatchObject({
-      kind: 'symbol',
-      language: 'py',
-      symbolKind: 'function',
-      file: 'src/app.py',
-      ownerKind: 'unknown',
-      range: { startLine: 6, startColumn: 0, endLine: 7, endColumn: 23 },
-    });
-  });
-
-  it('detects python entrypoints and ignores common environment/cache directories', async () => {
-    const rootDir = await createProject({
-      'pyproject.toml': `[project]\nname = "python-entrypoint"\n`,
-      'src/app.py': `import curses\n\ndef validate_environment() -> None:\n    pass\n\ndef main(stdscr: curses.window) -> None:\n    app = InstalledApp(stdscr)\n    app.run()\n\nif __name__ == "__main__":\n    validate_environment()\n    curses.wrapper(main)\n`,
-      'src/__main__.py': `from .app import main\n\nmain(None)\n`,
-      'venv/lib/python/site-packages/ignored.py': `def should_not_index():\n    pass\n`,
-      'env/lib/python/site-packages/ignored.py': `def should_not_index_either():\n    pass\n`,
-      '__pycache__/ignored.py': `def cached():\n    pass\n`,
-    });
-
-    const built = await buildWorkspaceGraph(rootDir);
-    const subprojectId = built.state.subprojects[0]?.id;
-    expect(subprojectId).toBeTruthy();
-    if (!subprojectId) return;
-
-    expect(built.state.coverage.indexedFiles).toBe(2);
-
-    const shardResult = await readSubprojectGraphShard(rootDir, subprojectId);
-    expect(shardResult.status).toBe('ok');
-    if (shardResult.status !== 'ok') return;
-
-    const shard = shardResult.data;
-    expect(shard.nodes.some((node) => node.kind === 'symbol' && node.name === 'should_not_index')).toBe(false);
-    expect(shard.nodes.some((node) => node.kind === 'symbol' && node.name === 'should_not_index_either')).toBe(false);
-    expect(shard.nodes.some((node) => node.kind === 'symbol' && node.name === 'cached')).toBe(false);
-
-    const appFile = shard.nodes.find((node) => node.kind === 'file' && node.path === 'src/app.py');
-    const mainFile = shard.nodes.find((node) => node.kind === 'file' && node.path === 'src/__main__.py');
-    const validateEnvironment = shard.nodes.find((node) => node.kind === 'symbol' && node.file === 'src/app.py' && node.name === 'validate_environment');
-    const main = shard.nodes.find((node) => node.kind === 'symbol' && node.file === 'src/app.py' && node.name === 'main');
-
-    expect(appFile).toMatchObject({ kind: 'file', language: 'py' });
-    expect(mainFile).toMatchObject({ kind: 'file', language: 'py', entrypoint: true });
-    expect(main).toMatchObject({ kind: 'symbol', language: 'py', name: 'main', entrypoint: true });
-    expect(validateEnvironment).toMatchObject({ kind: 'symbol', language: 'py', name: 'validate_environment', entrypoint: true });
-
-    const directEntryEdge = shard.edges.find((edge) => edge.kind === 'entrypoint' && edge.from === appFile?.id && edge.to === validateEnvironment?.id);
-    expect(directEntryEdge).toMatchObject({
-      kind: 'entrypoint',
-      callsite: { line: 11, column: 4, text: 'validate_environment()' },
-      reason: 'python __main__ guard direct call',
-    });
-
-    const wrapperEntryEdge = shard.edges.find((edge) => edge.kind === 'entrypoint' && edge.from === appFile?.id && edge.to === main?.id);
-    expect(wrapperEntryEdge).toMatchObject({
-      kind: 'entrypoint',
-      callsite: { line: 12, column: 4, text: 'curses.wrapper(main)' },
-      reason: 'python __main__ guard wrapper argument',
-    });
+    expect(shardResult.data.nodes.some((node) => node.kind === 'file' && node.path.endsWith('.py'))).toBe(false);
+    expect(shardResult.data.nodes.some((node) => node.kind === 'symbol' && node.language === ('py' as any))).toBe(false);
+    expect(shardResult.data.edges.some((edge) => edge.kind === ('entrypoint' as any))).toBe(false);
   });
 
   it('stores internal java call edges for dependency-injected fields with a unique application implementation', async () => {
@@ -386,7 +296,9 @@ describe('workspace graph shard content', () => {
     expect(callEdge).toMatchObject({
       kind: 'calls',
       external: false,
-      callsite: { line: 13, column: 4, text: 'service.run()', receiverName: 'service', receiverType: 'Service' },
+      callsite: { line: 13, column: 4, receiverName: 'service', receiverType: 'Service' },
+      occurrenceRange: { startLine: 13, startColumn: 4, endLine: 13, endColumn: 4 },
+      targetStatus: 'resolved',
     });
   });
 

@@ -38,9 +38,11 @@ The extension can persist a workspace graph under `.pi/workspace-code-graph` whe
 
 - `graph.enable` defaults to `false` and gates graph refresh scheduling plus graph-backed query usage.
 - `graph.addGitignore` defaults to `true` and lets the graph writer maintain ignore entries for generated graph artifacts.
-- Graph-backed queries use the persisted graph only when it is enabled, readable, schema-compatible, fresh enough, language-supported, and sufficient for the requested query.
+- Graph-backed queries use schema v4 persisted graph artifacts only when they are enabled, readable, schema-compatible, fresh enough, language-supported, and sufficient for the requested query.
+- Older graph artifacts are treated as incompatible and regenerated instead of migrated.
 - Tools automatically fall back to direct source inspection when the graph is disabled, missing, stale, partial, errored, incompatible, refreshing, unreadable, language-unsupported, or insufficient.
 - Query results include concise provenance/diagnostics in `details` so the agent can distinguish graph, direct, and fallback behavior.
+- Persisted graph call/reference occurrences store ranges, receiver metadata, target status, and resolution state, but do not persist raw callsite source text.
 - `workspace_graph_status` remains public because monorepos often contain multiple subprojects/languages and agents need a quick health/coverage summary before relying on graph-backed analysis.
 
 ### Registered tools
@@ -161,9 +163,11 @@ La extensión puede persistir un workspace graph en `.pi/workspace-code-graph` c
 ```
 
 - `graph.enable` es `false` por defecto.
-- Las consultas usan graph solo cuando está habilitado, legible, compatible, fresco, soporta el lenguaje y tiene cobertura suficiente.
+- Las consultas usan artifacts schema v4 solo cuando el graph está habilitado, legible, compatible, fresco, soporta el lenguaje y tiene cobertura suficiente.
+- Los artifacts viejos se consideran incompatibles y se regeneran en vez de migrarse.
 - Si no, hacen fallback automático a inspección directa.
 - Los resultados incluyen provenance/diagnósticos en `details`.
+- Las ocurrencias persistidas guardan rangos, metadata de receiver, target status y resolución, pero no guardan texto fuente crudo del callsite.
 - `workspace_graph_status` sigue pública porque en monorepos el agente necesita saber qué subproyectos/lenguajes están indexados.
 
 ### Tools registradas

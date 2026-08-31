@@ -129,14 +129,12 @@ export function extractCalls(callableNode: any): GoExtractedCall[] {
       const functionNode = node.childForFieldName('function');
       if (functionNode?.type === 'identifier') {
         calls.push({ symbol: functionNode.text, text: node.text, line: node.startPosition.row + 1, column: node.startPosition.column });
-        return;
       }
       if (functionNode?.type === 'selector_expression') {
         const receiver = functionNode.childForFieldName('operand')?.text;
         const symbol = functionNode.childForFieldName('field')?.text;
         if (receiver && symbol) {
           calls.push({ receiver, symbol, text: node.text, line: node.startPosition.row + 1, column: node.startPosition.column });
-          return;
         }
       }
     }

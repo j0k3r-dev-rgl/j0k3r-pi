@@ -63,7 +63,7 @@ describe('graph policy', () => {
         stateReadStatus: 'ok',
         manifestReadStatus: 'ok',
         stateStatus: 'fresh',
-        language: 'py',
+        language: 'py' as any,
       })
     ).toEqual({ usable: false, reason: 'language_unsupported' });
   });
@@ -76,7 +76,7 @@ describe('graph policy', () => {
     expect(normalizeGraphLanguage({ language: 'auto', path: '/tmp/example.js' })).toBe('js');
     expect(normalizeGraphLanguage({ language: 'auto', path: '/tmp/App.java' })).toBe('java');
     expect(normalizeGraphLanguage({ language: 'auto', path: '/tmp/example.py' })).toBeUndefined();
-    expect(normalizeGraphLanguage({ language: 'py' })).toBeUndefined();
+    expect(normalizeGraphLanguage({ language: 'py' as any })).toBeUndefined();
     expect(normalizeGraphLanguage({ language: 'auto', path: '/tmp/example.txt' })).toBeUndefined();
   });
 

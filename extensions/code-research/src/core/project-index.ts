@@ -143,7 +143,7 @@ function indexFile(file: string, source: string, rootNode: any, extraction: Java
         const classRecord = findMatchingRecord(extraction.records, {
           declarationKinds: ['class', 'interface', 'enum', 'record', 'annotation'],
           name: className,
-          line: node.startPosition.row + 1,
+          line: classNameNode.startPosition.row + 1,
         });
         if (classRecord) {
           index.classes.push({
@@ -231,7 +231,7 @@ function indexClassMembers(
         declarationKinds: ['method', 'constructor', 'compact_constructor', 'annotation_element'],
         name: methodName,
         ownerChain,
-        line: node.startPosition.row + 1,
+        line: nameNode?.startPosition.row + 1,
       });
       if (methodRecord) {
         const methodTypeNode = node.type === 'method_declaration' ? node.childForFieldName('type') : undefined;
