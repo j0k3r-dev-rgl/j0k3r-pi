@@ -37,7 +37,10 @@ export interface ListServicesResult {
 
 export interface ServicesStatusResult {
   configPath: string;
+  runtimeDir: string;
+  logsDir: string;
   statePath: string;
+  exists: boolean;
   services: ServiceStatus[];
 }
 
@@ -103,20 +106,22 @@ function serviceListEntry(service: WorkspaceServiceDefinition, envFilePresent: b
   };
 }
 
-function toServiceStatus(service: WorkspaceServiceDefinition, runtime?: RuntimeServiceStateV1, identityOk?: boolean): ServiceStatus {
+function toServiceStatus(service: WorkspaceServiceDefinition, runtime?: RuntimeServiceStateV1): ServiceStatus {
   if (!runtime) {
     return { name: service.name, type: service.type, path: service.relativePath, command: service.command, env_file: service.envFile, status: 'stopped', log_path: service.logPath };
   }
   if (runtime.phase === 'recovery_required') {
     return { name: service.name, type: service.type, path: service.relativePath, command: service.command, env_file: service.envFile, status: 'recovery_required', pid: runtime.identity?.pid, started_at: runtime.startedAt, log_path: service.logPath };
   }
-  if (identityOk === false) {
-    return { name: service.name, type: service.type, path: service.relativePath, command: service.command, env_file: service.envFile, status: 'identity_mismatch', pid: runtime.identity?.pid, started_at: runtime.startedAt, log_path: service.logPath };
-  }
   if (runtime.identity?.pid) {
     return { name: service.name, type: service.type, path: service.relativePath, command: service.command, env_file: service.envFile, status: 'running', pid: runtime.identity.pid, started_at: runtime.startedAt, log_path: service.logPath };
   }
   return { name: service.name, type: service.type, path: service.relativePath, command: service.command, env_file: service.envFile, status: 'stale', started_at: runtime.startedAt, log_path: service.logPath };
+}
+
+function staleOrMismatchStatus(service: WorkspaceServiceDefinition, runtime: RuntimeServiceStateV1, reason: string): ServiceStatus {
+  const stale = reason.includes('ENOENT') || reason.includes('no such file') || reason.includes('boot id');
+  return { name: service.name, type: service.type, path: service.relativePath, command: service.command, env_file: service.envFile, status: stale ? 'stale' : 'identity_mismatch', pid: runtime.identity?.pid, started_at: runtime.startedAt, log_path: service.logPath };
 }
 
 async function readTail(path: string, maxBytes: number): Promise<{ text: string; bytesRead: number; totalBytes: number; truncated: boolean }> {
@@ -226,7 +231,7 @@ export async function listServices(cwd: string): Promise<ListServicesResult> {
 
 export async function getServicesStatus(cwd: string, signal?: AbortSignal): Promise<ServicesStatusResult> {
   const config = await loadWorkspaceServicesConfig(cwd);
-  requireConfig(config);
+  if (!config.exists) return { configPath: config.configPath, runtimeDir: config.runtimeDir, logsDir: config.logsDir, statePath: config.statePath, exists: false, services: [] };
   return withLifecycleTransaction(config.statePath, { signal, deadlineMs: DEFAULT_TRANSACTION_DEADLINE_MS, ownerPath: config.ownerPath }, async () => {
     await initializeLastGoodState(config);
     const opened = await openRuntimeState(config);
@@ -242,15 +247,15 @@ export async function getServicesStatus(cwd: string, signal?: AbortSignal): Prom
       const validation = await validateManagedIdentity(config, runtime.identity, service.command);
       if (!validation.ok) {
         delete next.services[service.name];
-        statuses.push(toServiceStatus(service, runtime, false));
+        statuses.push(staleOrMismatchStatus(service, runtime, validation.reason));
         changed = true;
       } else {
         next.services[service.name] = { ...runtime, identity: validation.identity, updatedAt: new Date().toISOString() };
-        statuses.push(toServiceStatus(service, next.services[service.name], true));
+        statuses.push(toServiceStatus(service, next.services[service.name]));
       }
     }
     if (changed) await commitRuntimeState(config, opened.state, next);
-    return { configPath: config.configPath, statePath: config.statePath, services: statuses };
+    return { configPath: config.configPath, runtimeDir: config.runtimeDir, logsDir: config.logsDir, statePath: config.statePath, exists: true, services: statuses };
   });
 }
 

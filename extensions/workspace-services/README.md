@@ -41,8 +41,9 @@ When any service is started, the extension ensures `.gitignore` contains `.pi/wo
 ## Safety and lifecycle behavior
 
 - Linux-only lifecycle semantics.
-- Process identity uses procfs-backed PID, process-group, session, start-time, command-line, and cwd validation.
-- Stop and restart require confirmed managed-group absence before state deletion or replacement start.
+- Process identity uses procfs-backed PID, process-group, session, boot id, start-time, command-line, and cwd validation.
+- On trusted Pi session start, the extension reconciles persisted runtime state against real processes without auto-starting services.
+- Stop and restart require confirmed managed-group absence before state deletion or replacement start; restart truncates the managed log before writing the new start header.
 - Lifecycle operations are serialized across processes that share the same runtime-state path.
 - Runtime state is schema-versioned, atomically replaced, and recovered from `state.last-good.json` when possible.
 - Invalid state is quarantined and never silently treated as empty state.
@@ -59,7 +60,7 @@ When any service is started, the extension ensures `.gitignore` contains `.pi/wo
 - `workspace_services_status`
 - `workspace_service_restart`
 
-Each public tool has native collapsed/expanded rendering.
+Each public tool has native collapsed/expanded rendering. `workspace_services_status` also returns concise model-facing service details so the agent can see whether config exists and which services are configured without reading the JSON manually.
 
 ## Development
 

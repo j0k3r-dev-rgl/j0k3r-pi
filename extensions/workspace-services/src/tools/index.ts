@@ -52,6 +52,20 @@ function safeExpandHint(): string {
   try { return keyHint('app.tools.expand' as any, 'expand'); } catch { return 'ctrl+o expand'; }
 }
 
+function formatStatusText(result: Awaited<ReturnType<typeof getServicesStatus>>): string {
+  if (!result.exists) return `workspace_services_status: no config found at ${result.configPath}`;
+  if (result.services.length === 0) return `workspace_services_status: config found at ${result.configPath}, but no services are configured.`;
+  const lines = [
+    `workspace_services_status: ${result.services.length} configured service(s)`,
+    `config: ${result.configPath}`,
+  ];
+  for (const service of result.services) {
+    const pid = service.pid ? ` pid=${service.pid}` : '';
+    lines.push(`- ${service.name}: ${service.status}${pid} type=${service.type} path=${service.path} command=${service.command} log=${service.log_path}`);
+  }
+  return lines.join('\n');
+}
+
 export function registerWorkspaceServicesTools(pi: ExtensionAPI, options: RegisterWorkspaceServicesToolsOptions = {}): void {
   pi.registerTool({
     name: 'workspace_services_list',
@@ -140,7 +154,8 @@ export function registerWorkspaceServicesTools(pi: ExtensionAPI, options: Regist
     execute: async (_id, _params, signal, _onUpdate, ctx) => {
       if (!(await ensureTrusted(ctx))) return textResult(trustFailure(), trustFailure().summary);
       const result = await getServicesStatus(cwdFrom(ctx, options), signal);
-      return textResult({ ok: true, status: 'running', summary: `workspace_services_status: ${result.services.length} configured service(s)`, data: result as any }, `workspace_services_status: ${result.services.length} configured service(s)`);
+      const text = formatStatusText(result);
+      return textResult({ ok: true, status: 'running', summary: text.split('\n')[0] ?? 'workspace_services_status', data: result as any }, text);
     },
     renderCall: renderCall('workspace_services_status'),
     renderResult: (result, renderOptions, theme, context) => {
