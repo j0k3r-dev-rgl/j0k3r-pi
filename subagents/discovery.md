@@ -9,10 +9,8 @@ tools:
   - bash
   - skill_registry_resolve
   - workspace_graph_status
-  - find_symbol
-  - find_references
-  - function_call_tree
-  - reverse_function_call_tree
+  - code_find
+  - code_call_hierarchy
   - pdf_extract
   - mem_save
 ---
@@ -51,8 +49,8 @@ If a material field is missing, contradictory, or requires internet/external res
 - Reuse supplied context; do not reread files only to restate it.
 - Stay inside the delegated paths, symbols, artifacts, and exclusions.
 - Use the narrowest read, symbol lookup, reference lookup, call tree, or command that answers the question.
-- For TypeScript/JavaScript, Java, and Go code, call `workspace_graph_status` first, then use graph-backed code research before text search.
-- Use text search on supported-language code only after graph-backed lookup is unavailable, unusable, or fails for the exact need.
+- For TypeScript/JavaScript, Java, and Go code, call `workspace_graph_status` first, then use `code_find` for declarations, implementations, and references; use `code_call_hierarchy` only for known callable incoming/outgoing call flow.
+- Use text search on supported-language code only after `code_find` or `code_call_hierarchy` is unavailable, unusable, or fails for the exact need.
 - For other languages, docs, configs, scripts, generated workflow state, and unsupported local files, use targeted reads or bounded `rg/find` commands.
 - Do not edit, write, delete, create artifacts, create SDD files, choose workflows, implement code, run services, install dependencies, commit, push, or broaden scope.
 - Do not use internet, Context7, web, GitHub, discussions, research, or YouTube tools.

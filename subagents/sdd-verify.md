@@ -7,10 +7,8 @@ tools:
   - write
   - edit
   - workspace_graph_status
-  - find_symbol
-  - find_references
-  - function_call_tree
-  - reverse_function_call_tree
+  - code_find
+  - code_call_hierarchy
   - mem_save
 ---
 
@@ -49,7 +47,7 @@ If a material reference is missing, placeholder-based, or required verification 
 - Read only exact assigned skills.
 - Do not read unrelated artifacts or the full conversation unless explicitly required.
 - Do not modify implementation files or tests.
-- For TS/JS, Java, and Go verification lookups, call `workspace_graph_status` first and then use graph-backed code research before text search.
+- For TS/JS, Java, and Go verification lookups, call `workspace_graph_status` first, then use `code_find` for declarations, implementations, and references; use `code_call_hierarchy` only for known callable incoming/outgoing call flow.
 
 ## Verification Rules
 

@@ -7,11 +7,9 @@ tools:
   - edit
   - write
   - agent_todo
-  - find_symbol
-  - find_references
-  - function_call_tree
-  - reverse_function_call_tree
   - workspace_graph_status
+  - code_find
+  - code_call_hierarchy
   - context7_status
   - context7_search_library
   - context7_get_context
@@ -75,7 +73,7 @@ If the `mem_save` tool is available and the task produced a durable lesson, save
 - If the runtime does not expose it or it fails, record the exact signal and continue with any safe remaining smoke steps.
 - Never call `subagent_*` tools.
 - Do not create commits, pushes, tags, branches, memory updates, or persistent config changes unless the delegated smoke task explicitly asks for them.
-- For TS/JS, Java, and Go code lookups, call `workspace_graph_status` first and then use graph-backed code research before text search.
+- For TS/JS, Java, and Go code lookups, call `workspace_graph_status` first, then use `code_find` for declarations, implementations, and references; use `code_call_hierarchy` only for known callable incoming/outgoing call flow.
 
 ## Output Style
 

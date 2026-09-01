@@ -6,8 +6,8 @@ tools:
   - write
   - edit
   - workspace_graph_status
-  - find_symbol
-  - find_references
+  - code_find
+  - code_call_hierarchy
   - context7_resolve_and_get_context
   - web_search
   - discussion_search
@@ -46,6 +46,7 @@ If any material reference is missing, placeholder-based, contradictory, or outsi
 - Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `mini-sdd.md`.
 - Read supplied artifacts, assigned skills, and explicitly approved files first.
 - Use bounded repository inspection or external research only when needed to remove ambiguity from the Mini-SDD contract.
+- For TypeScript/JavaScript, Java, and Go code inspection, call `workspace_graph_status` first, then use `code_find` for declarations, implementations, and references; use `code_call_hierarchy` only for known callable incoming/outgoing call flow.
 - Do not scan the repository or `skills/` blindly.
 - Do not implement, verify, archive, or invent product, scope, architecture, or acceptance decisions.
 - Keep the contract small and implementation-ready.

@@ -4,6 +4,10 @@ description: performs bounded deep research across official docs, web, GitHub, d
 tools:
   - read
   - write
+  - bash
+  - workspace_graph_status
+  - code_find
+  - code_call_hierarchy
   - context7_status
   - context7_search_library
   - context7_get_context
@@ -88,7 +92,7 @@ For `DEEP`, use broader triangulation when relevant:
 3. Community discussions: Stack Exchange, Dev.to, Hacker News, or similar available tools.
 4. Academic or standards literature when claims involve research, safety, protocols, measurements, or long-term trade-offs.
 5. YouTube talks/demos only when transcript-backed and materially useful.
-6. Local files only when explicitly supplied in scope.
+6. Local files/code only when explicitly supplied in scope; for TS/JS, Java, and Go code inspection, call `workspace_graph_status` first, then use `code_find` for declarations, implementations, and references, and `code_call_hierarchy` only for known callable incoming/outgoing call flow before falling back to text search.
 
 Search process:
 

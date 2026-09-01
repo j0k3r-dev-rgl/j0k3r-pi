@@ -9,10 +9,8 @@ tools:
   - mem_get_observation
   - mem_update
   - workspace_graph_status
-  - find_symbol
-  - find_references
-  - function_call_tree
-  - reverse_function_call_tree
+  - code_find
+  - code_call_hierarchy
   - mem_save
 ---
 
@@ -50,7 +48,7 @@ If any required reference is missing, placeholder-based, contradictory, or outsi
 - Read only exact assigned skills.
 - Stay inside approved paths and behaviors.
 - If a material scope, product, architecture, or authority gap appears, stop as `BLOCKED`.
-- For TS/JS, Java, and Go implementation lookups, call `workspace_graph_status` first and then use graph-backed code research before text search.
+- For TS/JS, Java, and Go implementation lookups, call `workspace_graph_status` first, then use `code_find` for declarations, implementations, and references; use `code_call_hierarchy` only for known callable incoming/outgoing call flow.
 - Do not commit or push without explicit user approval.
 
 ## Validation Rules
