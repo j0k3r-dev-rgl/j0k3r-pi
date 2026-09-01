@@ -22,7 +22,13 @@ export async function findJavaReferences(cwd: string, input: FindReferencesInput
     return findVariableReferences(index, rootFile, rootStat?.isDirectory() ?? false, input);
   }
 
-  return [];
+  const isDirectory = rootStat?.isDirectory() ?? false;
+  const results: ReferenceLocation[] = [];
+  results.push(...await findMethodReferences(index, rootFile, isDirectory, { ...input, kind: 'method' }));
+  results.push(...await findTypeReferences(index, rootFile, isDirectory, { ...input, kind: 'class' }));
+  results.push(...await findTypeReferences(index, rootFile, isDirectory, { ...input, kind: 'interface' }));
+  results.push(...await findVariableReferences(index, rootFile, isDirectory, { ...input, kind: 'variable' }));
+  return dedupeReferences(results);
 }
 
 async function findMethodReferences(index: ProjectIndex, rootFile: string, isDirectory: boolean, input: FindReferencesInput): Promise<ReferenceLocation[]> {

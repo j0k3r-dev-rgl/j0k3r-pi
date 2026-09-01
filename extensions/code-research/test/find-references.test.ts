@@ -843,4 +843,31 @@ describe('find_references', () => {
 
     expect(results.map((item) => item.called_as)).toContain('getReviewAnalysisStatus()');
   });
+
+  it('does not return incomplete Java interface references when reference kind is omitted', async () => {
+    const rootDir = await createProject('pi-find-references-java-no-kind-interface', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/main/java/ports/StartReviewAnalysis.java': `package ports;\n\npublic interface StartReviewAnalysis {}\n`,
+      'src/main/java/app/StartReviewAnalysisUseCase.java': `package app;\n\nimport ports.StartReviewAnalysis;\n\npublic class StartReviewAnalysisUseCase implements StartReviewAnalysis {}\n`,
+      'src/main/java/web/ReviewAnalysisRestController.java': `package web;\n\nimport ports.StartReviewAnalysis;\n\npublic class ReviewAnalysisRestController {\n  private final StartReviewAnalysis startReviewAnalysis;\n\n  public ReviewAnalysisRestController(StartReviewAnalysis startReviewAnalysis) {\n    this.startReviewAnalysis = startReviewAnalysis;\n  }\n}\n`,
+      'src/test/java/web/ReviewAnalysisRestControllerTest.java': `package web;\n\nimport ports.StartReviewAnalysis;\n\nclass ReviewAnalysisRestControllerTest {\n  private StartReviewAnalysis startReviewAnalysis;\n}\n`,
+    });
+    await buildWorkspaceGraph(rootDir);
+
+    const results = await findReferences(rootDir, {
+      path: 'src',
+      symbol: 'StartReviewAnalysis',
+      language: 'java',
+    });
+
+    const kinds = new Set(results.map((item) => item.reference_kind));
+    expect(kinds.has('implements')).toBe(true);
+    expect(kinds.has('import')).toBe(true);
+    expect(kinds.has('type_reference')).toBe(true);
+    expect(new Set(results.map((item) => item.context_class).filter(Boolean))).toEqual(new Set([
+      'StartReviewAnalysisUseCase',
+      'ReviewAnalysisRestController',
+      'ReviewAnalysisRestControllerTest',
+    ]));
+  });
 });
