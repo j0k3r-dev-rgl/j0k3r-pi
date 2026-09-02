@@ -114,6 +114,7 @@ function buildReverseTree(
     callerNode.receiver_type = edge.callsite?.receiverType;
     callerNode.call_line = edge.callsite?.line;
     callerNode.call_column = edge.callsite?.column;
+    callerNode.reason = edge.reason;
     callers.push(callerNode);
   }
 

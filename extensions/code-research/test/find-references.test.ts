@@ -844,6 +844,50 @@ describe('find_references', () => {
     expect(results.map((item) => item.called_as)).toContain('getReviewAnalysisStatus()');
   });
 
+  it('deduplicates TypeScript interface method call references while preserving receiver and reason metadata', async () => {
+    const files = {
+      'src/repository.ts': `export interface ReviewAnalysisRepository {\n  transitionToTerminal(id: string, status: string): void;\n}\n`,
+      'src/sql-repository.ts': `import { ReviewAnalysisRepository } from './repository.js';\n\nexport class SqlReviewAnalysisRepository implements ReviewAnalysisRepository {\n  transitionToTerminal(id: string, status: string): void { void id; void status; }\n}\n`,
+      'src/service.ts': `import { ReviewAnalysisRepository } from './repository.js';\n\nexport class ReviewAnalysisService {\n  constructor(private readonly repository: ReviewAnalysisRepository) {}\n\n  cancelActiveReviewAnalysis(id: string): void {\n    this.repository.transitionToTerminal(id, 'cancelled');\n  }\n\n  beginTerminalTransition(id: string): void {\n    this.repository.transitionToTerminal(id, 'running');\n  }\n}\n`,
+    };
+    const directRoot = await createProject('pi-find-references-ts-interface-method-direct', files);
+    const graphRoot = await createProject('pi-find-references-ts-interface-method-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      ...files,
+    });
+    await buildWorkspaceGraph(graphRoot);
+
+    const query = { path: 'src/repository.ts', symbol: 'transitionToTerminal', language: 'ts' as const, kind: 'method' as const, reference_kinds: ['call' as const] };
+    const direct = await findReferences(directRoot, query);
+    const graph = await findReferences(graphRoot, query);
+    const normalize = (results: typeof direct) => results.map((item) => ({
+      context_symbol: item.context_symbol,
+      called_as: item.called_as,
+      receiver_name: item.receiver_name,
+      receiver_type: item.receiver_type,
+      reason: item.reason,
+    })).sort((a, b) => String(a.context_symbol).localeCompare(String(b.context_symbol)));
+
+    expect(normalize(direct)).toEqual([
+      {
+        context_symbol: 'beginTerminalTransition',
+        called_as: "this.repository.transitionToTerminal(id, 'running')",
+        receiver_name: 'this.repository',
+        receiver_type: 'ReviewAnalysisRepository',
+        reason: 'receiver-type-contract-method',
+      },
+      {
+        context_symbol: 'cancelActiveReviewAnalysis',
+        called_as: "this.repository.transitionToTerminal(id, 'cancelled')",
+        receiver_name: 'this.repository',
+        receiver_type: 'ReviewAnalysisRepository',
+        reason: 'receiver-type-contract-method',
+      },
+    ]);
+    expect(normalize(graph)).toEqual(normalize(direct));
+    expect(new Set(graph.map((item) => `${item.context_symbol}:${item.called_as}`)).size).toBe(graph.length);
+  });
+
   it('does not return incomplete Java interface references when reference kind is omitted', async () => {
     const rootDir = await createProject('pi-find-references-java-no-kind-interface', {
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,

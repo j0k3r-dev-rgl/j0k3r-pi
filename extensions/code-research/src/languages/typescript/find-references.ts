@@ -52,7 +52,10 @@ async function findCallableReferences(
     if (input.kind && input.kind !== callable.kind) return false;
     return true;
   });
-  if (!target) return [];
+  if (!target) {
+    if (input.kind === 'method' && !isDirectory) return findInterfaceMethodReferencesBySource(index, rootPath, input);
+    return [];
+  }
 
   const results: ReferenceLocation[] = [];
   if (isJsxLikeFile(target.file)) {
@@ -91,6 +94,9 @@ async function findCallableReferences(
     for (const receiverReference of findMethodReferencesByReceiverHeuristic(index, target, input)) {
       results.push(receiverReference);
     }
+    for (const typedReceiverReference of findMethodReferencesByTypedReceivers(index, target, input)) {
+      results.push(typedReceiverReference);
+    }
   }
 
   for (const caller of index.callables) {
@@ -100,7 +106,7 @@ async function findCallableReferences(
     for (const call of extractCalls(caller.node, { includeNestedCallableBodies: true })) {
       const resolved = resolveCall(index, caller, call);
       if (resolved.callable && sameCallable(resolved.callable, target)) {
-        results.push(createCallableReference(caller, target, call.line, call.column, 'call', call.text, resolved.receiverType, call.receiver));
+        results.push(createCallableReference(caller, target, call.line, call.column, 'call', call.text, resolved.receiverType, call.receiver, (resolved as any).reason));
         continue;
       }
 
@@ -125,7 +131,7 @@ async function findCallableReferences(
         column: callback.column,
       });
       if (resolved.callable && sameCallable(resolved.callable, target)) {
-        results.push(createCallableReference(caller, target, callback.line, callback.column, 'callback', callback.text, resolved.receiverType, callback.receiver));
+        results.push(createCallableReference(caller, target, callback.line, callback.column, 'callback', callback.text, resolved.receiverType, callback.receiver, (resolved as any).reason));
       }
     }
   }
@@ -199,6 +205,148 @@ function findMethodReferencesByReceiverHeuristic(index: TypeScriptProjectIndex, 
     }
   }
   return results;
+}
+
+function findInterfaceMethodReferencesBySource(index: TypeScriptProjectIndex, rootPath: string, input: FindReferencesInput): ReferenceLocation[] {
+  const file = index.files.get(rootPath);
+  if (!file) return [];
+  const interfaceMatch = file.source.match(new RegExp(`interface\\s+([A-Za-z_$][\\w$]*)[^{]*{[\\s\\S]*?\\b${escapeRegExp(input.symbol)}\\s*\\(`));
+  const ownerName = interfaceMatch?.[1];
+  if (!ownerName) return [];
+  return findMethodReferencesByTypedReceiverTargets(index, input, input.symbol, [{ ownerName, ownerFile: rootPath, reason: 'receiver-type-contract-method' }]);
+}
+
+function findMethodReferencesByTypedReceivers(index: TypeScriptProjectIndex, target: IndexedCallable, input: FindReferencesInput): ReferenceLocation[] {
+  const ownerName = target.ownerName;
+  if (!ownerName) return [];
+
+  const receiverTargets: Array<{ ownerName: string; ownerFile?: string; reason: string }> = [
+    { ownerName, ownerFile: target.file, reason: 'receiver-type-contract-method' },
+  ];
+
+  {
+    for (const interfaceName of collectImplementedInterfaceNames(index, target)) {
+      receiverTargets.push({ ownerName: interfaceName, reason: 'ambiguous-interface-implementation' });
+    }
+    for (const structural of index.callables) {
+      if (structural === target) continue;
+      if (structural.kind !== 'method' || structural.symbol !== target.symbol || !structural.ownerName) continue;
+      if (structural.ownerName === ownerName) continue;
+      if (receiverTargets.some((candidate) => candidate.ownerName === structural.ownerName)) continue;
+      receiverTargets.push({ ownerName: structural.ownerName, ownerFile: structural.file, reason: 'structural-implementation' });
+    }
+  }
+
+  for (const receiverType of collectTypedReceiverTypesForMethod(index, target.symbol)) {
+    if (receiverType === ownerName || receiverTargets.some((candidate) => candidate.ownerName === receiverType)) continue;
+    const hasMatchingOwner = index.callables.some((callable) => callable.kind === 'method' && callable.symbol === target.symbol && callable.ownerName === receiverType);
+    receiverTargets.push({
+      ownerName: receiverType,
+      reason: hasMatchingOwner ? 'structural-implementation' : 'ambiguous-interface-implementation',
+    });
+  }
+
+  return findMethodReferencesByTypedReceiverTargets(index, input, target.symbol, receiverTargets);
+}
+
+function collectTypedReceiverTypesForMethod(index: TypeScriptProjectIndex, methodName: string): Set<string> {
+  const types = new Set<string>();
+  for (const file of index.files.values()) {
+    const declarations = new Map<string, string>();
+    for (const match of file.source.matchAll(/\b([A-Za-z_$][\w$]*)\??\s*:\s*([A-Za-z_$][\w$]*)\b/g)) {
+      if (match[1] && match[2]) {
+        declarations.set(match[1], match[2]);
+        declarations.set(`this.${match[1]}`, match[2]);
+      }
+    }
+    for (const [receiver, receiverType] of declarations) {
+      const receiverPattern = receiver.includes('.') ? escapeRegExp(receiver) : `(?<![.\\w$])${escapeRegExp(receiver)}`;
+      if (new RegExp(`${receiverPattern}\\s*\\.\\s*${escapeRegExp(methodName)}\\s*\\(`).test(file.source)) types.add(receiverType);
+    }
+  }
+  return types;
+}
+
+function findMethodReferencesByTypedReceiverTargets(
+  index: TypeScriptProjectIndex,
+  input: FindReferencesInput,
+  methodName: string,
+  receiverTargets: Array<{ ownerName: string; ownerFile?: string; reason: string }>
+): ReferenceLocation[] {
+  const results: ReferenceLocation[] = [];
+  for (const file of index.files.values()) {
+    if (!matchesRequestedLanguage(file.language, input.language)) continue;
+    for (const receiverTarget of receiverTargets) {
+      const receivers = collectTypedReceiversForType(index, file, receiverTarget.ownerName, receiverTarget.ownerFile);
+      for (const receiver of receivers) {
+        const receiverPattern = receiver.includes('.') ? escapeRegExp(receiver) : `(?<![.\\w$])${escapeRegExp(receiver)}`;
+        const pattern = new RegExp(`${receiverPattern}\\s*\\.\\s*${escapeRegExp(methodName)}\\s*\\(`, 'g');
+        for (const match of findAllRegexPositions(file.source, pattern)) {
+          const context = findContext(index, file.file, match.line);
+          results.push({
+            file: file.file,
+            line: match.line,
+            column: match.column,
+            end_line: context?.endLine,
+            end_column: context?.endColumn,
+            symbol: input.symbol,
+            kind: 'method',
+            context_symbol: context?.symbol ?? '<top-level>',
+            context_kind: context?.kind ?? 'function',
+            context_class: context?.className,
+            owner_kind: context?.ownerKind ?? 'module',
+            reference_kind: 'call',
+            called_as: extractCallText(file.source, match.line, match.column),
+            receiver_name: receiver,
+            receiver_type: receiverTarget.ownerName,
+            is_application: true,
+            source: 'application',
+            reason: receiverTarget.reason,
+          });
+        }
+      }
+    }
+  }
+  return results;
+}
+
+function collectImplementedInterfaceNames(index: TypeScriptProjectIndex, target: IndexedCallable): string[] {
+  if (!target.ownerName) return [];
+  const file = index.files.get(target.file);
+  if (!file) return [];
+  const classPattern = new RegExp(`class\\s+${escapeRegExp(target.ownerName)}[^{}]*\\bimplements\\s+([^{}]+?)(?:\\{|$)`, 'm');
+  const match = file.source.match(classPattern);
+  if (!match?.[1]) return [];
+  return match[1]
+    .split(',')
+    .map((item) => item.trim().replace(/<.*$/, '').split(/\s+/)[0])
+    .filter(Boolean);
+}
+
+function collectTypedReceiversForType(
+  index: TypeScriptProjectIndex,
+  file: { file: string; source: string; imports: Map<string, any> },
+  typeName: string,
+  typeFile?: string
+): Set<string> {
+  const receivers = new Set<string>();
+  const localTypeNames = new Set<string>([typeName]);
+  for (const binding of file.imports.values()) {
+    const candidates = resolveTypeScriptImportCandidates(file.file, binding.source, index.projectConfig);
+    const targetFile = candidates.find((candidate) => index.files.has(candidate));
+    if (binding.importedName === typeName && (!typeFile || targetFile === typeFile)) localTypeNames.add(binding.localName);
+  }
+
+  for (const localTypeName of localTypeNames) {
+    const typePattern = new RegExp(`\\b([A-Za-z_$][\\w$]*)\\??\\s*:\\s*${escapeRegExp(localTypeName)}\\b`, 'g');
+    for (const match of file.source.matchAll(typePattern)) {
+      const receiver = match[1];
+      if (!receiver || ['const', 'let', 'var', 'function'].includes(receiver)) continue;
+      receivers.add(receiver);
+      receivers.add(`this.${receiver}`);
+    }
+  }
+  return receivers;
 }
 
 function collectCallableAliasesForFile(index: TypeScriptProjectIndex, file: { file: string; imports: Map<string, any> }, target: IndexedCallable): Set<string> {
@@ -376,7 +524,8 @@ function createCallableReference(
   kind: 'call' | 'callback',
   text: string,
   receiverType?: string,
-  receiverName?: string
+  receiverName?: string,
+  reason?: string
 ): ReferenceLocation {
   return {
     file: caller.file,
@@ -396,6 +545,7 @@ function createCallableReference(
     receiver_type: receiverType,
     is_application: true,
     source: 'application',
+    reason,
   };
 }
 
@@ -476,13 +626,27 @@ function offsetToLineColumn(source: string, offset: number) {
 }
 
 function dedupeReferences(references: ReferenceLocation[]): ReferenceLocation[] {
-  const seen = new Set<string>();
-  return references.filter((item) => {
-    const key = `${item.file}:${item.line}:${item.column}:${item.reference_kind}:${item.context_symbol ?? ''}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  const byKey = new Map<string, ReferenceLocation>();
+  for (const item of references) {
+    const key = `${item.file}:${item.line}:${item.column}:${item.reference_kind}:${item.context_symbol ?? ''}:${item.called_as ?? ''}`;
+    const existing = byKey.get(key);
+    if (!existing || referenceMetadataScore(item) > referenceMetadataScore(existing)) {
+      byKey.set(key, item);
+    }
+  }
+  return [...byKey.values()];
+}
+
+function referenceMetadataScore(item: ReferenceLocation): number {
+  return [
+    item.receiver_name,
+    item.receiver_type,
+    item.context_class,
+    item.called_as,
+    item.reason,
+    item.end_line,
+    item.end_column,
+  ].filter((value) => value !== undefined && value !== '').length;
 }
 
 async function findVariableReferences(

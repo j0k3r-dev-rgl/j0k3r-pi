@@ -426,6 +426,47 @@ describe('reverse_function_call_tree', () => {
     expect(graph.result.root.callers?.map((node: any) => node.symbol)).toEqual(direct.result.root.callers?.map((node: any) => node.symbol));
   });
 
+  it('augments TypeScript interface incoming hierarchy with all confirmed callers and preserves probable implementation reasons', async () => {
+    const rootDir = await createProject('pi-reverse-call-tree-ts-interface-method-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/repository.ts': `export interface ReviewAnalysisRepository {\n  transitionToTerminal(id: string, status: string): void;\n}\n`,
+      'src/sql-repository.ts': `import { ReviewAnalysisRepository } from './repository.js';\n\nexport class SqlReviewAnalysisRepository implements ReviewAnalysisRepository {\n  transitionToTerminal(id: string, status: string): void { void id; void status; }\n}\n`,
+      'src/memory-repository.ts': `export class InMemoryReviewAnalysisRepository {\n  transitionToTerminal(id: string, status: string): void { void id; void status; }\n}\n`,
+      'src/service.ts': `import { ReviewAnalysisRepository } from './repository.js';\nimport { SqlReviewAnalysisRepository } from './sql-repository.js';\nimport { InMemoryReviewAnalysisRepository } from './memory-repository.js';\n\nexport class ReviewAnalysisService {\n  constructor(private readonly repository: ReviewAnalysisRepository) {}\n\n  cancelActiveReviewAnalysis(id: string): void {\n    this.repository.transitionToTerminal(id, 'cancelled');\n  }\n\n  beginTerminalTransition(id: string): void {\n    this.repository.transitionToTerminal(id, 'running');\n  }\n}\n\nexport function concreteCaller(repository: SqlReviewAnalysisRepository): void {\n  repository.transitionToTerminal('id', 'done');\n}\n\nexport function structuralCaller(repository: InMemoryReviewAnalysisRepository): void {\n  repository.transitionToTerminal('id', 'memory');\n}\n`,
+    });
+    await buildWorkspaceGraph(rootDir);
+
+    const interfaceExecution = await executeReverseFunctionCallTree(rootDir, {
+      path: 'src/repository.ts',
+      symbol: 'transitionToTerminal',
+      language: 'ts',
+      kind: 'method',
+      max_depth: 3,
+    });
+    expect(interfaceExecution.status).toBe('ok');
+    if (interfaceExecution.status !== 'ok') return;
+    const interfaceCallers = interfaceExecution.result.root.callers ?? [];
+    expect(interfaceCallers.map((node: any) => node.symbol)).toEqual(expect.arrayContaining(['beginTerminalTransition', 'cancelActiveReviewAnalysis']));
+    for (const symbol of ['beginTerminalTransition', 'cancelActiveReviewAnalysis']) {
+      expect(interfaceCallers.find((node: any) => node.symbol === symbol)).toMatchObject({
+        receiver_type: 'ReviewAnalysisRepository',
+        reason: 'receiver-type-contract-method',
+      });
+    }
+
+    const implementationExecution = await executeReverseFunctionCallTree(rootDir, {
+      path: 'src/sql-repository.ts',
+      symbol: 'transitionToTerminal',
+      language: 'ts',
+      kind: 'method',
+      max_depth: 3,
+    });
+    expect(implementationExecution.status).toBe('ok');
+    if (implementationExecution.status !== 'ok') return;
+    const implementationReasons = new Set((implementationExecution.result.root.callers ?? []).map((node: any) => node.reason));
+    expect(implementationReasons.has('receiver-type-contract-method')).toBe(true);
+  });
+
   it('keeps exact-file JavaScript method reverse graph queries attached to the method owner and callers', async () => {
     const rootDir = await createProject('pi-reverse-call-tree-js-exact-method', {
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
