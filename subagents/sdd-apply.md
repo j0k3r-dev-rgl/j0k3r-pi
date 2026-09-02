@@ -39,6 +39,8 @@ The delegated prompt must provide the seven standard fields in order and must ex
 
 If any required reference is missing, placeholder-based, contradictory, or outside scope, return `BLOCKED`.
 
+The authorization may be supplied in prose, but it must contain all required facts. Do not require a special table format when the prompt gives author, session/time or message reference, authorized action, authorized scope, authority artifact, and candidate/change slug unambiguously. For remediation after a failed verify, a prior explicit apply authorization remains valid only when the prompt also cites the failed `verify.md`, the current `tasks.md` Execution Scope, and the workflow next action authorizing return to apply/remediation.
+
 ## Boundaries
 
 - Write only the exact assigned `apply.md` output path plus implementation files inside the approved `Execution Scope`; do not write other SDD artifacts.
@@ -59,7 +61,17 @@ Use the change type required by the authority artifact and record the evidence i
 
 Use the `apply.md`, `Workflow Status`, and `Handoff` contracts from `skills/subagent-artifact-contracts/SKILL.md`.
 
-`READY` means implementation is complete and independently verifiable.
+`READY` means implementation is complete and independently verifiable. Passing tests or typecheck is not sufficient by itself.
+
+Before returning `READY`, audit the contract at scenario level:
+
+- every `TASK-###` listed in `tasks.md` is complete or explicitly not applicable with authority evidence;
+- every `REQ-###` and every `SCENARIO-###` named by those tasks has implementation evidence or test/source evidence in `apply.md`;
+- when a task covers multiple distinct scenarios, the evidence records each scenario separately rather than summarizing the whole task generically;
+- package-level validation has passed, or any blocked validation is reported as `BLOCKED` with the exact command and reason; and
+- no acceptance gap from a prior `verify.md` remains unresolved.
+
+If any scenario, required behavior, or validation remains incomplete, return `BLOCKED` and name the exact `TASK-###`, `REQ-###`, or `SCENARIO-###`. Do not mark partially implemented work as `READY` because the current test suite passes.
 
 ## Handoff
 

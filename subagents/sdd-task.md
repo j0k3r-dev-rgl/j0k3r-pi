@@ -45,6 +45,18 @@ Use the `tasks.md`, `Workflow Status`, `Execution Scope`, and `Handoff` contract
 
 `READY` requires every `REQ-###` and every `SCENARIO-###` from `spec.md` to be covered by concrete tasks and a parseable execution scope. Each `TASK-###` must list exact upstream IDs in `Implements` and `Verifies` so apply and verify can trace `REQ/SCENARIO → TASK → evidence`.
 
+A task is concrete only when apply cannot reasonably satisfy part of it while claiming the whole task complete. When one requirement or task spans distinct behaviors, languages, frameworks, storage states, fallback paths, or renderer/tool surfaces, split it into separate `TASK-###` items or include explicit per-scenario evidence bullets under `Evidence`. Do not group heterogeneous acceptance scenarios behind a generic implementation phrase such as “add framework inference”, “implement fallback”, or “extend resolution” unless the task lists the exact scenario-specific checks that prove each behavior.
+
+Before returning `READY`, perform a coverage audit from `spec.md` and `design.md`:
+
+- every failed or high-risk `SCENARIO-###` has a named owning task and exact path list;
+- every task that verifies multiple scenarios identifies the distinct acceptance check for each scenario;
+- every path needed by the design decisions and scenario checks appears in `Allowed Paths` and, when implementation or tests may change it, in `Writable Paths`;
+- `Allowed Bash` contains only exact commands apply may run, and validation expectations do not require commands outside that list; and
+- `Next Permitted Action` is compatible with the artifact status.
+
+If the subagent is updating tasks after a blocked apply or failed verify, treat the blocker or failed scenarios as the remediation checklist. Preserve existing task IDs when possible, but refine tasks, evidence bullets, and execution scope until the next apply has scenario-level acceptance checks instead of broad claims.
+
 ## Handoff
 
 Return only the compact canonical handoff from `skills/subagent-artifact-contracts/SKILL.md`. For `READY`, put `tasks.md` in `Artifact` and do not repeat artifact content.
