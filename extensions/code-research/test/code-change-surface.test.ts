@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildCodeChangeSurface } from '../src/core/code-change-surface.js';
+import { buildWorkspaceGraph } from '../src/core/workspace-graph.js';
 import { registerCodeChangeSurfaceTool } from '../src/tools/code-change-surface.js';
 
 const renderTheme = { fg: (_name: string, text: string) => text, bold: (text: string) => text };
@@ -29,12 +30,15 @@ function registerTool(): any {
 describe('code_change_surface', () => {
   it('returns a bounded actionable map for an interface-mediated terminal transition', async () => {
     const rootDir = await createProject('pi-change-surface-sias', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'src/review-analysis-repository.ts': `export interface ReviewAnalysisRepository {\n  transitionToTerminal(id: string): Promise<void>;\n}\n\nexport class SqlReviewAnalysisRepository implements ReviewAnalysisRepository {\n  async transitionToTerminal(id: string): Promise<void> {\n    void id;\n  }\n}\n`,
       'src/review-analysis-processor.ts': `import type { ReviewAnalysisRepository } from './review-analysis-repository';\n\nexport class ReviewAnalysisProcessor {\n  constructor(private repository: ReviewAnalysisRepository) {}\n\n  async complete(id: string): Promise<void> {\n    await this.repository.transitionToTerminal(id);\n  }\n}\n`,
       'src/review-analysis-retry-processor.ts': `import type { ReviewAnalysisRepository } from './review-analysis-repository';\n\nexport class ReviewAnalysisRetryProcessor {\n  constructor(private repository: ReviewAnalysisRepository) {}\n\n  async retry(id: string): Promise<void> {\n    await this.repository.transitionToTerminal(id);\n  }\n}\n`,
       'test/review-analysis-processor.test.ts': `import { ReviewAnalysisProcessor } from '../src/review-analysis-processor';\nimport { SqlReviewAnalysisRepository } from '../src/review-analysis-repository';\n\nconst repository = new SqlReviewAnalysisRepository();\nconst processor = new ReviewAnalysisProcessor(repository);\nawait processor.complete('done');\n`,
       'test/review-analysis-retry-processor.test.ts': `import { ReviewAnalysisRetryProcessor } from '../src/review-analysis-retry-processor';\nimport { SqlReviewAnalysisRepository } from '../src/review-analysis-repository';\n\nconst repository = new SqlReviewAnalysisRepository();\nconst processor = new ReviewAnalysisRetryProcessor(repository);\nawait processor.retry('done');\n`,
+      'test/sql-review-analysis-repository.test.ts': `import { SqlReviewAnalysisRepository } from '../src/review-analysis-repository';\n\nconst repository = new SqlReviewAnalysisRepository();\nawait repository.transitionToTerminal('done');\n`,
     });
+    await buildWorkspaceGraph(rootDir);
 
     const surface = await buildCodeChangeSurface(rootDir, {
       path: 'src/review-analysis-repository.ts',
@@ -45,16 +49,70 @@ describe('code_change_surface', () => {
 
     expect(surface.status).toBe('ready');
     expect(surface.contract.items[0]).toMatchObject({ symbol: 'transitionToTerminal', kind: 'method' });
-    expect(surface.implementations.items.some((item: any) => item.file.endsWith('review-analysis-repository.ts'))).toBe(true);
+    expect(surface.implementations.items.some((item: any) => item.qualified_name === 'SqlReviewAnalysisRepository.transitionToTerminal')).toBe(true);
     expect(surface.callers.items.map((item: any) => item.symbol).sort()).toEqual(['complete', 'retry']);
+    expect(new Set(surface.callers.items.map((item: any) => `${item.file}:${item.symbol}:${item.call_line}`)).size).toBe(surface.callers.items.length);
     expect(surface.likely_tests.items.map((item: any) => item.file).sort()).toEqual([
       expect.stringContaining('review-analysis-processor.test.ts'),
       expect.stringContaining('review-analysis-retry-processor.test.ts'),
+      expect.stringContaining('sql-review-analysis-repository.test.ts'),
     ]);
     expect(surface.risks).toContain('Interface-mediated or heuristic edges are present; inspect contract and concrete implementations before editing.');
     expect(surface.trust.level).toBe('medium');
     expect(surface.fallback.required).toBe(false);
     expect(surface.validation_suggestions[0]).toContain('Review likely affected test files');
+  });
+
+  it('deduplicates Java interface-mediated callers and validation suggestions', async () => {
+    const rootDir = await createProject('pi-change-surface-java-dedupe', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/main/java/app/RootDeleteReview.java': `package app;\npublic interface RootDeleteReview { void deleteById(String id); }\n`,
+      'src/main/java/app/RootDeleteReviewUseCase.java': `package app;\npublic class RootDeleteReviewUseCase implements RootDeleteReview { public void deleteById(String id) {} }\n`,
+      'src/main/java/app/RootReviewRestController.java': `package app;\npublic class RootReviewRestController { private final RootDeleteReview rootDeleteReview; public RootReviewRestController(RootDeleteReview rootDeleteReview) { this.rootDeleteReview = rootDeleteReview; } public void deleteReview(String id) { rootDeleteReview.deleteById(id); } }\n`,
+      'src/test/java/app/RootDeleteReviewUseCaseTest.java': `package app;\nclass RootDeleteReviewUseCaseTest { void testDelete() { new RootDeleteReviewUseCase().deleteById("1"); } }\n`,
+      'src/test/java/app/RootReviewRestControllerTest.java': `package app;\nclass RootReviewRestControllerTest { void testRoute() { new RootReviewRestController(new RootDeleteReviewUseCase()).deleteReview("1"); } }\n`,
+    });
+    await buildWorkspaceGraph(rootDir);
+
+    const surface = await buildCodeChangeSurface(rootDir, {
+      path: 'src/main/java/app/RootDeleteReviewUseCase.java',
+      query: 'deleteById',
+      language: 'java',
+      kind: 'method',
+    });
+
+    expect(surface.callers.items.map((item: any) => `${item.class}.${item.symbol}`)).toEqual(['RootReviewRestController.deleteReview']);
+    expect(surface.validation_suggestions.filter((item) => item.includes('RootReviewRestController.java'))).toHaveLength(1);
+    expect(surface.likely_tests.items.map((item: any) => item.file).sort()).toEqual([
+      expect.stringContaining('RootDeleteReviewUseCaseTest.java'),
+      expect.stringContaining('RootReviewRestControllerTest.java'),
+    ]);
+  });
+
+  it('expands Java interface methods to implementations, callers, and tests', async () => {
+    const rootDir = await createProject('pi-change-surface-java-interface', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/main/java/app/RootDeleteReview.java': `package app;\npublic interface RootDeleteReview { void deleteById(String id); }\n`,
+      'src/main/java/app/RootDeleteReviewUseCase.java': `package app;\npublic class RootDeleteReviewUseCase implements RootDeleteReview { public void deleteById(String id) {} }\n`,
+      'src/main/java/app/RootReviewRestController.java': `package app;\npublic class RootReviewRestController { private final RootDeleteReview rootDeleteReview; public RootReviewRestController(RootDeleteReview rootDeleteReview) { this.rootDeleteReview = rootDeleteReview; } public void deleteReview(String id) { rootDeleteReview.deleteById(id); } }\n`,
+      'src/test/java/app/RootDeleteReviewUseCaseTest.java': `package app;\nclass RootDeleteReviewUseCaseTest { void testDelete() { new RootDeleteReviewUseCase().deleteById("1"); } }\n`,
+      'src/test/java/app/RootReviewRestControllerTest.java': `package app;\nclass RootReviewRestControllerTest { void testRoute() { new RootReviewRestController(new RootDeleteReviewUseCase()).deleteReview("1"); } }\n`,
+    });
+    await buildWorkspaceGraph(rootDir);
+
+    const surface = await buildCodeChangeSurface(rootDir, {
+      path: 'src/main/java/app/RootDeleteReview.java',
+      query: 'deleteById',
+      language: 'java',
+      kind: 'method',
+    });
+
+    expect(surface.implementations.items.map((item: any) => item.qualified_name)).toEqual(['app.RootDeleteReviewUseCase.deleteById']);
+    expect(surface.callers.items.map((item: any) => `${item.class}.${item.symbol}`)).toEqual(['RootReviewRestController.deleteReview']);
+    expect(surface.likely_tests.items.map((item: any) => item.file).sort()).toEqual([
+      expect.stringContaining('RootDeleteReviewUseCaseTest.java'),
+      expect.stringContaining('RootReviewRestControllerTest.java'),
+    ]);
   });
 
   it('reports concrete fallback inspection needs instead of guessing when the anchor is missing', async () => {

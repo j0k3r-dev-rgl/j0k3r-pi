@@ -1,8 +1,9 @@
-import { relative } from 'node:path';
+import { dirname, isAbsolute, relative, resolve as resolvePath } from 'node:path';
 import { resolveFindReferences } from './find-references-resolver.js';
 import { resolveFindSymbol } from './find-symbol-resolver.js';
 import { executeReverseFunctionCallTree } from './reverse-function-call-tree-resolver.js';
-import type { CallTreeNode, FindReferencesInput, FindSymbolInput, ReferenceLocation, SupportedLanguage, SymbolKind, SymbolLocation } from '../types.js';
+import { readSubprojectGraphShard, readWorkspaceGraphManifest, readWorkspaceGraphState } from './graph-persistence.js';
+import type { CallTreeNode, FindReferencesInput, FindSymbolInput, GraphNode, ReferenceLocation, SupportedLanguage, SymbolKind, SymbolLocation } from '../types.js';
 
 const SUPPORTED_LANGUAGES: Exclude<SupportedLanguage, 'auto'>[] = ['ts', 'js', 'java', 'go'];
 const SECTION_LIMIT = 5;
@@ -59,6 +60,16 @@ function uniqueBy<T>(items: T[], key: (item: T) => string): T[] {
   return unique;
 }
 
+function uniqueBestBy<T>(items: T[], key: (item: T) => string, score: (item: T) => number): T[] {
+  const selected = new Map<string, T>();
+  for (const item of items) {
+    const value = key(item);
+    const existing = selected.get(value);
+    if (!existing || score(item) > score(existing)) selected.set(value, item);
+  }
+  return [...selected.values()];
+}
+
 function bounded<T>(items: T[], follow_up?: FollowUp): BoundedSection<T> {
   const selected = items.slice(0, SECTION_LIMIT);
   const omitted = Math.max(0, items.length - selected.length);
@@ -73,6 +84,52 @@ function rel(cwd: string, file: string | undefined): string {
   if (!file) return '<unknown>';
   const value = relative(cwd, file) || file;
   return value.startsWith('..') ? file : value;
+}
+
+function canonicalFile(cwd: string, file: string | undefined): string {
+  if (!file) return '<unknown>';
+  const absolute = isAbsolute(file) ? file : resolvePath(cwd, file);
+  const value = relative(cwd, absolute).replace(/\\/g, '/');
+  return value && !value.startsWith('..') ? value : absolute.replace(/\\/g, '/');
+}
+
+function searchRootForInput(cwd: string, inputPath: string): string {
+  const normalized = canonicalFile(cwd, inputPath);
+  const srcIndex = normalized.indexOf('/src/');
+  if (srcIndex > 0) return normalized.slice(0, srcIndex);
+  if (normalized.startsWith('src/')) return 'src';
+  return dirname(normalized) === '.' ? normalized : dirname(normalized);
+}
+
+function ownerName(item: SymbolLocation): string | undefined {
+  return item.owner ?? item.qualified_name?.split('.').slice(0, -1).join('.');
+}
+
+function simpleName(value: string | undefined): string | undefined {
+  return value?.split('.').pop();
+}
+
+function callerKey(cwd: string, item: CallTreeNode): string {
+  return [canonicalFile(cwd, item.file), item.class ?? '', item.symbol, item.call_line ?? item.line ?? '', item.call_column ?? item.column ?? ''].join('::');
+}
+
+function callerMetadataScore(item: CallTreeNode): number {
+  return [item.called_as, item.receiver_name, item.receiver_type, item.classification, item.reason, item.signature].filter(Boolean).length;
+}
+
+function referenceMetadataScore(item: ReferenceLocation): number {
+  return [item.called_as, item.receiver_name, item.receiver_type, item.context_symbol, item.context_class, item.classification, item.reason, item.source_line].filter(Boolean).length;
+}
+
+function likelyTestScore(cwd: string, item: ReferenceLocation, query: string): number {
+  const file = canonicalFile(cwd, item.file);
+  let score = referenceMetadataScore(item);
+  if (/(^|\/)unit(\/|$)/u.test(file)) score += 40;
+  if (/(^|\/)integration(\/|$)/u.test(file)) score += 10;
+  if (item.reference_kind === 'call' || item.reference_kind === 'callback' || item.reference_kind === 'method_reference') score += 40;
+  if (item.reference_kind === 'import') score += 5;
+  if ((item.called_as ?? item.source_line ?? '').includes(query)) score += 20;
+  return score;
 }
 
 async function resolveReferencesAcrossLanguages(cwd: string, input: FindReferencesInput) {
@@ -90,6 +147,61 @@ async function resolveReferencesAcrossLanguages(cwd: string, input: FindReferenc
     }
   }
   return { results, diagnostics: { languages: diagnostics } };
+}
+
+async function findImplementationMethods(cwd: string, input: CodeChangeSurfaceInput, contractItems: SymbolLocation[]): Promise<{ implementations: SymbolLocation[]; diagnostics: unknown[] }> {
+  if (input.kind && input.kind !== 'method') return { implementations: [], diagnostics: [] };
+  const searchPath = searchRootForInput(cwd, input.path);
+  const diagnostics: unknown[] = [];
+  const implementationOwners = new Set<string>();
+
+  for (const contract of contractItems) {
+    const owner = ownerName(contract);
+    if (!owner) continue;
+    try {
+      const implementers = await resolveReferencesAcrossLanguages(cwd, {
+        path: searchPath,
+        symbol: simpleName(owner) ?? owner,
+        language: input.language ?? 'auto',
+        kind: 'interface',
+        scope: 'directory',
+        reference_kinds: ['implements'],
+      });
+      diagnostics.push({ owner, implementations: implementers.results.length, diagnostics: implementers.diagnostics });
+      for (const item of implementers.results) {
+        if (item.context_class) implementationOwners.add(item.context_class);
+        if (item.context_symbol) implementationOwners.add(item.context_symbol);
+      }
+    } catch (error) {
+      diagnostics.push({ owner, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  const contractOwners = new Set(contractItems.map(ownerName).filter((value): value is string => Boolean(value)));
+  const contractOwnerSimple = new Set([...contractOwners].map(simpleName).filter((value): value is string => Boolean(value)));
+  try {
+    const symbols = await resolveFindSymbol(cwd, {
+      path: searchPath,
+      symbol: input.query,
+      language: input.language ?? 'auto',
+      kind: 'method',
+      include_signature: true,
+      scope: 'directory',
+    });
+    diagnostics.push({ method_search: symbols.diagnostics, found: symbols.results.length });
+    const implementations = symbols.results.filter((item) => {
+      if (!item.is_implementation || isTestLike(item.file)) return false;
+      const owner = ownerName(item);
+      const simpleOwner = simpleName(owner);
+      if (!owner || contractOwners.has(owner) || contractOwnerSimple.has(simpleOwner ?? '')) return false;
+      if (implementationOwners.size > 0) return implementationOwners.has(owner) || implementationOwners.has(simpleOwner ?? '');
+      return contractItems.some((contract) => contract.declaration_kind === 'interface_method' || contract.kind === 'interface');
+    });
+    return { implementations: uniqueBestBy(implementations, (item) => keyForLocation(item), () => 1), diagnostics };
+  } catch (error) {
+    diagnostics.push({ method_search_error: error instanceof Error ? error.message : String(error) });
+    return { implementations: [], diagnostics };
+  }
 }
 
 async function incomingCallers(cwd: string, input: CodeChangeSurfaceInput): Promise<{ callers: CallTreeNode[]; diagnostics: unknown[] }> {
@@ -147,6 +259,61 @@ function followUpCodeFind(input: CodeChangeSurfaceInput, relation: 'declaration'
     params: { path: input.path, query: input.query, relation, language: input.language ?? 'auto', ...(input.kind ? { kind: input.kind } : {}), ...(input.scope ? { scope: input.scope } : {}), ...(input.glob ? { glob: input.glob } : {}) },
     reason,
   };
+}
+
+async function implementationCallers(cwd: string, input: CodeChangeSurfaceInput, implementations: SymbolLocation[]): Promise<{ callers: CallTreeNode[]; diagnostics: unknown[] }> {
+  const callers: CallTreeNode[] = [];
+  const diagnostics: unknown[] = [];
+  for (const implementation of implementations.filter((item) => !isTestLike(item.file)).slice(0, RELATED_TEST_QUERY_LIMIT)) {
+    try {
+      const result = await incomingCallers(cwd, { ...input, path: implementation.file, query: implementation.symbol, kind: implementation.kind === 'method' ? 'method' : input.kind });
+      callers.push(...result.callers);
+      diagnostics.push({ implementation: implementation.qualified_name ?? implementation.symbol, diagnostics: result.diagnostics });
+    } catch (error) {
+      diagnostics.push({ implementation: implementation.qualified_name ?? implementation.symbol, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return { callers, diagnostics };
+}
+
+async function graphTestImportsForFiles(cwd: string, input: CodeChangeSurfaceInput, files: string[]): Promise<ReferenceLocation[]> {
+  const state = await readWorkspaceGraphState(cwd);
+  const manifest = await readWorkspaceGraphManifest(cwd);
+  if (state.status !== 'ok' || manifest.status !== 'ok') return [];
+  if (state.data.status !== 'fresh' && state.data.status !== 'stale') return [];
+
+  const candidateFiles = new Set(files.map((file) => canonicalFile(cwd, file)));
+  if (candidateFiles.size === 0) return [];
+
+  const references: ReferenceLocation[] = [];
+  for (const subproject of manifest.data.subprojects) {
+    const shard = await readSubprojectGraphShard(cwd, subproject.id, { generation: subproject.generation });
+    if (shard.status !== 'ok') continue;
+    const nodeById = new Map<string, GraphNode>(shard.data.nodes.map((node) => [node.id, node]));
+    for (const edge of shard.data.edges) {
+      if (edge.kind !== 'imports') continue;
+      const from = nodeById.get(edge.from);
+      const to = nodeById.get(edge.to);
+      if (from?.kind !== 'file' || to?.kind !== 'file') continue;
+      if (!isTestLike(from.path) || !candidateFiles.has(to.path)) continue;
+      references.push({
+        file: resolvePath(cwd, from.path),
+        line: 1,
+        column: 0,
+        symbol: input.query,
+        kind: input.kind ?? 'unknown',
+        context_symbol: '<test-file-import>',
+        context_kind: 'function',
+        owner_kind: 'module',
+        reference_kind: 'import',
+        called_as: edge.importSource,
+        is_application: true,
+        source: 'application',
+        reason: 'test imports change-surface file',
+      });
+    }
+  }
+  return references;
 }
 
 async function relatedTestReferences(cwd: string, input: CodeChangeSurfaceInput, callers: CallTreeNode[], implementations: SymbolLocation[]): Promise<ReferenceLocation[]> {
@@ -217,17 +384,23 @@ export async function buildCodeChangeSurface(cwd: string, input: CodeChangeSurfa
   const allSymbols = declarations.results;
   const contractCandidates = allSymbols.filter((item) => item.kind === 'interface' || item.declaration_kind === 'interface_method' || item.is_definition && !item.is_implementation);
   const contractItems = contractCandidates.length > 0 ? contractCandidates : allSymbols.filter((item) => item.is_definition).slice(0, 1);
-  const implementationItems = uniqueBy([
+  const expandedImplementations = await findImplementationMethods(cwd, input, contractItems);
+  const implementationItems = uniqueBestBy([
     ...allSymbols.filter((item) => item.is_implementation && !contractItems.some((contract) => keyForLocation(contract) === keyForLocation(item))),
     ...allSymbols.flatMap((item) => item.implementation_locations ?? []),
-  ], keyForLocation);
+    ...expandedImplementations.implementations,
+  ], keyForLocation, () => 1);
 
+  const implementationIncoming = await implementationCallers(cwd, input, implementationItems);
   const referenceCallers = references.results.filter((item) => !isTestLike(item.file) && (item.reference_kind === 'call' || item.reference_kind === 'callback')).map(referenceToCaller);
-  const callers = uniqueBy([...hierarchy.callers.filter((item) => !isTestLike(item.file ?? '')), ...referenceCallers], (item) => [item.file, item.symbol, item.class].join('::'));
-  const testReferences = uniqueBy([
+  const callers = uniqueBestBy([...hierarchy.callers.filter((item) => !isTestLike(item.file ?? '')), ...implementationIncoming.callers.filter((item) => !isTestLike(item.file ?? '')), ...referenceCallers], (item) => callerKey(cwd, item), callerMetadataScore);
+  const surfaceFiles = [...contractItems, ...implementationItems, ...callers].map((item: any) => item.file).filter((file: unknown): file is string => typeof file === 'string');
+  const testReferences = uniqueBestBy([
     ...references.results.filter((item) => isTestLike(item.file)),
     ...await relatedTestReferences(cwd, input, callers, implementationItems),
-  ], keyForLocation);
+    ...await graphTestImportsForFiles(cwd, input, surfaceFiles),
+  ], (item) => canonicalFile(cwd, item.file), (item) => likelyTestScore(cwd, item, input.query))
+    .sort((a, b) => likelyTestScore(cwd, b, input.query) - likelyTestScore(cwd, a, input.query) || canonicalFile(cwd, a.file).localeCompare(canonicalFile(cwd, b.file)));
 
   const fallbackActions: FollowUp[] = [];
   let status: CodeChangeSurfaceResult['status'] = 'ready';
@@ -257,7 +430,7 @@ export async function buildCodeChangeSurface(cwd: string, input: CodeChangeSurfa
 
   const validation_suggestions = [
     likely_tests.total > 0 ? 'Review likely affected test files before editing; run the repository-specific test command for those files when known.' : 'No exact test runner is inferred; search for nearby test files and run the repository-specific focused tests when known.',
-    ...uniqueBy([...contract.items, ...implementations.items, ...callerSection.items], (item: any) => item.file).slice(0, 4).map((item: any) => `Include file-oriented validation around ${rel(cwd, item.file)}.`),
+    ...uniqueBy([...contract.items, ...implementations.items, ...callerSection.items], (item: any) => canonicalFile(cwd, item.file)).slice(0, 4).map((item: any) => `Include file-oriented validation around ${rel(cwd, item.file)}.`),
   ];
 
   const trustReasons: string[] = [];
@@ -284,7 +457,7 @@ export async function buildCodeChangeSurface(cwd: string, input: CodeChangeSurfa
     trust,
     fallback,
     summary,
-    diagnostics: { declarations: declarations.diagnostics, references: references.diagnostics, hierarchy: hierarchy.diagnostics },
+    diagnostics: { declarations: declarations.diagnostics, references: references.diagnostics, hierarchy: hierarchy.diagnostics, implementation_expansion: expandedImplementations.diagnostics, implementation_hierarchy: implementationIncoming.diagnostics },
   };
   return { ...partial, content: formatContent(cwd, partial) };
 }

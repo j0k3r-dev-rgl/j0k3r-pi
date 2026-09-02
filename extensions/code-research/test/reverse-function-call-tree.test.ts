@@ -275,6 +275,30 @@ describe('reverse_function_call_tree', () => {
     expect(execution.result.stats.application_nodes).toBe(7);
   });
 
+  it('expands graph-backed Java interface methods to implementation callers', async () => {
+    const rootDir = await createProject('pi-reverse-call-tree-java-interface-method-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/main/java/app/RootDeleteReview.java': `package app;\npublic interface RootDeleteReview { void deleteById(String id); }\n`,
+      'src/main/java/app/RootDeleteReviewUseCase.java': `package app;\npublic class RootDeleteReviewUseCase implements RootDeleteReview { public void deleteById(String id) {} }\n`,
+      'src/main/java/app/RootReviewRestController.java': `package app;\npublic class RootReviewRestController { private final RootDeleteReview rootDeleteReview; public RootReviewRestController(RootDeleteReview rootDeleteReview) { this.rootDeleteReview = rootDeleteReview; } public void deleteReview(String id) { rootDeleteReview.deleteById(id); } }\n`,
+    });
+    await buildWorkspaceGraph(rootDir);
+
+    const execution = await executeReverseFunctionCallTree(rootDir, {
+      path: 'src/main/java/app/RootDeleteReview.java',
+      symbol: 'deleteById',
+      language: 'java',
+      kind: 'method',
+      max_depth: 3,
+    });
+
+    expect(execution.status).toBe('ok');
+    if (execution.status !== 'ok') return;
+    expect(execution.result.root.owner_kind).toBe('interface');
+    expect(execution.result.root.callers?.map((node: any) => `${node.class}.${node.symbol}`)).toEqual(['RootReviewRestController.deleteReview']);
+    expect(execution.result.root.callers?.[0].reason).toBe('resolved via interface RootDeleteReview');
+  });
+
   it('uses conservative object-creation syntax to bind reverse edges to one Java overload', async () => {
     const rootDir = await createProject('pi-reverse-call-tree-java-object-overloads', {
       'src/main/java/app/Example.java': `package app;\n\npublic class Example {\n  public void runString() { process(new String("x")); }\n  private void process(String value) {}\n  private void process(Integer value) {}\n}\n`,

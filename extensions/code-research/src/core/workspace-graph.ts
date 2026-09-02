@@ -278,7 +278,7 @@ function buildJavaGraph(
         range: record.declarationRange,
         codeRange: record.codeRange,
         owner: record.owner,
-        ownerKind: record.owner ? 'class' : 'unknown',
+        ownerKind: record.owner ? (index.classes.find((klass) => klass.fullName === record.owner || klass.className === record.owner)?.kind === 'interface' ? 'interface' : 'class') : 'unknown',
         exported: true,
         signature: sanitizePersistedSignature(record.signature),
         declarationKind: record.declarationKind,
@@ -373,6 +373,7 @@ function buildTypeScriptGraph(
   const fileNodeIds = new Map<string, string>();
   const fileNodes = new Map<string, Extract<GraphNode, { kind: 'file' }>>();
   const callableSymbolIds = new Map<string, string>();
+  const typeScriptMemberSymbolIds = new Map<string, string>();
   const subprojectNodeId = createSubprojectNodeId(subprojectId);
   const completeFiles: string[] = [];
   const skippedFiles: Array<{ file: string; reason: 'parse_error' | 'input_unreadable' | 'unsupported_language' | 'unsupported_source' }> = [];
@@ -396,6 +397,9 @@ function buildTypeScriptGraph(
 
     for (const record of records) {
       const symbolId = createSymbolNodeId(subprojectId, relFile, record.owner, record.name, record.declarationRange.startLine, record.declarationRange.startColumn);
+      if (record.owner) {
+        typeScriptMemberSymbolIds.set(typeScriptMemberSymbolKey(record.owner, record.name), symbolId);
+      }
       if (isCallableGraphDeclaration(record.declarationKind)) {
         const callableKey = typeScriptCallableSymbolKey(file.file, record.owner, record.name);
         if (!callableSymbolIds.has(callableKey) || record.isImplementation) callableSymbolIds.set(callableKey, symbolId);
@@ -410,7 +414,7 @@ function buildTypeScriptGraph(
         range: record.declarationRange,
         codeRange: record.codeRange,
         owner: record.owner,
-        ownerKind: record.owner ? (record.declarationKind === 'namespace' || record.declarationKind === 'module' ? 'namespace' : 'class') : 'unknown',
+        ownerKind: record.owner ? (record.declarationKind === 'namespace' || record.declarationKind === 'module' ? 'namespace' : record.declarationKind === 'interface_method' || record.declarationKind === 'property' || record.declarationKind === 'call_signature' || record.declarationKind === 'construct_signature' || record.declarationKind === 'index_signature' ? 'interface' : 'class') : 'unknown',
         exported: Boolean(record.exportedName),
         signature: sanitizePersistedSignature(record.signature),
         declarationKind: record.declarationKind,
@@ -446,10 +450,14 @@ function buildTypeScriptGraph(
     if (!fromId) continue;
     for (const call of extractTypeScriptCalls(callable.node)) {
       const resolved = resolveTypeScriptCall(index, callable, call);
+      const typedReceiver = resolved.receiverType ?? inferTypeScriptReceiverTypeForGraph(index, callable, call.receiver, call.symbol);
       const target = resolved.target;
-      const toId = target
+      const directToId = target
         ? callableSymbolIds.get(typeScriptCallableSymbolKey(target.file, target.ownerName, target.symbol))
         : undefined;
+      const memberToId = !directToId && typedReceiver ? typeScriptMemberSymbolIds.get(typeScriptMemberSymbolKey(typedReceiver, call.symbol)) : undefined;
+      const toId = directToId ?? memberToId;
+      const reason = memberToId && !directToId ? 'receiver-type-contract-method' : resolved.reason;
       edges.push({
         id: createEdgeId('calls', fromId, toId ?? `external:${callable.language}:${call.symbol}`, `${call.line}:${call.column}`),
         kind: 'calls',
@@ -458,14 +466,14 @@ function buildTypeScriptGraph(
         occurrenceRange: pointOccurrenceRange(call.line, call.column),
         targetStatus: toId ? 'resolved' : 'external',
         resolution: toId ? 'exact' : 'heuristic',
-        callsite: { line: call.line, column: call.column, receiverName: call.receiver, receiverType: resolved.receiverType ?? (resolved.ownerKind === 'class' ? resolved.owner : undefined) },
+        callsite: { line: call.line, column: call.column, receiverName: call.receiver, receiverType: typedReceiver ?? (resolved.ownerKind === 'class' ? resolved.owner : undefined) },
         external: !toId,
         externalName: !toId ? call.symbol : undefined,
         externalKind: call.receiver ? 'method' : 'function',
         externalSource: !toId ? resolved.source : undefined,
         externalOwner: !toId ? resolved.owner : undefined,
         externalOwnerKind: !toId ? resolved.ownerKind : undefined,
-        reason: !toId ? resolved.reason : undefined,
+        reason,
       });
     }
 
@@ -500,12 +508,42 @@ function buildTypeScriptGraph(
   };
 }
 
+function inferTypeScriptReceiverTypeForGraph(
+  index: TypeScriptProjectIndex,
+  current: TsIndexedCallable,
+  receiver: string | undefined,
+  methodName: string
+): string | undefined {
+  if (!receiver) return undefined;
+  const file = index.files.get(current.file);
+  if (!file) return undefined;
+  const declarations = new Map<string, string>();
+  for (const match of file.source.matchAll(/\b([A-Za-z_$][\w$]*)\??\s*:\s*([A-Za-z_$][\w$]*)\b/g)) {
+    if (!match[1] || !match[2]) continue;
+    declarations.set(match[1], match[2]);
+    declarations.set(`this.${match[1]}`, match[2]);
+  }
+  const receiverType = declarations.get(receiver);
+  if (!receiverType) return undefined;
+  const receiverPattern = receiver.includes('.') ? escapeRegExp(receiver) : `(?<![.\\w$])${escapeRegExp(receiver)}`;
+  if (!new RegExp(`${receiverPattern}\\s*\\.\\s*${escapeRegExp(methodName)}\\s*\\(`).test(file.source)) return undefined;
+  return receiverType;
+}
+
 function typeScriptCallableSymbolKey(file: string, owner: string | undefined, symbol: string): string {
   return `${file}\u0000${owner ?? '<module>'}\u0000${symbol}`;
 }
 
+function typeScriptMemberSymbolKey(owner: string, symbol: string): string {
+  return `${owner}\u0000${symbol}`;
+}
+
 function isCallableGraphDeclaration(kind: string): boolean {
-  return kind === 'function' || kind === 'function_overload' || kind === 'callable_variable' || kind === 'constructor' || kind === 'method' || kind === 'getter' || kind === 'setter' || kind === 'object_method';
+  return kind === 'function' || kind === 'function_overload' || kind === 'callable_variable' || kind === 'constructor' || kind === 'method' || kind === 'interface_method' || kind === 'getter' || kind === 'setter' || kind === 'object_method';
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function sanitizePersistedSignature(signature: string | undefined): string | undefined {
@@ -681,13 +719,11 @@ function extractTypeScriptCalls(callableNode: any): Array<{ symbol: string; rece
       const functionNode = node.childForFieldName('function');
       if (functionNode?.type === 'identifier') {
         calls.push({ symbol: functionNode.text, text: node.text, line: node.startPosition.row + 1, column: node.startPosition.column });
-        return;
       }
       if (functionNode?.type === 'member_expression') {
         const propertyNode = functionNode.childForFieldName('property');
         const objectNode = functionNode.childForFieldName('object');
         if (propertyNode) calls.push({ symbol: propertyNode.text.replace(/^#/, ''), receiver: objectNode?.text, text: node.text, line: node.startPosition.row + 1, column: node.startPosition.column });
-        return;
       }
     }
     for (const child of node.children) visit(child);

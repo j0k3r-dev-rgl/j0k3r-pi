@@ -252,11 +252,18 @@ function pushMember(node: ts.Node & { name?: ts.PropertyName }, ctx: Context, ow
     declarationRange: rangeFor(node),
     codeRange: rangeFor(node),
     signature: node.getText(ctx.sourceFile).split('{')[0].trim(),
-    relationshipId: declarationKind === 'getter' || declarationKind === 'setter' ? createRelationshipId(relativeFile(ctx), ownerChain, name, 'accessor') : undefined,
+    relationshipId: relationshipFamilyForMember(declarationKind) ? createRelationshipId(relativeFile(ctx), ownerChain, name, relationshipFamilyForMember(declarationKind)!) : undefined,
     sourceName: node.name ? node.name.getText(ctx.sourceFile) : undefined,
     dynamicName: Boolean(node.name && ts.isComputedPropertyName(node.name) && !isLiteralPropertyName(node.name.expression)),
     modifiers: collectMemberModifiers(node),
   });
+}
+
+function relationshipFamilyForMember(declarationKind: TypeScriptDeclarationKind): string | undefined {
+  if (declarationKind === 'getter' || declarationKind === 'setter') return 'accessor';
+  if (declarationKind === 'method' || declarationKind === 'interface_method' || declarationKind === 'object_method') return 'method';
+  if (declarationKind === 'constructor') return 'constructor';
+  return undefined;
 }
 
 function pushSyntheticMember(node: ts.Node, ctx: Context, ownerChain: string[], declarationKind: TypeScriptDeclarationKind, name: string) {

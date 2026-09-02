@@ -47,7 +47,7 @@ export async function queryReverseFunctionCallTreeFromGraph(options: {
 
   const target = targetCandidates[0];
   if (!target) return undefined;
-  const rootTargetIds = new Set(targetCandidates.map((candidate) => candidate.id));
+  const rootTargetIds = expandInterfaceMethodTargetIds(targetCandidates, symbols, allShards.flatMap((shard) => shard.edges));
 
   const nodeById = new Map<string, GraphNode>(symbols.map((node) => [node.id, node]));
   for (const shard of allShards) {
@@ -120,6 +120,26 @@ function buildReverseTree(
 
   if (callers.length > 0) result.callers = callers;
   return result;
+}
+
+function expandInterfaceMethodTargetIds(
+  targetCandidates: Array<Extract<GraphNode, { kind: 'symbol' }>>,
+  symbols: Array<Extract<GraphNode, { kind: 'symbol' }>>,
+  edges: SubprojectGraphShard['edges']
+): Set<string> {
+  const ids = new Set(targetCandidates.map((candidate) => candidate.id));
+  for (const target of targetCandidates) {
+    if (!(target.declarationKind === 'interface_method' || target.ownerKind === 'interface') || !target.owner) continue;
+    const ownerInterface = symbols.find((node) => node.kind === 'symbol' && node.symbolKind === 'interface' && (node.qualifiedName === target.owner || node.name === target.owner));
+    if (!ownerInterface) continue;
+    const implementerIds = new Set(edges.filter((edge) => edge.kind === 'implements' && edge.to === ownerInterface.id).map((edge) => edge.from));
+    const implementerOwners = new Set(symbols.filter((node) => implementerIds.has(node.id)).flatMap((node) => [node.name, node.qualifiedName].filter(Boolean) as string[]));
+    for (const method of symbols) {
+      if (method.name !== target.name || method.symbolKind !== 'method' || !method.owner) continue;
+      if (implementerOwners.has(method.owner) || implementerOwners.has(method.owner.split('.').pop() ?? method.owner)) ids.add(method.id);
+    }
+  }
+  return ids;
 }
 
 function compactTree(node: CallTreeNode): CallTreeNode {
