@@ -77,6 +77,13 @@ export async function queryReferencesFromGraph(options: {
       : referenceKind === 'instantiate' && edge.calledAs?.startsWith('new ')
         ? Math.max(0, (edge.occurrenceRange?.startColumn ?? fallbackRange.startColumn) - 4)
         : edge.callsite?.column ?? edge.occurrenceRange?.startColumn ?? fallbackRange.startColumn;
+    const calledAs = isTypeRelationship
+      ? relationshipMetadata?.called_as
+      : referenceKind === 'instantiate'
+        ? undefined
+        : edge.calledAs ?? (edge.callsite as { text?: string } | undefined)?.text ?? (target.symbolKind === 'method'
+          ? await getCallExpressionText(sourceCache, sourceFile, line, column, target.name).catch(() => undefined)
+          : undefined);
     references.push({
       file: sourceFile,
       line,
@@ -90,7 +97,7 @@ export async function queryReferencesFromGraph(options: {
       context_class: fromNode.kind === 'symbol' ? (isTypeRelationship ? fromNode.name : fromNode.owner) : undefined,
       owner_kind: fromNode.kind === 'symbol' ? (isTypeRelationship ? (fromNode.symbolKind === 'interface' ? 'interface' : 'class') : fromNode.ownerKind ?? 'unknown') : 'unknown',
       reference_kind: referenceKind,
-      called_as: isTypeRelationship ? relationshipMetadata?.called_as : referenceKind === 'instantiate' ? undefined : edge.calledAs,
+      called_as: calledAs,
       receiver_name: edge.callsite?.receiverName,
       receiver_type: edge.callsite?.receiverType,
       is_application: true,
@@ -129,6 +136,40 @@ async function getJavaTypeRelationshipMetadata(
     end_column: match.index + match[0].length,
     called_as: match[0].trim().replace(/\s+</g, '<'),
   };
+}
+
+async function getCallExpressionText(
+  sourceCache: Map<string, string>,
+  file: string,
+  line: number,
+  column: number,
+  targetName: string
+): Promise<string | undefined> {
+  if (!sourceCache.has(file)) sourceCache.set(file, await readFile(file, 'utf8'));
+  const lineText = sourceCache.get(file)?.split('\n')[line - 1];
+  if (!lineText) return undefined;
+
+  const searchStart = Math.max(0, column - targetName.length - 8);
+  let symbolStart = lineText.indexOf(targetName, searchStart);
+  if (symbolStart < 0) symbolStart = lineText.indexOf(targetName);
+  if (symbolStart < 0) return undefined;
+
+  let start = symbolStart;
+  while (start > 0 && /[A-Za-z0-9_$?.]/.test(lineText[start - 1] ?? '')) start -= 1;
+
+  const openParen = lineText.indexOf('(', symbolStart + targetName.length);
+  if (openParen < 0) return lineText.slice(start, symbolStart + targetName.length).trim();
+
+  let depth = 0;
+  for (let index = openParen; index < lineText.length; index += 1) {
+    const char = lineText[index];
+    if (char === '(') depth += 1;
+    if (char === ')') {
+      depth -= 1;
+      if (depth === 0) return lineText.slice(start, index + 1).trim();
+    }
+  }
+  return lineText.slice(start).trim();
 }
 
 function escapeRegExp(value: string): string {

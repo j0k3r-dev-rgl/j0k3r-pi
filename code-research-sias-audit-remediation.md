@@ -237,11 +237,43 @@ action: 27
 
 ## P0 — TypeScript optional-chain calls missing from `code_find references`
 
-Status: **FAIL / PARTIAL**
+Status: **IMPLEMENTED / NEEDS SIAS RETEST AFTER EXTENSION RELOAD**
 
-Call hierarchy was fixed, but `code_find relation=references` still misses optional-chained calls.
+A targeted Mini-SDD was completed to fix graph-backed TypeScript optional-chain call consumption in `code_find relation=references`.
 
-Failing query:
+Implemented change:
+
+```text
+fix-ts-optional-chain-code-find-references
+status: PASS / archived
+archive: openspec/archive/2026-09-02/fix-ts-optional-chain-code-find-references/
+```
+
+What changed:
+
+- Graph-backed TypeScript reference querying now preserves existing call metadata and reconstructs method call text from the caller source line when graph call edges lack `calledAs`/text metadata.
+- Regression coverage proves `save` references include:
+  - `repo.save(...)`;
+  - `repo.save?.(...)`;
+  - `repo?.save(...)`;
+  - `this.repo?.save(...)`.
+- Graph-only regression builds a graph, removes the declaring `repository.ts`, and still returns optional-chain `save` call references from graph artifacts.
+
+Validation performed in Code Research repo:
+
+```bash
+cd /home/j0k3r/.pi/agent/extensions/code-research
+npm test -- test/find-references.test.ts test/find-references-graph-fallback.test.ts
+npm run typecheck
+```
+
+Result: **PASS**.
+
+Important next-audit instruction:
+
+> Reload/restart the extension or CLI so the updated Code Research code is active, then retest the SIAS query below from `/home/j0k3r/sias/app`. If results are still missing, inspect the SIAS `back_ia` graph JSON to confirm the `calls` edge still exists and then debug resolver filtering.
+
+Previously failing query:
 
 ```text
 code_find path=back_ia query=save relation=references language=ts kind=method reference_kinds=["call"]
@@ -649,8 +681,10 @@ action
 
 ## Recommended Fix Order
 
-1. **TS optional-chain calls in `code_find references`**
-   - Align `code_find` behavior with the already-improved call hierarchy behavior.
+1. **Retest TS optional-chain calls in `code_find references` after extension reload**
+   - The Mini-SDD `fix-ts-optional-chain-code-find-references` is implemented and archived.
+   - Retest `code_find path=back_ia query=save relation=references language=ts kind=method reference_kinds=["call"]` from SIAS.
+   - If still failing, inspect the `back_ia` graph JSON first, then resolver filtering.
 
 2. **TS type alias classification and references**
    - Fix `ReviewAnalysisStatus` declaration kind and refs.
@@ -781,8 +815,19 @@ schemaVersion=4
 Confirmed:
 
 - Java class/type/DTO references now pass on sampled regressions;
-- TypeScript optional-chain references still fail in `code_find`;
+- TypeScript optional-chain references still failed in `code_find` before the latest resolver-consumption Mini-SDD;
 - TypeScript type aliases still fail classification/references;
 - TypeScript unfiltered references still produce adjacent-line false positives.
 
-No SIAS source files were modified during the audits or graph-generation remediation.
+### Mini-SDD TypeScript optional-chain reference remediation
+
+Completed:
+
+```text
+fix-ts-optional-chain-code-find-references
+status: PASS / archived
+```
+
+This addressed graph-backed `code_find relation=references` consumption for optional-chained TypeScript method calls. The next auditor should reload/restart the extension or CLI, retest the SIAS `save` query, and inspect the `back_ia` graph JSON if the tool result still misses line 26.
+
+No SIAS source files were modified during the audits or remediations.

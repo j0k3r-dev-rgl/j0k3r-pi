@@ -152,6 +152,36 @@ describe('findReferences graph fallback', () => {
     expect(results[0].context_symbol).toBe('handle');
   });
 
+  it('uses graph-backed optional-chained TypeScript method call references after target source removal', async () => {
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/repository.ts': `export class Repository {\n  save(input: object): Promise<void> { void input; return Promise.resolve(); }\n}\n`,
+      'src/processor.ts': `import { Repository } from './repository';\nexport class Processor {\n  constructor(private repo?: Repository) {}\n  async persist(repo: Repository): Promise<void> {\n    await this.repo?.save({ source: 'field' });\n    await repo?.save({ source: 'param' });\n    await repo.save({ source: 'normal' });\n    await repo.save?.({ source: 'optional-call' });\n  }\n}\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+    await rm(join(rootDir, 'src/repository.ts'));
+
+    const results = await findReferences(rootDir, {
+      path: 'src/repository.ts',
+      symbol: 'save',
+      language: 'ts',
+      kind: 'method',
+      reference_kinds: ['call'],
+      compare_direct_fallback: true,
+    });
+
+    expect(results.map((item) => item.called_as).sort()).toEqual([
+      "repo.save({ source: 'normal' })",
+      "repo.save?.({ source: 'optional-call' })",
+      "repo?.save({ source: 'param' })",
+      "this.repo?.save({ source: 'field' })",
+    ]);
+    expect(results.every((item) => item.reference_kind === 'call')).toBe(true);
+    expect(results.map((item) => item.line).sort()).toEqual([5, 6, 7, 8]);
+    expect(results.map((item) => item.file)).toEqual(results.map(() => join(rootDir, 'src/processor.ts')));
+  });
+
   it('uses graph-backed SIAS-mapped java type reference edges for ReviewPersistenceModel, MongoIdUtils, DocumentationItemDTO, and MongoConfigs after source consumers are removed', async () => {
     const rootDir = await createProject({
       '.pi/code-research.json': `{"graph":{"enable":true}}
