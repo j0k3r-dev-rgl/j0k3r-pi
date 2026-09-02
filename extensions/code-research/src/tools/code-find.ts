@@ -53,8 +53,9 @@ function formatSymbolItems(cwd: string, query: string, items: SymbolLocation[], 
   const rows = items.map((item) => {
     const file = relative(cwd, item.file) || item.file;
     const qualified = item.qualified_name && item.qualified_name !== item.symbol ? ` (${item.qualified_name})` : '';
+    const declarationKind = item.declaration_kind ? ` declaration_kind=${item.declaration_kind}` : '';
     const signature = item.signature ? ` · ${item.signature}` : '';
-    const header = `${file}:${item.start_line}:${item.start_column}: ${item.symbol}${qualified} [${item.kind}]${signature}`;
+    const header = `${file}:${item.start_line}:${item.start_column}: ${item.symbol}${qualified} [${item.kind}]${declarationKind}${signature}`;
     return item.code ? `${header}\n\n\`\`\`\n${item.code}\n\`\`\`` : header;
   });
   const more = nextCursor ? `\n\nMore results available. Re-run code_find with cursor=${nextCursor}.` : '';

@@ -303,21 +303,23 @@ describe('findSymbol graph fallback', () => {
     expect(results[0]).toMatchObject({ declaration_kind: 'field', source_name: '#secret', modifiers: ['private'] });
   });
 
-  it('uses fresh graph authority for exported ReviewAnalysisStatus-style type aliases', async () => {
+  it('uses fresh graph authority for exported generic TypeScript type aliases', async () => {
     const rootDir = await createProject({
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
-      'src/status.ts': `export type ReviewAnalysisStatus = 'pending' | 'complete';\n`,
+      'src/alias.ts': `export type GenericStatusAlias = 'draft' | 'ready';\n`,
+      'src/value.ts': `export const GenericStatusValue = 'draft';\n`,
     });
 
     await buildWorkspaceGraph(rootDir);
     const results = await findSymbol(rootDir, {
-      path: 'src/status.ts',
-      symbol: 'ReviewAnalysisStatus',
+      path: 'src',
+      symbol: 'GenericStatus',
       language: 'ts',
       declaration_kind: 'type_alias',
+      search_mode: 'contains',
     });
     expect(results).toHaveLength(1);
-    expect(results[0]).toMatchObject({ kind: 'variable', declaration_kind: 'type_alias' });
+    expect(results[0]).toMatchObject({ symbol: 'GenericStatusAlias', kind: 'variable', declaration_kind: 'type_alias' });
   });
 
   it('reports exact Java graph fallback diagnostics across fresh stale partial missing corrupt incompatible oversized snapshot and unproven states', async () => {

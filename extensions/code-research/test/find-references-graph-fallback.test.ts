@@ -101,26 +101,26 @@ describe('findReferences graph fallback', () => {
     expect(results.some((result) => result.file === join(rootDir, 'src/documentacion.tsx') && result.reference_kind === 'import')).toBe(true);
   });
 
-  it('uses graph-backed TypeScript type-alias references after consumer source removal', async () => {
+  it('uses graph-backed generic TypeScript type-alias references after consumer source removal', async () => {
     const rootDir = await createProject({
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
-      'src/status.ts': `export type ReviewAnalysisStatus = 'pending' | 'complete';\n`,
-      'src/consumer.ts': `import type { ReviewAnalysisStatus } from './status';\n\nconst status: ReviewAnalysisStatus = 'pending';\nconst asserted = 'complete' as ReviewAnalysisStatus;\n`,
+      'src/alias.ts': `export type GenericStatusAlias = 'draft' | 'ready';\n`,
+      'src/consumer.ts': `import type { GenericStatusAlias } from './alias';\n\nconst current: GenericStatusAlias = 'draft';\nconst asserted = 'ready' as GenericStatusAlias;\n`,
     });
 
     await buildWorkspaceGraph(rootDir);
     await rm(join(rootDir, 'src/consumer.ts'));
 
     const results = await findReferences(rootDir, {
-      path: 'src/status.ts',
-      symbol: 'ReviewAnalysisStatus',
+      path: 'src/alias.ts',
+      symbol: 'GenericStatusAlias',
       language: 'ts',
       kind: 'variable',
       compare_direct_fallback: true,
     });
 
     expect(results.some((item) => item.reference_kind === 'import' && item.file.endsWith('consumer.ts'))).toBe(true);
-    expect(results.filter((item) => item.reference_kind === 'read').map((item) => `${item.line}:${item.column}`).sort()).toEqual(['3:14', '4:31']);
+    expect(results.filter((item) => item.reference_kind === 'read').map((item) => `${item.line}:${item.column}`).sort()).toEqual(['3:15', '4:28']);
     expect(results.every((item) => item.file.endsWith('consumer.ts'))).toBe(true);
   });
 

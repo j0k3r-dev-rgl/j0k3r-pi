@@ -415,15 +415,15 @@ describe('find_references', () => {
     expect(results.find((item) => item.reference_kind === 'read')?.context_symbol).toBe('getCounter');
   });
 
-  it('finds ReviewAnalysisStatus-style type alias imports and type-position reads', async () => {
+  it('finds generic TypeScript type alias imports and type-position reads', async () => {
     const rootDir = await createProject('pi-find-references-ts-type-alias-direct', {
-      'src/status.ts': `export type ReviewAnalysisStatus = 'pending' | 'complete';\n`,
-      'src/consumer.ts': `import type { ReviewAnalysisStatus } from './status';\n\nconst status: ReviewAnalysisStatus = 'pending';\nconst asserted = 'complete' as ReviewAnalysisStatus;\n`,
+      'src/alias.ts': `export type GenericStatusAlias = 'draft' | 'ready';\n`,
+      'src/consumer.ts': `import type { GenericStatusAlias } from './alias';\n\nconst current: GenericStatusAlias = 'draft';\nconst asserted = 'ready' as GenericStatusAlias;\n`,
     });
 
     const results = await findReferences(rootDir, {
-      path: 'src/status.ts',
-      symbol: 'ReviewAnalysisStatus',
+      path: 'src/alias.ts',
+      symbol: 'GenericStatusAlias',
       language: 'ts',
       kind: 'variable',
     });
@@ -1134,6 +1134,28 @@ describe('find_references', () => {
     ]);
     expect(normalize(graph)).toEqual(normalize(direct));
     expect(new Set(graph.map((item) => `${item.context_symbol}:${item.called_as}`)).size).toBe(graph.length);
+  });
+
+  it('exposes declaration_kind for generic TypeScript type aliases in code_find declaration output', async () => {
+    const rootDir = await createProject('pi-code-find-type-alias-declaration-kind', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/alias.ts': `export type GenericStatusAlias = 'draft' | 'ready';\n`,
+    });
+    await buildWorkspaceGraph(rootDir);
+
+    const tool = registerToolForTest(registerCodeFindTool);
+    const result = await tool.execute('tool-call', {
+      path: 'src/alias.ts',
+      query: 'GenericStatusAlias',
+      relation: 'declaration',
+      language: 'ts',
+      declaration_kind: 'type_alias',
+    }, undefined, undefined, { cwd: rootDir });
+    const text = result.content[0].text;
+
+    expect(text).toContain('[variable]');
+    expect(text).toContain('declaration_kind=type_alias');
+    expect(result.details.items[0]).toMatchObject({ kind: 'variable', declaration_kind: 'type_alias' });
   });
 
   it('exposes visible classification counts and row-level classification with reason in code_find references output', async () => {

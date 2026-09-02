@@ -5,12 +5,13 @@ Repo audited: `/home/j0k3r/sias/app`
 
 ## Status
 
-**NEEDS_FIX — 2 TypeScript issues remain.**
+**NEEDS_FIX — 1 confirmed TypeScript issue remains.**
 
-Most earlier issues are resolved. The remaining active failures are:
+Most earlier issues are resolved. TypeScript type-alias graph consumption/rendering has been remediated in-repo and now needs SIAS smoke after extension reload.
 
-1. TypeScript type alias references are persisted in the graph but not returned by `code_find relation=references`.
-2. Unfiltered TypeScript `relation=references` still emits adjacent/callback lines that do not contain the queried symbol.
+Remaining confirmed active failure:
+
+1. Unfiltered TypeScript `relation=references` still emits adjacent/callback lines that do not contain the queried symbol.
 
 ## Confirmed Fixed
 
@@ -76,9 +77,45 @@ Graph metadata:
 .pi/workspace-code-graph/workspace-state.json: builderModelVersion=3, schemaVersion=4
 ```
 
-## Remaining Issue 1 — TypeScript type alias references
+## Recently Remediated — TypeScript type alias references
 
-Status: **FAIL in tool result; graph evidence exists.**
+Status: **IMPLEMENTED / NEEDS SIAS RETEST AFTER EXTENSION RELOAD**
+
+Implemented changes:
+
+```text
+fix-ts-type-alias-references
+status: PASS / archived
+
+fix-ts-type-alias-graph-consumption
+status: PASS / archived
+archive: openspec/archive/2026-09-02/fix-ts-type-alias-graph-consumption/
+```
+
+The latest Mini-SDD was explicitly agnostic: tests use generic local fixtures, not SIAS hardcoded names.
+
+What changed in the latest graph-consumption pass:
+
+- graph-backed `relation=references` keeps persisted type-alias `imports`/`reads` results instead of being replaced by empty fallback results;
+- declaration queries remain filterable by `declaration_kind=type_alias`;
+- code_find declaration output now exposes precise `declaration_kind=type_alias` metadata while preserving the coarse compatibility `[variable]` marker;
+- generic regression coverage uses `GenericStatusAlias` and verifies graph-backed references after consumer source removal.
+
+Validation performed in Code Research repo:
+
+```bash
+cd /home/j0k3r/.pi/agent/extensions/code-research
+npm test -- test/find-references.test.ts test/find-references-graph-fallback.test.ts test/find-symbol-graph-fallback.test.ts
+npm run typecheck
+```
+
+Result: **PASS**.
+
+Next smoke instruction:
+
+> Reload/restart the extension or CLI, regenerate/reload SIAS graph if needed, then retest the `ReviewAnalysisStatus` queries below. If still failing, inspect whether graph-backed results are being replaced or filtered; graph generation already had type-alias edges.
+
+Previous smoke status: **FAIL in tool result; graph evidence exists.**
 
 Regression symbol:
 
@@ -147,12 +184,12 @@ symbolKind=variable
 declarationKind=type_alias
 ```
 
-Expected next fix:
+Expected retest result after reload:
 
 - `code_find relation=references` should consume `reads`/`imports` edges whose target has `declarationKind=type_alias`.
-- User-facing output should render precise `declarationKind=type_alias` when available instead of only `[variable]`, or at least show both.
+- User-facing output should show precise `declaration_kind=type_alias` metadata while preserving `[variable]` compatibility if applicable.
 
-## Remaining Issue 2 — TypeScript unfiltered adjacent-line false positives
+## Remaining Issue 1 — TypeScript unfiltered adjacent-line false positives
 
 Status: **FAIL in tool result; graph call edges look cleaner than output.**
 
@@ -271,8 +308,8 @@ Expected:
 - Initial audit found Java reference gaps, TS optional-chain gaps, duplicate Java refs, Mockito misses, TS adjacent false positives, TS type alias issues, and graph status transparency gaps.
 - Java graph-generation remediation fixed sampled Java class/type/DTO refs after builder model version `3` graph regeneration.
 - TS optional-chain remediation fixed sampled `save` optional-chain references after extension reload.
-- Current remaining active issues are only:
-  1. TS type alias graph-backed consumption/rendering;
-  2. TS unfiltered adjacent-line false positives.
+- TS type-alias graph-consumption/rendering remediation passed in-repo and awaits SIAS smoke after extension reload.
+- Current remaining confirmed active issue:
+  1. TS unfiltered adjacent-line false positives.
 
 No SIAS source files were modified during the audits or remediations.
