@@ -7,9 +7,12 @@ import { executeFunctionCallTree } from '../../src/core/function-call-tree-resol
 import { loadWorkspaceGraphState, writeWorkspaceGraphState } from '../../src/core/workspace-state.js';
 
 async function createProject(files: Record<string, string>) {
-  const rootDir = join(tmpdir(), `pi-graph-fallback-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const rootDir = join(tmpdir(), `pi-graph-unavailable-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   await mkdir(rootDir, { recursive: true });
-  for (const [relativePath, content] of Object.entries(files)) {
+  const effectiveFiles = files['.pi/code-research.json'] === undefined
+    ? { '.pi/code-research.json': `{"graph":{"enable":true}}\n`, ...files }
+    : files;
+  for (const [relativePath, content] of Object.entries(effectiveFiles)) {
     const fullPath = join(rootDir, relativePath);
     await mkdir(join(fullPath, '..'), { recursive: true });
     await writeFile(fullPath, content, 'utf8');
@@ -17,7 +20,7 @@ async function createProject(files: Record<string, string>) {
   return rootDir;
 }
 
-describe('graph-backed function_call_tree fallback', () => {
+describe('graph-backed function_call_tree unavailable', () => {
   it('prefers a fresh graph when available', async () => {
     const rootDir = await createProject({
       'src/service.ts': `export function runService(): void { helper(); }\nfunction helper(): void {}\n`,
@@ -39,7 +42,7 @@ describe('graph-backed function_call_tree fallback', () => {
     expect(execution.result.root.children?.[0].children?.[0].symbol).toBe('helper');
   });
 
-  it('falls back to direct parsing when graph state is partial', async () => {
+  it('returns not_found when graph state is partial', async () => {
     const rootDir = await createProject({
       'src/service.js': `export function runService() { helper(); }\nfunction helper() {}\n`,
       'src/controller.js': `import { runService } from './service.js';\nexport function handle() { runService(); }\n`,
@@ -55,12 +58,10 @@ describe('graph-backed function_call_tree fallback', () => {
       include_external: true,
     });
 
-    expect(execution.status).toBe('ok');
-    if (execution.status !== 'ok') return;
-    expect(execution.result.root.children?.[0].symbol).toBe('runService');
+    expect(execution).toMatchObject({ status: 'not_found', details: { found: 0 } });
   });
 
-  it('falls back to direct parsing when graph state is stale', async () => {
+  it('returns not_found when graph state is stale', async () => {
     const rootDir = await createProject({
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'src/service.ts': `export function oldRunService(): void { oldHelper(); }\nfunction oldHelper(): void {}\n`,
@@ -82,10 +83,7 @@ describe('graph-backed function_call_tree fallback', () => {
       include_external: true,
     });
 
-    expect(execution.status).toBe('ok');
-    if (execution.status !== 'ok') return;
-    expect(execution.result.root.children?.[0].symbol).toBe('runService');
-    expect(execution.result.root.children?.[0].children?.[0].symbol).toBe('helper');
+    expect(execution).toMatchObject({ status: 'not_found', details: { found: 0 } });
   });
 
   it('uses a fresh graph for ts projects that import local source through .js specifiers', async () => {

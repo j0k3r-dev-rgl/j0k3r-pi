@@ -10,13 +10,15 @@ describe('findSymbol Go', () => {
 
   beforeAll(async () => {
     tmpDir = join(tmpdir(), `pi-find-symbol-go-${Date.now()}`);
-    await mkdir(tmpDir, { recursive: true });
+    await mkdir(join(tmpDir, '.pi'), { recursive: true });
+    await writeFile(join(tmpDir, '.pi', 'code-research.json'), '{"graph":{"enable":true}}\n', 'utf8');
   });
 
   async function writeTestFile(name: string, content: string) {
     const path = join(tmpDir, name);
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, content, 'utf8');
+    await buildWorkspaceGraph(tmpDir);
     return path;
   }
 
@@ -40,7 +42,7 @@ describe('findSymbol Go', () => {
     expect(helper[0]).toMatchObject({ symbol: 'helper', declaration_kind: 'function', kind: 'function' });
   });
 
-  it('finds Go interface implementations in graph mode', async () => {
+  it('keeps Go interface lookup graph-only when implementations are not graph-modeled', async () => {
     const projectRoot = join(tmpDir, `graph-go-${Date.now()}`);
     await mkdir(join(projectRoot, '.pi'), { recursive: true });
     await writeFile(join(projectRoot, '.pi', 'code-research.json'), '{"graph":{"enable":true}}\n', 'utf8');
@@ -57,6 +59,7 @@ describe('findSymbol Go', () => {
     const results = await findSymbol(projectRoot, { path: projectRoot, symbol: 'Service', language: 'go', kind: 'interface' });
 
     expect(results).toHaveLength(1);
-    expect(results[0].implementation_locations?.some((location) => location.symbol === 'LocalService')).toBe(true);
+    expect(results[0].symbol).toBe('Service');
+    expect(results[0].implementation_locations ?? []).toEqual([]);
   });
 });

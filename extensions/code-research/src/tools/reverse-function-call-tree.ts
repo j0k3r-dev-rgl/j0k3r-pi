@@ -1,7 +1,7 @@
 import { Type } from 'typebox';
 import { loadCodeResearchConfig } from '../config.js';
 import { executeReverseFunctionCallTree } from '../core/reverse-function-call-tree-resolver.js';
-import { ensureWorkspaceGraphFreshness } from '../core/workspace-graph.js';
+import { scheduleWorkspaceGraphRefresh } from '../core/graph-scheduler.js';
 import { renderCodeResearchToolResult } from '../render.js';
 import type { FunctionCallTreeInput } from '../types.js';
 
@@ -45,7 +45,7 @@ export function registerReverseFunctionCallTreeTool(pi: any) {
 
       const execution = await executeReverseFunctionCallTree(ctx.cwd, input);
       const config = await loadCodeResearchConfig(ctx.cwd);
-      if (config.graph.enable) void ensureWorkspaceGraphFreshness(ctx.cwd).catch(() => undefined);
+      if (config.graph.enable) scheduleWorkspaceGraphRefresh(ctx.cwd);
 
       if (execution.status === 'not_found') {
         return { content: [{ type: 'text', text: execution.message }], details: execution.details };

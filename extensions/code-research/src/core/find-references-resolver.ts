@@ -1,45 +1,21 @@
 import { loadCodeResearchConfig } from '../config.js';
 import { queryReferencesFromGraph } from './reference-graph-queries.js';
-import { readWorkspaceGraphManifest, readWorkspaceGraphState } from './graph-persistence.js';
+import { ensureWorkspaceGraphReadable } from './graph-ensure.js';
 import { evaluateGraphUsability, getFindReferencesGraphCoverage } from './graph-policy.js';
-import { findTypeScriptReferences } from '../languages/typescript/find-references.js';
-import { findJavaReferences } from '../languages/java/find-references.js';
-import { findGoReferences } from '../languages/go/find-references.js';
 import type { FindReferencesInput, FindReferencesResolution, ReferenceLocation, ReferenceQueryDiagnostics } from '../types.js';
 
 export async function resolveFindReferences(cwd: string, input: FindReferencesInput): Promise<FindReferencesResolution> {
-  const config = await loadCodeResearchConfig(cwd);
-  const graph = config.graph.enable ? await findReferencesFromGraph(cwd, input) : undefined;
+  const graph = await findReferencesFromGraph(cwd, input);
   if (graph?.results !== undefined) {
-    const filteredGraphResults = filterReferenceKinds(graph.results, input);
-    const directFallback = (shouldRunDirectComparison(input) || shouldAlwaysCompareDirectResults(input)) && shouldCompareDirectResults(input)
-      ? filterReferenceKinds(await findReferencesDirect(cwd, input), input)
-      : undefined;
-    if (directFallback && hasMoreCompleteDirectCoverage(filteredGraphResults, directFallback)) {
-      return {
-        results: directFallback,
-        diagnostics: {
-          source_mode: 'hybrid',
-          graph_status: graph.diagnostics.graph_status,
-          completeness: 'fallback',
-          fallback_reason: 'coverage_insufficient',
-        },
-      };
-    }
     return {
-      results: filteredGraphResults,
+      results: filterReferenceKinds(graph.results, input),
       diagnostics: graph.diagnostics,
     };
   }
 
   return {
-    results: filterReferenceKinds(await findReferencesDirect(cwd, input), input),
-    diagnostics: graph?.diagnostics ?? {
-      source_mode: 'direct',
-      graph_status: config.graph.enable ? 'fresh' : 'disabled',
-      completeness: 'fallback',
-      fallback_reason: config.graph.enable ? 'coverage_insufficient' : 'graph_disabled',
-    },
+    results: [],
+    diagnostics: graph.diagnostics,
   };
 }
 
@@ -56,28 +32,23 @@ function filterReferenceKinds(results: ReferenceLocation[], input: FindReference
   return results.filter((result) => requestedKinds.has(result.reference_kind));
 }
 
-async function findReferencesDirect(cwd: string, input: FindReferencesInput): Promise<ReferenceLocation[]> {
-  switch (input.language ?? 'java') {
-    case 'java':
-      return findJavaReferences(cwd, input);
-    case 'ts':
-    case 'js':
-      return findTypeScriptReferences(cwd, input);
-    case 'go':
-      return findGoReferences(cwd, input as any);
-    case 'auto':
-      throw new Error('find_references does not support auto language detection yet');
-    default:
-      throw new Error(`Unsupported language: ${input.language}`);
-  }
-}
-
 async function findReferencesFromGraph(cwd: string, input: FindReferencesInput): Promise<{ results?: ReferenceLocation[]; diagnostics: ReferenceQueryDiagnostics }> {
-  const state = await readWorkspaceGraphState(cwd);
-  const manifest = await readWorkspaceGraphManifest(cwd);
+  const config = await loadCodeResearchConfig(cwd);
+  if (!config.graph.enable) {
+    return {
+      diagnostics: {
+        source_mode: 'graph',
+        graph_status: 'disabled',
+        completeness: 'unavailable',
+        graph_unavailable_reason: 'graph_disabled',
+      },
+    };
+  }
+
+  const { state, manifest } = await ensureWorkspaceGraphReadable(cwd);
   const coverage = getFindReferencesGraphCoverage(input);
   const decision = evaluateGraphUsability({
-    graphEnabled: true,
+    graphEnabled: config.graph.enable,
     query: 'find_references',
     stateReadStatus: state.status,
     manifestReadStatus: manifest.status,
@@ -89,10 +60,10 @@ async function findReferencesFromGraph(cwd: string, input: FindReferencesInput):
   if (!decision.usable || state.status !== 'ok' || manifest.status !== 'ok') {
     return {
       diagnostics: {
-        source_mode: 'direct',
+        source_mode: 'graph',
         graph_status: mapGraphStatus(state.status, manifest.status, state.status === 'ok' ? state.data.status : undefined),
-        completeness: 'fallback',
-        fallback_reason: mapFallbackReason(!decision.usable ? decision.reason : undefined),
+        completeness: 'unavailable',
+        graph_unavailable_reason: mapUnavailableReason(!decision.usable ? decision.reason : undefined),
       },
     };
   }
@@ -109,7 +80,7 @@ async function findReferencesFromGraph(cwd: string, input: FindReferencesInput):
       source_mode: 'graph',
       graph_status: mapGraphStatus(state.status, manifest.status, state.data.status),
       completeness: 'complete',
-      fallback_reason: null,
+      graph_unavailable_reason: null,
     },
   };
 }
@@ -123,46 +94,7 @@ function mapGraphStatus(stateStatus: string, manifestStatus: string, graphState?
   return 'fresh';
 }
 
-function shouldRunDirectComparison(input: FindReferencesInput): boolean {
-  return input.compare_direct_fallback === true;
-}
-
-function shouldAlwaysCompareDirectResults(input: FindReferencesInput): boolean {
-  if (input.kind === 'variable') return true;
-  if (input.language === 'java' && input.kind === 'interface') return true;
-  return (input.language === 'ts' || input.language === 'js') && (!input.kind || input.kind === 'function' || input.kind === 'method' || input.kind === 'class' || input.kind === 'interface');
-}
-
-function shouldCompareDirectResults(input: FindReferencesInput): boolean {
-  if (!Array.isArray(input.reference_kinds) || input.reference_kinds.length === 0) return true;
-  const requestedKinds = new Set(input.reference_kinds ?? []);
-  if (requestedKinds.has('read')) return true;
-  if (requestedKinds.has('call')) return true;
-  if ((input.language === 'ts' || input.language === 'js') && (requestedKinds.has('implements') || requestedKinds.has('extends'))) return true;
-  return input.language === 'java' && input.kind === 'interface' && requestedKinds.has('implements');
-}
-
-function hasMoreCompleteDirectCoverage(graphResults: ReferenceLocation[], directResults: ReferenceLocation[]): boolean {
-  if (directResults.length === 0) return false;
-  const graphKeys = new Set(graphResults.map(referenceKey));
-  return directResults.some((result) => !graphKeys.has(referenceKey(result)));
-}
-
-function referenceKey(result: ReferenceLocation): string {
-  return [
-    result.file,
-    result.line,
-    result.column,
-    result.reference_kind,
-    result.context_symbol,
-    result.context_class,
-    result.called_as,
-    result.receiver_name,
-    result.receiver_type,
-  ].join('::');
-}
-
-function mapFallbackReason(reason: string | undefined): ReferenceQueryDiagnostics['fallback_reason'] {
+function mapUnavailableReason(reason: string | undefined): ReferenceQueryDiagnostics['graph_unavailable_reason'] {
   switch (reason) {
     case 'graph_disabled':
     case 'language_unsupported':

@@ -3,12 +3,17 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { executeFunctionCallTree } from '../src/core/function-call-tree-resolver.js';
+import { buildWorkspaceGraph } from '../src/core/workspace-graph.js';
 
 async function createProject(files: Record<string, string>): Promise<string> {
   const rootDir = join(tmpdir(), `pi-function-call-tree-js-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   await mkdir(rootDir, { recursive: true });
+  const effectiveFiles = files['.pi/code-research.json'] === undefined
+    ? { '.pi/code-research.json': `{"graph":{"enable":true}}
+`, ...files }
+    : files;
 
-  for (const [relativePath, content] of Object.entries(files)) {
+  for (const [relativePath, content] of Object.entries(effectiveFiles)) {
     const fullPath = join(rootDir, relativePath);
     await mkdir(join(fullPath, '..'), { recursive: true });
     await writeFile(fullPath, content, 'utf8');
@@ -23,6 +28,8 @@ describe('function_call_tree JavaScript', () => {
       'src/service.js': `export function runService() {\n  helper();\n}\n\nfunction helper() {}\n`,
       'src/controller.js': `import { runService } from './service.js';\n\nexport function handle() {\n  runService();\n}\n`,
     });
+
+    await buildWorkspaceGraph(rootDir);
 
     const execution = await executeFunctionCallTree(rootDir, {
       path: 'src/controller.js',
@@ -50,6 +57,8 @@ describe('function_call_tree JavaScript', () => {
       'build/server/index.js': `export const bundle = "${'x'.repeat(1024 * 1024 + 64)}";\n`,
       '.react-router/types/routes.js': `export const generated = true;\n`,
     });
+
+    await buildWorkspaceGraph(rootDir);
 
     const execution = await executeFunctionCallTree(rootDir, {
       path: 'app/routes/controller.js',
@@ -83,6 +92,8 @@ describe('function_call_tree JavaScript', () => {
       'app/server/auth/guards.server.js': `export async function requirePermission(request, roles) {\n  return requireAuthenticated(request, roles);\n}\n\nasync function requireAuthenticated(request, roles) {\n  return { request, roles, token: 'x' };\n}\n`,
       'app/routes/root/resenia.js': `import { requirePermission } from '~/server/auth/guards.server.js';\n\nexport async function loader({ request }) {\n  return requirePermission(request, ['ROLE_ROOT']);\n}\n`,
     });
+
+    await buildWorkspaceGraph(rootDir);
 
     const execution = await executeFunctionCallTree(rootDir, {
       path: 'app/routes/root/resenia.js',
@@ -120,6 +131,8 @@ describe('function_call_tree JavaScript', () => {
       'app/routes/root/resenia.js': `import { getSessionInfo } from '~/server/auth/session.server.js';\n\nexport async function loader({ request }) {\n  return getSessionInfo(request);\n}\n`,
     });
 
+    await buildWorkspaceGraph(rootDir);
+
     const execution = await executeFunctionCallTree(rootDir, {
       path: 'app/routes/root/resenia.js',
       symbol: 'loader',
@@ -147,7 +160,9 @@ describe('function_call_tree JavaScript', () => {
       'app/routes/controller.js': `import { runService } from '../service.js';\n\nexport async function loader() {\n  runService();\n}\n`,
     });
 
-    const execution = await executeFunctionCallTree('/tmp', {
+    await buildWorkspaceGraph(rootDir);
+
+    const execution = await executeFunctionCallTree(rootDir, {
       path: resolve(rootDir, 'app/routes/controller.js'),
       symbol: 'loader',
       language: 'js',
@@ -164,25 +179,19 @@ describe('function_call_tree JavaScript', () => {
     expect(execution.result.root.children?.[0].children?.[0].symbol).toBe('helper');
   });
 
-  it('keeps graph-backed namespace-import call trees aligned with direct mode', async () => {
-    const files = {
+  it('uses graph-backed namespace-import call trees', async () => {
+    const rootDir = await createProject({
       'src/forms.js': `export function declared(name) {\n  return name;\n}\n`,
       'src/consumer.js': `import * as Forms from './forms.js';\n\nexport function middle() {\n  return Forms.declared('ns');\n}\n`,
-    };
-    const directRoot = await createProject(files);
-    const graphRoot = await createProject({ '.pi/code-research.json': `{"graph":{"enable":true}}\n`, ...files });
+    });
+    await buildWorkspaceGraph(rootDir);
 
-    const { buildWorkspaceGraph } = await import('../src/core/workspace-graph.js');
-    await buildWorkspaceGraph(graphRoot);
-
-    const direct = await executeFunctionCallTree(directRoot, { path: 'src/consumer.js', symbol: 'middle', language: 'js', kind: 'function', max_depth: 5 });
-    const graph = await executeFunctionCallTree(graphRoot, { path: 'src/consumer.js', symbol: 'middle', language: 'js', kind: 'function', max_depth: 5 });
+    const graph = await executeFunctionCallTree(rootDir, { path: 'src/consumer.js', symbol: 'middle', language: 'js', kind: 'function', max_depth: 5 });
 
     expect(graph.status).toBe('ok');
-    expect(direct.status).toBe('ok');
-    if (graph.status !== 'ok' || direct.status !== 'ok') return;
+    if (graph.status !== 'ok') return;
 
     const flatten = (node: any): string[] => [`${node.class ?? '<module>'}.${node.symbol}`, ...(node.children ?? []).flatMap(flatten)];
-    expect(flatten(graph.result.root)).toEqual(flatten(direct.result.root));
+    expect(flatten(graph.result.root)).toEqual(['<module>.middle', '<module>.declared']);
   });
 });

@@ -29,13 +29,13 @@ describe('workspace graph scheduler', () => {
       },
     };
 
-    registerWorkspaceGraphLifecycle(pi, { refresh: async () => undefined });
+    registerWorkspaceGraphLifecycle(pi, { schedule: () => undefined });
     expect(Object.keys(handlers)).toEqual(expect.arrayContaining(['session_start', 'turn_end']));
   });
 
-  it('awaits a refresh on session start using cwd context when graph is enabled', async () => {
+  it('schedules session start refresh using cwd context without awaiting the refresh', async () => {
     const handlers: Record<string, Function> = {};
-    const refresh = vi.fn(async () => undefined);
+    const schedule = vi.fn();
     const pi = {
       on(event: string, handler: Function) {
         handlers[event] = handler;
@@ -46,15 +46,15 @@ describe('workspace graph scheduler', () => {
     await mkdir(join(rootDir, '.pi'), { recursive: true });
     await writeFile(join(rootDir, '.pi', 'code-research.json'), '{"graph":{"enable":true}}\n', 'utf8');
 
-    registerWorkspaceGraphLifecycle(pi, { refresh });
-    await handlers.session_start?.({ reason: 'startup' }, { cwd: rootDir });
-
-    expect(refresh).toHaveBeenCalledWith(rootDir);
+    const result = registerWorkspaceGraphLifecycle(pi, { schedule });
+    expect(result).toBe(true);
+    expect(handlers.session_start?.({ reason: 'startup' }, { cwd: rootDir })).toBeUndefined();
+    await vi.waitFor(() => expect(schedule).toHaveBeenCalledWith(rootDir));
   });
 
-  it('does not refresh on turn end when graph is disabled by default', async () => {
+  it('does not schedule turn end refresh when graph mode is not enabled', async () => {
     const handlers: Record<string, Function> = {};
-    const refresh = vi.fn(async () => undefined);
+    const schedule = vi.fn();
     const pi = {
       on(event: string, handler: Function) {
         handlers[event] = handler;
@@ -64,9 +64,10 @@ describe('workspace graph scheduler', () => {
     const rootDir = join(tmpdir(), `pi-graph-scheduler-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     await mkdir(rootDir, { recursive: true });
 
-    registerWorkspaceGraphLifecycle(pi, { refresh });
-    await handlers.turn_end?.({ turnIndex: 1 }, { cwd: rootDir });
+    registerWorkspaceGraphLifecycle(pi, { schedule });
+    handlers.turn_end?.({ turnIndex: 1 }, { cwd: rootDir });
 
-    expect(refresh).not.toHaveBeenCalled();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(schedule).not.toHaveBeenCalled();
   });
 });

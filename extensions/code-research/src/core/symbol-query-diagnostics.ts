@@ -1,16 +1,16 @@
 import type {
   SymbolQueryCompleteness,
   SymbolQueryDiagnostics,
-  SymbolQueryFallbackReason,
+  SymbolQueryUnavailableReason,
   SymbolQueryGraphStatus,
   SymbolQuerySourceMode,
 } from '../types.js';
 
 export class SymbolQueryDiagnosticsBuilder {
-  private sourceMode: SymbolQuerySourceMode = 'direct';
+  private sourceMode: SymbolQuerySourceMode = 'graph';
   private graphStatus: SymbolQueryGraphStatus = 'disabled';
-  private completeness: SymbolQueryCompleteness = 'fallback';
-  private fallbackReason: SymbolQueryFallbackReason | null = null;
+  private completeness: SymbolQueryCompleteness = 'unavailable';
+  private unavailableReason: SymbolQueryUnavailableReason | null = null;
   private scannedFilesCount = 0;
   private skippedFilesCount = 0;
   private unreadableShardsCount = 0;
@@ -27,9 +27,9 @@ export class SymbolQueryDiagnosticsBuilder {
     return this;
   }
 
-  setCompleteness(completeness: SymbolQueryCompleteness, reason: SymbolQueryFallbackReason | null = null) {
+  setCompleteness(completeness: SymbolQueryCompleteness, reason: SymbolQueryUnavailableReason | null = null) {
     this.completeness = completeness;
-    this.fallbackReason = reason;
+    this.unavailableReason = reason;
     return this;
   }
 
@@ -53,7 +53,7 @@ export class SymbolQueryDiagnosticsBuilder {
       source_mode: this.sourceMode,
       graph_status: this.graphStatus,
       completeness: this.completeness,
-      fallback_reason: this.fallbackReason,
+      graph_unavailable_reason: this.unavailableReason,
       scanned_files_count: this.scannedFilesCount,
       skipped_files_count: this.skippedFilesCount,
       unreadable_shards_count: this.unreadableShardsCount,

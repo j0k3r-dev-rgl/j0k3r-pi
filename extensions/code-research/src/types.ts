@@ -68,10 +68,10 @@ export type JavaDeclarationFamily = 'compilation_unit' | 'type' | 'callable' | '
 export type JavaUnsupportedFormCode = 'anonymous_class_relationship_only' | 'lambda_relationship_only' | 'initializer_block' | 'unnamed_pattern';
 export type SymbolQueryInclusion = 'default' | 'compilation_unit' | 'local_binding' | 'relationship_only';
 
-export type SymbolQuerySourceMode = 'graph' | 'direct' | 'hybrid';
+export type SymbolQuerySourceMode = 'graph';
 export type SymbolQueryGraphStatus = 'disabled' | 'fresh' | 'stale' | 'partial' | 'missing' | 'incompatible' | 'error';
-export type SymbolQueryCompleteness = 'complete' | 'partial' | 'fallback';
-export type SymbolQueryFallbackReason =
+export type SymbolQueryCompleteness = 'complete' | 'partial' | 'unavailable';
+export type SymbolQueryUnavailableReason =
   | 'graph_disabled'
   | 'graph_missing'
   | 'graph_stale'
@@ -182,7 +182,7 @@ export interface SymbolQueryDiagnostics {
   source_mode: SymbolQuerySourceMode;
   graph_status: SymbolQueryGraphStatus;
   completeness: SymbolQueryCompleteness;
-  fallback_reason: SymbolQueryFallbackReason | null;
+  graph_unavailable_reason: SymbolQueryUnavailableReason | null;
   scanned_files_count: number;
   skipped_files_count: number;
   unreadable_shards_count: number;
@@ -202,13 +202,12 @@ export interface FindReferencesInput {
   scope?: SearchScope;
   glob?: string;
   reference_kinds?: ReferenceKind[];
-  compare_direct_fallback?: boolean;
 }
 
-export type ReferenceQuerySourceMode = 'graph' | 'direct' | 'hybrid';
+export type ReferenceQuerySourceMode = 'graph';
 export type ReferenceQueryGraphStatus = 'disabled' | 'fresh' | 'stale' | 'partial' | 'missing' | 'incompatible' | 'error';
-export type ReferenceQueryCompleteness = 'complete' | 'fallback';
-export type ReferenceQueryFallbackReason =
+export type ReferenceQueryCompleteness = 'complete' | 'unavailable';
+export type ReferenceQueryUnavailableReason =
   | 'graph_disabled'
   | 'graph_missing'
   | 'graph_stale'
@@ -224,7 +223,7 @@ export interface ReferenceQueryDiagnostics {
   source_mode: ReferenceQuerySourceMode;
   graph_status: ReferenceQueryGraphStatus;
   completeness: ReferenceQueryCompleteness;
-  fallback_reason: ReferenceQueryFallbackReason | null;
+  graph_unavailable_reason: ReferenceQueryUnavailableReason | null;
 }
 
 export interface FindReferencesResolution {

@@ -1,9 +1,6 @@
-import type { FunctionCallTreeInput, FunctionCallTreeResult } from '../types.js';
-import { executeJavaFunctionCallTree } from '../languages/java/function-call-tree.js';
-import { executeGoFunctionCallTree } from '../languages/go/function-call-tree.js';
-import { executeTypeScriptFunctionCallTree } from '../languages/typescript/function-call-tree.js';
 import { loadCodeResearchConfig } from '../config.js';
-import { readWorkspaceGraphManifest, readWorkspaceGraphState } from './graph-persistence.js';
+import type { FunctionCallTreeInput, FunctionCallTreeResult } from '../types.js';
+import { ensureWorkspaceGraphReadable } from './graph-ensure.js';
 import { evaluateGraphUsability } from './graph-policy.js';
 import { queryFunctionCallTreeFromGraph } from './graph-queries.js';
 
@@ -31,31 +28,20 @@ export async function executeFunctionCallTree(
   const graphResult = await tryGraphBackedFunctionCallTree(cwd, input);
   if (graphResult) return { status: 'ok', ...graphResult };
 
-  const language = input.language ?? 'java';
-
-  switch (language) {
-    case 'java':
-      return executeJavaFunctionCallTree(cwd, input);
-    case 'ts':
-    case 'js':
-      return executeTypeScriptFunctionCallTree(cwd, input);
-    case 'go':
-      return executeGoFunctionCallTree(cwd, input as any);
-    case 'auto':
-      throw new Error('function_call_tree does not support auto language detection yet');
-    default:
-      throw new Error(`Unsupported language: ${language}`);
-  }
+  return {
+    status: 'not_found',
+    message: 'No graph-backed call hierarchy found. Refresh the workspace graph and retry.',
+    details: { found: 0 },
+  };
 }
 
 async function tryGraphBackedFunctionCallTree(cwd: string, input: FunctionCallTreeInput) {
   const config = await loadCodeResearchConfig(cwd);
   if (!config.graph.enable) return undefined;
 
-  const state = await readWorkspaceGraphState(cwd);
-  const manifest = await readWorkspaceGraphManifest(cwd);
+  const { state, manifest } = await ensureWorkspaceGraphReadable(cwd);
   const decision = evaluateGraphUsability({
-    graphEnabled: true,
+    graphEnabled: config.graph.enable,
     query: 'function_call_tree',
     stateReadStatus: state.status,
     manifestReadStatus: manifest.status,

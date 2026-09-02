@@ -8,8 +8,12 @@ import { buildWorkspaceGraph } from '../src/core/workspace-graph.js';
 async function createProject(files: Record<string, string>): Promise<string> {
   const rootDir = join(tmpdir(), `pi-function-call-tree-ts-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   await mkdir(rootDir, { recursive: true });
+  const effectiveFiles = files['.pi/code-research.json'] === undefined
+    ? { '.pi/code-research.json': `{"graph":{"enable":true}}
+`, ...files }
+    : files;
 
-  for (const [relativePath, content] of Object.entries(files)) {
+  for (const [relativePath, content] of Object.entries(effectiveFiles)) {
     const fullPath = join(rootDir, relativePath);
     await mkdir(join(fullPath, '..'), { recursive: true });
     await writeFile(fullPath, content, 'utf8');
@@ -53,6 +57,8 @@ describe('function_call_tree TypeScript', () => {
       'src/controller.ts': `import { runService } from './service';\n\nexport function handle(): void {\n  runService();\n}\n`,
     });
 
+    await buildWorkspaceGraph(rootDir);
+
     const execution = await executeFunctionCallTree(rootDir, {
       path: 'src/controller.ts',
       symbol: 'handle',
@@ -72,14 +78,16 @@ describe('function_call_tree TypeScript', () => {
     expect(execution.result.stats.application_nodes).toBe(3);
   });
 
-  it('resolves absolute file paths outside cwd by deriving the project root from ts markers', async () => {
+  it('resolves absolute file paths through the workspace graph root', async () => {
     const rootDir = await createProject({
       'package.json': `{"name":"fixture","type":"module"}\n`,
       'app/service.ts': `export function runService(): void {\n  helper();\n}\n\nfunction helper(): void {}\n`,
       'app/routes/controller.ts': `import { runService } from '../service';\n\nexport async function loader(): Promise<void> {\n  runService();\n}\n`,
     });
 
-    const execution = await executeFunctionCallTree('/tmp', {
+    await buildWorkspaceGraph(rootDir);
+
+    const execution = await executeFunctionCallTree(rootDir, {
       path: resolve(rootDir, 'app/routes/controller.ts'),
       symbol: 'loader',
       language: 'ts',
@@ -104,6 +112,8 @@ describe('function_call_tree TypeScript', () => {
       'build/server/index.js': `export const bundle = "${'x'.repeat(1024 * 1024 + 64)}";\n`,
       '.react-router/types/routes.ts': `export const generated = true;\n`,
     });
+
+    await buildWorkspaceGraph(rootDir);
 
     const execution = await executeFunctionCallTree(rootDir, {
       path: 'app/routes/controller.ts',
@@ -136,6 +146,8 @@ describe('function_call_tree TypeScript', () => {
       'app/server/auth/guards.server.ts': `export async function requirePermission(request: Request, roles: string[]) {\n  return requireAuthenticated(request, roles);\n}\n\nasync function requireAuthenticated(request: Request, roles: string[]) {\n  return { request, roles, token: 'x' };\n}\n`,
       'app/routes/root/resenia.tsx': `import { requirePermission } from '~/server/auth/guards.server';\n\nexport async function loader({ request }: { request: Request }) {\n  return requirePermission(request, ['ROLE_ROOT']);\n}\n`,
     });
+
+    await buildWorkspaceGraph(rootDir);
 
     const execution = await executeFunctionCallTree(rootDir, {
       path: 'app/routes/root/resenia.tsx',
@@ -172,6 +184,8 @@ describe('function_call_tree TypeScript', () => {
       'app/routes/root/resenia.tsx': `import { getSessionInfo } from '~/server/auth/session.server';\n\nexport async function loader({ request }: { request: Request }) {\n  return getSessionInfo(request);\n}\n`,
     });
 
+    await buildWorkspaceGraph(rootDir);
+
     const execution = await executeFunctionCallTree(rootDir, {
       path: 'app/routes/root/resenia.tsx',
       symbol: 'loader',
@@ -198,6 +212,8 @@ describe('function_call_tree TypeScript', () => {
       'src/controller.ts': `import { AppService } from './service';\n\nexport class Controller {\n  handle(): void {\n    const service = new AppService();\n    service.run();\n  }\n}\n`,
     });
 
+    await buildWorkspaceGraph(rootDir);
+
     const execution = await executeFunctionCallTree(rootDir, {
       path: 'src/controller.ts',
       symbol: 'handle',
@@ -218,76 +234,57 @@ describe('function_call_tree TypeScript', () => {
     expect(execution.result.root.children?.[0].children?.[0].class).toBe('AppService');
   });
 
-  it('keeps graph-backed locally constructed instance call trees aligned with direct mode', async () => {
-    const files = {
+  it('uses graph-backed locally constructed instance call trees', async () => {
+    const rootDir = await createProject({
       'src/service.ts': `export class Worker {\n  run(): void {\n    this.helper();\n  }\n\n  helper(): void {}\n}\n`,
       'src/controller.ts': `import { Worker } from './service';\n\nexport function handle(): void {\n  const worker = new Worker();\n  worker.run();\n}\n`,
-    };
-    const directRoot = await createProject(files);
-    const graphRoot = await createProject({ '.pi/code-research.json': `{"graph":{"enable":true}}\n`, ...files });
-    await buildWorkspaceGraph(graphRoot);
+    });
+    await buildWorkspaceGraph(rootDir);
 
-    const direct = await executeFunctionCallTree(directRoot, { path: 'src/controller.ts', symbol: 'handle', language: 'ts', kind: 'function', max_depth: 5 });
-    const graph = await executeFunctionCallTree(graphRoot, { path: 'src/controller.ts', symbol: 'handle', language: 'ts', kind: 'function', max_depth: 5 });
+    const graph = await executeFunctionCallTree(rootDir, { path: 'src/controller.ts', symbol: 'handle', language: 'ts', kind: 'function', max_depth: 5 });
 
     expect(graph.status).toBe('ok');
-    expect(direct.status).toBe('ok');
-    if (graph.status !== 'ok' || direct.status !== 'ok') return;
+    if (graph.status !== 'ok') return;
 
     const flatten = (node: any): string[] => [node.symbol, ...(node.children ?? []).flatMap(flatten)];
-    expect(flatten(graph.result.root)).toEqual(flatten(direct.result.root));
+    expect(flatten(graph.result.root)).toEqual(['handle', 'run', 'helper']);
   });
 
-  it('includes optional-chained TypeScript calls in direct and graph-backed outgoing call trees', async () => {
-    const files = {
+  it('includes optional-chained TypeScript calls in graph-backed outgoing call trees', async () => {
+    const rootDir = await createProject({
       'src/repository.ts': `export class Repository {\n  save(input: object): Promise<void> { void input; return Promise.resolve(); }\n}\n`,
       'src/processor.ts': `import { Repository } from './repository';\nexport class Processor {\n  constructor(private repo?: Repository) {}\n  async persist(repo: Repository): Promise<void> {\n    await this.repo?.save({ source: 'field' });\n    await repo?.save({ source: 'param' });\n    await repo.save({ source: 'normal' });\n    await repo.save?.({ source: 'optional-call' });\n  }\n}\n`,
-    };
-    const directRoot = await createProject(files);
-    const graphRoot = await createProject({ '.pi/code-research.json': `{"graph":{"enable":true}}\n`, ...files });
-    await buildWorkspaceGraph(graphRoot);
+    });
+    await buildWorkspaceGraph(rootDir);
 
-    const direct = await executeFunctionCallTree(directRoot, { path: 'src/processor.ts', symbol: 'persist', language: 'ts', kind: 'method', max_depth: 2 });
-    const graph = await executeFunctionCallTree(graphRoot, { path: 'src/processor.ts', symbol: 'persist', language: 'ts', kind: 'method', max_depth: 2 });
+    const graph = await executeFunctionCallTree(rootDir, { path: 'src/processor.ts', symbol: 'persist', language: 'ts', kind: 'method', max_depth: 2 });
 
     expect(graph.status).toBe('ok');
-    expect(direct.status).toBe('ok');
-    if (graph.status !== 'ok' || direct.status !== 'ok') return;
+    if (graph.status !== 'ok') return;
 
     const summarize = (node: any): string[] => (node.children ?? []).map((child: any) => `${child.receiver_name}:${child.receiver_type}:${child.symbol}`).sort();
-    expect((direct.result.root.children ?? []).map((child: any) => child.called_as).sort()).toEqual([
-      "repo.save({ source: 'normal' })",
-      "repo.save?.({ source: 'optional-call' })",
-      "repo?.save({ source: 'param' })",
-      "this.repo?.save({ source: 'field' })",
-    ]);
-    expect(summarize(direct.result.root)).toEqual([
+    expect(summarize(graph.result.root)).toEqual([
       'repo:Repository:save',
       'repo:Repository:save',
       'repo:Repository:save',
       'this.repo:Repository:save',
     ]);
-    expect(summarize(graph.result.root)).toEqual(summarize(direct.result.root));
   });
 
-  it('keeps graph-backed inline-import typed receiver call trees aligned with direct mode', async () => {
-    const files = {
+  it('uses graph-backed inline-import typed receiver call trees', async () => {
+    const rootDir = await createProject({
       'src/service.ts': `export class A {\n  run(): void {\n    this.helper();\n  }\n\n  helper(): void {}\n}\n`,
       'src/owner.ts': `export function ownerCalls(a: import('./service').A): void {\n  a.run();\n}\n`,
-    };
-    const directRoot = await createProject(files);
-    const graphRoot = await createProject({ '.pi/code-research.json': `{"graph":{"enable":true}}\n`, ...files });
-    await buildWorkspaceGraph(graphRoot);
+    });
+    await buildWorkspaceGraph(rootDir);
 
-    const direct = await executeFunctionCallTree(directRoot, { path: 'src/owner.ts', symbol: 'ownerCalls', language: 'ts', kind: 'function', max_depth: 5 });
-    const graph = await executeFunctionCallTree(graphRoot, { path: 'src/owner.ts', symbol: 'ownerCalls', language: 'ts', kind: 'function', max_depth: 5 });
+    const graph = await executeFunctionCallTree(rootDir, { path: 'src/owner.ts', symbol: 'ownerCalls', language: 'ts', kind: 'function', max_depth: 5 });
 
     expect(graph.status).toBe('ok');
-    expect(direct.status).toBe('ok');
-    if (graph.status !== 'ok' || direct.status !== 'ok') return;
+    if (graph.status !== 'ok') return;
 
     const flatten = (node: any): string[] => [`${node.class ?? '<module>'}.${node.symbol}`, ...(node.children ?? []).flatMap(flatten)];
-    expect(flatten(graph.result.root)).toEqual(flatten(direct.result.root));
+    expect(flatten(graph.result.root)).toEqual(['<module>.ownerCalls', 'A.run', 'A.helper']);
     expect(graph.result.root.children?.[0]?.receiver_type).toBe('A');
   });
 });

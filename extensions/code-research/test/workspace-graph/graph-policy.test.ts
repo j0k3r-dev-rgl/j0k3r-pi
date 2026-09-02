@@ -33,8 +33,8 @@ describe('graph policy', () => {
     for (const status of ['missing', 'stale', 'partial', 'errored', 'incompatible', 'refreshing'] as const) {
       expect(
         evaluateGraphUsability({
-          graphEnabled: true,
-          query: 'find_symbol',
+        graphEnabled: true,
+            query: 'find_symbol',
           stateReadStatus: 'ok',
           manifestReadStatus: 'ok',
           stateStatus: status,

@@ -24,7 +24,13 @@ import {
   TYPESCRIPT_GRAMMAR_VERSION,
   TYPESCRIPT_SYMBOL_COVERAGE_MODEL_VERSION,
 } from './graph-schema.js';
-import { ensureWorkspaceGraphGitignore, writeSubprojectGraphShard, writeWorkspaceGraphManifest } from './graph-persistence.js';
+import {
+  ensureWorkspaceGraphGitignore,
+  readSubprojectGraphShard,
+  readWorkspaceGraphManifest,
+  writeSubprojectGraphShard,
+  writeWorkspaceGraphManifest,
+} from './graph-persistence.js';
 import { detectWorkspaceSubprojects } from './project-detector.js';
 import { collectWorkspaceSourceFiles, detectGraphLanguage, toProjectRelativePath } from './source-policy.js';
 import { compareCanonicalPathStrings } from './shared.js';
@@ -58,42 +64,154 @@ export async function ensureWorkspaceGraphFreshness(projectRoot: string): Promis
   const unreadableDirectories = new Set<string>();
   const reportUnreadableDirectory = (dir: string) => unreadableDirectories.add(toProjectRelativePath(projectRoot, dir));
   const detected = await detectWorkspaceSubprojects(projectRoot, { onUnreadableDirectory: reportUnreadableDirectory });
-  const previousById = new Map(existing.subprojects.map((subproject) => [subproject.id, subproject]));
+  const assessment = await assessWorkspaceGraphFreshness(projectRoot, existing, detected, unreadableDirectories, reportUnreadableDirectory);
 
-  let stale = existing.status !== 'fresh';
-  if (detected.length !== existing.subprojects.length) stale = true;
-
-  for (const subproject of detected) {
-    const previous = previousById.get(subproject.id);
-    if (!previous || previous.root !== subproject.root || previous.markers.join('|') !== subproject.markers.join('|')) {
-      stale = true;
-      break;
-    }
-
-    const files = await collectWorkspaceSourceFiles(subproject.absoluteRoot, { onUnreadableDirectory: reportUnreadableDirectory });
-    const snapshot = await createSubprojectSnapshot(projectRoot, files);
-    if (compareSubprojectSnapshot(previous.snapshot, snapshot).stale) {
-      stale = true;
-      break;
-    }
-  }
-
-  const previousUnreadable = [...(existing.coverage.unreadableDirectories ?? [])].sort();
-  const nextUnreadable = [...unreadableDirectories].sort();
-  if (previousUnreadable.join('|') !== nextUnreadable.join('|')) stale = true;
-
-  if (!stale) {
+  if (assessment.mode === 'fresh') {
     return { state: existing, changed: false };
   }
 
-  await writeWorkspaceGraphState(projectRoot, {
-    ...existing,
-    status: 'refreshing',
-  });
+  if (assessment.mode === 'incremental') {
+    const refreshed = await refreshChangedSubprojectShards(projectRoot, existing, assessment.subprojects, assessment.changedSubprojectIds);
+    if (refreshed) return { ...refreshed, changed: true };
+  }
 
   const built = await buildWorkspaceGraph(projectRoot);
   return { ...built, changed: true };
 }
+
+interface FreshnessAssessmentSubproject {
+  id: string;
+  root: string;
+  absoluteRoot: string;
+  markers: string[];
+  snapshot: WorkspaceGraphState['subprojects'][number]['snapshot'];
+  indexedFiles: number;
+  changedFiles: string[];
+}
+
+type FreshnessAssessment =
+  | { mode: 'fresh'; subprojects: FreshnessAssessmentSubproject[] }
+  | { mode: 'incremental'; subprojects: FreshnessAssessmentSubproject[]; changedSubprojectIds: Set<string> }
+  | { mode: 'full' };
+
+async function assessWorkspaceGraphFreshness(
+  projectRoot: string,
+  existing: WorkspaceGraphState,
+  detected: Awaited<ReturnType<typeof detectWorkspaceSubprojects>>,
+  unreadableDirectories: Set<string>,
+  reportUnreadableDirectory: (dir: string) => void
+): Promise<FreshnessAssessment> {
+  if (existing.status !== 'fresh') return { mode: 'full' };
+  if (detected.length !== existing.subprojects.length) return { mode: 'full' };
+
+  const manifest = await readWorkspaceGraphManifest(projectRoot);
+  if (manifest.status !== 'ok') return { mode: 'full' };
+  const manifestById = new Map(manifest.data.subprojects.map((subproject) => [subproject.id, subproject]));
+  const previousById = new Map(existing.subprojects.map((subproject) => [subproject.id, subproject]));
+  const assessedSubprojects: FreshnessAssessmentSubproject[] = [];
+  const changedSubprojectIds = new Set<string>();
+
+  for (const subproject of detected) {
+    const previous = previousById.get(subproject.id);
+    const manifestEntry = manifestById.get(subproject.id);
+    if (!previous || !manifestEntry || previous.root !== subproject.root || manifestEntry.root !== subproject.root || previous.shardPath !== manifestEntry.shardPath || previous.generation !== manifestEntry.generation || previous.markers.join('|') !== subproject.markers.join('|')) {
+      return { mode: 'full' };
+    }
+
+    const shard = await readSubprojectGraphShard(projectRoot, subproject.id, { generation: previous.generation });
+    if (shard.status !== 'ok') return { mode: 'full' };
+
+    const files = await collectWorkspaceSourceFiles(subproject.absoluteRoot, { onUnreadableDirectory: reportUnreadableDirectory });
+    const snapshot = await createSubprojectSnapshot(projectRoot, files);
+    const diff = compareSubprojectSnapshot(previous.snapshot, snapshot);
+    if (diff.stale) changedSubprojectIds.add(subproject.id);
+    assessedSubprojects.push({
+      id: subproject.id,
+      root: subproject.root,
+      absoluteRoot: subproject.absoluteRoot,
+      markers: subproject.markers,
+      snapshot,
+      indexedFiles: files.length,
+      changedFiles: diff.changedFiles,
+    });
+  }
+
+  const previousUnreadable = [...(existing.coverage.unreadableDirectories ?? [])].sort();
+  const nextUnreadable = [...unreadableDirectories].sort();
+  if (previousUnreadable.join('|') !== nextUnreadable.join('|')) return { mode: 'full' };
+
+  if (changedSubprojectIds.size === 0) return { mode: 'fresh', subprojects: assessedSubprojects };
+  return { mode: 'incremental', subprojects: assessedSubprojects, changedSubprojectIds };
+}
+
+async function refreshChangedSubprojectShards(
+  projectRoot: string,
+  existing: WorkspaceGraphState,
+  subprojects: FreshnessAssessmentSubproject[],
+  changedSubprojectIds: Set<string>
+): Promise<{ state: WorkspaceGraphState; manifest: GraphManifest } | undefined> {
+  const generation = Math.max(Date.now(), existing.generation + 1);
+  const workspaceNodeId = createWorkspaceNodeId(projectRoot);
+  const previousById = new Map(existing.subprojects.map((subproject) => [subproject.id, subproject]));
+  const manifestSubprojects: GraphManifest['subprojects'] = [];
+  const stateSubprojects: WorkspaceGraphState['subprojects'] = [];
+  let workspaceStatus: WorkspaceGraphState['status'] = 'fresh';
+
+  for (const subproject of subprojects) {
+    const previous = previousById.get(subproject.id);
+    if (!previous) return undefined;
+
+    if (!changedSubprojectIds.has(subproject.id)) {
+      manifestSubprojects.push({ id: previous.id, root: previous.root, shardPath: previous.shardPath, generation: previous.generation });
+      stateSubprojects.push(previous);
+      if (previous.status !== 'fresh') workspaceStatus = 'partial';
+      continue;
+    }
+
+    const shard = await buildSubprojectShard(projectRoot, subproject.absoluteRoot, subproject.id, subproject.root, subproject.markers, generation);
+    if (shard.nodes.length === 0) workspaceStatus = 'partial';
+    const shardPath = `graphs/${subproject.id}.json`;
+    await writeSubprojectGraphShard(projectRoot, subproject.id, shard);
+    manifestSubprojects.push({ id: subproject.id, root: subproject.root, shardPath, generation });
+    stateSubprojects.push({
+      id: subproject.id,
+      root: subproject.root,
+      status: shard.nodes.length > 0 ? 'fresh' : 'partial',
+      languageHints: Array.from(new Set(shard.nodes.flatMap((node) => node.kind === 'file' ? [node.language] : []))),
+      shardPath,
+      snapshot: subproject.snapshot,
+      generation,
+      markers: subproject.markers,
+    });
+  }
+
+  const manifest: GraphManifest = createBaseArtifact({
+    projectRoot,
+    generation,
+    workspaceNodeId,
+    subprojects: manifestSubprojects,
+  });
+  await writeWorkspaceGraphManifest(projectRoot, manifest);
+
+  const state = createWorkspaceGraphState({
+    projectRoot,
+    status: workspaceStatus,
+    generation,
+    manifestPath: '.pi/workspace-code-graph/graph-manifest.json',
+    subprojects: stateSubprojects,
+    coverage: {
+      indexedFiles: subprojects.reduce((total, subproject) => total + subproject.indexedFiles, 0),
+      skippedLargeFiles: 0,
+      skippedUnsupportedFiles: 0,
+      excludedDirectories: WORKSPACE_GRAPH_EXCLUDED_DIRECTORIES,
+      unreadableDirectories: [...(existing.coverage.unreadableDirectories ?? [])].sort(),
+    },
+  });
+  await writeWorkspaceGraphState(projectRoot, state);
+  return { state, manifest };
+}
+
+const WORKSPACE_GRAPH_EXCLUDED_DIRECTORIES = ['node_modules', 'build', 'dist', 'coverage', '.next', '.nuxt', '.svelte-kit', '.react-router', '.turbo', '.vite', '.cache', 'out', 'vendor', 'target'];
 
 export async function buildWorkspaceGraph(projectRoot: string): Promise<{ state: WorkspaceGraphState; manifest: GraphManifest }> {
   const generation = Date.now();
@@ -107,7 +225,7 @@ export async function buildWorkspaceGraph(projectRoot: string): Promise<{ state:
     indexedFiles: 0,
     skippedLargeFiles: 0,
     skippedUnsupportedFiles: 0,
-    excludedDirectories: ['node_modules', 'build', 'dist', 'coverage', '.next', '.nuxt', '.svelte-kit', '.react-router', '.turbo', '.vite', '.cache', 'out', 'vendor', 'target'],
+    excludedDirectories: WORKSPACE_GRAPH_EXCLUDED_DIRECTORIES,
     unreadableDirectories: [] as string[],
   };
   let workspaceStatus: WorkspaceGraphState['status'] = 'fresh';

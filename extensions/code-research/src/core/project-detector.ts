@@ -44,11 +44,7 @@ export async function detectWorkspaceSubprojects(
       });
     });
 
-  if (filtered.length === 0) {
-    return [{ id: createSubprojectId('.'), root: '.', absoluteRoot: projectRoot, markers: [], implicit: true }];
-  }
-
-  return filtered.map((candidate) => {
+  const detected = filtered.map((candidate) => {
     const root = toProjectRelativePath(projectRoot, candidate.absoluteRoot);
     return {
       id: createSubprojectId(root),
@@ -58,6 +54,12 @@ export async function detectWorkspaceSubprojects(
       implicit: false,
     };
   });
+
+  if (!detected.some((candidate) => candidate.root === '.')) {
+    detected.unshift({ id: createSubprojectId('.'), root: '.', absoluteRoot: projectRoot, markers: [], implicit: true });
+  }
+
+  return detected;
 }
 
 async function walk(

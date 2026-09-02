@@ -3,22 +3,17 @@ import { readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import ts from 'typescript';
 import { loadCodeResearchConfig } from '../config.js';
-import { readWorkspaceGraphManifest, readWorkspaceGraphState, readSubprojectGraphShard } from './graph-persistence.js';
+import { readSubprojectGraphShard } from './graph-persistence.js';
+import { ensureWorkspaceGraphReadable } from './graph-ensure.js';
 import { evaluateGraphUsability } from './graph-policy.js';
-import { getParserForFile, parseSource } from './parser.js';
 import { detectLanguage, resolveTargetFiles } from './shared.js';
 import { SymbolQueryDiagnosticsBuilder } from './symbol-query-diagnostics.js';
 import { matchesCanonicalSymbol, reconcileSymbolRecords } from './symbol-query.js';
-import {
-  buildSymbolLocation as buildTypeScriptSymbolLocation,
-  extractSymbols as extractTypeScriptSymbols,
-  findImplementationsOf as findTypeScriptImplementationsOf,
-} from '../languages/typescript/find-symbol.js';
+import { buildSymbolLocation as buildTypeScriptSymbolLocation } from '../languages/typescript/find-symbol.js';
 import type { CanonicalTypeScriptSymbolRecord } from '../languages/typescript/symbol-model.js';
-import { buildSymbolLocation as buildJavaSymbolLocation, extractSymbols as extractJavaSymbols, findImplementationsOf as findJavaImplementationsOf } from '../languages/java/find-symbol.js';
-import { buildSymbolLocation as buildGoSymbolLocation, extractSymbols as extractGoSymbols, findImplementationsOf as findGoImplementationsOf } from '../languages/go/find-symbol.js';
+import { buildSymbolLocation as buildJavaSymbolLocation } from '../languages/java/find-symbol.js';
+import { buildSymbolLocation as buildGoSymbolLocation } from '../languages/go/find-symbol.js';
 import { queryInclusionForJavaDeclarationKind } from '../languages/java/symbol-model.js';
-import { resolveJavaIndexRoot } from '../languages/java/function-call-tree.js';
 import { collectWorkspaceSourceFiles } from './source-policy.js';
 import type {
   CanonicalSymbolRecord,
@@ -69,45 +64,7 @@ export function getFindSymbolGraphQueryCacheStats(): { hits: number; misses: num
   return { ...indexedSymbolShardCacheStats };
 }
 
-interface ParsedFile {
-  path: string;
-  language: Exclude<SupportedLanguage, 'auto'>;
-  rootNode: any;
-  source: string;
-}
-
-interface LanguageAdapter {
-  extractSymbols(rootNode: any): Array<{ name: string; kind: any; node: any; isDefinition: boolean; isImplementation: boolean }>;
-  findImplementationsOf(symbolName: string, files: Array<{ path: string; rootNode: any; language: Exclude<SupportedLanguage, 'auto'> }>): SymbolLocation[];
-  buildSymbolLocation(filePath: string, symbolName: string, kind: any, node: any, isDefinition: boolean, isImplementation: boolean, includeSignature?: boolean, includeCode?: boolean, source?: string): SymbolLocation;
-}
-
-const typeScriptAdapter: LanguageAdapter = {
-  extractSymbols: extractTypeScriptSymbols,
-  findImplementationsOf: findTypeScriptImplementationsOf,
-  buildSymbolLocation: buildTypeScriptSymbolLocation,
-};
-
-const javaAdapter: LanguageAdapter = {
-  extractSymbols: extractJavaSymbols,
-  findImplementationsOf: findJavaImplementationsOf,
-  buildSymbolLocation: buildJavaSymbolLocation,
-};
-
-const goAdapter: LanguageAdapter = {
-  extractSymbols: extractGoSymbols,
-  findImplementationsOf: findGoImplementationsOf,
-  buildSymbolLocation: buildGoSymbolLocation,
-};
-
-function getLanguageAdapter(language: Exclude<SupportedLanguage, 'auto'>): LanguageAdapter {
-  if (language === 'java') return javaAdapter;
-  if (language === 'go') return goAdapter;
-  return typeScriptAdapter;
-}
-
 export async function resolveFindSymbol(cwd: string, input: FindSymbolInput): Promise<FindSymbolResolution> {
-  const config = await loadCodeResearchConfig(cwd);
   const explicitLanguage = input.language ?? 'auto';
   const includeSignature = input.include_signature ?? false;
   const searchMode = input.search_mode ?? 'exact';
@@ -116,32 +73,35 @@ export async function resolveFindSymbol(cwd: string, input: FindSymbolInput): Pr
   const diagnostics = new SymbolQueryDiagnosticsBuilder().setScannedFilesCount(resolved.filesToScan.length);
   const effectiveScope = input.scope ?? (resolved.filesToScan.length > 1 ? 'directory' : 'file');
 
+  const graphLanguage = explicitLanguage === 'auto' && resolved.filesToScan.length === 1 ? detectLanguage(resolved.filesToScan[0], explicitLanguage) : explicitLanguage;
+  const graphInput: FindSymbolInput = { ...input, language: graphLanguage };
   let graphRecords = new Map<string, CanonicalSymbolRecord[]>();
   let graphCompleteFiles = new Set<string>();
-  if (config.graph.enable && (explicitLanguage === 'auto' || explicitLanguage === 'ts' || explicitLanguage === 'js' || explicitLanguage === 'java' || explicitLanguage === 'go')) {
-    const graph = await loadGraphRecords(cwd, resolved.filesToScan, input);
+  if (explicitLanguage === 'auto' || explicitLanguage === 'ts' || explicitLanguage === 'js' || explicitLanguage === 'java' || explicitLanguage === 'go') {
+    const graph = await loadGraphRecords(cwd, resolved.filesToScan, graphInput);
     diagnostics.setGraph(graph.graphStatus, graph.graphGeneration);
     diagnostics.setSourceMode(graph.sourceMode);
-    if (graph.fallbackReason) diagnostics.setCompleteness(graph.completeness, graph.fallbackReason);
+    if (graph.unavailableReason) diagnostics.setCompleteness(graph.completeness, graph.unavailableReason);
     diagnostics.incrementUnreadableShardsCount(graph.unreadableShardsCount);
     diagnostics.incrementSkippedFilesCount(graph.skippedFilesCount);
     graphRecords = graph.records;
     graphCompleteFiles = graph.completeFiles;
   } else {
-    diagnostics.setGraph(config.graph.enable ? 'fresh' : 'disabled');
-    diagnostics.setSourceMode('direct').setCompleteness('fallback', config.graph.enable ? 'coverage_unproven' : 'graph_disabled');
+    diagnostics.setGraph('fresh');
+    diagnostics.setSourceMode('graph').setCompleteness('unavailable', 'coverage_unproven');
   }
 
-  const requiresCanonicalDirectContext = input.kind === 'interface' || input.declaration_kind === 'interface';
-  const directFiles = resolved.filesToScan.filter((file) => requiresCanonicalDirectContext || !graphCompleteFiles.has(file));
-  const parsedFiles = await parseFiles(cwd, directFiles, explicitLanguage, diagnostics);
-  const directResults = collectDirectMatches(parsedFiles, input, includeSignature, includeCode, searchMode, effectiveScope);
-  const implementationContextFiles = await loadJavaInterfaceMethodImplementationContext(cwd, resolved.targetPath, resolved.isDirectory, explicitLanguage, input, directResults, parsedFiles, diagnostics);
+  if (needsGraphImplementationContext(input)) {
+    const contextFiles = await collectWorkspaceSourceFiles(cwd).catch(() => []);
+    if (contextFiles.length > resolved.filesToScan.length) {
+      const contextGraph = await loadGraphRecords(cwd, contextFiles, { ...graphInput, path: cwd, scope: 'directory' });
+      for (const [file, records] of contextGraph.records) if (!graphRecords.has(file)) graphRecords.set(file, records);
+    }
+  }
 
   const graphLocations: SymbolLocation[] = [];
   for (const file of resolved.filesToScan) {
-    let source = parsedFiles.find((entry) => entry.path === file)?.source;
-    if (!source && includeCode && graphCompleteFiles.has(file)) source = await readFile(file, 'utf8').catch(() => undefined);
+    const source = includeCode && graphCompleteFiles.has(file) ? await readFile(file, 'utf8').catch(() => undefined) : undefined;
     for (const record of graphRecords.get(file) ?? []) {
       if (!matchesCanonicalSymbol(record, input.symbol, searchMode, input.kind, input.declaration_kind, effectiveScope)) continue;
       const builder = detectLanguage(file, explicitLanguage) === 'java'
@@ -153,13 +113,13 @@ export async function resolveFindSymbol(cwd: string, input: FindSymbolInput): Pr
     }
   }
 
-  const results = reconcileLocations([...directResults, ...graphLocations]);
-  hydrateInterfaceImplementationLocations(results, explicitLanguage, graphRecords, implementationContextFiles);
+  const results = reconcileLocations(graphLocations);
+  hydrateInterfaceImplementationLocations(results, explicitLanguage, graphRecords);
   const currentDiagnostics = diagnostics.build();
-  if (graphCompleteFiles.size === resolved.filesToScan.length && directFiles.length === 0 && currentDiagnostics.graph_status === 'fresh') {
+  if (graphCompleteFiles.size === resolved.filesToScan.length && currentDiagnostics.graph_status === 'fresh') {
     diagnostics.setSourceMode('graph').setCompleteness('complete', null);
-  } else if (graphLocations.length > 0 && currentDiagnostics.completeness !== 'partial') {
-    diagnostics.setSourceMode('hybrid').setCompleteness('fallback', currentDiagnostics.fallback_reason);
+  } else if (currentDiagnostics.completeness === 'complete') {
+    diagnostics.setCompleteness('unavailable', currentDiagnostics.graph_unavailable_reason ?? 'coverage_unproven');
   }
 
   return { results, diagnostics: diagnostics.build() };
@@ -169,86 +129,6 @@ export async function findSymbol(cwd: string, input: FindSymbolInput): Promise<S
   return (await resolveFindSymbol(cwd, input)).results;
 }
 
-async function parseFiles(cwd: string, filesToScan: string[], explicitLanguage: SupportedLanguage, diagnostics: SymbolQueryDiagnosticsBuilder): Promise<ParsedFile[]> {
-  const parsedFiles: ParsedFile[] = [];
-  for (const filePath of filesToScan) {
-    const language = detectLanguage(filePath, explicitLanguage);
-    try {
-      const source = await readFile(filePath, 'utf8');
-      if (language === 'java' || language === 'go') {
-        const parser = getParserForFile(filePath, language);
-        const tree = parseSource(parser, source);
-        (tree.rootNode as any).__filePath = filePath;
-        (tree.rootNode as any).__source = source;
-        parsedFiles.push({ path: filePath, language, rootNode: tree.rootNode, source });
-      } else {
-        const scriptKind = filePath.endsWith('.tsx') ? ts.ScriptKind.TSX : filePath.endsWith('.jsx') ? ts.ScriptKind.JSX : filePath.endsWith('.js') || filePath.endsWith('.mjs') || filePath.endsWith('.cjs') ? ts.ScriptKind.JS : ts.ScriptKind.TS;
-        const canonicalFilePath = filePath.startsWith(`${cwd}/`) ? filePath.slice(cwd.length + 1).replace(/\\/g, '/') : filePath.replace(/\\/g, '/');
-        const sourceFile = ts.createSourceFile(canonicalFilePath, source, ts.ScriptTarget.Latest, true, scriptKind);
-        parsedFiles.push({ path: filePath, language, rootNode: sourceFile, source });
-      }
-    } catch {
-      diagnostics.incrementSkippedFilesCount();
-    }
-  }
-  return parsedFiles;
-}
-
-function collectDirectMatches(
-  parsedFiles: ParsedFile[],
-  input: FindSymbolInput,
-  includeSignature: boolean,
-  includeCode: boolean,
-  searchMode: SearchMode,
-  scope: 'file' | 'directory'
-): SymbolLocation[] {
-  const matches: SymbolLocation[] = [];
-  for (const file of parsedFiles) {
-    const adapter = getLanguageAdapter(file.language);
-    const symbols = adapter.extractSymbols(file.rootNode);
-    for (const sym of symbols) {
-      const record = isCanonicalRecord(sym.node) ? (sym.node as CanonicalSymbolRecord) : undefined;
-      const matchedKind = input.kind === 'function' && sym.kind === 'variable' && sym.isImplementation ? 'function' : sym.kind;
-      if (record) {
-        if (!matchesCanonicalSymbol(record, input.symbol, searchMode, input.kind, input.declaration_kind, scope)) continue;
-      } else {
-        if (!matchesSymbol(sym.name, input.symbol, searchMode)) continue;
-        if (input.kind && matchedKind !== input.kind) continue;
-      }
-      matches.push(adapter.buildSymbolLocation(file.path, sym.name, matchedKind, sym.node, sym.isDefinition, sym.isImplementation, includeSignature, includeCode, file.source));
-    }
-  }
-
-  for (const match of matches) {
-    if (match.kind === 'interface' && match.is_definition) {
-      const adapter = getLanguageAdapter(detectLanguage(match.file, 'auto'));
-      match.implementation_locations = adapter.findImplementationsOf(match.symbol, parsedFiles);
-    }
-  }
-
-  return matches;
-}
-
-async function loadJavaInterfaceMethodImplementationContext(
-  cwd: string,
-  targetPath: string,
-  isDirectory: boolean,
-  explicitLanguage: SupportedLanguage,
-  input: FindSymbolInput,
-  directResults: SymbolLocation[],
-  parsedFiles: ParsedFile[],
-  diagnostics: SymbolQueryDiagnosticsBuilder
-): Promise<ParsedFile[]> {
-  if (isDirectory || explicitLanguage !== 'java') return parsedFiles;
-  const needsImplementationContext = directResults.some((item) => item.kind === 'interface' || item.kind === 'method' || item.declaration_kind === 'interface_method');
-  if (!needsImplementationContext) return parsedFiles;
-  const indexRoot = await resolveJavaIndexRoot(targetPath).catch(() => undefined);
-  if (!indexRoot) return parsedFiles;
-  const files = (await collectWorkspaceSourceFiles(indexRoot).catch(() => [])).filter((file) => file.endsWith('.java') && !parsedFiles.some((entry) => entry.path === file));
-  if (files.length === 0) return parsedFiles;
-  return [...parsedFiles, ...await parseFiles(cwd, files, explicitLanguage, diagnostics)];
-}
-
 async function loadGraphRecords(
   cwd: string,
   filesToScan: string[],
@@ -256,18 +136,31 @@ async function loadGraphRecords(
 ): Promise<{
   records: Map<string, CanonicalSymbolRecord[]>;
   completeFiles: Set<string>;
-  sourceMode: 'direct' | 'graph' | 'hybrid';
-  completeness: 'complete' | 'partial' | 'fallback';
-  fallbackReason: any;
+  sourceMode: 'graph';
+  completeness: 'complete' | 'partial' | 'unavailable';
+  unavailableReason: any;
   graphStatus: SymbolQueryGraphStatus;
   graphGeneration?: number;
   unreadableShardsCount: number;
   skippedFilesCount: number;
 }> {
-  const state = await readWorkspaceGraphState(cwd);
-  const manifest = await readWorkspaceGraphManifest(cwd);
+  const config = await loadCodeResearchConfig(cwd);
+  if (!config.graph.enable) {
+    return {
+      records: new Map(),
+      completeFiles: new Set(),
+      sourceMode: 'graph',
+      completeness: 'unavailable',
+      unavailableReason: 'graph_disabled',
+      graphStatus: 'disabled',
+      unreadableShardsCount: 0,
+      skippedFilesCount: 0,
+    };
+  }
+
+  const { state, manifest } = await ensureWorkspaceGraphReadable(cwd, { refreshStale: true });
   const decision = evaluateGraphUsability({
-    graphEnabled: true,
+    graphEnabled: config.graph.enable,
     query: 'find_symbol',
     stateReadStatus: state.status,
     manifestReadStatus: manifest.status,
@@ -280,9 +173,9 @@ async function loadGraphRecords(
     return {
       records: new Map(),
       completeFiles: new Set(),
-      sourceMode: 'direct',
-      completeness: 'fallback',
-      fallbackReason: mapFallbackReason(state.status, manifest.status, state.status === 'ok' ? state.data.status : undefined),
+      sourceMode: 'graph',
+      completeness: 'unavailable',
+      unavailableReason: mapUnavailableReason(state.status, manifest.status, state.status === 'ok' ? state.data.status : undefined),
       graphStatus: mapGraphStatus(state.status, manifest.status, state.status === 'ok' ? state.data.status : undefined),
       graphGeneration: state.status === 'ok' ? state.data.generation : undefined,
       unreadableShardsCount: 0,
@@ -294,9 +187,9 @@ async function loadGraphRecords(
     return {
       records: new Map(),
       completeFiles: new Set(),
-      sourceMode: 'direct',
-      completeness: 'fallback',
-      fallbackReason: 'graph_stale',
+      sourceMode: 'graph',
+      completeness: 'unavailable',
+      unavailableReason: 'graph_stale',
       graphStatus: 'stale',
       graphGeneration: state.data.generation,
       unreadableShardsCount: 0,
@@ -383,48 +276,44 @@ async function loadGraphRecords(
   }
 
   let graphStatus: SymbolQueryGraphStatus = 'fresh';
-  let fallbackReason: any = null;
+  let unavailableReason: any = null;
   if (issueCounts.shard_corrupt > 0) {
     graphStatus = 'error';
-    fallbackReason = 'shard_corrupt';
+    unavailableReason = 'shard_corrupt';
   } else if (issueCounts.shard_oversized > 0) {
     graphStatus = 'error';
-    fallbackReason = 'shard_oversized';
+    unavailableReason = 'shard_oversized';
   } else if (issueCounts.shard_unreadable > 0) {
     graphStatus = 'error';
-    fallbackReason = 'shard_unreadable';
+    unavailableReason = 'shard_unreadable';
   } else if (issueCounts.shard_missing > 0) {
     graphStatus = 'missing';
-    fallbackReason = 'shard_missing';
+    unavailableReason = 'shard_missing';
   } else if (issueCounts.shard_incompatible > 0) {
     graphStatus = 'incompatible';
-    fallbackReason = 'shard_incompatible';
+    unavailableReason = 'shard_incompatible';
   } else if (issueCounts.snapshot_mismatch > 0) {
     graphStatus = 'stale';
-    fallbackReason = 'snapshot_mismatch';
+    unavailableReason = 'snapshot_mismatch';
   } else if (state.data.status === 'partial' || issueCounts.coverage_unproven > 0) {
     graphStatus = 'partial';
-    fallbackReason = state.data.status === 'partial' ? 'graph_partial' : 'coverage_unproven';
+    unavailableReason = state.data.status === 'partial' ? 'graph_partial' : 'coverage_unproven';
   }
 
-  if (issueCounts.input_unreadable > 0 && !fallbackReason) fallbackReason = 'input_unreadable';
-  const sourceMode = completeFiles.size === filesToScan.length && graphStatus === 'fresh'
-    ? 'graph'
-    : completeFiles.size > 0
-      ? 'hybrid'
-      : 'direct';
+  if (issueCounts.input_unreadable > 0 && !unavailableReason) unavailableReason = 'input_unreadable';
+  const sourceMode = 'graph' as const;
   const completeness = completeFiles.size === filesToScan.length && graphStatus === 'fresh'
     ? 'complete'
     : issueCounts.input_unreadable > 0
       ? 'partial'
-      : 'fallback';
+      : 'unavailable';
 
   return {
     records,
     completeFiles,
     sourceMode,
     completeness,
-    fallbackReason,
+    unavailableReason,
     graphStatus,
     graphGeneration: state.data.generation,
     unreadableShardsCount: issueCounts.shard_unreadable,
@@ -575,18 +464,6 @@ function graphNodeToCanonicalRecord(node: Extract<GraphNode, { kind: 'symbol' }>
   };
 }
 
-function matchesSymbol(name: string, query: string, mode: SearchMode): boolean {
-  switch (mode) {
-    case 'prefix':
-      return name.startsWith(query);
-    case 'contains':
-      return name.includes(query);
-    case 'exact':
-    default:
-      return name === query;
-  }
-}
-
 function reconcileLocations(results: SymbolLocation[]): SymbolLocation[] {
   const byId = new Map<string, SymbolLocation>();
   for (const result of results) {
@@ -608,13 +485,12 @@ function reconcileLocations(results: SymbolLocation[]): SymbolLocation[] {
 function hydrateInterfaceImplementationLocations(
   results: SymbolLocation[],
   explicitLanguage: SupportedLanguage,
-  graphRecords: Map<string, CanonicalSymbolRecord[]>,
-  parsedFiles: ParsedFile[]
+  graphRecords: Map<string, CanonicalSymbolRecord[]>
 ): void {
   for (const result of results) {
     const language = detectLanguage(result.file, explicitLanguage);
     if (result.kind === 'method' && result.is_definition && (result.implementation_locations?.length ?? 0) === 0 && language === 'java') {
-      result.implementation_locations = collectJavaMethodImplementationLocations(result, graphRecords, parsedFiles);
+      result.implementation_locations = collectJavaMethodImplementationLocations(result, graphRecords);
       continue;
     }
 
@@ -623,15 +499,13 @@ function hydrateInterfaceImplementationLocations(
       result.implementation_locations = collectJavaImplementationLocationsFromGraph(result, graphRecords);
       if ((result.implementation_locations?.length ?? 0) > 0) continue;
     }
-    const adapter = getLanguageAdapter(language);
-    result.implementation_locations = dedupeImplementationLocations(adapter.findImplementationsOf(result.symbol, parsedFiles));
+    result.implementation_locations = collectStructuralImplementationLocationsFromGraph(result, graphRecords);
   }
 }
 
 function collectJavaMethodImplementationLocations(
   target: SymbolLocation,
-  graphRecords: Map<string, CanonicalSymbolRecord[]>,
-  parsedFiles: ParsedFile[]
+  graphRecords: Map<string, CanonicalSymbolRecord[]>
 ): SymbolLocation[] {
   const interfaceOwner = target.owner;
   if (!interfaceOwner) return [];
@@ -642,19 +516,13 @@ function collectJavaMethodImplementationLocations(
   for (const records of graphRecords.values()) {
     for (const record of records) {
       if (record.declarationKind !== 'class' && record.declarationKind !== 'record') continue;
-      if (record.signature && implementsPattern.test(record.signature)) implementationOwners.add(record.qualifiedName);
+      if (record.signature && implementsPattern.test(record.signature)) {
+        implementationOwners.add(record.qualifiedName);
+        implementationOwners.add(record.name);
+      }
     }
   }
 
-  for (const file of parsedFiles.filter((item) => item.language === 'java')) {
-    for (const sym of javaAdapter.extractSymbols(file.rootNode)) {
-      if ((sym.node.declarationKind === 'class' || sym.node.declarationKind === 'record') && sym.node.signature && implementsPattern.test(sym.node.signature)) implementationOwners.add(sym.node.qualifiedName);
-    }
-  }
-  for (const location of javaAdapter.findImplementationsOf(ownerSimple, parsedFiles)) {
-    if (location.qualified_name) implementationOwners.add(location.qualified_name);
-    implementationOwners.add(location.symbol);
-  }
 
   const locations: SymbolLocation[] = [];
   const maybeAdd = (filePath: string, record: CanonicalSymbolRecord) => {
@@ -664,11 +532,28 @@ function collectJavaMethodImplementationLocations(
   };
 
   for (const [filePath, records] of graphRecords) for (const record of records) maybeAdd(filePath, record);
-  for (const file of parsedFiles.filter((item) => item.language === 'java')) {
-    for (const sym of javaAdapter.extractSymbols(file.rootNode)) maybeAdd(file.path, sym.node);
-  }
-
   return dedupeImplementationLocations(locations);
+}
+
+function needsGraphImplementationContext(input: FindSymbolInput): boolean {
+  return input.kind === 'interface' || input.declaration_kind === 'interface' || input.declaration_kind === 'interface_method' || input.kind === 'method';
+}
+
+function collectStructuralImplementationLocationsFromGraph(
+  target: SymbolLocation,
+  graphRecords: Map<string, CanonicalSymbolRecord[]>
+): SymbolLocation[] {
+  const matches: SymbolLocation[] = [];
+  const implementsPattern = new RegExp(`\\bimplements\\b[^\\n{]*\\b${escapeRegExp(target.symbol)}(?:\\b|\\s*<)`, 'u');
+  for (const [filePath, records] of graphRecords) {
+    for (const record of records) {
+      if (record.declarationKind !== 'class' && record.declarationKind !== 'record') continue;
+      if (!record.signature || !implementsPattern.test(record.signature)) continue;
+      const builder = detectLanguage(filePath, 'auto') === 'go' ? buildGoSymbolLocation : buildTypeScriptSymbolLocation;
+      matches.push(builder(filePath, record.name, record.coarseKind, record, true, true));
+    }
+  }
+  return dedupeImplementationLocations(matches);
 }
 
 function collectJavaImplementationLocationsFromGraph(
@@ -690,7 +575,7 @@ function collectJavaImplementationLocationsFromGraph(
 function dedupeImplementationLocations(locations: SymbolLocation[]): SymbolLocation[] {
   const deduped = new Map<string, SymbolLocation>();
   for (const location of locations) {
-    deduped.set(`${location.file}:${location.symbol}:${location.start_line}:${location.start_column}`, location);
+    deduped.set(location.symbol, location);
   }
   return [...deduped.values()].sort((a, b) =>
     a.file.localeCompare(b.file) ||
@@ -721,7 +606,7 @@ function isCanonicalRecord(value: unknown): value is CanonicalTypeScriptSymbolRe
   return Boolean(value && typeof value === 'object' && 'declarationKind' in (value as any) && 'qualifiedName' in (value as any));
 }
 
-function mapFallbackReason(stateStatus: string, manifestStatus: string, graphState?: string) {
+function mapUnavailableReason(stateStatus: string, manifestStatus: string, graphState?: string) {
   if (stateStatus === 'missing' || manifestStatus === 'missing') return 'graph_missing';
   if (stateStatus === 'incompatible' || manifestStatus === 'incompatible') return 'graph_incompatible';
   if (stateStatus === 'errored' || manifestStatus === 'errored') return 'graph_read_error';

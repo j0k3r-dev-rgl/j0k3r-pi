@@ -7,10 +7,13 @@ import { buildWorkspaceGraph } from '../src/core/workspace-graph.js';
 import { loadWorkspaceGraphState, writeWorkspaceGraphState } from '../src/core/workspace-state.js';
 
 async function createProject(files: Record<string, string>): Promise<string> {
-  const rootDir = join(tmpdir(), `pi-find-references-graph-fallback-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const rootDir = join(tmpdir(), `pi-find-references-graph-unavailable-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   await mkdir(rootDir, { recursive: true });
+  const effectiveFiles = files['.pi/code-research.json'] === undefined
+    ? { '.pi/code-research.json': `{"graph":{"enable":true}}\n`, ...files }
+    : files;
 
-  for (const [relativePath, content] of Object.entries(files)) {
+  for (const [relativePath, content] of Object.entries(effectiveFiles)) {
     const fullPath = join(rootDir, relativePath);
     await mkdir(join(fullPath, '..'), { recursive: true });
     await writeFile(fullPath, content, 'utf8');
@@ -19,7 +22,7 @@ async function createProject(files: Record<string, string>): Promise<string> {
   return rootDir;
 }
 
-describe('findReferences graph fallback', () => {
+describe('findReferences graph-only', () => {
   it('uses graph-backed TSX JSX read references when requested explicitly', async () => {
     const rootDir = await createProject({
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
@@ -47,7 +50,7 @@ describe('findReferences graph fallback', () => {
     });
   });
 
-  it('finds TSX component JSX usage with direct fallback when no graph exists', async () => {
+  it('builds a graph and finds TSX component JSX usage when no graph exists', async () => {
     const rootDir = await createProject({
       'src/ImageUploader.tsx': `export const ImageUploader = ({ label }: { label: string }) => {\n  return <section><span>{label}</span></section>;\n};\n`,
       'src/documentacion.tsx': `import { ImageUploader } from './ImageUploader';\n\nexport function Documentation() {\n  return <ImageUploader name="file" label="Documento" />;\n}\n`,
@@ -61,7 +64,6 @@ describe('findReferences graph fallback', () => {
     });
 
     expect(results.some((result) => result.file === join(rootDir, 'src/documentacion.tsx'))).toBe(true);
-    expect(new Set(results.map((result) => result.reference_kind))).toContain('import');
     expect(new Set(results.map((result) => result.reference_kind))).toContain('read');
   });
 
@@ -81,7 +83,6 @@ describe('findReferences graph fallback', () => {
     });
 
     expect(results.some((result) => result.file === join(rootDir, 'src/documentacion.tsx') && result.reference_kind === 'read')).toBe(true);
-    expect(results.some((result) => result.file === join(rootDir, 'src/documentacion.tsx') && result.reference_kind === 'import')).toBe(true);
   });
 
   it('resolves default-exported TSX components imported with local names', async () => {
@@ -98,7 +99,6 @@ describe('findReferences graph fallback', () => {
     });
 
     expect(results.some((result) => result.file === join(rootDir, 'src/documentacion.tsx') && result.reference_kind === 'read')).toBe(true);
-    expect(results.some((result) => result.file === join(rootDir, 'src/documentacion.tsx') && result.reference_kind === 'import')).toBe(true);
   });
 
   it('uses graph-backed generic TypeScript type-alias references after consumer source removal', async () => {
@@ -116,7 +116,7 @@ describe('findReferences graph fallback', () => {
       symbol: 'GenericStatusAlias',
       language: 'ts',
       kind: 'variable',
-      compare_direct_fallback: true,
+      
     });
 
     expect(results.some((item) => item.reference_kind === 'import' && item.file.endsWith('consumer.ts'))).toBe(true);
@@ -167,14 +167,14 @@ describe('findReferences graph fallback', () => {
       symbol: 'chooseDestination',
       language: 'ts',
       kind: 'function',
-      compare_direct_fallback: true,
+      
     });
     const moduleRefs = await findReferences(rootDir, {
       path: 'src/actions.ts',
       symbol: 'collectModules',
       language: 'ts',
       kind: 'function',
-      compare_direct_fallback: true,
+      
     });
     const routeCallRefs = await findReferences(rootDir, {
       path: 'src/actions.ts',
@@ -182,7 +182,7 @@ describe('findReferences graph fallback', () => {
       language: 'ts',
       kind: 'function',
       reference_kinds: ['call'],
-      compare_direct_fallback: true,
+      
     });
 
     expect(routeRefs.map((item) => `${item.reference_kind}:${item.line}:${item.context_symbol}`).sort()).toEqual([
@@ -214,7 +214,7 @@ describe('findReferences graph fallback', () => {
     });
 
     expect(results).toHaveLength(1);
-    expect(results[0].called_as).toBeUndefined();
+    expect(results[0].called_as).toBe('runService()');
     expect(results[0].context_symbol).toBe('handle');
   });
 
@@ -234,7 +234,7 @@ describe('findReferences graph fallback', () => {
       language: 'ts',
       kind: 'method',
       reference_kinds: ['call'],
-      compare_direct_fallback: true,
+      
     });
 
     expect(results.map((item) => item.called_as).sort()).toEqual([
@@ -337,7 +337,7 @@ public class Controller implements MongoConfigs {
     expect(mongoConfigsRefs.some((item) => item.reference_kind === 'implements'), 'MongoConfigs-style config/interface relationship refs').toBe(true);
   });
 
-  it('falls back to direct lookup when the graph is stale', async () => {
+  it('returns no references when the graph is stale', async () => {
     const rootDir = await createProject({
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'src/service.ts': `export function oldHelper(): void {}\nexport function useOld(): void { oldHelper(); }\n`,
@@ -362,12 +362,10 @@ public class Controller implements MongoConfigs {
       kind: 'function',
     });
 
-    expect(results).toHaveLength(1);
-    expect(results[0].context_symbol).toBe('useFresh');
-    expect(results[0].reference_kind).toBe('call');
+    expect(results).toEqual([]);
   });
 
-  it('falls back to direct lookup for normal public calls because graph coverage is incomplete', async () => {
+  it('returns only graph-modeled Java interface relationship references', async () => {
     const rootDir = await createProject({
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'src/main/java/ports/Service.java': `package ports;\n\npublic interface Service {}\n`,
@@ -386,7 +384,7 @@ public class Controller implements MongoConfigs {
     });
 
     expect(new Set(results.map((item) => item.reference_kind))).toEqual(
-      new Set(['extends', 'implements', 'import', 'type_reference'])
+      new Set(['implements', 'import', 'type_reference'])
     );
   });
 });

@@ -18,10 +18,13 @@ describe('TypeScript symbol security controls', () => {
 
   it('enforces file/directory scope and per-result code allowlist', async () => {
     const root = await mkdtemp(join(tmpdir(), 'pi-ts-symbol-scope-'));
+    await mkdir(join(root, '.pi'), { recursive: true });
+    await writeFile(join(root, '.pi', 'code-research.json'), '{"graph":{"enable":true}}\n');
     const file = join(root, 'mixed.ts');
     await writeFile(file, `interface Contract { run(): void }\nfunction run() { return 'EXECUTABLE_SENTINEL'; }\ntype Alias = string;\n`);
     await expect(findSymbol(root, { path: root, scope: 'file', symbol: 'run', language: 'ts' })).rejects.toThrow(/scope=file/);
     await expect(findSymbol(root, { path: file, scope: 'directory', symbol: 'run', language: 'ts' })).rejects.toThrow(/scope=directory/);
+    await buildWorkspaceGraph(root);
     const run = await findSymbol(root, { path: file, symbol: 'run', language: 'ts', include_code: true });
     expect(run.find((result) => result.declaration_kind === 'function')?.code).toContain('EXECUTABLE_SENTINEL');
     expect(run.find((result) => result.declaration_kind === 'interface_method')?.code).toBeUndefined();

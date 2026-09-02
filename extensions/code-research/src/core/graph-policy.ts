@@ -35,7 +35,7 @@ export interface GraphUsabilityInput {
 
 export interface FindReferencesGraphCoverage {
   requiredReferenceKinds?: ReferenceKind[];
-  graphCoverageMode: 'supported-subset' | 'conservative-fallback';
+  graphCoverageMode: 'supported-subset' | 'conservative-unavailable';
 }
 
 export const GRAPH_POLICY_SUPPORTED_LANGUAGES = new Set(['ts', 'js', 'java', 'go'] as const);
@@ -65,7 +65,7 @@ export function getFindReferencesGraphCoverage(input: FindReferencesInput): Find
   if (Array.isArray(input.reference_kinds) && input.reference_kinds.length > 0) {
     return {
       requiredReferenceKinds: input.reference_kinds,
-      graphCoverageMode: input.reference_kinds.every((kind) => GRAPH_REFERENCE_KINDS.has(kind)) ? 'supported-subset' : 'conservative-fallback',
+      graphCoverageMode: input.reference_kinds.every((kind) => GRAPH_REFERENCE_KINDS.has(kind)) ? 'supported-subset' : 'conservative-unavailable',
     };
   }
 

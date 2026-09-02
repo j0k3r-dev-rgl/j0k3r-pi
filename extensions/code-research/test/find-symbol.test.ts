@@ -11,12 +11,14 @@ describe('findSymbol', () => {
 
   beforeAll(async () => {
     tmpDir = join(tmpdir(), `pi-find-symbol-${Date.now()}`);
-    await mkdir(tmpDir, { recursive: true });
+    await mkdir(join(tmpDir, '.pi'), { recursive: true });
+    await writeFile(join(tmpDir, '.pi', 'code-research.json'), `{"graph":{"enable":true}}\n`, 'utf8');
   });
 
   async function writeTestFile(name: string, content: string) {
     const path = join(tmpDir, name);
     await writeFile(path, content, 'utf8');
+    await buildWorkspaceGraph(tmpDir);
     return path;
   }
 
@@ -226,7 +228,7 @@ describe('findSymbol', () => {
       path: tmpDir,
       symbol: 'serviceA',
       language: 'ts',
-      glob: '*.service.ts',
+      glob: '**/*.service.ts',
     });
 
     expect(results).toHaveLength(1);
@@ -323,7 +325,7 @@ describe('findSymbol', () => {
     expect(results[0].code).toContain('#getHash');
   });
 
-  it('preserves private-name source spelling and modifiers in direct mode', async () => {
+  it('preserves private-name source spelling and modifiers in graph-only mode', async () => {
     const file = await writeTestFile(
       'hash-private-metadata.ts',
       `class Vault {\n  #secret = 1;\n}\n`

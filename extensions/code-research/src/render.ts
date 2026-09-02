@@ -113,7 +113,7 @@ function compactFindSymbol(result: any, theme: any, toolName = 'find_symbol'): s
   const lines = [`${titleFor(toolName, theme)} · ${countText} match(es)`];
   const search = querySummary(result);
   if (search) lines.push(search);
-  lines.push(`mode ${result?.details?.source_mode ?? result?.details?.provenance?.source_mode ?? 'direct'} · graph ${result?.details?.graph_status ?? result?.details?.provenance?.graph_status ?? 'disabled'} · ${result?.details?.completeness ?? result?.details?.provenance?.completeness ?? 'fallback'}`, dim(expandHint('expand'), theme));
+  lines.push(`mode ${result?.details?.source_mode ?? result?.details?.provenance?.source_mode ?? 'graph'} · graph ${result?.details?.graph_status ?? result?.details?.provenance?.graph_status ?? 'disabled'} · ${result?.details?.completeness ?? result?.details?.provenance?.completeness ?? 'unavailable'}`, dim(expandHint('expand'), theme));
   for (const row of rows.slice(0, 5)) {
     const loc = `${relativeFile(row.file)}:${row.start_line ?? '?'}:${row.start_column ?? '?'}`;
     lines.push(`- ${row.symbol ?? '<unknown>'} (${row.kind ?? 'unknown'}) ${loc}`);
@@ -172,11 +172,11 @@ function compactChangeSurface(result: any, theme: any): string[] {
     if (!section) return `${name} 0/0`;
     return `${name} ${section.returned ?? section.items?.length ?? 0}/${section.total ?? section.items?.length ?? 0}`;
   };
-  const lines = [`${titleFor('code_change_surface', theme)} · ${details.status ?? 'result'} · trust=${details.trust?.level ?? 'unknown'} · fallback=${details.fallback?.required ? 'yes' : 'no'}`];
+  const lines = [`${titleFor('code_change_surface', theme)} · ${details.status ?? 'result'} · trust=${details.trust?.level ?? 'unknown'} · follow_up=${details.follow_up?.required ? 'yes' : 'no'}`];
   const search = querySummary(result);
   if (search) lines.push(search);
   lines.push([count('contract'), count('implementations'), count('callers'), count('likely_tests')].join(' · '));
-  if (details.fallback?.reason) lines.push(`fallback: ${clip(details.fallback.reason, 120)}`);
+  if (details.follow_up?.reason) lines.push(`follow_up: ${clip(details.follow_up.reason, 120)}`);
   lines.push(dim(expandHint('expand'), theme));
   return lines;
 }

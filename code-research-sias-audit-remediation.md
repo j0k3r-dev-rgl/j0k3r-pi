@@ -5,11 +5,9 @@ Repo audited: `/home/j0k3r/sias/app`
 
 ## Status
 
-**IMPLEMENTED — needs final SIAS smoke after extension reload.**
+**ALMOST DONE — 1 TypeScript usability/default-kind issue remains.**
 
-Most earlier issues are resolved. TypeScript type-alias graph consumption/rendering has been remediated in-repo and needs SIAS smoke after extension reload.
-
-The final confirmed active failure, unfiltered TypeScript `relation=references` adjacent/callback false positives, has now been remediated in-repo and also needs SIAS smoke after extension reload.
+All original high-priority SIAS regression categories are now fixed or working with an explicit query shape. The only remaining issue is that TypeScript type-alias references work with `kind=variable`, but the same references are not returned when `kind` is omitted.
 
 ## Confirmed Fixed
 
@@ -29,13 +27,13 @@ Also fixed on sampled cases:
 
 ### TypeScript optional-chained calls — PASS
 
-After extension reload, this query now returns the previously missing optional-chain call:
+Query:
 
 ```text
 code_find path=back_ia query=save relation=references language=ts kind=method reference_kinds=["call"]
 ```
 
-Current result includes 3 confirmed refs:
+Current result includes 3 confirmed refs, including the original optional-chain regression:
 
 ```text
 back_ia/src/application/use-cases/analyze-image-readability.use-case.ts:26
@@ -43,15 +41,29 @@ back_ia/src/application/use-cases/fetch-to-ia.use-case.ts:39
 back_ia/src/application/use-cases/start-review-analysis.use-case.ts:66
 ```
 
-The first line is the key regression:
+### TypeScript unfiltered adjacent-line false positives — PASS
 
-```ts
-await this.aiLogRepository?.save({ ... })
+After extension reload, the unfiltered `relation=references` smokes no longer return adjacent/callback lines.
+
+Passing smokes:
+
+```text
+code_find path=front query=getDefaultRouteForRole relation=references language=ts kind=function
+# 3 refs only: lines 29, 13, 42
+# no home.tsx:31 or startup.tsx:15
+
+code_find path=front query=buildModulesByDependencyModuleVariables relation=references language=ts kind=function
+# 1 ref only: modules.query.server.ts:211
+# no modules.query.server.ts:212
+
+code_find path=front query=asRecord relation=references language=ts kind=function
+# 11 refs only
+# no review_analysis_ui.ts:199
 ```
 
 ### Graph health/status transparency — PASS
 
-`workspace_graph_status` is fresh/usable and now exposes unreadable paths safely.
+`workspace_graph_status` is fresh/usable and exposes unreadable paths safely.
 
 ```text
 fresh | usable=yes | monorepo=yes | shards=5 | indexed_files=1465
@@ -75,45 +87,9 @@ Graph metadata:
 .pi/workspace-code-graph/workspace-state.json: builderModelVersion=3, schemaVersion=4
 ```
 
-## Recently Remediated — TypeScript type alias references
+## TypeScript Type Alias Status
 
-Status: **IMPLEMENTED / NEEDS SIAS RETEST AFTER EXTENSION RELOAD**
-
-Implemented changes:
-
-```text
-fix-ts-type-alias-references
-status: PASS / archived
-
-fix-ts-type-alias-graph-consumption
-status: PASS / archived
-archive: openspec/archive/2026-09-02/fix-ts-type-alias-graph-consumption/
-```
-
-The latest Mini-SDD was explicitly agnostic: tests use generic local fixtures, not SIAS hardcoded names.
-
-What changed in the latest graph-consumption pass:
-
-- graph-backed `relation=references` keeps persisted type-alias `imports`/`reads` results instead of being replaced by empty fallback results;
-- declaration queries remain filterable by `declaration_kind=type_alias`;
-- code_find declaration output now exposes precise `declaration_kind=type_alias` metadata while preserving the coarse compatibility `[variable]` marker;
-- generic regression coverage uses `GenericStatusAlias` and verifies graph-backed references after consumer source removal.
-
-Validation performed in Code Research repo:
-
-```bash
-cd /home/j0k3r/.pi/agent/extensions/code-research
-npm test -- test/find-references.test.ts test/find-references-graph-fallback.test.ts test/find-symbol-graph-fallback.test.ts
-npm run typecheck
-```
-
-Result: **PASS**.
-
-Next smoke instruction:
-
-> Reload/restart the extension or CLI, regenerate/reload SIAS graph if needed, then retest the `ReviewAnalysisStatus` queries below. If still failing, inspect whether graph-backed results are being replaced or filtered; graph generation already had type-alias edges.
-
-Previous smoke status: **FAIL in tool result; graph evidence exists.**
+Status: **PARTIAL / LAST REMAINING ISSUE**
 
 Regression symbol:
 
@@ -121,17 +97,49 @@ Regression symbol:
 ReviewAnalysisStatus
 ```
 
-Tool smoke results:
+### Declaration output — PASS
+
+Declaration queries now expose the precise declaration kind:
 
 ```text
 code_find path=. query=ReviewAnalysisStatus relation=declaration language=ts
-# 13 matches, still rendered as [variable]
+```
 
+Current output includes import aliases plus the two real type aliases. Type aliases are still coarse-rendered as `[variable]`, but now include precise metadata:
+
+```text
+back_ia/src/application/ports/output/review-analysis-repository.ts:4 [variable] declaration_kind=type_alias
+front/app/server/features/review/review.query.server.ts:244 [variable] declaration_kind=type_alias
+```
+
+Explicit type-alias declaration query also works:
+
+```text
 code_find path=. query=ReviewAnalysisStatus relation=declaration language=ts declaration_kind=type_alias
-# 2 matches, still rendered as [variable]
+# 2 matches, both declaration_kind=type_alias
+```
 
-code_find path=. query=ReviewAnalysisStatus relation=references language=ts
-# No references found
+This is acceptable because `[variable]` is preserved for compatibility while `declaration_kind=type_alias` is visible.
+
+### References with explicit kind — PASS
+
+Type-alias references now work when using the compatibility kind:
+
+```text
+code_find path=. query=ReviewAnalysisStatus relation=references language=ts kind=variable
+```
+
+Current result:
+
+```text
+47 references
+```
+
+Breakdown from focused checks:
+
+```text
+back_ia: 46 references
+front: 1 reference
 ```
 
 `rg` baseline:
@@ -141,9 +149,36 @@ rg -n '\bReviewAnalysisStatus\b' front back_ia --glob '!node_modules/**' --glob 
 # 45
 ```
 
-### Graph JSON inspection result
+The Code Research count is reasonable because it returns semantic import/read rows and can split import + read on the same line.
 
-The graph **does contain** type-alias declarations and semantic reference edges. This suggests the remaining bug is likely in `code_find` graph-backed consumption/filtering or output rendering, not graph generation.
+### References without kind — FAIL
+
+The only remaining issue:
+
+```text
+code_find path=. query=ReviewAnalysisStatus relation=references language=ts
+```
+
+Current result:
+
+```text
+No references found
+```
+
+Expected behavior:
+
+- When `kind` is omitted, Code Research should still consider TypeScript type aliases and return the same relevant references as `kind=variable`, or at least suggest the correct query shape.
+- This is now a usability/default-kind bug, not a graph-generation failure.
+
+Likely fix area:
+
+- broad/no-kind reference candidate selection for TS type aliases;
+- fallback from no-kind references to `declarationKind=type_alias` / compatibility `kind=variable` symbols;
+- optional warning/suggestion when exact symbol exists only as `declaration_kind=type_alias`.
+
+## Graph JSON Inspection Result for Type Aliases
+
+Graph generation is not the remaining blocker.
 
 Inspected shards:
 
@@ -152,12 +187,16 @@ back_ia -> .pi/workspace-code-graph/graphs/0db2d2dc6313.json
 front   -> .pi/workspace-code-graph/graphs/1b78eb3be0ae.json
 ```
 
-Back IA graph evidence:
+Evidence found:
 
 ```text
-type_alias declarations for ReviewAnalysisStatus: 1
-incoming reads/imports to exact declaration: 42
-related edges: contains=12, imports=7, reads=35
+back_ia type_alias declarations for ReviewAnalysisStatus: 1
+back_ia incoming reads/imports to exact declaration: 42
+back_ia related edges: contains=12, imports=7, reads=35
+
+front type_alias declarations for ReviewAnalysisStatus: 1
+front incoming reads/imports to exact declaration: 1
+front related edges: contains=1, reads=1
 ```
 
 Example edge reasons:
@@ -167,138 +206,18 @@ typescript_type_alias_reference
 typescript_type_alias_import
 ```
 
-Front graph evidence:
-
-```text
-type_alias declarations for ReviewAnalysisStatus: 1
-incoming reads/imports to exact declaration: 1
-related edges: contains=1, reads=1
-```
-
-The declaration node has:
+Declaration node shape:
 
 ```text
 symbolKind=variable
 declarationKind=type_alias
 ```
 
-Expected retest result after reload:
+Conclusion: graph data exists and explicit-kind tool lookup can consume it. Only no-kind reference lookup remains inconsistent.
 
-- `code_find relation=references` should consume `reads`/`imports` edges whose target has `declarationKind=type_alias`.
-- User-facing output should show precise `declaration_kind=type_alias` metadata while preserving `[variable]` compatibility if applicable.
+## Minimal Final Smoke Checklist
 
-## Recently Remediated — TypeScript unfiltered adjacent-line false positives
-
-Status: **IMPLEMENTED / NEEDS SIAS RETEST AFTER EXTENSION RELOAD**
-
-Implemented change:
-
-```text
-fix-ts-unfiltered-reference-spans
-status: PASS / archived
-archive: openspec/archive/2026-09-02/fix-ts-unfiltered-reference-spans/
-```
-
-What changed:
-
-- TypeScript callable result aliases initialized by immediate calls are no longer treated as callable-value aliases.
-- This prevents follow-on variables such as `route`, `modules`, or `rawRecord` from producing independent references to the original queried callable on adjacent/body lines.
-- Call-only behavior is preserved.
-- Graph-backed fallback tests verify clean occurrence rows after target source removal.
-- Tool-level tests verify user-visible `code_find` output excludes adjacent lines that do not contain the queried symbol.
-
-Validation performed in Code Research repo:
-
-```bash
-cd /home/j0k3r/.pi/agent/extensions/code-research
-npm test -- test/find-references.test.ts test/find-references-graph-fallback.test.ts
-npm run typecheck
-```
-
-Result: **PASS**.
-
-Next smoke instruction:
-
-> Reload/restart the extension or CLI, then retest the unfiltered TypeScript reference queries below from `/home/j0k3r/sias/app`.
-
-Previous smoke status: **FAIL in tool result; graph call edges looked cleaner than output.**
-
-`reference_kinds=["call"]` returns correct call-only results, but unfiltered `relation=references` still emits callback/body lines that do not contain the queried symbol.
-
-### Failing smokes
-
-#### `getDefaultRouteForRole`
-
-```text
-code_find path=front query=getDefaultRouteForRole relation=references language=ts kind=function
-```
-
-Incorrect extra lines:
-
-```text
-front/app/routes/home.tsx:31
-front/app/routes/startup.tsx:15
-```
-
-Those are `redirect(route)` lines, not `getDefaultRouteForRole` references.
-
-Call-only mode is correct:
-
-```text
-reference_kinds=["call"] -> lines 29, 13, 42 only
-```
-
-Graph inspection: graph has only 3 call edges for this symbol, at the correct lines `29`, `13`, and `42`.
-
-#### `buildModulesByDependencyModuleVariables`
-
-```text
-code_find path=front query=buildModulesByDependencyModuleVariables relation=references language=ts kind=function
-```
-
-Incorrect extra line:
-
-```text
-front/app/server/features/modules/modules.query.server.ts:212
-```
-
-Correct call line is `211`. Call-only mode returns only `211`.
-
-#### `asRecord`
-
-```text
-code_find path=front query=asRecord relation=references language=ts kind=function
-```
-
-Incorrect extra line:
-
-```text
-front/app/utils/review_analysis_ui.ts:199
-```
-
-That line calls `normalizeRevisionDecision(rawDecision)`, not `asRecord`.
-
-Call-only mode returns 11 correct call references.
-
-Graph inspection: graph has 11 true `asRecord` call edges and does not need the line `199` false positive.
-
-Expected retest result after reload:
-
-- Unfiltered `relation=references` should not add parent callback/body lines as independent references.
-- If callback/body context is useful, it should not appear as a separate reference row.
-- Actual occurrence ranges from graph edges or direct call spans should be preferred when present.
-
-## Secondary / Later Follow-ups
-
-These are not blocking the main audit but should be tracked:
-
-- Frontend test/mock reference policy: decide whether semantic refs should include test imports/mocks consistently.
-- Java record accessor classification: verify record accessors such as `VerifiedToken.subject()` / `role()`.
-- Framework entrypoint documentation: Spring MVC/Security incoming callers may be framework-invoked and not local references.
-
-## Minimal Validation Checklist for Next Agent
-
-Run from `/home/j0k3r/sias/app` after extension reload/restart and graph regeneration if needed.
+Run from `/home/j0k3r/sias/app` after the final fix/reload.
 
 ### Graph status
 
@@ -306,22 +225,30 @@ Run from `/home/j0k3r/sias/app` after extension reload/restart and graph regener
 workspace_graph_status
 ```
 
-### Type alias smoke
+### Remaining type-alias default-kind smoke
 
 ```text
-code_find path=. query=ReviewAnalysisStatus relation=declaration language=ts
-code_find path=. query=ReviewAnalysisStatus relation=declaration language=ts declaration_kind=type_alias
 code_find path=. query=ReviewAnalysisStatus relation=references language=ts
 ```
 
 Expected:
 
-- declaration output exposes `declarationKind=type_alias` clearly;
-- references are non-zero and include persisted type alias import/read edges.
+```text
+non-zero references, ideally matching the explicit-kind query behavior
+```
 
-### Adjacent false-positive smoke
+Compare with explicit working query:
 
 ```text
+code_find path=. query=ReviewAnalysisStatus relation=references language=ts kind=variable
+# currently 47 references
+```
+
+### Already passing regression smokes to keep green
+
+```text
+code_find path=back_ia query=save relation=references language=ts kind=method reference_kinds=["call"]
+
 code_find path=front query=getDefaultRouteForRole relation=references language=ts kind=function
 code_find path=front query=buildModulesByDependencyModuleVariables relation=references language=ts kind=function
 code_find path=front query=asRecord relation=references language=ts kind=function
@@ -329,17 +256,28 @@ code_find path=front query=asRecord relation=references language=ts kind=functio
 
 Expected:
 
-- no `home.tsx:31` or `startup.tsx:15` for `getDefaultRouteForRole`;
-- no `modules.query.server.ts:212` for `buildModulesByDependencyModuleVariables`;
-- no `review_analysis_ui.ts:199` for `asRecord`.
+- `save` includes `analyze-image-readability.use-case.ts:26`.
+- No adjacent false-positive lines:
+  - no `home.tsx:31`;
+  - no `startup.tsx:15`;
+  - no `modules.query.server.ts:212`;
+  - no `review_analysis_ui.ts:199`.
+
+## Secondary / Later Follow-ups
+
+Not blocking this main audit:
+
+- Frontend test/mock reference policy.
+- Java record accessor classification.
+- Framework entrypoint documentation for Spring MVC/Security lifecycle calls.
 
 ## Audit History Summary
 
 - Initial audit found Java reference gaps, TS optional-chain gaps, duplicate Java refs, Mockito misses, TS adjacent false positives, TS type alias issues, and graph status transparency gaps.
 - Java graph-generation remediation fixed sampled Java class/type/DTO refs after builder model version `3` graph regeneration.
 - TS optional-chain remediation fixed sampled `save` optional-chain references after extension reload.
-- TS type-alias graph-consumption/rendering remediation passed in-repo and awaits SIAS smoke after extension reload.
-- TS unfiltered adjacent-line false-positive remediation passed in-repo and awaits SIAS smoke after extension reload.
-- Current state: no known unremediated P0/P1 implementation issue remains in this checklist; final SIAS smoke is required.
+- TS adjacent-line false-positive remediation fixed sampled unfiltered TS reference output after extension reload.
+- TS type-alias graph-consumption/rendering now works with explicit `kind=variable` and exposes `declaration_kind=type_alias`.
+- Current remaining issue: no-kind TS type-alias references return zero despite explicit-kind references working.
 
 No SIAS source files were modified during the audits or remediations.

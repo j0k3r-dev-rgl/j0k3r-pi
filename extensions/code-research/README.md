@@ -25,7 +25,7 @@ The public surface is intentionally small:
 
 No public tool supports Python or other languages.
 
-### Workspace graph and fallback behavior
+### Workspace graph and unavailable behavior
 
 The extension can persist a workspace graph under `.pi/workspace-code-graph` when graph support is enabled in `.pi/code-research.json`:
 
@@ -38,12 +38,12 @@ The extension can persist a workspace graph under `.pi/workspace-code-graph` whe
 }
 ```
 
-- `graph.enable` defaults to `false` and gates graph refresh scheduling plus graph-backed query usage.
+- Code Research uses the workspace graph by default; graph refresh scheduling and supported-language queries are graph-only.
 - `graph.addGitignore` defaults to `true` and lets the graph writer maintain ignore entries for generated graph artifacts.
-- Graph-backed queries use schema v4 persisted graph artifacts only when they are enabled, readable, schema-compatible, fresh enough, language-supported, and sufficient for the requested query.
+- Graph-backed queries use schema v4 persisted graph artifacts when they are readable, schema-compatible, fresh enough, language-supported, and sufficient for the requested query.
 - Older graph artifacts are treated as incompatible and regenerated instead of migrated.
-- Tools automatically fall back to direct source inspection when the graph is disabled, missing, stale, partial, errored, incompatible, refreshing, unreadable, language-unsupported, or insufficient.
-- Query results include concise provenance/diagnostics in `details` so the agent can distinguish graph, direct, and fallback behavior.
+- Tools do not use direct source inspection for graph queries. If the graph is missing, stale, partial, errored, incompatible, refreshing, unreadable, language-unsupported, or insufficient, the tool returns graph diagnostics or uses a controlled graph rebuild path.
+- Query results include concise provenance/diagnostics in `details` so the agent can distinguish graph-backed results from unavailable graph authority.
 - Persisted graph call/reference occurrences store ranges, receiver metadata, target status, and resolution state, but do not persist raw callsite source text.
 - `workspace_graph_status` remains public because monorepos often contain multiple subprojects/languages and agents need a quick health/coverage summary before relying on graph-backed analysis.
 
@@ -75,7 +75,7 @@ Result:
 - `content`: bounded human/model-readable summary for the current page.
 - `details.items` / `details.results`: current page of symbol or reference records.
 - `details.summary`: `returned`, `total`, `has_more`, `next_cursor`, `offset`, and `limit`.
-- `details.provenance`: graph/direct/fallback diagnostics.
+- `details.provenance`: graph/direct/unavailable diagnostics.
 
 Usage guidance:
 
@@ -132,7 +132,7 @@ Result:
 - `details.contract`, `details.implementations`, `details.callers`, and `details.likely_tests`: capped sections with `returned`, `total`, `omitted`, and `follow_up` metadata when additional inspection is needed.
 - `details.implementation_reporting`, `details.caller_reporting`, and `details.test_reporting`: visible mode/completeness metadata, including `exhaustive-truncated` when an exhaustive result still hits its cap. Exhaustive means exhaustive over Code Research semantic evidence, not every raw textual match.
 - `details.validation_suggestions`: heuristic, file-oriented suggestions only; the tool does not fabricate exact repository-specific runner commands.
-- `details.trust` and `details.fallback`: explicit confidence state and exact existing-tool follow-up actions (`code_find` or `code_call_hierarchy`) when the map is ambiguous, missing, or truncated.
+- `details.trust` and `details.follow_up`: explicit confidence state and exact existing-tool follow-up actions (`code_find` or `code_call_hierarchy`) when the map is ambiguous, missing, or truncated.
 
 ### Installation
 
@@ -190,7 +190,7 @@ La superficie pública es pequeña a propósito:
 
 Ninguna tool pública soporta Python u otros lenguajes.
 
-### Workspace graph y fallback
+### Workspace graph y unavailable
 
 La extensión puede persistir un workspace graph en `.pi/workspace-code-graph` cuando `.pi/code-research.json` habilita el graph:
 
@@ -203,10 +203,10 @@ La extensión puede persistir un workspace graph en `.pi/workspace-code-graph` c
 }
 ```
 
-- `graph.enable` es `false` por defecto.
+- Code Research usa el workspace graph por defecto; las consultas de lenguajes soportados son graph-only.
 - Las consultas usan artifacts schema v4 solo cuando el graph está habilitado, legible, compatible, fresco, soporta el lenguaje y tiene cobertura suficiente.
 - Los artifacts viejos se consideran incompatibles y se regeneran en vez de migrarse.
-- Si no, hacen fallback automático a inspección directa.
+- Si no, hacen unavailable automático a inspección directa.
 - Los resultados incluyen provenance/diagnósticos en `details`.
 - Las ocurrencias persistidas guardan rangos, metadata de receiver, target status y resolución, pero no guardan texto fuente crudo del callsite.
 - `workspace_graph_status` sigue pública porque en monorepos el agente necesita saber qué subproyectos/lenguajes están indexados.
@@ -231,7 +231,7 @@ Reporta estado del graph, monorepo/subproyectos y cobertura por lenguaje.
 
 #### `code_change_surface`
 
-Devuelve un mapa acotado para un cambio anclado a un símbolo: contrato, implementaciones, callers a inspeccionar, tests probables, sugerencias heurísticas de validación, riesgos, confianza y acciones de fallback con `code_find` o `code_call_hierarchy`. Requiere `path` y `query`; acepta `language`, `kind`, `scope`, `glob`, `implementation_mode`, `test_mode`, `caller_mode`, `max_implementations`, `max_tests` y `max_callers` como filtros opcionales. Los modos `exhaustive` amplían implementaciones/tests/callers hasta el límite configurado e indican `exhaustive-truncated` si todavía hay omitidos; exhaustivo significa sobre evidencia semántica de Code Research, no cada match textual crudo. No inventa comandos exactos de test runner del repositorio analizado.
+Devuelve un mapa acotado para un cambio anclado a un símbolo: contrato, implementaciones, callers a inspeccionar, tests probables, sugerencias heurísticas de validación, riesgos, confianza y acciones de unavailable con `code_find` o `code_call_hierarchy`. Requiere `path` y `query`; acepta `language`, `kind`, `scope`, `glob`, `implementation_mode`, `test_mode`, `caller_mode`, `max_implementations`, `max_tests` y `max_callers` como filtros opcionales. Los modos `exhaustive` amplían implementaciones/tests/callers hasta el límite configurado e indican `exhaustive-truncated` si todavía hay omitidos; exhaustivo significa sobre evidencia semántica de Code Research, no cada match textual crudo. No inventa comandos exactos de test runner del repositorio analizado.
 
 ### Desarrollo
 

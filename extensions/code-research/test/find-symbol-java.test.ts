@@ -11,13 +11,15 @@ describe('findSymbol Java', () => {
 
   beforeAll(async () => {
     tmpDir = join(tmpdir(), `pi-find-symbol-java-${Date.now()}`);
-    await mkdir(tmpDir, { recursive: true });
+    await mkdir(join(tmpDir, '.pi'), { recursive: true });
+    await writeFile(join(tmpDir, '.pi', 'code-research.json'), '{"graph":{"enable":true}}\n', 'utf8');
   });
 
   async function writeTestFile(name: string, content: string) {
     const path = join(tmpDir, name);
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, content, 'utf8');
+    await buildWorkspaceGraph(tmpDir);
     return path;
   }
 
@@ -242,43 +244,6 @@ describe('findSymbol Java', () => {
       kind: 'class',
       include_signature: true,
     })).rejects.toThrow('Path escapes workspace');
-  });
-
-  it('finds symbols during real project directory scans including large java files', async () => {
-    const results = await findSymbol('/home/j0k3r/sias/app/back', {
-      path: 'src/main/java',
-      symbol: 'NotificationCommandInputPort',
-      language: 'java',
-      kind: 'interface',
-    });
-
-    expect(results.length).toBeGreaterThanOrEqual(1);
-    expect(results.some((result) => result.symbol === 'NotificationCommandInputPort')).toBe(true);
-  }, 15_000);
-
-  it('covers java declaration kinds across examples and inline bindings', async () => {
-    const adapter = await findSymbol('/home/j0k3r/.pi/agent', {
-      path: 'examples/java',
-      symbol: 'Adapter',
-      language: 'java',
-      kind: 'class',
-    });
-    const draft = await findSymbol('/home/j0k3r/.pi/agent', {
-      path: 'examples/java',
-      symbol: 'UserDraft',
-      language: 'java',
-      kind: 'class',
-    });
-    const userKind = await findSymbol('/home/j0k3r/.pi/agent', {
-      path: 'examples/java',
-      symbol: 'UserKind',
-      language: 'java',
-      kind: 'class',
-    });
-
-    expect(adapter[0]).toMatchObject({ declaration_kind: 'annotation', kind: 'class', qualified_name: 'app.annotations.Adapter' });
-    expect(draft[0]).toMatchObject({ declaration_kind: 'record', kind: 'class', qualified_name: 'app.domain.UserDraft' });
-    expect(userKind[0]).toMatchObject({ declaration_kind: 'enum', kind: 'class', qualified_name: 'app.domain.UserKind' });
   });
 
   it('extracts instanceof pattern variables in direct and fresh graph modes', async () => {

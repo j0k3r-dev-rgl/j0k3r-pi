@@ -1,6 +1,6 @@
 # TypeScript symbol contract v1
 
-`find_symbol` now uses one TypeScript/TSX declaration model for direct lookup and workspace-graph persistence. A schema-v2 graph may answer only for files whose generation, snapshot metadata, source hash, and canonical symbol shape are current; all other files use direct fallback.
+`find_symbol` now uses one TypeScript/TSX declaration model for graph lookup and workspace-graph persistence. A schema-v2 graph may answer only for files whose generation, snapshot metadata, source hash, and canonical symbol shape are current; all other files use graph-only lookup.
 
 ## Public compatibility
 
@@ -20,21 +20,21 @@
 
 Tool `details` always includes:
 
-- `source_mode`: `graph`, `direct`, or `hybrid`;
+- `source_mode`: `graph`;
 - `graph_status`: `disabled`, `fresh`, `stale`, `partial`, `missing`, `incompatible`, or `error`;
-- `completeness`: `complete`, `partial`, or `fallback`;
-- `fallback_reason`: stable enum or `null`;
+- `completeness`: `complete`, `partial`, or `unavailable`;
+- `graph_unavailable_reason`: stable enum or `null`;
 - file, skipped-input, and unreadable-shard counts;
 - `graph_generation` when graph state contributes.
 
-Fallback reasons are `graph_disabled`, `graph_missing`, `graph_stale`, `graph_partial`, `graph_incompatible`, `graph_read_error`, `shard_missing`, `shard_unreadable`, `shard_incompatible`, `snapshot_mismatch`, `coverage_unproven`, `parse_error`, and `input_unreadable`. Diagnostics contain counts and stable enums—not source text or raw parser/filesystem errors.
+Unavailable reasons are `graph_disabled`, `graph_missing`, `graph_stale`, `graph_partial`, `graph_incompatible`, `graph_read_error`, `shard_missing`, `shard_unreadable`, `shard_incompatible`, `snapshot_mismatch`, `coverage_unproven`, `parse_error`, and `input_unreadable`. Diagnostics contain counts and stable enums—not source text or raw filesystem errors.
 
 ## Graph migration and rebuild
 
-The workspace graph schema is version 2. Version 1 and future incompatible artifacts are not reinterpreted. Queries fall back to direct analysis until the existing workspace graph lifecycle rebuilds state/manifest/shards. Removing `.pi/workspace-code-graph/` is a safe manual reset when a rebuild is required; source files are never stored there.
+The workspace graph schema is version 4. Older and future incompatible artifacts are not reinterpreted. Queries use graph artifacts only; removing `.pi/workspace-code-graph/` is a safe manual reset when a rebuild is required; source files are never stored there.
 
 ## Security and rollback
 
 Targets are realpath-bounded to the workspace, scope is validated before scanning, and each graph artifact is capped at 256 MiB and schema-validated. Canonical graph symbols persist names, ranges, hashes, flags, and redacted signatures only—never AST nodes, code snippets, or full source bodies.
 
-If graph acceleration must be disabled, direct extraction preserves the same semantic contract and reports truthful fallback diagnostics. Never roll back by accepting incompatible shards, suppressing direct-supported declarations, or broadening code payloads.
+Never roll back by accepting incompatible shards, suppressing graph-supported declarations, reintroducing direct source inspection for graph queries, or broadening code payloads.

@@ -142,10 +142,10 @@ async function resolveReferencesAcrossLanguages(cwd: string, input: FindReferenc
   return {
     results,
     diagnostics: {
-      source_mode: diagnostics.some((item) => item.source_mode === 'graph') ? 'hybrid' : 'direct',
-      graph_status: diagnostics.find((item) => item.graph_status)?.graph_status ?? 'disabled',
-      completeness: diagnostics.some((item) => item.completeness === 'complete') ? 'complete' : 'fallback',
-      fallback_reason: diagnostics.find((item) => item.fallback_reason)?.fallback_reason ?? 'graph_disabled',
+      source_mode: 'graph',
+      graph_status: diagnostics.find((item) => item.graph_status)?.graph_status ?? 'missing',
+      completeness: diagnostics.some((item) => item.completeness === 'complete') ? 'complete' : 'unavailable',
+      graph_unavailable_reason: diagnostics.find((item) => item.graph_unavailable_reason)?.graph_unavailable_reason ?? 'graph_missing',
       languages: diagnostics,
     },
   };
@@ -156,9 +156,9 @@ export function registerCodeFindTool(pi: any) {
     name: 'code_find',
     label: 'Code Find',
     description: 'Primary symbol search tool for TypeScript/JavaScript, Java, and Go. Use it to find declarations, concrete implementations, and reference/call sites before using text search. For impact analysis, use relation=references; omit reference_kinds to search all supported reference kinds, or pass call/read/implements/extends to narrow. Use relation=implementation on an interface/base type to return implementers, not the interface itself.',
-    promptSnippet: 'Find declarations, implementations, or references for supported-language symbols across TS/JS/Java/Go code. Prefer this before rg for supported languages, then use rg only to cross-check suspicious or missing results.',
+    promptSnippet: 'Find declarations, implementations, or references for supported-language symbols across TS/JS/Java/Go code using the workspace graph.',
     promptGuidelines: [
-      'Use code_find as the default entry point for supported-language symbol lookup. Use rg only as a validation fallback or for unsupported text/config/doc searches.',
+      'Use code_find as the default entry point for supported-language symbol lookup; it reads the workspace graph for supported languages.',
       'Choose relation deliberately: declaration finds where a symbol is defined; implementation finds implementers of an interface/base type; references finds usages/call sites for impact analysis.',
       'For references, omit reference_kinds when you want all supported usages. Use reference_kinds=["call"] only for function/method invocations, ["read"] for value/JSX/type-like reads, and ["implements"|"extends"] for inheritance relationships.',
       'For common names such as execute, run, stop, handle, or Service, use the smallest relevant path plus explicit language and kind; for method references, prefer the declaring file path when known.',

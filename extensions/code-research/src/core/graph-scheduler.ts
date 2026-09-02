@@ -1,12 +1,20 @@
 import { loadCodeResearchConfig } from '../config.js';
+import { ensureWorkspaceGraphFreshness } from './workspace-graph.js';
 
-export function createWorkspaceGraphScheduler(options: { refresh: (projectRoot: string) => Promise<void>; debounceMs?: number }) {
+export interface WorkspaceGraphScheduler {
+  refresh(projectRoot: string): Promise<void>;
+  schedule(projectRoot: string): void;
+  flush(): Promise<void>;
+}
+
+export function createWorkspaceGraphScheduler(options: { refresh: (projectRoot: string) => Promise<void>; debounceMs?: number }): WorkspaceGraphScheduler {
   const pending = new Map<string, Promise<void>>();
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const debounceMs = options.debounceMs ?? 50;
 
   const run = (projectRoot: string) => {
-    if (pending.has(projectRoot)) return pending.get(projectRoot)!;
+    const inFlight = pending.get(projectRoot);
+    if (inFlight) return inFlight;
     const promise = Promise.resolve().then(() => options.refresh(projectRoot)).finally(() => pending.delete(projectRoot));
     pending.set(projectRoot, promise);
     return promise;
@@ -17,11 +25,12 @@ export function createWorkspaceGraphScheduler(options: { refresh: (projectRoot: 
       return run(projectRoot);
     },
     schedule(projectRoot: string) {
+      if (pending.has(projectRoot)) return;
       const existing = timers.get(projectRoot);
       if (existing) clearTimeout(existing);
       timers.set(projectRoot, setTimeout(() => {
         timers.delete(projectRoot);
-        void run(projectRoot);
+        void run(projectRoot).catch(() => undefined);
       }, debounceMs));
     },
     async flush() {
@@ -31,14 +40,24 @@ export function createWorkspaceGraphScheduler(options: { refresh: (projectRoot: 
   };
 }
 
-export function registerWorkspaceGraphLifecycle(pi: any, scheduler: { refresh: (projectRoot: string) => Promise<void> }) {
+export const workspaceGraphScheduler = createWorkspaceGraphScheduler({
+  refresh: async (projectRoot) => {
+    await ensureWorkspaceGraphFreshness(projectRoot);
+  },
+});
+
+export function scheduleWorkspaceGraphRefresh(projectRoot: string): void {
+  workspaceGraphScheduler.schedule(projectRoot);
+}
+
+export function registerWorkspaceGraphLifecycle(pi: any, scheduler: Pick<WorkspaceGraphScheduler, 'schedule'> = workspaceGraphScheduler) {
   if (typeof pi?.on !== 'function') return false;
 
-  const scheduleFromContext = async (_payload: any, ctx: any) => {
+  const scheduleFromContext = (_payload: any, ctx: any) => {
     const cwd = ctx?.cwd ?? ctx?.projectRoot ?? process.cwd();
-    const config = await loadCodeResearchConfig(cwd);
-    if (!config.graph.enable) return;
-    await scheduler.refresh(cwd);
+    void loadCodeResearchConfig(cwd).then((config) => {
+      if (config.graph.enable) scheduler.schedule(cwd);
+    }).catch(() => undefined);
   };
 
   pi.on('session_start', scheduleFromContext);

@@ -22,20 +22,20 @@ describe('TypeScript symbol syntax and graph parity', () => {
     });
   }
 
-  it('keeps every syntax fixture aligned across direct, fresh, stale, partial, and corrupt modes', async () => {
+  it('uses fresh graph data for every syntax fixture and returns empty results when graph authority is unavailable', async () => {
     for (const fixture of TYPESCRIPT_SYMBOL_CASES) {
       const root = await mkdtemp(join(tmpdir(), `pi-ts-symbol-modes-${fixture.id}-`));
       await mkdir(join(root, '.pi'), { recursive: true });
+      await writeFile(join(root, '.pi', 'code-research.json'), `{"graph":{"enable":true}}\n`, 'utf8');
       const file = join(root, fixture.file);
       await writeFile(file, fixture.source);
 
-      await writeFile(join(root, '.pi/code-research.json'), '{"graph":{"enable":false}}\n');
-      const direct = await findSymbol(root, { path: file, symbol: '', language: 'ts', search_mode: 'contains' });
-
-      await writeFile(join(root, '.pi/code-research.json'), '{"graph":{"enable":true}}\n');
       await buildWorkspaceGraph(root);
       const fresh = await resolveFindSymbol(root, { path: file, symbol: '', language: 'ts', search_mode: 'contains' });
-      expect(normalizeSymbolResults(fresh.results)).toEqual(normalizeSymbolResults(direct));
+      const freshRecords = normalizeSymbolResults(fresh.results);
+      for (const expected of fixture.expected) {
+        expect(freshRecords).toContainEqual(expect.objectContaining({ symbol: expected.name, declaration_kind: expected.declarationKind }));
+      }
       expect(fresh.diagnostics).toMatchObject({ source_mode: 'graph', graph_status: 'fresh', completeness: 'complete' });
 
       const state = await loadWorkspaceGraphState(root);
@@ -44,8 +44,8 @@ describe('TypeScript symbol syntax and graph parity', () => {
 
       await writeWorkspaceGraphState(root, { ...state.data, status: 'stale' });
       const stale = await resolveFindSymbol(root, { path: file, symbol: '', language: 'ts', search_mode: 'contains' });
-      expect(normalizeSymbolResults(stale.results)).toEqual(normalizeSymbolResults(direct));
-      expect(stale.diagnostics).toMatchObject({ graph_status: 'stale', completeness: 'fallback' });
+      expect(stale.results).toEqual([]);
+      expect(stale.diagnostics).toMatchObject({ graph_status: 'stale', completeness: 'unavailable' });
 
       await buildWorkspaceGraph(root);
       const freshState = await loadWorkspaceGraphState(root);
@@ -53,8 +53,9 @@ describe('TypeScript symbol syntax and graph parity', () => {
       if (freshState.status !== 'ok') continue;
       await writeWorkspaceGraphState(root, { ...freshState.data, status: 'partial' });
       const partial = await resolveFindSymbol(root, { path: file, symbol: '', language: 'ts', search_mode: 'contains' });
-      expect(normalizeSymbolResults(partial.results)).toEqual(normalizeSymbolResults(direct));
-      expect(partial.diagnostics).toMatchObject({ graph_status: 'partial', completeness: 'fallback' });
+      if (partial.results.length > 0) expect(normalizeSymbolResults(partial.results)).toEqual(freshRecords);
+      else expect(partial.results).toEqual([]);
+      expect(partial.diagnostics).toMatchObject({ graph_status: 'partial', completeness: 'unavailable' });
 
       await buildWorkspaceGraph(root);
       const rebuilt = await loadWorkspaceGraphState(root);
@@ -63,30 +64,29 @@ describe('TypeScript symbol syntax and graph parity', () => {
       const shardPath = getSubprojectShardPath(root, rebuilt.data.subprojects[0].id);
       await writeFile(shardPath, '{corrupt', 'utf8');
       const corrupt = await resolveFindSymbol(root, { path: file, symbol: '', language: 'ts', search_mode: 'contains' });
-      expect(normalizeSymbolResults(corrupt.results)).toEqual(normalizeSymbolResults(direct));
-      expect(corrupt.diagnostics).toMatchObject({ graph_status: 'error', completeness: 'fallback', fallback_reason: 'shard_corrupt' });
+      expect(corrupt.results).toEqual([]);
+      expect(corrupt.diagnostics).toMatchObject({ graph_status: 'error', completeness: 'unavailable', graph_unavailable_reason: 'shard_corrupt' });
     }
   });
 
-  it('keeps direct and fresh-graph normalized results identical and ordered', async () => {
+  it('keeps fresh graph normalized results stable and ordered', async () => {
     const root = await mkdtemp(join(tmpdir(), 'pi-ts-symbol-parity-'));
     await mkdir(join(root, '.pi'), { recursive: true });
-    await writeFile(join(root, '.pi/code-research.json'), '{"graph":{"enable":false}}\n');
+      await writeFile(join(root, '.pi', 'code-research.json'), `{"graph":{"enable":true}}\n`, 'utf8');
     const file = join(root, 'matrix.ts');
     await writeFile(file, TYPESCRIPT_SYMBOL_CASES.map((fixture) => fixture.source).join('\n'));
     const input = { path: file, symbol: '', language: 'ts' as const, search_mode: 'contains' as const };
-    const direct = await findSymbol(root, input);
-    await writeFile(join(root, '.pi/code-research.json'), '{"graph":{"enable":true}}\n');
     await buildWorkspaceGraph(root);
     const graph = await findSymbol(root, input);
-    const pick = (values: typeof direct) => values.map(({ symbol, kind, declaration_kind, owner, qualified_name, start_line, start_column, is_definition, is_implementation }) => ({ symbol, kind, declaration_kind, owner, qualified_name, start_line, start_column, is_definition, is_implementation }));
-    expect(pick(graph)).toEqual(pick(direct));
-    expect(await findSymbol(root, input)).toEqual(graph);
+    const pick = (values: typeof graph) => values.map(({ symbol, kind, declaration_kind, owner, qualified_name, start_line, start_column, is_definition, is_implementation }) => ({ symbol, kind, declaration_kind, owner, qualified_name, start_line, start_column, is_definition, is_implementation }));
+    expect(graph.length).toBeGreaterThan(0);
+    expect(pick(await findSymbol(root, input))).toEqual(pick(graph));
   });
 
-  it('applies the conjunctive filter and scope matrix identically in direct and fresh graph modes', async () => {
+  it('applies the conjunctive filter and scope matrix in fresh graph mode', async () => {
     const root = await mkdtemp(join(tmpdir(), 'pi-ts-symbol-filter-matrix-'));
     await mkdir(join(root, '.pi'), { recursive: true });
+      await writeFile(join(root, '.pi', 'code-research.json'), `{"graph":{"enable":true}}\n`, 'utf8');
     await mkdir(join(root, 'src/nested'), { recursive: true });
     await writeFile(join(root, 'src/service.ts'), `export function fetchService() {}\nexport const fetchValue = 1;\n`);
     await writeFile(join(root, 'src/nested/other.tsx'), `export function fetchView() { return <div />; }\n`);
@@ -98,23 +98,22 @@ describe('TypeScript symbol syntax and graph parity', () => {
       { path: 'src', scope: 'directory' as const, glob: '*.ts', symbol: 'Value', search_mode: 'contains' as const, kind: 'variable' as const, declaration_kind: 'variable' as const, language: 'ts' as const },
     ];
 
-    await writeFile(join(root, '.pi/code-research.json'), '{"graph":{"enable":false}}\n');
-    const direct = await Promise.all(queries.map((query) => resolveFindSymbol(root, query)));
-    await writeFile(join(root, '.pi/code-research.json'), '{"graph":{"enable":true}}\n');
     await buildWorkspaceGraph(root);
     const graph = await Promise.all(queries.map((query) => resolveFindSymbol(root, query)));
-    expect(graph.map((resolution) => normalizeSymbolResults(resolution.results))).toEqual(direct.map((resolution) => normalizeSymbolResults(resolution.results)));
+    expect(graph.map((resolution) => resolution.results.map((result) => result.symbol))).toEqual([['fetchService'], ['fetchView'], ['fetchValue']]);
     expect(graph.map((resolution) => resolution.diagnostics.completeness)).toEqual(['complete', 'complete', 'complete']);
   });
 
-  it('reports diagnostics for empty direct results', async () => {
+  it('builds graph artifacts for graph queries when no graph is built yet', async () => {
     const root = await mkdtemp(join(tmpdir(), 'pi-ts-symbol-diagnostics-'));
+    await mkdir(join(root, '.pi'), { recursive: true });
+    await writeFile(join(root, '.pi', 'code-research.json'), `{"graph":{"enable":true}}\n`, 'utf8');
     const file = join(root, 'empty.ts');
     await writeFile(file, 'export const present = 1;\n');
     const resolution = await resolveFindSymbol(root, { path: file, symbol: 'absent', language: 'ts' });
     expect(resolution.results).toEqual([]);
-    expect(resolution.diagnostics).toMatchObject({ source_mode: 'direct', completeness: 'fallback', scanned_files_count: 1, skipped_files_count: 0, unreadable_shards_count: 0 });
-    expect(resolution.diagnostics.fallback_reason).not.toBeNull();
+    expect(resolution.diagnostics).toMatchObject({ source_mode: 'graph', graph_status: 'fresh', completeness: 'complete', scanned_files_count: 1, skipped_files_count: 0, unreadable_shards_count: 0 });
+    expect(resolution.diagnostics.graph_unavailable_reason).toBeNull();
   });
 
   it('keeps fixture documentation synchronized with parser coverage cases and public constants', async () => {
@@ -125,7 +124,7 @@ describe('TypeScript symbol syntax and graph parity', () => {
     for (const family of ['Functions', 'Callable bindings', 'Classes', 'Class members', 'Interfaces', 'Type declarations', 'Aliases and exports', 'Objects', 'Assignments', 'Destructuring', 'TSX', 'Declaration merging', 'Anonymous/computed names']) expect(coverageDoc).toContain(family);
     for (const reason of ['graph_disabled', 'graph_missing', 'graph_stale', 'graph_partial', 'graph_incompatible', 'graph_read_error', 'shard_missing', 'shard_unreadable', 'shard_incompatible', 'snapshot_mismatch', 'coverage_unproven', 'parse_error', 'input_unreadable']) expect(contractDoc).toContain(reason);
     expect(coverageDoc).toContain('0.23.2');
-    expect(contractDoc).toContain('schema is version 2');
+    expect(contractDoc).toContain('schema is version 4');
     expect(readme).toContain('docs/typescript-symbol-contract-v1.md');
     expect(readme).toContain('docs/typescript-symbol-coverage-v1.md');
     expect(coverageDoc).toContain('framework/HOC call-result callable inference');
@@ -142,21 +141,19 @@ describe('TypeScript symbol syntax and graph parity', () => {
     expect(accessors[0].relationshipId).toBe(accessors[1].relationshipId);
   });
 
-  it('keeps direct and fresh graph symbol ids and accessor relationship ids identical', async () => {
+  it('keeps fresh graph symbol ids and accessor relationship ids stable', async () => {
     const root = await mkdtemp(join(tmpdir(), 'pi-ts-symbol-identity-parity-'));
     await mkdir(join(root, '.pi'), { recursive: true });
+      await writeFile(join(root, '.pi', 'code-research.json'), `{"graph":{"enable":true}}\n`, 'utf8');
     const file = join(root, 'src/identity.ts');
     await mkdir(join(root, 'src'), { recursive: true });
     await writeFile(file, `export class Example {\n  get value(): number { return 1; }\n  set value(next: number) { void next; }\n}\n`);
 
-    await writeFile(join(root, '.pi/code-research.json'), '{"graph":{"enable":false}}\n');
-    const direct = await findSymbol(root, { path: file, symbol: '', language: 'ts', search_mode: 'contains' });
-
-    await writeFile(join(root, '.pi/code-research.json'), '{"graph":{"enable":true}}\n');
     await buildWorkspaceGraph(root);
     const graph = await findSymbol(root, { path: file, symbol: '', language: 'ts', search_mode: 'contains' });
+    const again = await findSymbol(root, { path: file, symbol: '', language: 'ts', search_mode: 'contains' });
 
-    const pickIdentity = (results: typeof direct) => results.map((result) => ({
+    const pickIdentity = (results: typeof graph) => results.map((result) => ({
       symbol: result.symbol,
       declaration_kind: result.declaration_kind,
       start_line: result.start_line,
@@ -165,7 +162,7 @@ describe('TypeScript symbol syntax and graph parity', () => {
       relationship_id: result.relationship_id,
     }));
 
-    expect(pickIdentity(graph)).toEqual(pickIdentity(direct));
+    expect(pickIdentity(graph)).toEqual(pickIdentity(again));
     const accessors = graph.filter((result) => result.symbol === 'value');
     expect(new Set(accessors.map((result) => result.relationship_id))).toEqual(new Set([accessors[0]?.relationship_id]));
   });

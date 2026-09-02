@@ -14,15 +14,21 @@ interface RegisteredTool {
 
 const renderTheme = { fg: (_name: string, text: string) => text, bold: (text: string) => text };
 
-function registerTools(): RegisteredTool[] {
+function registerTools(cwd?: string): RegisteredTool[] {
   const tools: RegisteredTool[] = [];
-  codeResearchExtension({
-    registerTool(tool: RegisteredTool) {
-      tools.push(tool);
-    },
-    on() {},
-  });
-  return tools;
+  const previousCwd = process.cwd();
+  try {
+    if (cwd) process.chdir(cwd);
+    codeResearchExtension({
+      registerTool(tool: RegisteredTool) {
+        tools.push(tool);
+      },
+      on() {},
+    });
+    return tools;
+  } finally {
+    if (cwd) process.chdir(previousCwd);
+  }
 }
 
 function renderToolResult(tool: RegisteredTool, result: any, expanded: boolean): string {
@@ -44,7 +50,15 @@ async function createProject(files: Record<string, string>): Promise<string> {
 }
 
 describe('code-research extension entry integration', () => {
-  it('registers the minimal public tool surface while preserving workspace graph status', () => {
+  it('does not register tools unless graph.enable is explicitly true', async () => {
+    const rootDir = await createProject({
+      'src/app.ts': `export const ok = true;\n`,
+    });
+
+    expect(registerTools(rootDir)).toEqual([]);
+  });
+
+  it('registers the minimal public tool surface when graph.enable is true', () => {
     const tools = registerTools();
     expect(tools.map((tool) => tool.name)).toEqual(['code_find', 'code_call_hierarchy', 'workspace_graph_status', 'code_change_surface']);
     expect(JSON.stringify(tools.map((tool) => tool.parameters))).not.toContain('py');
@@ -57,6 +71,7 @@ describe('code-research extension entry integration', () => {
     expect(codeFind).toBeDefined();
 
     const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'src/main/java/ports/Service.java': `package ports;\npublic interface Service {\n  String run();\n}\n`,
       'src/main/java/impl/LocalService.java': `package impl;\n\nimport ports.Service;\n\npublic class LocalService implements Service {\n  public String run() {\n    return "local";\n  }\n}\n`,
     });
@@ -77,30 +92,31 @@ describe('code-research extension entry integration', () => {
     expect(result.details.summary).toMatchObject({ returned: 1, total: 1, has_more: false });
   });
 
-  it('executes file-scoped Java interface implementation lookup through code_find', async () => {
+  it('executes directory-scoped Java interface implementation lookup through code_find', async () => {
     const tools = registerTools();
     const codeFind = tools.find((tool) => tool.name === 'code_find');
     expect(codeFind).toBeDefined();
 
     const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'src/main/java/ports/Service.java': `package ports;\npublic interface Service {\n  String run();\n}\n`,
       'src/main/java/impl/LocalService.java': `package impl;\n\nimport ports.Service;\n\npublic class LocalService implements Service {\n  public String run() { return "local"; }\n}\n`,
     });
 
     const interfaceResult = await codeFind!.execute('test-call-implementation-interface', {
-      path: 'src/main/java/ports/Service.java',
+      path: 'src/main/java',
       query: 'Service',
       relation: 'implementation',
       language: 'java',
-      scope: 'file',
+      scope: 'directory',
     }, undefined, undefined, { cwd: rootDir });
     const methodResult = await codeFind!.execute('test-call-implementation-method', {
-      path: 'src/main/java/ports/Service.java',
+      path: 'src/main/java',
       query: 'run',
       relation: 'implementation',
       language: 'java',
       kind: 'method',
-      scope: 'file',
+      scope: 'directory',
     }, undefined, undefined, { cwd: rootDir });
 
     expect(interfaceResult.details.items.map((item: any) => item.symbol)).toEqual(['LocalService']);
@@ -139,6 +155,7 @@ describe('code-research extension entry integration', () => {
     expect(codeFind).toBeDefined();
 
     const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'src/service.ts': `export function helper(): void {}\n\nexport function runService(): void {\n  helper();\n}\n\nexport function warmupService(): void {\n  helper();\n}\n`,
     });
 
@@ -164,6 +181,7 @@ describe('code-research extension entry integration', () => {
     expect(hierarchy).toBeDefined();
 
     const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'src/main/java/ports/Service.java': `package ports;\npublic interface Service {\n  void run();\n}\n`,
       'src/main/java/app/AppService.java': `package app;\n\nimport ports.Service;\n\npublic class AppService implements Service {\n  public void run() {\n    helper();\n  }\n\n  private void helper() {}\n}\n`,
       'src/main/java/web/Controller.java': `package web;\n\nimport ports.Service;\n\npublic class Controller {\n  private final Service service;\n\n  public Controller(Service service) {\n    this.service = service;\n  }\n\n  public void handle() {\n    service.run();\n  }\n}\n`,
@@ -201,6 +219,7 @@ describe('code-research extension entry integration', () => {
     expect(hierarchy).toBeDefined();
 
     const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'src/main/java/app/DeepService.java': `package app;\n\npublic class DeepService {\n  public void root() {\n    stepOne();\n  }\n\n  private void stepOne() {\n    stepTwo();\n  }\n\n  private void stepTwo() {\n    CODE_RESEARCH_RENDER_FULL_CONTENT_MARKER();\n  }\n\n  private void CODE_RESEARCH_RENDER_FULL_CONTENT_MARKER() {}\n}\n`,
     });
 
@@ -228,12 +247,13 @@ describe('code-research extension entry integration', () => {
     expect(expanded).toContain('CODE_RESEARCH_RENDER_FULL_CONTENT_MARKER');
   });
 
-  it('keeps graph.enable as the query and scheduler gate in this slice', async () => {
+  it('uses graph.enable as the query and scheduler gate in this slice', async () => {
     const tools = registerTools();
     const codeFind = tools.find((tool) => tool.name === 'code_find');
     expect(codeFind).toBeDefined();
 
     const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'src/main/java/app/App.java': `package app;\npublic class App { public void run() {} }\n`,
     });
 
@@ -246,22 +266,6 @@ describe('code-research extension entry integration', () => {
     }, undefined, undefined, { cwd: rootDir });
 
     expect(result.details.found).toBe(1);
-  });
-
-  it('reports workspace graph as disabled by default until explicitly enabled', async () => {
-    const tools = registerTools();
-    const workspaceGraphStatusTool = tools.find((tool) => tool.name === 'workspace_graph_status');
-    expect(workspaceGraphStatusTool).toBeDefined();
-
-    const rootDir = await createProject({
-      'pom.xml': `<project />\n`,
-      'src/main/java/app/App.java': `package app;\npublic class App { public void run() {} }\n`,
-    });
-
-    const result = await workspaceGraphStatusTool!.execute('test-call-disabled', {}, undefined, undefined, { cwd: rootDir });
-
-    expect(result.content[0].text).toContain('disabled');
-    expect(result.details).toMatchObject({ status: 'disabled', graph: { enable: false, addGitignore: true } });
   });
 
   it('includes bounded unreadable directory paths in workspace_graph_status compact output', async () => {
@@ -311,13 +315,13 @@ describe('code-research extension entry integration', () => {
 
     expect(result.details).toMatchObject({
       status: 'fresh',
-      monorepo: { detected: true, subprojectCount: 2, roots: ['back', 'front'] },
+      monorepo: { detected: true, subprojectCount: 3, roots: ['.', 'back', 'front'] },
       graphUsableForQueries: true,
-      coverage: { indexedFiles: 2, detectedProjects: 2, indexedProjects: 2, emptyProjects: 0 },
-      languages: { java: 1, ts: 1, js: 0 },
+      coverage: { indexedFiles: 4, detectedProjects: 3, indexedProjects: 3, emptyProjects: 0 },
+      languages: { java: 2, ts: 2, js: 0 },
     });
     expect(result.content[0].text).toContain('usable=yes');
     expect(result.content[0].text).toContain('monorepo=yes');
-    expect(result.content[0].text).toContain('workspace_projects=back,front');
+    expect(result.content[0].text).toContain('workspace_projects=.,back,front');
   });
 });

@@ -17,7 +17,7 @@ import type {
 import { compareCanonicalPathStrings } from './shared.js';
 
 export const WORKSPACE_GRAPH_SCHEMA_VERSION = 4;
-export const WORKSPACE_GRAPH_BUILDER_MODEL_VERSION = 3;
+export const WORKSPACE_GRAPH_BUILDER_MODEL_VERSION = 4;
 export const WORKSPACE_GRAPH_BUILDER_FINGERPRINT = createWorkspaceGraphBuilderFingerprint();
 export const WORKSPACE_GRAPH_CREATED_BY = 'pi-code-research-extension' as const;
 export const TYPESCRIPT_SYMBOL_COVERAGE_MODEL_VERSION = 1 as const;

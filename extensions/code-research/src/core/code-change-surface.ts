@@ -33,7 +33,7 @@ export interface CodeChangeSurfaceInput {
 }
 
 export interface CodeChangeSurfaceResult {
-  status: 'ready' | 'needs_fallback';
+  status: 'ready' | 'needs_unavailable';
   query: string;
   path: string;
   language: SupportedLanguage;
@@ -48,7 +48,7 @@ export interface CodeChangeSurfaceResult {
   validation_suggestions: string[];
   risks: string[];
   trust: { level: 'high' | 'medium' | 'low'; reasons: string[] };
-  fallback: { required: boolean; reason?: string; actions: FollowUp[] };
+  follow_up: { required: boolean; reason?: string; actions: FollowUp[] };
   summary: Record<string, { returned: number; total: number; omitted: number }>;
   content: string;
   diagnostics: Record<string, unknown>;
@@ -90,8 +90,8 @@ function bounded<T>(items: T[], follow_up?: FollowUp, limit = SECTION_LIMIT): Bo
   return { items: selected, returned: selected.length, total: items.length, omitted, ...(omitted > 0 && follow_up ? { follow_up } : {}) };
 }
 
-function normalizedLimit(value: number | undefined, fallback: number): number {
-  if (!Number.isFinite(value)) return fallback;
+function normalizedLimit(value: number | undefined, defaultValue: number): number {
+  if (!Number.isFinite(value)) return defaultValue;
   return Math.max(1, Math.min(MAX_EXHAUSTIVE_SECTION_LIMIT, Math.floor(value as number)));
 }
 
@@ -157,7 +157,7 @@ function likelyTestScore(cwd: string, item: ReferenceLocation, query: string): n
 }
 
 async function resolveReferencesAcrossLanguages(cwd: string, input: FindReferencesInput) {
-  const graphFirstInput = { ...input, compare_direct_fallback: false };
+  const graphFirstInput = { ...input };
   if (input.language && input.language !== 'auto') return resolveFindReferences(cwd, graphFirstInput);
   const results: ReferenceLocation[] = [];
   const diagnostics: unknown[] = [];
@@ -416,7 +416,7 @@ async function relatedTestReferences(cwd: string, input: CodeChangeSurfaceInput,
       });
       tests.push(...references.results.filter((item) => isTestLike(item.file)));
     } catch {
-      // Related test discovery is best-effort; fallback actions already cover uncertain surfaces.
+      // Related test discovery is best-effort; unavailable actions already cover uncertain surfaces.
     }
   }
   return tests;
@@ -442,7 +442,7 @@ function formatContent(cwd: string, result: Omit<CodeChangeSurfaceResult, 'conte
   };
   const lines = [
     `Change surface for '${result.query}' in ${result.path}`,
-    `Status: ${result.status}; trust=${result.trust.level}; fallback=${result.fallback.required ? 'yes' : 'no'}`,
+    `Status: ${result.status}; trust=${result.trust.level}; follow_up=${result.follow_up.required ? 'yes' : 'no'}`,
     count('Contract', result.contract),
     ...result.contract.items.map((item) => `- contract ${rel(cwd, item.file)}:${item.start_line} ${item.qualified_name ?? item.symbol} [${item.kind}]`),
     count('Implementations', result.implementations),
@@ -459,9 +459,9 @@ function formatContent(cwd: string, result: Omit<CodeChangeSurfaceResult, 'conte
     'Risks:',
     ...result.risks.map((item) => `- ${item}`),
   ];
-  if (result.fallback.actions.length > 0) {
+  if (result.follow_up.actions.length > 0) {
     lines.push('Follow-up inspection actions:');
-    for (const action of result.fallback.actions) lines.push(`- ${action.tool} ${JSON.stringify(action.params)} — ${action.reason}`);
+    for (const action of result.follow_up.actions) lines.push(`- ${action.tool} ${JSON.stringify(action.params)} — ${action.reason}`);
   }
   return lines.join('\n');
 }
@@ -507,19 +507,19 @@ export async function buildCodeChangeSurface(cwd: string, input: CodeChangeSurfa
       ? { mode: 'representative' as const, evidence_total: rawTestReferences.length, files_total: representativeTestReferences.length, reason: 'Multiple test evidence matches were collapsed to one representative entry per file.' }
       : { mode: 'complete' as const, evidence_total: rawTestReferences.length, files_total: representativeTestReferences.length };
 
-  const fallbackActions: FollowUp[] = [];
+  const followUpActions: FollowUp[] = [];
   let status: CodeChangeSurfaceResult['status'] = 'ready';
-  let fallbackReason: string | undefined;
+  let unavailableReason: string | undefined;
   if (contractItems.length === 0) {
-    status = 'needs_fallback';
-    fallbackReason = 'No declaration or contract anchor was found; no edits are guessed.';
-    fallbackActions.push(followUpCodeFind(input, 'declaration', 'Confirm the symbol name, kind, language, or path.'));
-    fallbackActions.push(followUpCodeFind(input, 'references', 'Check whether usages exist under a different declaration shape.'));
+    status = 'needs_unavailable';
+    unavailableReason = 'No declaration or contract anchor was found; no edits are guessed.';
+    followUpActions.push(followUpCodeFind(input, 'declaration', 'Confirm the symbol name, kind, language, or path.'));
+    followUpActions.push(followUpCodeFind(input, 'references', 'Check whether usages exist under a different declaration shape.'));
   }
 
   const risks = new Set<string>();
   if (references.results.some((item) => item.reason === 'receiver-type-contract-method' || item.classification === 'probable') || (contractItems.some((item) => item.declaration_kind === 'interface_method' || item.kind === 'interface') && callers.length > 0)) risks.add('Interface-mediated or heuristic edges are present; inspect contract and concrete implementations before editing.');
-  if ((declarations.diagnostics as any).completeness !== 'complete') risks.add('Symbol lookup used direct or fallback inspection; generated/dynamic code may be incomplete.');
+  if ((declarations.diagnostics as any).completeness !== 'complete') risks.add('Symbol lookup was not fully covered by the graph; generated/dynamic code may be incomplete.');
   if (implementationItems.length === 0 && contractItems.some((item) => item.kind === 'interface' || item.declaration_kind === 'interface_method')) risks.add('No concrete implementation was confirmed; inspect implementers before editing.');
   if (callers.length === 0 && status === 'ready') risks.add('No callers were confirmed; validate with a focused references query before assuming no impact.');
 
@@ -536,9 +536,9 @@ export async function buildCodeChangeSurface(cwd: string, input: CodeChangeSurfa
     : { mode: callerSection.omitted > 0 ? 'representative' : 'complete', evidence_total: callers.length, limit: callerLimit, ...(callerSection.omitted > 0 ? { reason: 'Caller evidence was capped to representative entries.' } : {}) };
 
   for (const section of [contract, implementations, callerSection, likely_tests]) {
-    if (section.follow_up) fallbackActions.push(section.follow_up);
+    if (section.follow_up) followUpActions.push(section.follow_up);
   }
-  if (status === 'ready' && callers.length === 0 && (input.kind === 'function' || input.kind === 'method' || input.kind === 'class' || !input.kind)) fallbackActions.push(followUpHierarchy(input, 'Inspect incoming hierarchy if reference lookup is incomplete.'));
+  if (status === 'ready' && callers.length === 0 && (input.kind === 'function' || input.kind === 'method' || input.kind === 'class' || !input.kind)) followUpActions.push(followUpHierarchy(input, 'Inspect incoming hierarchy if reference lookup is incomplete.'));
 
   const validation_suggestions = [
     likely_tests.total > 0 ? 'Review likely affected test files before editing; run the repository-specific test command for those files when known.' : 'No exact test runner is inferred; search for nearby test files and run the repository-specific focused tests when known.',
@@ -546,13 +546,13 @@ export async function buildCodeChangeSurface(cwd: string, input: CodeChangeSurfa
   ];
 
   const trustReasons: string[] = [];
-  if (status === 'needs_fallback') trustReasons.push(fallbackReason ?? 'Fallback inspection is required.');
+  if (status === 'needs_unavailable') trustReasons.push(unavailableReason ?? 'Unavailable inspection is required.');
   if (risks.size > 0) trustReasons.push(...risks);
   const omitted = [contract, implementations, callerSection, likely_tests].some((section) => section.omitted > 0);
   if (omitted) trustReasons.push('One or more sections were capped; use follow-up actions for the omitted items.');
-  const trust = { level: (status === 'needs_fallback' ? 'low' : risks.size > 0 || omitted ? 'medium' : 'high') as 'high' | 'medium' | 'low', reasons: trustReasons };
+  const trust = { level: (status === 'needs_unavailable' ? 'low' : risks.size > 0 || omitted ? 'medium' : 'high') as 'high' | 'medium' | 'low', reasons: trustReasons };
 
-  const fallback = { required: status === 'needs_fallback' || omitted, ...(fallbackReason ? { reason: fallbackReason } : {}), actions: uniqueBy(fallbackActions, (action) => `${action.tool}:${JSON.stringify(action.params)}`) };
+  const followUp = { required: status === 'needs_unavailable' || omitted, ...(unavailableReason ? { reason: unavailableReason } : {}), actions: uniqueBy(followUpActions, (action) => `${action.tool}:${JSON.stringify(action.params)}`) };
   const summary = { contract: sectionSummary(contract), implementations: sectionSummary(implementations), callers: sectionSummary(callerSection), likely_tests: sectionSummary(likely_tests) };
   const partial: Omit<CodeChangeSurfaceResult, 'content'> = {
     status,
@@ -570,7 +570,7 @@ export async function buildCodeChangeSurface(cwd: string, input: CodeChangeSurfa
     validation_suggestions,
     risks: [...risks],
     trust,
-    fallback,
+    follow_up: followUp,
     summary,
     diagnostics: { declarations: declarations.diagnostics, references: references.diagnostics, hierarchy: hierarchy.diagnostics, implementation_expansion: expandedImplementations.diagnostics, implementation_hierarchy: implementationIncoming.diagnostics, implementation_reporting, caller_reporting, test_reporting },
   };

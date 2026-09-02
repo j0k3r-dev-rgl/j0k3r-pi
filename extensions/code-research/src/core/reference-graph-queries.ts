@@ -65,31 +65,31 @@ export async function queryReferencesFromGraph(options: {
 
     const isTypeRelationship = referenceKind === 'extends' || referenceKind === 'implements';
     const sourceFile = resolve(cwd, fromNode.kind === 'file' ? fromNode.path : fromNode.file);
-    const fallbackRange = fromNode.kind === 'symbol' ? fromNode.range : { startLine: 1, startColumn: 0, endLine: 1, endColumn: 0 };
+    const unavailableRange = fromNode.kind === 'symbol' ? fromNode.range : { startLine: 1, startColumn: 0, endLine: 1, endColumn: 0 };
     const relationshipMetadata = isTypeRelationship
       ? edge.calledAs && edge.occurrenceRange
         ? { end_line: edge.occurrenceRange.endLine, end_column: edge.occurrenceRange.endColumn, called_as: edge.calledAs }
-        : await getJavaTypeRelationshipMetadata(sourceCache, sourceFile, fallbackRange.startLine, referenceKind, target.name).catch(() => undefined)
+        : await getJavaTypeRelationshipMetadata(sourceCache, sourceFile, unavailableRange.startLine, referenceKind, target.name).catch(() => undefined)
       : undefined;
-    const line = isTypeRelationship ? edge.occurrenceRange?.startLine ?? fallbackRange.startLine : edge.callsite?.line ?? edge.occurrenceRange?.startLine ?? fallbackRange.startLine;
+    const line = isTypeRelationship ? edge.occurrenceRange?.startLine ?? unavailableRange.startLine : edge.callsite?.line ?? edge.occurrenceRange?.startLine ?? unavailableRange.startLine;
     const column = isTypeRelationship
       ? 0
       : referenceKind === 'instantiate' && edge.calledAs?.startsWith('new ')
-        ? Math.max(0, (edge.occurrenceRange?.startColumn ?? fallbackRange.startColumn) - 4)
-        : edge.callsite?.column ?? edge.occurrenceRange?.startColumn ?? fallbackRange.startColumn;
+        ? Math.max(0, (edge.occurrenceRange?.startColumn ?? unavailableRange.startColumn) - 4)
+        : edge.callsite?.column ?? edge.occurrenceRange?.startColumn ?? unavailableRange.startColumn;
     const calledAs = isTypeRelationship
       ? relationshipMetadata?.called_as
       : referenceKind === 'instantiate'
         ? undefined
-        : edge.calledAs ?? (edge.callsite as { text?: string } | undefined)?.text ?? (target.symbolKind === 'method'
+        : edge.calledAs ?? (edge.callsite as { text?: string } | undefined)?.text ?? (referenceKind === 'call'
           ? await getCallExpressionText(sourceCache, sourceFile, line, column, target.name).catch(() => undefined)
           : undefined);
     references.push({
       file: sourceFile,
       line,
       column,
-      end_line: isTypeRelationship ? relationshipMetadata?.end_line : edge.occurrenceRange?.endLine ?? fallbackRange.endLine,
-      end_column: isTypeRelationship ? relationshipMetadata?.end_column : edge.occurrenceRange?.endColumn ?? fallbackRange.endColumn,
+      end_line: isTypeRelationship ? relationshipMetadata?.end_line : edge.occurrenceRange?.endLine ?? unavailableRange.endLine,
+      end_column: isTypeRelationship ? relationshipMetadata?.end_column : edge.occurrenceRange?.endColumn ?? unavailableRange.endColumn,
       symbol: target.name,
       kind: target.symbolKind,
       context_symbol: fromNode.kind === 'symbol' ? fromNode.name : undefined,

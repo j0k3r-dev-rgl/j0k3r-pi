@@ -14,7 +14,7 @@ export function registerFindSymbolTool(pi: any) {
     name: 'find_symbol',
     label: 'Find Symbol',
     description:
-      'Use this tool when you need to locate where a symbol is defined or implemented in code. It searches TypeScript, JavaScript, and Java files and returns structured match data such as file, line, column, symbol kind, and diagnostics describing graph or direct lookup behavior.',
+      'Use this tool when you need to locate where a symbol is defined or implemented in code. It searches TypeScript, JavaScript, and Java files and returns structured match data such as file, line, column, symbol kind, and diagnostics describing graph or graph lookup behavior.',
     promptSnippet: 'Locate where a symbol is defined or implemented across TS/JS/Java code.',
     promptGuidelines: [
       'Use find_symbol when the task is to locate a definition, implementation, declaration, or matching symbol by name.',

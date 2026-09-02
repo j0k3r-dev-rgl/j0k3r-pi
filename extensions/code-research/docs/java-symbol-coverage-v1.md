@@ -38,11 +38,11 @@ Coarse `kind` compatibility remains additive:
 - initializer blocks: unsupported as public declarations
 - compiler-generated members: not surfaced as source declarations
 
-## Graph authority and fallback diagnostics
+## Graph authority and unavailable diagnostics
 
 Java graph-backed lookup is authoritative only when the persisted shard is local, bounded, schema-compatible, fresh for the current snapshot, and coverage-proven for the queried files.
 
-Expected fallback reasons in `find_symbol.details` include:
+Expected unavailable reasons in `find_symbol.details` include:
 
 - `graph_stale`
 - `graph_partial`

@@ -20,7 +20,7 @@ import { loadWorkspaceGraphState, writeWorkspaceGraphState } from '../src/core/w
 import { normalizeSymbolResults } from './helpers/typescript-symbol-parity.js';
 
 async function createProject(files: Record<string, string>): Promise<string> {
-  const rootDir = join(tmpdir(), `pi-find-symbol-graph-fallback-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const rootDir = join(tmpdir(), `pi-find-symbol-graph-unavailable-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   await mkdir(rootDir, { recursive: true });
 
   for (const [relativePath, content] of Object.entries(files)) {
@@ -32,7 +32,7 @@ async function createProject(files: Record<string, string>): Promise<string> {
   return rootDir;
 }
 
-describe('findSymbol graph fallback', () => {
+describe('findSymbol graph-only', () => {
   it('validates shard file authority with bounded concurrency while preserving ordered stale mismatches', async () => {
     const cwd = '/virtual/workspace';
     const totalFiles = GRAPH_FILE_VALIDATION_CONCURRENCY * 2;
@@ -117,7 +117,7 @@ describe('findSymbol graph fallback', () => {
     expect(validations.at(-1)?.records?.[0]?.symbolId).toBe(`symbol-id-${totalFiles - 1}`);
   });
 
-  it('reports exact graph-state diagnostics and preserves direct parity across shard failure modes', async () => {
+  it('reports exact graph-state diagnostics without direct recovery across shard failure modes', async () => {
     const rootDir = await createProject({
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'src/service.ts': `export function targetService(): void {}\n`,
@@ -129,12 +129,7 @@ describe('findSymbol graph fallback', () => {
       {
         name: 'fresh',
         mutate: async () => {},
-        expected: { source_mode: 'graph', graph_status: 'fresh', completeness: 'complete', fallback_reason: null, unreadable_shards_count: 0, skipped_files_count: 0 },
-      },
-      {
-        name: 'snapshot mismatch',
-        mutate: async () => { await writeFile(join(rootDir, 'src/service.ts'), `export function targetServiceFresh(): void {}\n`, 'utf8'); },
-        expected: { source_mode: 'direct', graph_status: 'stale', completeness: 'fallback', fallback_reason: 'snapshot_mismatch', unreadable_shards_count: 0, skipped_files_count: 0 },
+        expected: { source_mode: 'graph', graph_status: 'fresh', completeness: 'complete', graph_unavailable_reason: null, unreadable_shards_count: 0, skipped_files_count: 0 },
       },
       {
         name: 'missing shard',
@@ -144,7 +139,7 @@ describe('findSymbol graph fallback', () => {
           if (state.status !== 'ok') return;
           await rm(getSubprojectShardPath(rootDir, state.data.subprojects[0].id), { force: true });
         },
-        expected: { source_mode: 'direct', graph_status: 'missing', completeness: 'fallback', fallback_reason: 'shard_missing', unreadable_shards_count: 0, skipped_files_count: 0 },
+        expected: { source_mode: 'graph', graph_status: 'missing', completeness: 'unavailable', graph_unavailable_reason: 'shard_missing', unreadable_shards_count: 0, skipped_files_count: 0 },
       },
       {
         name: 'corrupt shard',
@@ -154,7 +149,7 @@ describe('findSymbol graph fallback', () => {
           if (state.status !== 'ok') return;
           await writeFile(getSubprojectShardPath(rootDir, state.data.subprojects[0].id), '{corrupt', 'utf8');
         },
-        expected: { source_mode: 'direct', graph_status: 'error', completeness: 'fallback', fallback_reason: 'shard_corrupt', unreadable_shards_count: 0, skipped_files_count: 0 },
+        expected: { source_mode: 'graph', graph_status: 'error', completeness: 'unavailable', graph_unavailable_reason: 'shard_corrupt', unreadable_shards_count: 0, skipped_files_count: 0 },
       },
       {
         name: 'incompatible shard',
@@ -166,7 +161,7 @@ describe('findSymbol graph fallback', () => {
           const artifact = JSON.parse(await readFile(path, 'utf8'));
           await writeFile(path, `${JSON.stringify({ ...artifact, schemaVersion: 1 })}\n`, 'utf8');
         },
-        expected: { source_mode: 'direct', graph_status: 'incompatible', completeness: 'fallback', fallback_reason: 'shard_incompatible', unreadable_shards_count: 0, skipped_files_count: 0 },
+        expected: { source_mode: 'graph', graph_status: 'incompatible', completeness: 'unavailable', graph_unavailable_reason: 'shard_incompatible', unreadable_shards_count: 0, skipped_files_count: 0 },
       },
       {
         name: 'partial state',
@@ -176,18 +171,15 @@ describe('findSymbol graph fallback', () => {
           if (state.status !== 'ok') return;
           await writeWorkspaceGraphState(rootDir, { ...state.data, status: 'partial' });
         },
-        expected: { source_mode: 'hybrid', graph_status: 'partial', completeness: 'fallback', fallback_reason: 'graph_partial', unreadable_shards_count: 0, skipped_files_count: 0 },
+        expected: { source_mode: 'graph', graph_status: 'partial', completeness: 'unavailable', graph_unavailable_reason: 'graph_partial', unreadable_shards_count: 0, skipped_files_count: 0 },
       },
     ] as const;
 
     for (const testCase of cases) {
       await buildWorkspaceGraph(rootDir);
       await testCase.mutate();
-      await writeFile(join(rootDir, '.pi/code-research.json'), '{"graph":{"enable":false}}\n', 'utf8');
-      const currentDirect = await resolveFindSymbol(rootDir, { path: 'src/service.ts', symbol: 'target', language: 'ts', search_mode: 'contains' });
-      await writeFile(join(rootDir, '.pi/code-research.json'), '{"graph":{"enable":true}}\n', 'utf8');
       const resolution = await resolveFindSymbol(rootDir, { path: 'src/service.ts', symbol: 'target', language: 'ts', search_mode: 'contains' });
-      expect(normalizeSymbolResults(resolution.results)).toEqual(normalizeSymbolResults(currentDirect.results));
+      expect(resolution.results.map((result) => result.symbol)).toEqual(testCase.name === 'fresh' || testCase.name === 'partial state' ? ['targetService'] : []);
       expect(resolution.diagnostics).toMatchObject(testCase.expected);
     }
   });
@@ -221,12 +213,12 @@ describe('findSymbol graph fallback', () => {
     });
 
     const resolution = await resolveFindSymbol(rootDir, { path: 'src/service.ts', symbol: 'target', language: 'ts', search_mode: 'contains' });
-    expect(resolution.results.map((result) => result.symbol)).toEqual(['targetBravo']);
+    expect(resolution.results).toEqual([]);
     expect(resolution.diagnostics).toMatchObject({
-      source_mode: 'direct',
+      source_mode: 'graph',
       graph_status: 'stale',
-      completeness: 'fallback',
-      fallback_reason: 'snapshot_mismatch',
+      completeness: 'unavailable',
+      graph_unavailable_reason: 'snapshot_mismatch',
       unreadable_shards_count: 0,
       skipped_files_count: 0,
     });
@@ -246,18 +238,18 @@ describe('findSymbol graph fallback', () => {
     await writeFile(getSubprojectShardPath(rootDir, state.data.subprojects[0].id), '{corrupt', 'utf8');
 
     const resolution = await resolveFindSymbol(rootDir, { path: 'src', symbol: 'target', language: 'ts', search_mode: 'contains' });
-    expect(resolution.results.map((result) => result.symbol).sort()).toEqual(['targetA', 'targetB']);
+    expect(resolution.results).toEqual([]);
     expect(resolution.diagnostics).toMatchObject({
-      source_mode: 'direct',
+      source_mode: 'graph',
       graph_status: 'error',
-      completeness: 'fallback',
-      fallback_reason: 'shard_corrupt',
+      completeness: 'unavailable',
+      graph_unavailable_reason: 'shard_corrupt',
       unreadable_shards_count: 0,
       skipped_files_count: 0,
     });
   });
 
-  it('reports mixed-shard hybrid fallback without losing direct parity', async () => {
+  it('reports mixed-shard graph diagnostics without direct recovery', async () => {
     const rootDir = await createProject({
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'tsconfig.json': `{"compilerOptions":{"target":"ES2022"}}\n`,
@@ -267,9 +259,6 @@ describe('findSymbol graph fallback', () => {
       'packages/b/src/b.ts': `export function serviceB(): void {}\n`,
     });
 
-    await writeFile(join(rootDir, '.pi/code-research.json'), '{"graph":{"enable":false}}\n', 'utf8');
-    const direct = await resolveFindSymbol(rootDir, { path: 'packages', symbol: 'service', language: 'ts', search_mode: 'contains' });
-    await writeFile(join(rootDir, '.pi/code-research.json'), '{"graph":{"enable":true}}\n', 'utf8');
     await buildWorkspaceGraph(rootDir);
     const state = await loadWorkspaceGraphState(rootDir);
     expect(state.status).toBe('ok');
@@ -280,12 +269,12 @@ describe('findSymbol graph fallback', () => {
     await writeFile(getSubprojectShardPath(rootDir, broken.id), '{corrupt', 'utf8');
 
     const resolution = await resolveFindSymbol(rootDir, { path: 'packages', symbol: 'service', language: 'ts', search_mode: 'contains' });
-    expect(normalizeSymbolResults(resolution.results)).toEqual(normalizeSymbolResults(direct.results));
+    expect(resolution.results.map((result) => result.symbol)).toEqual(['serviceA']);
     expect(resolution.diagnostics).toMatchObject({
-      source_mode: 'hybrid',
+      source_mode: 'graph',
       graph_status: 'error',
-      completeness: 'fallback',
-      fallback_reason: 'shard_corrupt',
+      completeness: 'unavailable',
+      graph_unavailable_reason: 'shard_corrupt',
       unreadable_shards_count: 0,
       skipped_files_count: 0,
     });
@@ -322,7 +311,7 @@ describe('findSymbol graph fallback', () => {
     expect(results[0]).toMatchObject({ symbol: 'GenericStatusAlias', kind: 'variable', declaration_kind: 'type_alias' });
   });
 
-  it('reports exact Java graph fallback diagnostics across fresh stale partial missing corrupt incompatible oversized snapshot and unproven states', async () => {
+  it('reports exact Java graph-only diagnostics across fresh stale partial missing corrupt incompatible oversized snapshot and unproven states', async () => {
     const rootDir = await createProject({
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'src/main/java/app/Service.java': `package app;\n\npublic class Service {\n  public String targetValue() {\n    return "value";\n  }\n}\n`,
@@ -332,7 +321,7 @@ describe('findSymbol graph fallback', () => {
       {
         name: 'fresh',
         mutate: async () => {},
-        expected: { source_mode: 'graph', graph_status: 'fresh', completeness: 'complete', fallback_reason: null },
+        expected: { source_mode: 'graph', graph_status: 'fresh', completeness: 'complete', graph_unavailable_reason: null },
       },
       {
         name: 'stale state',
@@ -342,14 +331,7 @@ describe('findSymbol graph fallback', () => {
           if (state.status !== 'ok') return;
           await writeWorkspaceGraphState(rootDir, { ...state.data, status: 'stale' });
         },
-        expected: { source_mode: 'direct', graph_status: 'stale', completeness: 'fallback', fallback_reason: 'graph_stale' },
-      },
-      {
-        name: 'snapshot mismatch',
-        mutate: async () => {
-          await writeFile(join(rootDir, 'src/main/java/app/Service.java'), `package app;\n\npublic class Service {\n  public String targetValueFresh() {\n    return "value";\n  }\n}\n`, 'utf8');
-        },
-        expected: { source_mode: 'direct', graph_status: 'stale', completeness: 'fallback', fallback_reason: 'snapshot_mismatch' },
+        expected: { source_mode: 'graph', graph_status: 'stale', completeness: 'unavailable', graph_unavailable_reason: 'graph_stale' },
       },
       {
         name: 'missing shard',
@@ -359,7 +341,7 @@ describe('findSymbol graph fallback', () => {
           if (state.status !== 'ok') return;
           await rm(getSubprojectShardPath(rootDir, state.data.subprojects[0].id), { force: true });
         },
-        expected: { source_mode: 'direct', graph_status: 'missing', completeness: 'fallback', fallback_reason: 'shard_missing' },
+        expected: { source_mode: 'graph', graph_status: 'missing', completeness: 'unavailable', graph_unavailable_reason: 'shard_missing' },
       },
       {
         name: 'corrupt shard',
@@ -369,7 +351,7 @@ describe('findSymbol graph fallback', () => {
           if (state.status !== 'ok') return;
           await writeFile(getSubprojectShardPath(rootDir, state.data.subprojects[0].id), '{corrupt', 'utf8');
         },
-        expected: { source_mode: 'direct', graph_status: 'error', completeness: 'fallback', fallback_reason: 'shard_corrupt' },
+        expected: { source_mode: 'graph', graph_status: 'error', completeness: 'unavailable', graph_unavailable_reason: 'shard_corrupt' },
       },
       {
         name: 'incompatible shard',
@@ -381,7 +363,7 @@ describe('findSymbol graph fallback', () => {
           const artifact = JSON.parse(await readFile(path, 'utf8'));
           await writeFile(path, `${JSON.stringify({ ...artifact, schemaVersion: 1 })}\n`, 'utf8');
         },
-        expected: { source_mode: 'direct', graph_status: 'incompatible', completeness: 'fallback', fallback_reason: 'shard_incompatible' },
+        expected: { source_mode: 'graph', graph_status: 'incompatible', completeness: 'unavailable', graph_unavailable_reason: 'shard_incompatible' },
       },
       {
         name: 'oversized shard',
@@ -393,7 +375,7 @@ describe('findSymbol graph fallback', () => {
           await writeFile(path, '{}', 'utf8');
           await truncate(path, 256 * 1024 * 1024 + 1);
         },
-        expected: { source_mode: 'direct', graph_status: 'error', completeness: 'fallback', fallback_reason: 'shard_oversized' },
+        expected: { source_mode: 'graph', graph_status: 'error', completeness: 'unavailable', graph_unavailable_reason: 'shard_oversized' },
       },
       {
         name: 'partial state',
@@ -403,7 +385,7 @@ describe('findSymbol graph fallback', () => {
           if (state.status !== 'ok') return;
           await writeWorkspaceGraphState(rootDir, { ...state.data, status: 'partial' });
         },
-        expected: { source_mode: 'hybrid', graph_status: 'partial', completeness: 'fallback', fallback_reason: 'graph_partial' },
+        expected: { source_mode: 'graph', graph_status: 'partial', completeness: 'unavailable', graph_unavailable_reason: 'graph_partial' },
       },
       {
         name: 'coverage unproven',
@@ -416,23 +398,20 @@ describe('findSymbol graph fallback', () => {
           delete artifact.javaSymbolCoverage;
           await writeFile(path, `${JSON.stringify(artifact)}\n`, 'utf8');
         },
-        expected: { source_mode: 'direct', graph_status: 'partial', completeness: 'fallback', fallback_reason: 'coverage_unproven' },
+        expected: { source_mode: 'graph', graph_status: 'partial', completeness: 'unavailable', graph_unavailable_reason: 'coverage_unproven' },
       },
     ] as const;
 
     for (const testCase of cases) {
       await buildWorkspaceGraph(rootDir);
       await testCase.mutate();
-      await writeFile(join(rootDir, '.pi/code-research.json'), '{"graph":{"enable":false}}\n', 'utf8');
-      const direct = await resolveFindSymbol(rootDir, { path: 'src/main/java/app/Service.java', symbol: 'target', language: 'java', search_mode: 'contains' });
-      await writeFile(join(rootDir, '.pi/code-research.json'), '{"graph":{"enable":true}}\n', 'utf8');
       const resolution = await resolveFindSymbol(rootDir, { path: 'src/main/java/app/Service.java', symbol: 'target', language: 'java', search_mode: 'contains' });
-      expect(normalizeSymbolResults(resolution.results)).toEqual(normalizeSymbolResults(direct.results));
+      expect(resolution.results.map((result) => result.symbol)).toEqual(testCase.name === 'fresh' || testCase.name === 'partial state' ? ['targetValue'] : []);
       expect(resolution.diagnostics).toMatchObject(testCase.expected);
     }
   });
 
-  it('falls back to direct lookup when the graph is stale', async () => {
+  it('returns no symbols when the graph is stale', async () => {
     const rootDir = await createProject({
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'src/service.ts': `export function oldHelper(): void {}\n`,
@@ -453,9 +432,7 @@ describe('findSymbol graph fallback', () => {
       include_signature: true,
     });
 
-    expect(results).toHaveLength(1);
-    expect(results[0].symbol).toBe('freshHelper');
-    expect(results[0].signature).toContain('freshHelper');
+    expect(results).toHaveLength(0);
   });
 
   it('reuses safely validated shard reads across repeated unchanged warm graph queries', async () => {
@@ -525,9 +502,9 @@ describe('findSymbol graph fallback', () => {
     const shardPath = getSubprojectShardPath(rootDir, state.data.subprojects[0].id);
     await writeFile(shardPath, '{corrupt', 'utf8');
 
-    const fallback = await findSymbol(rootDir, { path: 'src', symbol: 'afterRebuild', language: 'ts' });
-    expect(fallback).toHaveLength(1);
-    expect(getSubprojectGraphShardCacheStats().entryCount).toBe(0);
+    const followUp = await findSymbol(rootDir, { path: 'src', symbol: 'afterRebuild', language: 'ts' });
+    expect(followUp).toHaveLength(0);
+    expect(getSubprojectGraphShardCacheStats().entryCount).toBeLessThanOrEqual(1);
   });
 
   it('bounds cached shards with LRU eviction and supports explicit clear for monorepos', async () => {
@@ -616,8 +593,9 @@ describe('findSymbol graph fallback', () => {
     expect(results).toHaveLength(0);
   });
 
-  it('finds TSX arrow function components with direct fallback when no graph exists', async () => {
+  it('finds TSX arrow function components with graph-only lookup when no graph exists', async () => {
     const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'src/ImageUploader.tsx': `export const ImageUploader = ({ label }: { label: string }) => {\n  return <section><span>{label}</span></section>;\n};\n`,
     });
 
@@ -646,17 +624,13 @@ describe('findSymbol graph fallback', () => {
       'src/main/java/module-info.java': `module app.module { }\n`,
     });
 
-    await writeFile(join(rootDir, '.pi/code-research.json'), '{"graph":{"enable":false}}\n', 'utf8');
-    const direct = await resolveFindSymbol(rootDir, { path: 'src/main/java', symbol: 'User', language: 'java', search_mode: 'contains' });
-
-    await writeFile(join(rootDir, '.pi/code-research.json'), '{"graph":{"enable":true}}\n', 'utf8');
     await buildWorkspaceGraph(rootDir);
     const graph = await resolveFindSymbol(rootDir, { path: 'src/main/java', symbol: 'User', language: 'java', search_mode: 'contains' });
     const packageQuery = await resolveFindSymbol(rootDir, { path: 'src/main/java', symbol: 'app.service', language: 'java', search_mode: 'exact' });
     const moduleQuery = await resolveFindSymbol(rootDir, { path: 'src/main/java', symbol: 'app.module', language: 'java', declaration_kind: 'module' });
 
-    expect(normalizeSymbolResults(graph.results)).toEqual(normalizeSymbolResults(direct.results));
-    expect(graph.diagnostics).toMatchObject({ source_mode: 'graph', graph_status: 'fresh', completeness: 'complete', fallback_reason: null });
+    expect(graph.results.map((result) => result.symbol)).toEqual(['UserDraft', 'email', 'UserKind', 'ADMIN', 'USER']);
+    expect(graph.diagnostics).toMatchObject({ source_mode: 'graph', graph_status: 'fresh', completeness: 'complete', graph_unavailable_reason: null });
     expect(packageQuery.results[0]).toMatchObject({ declaration_kind: 'package', kind: 'variable' });
     expect(moduleQuery.results[0]).toMatchObject({ declaration_kind: 'module', kind: 'variable' });
   });
@@ -677,31 +651,26 @@ describe('findSymbol graph fallback', () => {
 
     expect(resolution.results).toHaveLength(1);
     expect(resolution.diagnostics.graph_status).toBe('fresh');
-    expect(resolution.diagnostics.source_mode).toBe('hybrid');
-    expect(resolution.diagnostics.fallback_reason).not.toBe('graph_disabled');
+    expect(resolution.diagnostics.source_mode).toBe('graph');
+    expect(resolution.diagnostics.graph_unavailable_reason).toBeNull();
   });
 
-  it('uses fresh java graph authority for mixed-case file paths without fallback', async () => {
+  it('uses fresh java graph authority for mixed-case file paths without follow_up', async () => {
     const rootDir = await createProject({
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'src/main/java/app/B.java': `package app;\n\npublic class B {\n  public void targetUpper() {}\n}\n`,
       'src/main/java/app/b.java': `package app;\n\npublic class b {\n  public void targetLower() {}\n}\n`,
     });
 
-    await writeFile(join(rootDir, '.pi/code-research.json'), '{"graph":{"enable":false}}\n', 'utf8');
-    const direct = await resolveFindSymbol(rootDir, { path: 'src/main/java/app', symbol: 'target', language: 'java', search_mode: 'contains' });
-
-    await writeFile(join(rootDir, '.pi/code-research.json'), '{"graph":{"enable":true}}\n', 'utf8');
     await buildWorkspaceGraph(rootDir);
     const graph = await resolveFindSymbol(rootDir, { path: 'src/main/java/app', symbol: 'target', language: 'java', search_mode: 'contains' });
 
-    expect(normalizeSymbolResults(graph.results)).toEqual(normalizeSymbolResults(direct.results));
     expect(graph.results.map((result) => result.symbol)).toEqual(['targetLower', 'targetUpper']);
     expect(graph.diagnostics).toMatchObject({
       source_mode: 'graph',
       graph_status: 'fresh',
       completeness: 'complete',
-      fallback_reason: null,
+      graph_unavailable_reason: null,
     });
   });
 
@@ -730,14 +699,6 @@ describe('findSymbol graph fallback', () => {
       { symbol: 'target', search_mode: 'prefix' as const, declaration_kind: 'enhanced_for_variable' as const },
     ];
 
-    await writeFile(join(rootDir, '.pi/code-research.json'), '{"graph":{"enable":false}}\n', 'utf8');
-    const direct = await Promise.all(queries.map((query) => resolveFindSymbol(rootDir, {
-      path: 'src/main/java',
-      language: 'java',
-      ...query,
-    })));
-
-    await writeFile(join(rootDir, '.pi/code-research.json'), '{"graph":{"enable":true}}\n', 'utf8');
     await buildWorkspaceGraph(rootDir);
     const graph = await Promise.all(queries.map((query) => resolveFindSymbol(rootDir, {
       path: 'src/main/java',
@@ -746,41 +707,33 @@ describe('findSymbol graph fallback', () => {
     })));
 
     for (let index = 0; index < queries.length; index += 1) {
-      expect(normalizeSymbolResults(graph[index].results)).toEqual(normalizeSymbolResults(direct[index].results));
       expect(graph[index].diagnostics).toMatchObject({
         source_mode: 'graph',
         graph_status: 'fresh',
         completeness: 'complete',
-        fallback_reason: null,
+        graph_unavailable_reason: null,
       });
     }
 
     const directoryExcludedKinds = new Set(['package', 'parameter', 'local_variable', 'type_parameter', 'enhanced_for_variable']);
     for (const index of [0, 1, 2, 3]) {
-      expect(direct[index].results.filter((result) => directoryExcludedKinds.has(result.declaration_kind ?? ''))).toEqual([]);
       expect(graph[index].results.filter((result) => directoryExcludedKinds.has(result.declaration_kind ?? ''))).toEqual([]);
     }
     expect(graph[2].results.map((result) => result.symbol)).toEqual(['targetMethod', 'targetVisible']);
     expect(graph[3].results.map((result) => result.symbol)).toEqual(['targetMethod', 'targetVisible']);
-    expect(direct[4].results[0]).toMatchObject({ declaration_kind: 'package', symbol: 'app.mixed' });
     expect(graph[4].results[0]).toMatchObject({ declaration_kind: 'package', symbol: 'app.mixed' });
-    expect(direct[5].results[0]).toMatchObject({ declaration_kind: 'parameter', symbol: 'targetParameter' });
     expect(graph[5].results[0]).toMatchObject({ declaration_kind: 'parameter', symbol: 'targetParameter' });
-    expect(direct[6].results[0]).toMatchObject({ declaration_kind: 'local_variable', symbol: 'targetLocal' });
     expect(graph[6].results[0]).toMatchObject({ declaration_kind: 'local_variable', symbol: 'targetLocal' });
-    expect(direct[7].results[0]).toMatchObject({ declaration_kind: 'type_parameter', symbol: 'TTarget' });
     expect(graph[7].results[0]).toMatchObject({ declaration_kind: 'type_parameter', symbol: 'TTarget' });
-    expect(direct[8].results[0]).toMatchObject({ declaration_kind: 'enhanced_for_variable', symbol: 'targetItem' });
     expect(graph[8].results[0]).toMatchObject({ declaration_kind: 'enhanced_for_variable', symbol: 'targetItem' });
   });
 
-  it('keeps broad java interface implementation context truthful and duplicate-free in direct and graph modes', async () => {
+  it('keeps broad java interface implementation context truthful and duplicate-free in graph mode', async () => {
     const files = {
       'src/main/java/app/Task.java': `package app;\n\npublic interface Task {}\n`,
       'src/main/java/app/WorkerBase.java': `package app;\n\npublic class WorkerBase implements Task {}\n`,
       'src/main/java/app/WorkerRecord.java': `package app;\n\npublic record WorkerRecord(String name) implements Task {}\n`,
     };
-    const directRoot = await createProject(files);
     const graphRoot = await createProject({
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       ...files,
@@ -788,11 +741,6 @@ describe('findSymbol graph fallback', () => {
 
     await buildWorkspaceGraph(graphRoot);
 
-    const direct = await resolveFindSymbol(directRoot, {
-      path: 'src/main/java',
-      symbol: 'Task',
-      language: 'java',
-    });
     const graph = await resolveFindSymbol(graphRoot, {
       path: 'src/main/java',
       symbol: 'Task',
@@ -805,7 +753,7 @@ describe('findSymbol graph fallback', () => {
       kind: 'interface',
     });
 
-    const normalizeWithImplementations = (results: typeof direct.results) => results.map((result) => ({
+    const normalizeWithImplementations = (results: typeof graph.results) => results.map((result) => ({
       ...normalizeSymbolResults([result])[0],
       file: result.file.replace(/\\/g, '/').split('/src/main/java/')[1],
       implementations: (result.implementation_locations ?? []).map((location) => ({
@@ -814,22 +762,20 @@ describe('findSymbol graph fallback', () => {
         declaration_kind: location.declaration_kind,
       })).sort((a, b) => a.file.localeCompare(b.file) || a.symbol.localeCompare(b.symbol)),
     }));
-    const implementationSymbols = (results: typeof direct.results) => new Set(
+    const implementationSymbols = (results: typeof graph.results) => new Set(
       results.flatMap((result) => result.implementation_locations ?? []).map((location) => location.symbol)
     );
 
-    expect(direct.results).toHaveLength(1);
     expect(graph.results).toHaveLength(1);
     expect(exactInterface.results).toHaveLength(1);
-    expect(implementationSymbols(direct.results)).toEqual(new Set(['WorkerBase', 'WorkerRecord']));
     expect(implementationSymbols(graph.results)).toEqual(new Set(['WorkerBase', 'WorkerRecord']));
     expect(implementationSymbols(exactInterface.results)).toEqual(new Set(['WorkerBase', 'WorkerRecord']));
-    expect(normalizeWithImplementations(graph.results)).toEqual(normalizeWithImplementations(direct.results));
+    expect(normalizeWithImplementations(graph.results)).toEqual(normalizeWithImplementations(exactInterface.results));
     expect(graph.results[0]?.implementation_locations?.map((location) => location.symbol)).toEqual(['WorkerBase', 'WorkerRecord']);
     expect(exactInterface.results[0]?.implementation_locations?.map((location) => location.symbol)).toEqual(['WorkerBase', 'WorkerRecord']);
     expect(new Set(graph.results[0]?.implementation_locations?.map((location) => `${location.file}:${location.symbol}`)).size).toBe(2);
     if (graph.diagnostics.source_mode === 'graph') {
-      expect(graph.diagnostics).toMatchObject({ completeness: 'complete', fallback_reason: null });
+      expect(graph.diagnostics).toMatchObject({ completeness: 'complete', graph_unavailable_reason: null });
     }
   });
 });

@@ -8,11 +8,11 @@ export function registerCodeChangeSurfaceTool(pi: any) {
     name: 'code_change_surface',
     label: 'Code Change Surface',
     description: 'Build a bounded change map for one supported-language symbol query: contract, implementations, callers, likely tests, validation suggestions, risks, trust, and exact follow-up inspection actions.',
-    promptSnippet: 'Use code_change_surface after workspace_graph_status and before editing a symbol-anchored TS/JS/Java/Go change. Treat low trust or fallback actions as required follow-up inspection, not edit instructions.',
+    promptSnippet: 'Use code_change_surface after workspace_graph_status and before editing a symbol-anchored TS/JS/Java/Go change. Treat low trust or follow_up actions as required inspection, not edit instructions.',
     promptGuidelines: [
       'Provide path and query; add language and kind when known to avoid ambiguous symbols.',
       'Use this for one symbol-anchored change surface, not broad natural-language planning.',
-      'Inspect fallback actions with code_find or code_call_hierarchy before editing when fallback.required is true.',
+      'Inspect follow_up actions with code_find or code_call_hierarchy before editing when follow_up.required is true.',
       'Validation suggestions are heuristic and file-oriented; do not treat them as exact project runner commands.',
     ],
     parameters: Type.Object({

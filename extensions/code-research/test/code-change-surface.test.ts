@@ -11,8 +11,12 @@ const renderTheme = { fg: (_name: string, text: string) => text, bold: (text: st
 async function createProject(prefix: string, files: Record<string, string>): Promise<string> {
   const rootDir = join(tmpdir(), `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   await mkdir(rootDir, { recursive: true });
+  const effectiveFiles = files['.pi/code-research.json'] === undefined
+    ? { '.pi/code-research.json': `{"graph":{"enable":true}}
+`, ...files }
+    : files;
 
-  for (const [relativePath, content] of Object.entries(files)) {
+  for (const [relativePath, content] of Object.entries(effectiveFiles)) {
     const fullPath = join(rootDir, relativePath);
     await mkdir(join(fullPath, '..'), { recursive: true });
     await writeFile(fullPath, content, 'utf8');
@@ -60,7 +64,7 @@ describe('code_change_surface', () => {
     ]);
     expect(surface.risks).toContain('Interface-mediated or heuristic edges are present; inspect contract and concrete implementations before editing.');
     expect(surface.trust.level).toBe('medium');
-    expect(surface.fallback.required).toBe(false);
+    expect(surface.follow_up.required).toBe(false);
     expect(surface.validation_suggestions[0]).toContain('Review likely affected test files');
   });
 
@@ -138,7 +142,7 @@ describe('code_change_surface', () => {
     ]);
   });
 
-  it('reports concrete fallback inspection needs instead of guessing when the anchor is missing', async () => {
+  it('reports concrete follow_up inspection needs instead of guessing when the anchor is missing', async () => {
     const rootDir = await createProject('pi-change-surface-missing', {
       'src/service.ts': `export function run(): void {}\n`,
     });
@@ -150,10 +154,10 @@ describe('code_change_surface', () => {
       kind: 'function',
     });
 
-    expect(surface.status).toBe('needs_fallback');
+    expect(surface.status).toBe('needs_unavailable');
     expect(surface.contract.items).toEqual([]);
-    expect(surface.fallback.required).toBe(true);
-    expect(surface.fallback.actions).toEqual(expect.arrayContaining([
+    expect(surface.follow_up.required).toBe(true);
+    expect(surface.follow_up.actions).toEqual(expect.arrayContaining([
       expect.objectContaining({ tool: 'code_find', params: expect.objectContaining({ query: 'missingSymbol', relation: 'declaration' }) }),
       expect.objectContaining({ tool: 'code_find', params: expect.objectContaining({ query: 'missingSymbol', relation: 'references' }) }),
     ]));
@@ -234,7 +238,7 @@ describe('code_change_surface', () => {
     expect(surface.content).toContain('Test reporting: exhaustive');
   });
 
-  it('registers schema and renders compact trust plus fallback state', async () => {
+  it('registers schema and renders compact trust plus follow_up state', async () => {
     const tool = registerTool();
     expect(tool.name).toBe('code_change_surface');
     expect(JSON.stringify(tool.parameters.required)).toContain('path');
@@ -245,11 +249,11 @@ describe('code_change_surface', () => {
     expect(JSON.stringify(tool.parameters)).toContain('caller_mode');
     expect(JSON.stringify(tool.parameters)).not.toContain('py');
 
-    const result = { content: [{ type: 'text', text: 'full content marker' }], details: { query: 'target', path: 'src/target.ts', status: 'ready', trust: { level: 'medium' }, fallback: { required: false }, summary: { contract: { returned: 1, total: 1 }, implementations: { returned: 1, total: 1 }, callers: { returned: 5, total: 8 }, likely_tests: { returned: 0, total: 0 } } } };
+    const result = { content: [{ type: 'text', text: 'full content marker' }], details: { query: 'target', path: 'src/target.ts', status: 'ready', trust: { level: 'medium' }, follow_up: { required: false }, summary: { contract: { returned: 1, total: 1 }, implementations: { returned: 1, total: 1 }, callers: { returned: 5, total: 8 }, likely_tests: { returned: 0, total: 0 } } } };
     const compact = tool.renderResult(result, { expanded: false, isPartial: false }, renderTheme).render(120).join('\n');
     expect(compact).toContain('code_change_surface');
     expect(compact).toContain('trust=medium');
-    expect(compact).toContain('fallback=no');
+    expect(compact).toContain('follow_up=no');
     expect(compact).toContain('callers 5/8');
     expect(compact).not.toContain('full content marker');
   });
