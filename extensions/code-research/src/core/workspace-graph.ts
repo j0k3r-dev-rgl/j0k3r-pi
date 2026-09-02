@@ -23,6 +23,7 @@ import {
   TYPESCRIPT_COMPILER_MODEL_VERSION,
   TYPESCRIPT_GRAMMAR_VERSION,
   TYPESCRIPT_SYMBOL_COVERAGE_MODEL_VERSION,
+  validateSubprojectGraphShard,
 } from './graph-schema.js';
 import {
   ensureWorkspaceGraphGitignore,
@@ -168,7 +169,11 @@ async function refreshChangedSubprojectShards(
       continue;
     }
 
-    const shard = await buildSubprojectShard(projectRoot, subproject.absoluteRoot, subproject.id, subproject.root, subproject.markers, generation);
+    const previousShardResult = await readSubprojectGraphShard(projectRoot, subproject.id, { generation: previous.generation });
+    if (previousShardResult.status !== 'ok') return undefined;
+
+    const rebuiltShard = await buildSubprojectShard(projectRoot, subproject.absoluteRoot, subproject.id, subproject.root, subproject.markers, generation);
+    const shard = createSafeFileIncrementalShard(previousShardResult.data, rebuiltShard, subproject.changedFiles, generation) ?? rebuiltShard;
     if (shard.nodes.length === 0) workspaceStatus = 'partial';
     const shardPath = `graphs/${subproject.id}.json`;
     await writeSubprojectGraphShard(projectRoot, subproject.id, shard);
@@ -343,6 +348,139 @@ async function buildSubprojectShard(
     javaSymbolCoverage,
     goSymbolCoverage,
   });
+}
+
+function createSafeFileIncrementalShard(
+  previous: SubprojectGraphShard,
+  rebuilt: SubprojectGraphShard,
+  changedFiles: string[],
+  generation: number
+): SubprojectGraphShard | undefined {
+  if (previous.subprojectId !== rebuilt.subprojectId) return undefined;
+  const changed = new Set(changedFiles);
+  if (changed.size === 0) return undefined;
+
+  const previousFilePaths = new Set(previous.nodes.filter((node): node is Extract<GraphNode, { kind: 'file' }> => node.kind === 'file').map((node) => node.path));
+  const rebuiltFilePaths = new Set(rebuilt.nodes.filter((node): node is Extract<GraphNode, { kind: 'file' }> => node.kind === 'file').map((node) => node.path));
+  for (const file of changed) {
+    if (!previousFilePaths.has(file) && rebuiltFilePaths.has(file)) return undefined;
+    if (!previousFilePaths.has(file) && !rebuiltFilePaths.has(file)) return undefined;
+  }
+
+  if (!hasStableUntouchedFiles(previous, rebuilt, changed)) return undefined;
+  if (!hasSafeChangedFileTopology(previous, rebuilt, changed)) return undefined;
+
+  const previousAffected = collectFileScopedNodeIds(previous, changed);
+  const rebuiltAffected = collectFileScopedNodeIds(rebuilt, changed);
+  const nodes = [
+    ...previous.nodes.filter((node) => !previousAffected.has(node.id)),
+    ...rebuilt.nodes.filter((node) => rebuiltAffected.has(node.id)),
+  ];
+  const edgesById = new Map<string, GraphEdge>();
+  for (const edge of previous.edges) {
+    if (previousAffected.has(edge.from) || previousAffected.has(edge.to)) continue;
+    edgesById.set(edge.id, edge);
+  }
+  for (const edge of rebuilt.edges) {
+    if (rebuiltAffected.has(edge.from) || rebuiltAffected.has(edge.to)) edgesById.set(edge.id, edge);
+  }
+
+  const candidate = createBaseArtifact({
+    subprojectId: previous.subprojectId,
+    generation,
+    nodes,
+    edges: [...edgesById.values()],
+    typescriptSymbolCoverage: rebuilt.typescriptSymbolCoverage,
+    javaSymbolCoverage: rebuilt.javaSymbolCoverage,
+    goSymbolCoverage: rebuilt.goSymbolCoverage,
+  });
+  return validateSubprojectGraphShard(candidate) ? candidate : undefined;
+}
+
+function collectFileScopedNodeIds(shard: SubprojectGraphShard, files: Set<string>): Set<string> {
+  const ids = new Set<string>();
+  for (const node of shard.nodes) {
+    if (node.kind === 'file' && files.has(node.path)) ids.add(node.id);
+    if (node.kind === 'symbol' && files.has(node.file)) ids.add(node.id);
+  }
+  return ids;
+}
+
+function hasStableUntouchedFiles(previous: SubprojectGraphShard, rebuilt: SubprojectGraphShard, changed: Set<string>): boolean {
+  const previousFiles = previous.nodes.filter((node): node is Extract<GraphNode, { kind: 'file' }> => node.kind === 'file' && !changed.has(node.path));
+  const rebuiltFileIds = new Set(rebuilt.nodes.filter((node): node is Extract<GraphNode, { kind: 'file' }> => node.kind === 'file' && !changed.has(node.path)).map((node) => node.id));
+  for (const file of previousFiles) {
+    if (!rebuiltFileIds.has(file.id)) return false;
+  }
+  return true;
+}
+
+function hasSafeChangedFileTopology(previous: SubprojectGraphShard, rebuilt: SubprojectGraphShard, changed: Set<string>): boolean {
+  const previousFiles = new Set(previous.nodes.filter((node): node is Extract<GraphNode, { kind: 'file' }> => node.kind === 'file').map((node) => node.path));
+  const rebuiltFiles = new Set(rebuilt.nodes.filter((node): node is Extract<GraphNode, { kind: 'file' }> => node.kind === 'file').map((node) => node.path));
+  const retainedChanged = new Set([...changed].filter((file) => previousFiles.has(file) && rebuiltFiles.has(file)));
+  const deletedChanged = new Set([...changed].filter((file) => previousFiles.has(file) && !rebuiltFiles.has(file)));
+
+  const previousRetained = collectFileScopedNodeIds(previous, retainedChanged);
+  const rebuiltRetained = collectFileScopedNodeIds(rebuilt, retainedChanged);
+  if (!sameStringSet(previousRetained, rebuiltRetained)) return false;
+
+  const previousDeleted = collectFileScopedNodeIds(previous, deletedChanged);
+  if (publicTopologyFingerprints(previous, deletedChanged).size > 0) return false;
+  if (inboundFingerprints(previous, previousDeleted).size > 0) return false;
+
+  const previousPublic = publicTopologyFingerprints(previous, retainedChanged);
+  const rebuiltPublic = publicTopologyFingerprints(rebuilt, retainedChanged);
+  if (!sameStringSet(previousPublic, rebuiltPublic)) return false;
+
+  const previousRelationships = relationshipFingerprints(previous, previousRetained);
+  const rebuiltRelationships = relationshipFingerprints(rebuilt, rebuiltRetained);
+  if (!sameStringSet(previousRelationships, rebuiltRelationships)) return false;
+
+  const previousInbound = inboundFingerprints(previous, previousRetained);
+  const rebuiltInbound = inboundFingerprints(rebuilt, rebuiltRetained);
+  return sameStringSet(previousInbound, rebuiltInbound);
+}
+
+function publicTopologyFingerprints(shard: SubprojectGraphShard, files: Set<string>): Set<string> {
+  const result = new Set<string>();
+  for (const node of shard.nodes) {
+    if (node.kind !== 'symbol' || !files.has(node.file)) continue;
+    const topologySensitive = node.exported || node.declarationKind === 'interface' || node.declarationKind === 'interface_method' || node.declarationKind === 'property' || node.declarationKind === 'call_signature' || node.declarationKind === 'construct_signature' || node.declarationKind === 'index_signature' || node.declarationKind === 'type_alias';
+    if (!topologySensitive) continue;
+    result.add([node.id, node.language, node.symbolKind, node.name, node.owner ?? '', node.declarationKind ?? '', node.qualifiedName ?? '', node.signature ?? '', node.exportedName ?? ''].join('\u0000'));
+  }
+  return result;
+}
+
+function relationshipFingerprints(shard: SubprojectGraphShard, scopedIds: Set<string>): Set<string> {
+  const result = new Set<string>();
+  for (const edge of shard.edges) {
+    if (!scopedIds.has(edge.from)) continue;
+    if (edge.kind === 'contains') continue;
+    result.add(edgeTopologyFingerprint(edge));
+  }
+  return result;
+}
+
+function inboundFingerprints(shard: SubprojectGraphShard, scopedIds: Set<string>): Set<string> {
+  const result = new Set<string>();
+  for (const edge of shard.edges) {
+    if (scopedIds.has(edge.from) || !scopedIds.has(edge.to)) continue;
+    if (edge.kind === 'contains') continue;
+    result.add(edgeTopologyFingerprint(edge));
+  }
+  return result;
+}
+
+function edgeTopologyFingerprint(edge: GraphEdge): string {
+  return [edge.kind, edge.from, edge.to, edge.targetStatus ?? '', edge.resolution ?? '', edge.calledAs ?? '', edge.importSource ?? '', edge.externalName ?? '', edge.externalKind ?? '', edge.externalOwner ?? '', edge.reason ?? ''].join('\u0000');
+}
+
+function sameStringSet(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const item of a) if (!b.has(item)) return false;
+  return true;
 }
 
 function createLogicalSymbolKey(language: 'ts' | 'js' | 'java' | 'go', subprojectId: string, file: string, owner: string | undefined, qualifiedName: string | undefined, declarationKind: string | undefined, signature: string | undefined): string {

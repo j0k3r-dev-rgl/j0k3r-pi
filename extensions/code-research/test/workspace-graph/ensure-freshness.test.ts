@@ -202,6 +202,92 @@ describe('workspace graph ensure freshness', () => {
     expect(apiShardStatAfter.mtimeMs).toBeGreaterThanOrEqual(apiShardStatBefore.mtimeMs);
   });
 
+  it('updates an existing file in place when public topology and relationships stay stable', async () => {
+    const rootDir = await createProject({
+      'package.json': `{"name":"fixture","type":"module"}\n`,
+      'src/service.ts': `export function stableService() { return 1; }\n`,
+      'src/consumer.ts': `import { stableService } from './service.js';\nexport function consumer() { return stableService(); }\n`,
+    });
+
+    const built = await buildWorkspaceGraph(rootDir);
+    const subprojectId = built.state.subprojects[0]?.id;
+    expect(subprojectId).toBeTruthy();
+    if (!subprojectId) return;
+
+    await writeFile(join(rootDir, 'src/service.ts'), `export function stableService() { return 2; }\n`, 'utf8');
+
+    const after = await ensureWorkspaceGraphFreshness(rootDir);
+    expect(after.changed).toBe(true);
+    const shardResult = await readSubprojectGraphShard(rootDir, subprojectId, { generation: after.state.subprojects[0]?.generation });
+    expect(shardResult.status).toBe('ok');
+    if (shardResult.status !== 'ok') return;
+    expect(shardResult.data.nodes.filter((node) => node.kind === 'file' && node.path === 'src/service.ts')).toHaveLength(1);
+    expect(shardResult.data.edges.every((edge) => shardResult.data.nodes.some((node) => node.id === edge.from) && (edge.to.startsWith('external:') || shardResult.data.nodes.some((node) => node.id === edge.to)))).toBe(true);
+
+    const references = await findReferences(rootDir, {
+      path: 'src/service.ts',
+      symbol: 'stableService',
+      language: 'ts',
+      kind: 'function',
+      reference_kinds: ['call'],
+    });
+    expect(references).toHaveLength(1);
+    expect(references[0]?.file).toBe(join(rootDir, 'src/consumer.ts'));
+  });
+
+  it('removes stale graph nodes and edges when a private file is safely deleted', async () => {
+    const rootDir = await createProject({
+      'package.json': `{"name":"fixture","type":"module"}\n`,
+      'src/service.ts': `export function stableService() { return 1; }\n`,
+      'src/private.ts': `function privateHelper() { return 1; }\n`,
+    });
+
+    const built = await buildWorkspaceGraph(rootDir);
+    const subprojectId = built.state.subprojects[0]?.id;
+    expect(subprojectId).toBeTruthy();
+    if (!subprojectId) return;
+
+    await writeFile(join(rootDir, 'src/private.ts'), '', 'utf8');
+    const afterEmpty = await ensureWorkspaceGraphFreshness(rootDir);
+    expect(afterEmpty.changed).toBe(true);
+    await import('node:fs/promises').then(({ rm }) => rm(join(rootDir, 'src/private.ts')));
+
+    const afterDelete = await ensureWorkspaceGraphFreshness(rootDir);
+    expect(afterDelete.changed).toBe(true);
+    const shardResult = await readSubprojectGraphShard(rootDir, subprojectId, { generation: afterDelete.state.subprojects[0]?.generation });
+    expect(shardResult.status).toBe('ok');
+    if (shardResult.status !== 'ok') return;
+    expect(shardResult.data.nodes.some((node) => node.kind === 'file' && node.path === 'src/private.ts')).toBe(false);
+    expect(shardResult.data.nodes.some((node) => node.kind === 'symbol' && node.file === 'src/private.ts')).toBe(false);
+    expect(shardResult.data.edges.every((edge) => !edge.from.includes('src/private.ts') && !edge.to.includes('src/private.ts'))).toBe(true);
+  });
+
+  it('falls back to full shard rebuild when an exported signature changes', async () => {
+    const rootDir = await createProject({
+      'package.json': `{"name":"fixture","type":"module"}\n`,
+      'src/api.ts': `export type ApiValue = { value: number };\nexport function apiValue(input: ApiValue) { return input.value; }\n`,
+      'src/consumer.ts': `import { apiValue, type ApiValue } from './api.js';\nexport function consumer(input: ApiValue) { return apiValue(input); }\n`,
+    });
+
+    const built = await buildWorkspaceGraph(rootDir);
+    const subprojectId = built.state.subprojects[0]?.id;
+    expect(subprojectId).toBeTruthy();
+    if (!subprojectId) return;
+
+    await writeFile(join(rootDir, 'src/api.ts'), `export type ApiValue = { value: number; label: string };\nexport function apiValue(input: ApiValue, label: string) { return input.value; }\n`, 'utf8');
+
+    const after = await ensureWorkspaceGraphFreshness(rootDir);
+    expect(after.changed).toBe(true);
+    const shardResult = await readSubprojectGraphShard(rootDir, subprojectId, { generation: after.state.subprojects[0]?.generation });
+    expect(shardResult.status).toBe('ok');
+    if (shardResult.status !== 'ok') return;
+    const apiFunction = shardResult.data.nodes.find((node) => node.kind === 'symbol' && node.file === 'src/api.ts' && node.name === 'apiValue');
+    expect(apiFunction?.kind).toBe('symbol');
+    if (apiFunction?.kind !== 'symbol') return;
+    expect(apiFunction.signature).toContain('label');
+    expect(shardResult.data.edges.some((edge) => edge.reason === 'typescript_type_alias_import' && edge.importSource === './api.js')).toBe(true);
+  });
+
   it('rebuilds when a new source file appears after the graph was already fresh', async () => {
     const rootDir = await createProject({
       'package.json': `{"name":"fixture","type":"module"}\n`,
