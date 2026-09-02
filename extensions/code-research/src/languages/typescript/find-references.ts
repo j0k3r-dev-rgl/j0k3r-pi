@@ -278,6 +278,9 @@ function findMethodReferencesByTypedReceiverTargets(
     if (!matchesRequestedLanguage(file.language, input.language)) continue;
     for (const receiverTarget of receiverTargets) {
       const receivers = collectTypedReceiversForType(index, file, receiverTarget.ownerName, receiverTarget.ownerFile);
+      for (const propertyReference of findObjectLiteralMethodReferences(index, file, input, methodName, receiverTarget)) {
+        results.push(propertyReference);
+      }
       for (const receiver of receivers) {
         const receiverPattern = receiver.includes('.') ? escapeRegExp(receiver) : `(?<![.\\w$])${escapeRegExp(receiver)}`;
         const pattern = new RegExp(`${receiverPattern}\\s*\\.\\s*${escapeRegExp(methodName)}\\s*\\(`, 'g');
@@ -310,6 +313,43 @@ function findMethodReferencesByTypedReceiverTargets(
   return results;
 }
 
+function findObjectLiteralMethodReferences(
+  index: TypeScriptProjectIndex,
+  file: { file: string; source: string; imports: Map<string, any> },
+  input: FindReferencesInput,
+  methodName: string,
+  receiverTarget: { ownerName: string; ownerFile?: string; reason: string }
+): ReferenceLocation[] {
+  const results: ReferenceLocation[] = [];
+  const localTypeNames = collectLocalTypeNames(index, file, receiverTarget.ownerName, receiverTarget.ownerFile);
+  for (const localTypeName of localTypeNames) {
+    const objectPattern = new RegExp(`(?:const|let|var)\\s+[A-Za-z_$][\\w$]*\\s*:\\s*${escapeRegExp(localTypeName)}\\b\\s*=\\s*\\{[\\s\\S]*?\\b${escapeRegExp(methodName)}\\s*(?::|\\()`, 'g');
+    for (const match of findAllRegexPositions(file.source, objectPattern)) {
+      const context = findContext(index, file.file, match.line);
+      results.push({
+        file: file.file,
+        line: match.line,
+        column: match.column,
+        end_line: context?.endLine,
+        end_column: context?.endColumn,
+        symbol: input.symbol,
+        kind: 'method',
+        context_symbol: context?.symbol ?? '<top-level>',
+        context_kind: context?.kind ?? 'function',
+        context_class: context?.className,
+        owner_kind: context?.ownerKind ?? 'module',
+        reference_kind: 'method_reference',
+        called_as: extractCallText(file.source, match.line, match.column),
+        receiver_type: receiverTarget.ownerName,
+        is_application: true,
+        source: 'application',
+        reason: `object-literal implementation of ${receiverTarget.ownerName}`,
+      });
+    }
+  }
+  return results;
+}
+
 function collectImplementedInterfaceNames(index: TypeScriptProjectIndex, target: IndexedCallable): string[] {
   if (!target.ownerName) return [];
   const file = index.files.get(target.file);
@@ -330,12 +370,7 @@ function collectTypedReceiversForType(
   typeFile?: string
 ): Set<string> {
   const receivers = new Set<string>();
-  const localTypeNames = new Set<string>([typeName]);
-  for (const binding of file.imports.values()) {
-    const candidates = resolveTypeScriptImportCandidates(file.file, binding.source, index.projectConfig);
-    const targetFile = candidates.find((candidate) => index.files.has(candidate));
-    if (binding.importedName === typeName && (!typeFile || targetFile === typeFile)) localTypeNames.add(binding.localName);
-  }
+  const localTypeNames = collectLocalTypeNames(index, file, typeName, typeFile);
 
   for (const localTypeName of localTypeNames) {
     const typePattern = new RegExp(`\\b([A-Za-z_$][\\w$]*)\\??\\s*:\\s*${escapeRegExp(localTypeName)}\\b`, 'g');
@@ -347,6 +382,21 @@ function collectTypedReceiversForType(
     }
   }
   return receivers;
+}
+
+function collectLocalTypeNames(
+  index: TypeScriptProjectIndex,
+  file: { file: string; imports: Map<string, any> },
+  typeName: string,
+  typeFile?: string
+): Set<string> {
+  const localTypeNames = new Set<string>([typeName]);
+  for (const binding of file.imports.values()) {
+    const candidates = resolveTypeScriptImportCandidates(file.file, binding.source, index.projectConfig);
+    const targetFile = candidates.find((candidate) => index.files.has(candidate));
+    if (binding.importedName === typeName && (!typeFile || targetFile === typeFile)) localTypeNames.add(binding.localName);
+  }
+  return localTypeNames;
 }
 
 function collectCallableAliasesForFile(index: TypeScriptProjectIndex, file: { file: string; imports: Map<string, any> }, target: IndexedCallable): Set<string> {
@@ -444,6 +494,13 @@ async function findTypeLikeReferences(
       }
 
       for (const match of findAllRegexPositions(file.source, new RegExp(`:\\s*${escapeRegExp(localName)}\\b`, 'g'))) {
+        references.push(createRef(file.file, input, 'type_reference', match.line, match.column, file.source, index));
+      }
+
+      for (const match of findAllRegexPositions(file.source, new RegExp(`\\bas\\s+${escapeRegExp(localName)}\\b`, 'g'))) {
+        references.push(createRef(file.file, input, 'type_reference', match.line, match.column, file.source, index));
+      }
+      for (const match of findAllRegexPositions(file.source, new RegExp(`<\\s*${escapeRegExp(localName)}\\s*>`, 'g'))) {
         references.push(createRef(file.file, input, 'type_reference', match.line, match.column, file.source, index));
       }
     }

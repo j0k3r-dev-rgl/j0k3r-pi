@@ -29,7 +29,7 @@ describe('find_references', () => {
   it('finds TypeScript and JavaScript variable references, class references, and top-level chained calls', async () => {
     const files = {
       'src/constants.ts': `export const LIMIT = 2;\nexport const STATUS = { OPEN: 'open' };\nexport function main(): void {}\nmain().catch(console.error);\n`,
-      'src/consumer.tsx': `import { LIMIT, STATUS } from './constants';\nexport class WidgetError extends Error {}\nexport class Widget {}\nconst value = LIMIT + STATUS.OPEN.length;\nconst widget: Widget = new Widget();\nconst error = new WidgetError('x');\n`,
+      'src/consumer.tsx': `import { LIMIT, STATUS } from './constants';\nexport class WidgetError extends Error {}\nexport class Widget {}\nconst value = LIMIT + STATUS.OPEN.length;\nconst widget: Widget = new Widget();\nconst asserted = {} as Widget;\nconst error = new WidgetError('x');\n`,
       'src/consumer.test.ts': `import { Widget, WidgetError } from './consumer';\nit('uses classes', () => { expect(new Widget()).toBeInstanceOf(Widget); expect(new WidgetError('x')).toBeInstanceOf(Error); });\n`,
     };
     const directRoot = await createProject('pi-find-references-ts-vars-direct', files);
@@ -40,12 +40,28 @@ describe('find_references', () => {
       const limitRefs = await findReferences(root, { path: 'src/constants.ts', symbol: 'LIMIT', language: 'ts', kind: 'variable' });
       const statusRefs = await findReferences(root, { path: 'src/constants.ts', symbol: 'STATUS', language: 'ts', kind: 'variable' });
       const classRefs = await findReferences(root, { path: 'src/consumer.tsx', symbol: 'WidgetError', language: 'ts', kind: 'class' });
+      const inferredClassRefs = await findReferences(root, { path: 'src/consumer.tsx', symbol: 'WidgetError', language: 'ts' });
+      const typeRefs = await findReferences(root, { path: 'src/consumer.tsx', symbol: 'Widget', language: 'ts', kind: 'class' });
       const mainRefs = await findReferences(root, { path: 'src/constants.ts', symbol: 'main', language: 'ts', kind: 'function', reference_kinds: ['call'] });
       expect(limitRefs.map((item) => item.reference_kind)).toContain('read');
       expect(statusRefs.map((item) => item.reference_kind)).toContain('read');
       expect(classRefs.map((item) => item.reference_kind)).toContain('instantiate');
+      expect(inferredClassRefs.map((item) => item.reference_kind)).toContain('instantiate');
+      expect(typeRefs.map((item) => item.reference_kind)).toContain('type_reference');
       expect(mainRefs.map((item) => item.called_as)).toContain('main().catch(console.error)');
     }
+  });
+
+  it('finds TypeScript object-literal method implementations for interface methods', async () => {
+    const rootDir = await createProject('pi-find-references-ts-object-literal-method', {
+      'src/repository.ts': `export interface Repository {\n  save(id: string): Promise<void>;\n}\n`,
+      'test/repository.test.ts': `import type { Repository } from '../src/repository';\nit('uses a fake', async () => {\n  const fake: Repository = {\n    async save(id: string) { void id; },\n  };\n  await fake.save('1');\n});\n`,
+    });
+
+    const refs = await findReferences(rootDir, { path: 'src/repository.ts', symbol: 'save', language: 'ts', kind: 'method' });
+
+    expect(refs.map((item) => item.reference_kind)).toContain('method_reference');
+    expect(refs.map((item) => item.reference_kind)).toContain('call');
   });
 
   it('does not treat callback-consuming call results as callable reference targets', async () => {

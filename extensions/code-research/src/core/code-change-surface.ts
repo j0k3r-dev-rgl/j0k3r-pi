@@ -432,6 +432,7 @@ function followUpHierarchy(input: CodeChangeSurfaceInput, reason: string): Follo
 
 function formatContent(cwd: string, result: Omit<CodeChangeSurfaceResult, 'content'>): string {
   const count = (label: string, section: BoundedSection<unknown>) => `${label}: ${section.returned}/${section.total}${section.omitted > 0 ? ` (${section.omitted} omitted)` : ''}`;
+  const callerLabel = result.kind === 'variable' ? 'Usages/readers to inspect' : 'Production callers to inspect';
   const reporting = (item: SectionReporting): string => {
     const label = item.mode === 'exhaustive' || item.mode === 'exhaustive-truncated' ? `${item.mode} over Code Research semantic evidence` : item.mode;
     const parts = [label];
@@ -447,7 +448,7 @@ function formatContent(cwd: string, result: Omit<CodeChangeSurfaceResult, 'conte
     count('Implementations', result.implementations),
     `Implementation reporting: ${reporting(result.implementation_reporting)}`,
     ...result.implementations.items.map((item) => `- implementation ${rel(cwd, item.file)}:${item.start_line} ${item.qualified_name ?? item.symbol} [${item.kind}]`),
-    count('Callers to inspect', result.callers),
+    count(callerLabel, result.callers),
     `Caller reporting: ${reporting(result.caller_reporting)}`,
     ...result.callers.items.map((item) => `- caller ${rel(cwd, item.file)}:${item.call_line ?? item.line ?? '?'} ${item.class ? `${item.class}.` : ''}${item.symbol}${item.reason ? ` (${item.reason})` : ''}`),
     count('Likely tests', result.likely_tests),
@@ -483,7 +484,7 @@ export async function buildCodeChangeSurface(cwd: string, input: CodeChangeSurfa
   ], keyForLocation, () => 1);
 
   const implementationIncoming = await implementationCallers(cwd, input, implementationItems);
-  const referenceCallers = references.results.filter((item) => !isTestLike(item.file) && (item.reference_kind === 'call' || item.reference_kind === 'callback')).map(referenceToCaller);
+  const referenceCallers = references.results.filter((item) => !isTestLike(item.file) && (input.kind === 'variable' ? item.reference_kind === 'read' || item.reference_kind === 'write' : item.reference_kind === 'call' || item.reference_kind === 'callback')).map(referenceToCaller);
   const callers = uniqueBestBy([...hierarchy.callers.filter((item) => !isTestLike(item.file ?? '')), ...implementationIncoming.callers.filter((item) => !isTestLike(item.file ?? '')), ...referenceCallers], (item) => callerKey(cwd, item), callerMetadataScore);
   const callerLimit = input.caller_mode === 'exhaustive' ? normalizedLimit(input.max_callers, 50) : SECTION_LIMIT;
   const surfaceFiles = [...contractItems, ...implementationItems, ...callers].map((item: any) => item.file).filter((file: unknown): file is string => typeof file === 'string');

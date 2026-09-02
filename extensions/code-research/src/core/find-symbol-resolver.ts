@@ -239,8 +239,9 @@ async function loadJavaInterfaceMethodImplementationContext(
   parsedFiles: ParsedFile[],
   diagnostics: SymbolQueryDiagnosticsBuilder
 ): Promise<ParsedFile[]> {
-  if (isDirectory || explicitLanguage !== 'java' || input.kind !== 'method') return parsedFiles;
-  if (directResults.length === 0) return parsedFiles;
+  if (isDirectory || explicitLanguage !== 'java') return parsedFiles;
+  const needsImplementationContext = directResults.some((item) => item.kind === 'interface' || item.kind === 'method' || item.declaration_kind === 'interface_method');
+  if (!needsImplementationContext) return parsedFiles;
   const indexRoot = await resolveJavaIndexRoot(targetPath).catch(() => undefined);
   if (!indexRoot) return parsedFiles;
   const files = (await collectWorkspaceSourceFiles(indexRoot).catch(() => [])).filter((file) => file.endsWith('.java') && !parsedFiles.some((entry) => entry.path === file));

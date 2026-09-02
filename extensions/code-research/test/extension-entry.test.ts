@@ -77,6 +77,36 @@ describe('code-research extension entry integration', () => {
     expect(result.details.summary).toMatchObject({ returned: 1, total: 1, has_more: false });
   });
 
+  it('executes file-scoped Java interface implementation lookup through code_find', async () => {
+    const tools = registerTools();
+    const codeFind = tools.find((tool) => tool.name === 'code_find');
+    expect(codeFind).toBeDefined();
+
+    const rootDir = await createProject({
+      'src/main/java/ports/Service.java': `package ports;\npublic interface Service {\n  String run();\n}\n`,
+      'src/main/java/impl/LocalService.java': `package impl;\n\nimport ports.Service;\n\npublic class LocalService implements Service {\n  public String run() { return "local"; }\n}\n`,
+    });
+
+    const interfaceResult = await codeFind!.execute('test-call-implementation-interface', {
+      path: 'src/main/java/ports/Service.java',
+      query: 'Service',
+      relation: 'implementation',
+      language: 'java',
+      scope: 'file',
+    }, undefined, undefined, { cwd: rootDir });
+    const methodResult = await codeFind!.execute('test-call-implementation-method', {
+      path: 'src/main/java/ports/Service.java',
+      query: 'run',
+      relation: 'implementation',
+      language: 'java',
+      kind: 'method',
+      scope: 'file',
+    }, undefined, undefined, { cwd: rootDir });
+
+    expect(interfaceResult.details.items.map((item: any) => item.symbol)).toEqual(['LocalService']);
+    expect(methodResult.details.items.map((item: any) => item.qualified_name)).toEqual(['impl.LocalService.run']);
+  });
+
   it('includes bounded source code in declaration output when include_code is requested', async () => {
     const tools = registerTools();
     const codeFind = tools.find((tool) => tool.name === 'code_find');

@@ -352,8 +352,8 @@ function dedupeReferences(references: ReferenceLocation[]): ReferenceLocation[] 
 }
 
 async function findVariableReferences(index: ProjectIndex, rootFile: string, isDirectory: boolean, input: FindReferencesInput): Promise<ReferenceLocation[]> {
-  const target = index.fields.find((field) => field.fieldName === input.symbol && (isDirectory || field.file === rootFile));
-  if (!target) return [];
+  const targets = index.fields.filter((field) => field.fieldName === input.symbol && (isDirectory || field.file === rootFile));
+  if (targets.length === 0) return [];
 
   const sourceCache = new Map<string, string>();
   const getSource = async (file: string) => {
@@ -363,8 +363,8 @@ async function findVariableReferences(index: ProjectIndex, rootFile: string, isD
 
   const references: ReferenceLocation[] = [];
   for (const method of index.methods) {
-    const fieldOwner = resolveFieldOwnerForClass(index, method.qualifiedClassName, target.fieldName);
-    if (!fieldOwner || fieldOwner.qualifiedClassName !== target.qualifiedClassName) continue;
+    const fieldOwner = resolveFieldOwnerForClass(index, method.qualifiedClassName, input.symbol);
+    if (!fieldOwner || !targets.some((target) => fieldOwner.qualifiedClassName === target.qualifiedClassName)) continue;
 
     const source = await getSource(method.file);
     const lines = source.split('\n').slice(method.line - 1, method.node.endPosition.row + 1);

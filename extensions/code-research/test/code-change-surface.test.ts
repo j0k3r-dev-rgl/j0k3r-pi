@@ -183,7 +183,7 @@ describe('code_change_surface', () => {
     expect(surface.callers.omitted).toBe(3);
     expect(surface.caller_reporting.mode).toBe('representative');
     expect(surface.callers.follow_up).toMatchObject({ tool: 'code_find', params: { path: 'src/target.ts', query: 'target', relation: 'references', language: 'ts', kind: 'function' } });
-    expect(surface.content).toContain('Callers to inspect: 5/8 (3 omitted)');
+    expect(surface.content).toContain('Production callers to inspect: 5/8 (3 omitted)');
   });
 
   it('returns exhaustive callers up to max_callers', async () => {
