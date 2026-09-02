@@ -5,16 +5,15 @@ Repo audited: `/home/j0k3r/sias/app`
 
 ## Current Status
 
-Status: **NEEDS_FIX / TYPESCRIPT TYPE ALIASES + UNFILTERED REFERENCES REMAINING**
+Status: **NEEDS_FIX / UNFILTERED TYPESCRIPT REFERENCES REMAINING**
 
 After regenerating the SIAS graph with builder model version `3`, the previous Java P0 class/type/DTO reference failures are resolved on the sampled SIAS regressions.
 
 After the latest extension reload, TypeScript optional-chained calls are also resolved for `code_find relation=references` on the sampled SIAS regression.
 
-Remaining work is concentrated in two TypeScript reference behaviors:
+A Mini-SDD has now been completed for TypeScript type alias declaration and reference support. It passed in-repo verification and needs SIAS retest after extension reload.
 
-1. TypeScript type alias classification and references;
-2. unfiltered TypeScript `relation=references` adjacent-line false positives.
+Remaining confirmed implementation work is concentrated in unfiltered TypeScript `relation=references` adjacent-line false positives.
 
 ## Graph Health
 
@@ -302,41 +301,53 @@ await this.aiLogRepository?.save({ ... })
 
 Status: **resolved on sampled SIAS regression**.
 
-## P1 — TypeScript type alias classification and references fail
+## P1 — TypeScript type alias classification and references
 
-Status: **FAIL**
+Status: **IMPLEMENTED / NEEDS SIAS RETEST AFTER EXTENSION RELOAD**
 
-Observed with:
+A targeted Mini-SDD was completed to fix TypeScript type alias declaration metadata and references.
+
+Implemented change:
 
 ```text
-ReviewAnalysisStatus
+fix-ts-type-alias-references
+status: PASS / archived
+archive: openspec/archive/2026-09-02/fix-ts-type-alias-references/
 ```
 
-Declaration query still reports TypeScript type aliases as `[variable]`.
+What changed:
 
-Failing query:
+- `declaration_kind=type_alias` is preserved and tested in direct and graph-backed declaration flows.
+- Coarse `kind` may remain `variable` for compatibility, but precise callers should use `declaration_kind=type_alias`.
+- Direct TypeScript references now handle type aliases as referenceable symbols when ordinary variable references are empty.
+- Type alias references include type-only/named imports and type-position usages such as annotations and assertions.
+- Workspace graph generation now persists TypeScript type-alias import/read edges with token coordinates.
+- Graph-backed reference queries return those type-alias import/read edges after source removal in regression tests.
+
+Validation performed in Code Research repo:
+
+```bash
+cd /home/j0k3r/.pi/agent/extensions/code-research
+npm test -- test/find-symbol.test.ts test/find-symbol-graph-fallback.test.ts test/find-references.test.ts test/find-references-graph-fallback.test.ts test/workspace-graph/shard-content.test.ts
+npm run typecheck
+```
+
+Result: **PASS**.
+
+Important next-audit instruction:
+
+> Reload/restart the extension or CLI, regenerate/reload the SIAS graph if needed, then retest the `ReviewAnalysisStatus` declaration and references queries below from `/home/j0k3r/sias/app`. If still failing, inspect the TypeScript graph JSON for persisted type-alias import/read edges before debugging resolver filtering.
+
+Previously failing declaration query:
 
 ```text
 code_find path=. query=ReviewAnalysisStatus language=ts relation=declaration
 ```
 
-Observed results include declarations/import-like matches reported as variables:
-
-```text
-back_ia/src/application/ports/output/review-analysis-repository.ts:4 [variable]
-front/app/server/features/review/review.query.server.ts:244 [variable]
-```
-
-References query fails:
+Previously failing references query:
 
 ```text
 code_find path=. query=ReviewAnalysisStatus language=ts relation=references
-```
-
-Observed result:
-
-```text
-0 references
 ```
 
 `rg` baseline:
@@ -345,12 +356,6 @@ Observed result:
 rg -n '\bReviewAnalysisStatus\b' front back_ia --glob '!node_modules/**' --glob '!dist/**' | wc -l
 # 45
 ```
-
-Expected fix:
-
-- classify `export type X = ...` as `type_alias` where possible;
-- `relation=references` should include imports and type positions;
-- if type aliases are internally represented as variables for compatibility, expose this limitation clearly and make `declaration_kind=type_alias` reliable.
 
 ## P1 — TypeScript adjacent-line false positives remain in unfiltered references
 
@@ -650,7 +655,6 @@ toResponse
 TypeScript regression symbols still relevant:
 
 ```text
-ReviewAnalysisStatus
 getDefaultRouteForRole
 buildModulesByDependencyModuleVariables
 asRecord
@@ -660,16 +664,19 @@ loader
 action
 ```
 
-TypeScript regression symbols now passing on sampled SIAS checks:
+TypeScript regression symbols implemented and awaiting or passing sampled SIAS checks:
 
 ```text
 save
+ReviewAnalysisStatus
 ```
 
 ## Recommended Fix Order
 
-1. **TS type alias classification and references**
-   - Fix `ReviewAnalysisStatus` declaration kind and refs.
+1. **Retest TS type alias classification and references after extension reload**
+   - The Mini-SDD `fix-ts-type-alias-references` is implemented and archived.
+   - Retest `ReviewAnalysisStatus` declaration and references from SIAS.
+   - If still failing, inspect the TypeScript graph JSON for type-alias import/read edges first, then resolver filtering.
 
 2. **TS adjacent-line false positives**
    - Ensure unfiltered `relation=references` returns actual symbol lines/spans only.
@@ -690,7 +697,7 @@ Until all TypeScript fixes are complete, keep this guidance:
 ```text
 Code Research is semantic, not a replacement for exhaustive text search.
 Use it first for declarations, implementations, references, and call hierarchy.
-For audit-grade completeness, validate with targeted rg/grep, especially for TypeScript type aliases,
+For audit-grade completeness, validate with targeted rg/grep, especially for unfiltered TypeScript references,
 tests/mocks, framework-reflection entrypoints, generated files, and common names.
 For Java class/type/DTO references, builder model version 3 has fixed the sampled SIAS regressions,
 but keep rg validation for audit-grade changes until broader coverage is proven.
@@ -830,5 +837,16 @@ Remaining TypeScript failures after this retest:
 
 - `ReviewAnalysisStatus` type alias classification/references;
 - unfiltered `relation=references` adjacent-line false positives for `getDefaultRouteForRole`, `buildModulesByDependencyModuleVariables`, and `asRecord`.
+
+### Mini-SDD TypeScript type alias remediation
+
+Completed:
+
+```text
+fix-ts-type-alias-references
+status: PASS / archived
+```
+
+This addressed TypeScript type alias declaration metadata and direct/graph-backed references. The next auditor should reload/restart the extension or CLI, regenerate/reload the SIAS graph if needed, and retest `ReviewAnalysisStatus` from SIAS. If it still fails, inspect the TypeScript graph JSON for persisted type-alias import/read edges before debugging resolver filtering.
 
 No SIAS source files were modified during the audits or remediations.

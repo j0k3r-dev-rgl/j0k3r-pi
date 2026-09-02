@@ -415,6 +415,24 @@ describe('find_references', () => {
     expect(results.find((item) => item.reference_kind === 'read')?.context_symbol).toBe('getCounter');
   });
 
+  it('finds ReviewAnalysisStatus-style type alias imports and type-position reads', async () => {
+    const rootDir = await createProject('pi-find-references-ts-type-alias-direct', {
+      'src/status.ts': `export type ReviewAnalysisStatus = 'pending' | 'complete';\n`,
+      'src/consumer.ts': `import type { ReviewAnalysisStatus } from './status';\n\nconst status: ReviewAnalysisStatus = 'pending';\nconst asserted = 'complete' as ReviewAnalysisStatus;\n`,
+    });
+
+    const results = await findReferences(rootDir, {
+      path: 'src/status.ts',
+      symbol: 'ReviewAnalysisStatus',
+      language: 'ts',
+      kind: 'variable',
+    });
+
+    expect(results.some((item) => item.reference_kind === 'import' && item.file.endsWith('consumer.ts'))).toBe(true);
+    expect(results.filter((item) => item.reference_kind === 'read').map((item) => item.line).sort()).toEqual([3, 4]);
+    expect(results.every((item) => item.line !== 1 || item.file.endsWith('consumer.ts'))).toBe(true);
+  });
+
   it('finds JavaScript variable read and write references for obvious cases', async () => {
     const rootDir = await createProject('pi-find-references-js-variable', {
       'src/state.js': `export let counter = 0;\n\nexport function setCounter(value) {\n  counter = value;\n}\n\nexport function getCounter() {\n  return counter;\n}\n`,

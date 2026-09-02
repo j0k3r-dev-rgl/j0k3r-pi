@@ -371,6 +371,28 @@ describe('findSymbol', () => {
     expect(narrowed[0].declaration_kind).toBe('type_alias');
   });
 
+  it('finds exported ReviewAnalysisStatus-style type aliases by declaration kind', async () => {
+    const file = await writeTestFile(
+      'review-analysis-status.ts',
+      `export type ReviewAnalysisStatus = 'pending' | 'complete';\n`
+    );
+
+    const results = await findSymbol(tmpDir, {
+      path: file,
+      symbol: 'ReviewAnalysisStatus',
+      language: 'ts',
+      declaration_kind: 'type_alias',
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      kind: 'variable',
+      declaration_kind: 'type_alias',
+      symbol: 'ReviewAnalysisStatus',
+      is_definition: true,
+    });
+  });
+
   it('treats nested function declarations as definitions', async () => {
     const file = await writeTestFile(
       'nested.ts',

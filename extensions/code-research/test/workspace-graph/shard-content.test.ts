@@ -158,6 +158,38 @@ describe('workspace graph shard content', () => {
     expect(ensureFileNodeBlock?.[0]).not.toContain('nodes.find(');
   });
 
+  it('stores TypeScript type-alias symbol metadata and reference edges with token coordinates', async () => {
+    const rootDir = await createProject({
+      'src/status.ts': `export type ReviewAnalysisStatus = 'pending' | 'complete';\n`,
+      'src/consumer.ts': `import type { ReviewAnalysisStatus } from './status';\n\nconst status: ReviewAnalysisStatus = 'pending';\nconst asserted = 'complete' as ReviewAnalysisStatus;\n`,
+    });
+
+    const built = await buildWorkspaceGraph(rootDir);
+    const subprojectId = built.state.subprojects[0]?.id;
+    expect(subprojectId).toBeTruthy();
+    if (!subprojectId) return;
+
+    const shardResult = await readSubprojectGraphShard(rootDir, subprojectId);
+    expect(shardResult.status).toBe('ok');
+    if (shardResult.status !== 'ok') return;
+
+    const shard = shardResult.data;
+    const status = shard.nodes.find((node) => node.kind === 'symbol' && node.name === 'ReviewAnalysisStatus' && node.declarationKind === 'type_alias');
+    expect(status).toMatchObject({
+      kind: 'symbol',
+      symbolKind: 'variable',
+      declarationKind: 'type_alias',
+      file: 'src/status.ts',
+    });
+
+    const semanticEdges = shard.edges.filter((edge) => edge.to === status?.id);
+    expect(semanticEdges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'imports', reason: 'typescript_type_alias_import', occurrenceRange: { startLine: 1, startColumn: 14, endLine: 1, endColumn: 34 } }),
+      expect.objectContaining({ kind: 'reads', reason: 'typescript_type_alias_reference', occurrenceRange: { startLine: 3, startColumn: 14, endLine: 3, endColumn: 34 } }),
+      expect.objectContaining({ kind: 'reads', reason: 'typescript_type_alias_reference', occurrenceRange: { startLine: 4, startColumn: 31, endLine: 4, endColumn: 51 } }),
+    ]));
+  });
+
   it('stores symbol ranges and internal import/call relationships for ts source referenced via .js specifiers', async () => {
     const rootDir = await createProject({
       'package.json': `{"name":"fixture","type":"module"}\n`,
