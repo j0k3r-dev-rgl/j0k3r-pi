@@ -223,7 +223,6 @@ See [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 | Code Research | [`extensions/code-research/README.md`](extensions/code-research/README.md) | Tree-sitter-backed TypeScript, JavaScript, Java, and Go symbol lookup, references, function call trees, and reverse call trees, plus Python workspace graph indexing. |
 | Context7 | [`extensions/context7/README.md`](extensions/context7/README.md) | Safe, bounded Context7 library documentation tools without MCP. |
 | PDF Review | [`extensions/pdf-review/README.md`](extensions/pdf-review/README.md) | Local PDF extraction with optional OCR via OCRmyPDF/Tesseract. |
-| Workflow Guard | [`extensions/workflow-guard/README.md`](extensions/workflow-guard/README.md) | OpenSpec workflow-state derivation and execution-scope preflight/enforcement for scoped subagent tool calls. |
 | Sidebar | [`extensions/sidebar/README.md`](extensions/sidebar/README.md) | HUD-style sidebar with chat, subagents, todo, and git status. |
 | Skill Registry | [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md) | Routing index generator for global and project skills. Opt-in via `.pi/skill-registry.config.json` with `enabled: true`; no dedicated environment variables. |
 | Utils | [`extensions/utils/README.md`](extensions/utils/README.md) | General utility tools, currently Markdown-to-audio conversion using local Piper/eSpeak engines with Piper voice-model, MP3, bitrate, and progress-status support. |
@@ -241,7 +240,6 @@ See [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 | Code Research | `find_symbol`, `find_references`, `function_call_tree`, `reverse_function_call_tree`, `workspace_graph_status` | Provides code intelligence for TypeScript, JavaScript, Java, and Go, with Python file/symbol indexing in the workspace graph. | [Read more](extensions/code-research/README.md) |
 | Context7 | `context7_search_library`, `context7_get_context`, `context7_resolve_and_get_context` | Fetches focused library documentation through Context7 with bounded output and safe configuration. | [Read more](extensions/context7/README.md) |
 | PDF Review | `pdf_extract` | Extracts text and metadata from local PDFs, with optional OCR through OCRmyPDF/Tesseract. | [Read more](extensions/pdf-review/README.md) |
-| Workflow Guard | `workflow_state_get`, `workflow_validate`, `workflow_scope_get`, `workflow_scope_check` | Derives OpenSpec workflow state and preflights scoped read/write/edit/bash actions for active SDD changes. | [Read more](extensions/workflow-guard/README.md) |
 | Sidebar | TUI sidebar/HUD | Adds a sidebar view for chat, subagents, todo state, and git status. | [Read more](extensions/sidebar/README.md) |
 | Skill Registry | `skill_registry_generate`, `skill_registry_resolve` | Builds and queries the routing index for global and project skills. | [Read more](extensions/skill-registry/README.md) |
 | Utils | `markdown_to_audio` | Converts Markdown into local audio using Piper or eSpeak NG, with MP3 bitrate control and concise progress status. | [Read more](extensions/utils/README.md) |
@@ -303,7 +301,6 @@ Runtime notes:
 - Live Context7 calls require `CONTEXT7_API_KEY` in the Pi process environment, not in repository files.
 - Skill Registry has no dedicated environment variables; project opt-in is controlled by `.pi/skill-registry.config.json` with `enabled: true`.
 - Websearch credentials such as `EXA_API_KEY`, `PARALLEL_API_KEY`, `GITHUB_TOKEN`, `STACK_EXCHANGE_KEY`, `OPENALEX_MAILTO`, `CROSSREF_MAILTO`, and `SEMANTIC_SCHOLAR_API_KEY` belong in the process environment, not repository files.
-- Workflow Guard is an OpenSpec-aware preflight/enforcement helper for scoped subagent tool calls, not an OS sandbox.
 - `Allowed Bash` currently requires explicit patterns for Python-related risky commands; full Bash deny-by-default allowlisting is a known pending hardening item.
 
 ### Subagents
@@ -553,7 +550,6 @@ Ver [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 | Code Research | [`extensions/code-research/README.md`](extensions/code-research/README.md) | Búsqueda de símbolos, referencias, call trees y reverse call trees para TypeScript, JavaScript, Java y Go usando Tree-sitter, más indexado Python en el workspace graph. |
 | Context7 | [`extensions/context7/README.md`](extensions/context7/README.md) | Herramientas seguras y acotadas para documentación de librerías con Context7, sin MCP. |
 | PDF Review | [`extensions/pdf-review/README.md`](extensions/pdf-review/README.md) | Extracción local de PDF con OCR opcional vía OCRmyPDF/Tesseract. |
-| Workflow Guard | [`extensions/workflow-guard/README.md`](extensions/workflow-guard/README.md) | Derivación de estado OpenSpec y preflight/enforcement de Execution Scope para llamadas scoped de subagentes. |
 | Sidebar | [`extensions/sidebar/README.md`](extensions/sidebar/README.md) | Sidebar tipo HUD con chat, subagentes, todo y estado de git. |
 | Skill Registry | [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md) | Generador de índice de routing para skills globales y de proyecto. Opt-in vía `.pi/skill-registry.config.json` con `enabled: true`; sin variables de entorno dedicadas. |
 | Utils | [`extensions/utils/README.md`](extensions/utils/README.md) | Utilidades generales; actualmente conversión de Markdown a audio con Piper/eSpeak local, voces Piper, MP3, bitrate y progreso en status bar. |
@@ -571,7 +567,6 @@ Ver [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 | Code Research | `find_symbol`, `find_references`, `function_call_tree`, `reverse_function_call_tree`, `workspace_graph_status` | Aporta inteligencia de código para TypeScript, JavaScript, Java y Go, con indexado de archivos/símbolos Python en el workspace graph. | [Ver más](extensions/code-research/README.md) |
 | Context7 | `context7_search_library`, `context7_get_context`, `context7_resolve_and_get_context` | Obtiene documentación enfocada de librerías con Context7, salida acotada y configuración segura. | [Ver más](extensions/context7/README.md) |
 | PDF Review | `pdf_extract` | Extrae texto y metadata de PDFs locales, con OCR opcional mediante OCRmyPDF/Tesseract. | [Ver más](extensions/pdf-review/README.md) |
-| Workflow Guard | `workflow_state_get`, `workflow_validate`, `workflow_scope_get`, `workflow_scope_check` | Deriva estado OpenSpec y preflight de acciones read/write/edit/bash scoped para cambios SDD activos. | [Ver más](extensions/workflow-guard/README.md) |
 | Sidebar | Sidebar/HUD de TUI | Agrega una vista lateral para chat, subagentes, estado de todo y estado de git. | [Ver más](extensions/sidebar/README.md) |
 | Skill Registry | `skill_registry_generate`, `skill_registry_resolve` | Construye y consulta el índice de routing para skills globales y de proyecto. | [Ver más](extensions/skill-registry/README.md) |
 | Utils | `markdown_to_audio` | Convierte Markdown a audio local con Piper o eSpeak NG, control de bitrate MP3 y progreso compacto en status bar. | [Ver más](extensions/utils/README.md) |
@@ -633,7 +628,6 @@ Notas runtime:
 - Las llamadas live de Context7 requieren `CONTEXT7_API_KEY` en el entorno del proceso Pi, no en archivos del repositorio.
 - Skill Registry no tiene variables de entorno dedicadas; el opt-in por proyecto se controla con `.pi/skill-registry.config.json` y `enabled: true`.
 - Credenciales de Websearch como `EXA_API_KEY`, `PARALLEL_API_KEY`, `GITHUB_TOKEN`, `STACK_EXCHANGE_KEY`, `OPENALEX_MAILTO`, `CROSSREF_MAILTO` y `SEMANTIC_SCHOLAR_API_KEY` deben vivir en el entorno del proceso, no en archivos del repositorio.
-- Workflow Guard es un helper de preflight/enforcement para llamadas scoped de subagentes, no un sandbox de sistema operativo.
 - `Allowed Bash` hoy exige patrones explícitos para comandos Python riesgosos; la allowlist deny-by-default para todo Bash queda como hardening pendiente conocido.
 
 ### Subagentes

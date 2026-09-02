@@ -278,4 +278,3 @@ Only `Verification Result: PASS` may produce artifact and handoff `READY`. For F
 - `AGENTS.md` — global delegation and authority rules.
 - `skills/sdd-workflow/SKILL.md` — SDD lifecycle and phase gates.
 - `subagents/*.md` — subagent definitions that consume these contracts.
-- `extensions/workflow-guard/src/core/scope.ts` — parser requiring exact `Execution Scope` labels and plain text values.
