@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { findReferences } from '../src/core/find-references-resolver.js';
 import { buildWorkspaceGraph } from '../src/core/workspace-graph.js';
+import { registerCodeFindTool } from '../src/tools/code-find.js';
 
 async function createProject(prefix: string, files: Record<string, string>): Promise<string> {
   const rootDir = join(tmpdir(), `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -16,6 +17,12 @@ async function createProject(prefix: string, files: Record<string, string>): Pro
   }
 
   return rootDir;
+}
+
+function registerToolForTest(register: (pi: any) => void): any {
+  let tool: any;
+  register({ registerTool(definition: any) { tool = definition; } });
+  return tool;
 }
 
 describe('find_references', () => {
@@ -102,6 +109,7 @@ describe('find_references', () => {
       symbol: 'ReviewAnalysisProcessor',
       language: 'ts',
       kind: 'class',
+      compare_direct_fallback: true,
     });
     expect(classRefs.map((item) => `${item.reference_kind}:${item.line}`).sort()).toEqual([
       'import:1',
@@ -117,6 +125,7 @@ describe('find_references', () => {
       language: 'ts',
       kind: 'method',
       reference_kinds: ['call'],
+      compare_direct_fallback: true,
     });
     expect(methodRefs.map((item) => item.called_as).sort()).toEqual(['processor.stop()', 'reviewAnalysisProcessor.stop()']);
   });
@@ -506,7 +515,7 @@ describe('find_references', () => {
     await buildWorkspaceGraph(graphRoot);
 
     const directReads = await findReferences(directRoot, { path: 'src/Shared.tsx', symbol: 'Shared', language: 'ts', kind: 'function', reference_kinds: ['read'] });
-    const graphReads = await findReferences(graphRoot, { path: 'src/Shared.tsx', symbol: 'Shared', language: 'ts', kind: 'function', reference_kinds: ['read'] });
+    const graphReads = await findReferences(graphRoot, { path: 'src/Shared.tsx', symbol: 'Shared', language: 'ts', kind: 'function', reference_kinds: ['read'], compare_direct_fallback: true });
     const graphCalls = await findReferences(graphRoot, { path: 'src/Screen.tsx', symbol: 'NotCallable', language: 'ts', kind: 'function', reference_kinds: ['call'] });
 
     expect(directReads).toHaveLength(1);
@@ -613,13 +622,13 @@ describe('find_references', () => {
     await buildWorkspaceGraph(graphRoot);
 
     const directFirst = await findReferences(directRoot, { path: 'src/main/java/app/Worker.java', symbol: 'first', language: 'java', kind: 'variable', reference_kinds: ['read'] });
-    const graphFirst = await findReferences(graphRoot, { path: 'src/main/java/app/Worker.java', symbol: 'first', language: 'java', kind: 'variable', reference_kinds: ['read'] });
+    const graphFirst = await findReferences(graphRoot, { path: 'src/main/java/app/Worker.java', symbol: 'first', language: 'java', kind: 'variable', reference_kinds: ['read'], compare_direct_fallback: true });
     const directBase = await findReferences(directRoot, { path: 'src/main/java/app/Base.java', symbol: 'baseValue', language: 'java', kind: 'variable', reference_kinds: ['read'] });
-    const graphBase = await findReferences(graphRoot, { path: 'src/main/java/app/Base.java', symbol: 'baseValue', language: 'java', kind: 'variable', reference_kinds: ['read'] });
+    const graphBase = await findReferences(graphRoot, { path: 'src/main/java/app/Base.java', symbol: 'baseValue', language: 'java', kind: 'variable', reference_kinds: ['read'], compare_direct_fallback: true });
     const directImplements = await findReferences(directRoot, { path: 'src/main/java/app/Service.java', symbol: 'Service', language: 'java', kind: 'interface', reference_kinds: ['implements'] });
-    const graphImplements = await findReferences(graphRoot, { path: 'src/main/java/app/Service.java', symbol: 'Service', language: 'java', kind: 'interface', reference_kinds: ['implements'] });
+    const graphImplements = await findReferences(graphRoot, { path: 'src/main/java/app/Service.java', symbol: 'Service', language: 'java', kind: 'interface', reference_kinds: ['implements'], compare_direct_fallback: true });
     const directInstantiate = await findReferences(directRoot, { path: 'src/main/java/app/Worker.java', symbol: 'Worker', language: 'java', kind: 'class', reference_kinds: ['instantiate'] });
-    const graphInstantiate = await findReferences(graphRoot, { path: 'src/main/java/app/Worker.java', symbol: 'Worker', language: 'java', kind: 'class', reference_kinds: ['instantiate'] });
+    const graphInstantiate = await findReferences(graphRoot, { path: 'src/main/java/app/Worker.java', symbol: 'Worker', language: 'java', kind: 'class', reference_kinds: ['instantiate'], compare_direct_fallback: true });
 
     expect(graphFirst.map((item) => `${item.context_class}.${item.context_symbol}:${item.reference_kind}`)).toEqual(
       directFirst.map((item) => `${item.context_class}.${item.context_symbol}:${item.reference_kind}`)
@@ -635,7 +644,7 @@ describe('find_references', () => {
     );
   });
 
-  it('falls back to complete direct references when graph coverage is incomplete for public calls', async () => {
+  it('falls back to complete direct references when graph coverage is incomplete and direct comparison is requested', async () => {
     const rootDir = await createProject('pi-find-references-graph', {
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'src/main/java/ports/Service.java': `package ports;\n\npublic interface Service {}\n`,
@@ -650,6 +659,7 @@ describe('find_references', () => {
       symbol: 'Service',
       language: 'java',
       kind: 'interface',
+      compare_direct_fallback: true,
     });
 
     expect(new Set(results.map((item) => item.reference_kind))).toEqual(new Set(['extends', 'implements', 'import']));
@@ -819,6 +829,7 @@ describe('find_references', () => {
       language: 'ts',
       kind: 'interface',
       reference_kinds: ['implements'],
+      compare_direct_fallback: true,
     });
 
     expect(new Set(results.map((item) => item.context_symbol))).toEqual(new Set([
@@ -839,6 +850,7 @@ describe('find_references', () => {
       path: 'src',
       symbol: 'getReviewAnalysisStatus',
       language: 'ts',
+      compare_direct_fallback: true,
     });
 
     expect(results.map((item) => item.called_as)).toContain('getReviewAnalysisStatus()');
@@ -859,7 +871,7 @@ describe('find_references', () => {
 
     const query = { path: 'src/repository.ts', symbol: 'transitionToTerminal', language: 'ts' as const, kind: 'method' as const, reference_kinds: ['call' as const] };
     const direct = await findReferences(directRoot, query);
-    const graph = await findReferences(graphRoot, query);
+    const graph = await findReferences(graphRoot, { ...query, compare_direct_fallback: true });
     const normalize = (results: typeof direct) => results.map((item) => ({
       context_symbol: item.context_symbol,
       called_as: item.called_as,
@@ -888,6 +900,32 @@ describe('find_references', () => {
     expect(new Set(graph.map((item) => `${item.context_symbol}:${item.called_as}`)).size).toBe(graph.length);
   });
 
+  it('exposes visible classification counts and row-level classification with reason in code_find references output', async () => {
+    const rootDir = await createProject('pi-code-find-visible-classification', {
+      'src/repository.ts': `export interface ReviewAnalysisRepository {\n  transitionToTerminal(id: string, status: string): void;\n}\n`,
+      'src/sql-repository.ts': `import { ReviewAnalysisRepository } from './repository.js';\n\nexport class SqlReviewAnalysisRepository implements ReviewAnalysisRepository {\n  transitionToTerminal(id: string, status: string): void { void id; void status; }\n}\n`,
+      'src/service.ts': `import { ReviewAnalysisRepository } from './repository.js';\n\nexport class ReviewAnalysisService {\n  constructor(private readonly repository: ReviewAnalysisRepository) {}\n\n  cancelActiveReviewAnalysis(id: string): void {\n    this.repository.transitionToTerminal(id, 'cancelled');\n  }\n\n  beginTerminalTransition(id: string): void {\n    this.repository.transitionToTerminal(id, 'running');\n  }\n}\n`,
+    });
+
+    const tool = registerToolForTest(registerCodeFindTool);
+    const result = await tool.execute('tool-call', {
+      path: 'src/repository.ts',
+      query: 'transitionToTerminal',
+      relation: 'references',
+      language: 'ts',
+      kind: 'method',
+      reference_kinds: ['call'],
+    }, undefined, undefined, { cwd: rootDir });
+    const text = result.content[0].text;
+
+    expect(text).toContain('classification counts: confirmed=2');
+    expect(text).toContain('classification: confirmed');
+    expect(text).toContain('reason: receiver-type-contract-method');
+    expect(result.details.summary.classification_counts).toEqual({ confirmed: 2 });
+    expect(result.details.items.every((item: any) => item.classification === 'confirmed')).toBe(true);
+    expect(result.details.items.every((item: any) => item.reason === 'receiver-type-contract-method')).toBe(true);
+  });
+
   it('does not return incomplete Java interface references when reference kind is omitted', async () => {
     const rootDir = await createProject('pi-find-references-java-no-kind-interface', {
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
@@ -902,6 +940,7 @@ describe('find_references', () => {
       path: 'src',
       symbol: 'StartReviewAnalysis',
       language: 'java',
+      compare_direct_fallback: true,
     });
 
     const kinds = new Set(results.map((item) => item.reference_kind));

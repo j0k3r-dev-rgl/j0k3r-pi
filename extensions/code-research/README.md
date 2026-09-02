@@ -11,6 +11,7 @@ The public surface is intentionally small:
 - `code_find` — universal symbol-aware finder for declarations, implementations, and references.
 - `code_call_hierarchy` — incoming/outgoing call hierarchy in one directional tool.
 - `workspace_graph_status` — graph/monorepo health and coverage status for agents that need to know whether indexed graph data is usable.
+- `code_change_surface` — bounded symbol-anchored change map for agents preparing an implementation.
 
 ### Supported languages
 
@@ -20,6 +21,7 @@ The public surface is intentionally small:
 | `code_find` references | ✅ `ts` / `auto` | ✅ `js` / `auto` | ✅ `java` / `auto` | ✅ `go` / `auto` |
 | `code_call_hierarchy` outgoing/incoming | ✅ `ts` / `auto` | ✅ `js` / `auto` | ✅ `java` / `auto` | ✅ `go` / `auto` |
 | Workspace graph indexing/status | ✅ | ✅ | ✅ | ✅ |
+| `code_change_surface` bounded change map | ✅ `ts` / `auto` | ✅ `js` / `auto` | ✅ `java` / `auto` | ✅ `go` / `auto` |
 
 No public tool supports Python or other languages.
 
@@ -96,6 +98,26 @@ Result shape matches the existing call-tree contract with `root` and `stats`, pl
 
 Reports whether persisted workspace graph data is available, fresh, stale, partial, missing, disabled, errored, incompatible, or refreshing. It also reports monorepo/subproject layout and language coverage counts so the agent can decide whether graph-backed inspection is trustworthy.
 
+#### `code_change_surface`
+
+Builds a bounded, implementation-ready map for one symbol-anchored change. It composes existing declaration, implementation, reference, and incoming-call inspection; it does not add graph persistence or infer broad natural-language change plans.
+
+Parameters:
+
+- `path` *(string, required)*: file or directory to inspect.
+- `query` *(string, required)*: exact symbol name anchoring the potential change.
+- `language` *(string, optional)*: `auto`, `ts`, `js`, `java`, or `go`. Default: `auto`.
+- `kind` *(string, optional)*: `function`, `class`, `method`, `interface`, or `variable`.
+- `scope` *(string, optional)*: `file` or `directory`.
+- `glob` *(string, optional)*: optional file glob for directory scans.
+
+Result:
+
+- `content`: compact bounded summary separating contract, implementations, callers to inspect, likely tests, validation suggestions, risks, trust, and follow-up inspection needs.
+- `details.contract`, `details.implementations`, `details.callers`, and `details.likely_tests`: capped sections with `returned`, `total`, `omitted`, and `follow_up` metadata when additional inspection is needed.
+- `details.validation_suggestions`: heuristic, file-oriented suggestions only; the tool does not fabricate exact repository-specific runner commands.
+- `details.trust` and `details.fallback`: explicit confidence state and exact existing-tool follow-up actions (`code_find` or `code_call_hierarchy`) when the map is ambiguous, missing, or truncated.
+
 ### Installation
 
 The extension lives at `~/.pi/agent/extensions/code-research/`. Pi auto-discovers it at startup.
@@ -137,6 +159,7 @@ La superficie pública es pequeña a propósito:
 - `code_find` — buscador universal de símbolos para declaraciones, implementaciones y referencias.
 - `code_call_hierarchy` — jerarquía de llamadas entrantes/salientes en una sola tool direccional.
 - `workspace_graph_status` — salud/cobertura del graph y monorepo para que el agente sepa si puede confiar en datos indexados.
+- `code_change_surface` — mapa acotado de cambio anclado a un símbolo para preparar implementación.
 
 ### Lenguajes soportados
 
@@ -146,6 +169,7 @@ La superficie pública es pequeña a propósito:
 | `code_find` referencias | ✅ `ts` / `auto` | ✅ `js` / `auto` | ✅ `java` / `auto` | ✅ `go` / `auto` |
 | `code_call_hierarchy` incoming/outgoing | ✅ `ts` / `auto` | ✅ `js` / `auto` | ✅ `java` / `auto` | ✅ `go` / `auto` |
 | Indexado/status del workspace graph | ✅ | ✅ | ✅ | ✅ |
+| `code_change_surface` mapa acotado | ✅ `ts` / `auto` | ✅ `js` / `auto` | ✅ `java` / `auto` | ✅ `go` / `auto` |
 
 Ninguna tool pública soporta Python u otros lenguajes.
 
@@ -187,6 +211,10 @@ Parámetros principales: `path`, `symbol`, `direction`, `language`, `kind`, `max
 #### `workspace_graph_status`
 
 Reporta estado del graph, monorepo/subproyectos y cobertura por lenguaje.
+
+#### `code_change_surface`
+
+Devuelve un mapa acotado para un cambio anclado a un símbolo: contrato, implementaciones, callers a inspeccionar, tests probables, sugerencias heurísticas de validación, riesgos, confianza y acciones de fallback con `code_find` o `code_call_hierarchy`. Requiere `path` y `query`; acepta `language`, `kind`, `scope` y `glob` como filtros opcionales. No inventa comandos exactos de test runner del repositorio analizado.
 
 ### Desarrollo
 

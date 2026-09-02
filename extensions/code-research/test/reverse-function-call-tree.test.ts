@@ -7,6 +7,7 @@ import { buildProjectIndex } from '../src/core/project-index.js';
 import { buildReverseCallTree } from '../src/languages/java/reverse-function-call-tree.js';
 import { buildWorkspaceGraph } from '../src/core/workspace-graph.js';
 import { loadWorkspaceGraphState, writeWorkspaceGraphState } from '../src/core/workspace-state.js';
+import { registerCodeCallHierarchyTool } from '../src/tools/code-call-hierarchy.js';
 
 async function createProject(prefix: string, files: Record<string, string>): Promise<string> {
   const rootDir = join(tmpdir(), `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -19,6 +20,12 @@ async function createProject(prefix: string, files: Record<string, string>): Pro
   }
 
   return rootDir;
+}
+
+function registerToolForTest(register: (pi: any) => void): any {
+  let tool: any;
+  register({ registerTool(definition: any) { tool = definition; } });
+  return tool;
 }
 
 describe('reverse_function_call_tree', () => {
@@ -465,6 +472,55 @@ describe('reverse_function_call_tree', () => {
     if (implementationExecution.status !== 'ok') return;
     const implementationReasons = new Set((implementationExecution.result.root.callers ?? []).map((node: any) => node.reason));
     expect(implementationReasons.has('receiver-type-contract-method')).toBe(true);
+  });
+
+  it('exposes visible classification counts and caller-level classification with reason in code_call_hierarchy output and compact rendering', async () => {
+    const rootDir = await createProject('pi-call-hierarchy-visible-classification', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/repository.ts': `export interface ReviewAnalysisRepository {\n  transitionToTerminal(id: string, status: string): void;\n}\n`,
+      'src/sql-repository.ts': `import { ReviewAnalysisRepository } from './repository.js';\n\nexport class SqlReviewAnalysisRepository implements ReviewAnalysisRepository {\n  transitionToTerminal(id: string, status: string): void { void id; void status; }\n}\n`,
+      'src/memory-repository.ts': `export class InMemoryReviewAnalysisRepository {\n  transitionToTerminal(id: string, status: string): void { void id; void status; }\n}\n`,
+      'src/service.ts': `import { ReviewAnalysisRepository } from './repository.js';\nimport { SqlReviewAnalysisRepository } from './sql-repository.js';\nimport { InMemoryReviewAnalysisRepository } from './memory-repository.js';\n\nexport class ReviewAnalysisService {\n  constructor(private readonly repository: ReviewAnalysisRepository) {}\n\n  cancelActiveReviewAnalysis(id: string): void {\n    this.repository.transitionToTerminal(id, 'cancelled');\n  }\n\n  beginTerminalTransition(id: string): void {\n    this.repository.transitionToTerminal(id, 'running');\n  }\n}\n\nexport function concreteCaller(repository: SqlReviewAnalysisRepository): void {\n  repository.transitionToTerminal('id', 'done');\n}\n\nexport function structuralCaller(repository: InMemoryReviewAnalysisRepository): void {\n  repository.transitionToTerminal('id', 'memory');\n}\n`,
+    });
+    await buildWorkspaceGraph(rootDir);
+    const tool = registerToolForTest(registerCodeCallHierarchyTool);
+
+    const interfaceResult = await tool.execute('tool-call', {
+      path: 'src/repository.ts',
+      symbol: 'transitionToTerminal',
+      direction: 'incoming',
+      language: 'ts',
+      kind: 'method',
+      max_depth: 3,
+    }, undefined, undefined, { cwd: rootDir });
+    const interfaceText = interfaceResult.content[0].text;
+    expect(interfaceText).toContain('classification counts: confirmed=4');
+    expect(interfaceText).toContain('classification: confirmed');
+    expect(interfaceText).toContain('reason: receiver-type-contract-method');
+    expect(interfaceResult.details.summary.classification_counts).toEqual({ confirmed: 4 });
+    for (const symbol of ['beginTerminalTransition', 'cancelActiveReviewAnalysis']) {
+      expect(interfaceResult.details.root.callers.find((node: any) => node.symbol === symbol)).toMatchObject({
+        classification: 'confirmed',
+        reason: 'receiver-type-contract-method',
+      });
+    }
+
+    const implementationResult = await tool.execute('tool-call', {
+      path: 'src/sql-repository.ts',
+      symbol: 'transitionToTerminal',
+      direction: 'incoming',
+      language: 'ts',
+      kind: 'method',
+      max_depth: 3,
+    }, undefined, undefined, { cwd: rootDir });
+    const implementationText = implementationResult.content[0].text;
+    expect(implementationText).toContain('classification counts: confirmed=4');
+    expect(implementationText).toContain('classification: confirmed');
+    expect(implementationText).toContain('reason: receiver-type-contract-method');
+    expect(implementationResult.details.summary.classification_counts).toEqual({ confirmed: 4 });
+
+    const compactLines = tool.renderResult(interfaceResult, { expanded: false }, {}).render(120).join('\n');
+    expect(compactLines).toContain('classification counts: confirmed=4');
   });
 
   it('keeps exact-file JavaScript method reverse graph queries attached to the method owner and callers', async () => {

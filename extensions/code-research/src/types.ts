@@ -202,6 +202,7 @@ export interface FindReferencesInput {
   scope?: SearchScope;
   glob?: string;
   reference_kinds?: ReferenceKind[];
+  compare_direct_fallback?: boolean;
 }
 
 export type ReferenceQuerySourceMode = 'graph' | 'direct' | 'hybrid';
@@ -242,6 +243,8 @@ export interface FunctionCallTreeInput {
 }
 
 export type CallSource = 'application' | 'language' | 'framework' | 'library' | 'unknown';
+export type ConfidenceClassification = 'confirmed' | 'probable' | 'framework';
+export type ClassificationCounts = Partial<Record<ConfidenceClassification, number>>;
 export type OwnerKind = 'class' | 'interface' | 'object' | 'namespace' | 'module' | 'unknown';
 export type CallNodeType = 'application' | 'external' | 'callback' | 'data_access' | 'fluent_chain' | 'framework';
 
@@ -270,6 +273,7 @@ export interface CallTreeNode {
   is_application: boolean;
   is_external: boolean;
   source: CallSource;
+  classification?: ConfidenceClassification;
   reason?: string;
   children?: CallTreeNode[];
   callers?: CallTreeNode[];
@@ -316,6 +320,7 @@ export interface ReferenceLocation {
   receiver_type?: string;
   is_application: boolean;
   source: CallSource;
+  classification?: ConfidenceClassification;
   reason?: string;
 }
 

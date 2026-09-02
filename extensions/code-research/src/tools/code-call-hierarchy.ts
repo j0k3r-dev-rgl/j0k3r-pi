@@ -4,11 +4,60 @@ import { executeFunctionCallTree } from '../core/function-call-tree-resolver.js'
 import { executeReverseFunctionCallTree } from '../core/reverse-function-call-tree-resolver.js';
 import { ensureWorkspaceGraphFreshness } from '../core/workspace-graph.js';
 import { renderCodeResearchToolResult } from '../render.js';
-import type { FunctionCallTreeInput, SupportedLanguage } from '../types.js';
+import type { CallTreeNode, ClassificationCounts, ConfidenceClassification, FunctionCallTreeInput, SupportedLanguage } from '../types.js';
 
 const SUPPORTED_LANGUAGES = ['ts', 'js', 'java', 'go'] as const;
 
 type Direction = 'outgoing' | 'incoming';
+
+function classifyInference(item: { source?: string; reason?: string; node_type?: string }): ConfidenceClassification | undefined {
+  if (item.source === 'framework' || item.node_type === 'framework') return 'framework';
+  if (!item.reason) return undefined;
+  if (item.reason === 'receiver-type-contract-method') return 'confirmed';
+  if (item.reason.includes('framework')) return 'framework';
+  return 'probable';
+}
+
+function annotateClassifications(node: CallTreeNode): CallTreeNode {
+  const children = node.children?.map(annotateClassifications);
+  const callers = node.callers?.map(annotateClassifications);
+  const classification = node.classification ?? classifyInference(node);
+  return { ...node, ...(classification ? { classification } : {}), ...(children ? { children } : {}), ...(callers ? { callers } : {}) };
+}
+
+function collectClassificationCounts(node: CallTreeNode): ClassificationCounts | undefined {
+  const counts: ClassificationCounts = {};
+  const visit = (current: CallTreeNode) => {
+    if (current.classification) counts[current.classification] = (counts[current.classification] ?? 0) + 1;
+    for (const child of current.children ?? []) visit(child);
+    for (const caller of current.callers ?? []) visit(caller);
+  };
+  visit(node);
+  return Object.keys(counts).length > 0 ? counts : undefined;
+}
+
+function formatClassificationCounts(counts: ClassificationCounts | undefined): string {
+  if (!counts) return '';
+  const ordered = (['confirmed', 'probable', 'framework'] as const)
+    .filter((key) => counts[key])
+    .map((key) => `${key}=${counts[key]}`)
+    .join(', ');
+  return ordered ? `\nclassification counts: ${ordered}` : '';
+}
+
+function formatClassificationRows(root: CallTreeNode): string {
+  const rows: string[] = [];
+  const visit = (node: CallTreeNode) => {
+    if (node.classification) {
+      const owner = node.class ? `${node.class}.` : '';
+      rows.push(`${owner}${node.symbol} classification: ${node.classification}${node.reason ? `; reason: ${node.reason}` : ''}`);
+    }
+    for (const child of node.children ?? []) visit(child);
+    for (const caller of node.callers ?? []) visit(caller);
+  };
+  visit(root);
+  return rows.length > 0 ? `\n${rows.join('\n')}` : '';
+}
 
 async function executeHierarchy(cwd: string, direction: Direction, input: FunctionCallTreeInput) {
   if (input.language && input.language !== 'auto') {
@@ -83,9 +132,11 @@ export function registerCodeCallHierarchyTool(pi: any) {
         return { content: [{ type: 'text', text: execution.message }], details: { query: input.symbol, path: input.path, language: input.language, kind: input.kind, direction, ...execution.details } };
       }
 
+      const annotatedResult = { ...execution.result, root: annotateClassifications(execution.result.root) };
+      const classification_counts = collectClassificationCounts(annotatedResult.root);
       return {
-        content: [{ type: 'text', text: `${direction === 'incoming' ? 'Incoming' : 'Outgoing'} call hierarchy for ${execution.rootClassName}.${input.symbol}:\n\n${JSON.stringify(execution.result, null, 2)}` }],
-        details: { query: input.symbol, path: input.path, language: input.language, kind: input.kind, direction, ...execution.result },
+        content: [{ type: 'text', text: `${direction === 'incoming' ? 'Incoming' : 'Outgoing'} call hierarchy for ${execution.rootClassName}.${input.symbol}:${formatClassificationCounts(classification_counts)}${formatClassificationRows(annotatedResult.root)}\n\n${JSON.stringify(annotatedResult, null, 2)}` }],
+        details: { query: input.symbol, path: input.path, language: input.language, kind: input.kind, direction, ...annotatedResult, summary: { classification_counts } },
       };
     },
   });

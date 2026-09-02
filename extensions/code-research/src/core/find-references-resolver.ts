@@ -12,7 +12,7 @@ export async function resolveFindReferences(cwd: string, input: FindReferencesIn
   const graph = config.graph.enable ? await findReferencesFromGraph(cwd, input) : undefined;
   if (graph?.results !== undefined) {
     const filteredGraphResults = filterReferenceKinds(graph.results, input);
-    const directFallback = shouldCompareDirectResults(input)
+    const directFallback = shouldRunDirectComparison(input) && shouldCompareDirectResults(input)
       ? filterReferenceKinds(await findReferencesDirect(cwd, input), input)
       : undefined;
     if (directFallback && hasMoreCompleteDirectCoverage(filteredGraphResults, directFallback)) {
@@ -121,6 +121,10 @@ function mapGraphStatus(stateStatus: string, manifestStatus: string, graphState?
   if (graphState === 'partial') return 'partial';
   if (graphState === 'stale' || graphState === 'refreshing') return 'stale';
   return 'fresh';
+}
+
+function shouldRunDirectComparison(input: FindReferencesInput): boolean {
+  return input.compare_direct_fallback === true;
 }
 
 function shouldCompareDirectResults(input: FindReferencesInput): boolean {

@@ -122,6 +122,19 @@ function compactFindSymbol(result: any, theme: any, toolName = 'find_symbol'): s
   return lines;
 }
 
+function classificationCountsText(counts: any): string | undefined {
+  if (!counts || typeof counts !== 'object') return undefined;
+  const text = ['confirmed', 'probable', 'framework']
+    .filter((key) => counts[key])
+    .map((key) => `${key}=${counts[key]}`)
+    .join(', ');
+  return text ? `classification counts: ${text}` : undefined;
+}
+
+function classificationMetadataText(item: any): string {
+  return [item?.classification ? `classification: ${item.classification}` : undefined, item?.reason ? `reason: ${item.reason}` : undefined].filter(Boolean).join('; ');
+}
+
 function compactFindReferences(result: any, theme: any, toolName = 'find_references'): string[] {
   const found = Number(result?.details?.found ?? result?.details?.results?.length ?? result?.details?.items?.length ?? 0);
   const rows = Array.isArray(result?.details?.results) ? result.details.results : Array.isArray(result?.details?.items) ? result.details.items : [];
@@ -130,11 +143,14 @@ function compactFindReferences(result: any, theme: any, toolName = 'find_referen
   const lines = [`${titleFor(toolName, theme)} · ${countText} reference(s)`];
   const search = querySummary(result);
   if (search) lines.push(search);
+  const counts = classificationCountsText(summary?.classification_counts);
+  if (counts) lines.push(counts);
   lines.push(dim(expandHint('expand'), theme));
   for (const row of rows.slice(0, 7)) {
     const loc = `${relativeFile(row.file)}:${row.line ?? '?'}:${row.column ?? '?'}`;
     const context = row.context_symbol ? ` in ${row.context_symbol}` : '';
-    lines.push(`- ${row.reference_kind ?? 'reference'}${context} ${loc} · ${clip(row.source_line ?? row.called_as, 90)}`);
+    const metadata = classificationMetadataText(row);
+    lines.push(`- ${row.reference_kind ?? 'reference'}${context} ${loc} · ${clip(row.source_line ?? row.called_as, 90)}${metadata ? ` · ${metadata}` : ''}`);
   }
   if (rows.length > 7) lines.push(dim(`… ${rows.length - 7} more`, theme));
   return lines;
@@ -144,7 +160,25 @@ function childSummary(child: any): string {
   const owner = child.class ? `${child.class}.` : '';
   const type = child.node_type ? ` · ${child.node_type}` : '';
   const loc = child.file ? ` · ${relativeFile(child.file)}:${child.line ?? '?'}` : '';
-  return `- ${owner}${child.symbol ?? '<unknown>'}${type}${loc}`;
+  const metadata = classificationMetadataText(child);
+  return `- ${owner}${child.symbol ?? '<unknown>'}${type}${loc}${metadata ? ` · ${metadata}` : ''}`;
+}
+
+function compactChangeSurface(result: any, theme: any): string[] {
+  const details = result?.details ?? {};
+  const summary = details.summary ?? {};
+  const count = (name: string) => {
+    const section = summary[name] ?? details[name];
+    if (!section) return `${name} 0/0`;
+    return `${name} ${section.returned ?? section.items?.length ?? 0}/${section.total ?? section.items?.length ?? 0}`;
+  };
+  const lines = [`${titleFor('code_change_surface', theme)} · ${details.status ?? 'result'} · trust=${details.trust?.level ?? 'unknown'} · fallback=${details.fallback?.required ? 'yes' : 'no'}`];
+  const search = querySummary(result);
+  if (search) lines.push(search);
+  lines.push([count('contract'), count('implementations'), count('callers'), count('likely_tests')].join(' · '));
+  if (details.fallback?.reason) lines.push(`fallback: ${clip(details.fallback.reason, 120)}`);
+  lines.push(dim(expandHint('expand'), theme));
+  return lines;
 }
 
 function compactCallTree(toolName: string, result: any, theme: any): string[] {
@@ -160,8 +194,10 @@ function compactCallTree(toolName: string, result: any, theme: any): string[] {
   if (search) lines.push(search);
   lines.push(
     stats ? `nodes ${stats.total_nodes ?? '?'} · app ${stats.application_nodes ?? '?'} · external ${stats.external_nodes ?? '?'} · depth ${stats.max_depth_reached ?? '?'}` : 'call tree result',
-    dim(expandHint('expand'), theme),
   );
+  const counts = classificationCountsText(result?.details?.summary?.classification_counts);
+  if (counts) lines.push(counts);
+  lines.push(dim(expandHint('expand'), theme));
 
   const children = Array.isArray(root.children) ? root.children : Array.isArray(root.callers) ? root.callers : [];
   for (const child of children.slice(0, 5)) lines.push(childSummary(child));
@@ -173,6 +209,7 @@ function compactResult(toolName: string, result: any, theme: any): string[] {
   if (toolName === 'find_symbol') return compactFindSymbol(result, theme);
   if (toolName === 'find_references') return compactFindReferences(result, theme);
   if (toolName === 'code_find') return result?.details?.relation === 'references' ? compactFindReferences(result, theme, toolName) : compactFindSymbol(result, theme, toolName);
+  if (toolName === 'code_change_surface') return compactChangeSurface(result, theme);
   if (toolName === 'function_call_tree' || toolName === 'reverse_function_call_tree' || toolName === 'code_call_hierarchy') return compactCallTree(toolName, result, theme);
   return [`${titleFor(toolName, theme)} · result`, dim(expandHint('expand'), theme), clip(resultText(result), 220)];
 }

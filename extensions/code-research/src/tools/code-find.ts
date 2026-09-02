@@ -4,7 +4,7 @@ import { Type } from 'typebox';
 import { resolveFindReferences } from '../core/find-references-resolver.js';
 import { resolveFindSymbol } from '../core/find-symbol-resolver.js';
 import { renderCodeResearchToolResult } from '../render.js';
-import type { FindReferencesInput, FindSymbolInput, ReferenceLocation, SupportedLanguage, SymbolLocation } from '../types.js';
+import type { ClassificationCounts, ConfidenceClassification, FindReferencesInput, FindSymbolInput, ReferenceLocation, SupportedLanguage, SymbolLocation } from '../types.js';
 
 const SUPPORTED_LANGUAGES = ['ts', 'js', 'java', 'go'] as const;
 
@@ -61,15 +61,50 @@ function formatSymbolItems(cwd: string, query: string, items: SymbolLocation[], 
   return `Found ${items.length} of ${total} symbol match(es) for '${query}':\n\n${rows.join('\n')}${more}`;
 }
 
-function formatReferenceItems(cwd: string, query: string, items: ReferenceLocation[], total: number, nextCursor?: string): string {
+function classifyInference(item: { source?: string; reason?: string }): ConfidenceClassification | undefined {
+  if (item.source === 'framework') return 'framework';
+  if (!item.reason) return undefined;
+  if (item.reason === 'receiver-type-contract-method') return 'confirmed';
+  if (item.reason.includes('framework')) return 'framework';
+  return 'probable';
+}
+
+function classificationCounts(items: Array<{ classification?: ConfidenceClassification }>): ClassificationCounts | undefined {
+  const counts: ClassificationCounts = {};
+  for (const item of items) {
+    if (!item.classification) continue;
+    counts[item.classification] = (counts[item.classification] ?? 0) + 1;
+  }
+  return Object.keys(counts).length > 0 ? counts : undefined;
+}
+
+function formatClassificationCounts(counts: ClassificationCounts | undefined): string {
+  if (!counts) return '';
+  const ordered = (['confirmed', 'probable', 'framework'] as const)
+    .filter((key) => counts[key])
+    .map((key) => `${key}=${counts[key]}`)
+    .join(', ');
+  return ordered ? `\nclassification counts: ${ordered}` : '';
+}
+
+function withReferenceClassifications(items: ReferenceLocation[]): ReferenceLocation[] {
+  return items.map((item) => {
+    const classification = item.classification ?? classifyInference(item);
+    return classification ? { ...item, classification } : item;
+  });
+}
+
+function formatReferenceItems(cwd: string, query: string, items: ReferenceLocation[], total: number, nextCursor?: string, counts?: ClassificationCounts): string {
   const rows = items.map((item) => {
     const file = relative(cwd, item.file) || item.file;
     const context = item.context_symbol ? ` in ${item.context_symbol}` : '';
     const sourceLine = item.source_line ?? item.called_as ?? '';
-    return `${file}:${item.line}:${item.column}: ${sourceLine} (${item.reference_kind}${context})`;
+    const metadata = [item.classification ? `classification: ${item.classification}` : undefined, item.reason ? `reason: ${item.reason}` : undefined].filter(Boolean).join('; ');
+    const suffix = metadata ? ` · ${metadata}` : '';
+    return `${file}:${item.line}:${item.column}: ${sourceLine} (${item.reference_kind}${context})${suffix}`;
   });
   const more = nextCursor ? `\n\nMore results available. Re-run code_find with cursor=${nextCursor}.` : '';
-  return `Found ${items.length} of ${total} reference(s) for '${query}':\n\n${rows.join('\n')}${more}`;
+  return `Found ${items.length} of ${total} reference(s) for '${query}':${formatClassificationCounts(counts)}\n\n${rows.join('\n')}${more}`;
 }
 
 function flattenImplementationResults(results: SymbolLocation[]): SymbolLocation[] {
@@ -169,14 +204,15 @@ export function registerCodeFindTool(pi: any) {
           reference_kinds: params.reference_kinds,
         };
         const resolution = await resolveReferencesAcrossLanguages(ctx.cwd, input);
-        const allResults = await addSourceLines(resolution.results);
+        const allResults = withReferenceClassifications(await addSourceLines(resolution.results));
         const page = boundedWindow(allResults, params.limit, params.cursor);
+        const pageClassificationCounts = classificationCounts(page.items);
         if (allResults.length === 0) {
           return { content: [{ type: 'text', text: `No references found for '${input.symbol}'.` }], details: { query: input.symbol, path: input.path, language: input.language, kind: input.kind, match: params.match, relation, found: 0, items: [], results: [], summary: { returned: 0, total: 0, has_more: false }, provenance: resolution.diagnostics, ...resolution.diagnostics } };
         }
         return {
-          content: [{ type: 'text', text: formatReferenceItems(ctx.cwd, input.symbol, page.items, allResults.length, page.nextCursor) }],
-          details: { query: input.symbol, path: input.path, language: input.language, kind: input.kind, match: params.match, relation, found: page.items.length, items: page.items, results: page.items, summary: { returned: page.items.length, total: allResults.length, has_more: Boolean(page.nextCursor), next_cursor: page.nextCursor, offset: page.offset, limit: page.limit }, provenance: resolution.diagnostics, ...resolution.diagnostics },
+          content: [{ type: 'text', text: formatReferenceItems(ctx.cwd, input.symbol, page.items, allResults.length, page.nextCursor, pageClassificationCounts) }],
+          details: { query: input.symbol, path: input.path, language: input.language, kind: input.kind, match: params.match, relation, found: page.items.length, items: page.items, results: page.items, summary: { returned: page.items.length, total: allResults.length, has_more: Boolean(page.nextCursor), next_cursor: page.nextCursor, offset: page.offset, limit: page.limit, classification_counts: pageClassificationCounts }, provenance: resolution.diagnostics, ...resolution.diagnostics },
         };
       }
 

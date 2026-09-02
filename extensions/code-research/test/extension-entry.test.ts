@@ -46,7 +46,7 @@ async function createProject(files: Record<string, string>): Promise<string> {
 describe('code-research extension entry integration', () => {
   it('registers the minimal public tool surface while preserving workspace graph status', () => {
     const tools = registerTools();
-    expect(tools.map((tool) => tool.name)).toEqual(['code_find', 'code_call_hierarchy', 'workspace_graph_status']);
+    expect(tools.map((tool) => tool.name)).toEqual(['code_find', 'code_call_hierarchy', 'workspace_graph_status', 'code_change_surface']);
     expect(JSON.stringify(tools.map((tool) => tool.parameters))).not.toContain('py');
     for (const tool of tools) expect(tool.renderResult ?? (() => undefined)).toBeTypeOf('function');
   });
