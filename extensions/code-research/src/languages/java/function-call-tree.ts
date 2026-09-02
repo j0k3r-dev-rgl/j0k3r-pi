@@ -35,6 +35,8 @@ export interface MethodCall {
   callText: string;
   line: number;
   column: number;
+  endLine: number;
+  endColumn: number;
   callbacks?: CallbackInfo[];
 }
 
@@ -301,15 +303,19 @@ function extractMethodCalls(methodNode: any): MethodCall[] {
           callText: node.text,
           line: node.startPosition.row + 1,
           column: node.startPosition.column,
+          endLine: node.endPosition.row + 1,
+          endColumn: node.endPosition.column,
           callbacks: extractCallbacks(node),
         });
       }
       for (const child of node.children) {
-        if (child === nameNode) continue;
+        if (child === nameNode || isJavaCallbackNode(child)) continue;
         visit(child);
       }
       return;
     }
+
+    if (isJavaCallbackNode(node)) return;
 
     for (const child of node.children) {
       visit(child);
@@ -374,6 +380,8 @@ function extractMethodCallsFromNode(rootNode: any): MethodCall[] {
           callText: node.text,
           line: node.startPosition.row + 1,
           column: node.startPosition.column,
+          endLine: node.endPosition.row + 1,
+          endColumn: node.endPosition.column,
           callbacks: extractCallbacks(node),
         });
       }
@@ -391,6 +399,10 @@ function extractMethodCallsFromNode(rootNode: any): MethodCall[] {
 
   visit(rootNode);
   return calls;
+}
+
+function isJavaCallbackNode(node: any): boolean {
+  return node?.type === 'lambda_expression' || node?.type === 'method_reference' || (node?.type === 'object_creation_expression' && /\{[\s\S]*\}/.test(node.text));
 }
 
 export function resolveJavaCallsForGraph(
@@ -554,7 +566,7 @@ function resolveInvocationExpressionType(
   expression: string,
   index: ProjectIndex
 ): ObjectTypeResolution | undefined {
-  const mockWrapped = unwrapSingleArgumentInvocation(expression, new Set(['verify', 'when']));
+  const mockWrapped = unwrapMockitoReceiverInvocation(expression);
   if (mockWrapped) return resolveObjectType(currentMethod, mockWrapped, inferExpressionNodeType(mockWrapped), index);
 
   const invocation = splitInvocationExpression(expression);
@@ -1026,11 +1038,12 @@ function extractFirstGenericType(typeText?: string): string | undefined {
   return match ? simpleName(normalizeScopedTypeName(match[1])) : undefined;
 }
 
-function unwrapSingleArgumentInvocation(expression: string, methodNames: Set<string>): string | undefined {
+function unwrapMockitoReceiverInvocation(expression: string): string | undefined {
   const trimmed = expression.trim();
   const match = trimmed.match(/^(?:[A-Za-z_$][\w$]*\.)?([A-Za-z_$][\w$]*)\s*\(([\s\S]*)\)$/);
-  if (!match || !methodNames.has(match[1])) return undefined;
+  if (!match || (match[1] !== 'verify' && match[1] !== 'when')) return undefined;
   const args = splitTopLevelArguments(match[2]);
+  if (match[1] === 'verify') return args[0]?.trim();
   return args.length === 1 ? args[0].trim() : undefined;
 }
 

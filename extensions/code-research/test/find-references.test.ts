@@ -748,7 +748,7 @@ describe('find_references', () => {
       'src/main/java/app/RootDeleteReview.java': `package app;\n\npublic interface RootDeleteReview {\n  void deleteById(String id);\n}\n`,
       'src/main/java/app/RootDeleteReviewUseCase.java': `package app;\n\npublic class RootDeleteReviewUseCase implements RootDeleteReview {\n  private int deletionGuards;\n  public void deleteById(String id) {\n    deletionGuards++;\n  }\n}\n`,
       'src/main/java/app/RootReviewRestController.java': `package app;\n\npublic class RootReviewRestController {\n  private final RootDeleteReview rootDeleteReview;\n\n  public RootReviewRestController(RootDeleteReview rootDeleteReview) {\n    this.rootDeleteReview = rootDeleteReview;\n  }\n\n  public void deleteReview(String id) {\n    rootDeleteReview.deleteById(id);\n  }\n}\n`,
-      'src/test/java/app/RootDeleteReviewUseCaseTest.java': `package app;\n\nimport static org.junit.jupiter.api.Assertions.assertThrows;\n\nclass RootDeleteReviewUseCaseTest {\n  private final RootDeleteReview useCase = new RootDeleteReviewUseCase();\n\n  void direct() {\n    useCase.deleteById("1");\n  }\n\n  void assertion() {\n    assertThrows(RuntimeException.class, () -> useCase.deleteById("2"));\n  }\n\n  void mockito() {\n    verify(useCase).deleteById("3");\n    when(useCase.toString()).thenReturn("mock");\n  }\n}\n`,
+      'src/test/java/app/RootDeleteReviewUseCaseTest.java': `package app;\n\nimport static org.junit.jupiter.api.Assertions.assertThrows;\n\nclass RootDeleteReviewUseCaseTest {\n  private final RootDeleteReview useCase = new RootDeleteReviewUseCase();\n\n  void direct() {\n    useCase.deleteById("1");\n  }\n\n  void assertion() {\n    assertThrows(RuntimeException.class, () -> useCase.deleteById("2"));\n  }\n\n  void mockito() {\n    verify(useCase).deleteById("3");\n    verify(useCase, never()).deleteById("4");\n    verify(useCase, times(1)).deleteById("5");\n    when(useCase.toString()).thenReturn("mock");\n  }\n}\n`,
     };
 
     const directRoot = await createProject('pi-find-references-java-interface-method-direct', files);
@@ -764,7 +764,35 @@ describe('find_references', () => {
 
     expect(new Set(direct.map((item) => `${item.context_class}.${item.context_symbol}`))).toEqual(new Set(['RootReviewRestController.deleteReview', 'RootDeleteReviewUseCaseTest.direct', 'RootDeleteReviewUseCaseTest.assertion', 'RootDeleteReviewUseCaseTest.mockito']));
     expect(new Set(graph.map((item) => `${item.context_class}.${item.context_symbol}`))).toEqual(new Set(['RootReviewRestController.deleteReview', 'RootDeleteReviewUseCaseTest.direct', 'RootDeleteReviewUseCaseTest.assertion', 'RootDeleteReviewUseCaseTest.mockito']));
+    expect(direct.filter((item) => item.context_symbol === 'mockito').map((item) => item.called_as).sort()).toEqual([
+      'verify(useCase).deleteById("3")',
+      'verify(useCase, never()).deleteById("4")',
+      'verify(useCase, times(1)).deleteById("5")',
+    ]);
     expect(fieldRefs.map((item) => `${item.context_class}.${item.context_symbol}`)).toContain('RootDeleteReviewUseCase.deleteById');
+  });
+
+  it('deduplicates Java references from assertion lambdas without hiding distinct calls', async () => {
+    const rootDir = await createProject('pi-find-references-java-assertion-dedupe', {
+      'src/main/java/app/AppService.java': `package app;\n\npublic class AppService {\n  public void method() {}\n}\n`,
+      'src/test/java/app/AppServiceTest.java': `package app;\n\nclass AppServiceTest {\n  private final AppService service = new AppService();\n\n  void thrownBy() {\n    assertThatThrownBy(() -> service.method());\n  }\n\n  void doesNotThrow() {\n    assertDoesNotThrow(() -> service.method());\n  }\n\n  void distinct() {\n    service.method();\n    service.method();\n  }\n}\n`,
+    });
+
+    const results = await findReferences(rootDir, {
+      path: 'src/main/java/app/AppService.java',
+      symbol: 'method',
+      language: 'java',
+      kind: 'method',
+      reference_kinds: ['call'],
+    });
+
+    expect(results.filter((item) => item.context_symbol === 'thrownBy')).toHaveLength(1);
+    expect(results.filter((item) => item.context_symbol === 'doesNotThrow')).toHaveLength(1);
+    expect(results.filter((item) => item.context_symbol === 'distinct')).toHaveLength(2);
+    expect(results.filter((item) => item.context_symbol !== 'distinct').map((item) => item.called_as).sort()).toEqual([
+      'service.method()',
+      'service.method()',
+    ]);
   });
 
   it('keeps Java field reads truthful, includes record implementations, and falls back for diamond instantiation references', async () => {

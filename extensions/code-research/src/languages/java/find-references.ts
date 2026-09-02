@@ -53,8 +53,8 @@ async function findMethodReferences(index: ProjectIndex, rootFile: string, isDir
         file: caller.file,
         line: resolvedCall.call.line,
         column: resolvedCall.call.column,
-        end_line: caller.node.endPosition.row + 1,
-        end_column: caller.node.endPosition.column,
+        end_line: resolvedCall.call.endLine,
+        end_column: resolvedCall.call.endColumn,
         symbol: target.symbol,
         kind: 'method',
         context_symbol: caller.symbol,
@@ -84,8 +84,8 @@ async function findMethodReferences(index: ProjectIndex, rootFile: string, isDir
           file: caller.file,
           line: lineNumber,
           column: callText.column,
-          end_line: caller.node.endPosition.row + 1,
-          end_column: caller.node.endPosition.column,
+          end_line: lineNumber,
+          end_column: callText.column + callText.text.length,
           symbol: target.symbol,
           kind: 'method',
           context_symbol: caller.symbol,
@@ -105,8 +105,8 @@ async function findMethodReferences(index: ProjectIndex, rootFile: string, isDir
           file: caller.file,
           line: lineNumber,
           column: methodReferenceMatch.index ?? 0,
-          end_line: caller.node.endPosition.row + 1,
-          end_column: caller.node.endPosition.column,
+          end_line: lineNumber,
+          end_column: (methodReferenceMatch.index ?? 0) + methodReferenceMatch[0].length,
           symbol: target.symbol,
           kind: 'method',
           context_symbol: caller.symbol,
@@ -476,7 +476,16 @@ function offsetToLineColumn(source: string, offset: number) {
 function dedupeReferences(references: ReferenceLocation[]): ReferenceLocation[] {
   const seen = new Set<string>();
   return references.filter((item) => {
-    const key = `${item.file}:${item.line}:${item.column}:${item.context_symbol ?? ''}:${item.called_as ?? ''}`;
+    const key = [
+      item.symbol,
+      item.kind,
+      item.file,
+      item.line,
+      item.column,
+      item.end_line ?? '',
+      item.end_column ?? '',
+      item.reference_kind,
+    ].join(':');
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

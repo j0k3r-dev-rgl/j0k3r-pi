@@ -367,6 +367,58 @@ describe('function_call_tree Java', () => {
     });
   });
 
+  it('extracts Mockito verification chains and assertion lambdas without duplicate child calls', async () => {
+    const rootDir = await createProject({
+      'Example.java': `public class Example {
+  private final AppService service = new AppService();
+
+  public void mockito() {
+    verify(service).method();
+    verify(service, never()).method();
+    verify(service, times(1)).method();
+  }
+
+  public void assertion() {
+    assertThatThrownBy(() -> service.method());
+  }
+}
+
+class AppService {
+  public void method() {}
+}
+`,
+    });
+
+    const index = await buildProjectIndex(rootDir);
+    const mockito = index.methods.find((method) => method.className === 'Example' && method.symbol === 'mockito');
+    const assertion = index.methods.find((method) => method.className === 'Example' && method.symbol === 'assertion');
+    expect(mockito).toBeDefined();
+    expect(assertion).toBeDefined();
+
+    const mockitoTree = buildCallTree({
+      rootFile: mockito!.file,
+      rootMethod: mockito!,
+      index,
+      maxDepth: 5,
+      includeExternal: true,
+    });
+    expect(mockitoTree.root.children?.filter((child) => child.symbol === 'method').map((child) => child.called_as)).toEqual([
+      'verify(service).method()',
+      'verify(service, never()).method()',
+      'verify(service, times(1)).method()',
+    ]);
+
+    const assertionTree = buildCallTree({
+      rootFile: assertion!.file,
+      rootMethod: assertion!,
+      index,
+      maxDepth: 5,
+      includeExternal: true,
+    });
+    const callbackChildren = assertionTree.root.children?.[0].children?.[0].children ?? [];
+    expect(callbackChildren.map((child) => child.called_as)).toEqual(['service.method()']);
+  });
+
   it('preserves nested owner identity when simple class names collide', async () => {
     const rootDir = await createProject({
       'Example.java': `public class Example {\n  static class OuterA {\n    static class Inner {\n      void run() {\n        helperA();\n      }\n\n      void helperA() {}\n    }\n  }\n\n  static class OuterB {\n    static class Inner {\n      void run() {\n        helperB();\n      }\n\n      void helperB() {}\n    }\n  }\n\n  public void start() {\n    new OuterB.Inner().run();\n  }\n}\n`,
