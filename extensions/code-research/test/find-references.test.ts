@@ -252,6 +252,76 @@ describe('find_references', () => {
     expect(results.map((item) => item.reference_kind).sort()).toEqual(['extends', 'import', 'instantiate', 'type_reference']);
   });
 
+  it('finds Java class type references in signatures constructors generics and class-qualified usages', async () => {
+    const files = {
+      'src/main/java/app/AppService.java': `package app;\n\npublic class AppService {\n  public static AppService create() { return new AppService(); }\n}\n`,
+      'src/main/java/web/Controller.java': `package web;\n\nimport app.AppService;\nimport java.util.List;\n\npublic class Controller {\n  private final AppService current;\n  private final List<AppService> services;\n\n  public Controller(AppService current, List<AppService> services) {\n    this.current = current;\n    this.services = services;\n  }\n\n  public AppService build(AppService input) {\n    AppService created = new AppService();\n    AppService utility = AppService.create();\n    String ignored = "AppService";\n    return utility;\n  }\n}\n`,
+    };
+    const directRoot = await createProject('pi-find-references-java-type-refs-direct', files);
+    const graphRoot = await createProject('pi-find-references-java-type-refs-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      ...files,
+    });
+    await buildWorkspaceGraph(graphRoot);
+
+    const query = {
+      path: 'src/main/java/app/AppService.java',
+      symbol: 'AppService',
+      language: 'java' as const,
+      kind: 'class' as const,
+      compare_direct_fallback: true,
+    };
+    const direct = await findReferences(directRoot, query);
+    const graph = await findReferences(graphRoot, query);
+    const normalize = (results: typeof direct) => results.map((item) => `${item.reference_kind}:${item.context_symbol ?? item.context_class ?? '<none>'}:${item.line}:${item.column}`).sort();
+
+    expect(new Set(direct.map((item) => item.reference_kind))).toEqual(new Set(['import', 'type_reference', 'instantiate', 'read']));
+    expect(direct.some((item) => item.reference_kind === 'type_reference' && item.context_symbol === 'Controller')).toBe(true);
+    expect(direct.some((item) => item.reference_kind === 'type_reference' && item.context_symbol === 'build')).toBe(true);
+    expect(direct.some((item) => item.reference_kind === 'instantiate')).toBe(true);
+    expect(direct.some((item) => item.reference_kind === 'read' && item.called_as === 'AppService.create()')).toBe(true);
+    expect(direct.some((item) => item.called_as === '"AppService"')).toBe(false);
+    expect(normalize(graph)).toEqual(normalize(direct));
+  });
+
+  it('finds Java record constructor and nested DTO generic type references', async () => {
+    const files = {
+      'src/main/java/app/Payload.java': `package app;\n\npublic class Payload {}\n`,
+      'src/main/java/app/OrderDto.java': `package app;\n\nimport java.util.List;\n\npublic record OrderDto(Payload primary, List<Payload> items) {}\n`,
+      'src/main/java/web/RecordController.java': `package web;\n\nimport app.OrderDto;\nimport app.Payload;\nimport java.util.List;\n\npublic class RecordController {\n  public OrderDto build(Payload primary) {\n    return new OrderDto(primary, List.of(new Payload()));\n  }\n}\n`,
+    };
+    const directRoot = await createProject('pi-find-references-java-record-refs-direct', files);
+    const graphRoot = await createProject('pi-find-references-java-record-refs-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      ...files,
+    });
+    await buildWorkspaceGraph(graphRoot);
+
+    const orderQuery = {
+      path: 'src/main/java/app/OrderDto.java',
+      symbol: 'OrderDto',
+      language: 'java' as const,
+      kind: 'class' as const,
+      compare_direct_fallback: true,
+    };
+    const directOrder = await findReferences(directRoot, orderQuery);
+    const graphOrder = await findReferences(graphRoot, orderQuery);
+    expect(directOrder.map((item) => item.reference_kind)).toContain('instantiate');
+    expect(directOrder.some((item) => item.context_symbol === 'build' && item.reference_kind === 'type_reference')).toBe(true);
+    expect(graphOrder.map((item) => `${item.reference_kind}:${item.line}:${item.column}`).sort()).toEqual(
+      directOrder.map((item) => `${item.reference_kind}:${item.line}:${item.column}`).sort()
+    );
+
+    const payloadRefs = await findReferences(directRoot, {
+      path: 'src/main/java/app/Payload.java',
+      symbol: 'Payload',
+      language: 'java',
+      kind: 'class',
+    });
+    expect(payloadRefs.some((item) => item.file.endsWith('OrderDto.java') && item.reference_kind === 'type_reference')).toBe(true);
+    expect(payloadRefs.some((item) => item.reference_kind === 'instantiate')).toBe(true);
+  });
+
   it('finds Java interface references for import implements extends and type_reference cases', async () => {
     const rootDir = await createProject('pi-find-references-java-interface', {
       'src/main/java/ports/Service.java': `package ports;\n\npublic interface Service {}\n`,

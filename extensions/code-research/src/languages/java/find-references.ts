@@ -1,7 +1,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { FindReferencesInput, ReferenceKind, ReferenceLocation } from '../../types.js';
-import { buildProjectIndex, type IndexedClass, type IndexedMethod, type ProjectIndex } from '../../core/project-index.js';
+import { buildProjectIndex, type FileImports, type IndexedClass, type IndexedMethod, type ProjectIndex } from '../../core/project-index.js';
 import { resolveJavaCallsForGraph, resolveJavaIndexRoot, type ResolvedJavaGraphCall } from './function-call-tree.js';
 
 export async function findJavaReferences(cwd: string, input: FindReferencesInput): Promise<ReferenceLocation[]> {
@@ -129,7 +129,7 @@ async function findTypeReferences(index: ProjectIndex, rootFile: string, isDirec
   const target = index.classes.find((klass) => {
     if (klass.className !== input.symbol) return false;
     if (!isDirectory && klass.file !== rootFile) return false;
-    if (input.kind && klass.kind !== input.kind) return false;
+    if (input.kind && !javaKindMatchesInput(klass.kind, input.kind)) return false;
     return true;
   });
   if (!target) return [];
@@ -188,7 +188,139 @@ async function findTypeReferences(index: ProjectIndex, rootFile: string, isDirec
     }
   }
 
+  for (const file of index.files) {
+    results.push(...collectSemanticJavaTypeReferences(file, target, input, index));
+  }
+
   return dedupeReferences(results);
+}
+
+function javaKindMatchesInput(kind: IndexedClass['kind'], inputKind: FindReferencesInput['kind']): boolean {
+  if (inputKind === 'class') return kind === 'class' || kind === 'record';
+  return kind === inputKind;
+}
+
+function collectSemanticJavaTypeReferences(
+  file: ProjectIndex['files'][number],
+  target: IndexedClass,
+  input: FindReferencesInput,
+  index: ProjectIndex
+): ReferenceLocation[] {
+  const results: ReferenceLocation[] = [];
+
+  if (file.file === target.file) return results;
+  const fileImports = index.imports.get(file.file);
+
+  function visit(node: any, ancestors: any[] = []) {
+    if (!node?.isNamed) return;
+
+    if (node.type === 'import_declaration') return;
+
+    const parent = ancestors[ancestors.length - 1];
+    if (isIndexedTypeNodeName(node, parent)) {
+      return;
+    }
+
+    if ((node.type === 'method_invocation' || node.type === 'field_access') && javaQualifierMatchesTarget(node.childForFieldName('object')?.text, target, fileImports)) {
+      results.push(createAstRef(file.file, input, 'read', node.startPosition.row + 1, node.startPosition.column, index, node.text));
+    }
+
+    if (
+      (node.type === 'type_identifier' || node.type === 'scoped_type_identifier') &&
+      !isInsideJavaObjectCreation(ancestors) &&
+      !isJavaRelationshipTypeNode(ancestors) &&
+      !isAlreadyIndexedSimpleFieldType(node, ancestors) &&
+      javaTypeTextMatchesTarget(node.text, target, fileImports)
+    ) {
+      results.push(createAstRef(file.file, input, 'type_reference', node.startPosition.row + 1, node.startPosition.column, index, node.text));
+    }
+
+    for (const child of node.children ?? []) visit(child, [...ancestors, node]);
+  }
+
+  visit(file.rootNode);
+  return results;
+}
+
+function isIndexedTypeNodeName(node: any, parent?: any): boolean {
+  if (!parent || !isJavaTypeDeclarationNode(parent)) return false;
+  return parent.childForFieldName('name') === node;
+}
+
+function isJavaTypeDeclarationNode(node: any): boolean {
+  return (
+    node.type === 'class_declaration' ||
+    node.type === 'interface_declaration' ||
+    node.type === 'enum_declaration' ||
+    node.type === 'record_declaration' ||
+    node.type === 'annotation_type_declaration'
+  );
+}
+
+function isInsideJavaObjectCreation(ancestors: any[]): boolean {
+  return ancestors.some((ancestor) => ancestor.type === 'object_creation_expression');
+}
+
+function isJavaRelationshipTypeNode(ancestors: any[]): boolean {
+  return ancestors.some((ancestor) => ancestor.type === 'superclass' || ancestor.type === 'super_interfaces' || ancestor.type === 'extends_interfaces');
+}
+
+function isAlreadyIndexedSimpleFieldType(node: any, ancestors: any[]): boolean {
+  const fieldDeclaration = [...ancestors].reverse().find((ancestor: any) => ancestor.type === 'field_declaration');
+  if (!fieldDeclaration) return false;
+  const typeNode = fieldDeclaration.childForFieldName('type');
+  if (!typeNode) return false;
+  return typeNode === node && !/[<.]/.test(node.text);
+}
+
+function javaTypeTextMatchesTarget(typeText: string | undefined, target: IndexedClass, fileImports?: FileImports): boolean {
+  if (!typeText) return false;
+  const normalized = typeText.replace(/@[A-Za-z_$][\w$.]*(?:\([^)]*\))?\s*/g, '').replace(/<[^<>]*>/g, '').replace(/\[\]/g, '').replace(/\.\.\./g, '').trim();
+  if (normalized === target.fullName) return true;
+  if (normalized.endsWith(`.${target.className}`)) return normalized === target.fullName;
+  if (normalized !== target.className) return false;
+  const imported = fileImports?.imports.get(target.className);
+  if (imported) return imported === target.fullName;
+  return fileImports?.package === target.package;
+}
+
+function javaQualifierMatchesTarget(qualifier: string | undefined, target: IndexedClass, fileImports?: FileImports): boolean {
+  if (!qualifier) return false;
+  return javaTypeTextMatchesTarget(qualifier, target, fileImports);
+}
+
+function createAstRef(
+  file: string,
+  input: FindReferencesInput,
+  kind: ReferenceKind,
+  line: number,
+  column: number,
+  index: ProjectIndex,
+  calledAs?: string
+): ReferenceLocation {
+  const methodContext = index.methods.find((method) => method.file === file && method.line <= line && method.node.endPosition.row + 1 >= line);
+  if (methodContext) {
+    return {
+      file,
+      line,
+      column,
+      end_line: methodContext.node.endPosition.row + 1,
+      end_column: methodContext.node.endPosition.column,
+      symbol: input.symbol,
+      kind: input.kind ?? 'unknown',
+      context_symbol: methodContext.symbol,
+      context_kind: 'method',
+      context_class: methodContext.className,
+      owner_kind: 'class',
+      reference_kind: kind,
+      called_as: calledAs,
+      is_application: true,
+      source: 'application',
+    };
+  }
+
+  const contextClass = index.classes.find((klass) => klass.file === file && klass.line <= line);
+  return createRef(file, input, kind, line, column, index, contextClass?.className, contextClass?.kind, calledAs ? { called_as: calledAs } : undefined);
 }
 
 function createRef(
