@@ -80,11 +80,11 @@ describe('graph policy', () => {
     expect(normalizeGraphLanguage({ language: 'auto', path: '/tmp/example.txt' })).toBeUndefined();
   });
 
-  it('limits graph reference coverage to call, read, implements, and extends', () => {
-    expect([...GRAPH_REFERENCE_KINDS].sort()).toEqual(['call', 'extends', 'implements', 'read']);
+  it('limits graph reference coverage to persisted semantic reference kinds', () => {
+    expect([...GRAPH_REFERENCE_KINDS].sort()).toEqual(['call', 'extends', 'implements', 'import', 'instantiate', 'read', 'type_reference']);
 
     expect(getFindReferencesGraphCoverage({ path: 'src/a.ts', symbol: 'helper', language: 'ts', kind: 'function' })).toEqual({
-      requiredReferenceKinds: ['call', 'read', 'implements', 'extends'],
+      requiredReferenceKinds: ['call', 'read', 'import', 'type_reference', 'instantiate', 'implements', 'extends'],
       graphCoverageMode: 'supported-subset',
     });
 
@@ -110,7 +110,7 @@ describe('graph policy', () => {
         language: 'java',
         requiredReferenceKinds: ['call', 'import'],
       })
-    ).toEqual({ usable: false, reason: 'coverage_insufficient' });
+    ).toEqual({ usable: true });
 
     expect(
       evaluateGraphUsability({

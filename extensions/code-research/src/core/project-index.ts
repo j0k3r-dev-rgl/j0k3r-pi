@@ -422,58 +422,74 @@ function resolveTypeReference(
 
 function collectJavaTypeReferences(index: ProjectIndex): IndexedJavaTypeReference[] {
   const results: IndexedJavaTypeReference[] = [];
-  for (const target of index.classes) {
-    for (const file of index.files) {
-      if (file.file === target.file) continue;
-      const fileImports = index.imports.get(file.file);
-      if (!fileImports) continue;
-      const imported = fileImports.imports.get(target.className);
-      if (imported === target.fullName) {
-        const position = findRegexPosition(file.source, new RegExp(`import\\s+${escapeRegExp(target.fullName)}\\s*;`));
-        if (position) {
-          results.push({
-            file: file.file,
-            targetSymbolId: target.symbolId,
-            referenceKind: 'import',
-            line: position.line,
-            column: position.column,
-            endLine: position.line,
-            endColumn: position.column + `import ${target.fullName};`.length,
-            calledAs: `import ${target.fullName};`,
-            importSource: target.fullName,
-          });
-        }
-      }
-      for (const field of index.fields) {
-        if (field.file !== file.file || !(field.typeName === target.className || field.fullTypeName === target.fullName)) continue;
-        const contextClass = index.classes.find((klass) => klass.file === field.file && klass.className === field.className);
+  const classByFullName = new Map(index.classes.map((klass) => [klass.fullName, klass]));
+  const classesBySimpleName = new Map<string, IndexedClass[]>();
+  for (const klass of index.classes) {
+    const existing = classesBySimpleName.get(klass.className) ?? [];
+    existing.push(klass);
+    classesBySimpleName.set(klass.className, existing);
+  }
+
+  for (const file of index.files) {
+    const fileImports = index.imports.get(file.file);
+    if (!fileImports) continue;
+
+    for (const imported of fileImports.imports.values()) {
+      const target = classByFullName.get(imported);
+      if (!target || target.file === file.file) continue;
+      const position = findRegexPosition(file.source, new RegExp(`import\\s+${escapeRegExp(target.fullName)}\\s*;`));
+      if (position) {
         results.push({
-          file: field.file,
+          file: file.file,
           targetSymbolId: target.symbolId,
-          contextSymbolId: contextClass?.symbolId,
-          contextClassName: field.className,
-          contextKind: 'class',
-          referenceKind: 'type_reference',
-          line: field.typeLine,
-          column: field.typeColumn,
-          endLine: field.typeEndLine,
-          endColumn: field.typeEndColumn,
-          calledAs: field.typeName,
+          referenceKind: 'import',
+          line: position.line,
+          column: position.column,
+          endLine: position.line,
+          endColumn: position.column + `import ${target.fullName};`.length,
+          calledAs: `import ${target.fullName};`,
+          importSource: target.fullName,
         });
       }
-      collectSemanticReferencesForTarget(file, target, fileImports, index, results);
     }
+
+    for (const field of index.fields) {
+      if (field.file !== file.file) continue;
+      const target = resolveJavaTypeTarget(field.fullTypeName ?? field.typeName, fileImports, classByFullName, classesBySimpleName);
+      if (!target || target.file === field.file) continue;
+      const contextClass = index.classes.find((klass) => klass.file === field.file && klass.className === field.className);
+      results.push({
+        file: field.file,
+        targetSymbolId: target.symbolId,
+        contextSymbolId: contextClass?.symbolId,
+        contextClassName: field.className,
+        contextKind: 'class',
+        referenceKind: 'type_reference',
+        line: field.typeLine,
+        column: field.typeColumn,
+        endLine: field.typeEndLine,
+        endColumn: field.typeEndColumn,
+        calledAs: field.typeName,
+      });
+    }
+
+    collectSemanticReferencesForFile(file, fileImports, index, classByFullName, classesBySimpleName, results);
   }
+
   return dedupeTypeReferences(results);
 }
 
-function collectSemanticReferencesForTarget(
+function collectSemanticReferencesForFile(
   file: IndexedJavaFile,
-  target: IndexedClass,
   fileImports: FileImports,
   index: ProjectIndex,
+  classByFullName: Map<string, IndexedClass>,
+  classesBySimpleName: Map<string, IndexedClass[]>,
   results: IndexedJavaTypeReference[]
 ): void {
+  const methodsInFile = index.methods.filter((method) => method.file === file.file);
+  const classesInFile = index.classes.filter((klass) => klass.file === file.file);
+
   function visit(node: any, ancestors: any[] = []) {
     if (!node?.isNamed) return;
     if (node.type === 'import_declaration') return;
@@ -481,14 +497,18 @@ function collectSemanticReferencesForTarget(
     const parent = ancestors[ancestors.length - 1];
     if (isIndexedTypeNodeName(node, parent)) return;
 
-    if ((node.type === 'method_invocation' || node.type === 'field_access') && javaTypeTextMatchesTarget(node.childForFieldName('object')?.text, target, fileImports)) {
-      pushAstReference(file.file, target, index, results, 'read', node, ancestors, node.text);
+    if (node.type === 'method_invocation' || node.type === 'field_access') {
+      const target = resolveJavaTypeTarget(node.childForFieldName('object')?.text, fileImports, classByFullName, classesBySimpleName);
+      if (target && target.file !== file.file) {
+        pushAstReference(file.file, target, methodsInFile, classesInFile, results, 'read', node, node.text);
+      }
     }
 
     if (node.type === 'object_creation_expression') {
       const typeNode = node.childForFieldName('type') ?? node.children?.find((child: any) => child.type === 'type_identifier' || child.type === 'generic_type' || child.type === 'scoped_type_identifier');
-      if (javaTypeTextMatchesTarget(typeNode?.text, target, fileImports)) {
-        pushAstReference(file.file, target, index, results, 'instantiate', typeNode ?? node, ancestors, node.text);
+      const target = resolveJavaTypeTarget(typeNode?.text, fileImports, classByFullName, classesBySimpleName);
+      if (target && target.file !== file.file) {
+        pushAstReference(file.file, target, methodsInFile, classesInFile, results, 'instantiate', typeNode ?? node, node.text);
       }
     }
 
@@ -496,13 +516,16 @@ function collectSemanticReferencesForTarget(
       (node.type === 'type_identifier' || node.type === 'scoped_type_identifier') &&
       !isInsideJavaObjectCreation(ancestors) &&
       !isJavaRelationshipTypeNode(ancestors) &&
-      !isAlreadyIndexedSimpleFieldType(node, ancestors) &&
-      javaTypeTextMatchesTarget(node.text, target, fileImports)
+      !isAlreadyIndexedSimpleFieldType(node, ancestors)
     ) {
-      pushAstReference(file.file, target, index, results, 'type_reference', node, ancestors, node.text);
+      const target = resolveJavaTypeTarget(node.text, fileImports, classByFullName, classesBySimpleName);
+      if (target && target.file !== file.file) {
+        pushAstReference(file.file, target, methodsInFile, classesInFile, results, 'type_reference', node, node.text);
+      }
     }
 
-    for (const child of node.children ?? []) visit(child, [...ancestors, node]);
+    const nextAncestors = [...ancestors, node];
+    for (const child of node.children ?? []) visit(child, nextAncestors);
   }
   visit(file.rootNode);
 }
@@ -510,16 +533,16 @@ function collectSemanticReferencesForTarget(
 function pushAstReference(
   file: string,
   target: IndexedClass,
-  index: ProjectIndex,
+  methodsInFile: IndexedMethod[],
+  classesInFile: IndexedClass[],
   results: IndexedJavaTypeReference[],
   referenceKind: IndexedJavaTypeReference['referenceKind'],
   node: any,
-  ancestors: any[],
   calledAs?: string
 ): void {
   const line = node.startPosition.row + 1;
-  const methodContext = index.methods.find((method) => method.file === file && method.line <= line && method.node.endPosition.row + 1 >= line);
-  const contextClass = methodContext ? undefined : index.classes.find((klass) => klass.file === file && klass.line <= line);
+  const methodContext = methodsInFile.find((method) => method.line <= line && method.node.endPosition.row + 1 >= line);
+  const contextClass = methodContext ? undefined : classesInFile.find((klass) => klass.line <= line);
   results.push({
     file,
     targetSymbolId: target.symbolId,
@@ -556,15 +579,28 @@ function isAlreadyIndexedSimpleFieldType(node: any, ancestors: any[]): boolean {
   return typeNode === node && !/[<.]/.test(node.text);
 }
 
-function javaTypeTextMatchesTarget(typeText: string | undefined, target: IndexedClass, fileImports?: FileImports): boolean {
-  if (!typeText) return false;
+function resolveJavaTypeTarget(
+  typeText: string | undefined,
+  fileImports: FileImports,
+  classByFullName: Map<string, IndexedClass>,
+  classesBySimpleName: Map<string, IndexedClass[]>
+): IndexedClass | undefined {
+  if (!typeText) return undefined;
   const normalized = typeText.replace(/@[A-Za-z_$][\w$.]*(?:\([^)]*\))?\s*/g, '').replace(/<[^<>]*>/g, '').replace(/\[\]/g, '').replace(/\.\.\./g, '').trim();
-  if (normalized === target.fullName) return true;
-  if (normalized.endsWith(`.${target.className}`)) return normalized === target.fullName;
-  if (normalized !== target.className) return false;
-  const imported = fileImports?.imports.get(target.className);
-  if (imported) return imported === target.fullName;
-  return fileImports?.package === target.package;
+  if (!normalized) return undefined;
+  const direct = classByFullName.get(normalized);
+  if (direct) return direct;
+
+  const topLevel = normalized.split('.')[0] ?? normalized;
+  const imported = fileImports.imports.get(topLevel);
+  if (imported) {
+    const suffix = normalized === topLevel ? '' : `.${normalized.slice(topLevel.length + 1)}`;
+    return classByFullName.get(`${imported}${suffix}`);
+  }
+
+  if (normalized.includes('.')) return undefined;
+  const samePackage = (classesBySimpleName.get(normalized) ?? []).filter((klass) => klass.package === fileImports.package);
+  return samePackage.length === 1 ? samePackage[0] : undefined;
 }
 
 function findRegexPosition(source: string, pattern: RegExp): { line: number; column: number } | undefined {

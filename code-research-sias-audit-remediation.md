@@ -1,193 +1,181 @@
-# Code Research SIAS Audit — Remediation Roadmap
+# Code Research SIAS Audit — Updated Remediation Plan
 
 Date: 2026-09-02
 Repo audited: `/home/j0k3r/sias/app`
-Planning mode: four independent Mini-SDD slices
 
-## Decision
+## Current Status
 
-Do **not** remediate the full audit in one large change. Advance through **four Mini-SDDs**, each with a bounded scope, fixtures, validation matrix, and explicit regression target.
+Status: **NEEDS_FIX / TYPESCRIPT REMAINING**
 
-Until all slices are fixed, the user-facing contract remains:
+After regenerating the SIAS graph with builder model version `3`, the previous Java P0 class/type/DTO reference failures are now resolved on the sampled SIAS regressions.
 
-> Use Code Research first for semantic symbol navigation and call flow. Use targeted `rg`/`grep` afterward for exhaustive/textual validation.
+Remaining work is concentrated in TypeScript reference behavior:
 
-## Current Graph Health Baseline
+1. optional-chained calls missing from `code_find relation=references`;
+2. TypeScript type alias classification and references;
+3. unfiltered TypeScript `relation=references` adjacent-line false positives.
 
-Observed consistently by the audit subagents:
+## Graph Health
+
+Current SIAS graph is regenerated and usable.
+
+`workspace_graph_status`:
 
 ```text
 fresh | usable=yes | monorepo=yes | shards=5 | indexed_files=1465
 workspace_projects=lab,back,front,back_ia,back_files
-partial_projects=0 | empty_projects=0 | unreadable_dirs=4
+partial_projects=0 | empty_projects=0
+unreadable_dirs=4
 ```
 
-## Execution Order
-
-| Order | Mini-SDD | Priority | Main risk reduced |
-|---:|---|---|---|
-| 1 | `fix-java-type-references` | P0 | Java impact analysis false negatives |
-| 2 | `fix-ts-optional-chain-calls` | P0 | TypeScript call/reference false negatives |
-| 3 | `fix-java-mockito-and-dedupe` | P0/P1 | Missed Mockito calls and duplicate Java refs |
-| 4 | `fix-usability-status-and-docs` | P1/P2/P3 | Noise, transparency, and guidance gaps |
-
-## Mini-SDD 1 — `fix-java-type-references`
-
-### Goal
-
-Make Java `code_find relation=references` reliable for class, record, DTO, and utility type usages.
-
-### Scope
-
-Fix Java references for `kind=class` and equivalent type declarations so semantic references include:
-
-- imports;
-- field types;
-- method parameter types;
-- method return types;
-- constructor calls;
-- generic type arguments;
-- record constructor calls;
-- static member/class-qualified usages.
-
-### Real SIAS examples
-
-- `ReviewPersistenceModel`
-  - Code Research before: 0 references
-  - `rg` baseline: 48 textual usages
-- `MongoIdUtils`
-  - Code Research before: 0 references
-  - `rg` baseline: 313 textual usages
-- `DocumentationItemDTO`
-  - Code Research before: too few or missing type/constructor usages
-
-### Fixtures to add
-
-1. Java class/type reference fixture:
-   - import;
-   - field type;
-   - constructor call;
-   - static utility call;
-   - generic type argument;
-   - method return type;
-   - method parameter type.
-2. Java record/DTO fixture:
-   - record constructor call;
-   - list/map generic usage;
-   - nested DTO field/reference.
-
-### Validation
-
-For each fixture and selected SIAS symbol, compare:
-
-- `code_find relation=declaration`
-- `code_find relation=references`
-- `code_find relation=references reference_kinds=["call"]` where relevant
-- targeted `rg` baseline
-
-Pass criteria:
-
-- Declarations still point to exact declaration file/line.
-- Type references include all supported semantic usages above.
-- Static qualified usages are reported as references.
-- No string-only/test-description matches are counted as semantic references.
-
-### Out of scope
-
-- TypeScript extraction.
-- Call hierarchy changes unless directly required by Java type reference extraction.
-- UI/documentation copy.
-
-## Mini-SDD 2 — `fix-ts-optional-chain-calls`
-
-### Goal
-
-Detect optional-chained TypeScript calls in both references and outgoing call hierarchy.
-
-### Scope
-
-Support optional call expressions such as:
-
-```ts
-obj?.save()
-await this.repo?.save({})
-obj.method?.()
-```
-
-They must be included in:
-
-- `code_find relation=references query=<method> kind=method reference_kinds=["call"]`
-- `code_call_hierarchy direction=outgoing`
-
-### Real SIAS example
-
-```ts
-await this.aiLogRepository?.save({ ... })
-```
-
-File:
+Graph metadata inspection:
 
 ```text
-back_ia/src/application/use-cases/analyze-image-readability.use-case.ts:26
+.pi/workspace-code-graph/graph-manifest.json: builderModelVersion=3, schemaVersion=4
+.pi/workspace-code-graph/workspace-state.json: builderModelVersion=3, schemaVersion=4
 ```
 
-Missed before by both:
+Unreadable paths are now exposed safely:
 
-- `code_find relation=references query=save kind=method reference_kinds=["call"]`
-- `code_call_hierarchy AnalyzeImageReadabilityUseCase.execute outgoing`
-
-### Fixtures to add
-
-1. Optional chaining calls:
-   - `obj?.save()`;
-   - `await this.repo?.save({})`;
-   - `obj.method?.()` if supported by parser/model.
-2. Adjacent callback guard fixture if the same extractor area is touched:
-   - call assigns result to a local variable;
-   - next line uses local variable without the target symbol;
-   - only the actual call line is returned.
-
-### Validation
-
-For fixtures and SIAS example:
-
-- `code_find relation=references reference_kinds=["call"]` includes optional-chain call sites.
-- `code_call_hierarchy direction=outgoing` includes optional-chain callees.
-- Existing normal method calls still appear.
-- No adjacent non-symbol line is introduced as a false positive.
-
-### Out of scope
-
-- Java extraction.
-- Full TypeScript type alias classification unless touched incidentally.
-- Documentation/status output changes.
-
-## Mini-SDD 3 — `fix-java-mockito-and-dedupe`
-
-### Goal
-
-Make Java method reference extraction reliable in Mockito verification chains and remove duplicate references from nested lambda/assertion contexts.
-
-### Scope
-
-Support calls inside Mockito verification expressions:
-
-```java
-verify(mock).method(...)
-verify(mock, never()).method(...)
-verify(mock, times(1)).method(...)
+```text
+docker_compose_sias/volumes/clamav_db/tmp.5c9d80a0a7
+docker_compose_sias/volumes/mongo_data/_tmp
+docker_compose_sias/volumes/mongo_data/diagnostic.data
+docker_compose_sias/volumes/mongo_data/journal
 ```
 
-Deduplicate Java references by stable tuple:
+Status: **PASS**.
 
-- target symbol id;
-- source file;
-- AST node span;
-- reference kind.
+## Fixed or Improved
 
-### Real SIAS examples
+### Java class/type/DTO references after graph regeneration
 
-Mockito negative verifications previously missed:
+Status: **PASS on sampled regressions**
+
+The previous P0 Java issue is fixed after SIAS graph regeneration with builder model version `3`.
+
+#### `ReviewPersistenceModel`
+
+Query:
+
+```text
+code_find path=back query=ReviewPersistenceModel relation=references language=java kind=class
+```
+
+Result:
+
+```text
+61 references
+```
+
+`rg` baseline:
+
+```bash
+rg -n '\bReviewPersistenceModel\b' back --glob '!target/**' | wc -l
+# 48
+```
+
+Code Research now includes imports, type references, `.class` references, builder/static reads, method signatures, and local variable types.
+
+#### `MongoIdUtils`
+
+Query:
+
+```text
+code_find path=back query=MongoIdUtils relation=references language=java kind=class
+```
+
+Result:
+
+```text
+281 references
+```
+
+`rg` baseline:
+
+```bash
+rg -n '\bMongoIdUtils\b' back --glob '!target/**' | wc -l
+# 313
+```
+
+Result is acceptable because Code Research returns semantic refs while `rg` includes textual/Javadoc/non-semantic hits.
+
+#### `DocumentationItemDTO`
+
+Query:
+
+```text
+code_find path=back_files query=DocumentationItemDTO relation=references language=java kind=class
+```
+
+Result:
+
+```text
+25 references
+```
+
+`rg` baseline:
+
+```bash
+rg -n '\bDocumentationItemDTO\b' back_files/src --glob '*.java' | wc -l
+# 26
+```
+
+Code Research now includes imports, generic usage, return types, constructor calls, local variables, and test references.
+
+#### `MongoConfigs`
+
+Queries:
+
+```text
+code_find path=back query=MongoConfigs relation=references language=java kind=class
+code_find path=back_files query=MongoConfigs relation=references language=java kind=class
+```
+
+Results:
+
+```text
+back: 3 references
+back_files: 6 references
+```
+
+Status: **PASS**. Imports, constructor calls, and type references in tests are now returned.
+
+### Java duplicate lambda/assertion references
+
+Status: **PASS on sampled cases**
+
+Previously duplicated call sites now appear once.
+
+Examples retested:
+
+- `createReview`
+- `start`
+- `loadFile`
+- `toResponse`
+
+Representative paths:
+
+```text
+back/src/test/java/.../CreateReviewUseCaseRegisterTypeScopeTest.java:26
+back/src/test/java/.../StartReviewAnalysisUseCaseTest.java:149
+back/src/test/java/.../StartReviewAnalysisUseCaseTest.java:184
+back_files/src/test/java/.../StorageServiceTest.java:121
+back_files/src/test/java/.../StorageServiceTest.java:148-150
+back_files/src/test/java/.../StorageServiceTest.java:176-178
+```
+
+### Mockito verification calls
+
+Status: **PASS on sampled cases**
+
+`verify(..., never())` and related Mockito verification calls are now returned for:
+
+```text
+validateAndStageDocumentationUpload
+```
+
+Previously missed lines now appear:
 
 ```text
 back_files/src/test/java/.../UploadFileBySlotUseCaseTest.java:167
@@ -196,212 +184,605 @@ back_files/src/test/java/.../UploadFileBySlotUseCaseTest.java:293
 back_files/src/test/java/.../UploadFileBySlotUseCaseTest.java:308
 ```
 
-Duplicate Java references previously observed in:
+### TypeScript optional chaining in call hierarchy
+
+Status: **PARTIAL**
+
+`code_call_hierarchy` detects optional-chained method calls.
+
+Confirmed example:
 
 ```text
-back/src/test/java/.../StartReviewAnalysisUseCaseTest.java:149
-back/src/test/java/.../StartReviewAnalysisUseCaseTest.java:184
-back/src/test/java/.../CreateReviewUseCaseRegisterTypeScopeTest.java:26
-back_files/src/test/java/.../StorageServiceTest.java:121
-back_files/src/test/java/.../StorageServiceTest.java:148-150
-back_files/src/test/java/.../StorageServiceTest.java:176-178
+back_ia/src/application/use-cases/analyze-image-readability.use-case.ts:26
 ```
 
-### Fixtures to add
+```ts
+await this.aiLogRepository?.save({ ... })
+```
 
-1. Mockito verification calls:
-   - `verify(mock).method(...)`;
-   - `verify(mock, never()).method(...)`;
-   - `verify(mock, times(1)).method(...)`.
-2. Lambda/assertion dedupe:
-   - invocation inside `assertThatThrownBy(() -> service.method())`;
-   - invocation inside `assertDoesNotThrow(() -> service.method())`.
-
-### Validation
-
-- Mockito verification target methods are returned as call references.
-- Negative verification calls are not missed.
-- Nested assertion/lambda calls are returned once per actual invocation node.
-- Existing Java call reference behavior remains stable.
-
-### Out of scope
-
-- Java class/type reference expansion already covered by Mini-SDD 1.
-- TypeScript extraction.
-- Workspace graph status output.
-
-## Mini-SDD 4 — `fix-usability-status-and-docs`
-
-### Goal
-
-Reduce user confusion and improve audit transparency after semantic correctness fixes land.
-
-### Scope
-
-Address P1/P2/P3 usability and documentation issues:
-
-1. TypeScript adjacent-line false positives.
-2. Common-name query guidance.
-3. TypeScript type alias classification or documented limitation.
-4. Dynamic/dependency-injection call hierarchy limits.
-5. `workspace_graph_status` unreadable directory transparency.
-6. Safe user-facing guidance for semantic-vs-textual search.
-
-### Problems to address
-
-#### Adjacent-line false positives in TypeScript
-
-Observed examples:
-
-- `getDefaultRouteForRole` references included adjacent lines without the symbol:
-  - `front/app/routes/home.tsx:31` — `return redirect(route)`
-  - `front/app/routes/startup.tsx:15` — `return redirect(route)`
-- `buildModulesByDependencyModuleVariables` included adjacent `fetchToGraphql(...)` line after the real call.
-
-Expected:
-
-- Reference location should point only to the actual AST node span or line containing the symbol/call.
-- Parent/adjacent callback body lines must not be returned as separate references.
-
-#### Common-name usability
-
-Noisy symbols include:
+`AnalyzeImageReadabilityUseCase.execute` outgoing hierarchy includes:
 
 ```text
-loader, start, save, generate, execute, toResponse, ok
+AiLogRepository.save
+call_line=26
 ```
 
-Docs/help should recommend:
+But `code_find relation=references` still misses this same call. See remaining P0 below.
 
-- smallest path possible;
-- explicit `language`;
-- explicit `kind`;
-- declaring file path for common methods;
-- `reference_kinds=["call"]` only when call-only impact is needed.
+### DI/dynamic call hierarchy transparency
 
-#### TypeScript type aliases
+Status: **IMPROVED / PARTIAL**
 
-Observed with `ReviewAnalysisStatus`, where TS type aliases may be reported as `[variable]`.
-
-Expected:
-
-- Prefer `type_alias` classification when possible.
-- If the underlying model normalizes aliases to variables, expose a note or declaration-kind hint.
-
-#### Dynamic/dependency-injection call hierarchy
-
-Observed:
-
-- `startSiasAi` call hierarchy found local `registerShutdown`, but not injected calls like `deps.loadConfig()` / `deps.buildServer()`.
-
-Expected:
-
-- Document limits around injected/dynamic receiver calls.
-- Optionally classify unresolved dynamic calls as probable/external leaves when requested.
-
-#### Graph status transparency
-
-Observed:
+`startSiasAi` outgoing hierarchy reports dynamic dependency calls such as:
 
 ```text
-unreadable_dirs=4
+deps.loadConfig
+deps.buildServer
 ```
 
-Expected:
+These are classified as probable/external leaves rather than resolved concrete implementations. This is acceptable if documented clearly.
 
-- Include bounded unreadable directory paths or categories in `workspace_graph_status`.
-- Keep secrets safe: do not print `.env` contents or credential-bearing path contents.
+### Frontend broad route declaration counts
 
-### Fixtures/docs to add or update
+Status: **PASS on sampled cases**
 
-- TypeScript adjacent-line false-positive fixture.
-- Type alias classification fixture or documented expected output.
-- Status-output test for unreadable directory summaries if a test harness exists.
-- Code Research docs/help text with best-practice query recipes.
+Broad `loader` / `action` declaration counts match `rg` under `front`:
 
-### Validation
+```text
+loader: 88
+action: 27
+```
 
-- Adjacent false positives are removed.
-- Common-name guidance appears in docs/help text.
-- `workspace_graph_status` identifies unreadable directories in bounded, secret-safe form.
-- Existing status output remains concise and stable.
+## Remaining Problems
 
-### Out of scope
+## P0 — TypeScript optional-chain calls missing from `code_find references`
 
-- P0 Java/TS semantic extraction already covered by Mini-SDDs 1–3.
-- New text-search mode.
-- Broad UI redesign.
+Status: **FAIL / PARTIAL**
 
-## Shared Regression Matrix
+Call hierarchy was fixed, but `code_find relation=references` still misses optional-chained calls.
 
-Use this matrix in each Mini-SDD as applicable:
+Failing query:
 
-| Check | Expected result |
-|---|---|
-| `code_find relation=declaration` | exact file/line match |
-| `code_find relation=references` | no known semantic false negatives for supported constructs |
-| `code_find relation=references reference_kinds=["call"]` | only call references when call-only requested |
-| `code_call_hierarchy direction=outgoing` | includes supported direct and optional calls |
-| targeted `rg` baseline | used as audit-grade fallback comparator |
-| duplicate check | no duplicate same-node call references |
-| non-symbol text check | string literals and test names excluded from semantic refs |
+```text
+code_find path=back_ia query=save relation=references language=ts kind=method reference_kinds=["call"]
+```
 
-## Safe User-Facing Guidance Until Fixed
+Observed result:
+
+```text
+2 references
+back_ia/src/application/use-cases/fetch-to-ia.use-case.ts:39
+back_ia/src/application/use-cases/start-review-analysis.use-case.ts:66
+```
+
+Missing expected reference:
+
+```text
+back_ia/src/application/use-cases/analyze-image-readability.use-case.ts:26
+```
+
+Source pattern:
+
+```ts
+await this.aiLogRepository?.save({ ... })
+```
+
+`rg` baseline:
+
+```bash
+rg -n '\?\.\s*save\s*\(' back_ia --glob '!node_modules/**' --glob '!dist/**'
+```
+
+Result:
+
+```text
+back_ia/src/application/use-cases/analyze-image-readability.use-case.ts:26
+```
+
+Expected fix:
+
+- optional call expressions must be emitted by `code_find relation=references`;
+- behavior should match call hierarchy for this construct;
+- handle at least:
+  - `obj?.method()`;
+  - `this.repo?.save()`;
+  - `obj.method?.()` if the parser supports it.
+
+## P1 — TypeScript type alias classification and references fail
+
+Status: **FAIL**
+
+Observed with:
+
+```text
+ReviewAnalysisStatus
+```
+
+Declaration query still reports TypeScript type aliases as `[variable]`.
+
+Failing query:
+
+```text
+code_find path=. query=ReviewAnalysisStatus language=ts relation=declaration
+```
+
+Observed results include declarations/import-like matches reported as variables:
+
+```text
+back_ia/src/application/ports/output/review-analysis-repository.ts:4 [variable]
+front/app/server/features/review/review.query.server.ts:244 [variable]
+```
+
+References query fails:
+
+```text
+code_find path=. query=ReviewAnalysisStatus language=ts relation=references
+```
+
+Observed result:
+
+```text
+0 references
+```
+
+`rg` baseline:
+
+```bash
+rg -n '\bReviewAnalysisStatus\b' front back_ia --glob '!node_modules/**' --glob '!dist/**' | wc -l
+# 45
+```
+
+Expected fix:
+
+- classify `export type X = ...` as `type_alias` where possible;
+- `relation=references` should include imports and type positions;
+- if type aliases are internally represented as variables for compatibility, expose this limitation clearly and make `declaration_kind=type_alias` reliable.
+
+## P1 — TypeScript adjacent-line false positives remain in unfiltered references
+
+Status: **FAIL**
+
+`reference_kinds=["call"]` works well for sampled call-only lookups, but unfiltered `relation=references` still returns adjacent/body lines that do not contain the symbol.
+
+### `getDefaultRouteForRole`
+
+Failing query:
+
+```text
+code_find path=front query=getDefaultRouteForRole relation=references language=ts kind=function
+```
+
+Observed result includes false positives:
+
+```text
+front/app/routes/home.tsx:31
+front/app/routes/startup.tsx:15
+```
+
+Those lines are `redirect(route)` lines and do not contain `getDefaultRouteForRole`.
+
+Call-only mode passes:
+
+```text
+code_find path=front query=getDefaultRouteForRole relation=references language=ts kind=function reference_kinds=["call"]
+```
+
+Correct result:
+
+```text
+front/app/routes/home.tsx:29
+front/app/routes/startup.tsx:13
+front/app/server/auth/session-flow.server.ts:42
+```
+
+### `buildModulesByDependencyModuleVariables`
+
+Failing query:
+
+```text
+code_find path=front query=buildModulesByDependencyModuleVariables relation=references language=ts kind=function
+```
+
+False positive:
+
+```text
+front/app/server/features/modules/modules.query.server.ts:212
+```
+
+This is an adjacent `fetchToGraphql(...)` line after the real call.
+
+Call-only mode passes:
+
+```text
+code_find path=front query=buildModulesByDependencyModuleVariables relation=references language=ts kind=function reference_kinds=["call"]
+```
+
+Correct result:
+
+```text
+front/app/server/features/modules/modules.query.server.ts:211
+```
+
+### `asRecord`
+
+Failing query:
+
+```text
+code_find path=front query=asRecord relation=references language=ts kind=function
+```
+
+False positive:
+
+```text
+front/app/utils/review_analysis_ui.ts:199
+```
+
+Line content is unrelated to the symbol:
+
+```ts
+return normalizeRevisionDecision(rawDecision);
+```
+
+Call-only mode passes:
+
+```text
+code_find path=front query=asRecord relation=references language=ts kind=function reference_kinds=["call"]
+```
+
+Correct result:
+
+```text
+11 call references
+```
+
+Expected fix:
+
+- reference results should point to the actual AST node span or at least a line containing the referenced symbol;
+- parent callback/body lines should not be emitted as independent references;
+- unfiltered `relation=references` should not be less precise than call-only mode for symbol locations.
+
+## P2 — Frontend test/mock references still need policy clarification
+
+Status: **PARTIAL / CONTRACT QUESTION**
+
+Some frontend refs in tests/mocks were previously missed.
+
+Examples:
+
+```text
+front/app/server/features/modules/modules.query.server.test.ts:69
+front/app/server/features/modules/modules.query.server.test.ts:88
+front/app/components/ImageUploader.test.ts
+front/app/components/RouteErrorPanel.test.ts:2
+```
+
+Observed with:
+
+- `buildModulesByDependencyModuleVariables`
+- `ImageUploader`
+- `RouteErrorPanel`
+
+Clarify intended contract:
+
+- If Code Research should include tests, these are false negatives.
+- If test/mocks/textual refs are intentionally excluded, document that clearly and expose a way to request test refs if supported.
+
+Note from latest manual retest:
+
+- `buildModulesByDependencyModuleVariables` call-only currently returns the production call at line `211`, but not test calls at lines `69` and `88`.
+
+## P2 — Framework entrypoints remain expected blind spots
+
+Status: **EXPECTED / DOCUMENT**
+
+Examples:
+
+- Spring MVC invoking `DocumentController.getFile`;
+- Servlet/Spring Security invoking `JwtFilter.doFilterInternal`.
+
+These are not local application callers and should not necessarily be returned as incoming references.
+
+Expected action:
+
+- document this clearly;
+- optionally classify framework overrides/entrypoints as framework-invoked when declaration extends known framework classes or has route/filter annotations.
+
+## P2 — Java record accessor classification issue
+
+Status: **POSSIBLE ISSUE**
+
+Previously observed in `JwtFilter.doFilterInternal` outgoing hierarchy:
+
+```text
+VerifiedToken.subject
+VerifiedToken.role
+```
+
+These were marked as probable external because Java record accessors may not be recognized as declared methods.
+
+Expected action:
+
+- verify Java record accessor symbol extraction;
+- classify record component accessors as local methods/read references where appropriate.
+
+## Regression Fixtures to Add
+
+### Java fixtures
+
+Java P0 class/type/DTO refs now pass on SIAS samples, but fixtures should remain to prevent regressions.
+
+1. Class/type reference coverage:
+
+```java
+import example.MyType;
+
+class UsesMyType {
+  private MyType field;
+  MyType method(MyType input) { return new MyType(); }
+  Class<?> c = MyType.class;
+  List<MyType> items;
+}
+```
+
+2. Static utility class references:
+
+```java
+import example.MyUtils;
+
+class UsesUtils {
+  void run() {
+    MyUtils.normalize("x");
+  }
+}
+```
+
+3. Record/DTO references:
+
+```java
+record ItemDTO(String id) {}
+class UsesDto {
+  ItemDTO build() { return new ItemDTO("1"); }
+  List<ItemDTO> all() { return List.of(new ItemDTO("2")); }
+}
+```
+
+4. Mockito verification calls:
+
+```java
+verify(service).save(any());
+verify(service, never()).save(any());
+verify(service, times(1)).save(any());
+```
+
+5. Lambda/assertion dedupe:
+
+```java
+assertThatThrownBy(() -> service.execute());
+assertDoesNotThrow(() -> service.execute());
+```
+
+6. Record accessors:
+
+```java
+record VerifiedToken(String subject, String role) {}
+class UsesToken {
+  String read(VerifiedToken token) { return token.subject(); }
+}
+```
+
+### TypeScript fixtures
+
+1. Optional chaining calls:
+
+```ts
+await this.repo?.save({ id: "1" });
+obj?.generate();
+obj.method?.();
+```
+
+2. Adjacent false-positive guard:
+
+```ts
+const route = getDefaultRouteForRole(role);
+return redirect(route);
+```
+
+Expected: only the first line is a reference to `getDefaultRouteForRole`.
+
+3. Type alias references:
+
+```ts
+export type ReviewAnalysisStatus = "PENDING" | "DONE";
+import type { ReviewAnalysisStatus } from "./types";
+const status: ReviewAnalysisStatus = "PENDING";
+```
+
+4. JSX/default-export components and tests:
+
+```tsx
+export default function RouteErrorPanel() { return null; }
+<RouteErrorPanel />
+```
+
+Clarify whether test imports and mocks should be returned.
+
+## Validation Matrix
+
+For each fixture and each real SIAS regression symbol, compare:
+
+- `code_find relation=declaration`
+- `code_find relation=references`
+- `code_find relation=references reference_kinds=["call"]`
+- `code_find relation=implementation` where applicable
+- `code_call_hierarchy direction=outgoing`
+- `code_call_hierarchy direction=incoming`
+- targeted `rg` baseline
+
+### Real SIAS regression symbols
+
+Java regression symbols now passing after graph regeneration:
+
+```text
+ReviewPersistenceModel
+MongoIdUtils
+DocumentationItemDTO
+MongoConfigs
+CreateAuditLog
+validateAndStageDocumentationUpload
+loadFile
+toResponse
+```
+
+TypeScript regression symbols still relevant:
+
+```text
+save
+ReviewAnalysisStatus
+getDefaultRouteForRole
+buildModulesByDependencyModuleVariables
+asRecord
+ImageUploader
+RouteErrorPanel
+loader
+action
+```
+
+## Recommended Fix Order
+
+1. **TS optional-chain calls in `code_find references`**
+   - Align `code_find` behavior with the already-improved call hierarchy behavior.
+
+2. **TS type alias classification and references**
+   - Fix `ReviewAnalysisStatus` declaration kind and refs.
+
+3. **TS adjacent-line false positives**
+   - Ensure unfiltered `relation=references` returns actual symbol lines/spans only.
+
+4. **Frontend test/mock reference policy**
+   - Either include test refs consistently or document/expose filtering semantics.
+
+5. **Java record accessors**
+   - Verify and improve record component accessor resolution/classification.
+
+6. **Framework entrypoint documentation**
+   - Document Spring MVC/Security lifecycle limitations or classify framework-invoked declarations.
+
+## Temporary User-Facing Guidance
+
+Until all TypeScript fixes are complete, keep this guidance:
 
 ```text
 Code Research is semantic, not a replacement for exhaustive text search.
 Use it first for declarations, implementations, references, and call hierarchy.
-For audit-grade completeness, validate with targeted rg/grep, especially for imports,
-tests, mocks, Java DTO/type references, optional chaining, framework-reflection entrypoints,
-generated files, and common names.
+For audit-grade completeness, validate with targeted rg/grep, especially for TypeScript type aliases,
+optional chaining, tests/mocks, framework-reflection entrypoints, generated files, and common names.
+For Java class/type/DTO references, builder model version 3 has fixed the sampled SIAS regressions,
+but keep rg validation for audit-grade changes until broader coverage is proven.
 ```
 
 ## Best-Practice Query Recipes
 
-### Java declaration
+### Always start with graph status
 
 ```text
-code_find path=back query=ReviewRestController language=java kind=class
+workspace_graph_status
 ```
 
-### Java implementation
+### Java class references — now passing on SIAS samples
 
 ```text
-code_find path=back_files query=DocumentationSlotRepository relation=implementation language=java kind=interface
+code_find path=back query=ReviewPersistenceModel relation=references language=java kind=class
 ```
-
-### Java common method call hierarchy
-
-```text
-code_call_hierarchy path=back/src/main/java/.../StartReviewAnalysisUseCase.java symbol=start direction=incoming language=java kind=method max_depth=2
-```
-
-### TypeScript route loader
-
-```text
-code_call_hierarchy path=front/app/routes/startup.tsx symbol=loader direction=outgoing language=ts kind=function max_depth=2
-```
-
-### Exhaustive fallback with rg
 
 ```bash
-rg -n 'SymbolName\b' path --glob '!node_modules/**' --glob '!dist/**' --glob '!target/**'
+rg -n '\bReviewPersistenceModel\b' back --glob '!target/**'
 ```
 
-### Optional-chain fallback
+### Java interface implementation
+
+```text
+code_find path=back_files query=CreateAuditLog relation=implementation language=java kind=interface
+```
+
+### TS optional-chain fallback
 
 ```bash
-rg -n '\?\.\w+\s*\(' back_ia/src back_ia/test --glob '!node_modules/**' --glob '!dist/**'
+rg -n '\?\.\s*save\s*\(' back_ia --glob '!node_modules/**' --glob '!dist/**'
 ```
 
-## Source Audit Coverage
+### TS call-only references to avoid adjacent false positives
 
-Original audit coverage:
+```text
+code_find path=front query=getDefaultRouteForRole relation=references language=ts kind=function reference_kinds=["call"]
+```
 
-- `front` TypeScript/React Router
-- `back` Java backend
-- `back_files` Java service
-- `back_ia` TypeScript service
-- monorepo cross-service duplicate/common symbols
+### TS type alias fallback
 
-No SIAS source files were modified during the audit.
+```bash
+rg -n '\bReviewAnalysisStatus\b' front back_ia --glob '!node_modules/**' --glob '!dist/**'
+```
+
+## Audit History
+
+### First audit
+
+Initial finding: Code Research was strong for declarations, implementations, JSX, and call hierarchy, but had issues with Java type references, TS optional chaining, duplicate Java references, Mockito verifications, TS adjacent lines, type aliases, and graph status transparency.
+
+### Second audit after initial fixes/reload
+
+Confirmed improvements:
+
+- graph status unreadable paths;
+- Java duplicate call ref dedupe;
+- Mockito verification calls;
+- optional chaining in call hierarchy;
+- DI/dynamic call hierarchy transparency;
+- broad `loader` / `action` declaration counts.
+
+Remaining failures at that point:
+
+- Java class/type/DTO references;
+- TS optional-chain calls in `code_find references`;
+- TS type alias classification/references;
+- TS adjacent-line false positives;
+- incomplete frontend test/mock refs.
+
+### Graph inspection before Java remediation
+
+A direct SIAS graph JSON inspection found:
+
+- graph cache path: `/home/j0k3r/sias/app/.pi/workspace-code-graph/graphs/*.json`;
+- Java declarations existed for failing symbols;
+- `ReviewPersistenceModel` and `DocumentationItemDTO` had only `contains` edges;
+- `MongoIdUtils` and `MongoConfigs` had method `calls` edges but lacked class/type/import reference modeling;
+- TypeScript optional-chain `save` already existed as a call edge, suggesting that issue is resolver/query filtering rather than graph generation.
+
+### Mini-SDD Java graph-generation remediation
+
+Completed:
+
+```text
+fix-graph-java-type-references
+commit: 570e30a
+status: PASS / archived
+```
+
+This addressed Java graph generation/modeling and persisted semantic Java type/reference edges.
+
+### Manual retest after SIAS graph regeneration
+
+SIAS graph regenerated with:
+
+```text
+builderModelVersion=3
+schemaVersion=4
+```
+
+Confirmed:
+
+- Java class/type/DTO references now pass on sampled regressions;
+- TypeScript optional-chain references still fail in `code_find`;
+- TypeScript type aliases still fail classification/references;
+- TypeScript unfiltered references still produce adjacent-line false positives.
+
+No SIAS source files were modified during the audits or graph-generation remediation.
