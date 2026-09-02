@@ -5,15 +5,16 @@ Repo audited: `/home/j0k3r/sias/app`
 
 ## Current Status
 
-Status: **NEEDS_FIX / TYPESCRIPT REMAINING**
+Status: **NEEDS_FIX / TYPESCRIPT TYPE ALIASES + UNFILTERED REFERENCES REMAINING**
 
-After regenerating the SIAS graph with builder model version `3`, the previous Java P0 class/type/DTO reference failures are now resolved on the sampled SIAS regressions.
+After regenerating the SIAS graph with builder model version `3`, the previous Java P0 class/type/DTO reference failures are resolved on the sampled SIAS regressions.
 
-Remaining work is concentrated in TypeScript reference behavior:
+After the latest extension reload, TypeScript optional-chained calls are also resolved for `code_find relation=references` on the sampled SIAS regression.
 
-1. optional-chained calls missing from `code_find relation=references`;
-2. TypeScript type alias classification and references;
-3. unfiltered TypeScript `relation=references` adjacent-line false positives.
+Remaining work is concentrated in two TypeScript reference behaviors:
+
+1. TypeScript type alias classification and references;
+2. unfiltered TypeScript `relation=references` adjacent-line false positives.
 
 ## Graph Health
 
@@ -184,11 +185,11 @@ back_files/src/test/java/.../UploadFileBySlotUseCaseTest.java:293
 back_files/src/test/java/.../UploadFileBySlotUseCaseTest.java:308
 ```
 
-### TypeScript optional chaining in call hierarchy
+### TypeScript optional chaining in `code_find references` and call hierarchy
 
-Status: **PARTIAL**
+Status: **PASS on sampled regression after extension reload**
 
-`code_call_hierarchy` detects optional-chained method calls.
+Both `code_call_hierarchy` and `code_find relation=references` now detect optional-chained method calls.
 
 Confirmed example:
 
@@ -200,14 +201,27 @@ back_ia/src/application/use-cases/analyze-image-readability.use-case.ts:26
 await this.aiLogRepository?.save({ ... })
 ```
 
-`AnalyzeImageReadabilityUseCase.execute` outgoing hierarchy includes:
+Retested query:
+
+```text
+code_find path=back_ia query=save relation=references language=ts kind=method reference_kinds=["call"]
+```
+
+Current result:
+
+```text
+3 confirmed references
+back_ia/src/application/use-cases/analyze-image-readability.use-case.ts:26
+back_ia/src/application/use-cases/fetch-to-ia.use-case.ts:39
+back_ia/src/application/use-cases/start-review-analysis.use-case.ts:66
+```
+
+`AnalyzeImageReadabilityUseCase.execute` outgoing hierarchy also includes:
 
 ```text
 AiLogRepository.save
 call_line=26
 ```
-
-But `code_find relation=references` still misses this same call. See remaining P0 below.
 
 ### DI/dynamic call hierarchy transparency
 
@@ -235,11 +249,11 @@ action: 27
 
 ## Remaining Problems
 
-## P0 — TypeScript optional-chain calls missing from `code_find references`
+## P0 — TypeScript optional-chain calls in `code_find references`
 
-Status: **IMPLEMENTED / NEEDS SIAS RETEST AFTER EXTENSION RELOAD**
+Status: **PASS on sampled regression after extension reload**
 
-A targeted Mini-SDD was completed to fix graph-backed TypeScript optional-chain call consumption in `code_find relation=references`.
+A targeted Mini-SDD fixed graph-backed TypeScript optional-chain call consumption in `code_find relation=references`.
 
 Implemented change:
 
@@ -248,16 +262,6 @@ fix-ts-optional-chain-code-find-references
 status: PASS / archived
 archive: openspec/archive/2026-09-02/fix-ts-optional-chain-code-find-references/
 ```
-
-What changed:
-
-- Graph-backed TypeScript reference querying now preserves existing call metadata and reconstructs method call text from the caller source line when graph call edges lack `calledAs`/text metadata.
-- Regression coverage proves `save` references include:
-  - `repo.save(...)`;
-  - `repo.save?.(...)`;
-  - `repo?.save(...)`;
-  - `this.repo?.save(...)`.
-- Graph-only regression builds a graph, removes the declaring `repository.ts`, and still returns optional-chain `save` call references from graph artifacts.
 
 Validation performed in Code Research repo:
 
@@ -269,25 +273,22 @@ npm run typecheck
 
 Result: **PASS**.
 
-Important next-audit instruction:
-
-> Reload/restart the extension or CLI so the updated Code Research code is active, then retest the SIAS query below from `/home/j0k3r/sias/app`. If results are still missing, inspect the SIAS `back_ia` graph JSON to confirm the `calls` edge still exists and then debug resolver filtering.
-
-Previously failing query:
+SIAS retest after extension reload:
 
 ```text
 code_find path=back_ia query=save relation=references language=ts kind=method reference_kinds=["call"]
 ```
 
-Observed result:
+Current result:
 
 ```text
-2 references
+3 confirmed references
+back_ia/src/application/use-cases/analyze-image-readability.use-case.ts:26
 back_ia/src/application/use-cases/fetch-to-ia.use-case.ts:39
 back_ia/src/application/use-cases/start-review-analysis.use-case.ts:66
 ```
 
-Missing expected reference:
+The previously missing optional-chain call is now present:
 
 ```text
 back_ia/src/application/use-cases/analyze-image-readability.use-case.ts:26
@@ -299,26 +300,7 @@ Source pattern:
 await this.aiLogRepository?.save({ ... })
 ```
 
-`rg` baseline:
-
-```bash
-rg -n '\?\.\s*save\s*\(' back_ia --glob '!node_modules/**' --glob '!dist/**'
-```
-
-Result:
-
-```text
-back_ia/src/application/use-cases/analyze-image-readability.use-case.ts:26
-```
-
-Expected fix:
-
-- optional call expressions must be emitted by `code_find relation=references`;
-- behavior should match call hierarchy for this construct;
-- handle at least:
-  - `obj?.method()`;
-  - `this.repo?.save()`;
-  - `obj.method?.()` if the parser supports it.
+Status: **resolved on sampled SIAS regression**.
 
 ## P1 — TypeScript type alias classification and references fail
 
@@ -668,7 +650,6 @@ toResponse
 TypeScript regression symbols still relevant:
 
 ```text
-save
 ReviewAnalysisStatus
 getDefaultRouteForRole
 buildModulesByDependencyModuleVariables
@@ -679,26 +660,27 @@ loader
 action
 ```
 
+TypeScript regression symbols now passing on sampled SIAS checks:
+
+```text
+save
+```
+
 ## Recommended Fix Order
 
-1. **Retest TS optional-chain calls in `code_find references` after extension reload**
-   - The Mini-SDD `fix-ts-optional-chain-code-find-references` is implemented and archived.
-   - Retest `code_find path=back_ia query=save relation=references language=ts kind=method reference_kinds=["call"]` from SIAS.
-   - If still failing, inspect the `back_ia` graph JSON first, then resolver filtering.
-
-2. **TS type alias classification and references**
+1. **TS type alias classification and references**
    - Fix `ReviewAnalysisStatus` declaration kind and refs.
 
-3. **TS adjacent-line false positives**
+2. **TS adjacent-line false positives**
    - Ensure unfiltered `relation=references` returns actual symbol lines/spans only.
 
-4. **Frontend test/mock reference policy**
+3. **Frontend test/mock reference policy**
    - Either include test refs consistently or document/expose filtering semantics.
 
-5. **Java record accessors**
+4. **Java record accessors**
    - Verify and improve record component accessor resolution/classification.
 
-6. **Framework entrypoint documentation**
+5. **Framework entrypoint documentation**
    - Document Spring MVC/Security lifecycle limitations or classify framework-invoked declarations.
 
 ## Temporary User-Facing Guidance
@@ -709,7 +691,7 @@ Until all TypeScript fixes are complete, keep this guidance:
 Code Research is semantic, not a replacement for exhaustive text search.
 Use it first for declarations, implementations, references, and call hierarchy.
 For audit-grade completeness, validate with targeted rg/grep, especially for TypeScript type aliases,
-optional chaining, tests/mocks, framework-reflection entrypoints, generated files, and common names.
+tests/mocks, framework-reflection entrypoints, generated files, and common names.
 For Java class/type/DTO references, builder model version 3 has fixed the sampled SIAS regressions,
 but keep rg validation for audit-grade changes until broader coverage is proven.
 ```
@@ -828,6 +810,25 @@ fix-ts-optional-chain-code-find-references
 status: PASS / archived
 ```
 
-This addressed graph-backed `code_find relation=references` consumption for optional-chained TypeScript method calls. The next auditor should reload/restart the extension or CLI, retest the SIAS `save` query, and inspect the `back_ia` graph JSON if the tool result still misses line 26.
+This addressed graph-backed `code_find relation=references` consumption for optional-chained TypeScript method calls.
+
+### Manual retest after TypeScript optional-chain extension reload
+
+Confirmed:
+
+```text
+code_find path=back_ia query=save relation=references language=ts kind=method reference_kinds=["call"]
+```
+
+returns:
+
+```text
+3 confirmed references, including back_ia/src/application/use-cases/analyze-image-readability.use-case.ts:26
+```
+
+Remaining TypeScript failures after this retest:
+
+- `ReviewAnalysisStatus` type alias classification/references;
+- unfiltered `relation=references` adjacent-line false positives for `getDefaultRouteForRole`, `buildModulesByDependencyModuleVariables`, and `asRecord`.
 
 No SIAS source files were modified during the audits or remediations.
