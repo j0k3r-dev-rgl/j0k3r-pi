@@ -68,7 +68,7 @@ export function findImplementationsOf(
     const records = extractJavaSymbolRecords({ filePath: file.path, source, rootNode: file.rootNode }).records;
     for (const record of records) {
       if (record.declarationKind !== 'class' && record.declarationKind !== 'record') continue;
-      if (!record.signature?.includes(`implements ${symbolName}`)) continue;
+      if (!implementsExactSymbol(record.signature, symbolName)) continue;
       locations.push(buildSymbolLocation(file.path, record.name, record.coarseKind, record, true, true));
     }
   }
@@ -122,6 +122,15 @@ function extractCodeRange(source: string, startLine: number, startColumn: number
   slice[0] = slice[0].slice(startColumn);
   slice[slice.length - 1] = slice[slice.length - 1].slice(0, endColumn);
   return slice.join('\n');
+}
+
+function implementsExactSymbol(signature: string | undefined, symbolName: string): boolean {
+  if (!signature) return false;
+  return new RegExp(`\\bimplements\\b[^\\n{]*\\b${escapeRegExp(symbolName)}(?:\\b|\\s*<)`, 'u').test(signature);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export { extractSignature };

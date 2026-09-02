@@ -42,6 +42,7 @@ export async function queryReferencesFromGraph(options: {
   const target = targets[0];
   const targetIds = new Set(targets.map((node) => node.id));
   const targetRelationshipIds = new Set(targets.map((node) => node.relationshipId).filter((value): value is string => Boolean(value)));
+  const interfaceMethodTargets = targets.filter((node) => node.symbolKind === 'method' && node.ownerKind === 'interface');
 
   const nodeById = new Map<string, GraphNode>(allNodes.map((node) => [node.id, node]));
   const references: ReferenceLocation[] = [];
@@ -52,10 +53,12 @@ export async function queryReferencesFromGraph(options: {
     if (!(edge.kind === 'calls' || edge.kind === 'reads' || edge.kind === 'implements' || edge.kind === 'extends')) continue;
     const referenceKind = edge.kind === 'calls' ? 'call' : edge.kind === 'reads' ? 'read' : edge.kind === 'implements' ? 'implements' : 'extends';
     if (requestedKinds.size > 0 && !requestedKinds.has(referenceKind)) continue;
+    const toNode = nodeById.get(edge.to);
     const matchesTarget =
       targetIds.has(edge.to) ||
       ((edge.kind === 'implements' || edge.kind === 'extends') && targets.some((candidate) => edge.to === `external:java:${candidate.name}` || edge.to === `external:java:${candidate.qualifiedName ?? candidate.name}`)) ||
-      (edge.kind === 'calls' && edge.targetRelationshipId !== undefined && targetRelationshipIds.has(edge.targetRelationshipId));
+      (edge.kind === 'calls' && edge.targetRelationshipId !== undefined && targetRelationshipIds.has(edge.targetRelationshipId)) ||
+      (edge.kind === 'calls' && toNode?.kind === 'symbol' && interfaceMethodTargets.some((candidate) => toNode.name === candidate.name && receiverMatchesInterface(edge.callsite?.receiverType, candidate.owner)));
     if (!matchesTarget) continue;
     const fromNode = nodeById.get(edge.from);
     if (!fromNode || fromNode.kind !== 'symbol') continue;
@@ -111,6 +114,15 @@ async function getJavaTypeRelationshipMetadata(
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function receiverMatchesInterface(receiverType: string | undefined, interfaceOwner: string | undefined): boolean {
+  if (!receiverType || !interfaceOwner) return false;
+  return receiverType === interfaceOwner || receiverType === simpleName(interfaceOwner);
+}
+
+function simpleName(value: string): string {
+  return value.split('.').pop() ?? value;
 }
 
 function matchesTargetFile(nodeFile: string, relativeTarget: string, targetIsDirectory: boolean): boolean {

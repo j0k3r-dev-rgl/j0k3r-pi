@@ -605,6 +605,28 @@ describe('find_references', () => {
     expect(new Set(direct.map((item) => item.context_symbol))).toEqual(new Set(['Wrapped', 'user']));
   });
 
+  it('finds Java interface method calls through interface-typed fields and lambdas', async () => {
+    const files = {
+      'src/main/java/app/RootDeleteReview.java': `package app;\n\npublic interface RootDeleteReview {\n  void deleteById(String id);\n}\n`,
+      'src/main/java/app/RootDeleteReviewUseCase.java': `package app;\n\npublic class RootDeleteReviewUseCase implements RootDeleteReview {\n  public void deleteById(String id) {}\n}\n`,
+      'src/main/java/app/RootReviewRestController.java': `package app;\n\npublic class RootReviewRestController {\n  private final RootDeleteReview rootDeleteReview;\n\n  public RootReviewRestController(RootDeleteReview rootDeleteReview) {\n    this.rootDeleteReview = rootDeleteReview;\n  }\n\n  public void deleteReview(String id) {\n    rootDeleteReview.deleteById(id);\n  }\n}\n`,
+      'src/test/java/app/RootDeleteReviewUseCaseTest.java': `package app;\n\nimport static org.junit.jupiter.api.Assertions.assertThrows;\n\nclass RootDeleteReviewUseCaseTest {\n  private final RootDeleteReview useCase = new RootDeleteReviewUseCase();\n\n  void direct() {\n    useCase.deleteById("1");\n  }\n\n  void assertion() {\n    assertThrows(RuntimeException.class, () -> useCase.deleteById("2"));\n  }\n}\n`,
+    };
+
+    const directRoot = await createProject('pi-find-references-java-interface-method-direct', files);
+    const graphRoot = await createProject('pi-find-references-java-interface-method-graph', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      ...files,
+    });
+    await buildWorkspaceGraph(graphRoot);
+
+    const direct = await findReferences(directRoot, { path: 'src/main/java/app/RootDeleteReview.java', symbol: 'deleteById', language: 'java', kind: 'method', reference_kinds: ['call'] });
+    const graph = await findReferences(graphRoot, { path: 'src/main/java/app/RootDeleteReview.java', symbol: 'deleteById', language: 'java', kind: 'method', reference_kinds: ['call'] });
+
+    expect(new Set(direct.map((item) => `${item.context_class}.${item.context_symbol}`))).toEqual(new Set(['RootReviewRestController.deleteReview', 'RootDeleteReviewUseCaseTest.direct', 'RootDeleteReviewUseCaseTest.assertion']));
+    expect(new Set(graph.map((item) => `${item.context_class}.${item.context_symbol}`))).toEqual(new Set(['RootReviewRestController.deleteReview', 'RootDeleteReviewUseCaseTest.direct', 'RootDeleteReviewUseCaseTest.assertion']));
+  });
+
   it('keeps Java field reads truthful, includes record implementations, and falls back for diamond instantiation references', async () => {
     const files = {
       'src/main/java/app/Base.java': `package app;\n\npublic class Base {\n  protected int baseValue;\n}\n`,

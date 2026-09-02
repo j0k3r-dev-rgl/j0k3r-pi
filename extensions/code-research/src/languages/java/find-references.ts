@@ -2,7 +2,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { FindReferencesInput, ReferenceKind, ReferenceLocation } from '../../types.js';
 import { buildProjectIndex, type IndexedClass, type IndexedMethod, type ProjectIndex } from '../../core/project-index.js';
-import { resolveJavaCallsForGraph, resolveJavaIndexRoot } from './function-call-tree.js';
+import { resolveJavaCallsForGraph, resolveJavaIndexRoot, type ResolvedJavaGraphCall } from './function-call-tree.js';
 
 export async function findJavaReferences(cwd: string, input: FindReferencesInput): Promise<ReferenceLocation[]> {
   const rootFile = resolve(cwd, input.path);
@@ -47,8 +47,8 @@ async function findMethodReferences(index: ProjectIndex, rootFile: string, isDir
   };
 
   for (const caller of index.methods) {
-    for (const resolvedCall of resolveJavaCallsForGraph(caller, index)) {
-      if (!resolvedCall.targetMethod || !sameMethod(resolvedCall.targetMethod, target)) continue;
+    for (const resolvedCall of collectResolvedReferenceCalls(caller, index)) {
+      if (!resolvedCall.targetMethod || !referencesTargetMethod(index, resolvedCall, target)) continue;
       results.push({
         file: caller.file,
         line: resolvedCall.call.line,
@@ -61,12 +61,13 @@ async function findMethodReferences(index: ProjectIndex, rootFile: string, isDir
         context_kind: 'method',
         context_class: caller.className,
         owner_kind: 'class',
-        reference_kind: 'call',
+        reference_kind: resolvedCall.fromCallback ? 'callback' : 'call',
         called_as: resolvedCall.call.callText,
         receiver_name: resolvedCall.call.object,
         receiver_type: resolvedCall.resolved?.receiverType,
         is_application: true,
         source: 'application',
+        reason: resolvedCall.resolved?.reason,
       });
     }
 
@@ -239,6 +240,35 @@ function buildJavaTypeRelationshipMetadata(
   };
 }
 
+type ReferenceResolvedCall = ResolvedJavaGraphCall & { fromCallback?: boolean };
+
+function collectResolvedReferenceCalls(caller: IndexedMethod, index: ProjectIndex): ReferenceResolvedCall[] {
+  const collected: ReferenceResolvedCall[] = [];
+  const visit = (resolvedCalls: ResolvedJavaGraphCall[], fromCallback: boolean) => {
+    for (const resolvedCall of resolvedCalls) {
+      collected.push({ ...resolvedCall, fromCallback });
+      for (const callback of resolvedCall.call.callbacks ?? []) {
+        visit(resolveJavaCallsForGraph(caller, index, callback.calls), true);
+      }
+    }
+  };
+  visit(resolveJavaCallsForGraph(caller, index), false);
+  return collected;
+}
+
+function referencesTargetMethod(index: ProjectIndex, resolvedCall: ResolvedJavaGraphCall, target: IndexedMethod): boolean {
+  if (!resolvedCall.targetMethod) return false;
+  if (sameMethod(resolvedCall.targetMethod, target)) return true;
+
+  const targetOwner = index.classes.find((klass) => klass.fullName === target.qualifiedClassName);
+  if (targetOwner?.kind !== 'interface') return false;
+  if (resolvedCall.call.methodName !== target.symbol) return false;
+  if (resolvedCall.call.object && resolvedCall.resolved?.receiverType !== targetOwner.className && resolvedCall.resolved?.receiverType !== targetOwner.fullName) return false;
+
+  const implementationOwner = index.classes.find((klass) => klass.fullName === resolvedCall.targetMethod?.qualifiedClassName);
+  return Boolean(implementationOwner?.implements.some((implemented) => implemented === targetOwner.fullName || implemented === targetOwner.className || simpleName(implemented) === targetOwner.className));
+}
+
 function sameMethod(a: IndexedMethod, b: IndexedMethod): boolean {
   return a.file === b.file && a.className === b.className && a.symbol === b.symbol;
 }
@@ -401,6 +431,10 @@ function resolveFieldOwnerForClass(index: ProjectIndex, qualifiedClassName: stri
     current = parent ?? '';
   }
   return undefined;
+}
+
+function simpleName(value: string): string {
+  return value.split('.').pop() ?? value;
 }
 
 function escapeRegExp(value: string): string {

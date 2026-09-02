@@ -95,6 +95,10 @@ describe('findSymbol Java', () => {
       'cross-file-project/impl/LocalService.java',
       `package impl;\n\nimport ports.Service;\n\npublic class LocalService implements Service {\n  public String run() {\n    return "local";\n  }\n}\n`
     );
+    await writeTestFile(
+      'cross-file-project/impl/LocalServiceExtra.java',
+      `package impl;\n\npublic interface ServiceExtra {}\n\npublic class LocalServiceExtra implements ServiceExtra {}\n`
+    );
 
     const results = await findSymbol(tmpDir, {
       path: projectRoot,
@@ -105,7 +109,7 @@ describe('findSymbol Java', () => {
 
     expect(results).toHaveLength(1);
     expect(results[0].kind).toBe('interface');
-    expect(results[0].implementation_locations?.some((location) => location.symbol === 'LocalService')).toBe(true);
+    expect(results[0].implementation_locations?.map((location) => location.symbol)).toEqual(['LocalService']);
   });
 
   it('uses the graph for Java interface lookup and returns implementation locations', async () => {

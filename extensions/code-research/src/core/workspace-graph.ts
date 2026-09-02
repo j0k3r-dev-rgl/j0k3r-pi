@@ -10,7 +10,7 @@ import type {
   SubprojectGraphShard,
   WorkspaceGraphState,
 } from '../types.js';
-import { buildProjectIndex } from './project-index.js';
+import { buildProjectIndex, type IndexedMethod, type ProjectIndex } from './project-index.js';
 import { compareSubprojectSnapshot, createSubprojectSnapshot } from './freshness.js';
 import {
   createBaseArtifact,
@@ -39,7 +39,7 @@ import {
 import { extractSignature as extractTypeScriptSignature, resolveTypeScriptImportCandidates } from '../languages/typescript/shared.js';
 import { extractTypeScriptSymbols } from '../languages/typescript/symbol-extractor.js';
 import { extractSignature as extractJavaSignature } from '../languages/java/shared.js';
-import { resolveJavaCallsForGraph } from '../languages/java/function-call-tree.js';
+import { resolveJavaCallsForGraph, type ResolvedJavaGraphCall } from '../languages/java/function-call-tree.js';
 import { buildGoProjectIndex, extractCalls as extractGoCalls, findGoImplementations, resolveGoCall, type GoProjectIndex } from '../languages/go/workspace-graph.js';
 import { extractGoSymbolRecords } from '../languages/go/symbol-extractor.js';
 import { packagePathToName } from '../languages/go/shared.js';
@@ -322,7 +322,7 @@ function buildJavaGraph(
   for (const method of index.methods) {
     const fromId = symbolIds.get(method.symbolId);
     if (!fromId) continue;
-    for (const { call, resolved, targetMethod } of resolveJavaCallsForGraph(method, index)) {
+    for (const { call, resolved, targetMethod } of collectJavaGraphCalls(method, index)) {
       const resolvedTargetId = targetMethod ? symbolIds.get(targetMethod.symbolId) : undefined;
       const toId = resolvedTargetId ?? `external:java:${call.methodName}`;
       edges.push({
@@ -359,6 +359,20 @@ function buildJavaGraph(
     skippedFiles,
     fileProofs,
   };
+}
+
+function collectJavaGraphCalls(method: IndexedMethod, index: ProjectIndex): ResolvedJavaGraphCall[] {
+  const collected: ResolvedJavaGraphCall[] = [];
+  const visit = (calls: ResolvedJavaGraphCall[]) => {
+    for (const resolvedCall of calls) {
+      collected.push(resolvedCall);
+      for (const callback of resolvedCall.call.callbacks ?? []) {
+        visit(resolveJavaCallsForGraph(method, index, callback.calls));
+      }
+    }
+  };
+  visit(resolveJavaCallsForGraph(method, index));
+  return collected;
 }
 
 function buildTypeScriptGraph(
