@@ -367,7 +367,103 @@ name = "python-fixture"
     }
   });
 
-  it('accepts fresh schema-v3 java shards for mixed-case coverage file ordering', async () => {
+  it('persists SIAS-mapped java type reference edges with token coordinates for ReviewPersistenceModel, MongoIdUtils, DocumentationItemDTO, and MongoConfigs', async () => {
+    const rootDir = await createProject({
+      'pom.xml': `<project />
+`,
+      'src/main/java/domain/ReviewPersistenceModel.java': `package domain;
+
+public class ReviewPersistenceModel {
+  public static ReviewPersistenceModel create() { return new ReviewPersistenceModel(); }
+}
+`,
+      'src/main/java/domain/DocumentationItemDTO.java': `package domain;
+
+public record DocumentationItemDTO(String id) {}
+`,
+      'src/main/java/domain/MongoConfigs.java': `package domain;
+
+public interface MongoConfigs {}
+`,
+      'src/main/java/domain/MongoIdUtils.java': `package domain;
+
+public class MongoIdUtils {
+  public static void touch() {}
+}
+`,
+      'src/main/java/web/Controller.java': `package web;
+
+import domain.DocumentationItemDTO;
+import domain.MongoConfigs;
+import domain.ReviewPersistenceModel;
+import domain.MongoIdUtils;
+import java.util.List;
+
+public class Controller implements MongoConfigs {
+  private final ReviewPersistenceModel current;
+  private final List<DocumentationItemDTO> items;
+
+  public Controller(ReviewPersistenceModel current) {
+    this.current = current;
+  }
+
+  public DocumentationItemDTO build(List<ReviewPersistenceModel> inputs) {
+    ReviewPersistenceModel created = new ReviewPersistenceModel();
+    ReviewPersistenceModel utility = ReviewPersistenceModel.create();
+    MongoIdUtils.touch();
+    return new DocumentationItemDTO(utility.toString());
+  }
+}
+`,
+    });
+
+    const built = await buildWorkspaceGraph(rootDir);
+    const subprojectId = built.state.subprojects[0]?.id;
+    expect(subprojectId).toBeTruthy();
+    if (!subprojectId) return;
+
+    const shardResult = await readSubprojectGraphShard(rootDir, subprojectId);
+    expect(shardResult.status).toBe('ok');
+    if (shardResult.status !== 'ok') return;
+
+    const shard = shardResult.data;
+    const symbol = (name: string) => shard.nodes.find((node) => node.kind === 'symbol' && node.name === name);
+    const reviewPersistenceModel = symbol('ReviewPersistenceModel');
+    const documentationItemDto = symbol('DocumentationItemDTO');
+    const mongoConfigs = symbol('MongoConfigs');
+    const mongoIdUtils = symbol('MongoIdUtils');
+    const controller = symbol('Controller');
+    const build = shard.nodes.find((node) => node.kind === 'symbol' && node.name === 'build');
+    expect(reviewPersistenceModel, 'ReviewPersistenceModel-style model refs fixture').toBeTruthy();
+    expect(documentationItemDto, 'DocumentationItemDTO-style DTO/record refs fixture').toBeTruthy();
+    expect(mongoConfigs, 'MongoConfigs-style config/interface refs fixture').toBeTruthy();
+    expect(mongoIdUtils, 'MongoIdUtils-style static utility refs fixture').toBeTruthy();
+
+    const semanticEdges = shard.edges.filter((edge) => edge.kind !== 'contains');
+    expect(semanticEdges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'imports', to: reviewPersistenceModel?.id, occurrenceRange: { startLine: 5, startColumn: 0, endLine: 5, endColumn: 37 }, reason: 'java_import' }),
+      expect.objectContaining({ kind: 'imports', to: documentationItemDto?.id, reason: 'java_import' }),
+      expect.objectContaining({ kind: 'imports', to: mongoConfigs?.id, reason: 'java_import' }),
+      expect.objectContaining({ kind: 'imports', to: mongoIdUtils?.id, reason: 'java_import' }),
+      expect.objectContaining({ kind: 'implements', from: controller?.id, to: mongoConfigs?.id, calledAs: 'implements MongoConfigs' }),
+      expect.objectContaining({ kind: 'reads', to: reviewPersistenceModel?.id, reason: 'java_type_reference' }),
+      expect.objectContaining({ kind: 'reads', to: reviewPersistenceModel?.id, from: build?.id, reason: 'java_instantiate', calledAs: 'new ReviewPersistenceModel()' }),
+      expect.objectContaining({ kind: 'reads', to: reviewPersistenceModel?.id, from: build?.id, reason: 'java_read', calledAs: 'ReviewPersistenceModel.create()' }),
+      expect.objectContaining({ kind: 'reads', to: documentationItemDto?.id, from: build?.id, reason: 'java_instantiate', calledAs: 'new DocumentationItemDTO(utility.toString())' }),
+      expect.objectContaining({ kind: 'reads', to: mongoIdUtils?.id, from: build?.id, reason: 'java_read', calledAs: 'MongoIdUtils.touch()' }),
+    ]));
+
+    const reviewFieldTypeEdge = semanticEdges.find(
+      (edge) => edge.kind === 'reads' && edge.to === reviewPersistenceModel?.id && edge.reason === 'java_type_reference' && edge.occurrenceRange?.startLine === 10
+    );
+    expect(reviewFieldTypeEdge, 'ReviewPersistenceModel field type edge must point at the type token, not the field-name token').toMatchObject({
+      occurrenceRange: { startLine: 10, startColumn: 16, endLine: 10, endColumn: 38 },
+      calledAs: 'ReviewPersistenceModel',
+    });
+    expect(semanticEdges.filter((edge) => edge.kind === 'reads' && edge.to === reviewPersistenceModel?.id).every((edge) => edge.occurrenceRange?.startLine && edge.occurrenceRange.endColumn > edge.occurrenceRange.startColumn)).toBe(true);
+  });
+
+  it('accepts fresh builder-model-v3 java shards for mixed-case coverage file ordering', async () => {
     const rootDir = await createProject({
       'pom.xml': `<project />\n`,
       'src/main/java/app/B.java': `package app;\n\npublic class B {}\n`,

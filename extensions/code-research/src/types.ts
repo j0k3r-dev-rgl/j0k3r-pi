@@ -418,6 +418,7 @@ export interface GraphEdge {
   targetStatus?: 'resolved' | 'ambiguous' | 'external' | 'unresolved';
   resolution?: 'exact' | 'heuristic' | 'ambiguous' | 'unresolved';
   callsite?: { line: number; column: number; receiverName?: string; receiverType?: string };
+  calledAs?: string;
   importSource?: string;
   external?: boolean;
   externalName?: string;

@@ -152,6 +152,95 @@ describe('findReferences graph fallback', () => {
     expect(results[0].context_symbol).toBe('handle');
   });
 
+  it('uses graph-backed SIAS-mapped java type reference edges for ReviewPersistenceModel, MongoIdUtils, DocumentationItemDTO, and MongoConfigs after source consumers are removed', async () => {
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}
+`,
+      'pom.xml': `<project />
+`,
+      'src/main/java/domain/ReviewPersistenceModel.java': `package domain;
+
+public class ReviewPersistenceModel {
+  public static ReviewPersistenceModel create() { return new ReviewPersistenceModel(); }
+}
+`,
+      'src/main/java/domain/DocumentationItemDTO.java': `package domain;
+
+public record DocumentationItemDTO(String id) {}
+`,
+      'src/main/java/domain/MongoConfigs.java': `package domain;
+
+public interface MongoConfigs {}
+`,
+      'src/main/java/domain/MongoIdUtils.java': `package domain;
+
+public class MongoIdUtils {
+  public static void touch() {}
+}
+`,
+      'src/main/java/web/Controller.java': `package web;
+
+import domain.DocumentationItemDTO;
+import domain.MongoConfigs;
+import domain.ReviewPersistenceModel;
+import domain.MongoIdUtils;
+import java.util.List;
+
+public class Controller implements MongoConfigs {
+  private final ReviewPersistenceModel current;
+
+  public DocumentationItemDTO build(List<ReviewPersistenceModel> inputs) {
+    ReviewPersistenceModel created = new ReviewPersistenceModel();
+    ReviewPersistenceModel utility = ReviewPersistenceModel.create();
+    MongoIdUtils.touch();
+    return new DocumentationItemDTO(utility.toString());
+  }
+}
+`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+    await rm(join(rootDir, 'src/main/java/web/Controller.java'));
+
+    const reviewPersistenceModelRefs = await findReferences(rootDir, {
+      path: 'src/main/java/domain/ReviewPersistenceModel.java',
+      symbol: 'ReviewPersistenceModel',
+      language: 'java',
+      kind: 'class',
+    });
+
+    expect(reviewPersistenceModelRefs.length, 'ReviewPersistenceModel-style model refs').toBeGreaterThan(0);
+    expect(new Set(reviewPersistenceModelRefs.map((item) => item.reference_kind))).toEqual(new Set(['import', 'type_reference', 'instantiate', 'read']));
+    expect(reviewPersistenceModelRefs.some((item) => item.file.endsWith('Controller.java') && item.reason === 'java_type_reference')).toBe(true);
+    expect(reviewPersistenceModelRefs.some((item) => item.file.endsWith('Controller.java') && item.reason === 'java_instantiate')).toBe(true);
+    expect(reviewPersistenceModelRefs.some((item) => item.file.endsWith('Controller.java') && item.reason === 'java_read' && item.called_as === 'ReviewPersistenceModel.create()')).toBe(true);
+
+    const mongoIdUtilsRefs = await findReferences(rootDir, {
+      path: 'src/main/java/domain/MongoIdUtils.java',
+      symbol: 'MongoIdUtils',
+      language: 'java',
+      kind: 'class',
+      reference_kinds: ['read'],
+    });
+    expect(mongoIdUtilsRefs.some((item) => item.reason === 'java_read' && item.called_as === 'MongoIdUtils.touch()'), 'MongoIdUtils-style static utility refs').toBe(true);
+
+    const documentationItemDtoRefs = await findReferences(rootDir, {
+      path: 'src/main/java/domain/DocumentationItemDTO.java',
+      symbol: 'DocumentationItemDTO',
+      language: 'java',
+      kind: 'class',
+    });
+    expect(documentationItemDtoRefs.some((item) => item.reference_kind === 'instantiate' && item.reason === 'java_instantiate'), 'DocumentationItemDTO-style DTO/record refs').toBe(true);
+
+    const mongoConfigsRefs = await findReferences(rootDir, {
+      path: 'src/main/java/domain/MongoConfigs.java',
+      symbol: 'MongoConfigs',
+      language: 'java',
+      kind: 'interface',
+    });
+    expect(mongoConfigsRefs.some((item) => item.reference_kind === 'implements'), 'MongoConfigs-style config/interface relationship refs').toBe(true);
+  });
+
   it('falls back to direct lookup when the graph is stale', async () => {
     const rootDir = await createProject({
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,

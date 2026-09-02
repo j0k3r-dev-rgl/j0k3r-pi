@@ -1,6 +1,6 @@
 import { readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import type { FindReferencesInput, GraphLookupPolicy, GraphManifest, GraphNode, ReferenceLocation, WorkspaceGraphState } from '../types.js';
+import type { FindReferencesInput, GraphEdge, GraphLookupPolicy, GraphManifest, GraphNode, ReferenceLocation, WorkspaceGraphState } from '../types.js';
 import { readSubprojectGraphShard } from './graph-persistence.js';
 import { GRAPH_REFERENCE_KINDS } from './graph-policy.js';
 
@@ -50,8 +50,8 @@ export async function queryReferencesFromGraph(options: {
 
   const requestedKinds = new Set(input.reference_kinds ?? []);
   for (const edge of allEdges) {
-    if (!(edge.kind === 'calls' || edge.kind === 'reads' || edge.kind === 'implements' || edge.kind === 'extends')) continue;
-    const referenceKind = edge.kind === 'calls' ? 'call' : edge.kind === 'reads' ? 'read' : edge.kind === 'implements' ? 'implements' : 'extends';
+    if (!(edge.kind === 'imports' || edge.kind === 'calls' || edge.kind === 'reads' || edge.kind === 'implements' || edge.kind === 'extends')) continue;
+    const referenceKind = graphEdgeReferenceKind(edge);
     if (requestedKinds.size > 0 && !requestedKinds.has(referenceKind)) continue;
     const toNode = nodeById.get(edge.to);
     const matchesTarget =
@@ -61,27 +61,36 @@ export async function queryReferencesFromGraph(options: {
       (edge.kind === 'calls' && toNode?.kind === 'symbol' && interfaceMethodTargets.some((candidate) => toNode.name === candidate.name && receiverMatchesInterface(edge.callsite?.receiverType, candidate.owner)));
     if (!matchesTarget) continue;
     const fromNode = nodeById.get(edge.from);
-    if (!fromNode || fromNode.kind !== 'symbol') continue;
+    if (!fromNode || (fromNode.kind !== 'symbol' && fromNode.kind !== 'file')) continue;
 
     const isTypeRelationship = referenceKind === 'extends' || referenceKind === 'implements';
-    const sourceFile = resolve(cwd, fromNode.file);
+    const sourceFile = resolve(cwd, fromNode.kind === 'file' ? fromNode.path : fromNode.file);
+    const fallbackRange = fromNode.kind === 'symbol' ? fromNode.range : { startLine: 1, startColumn: 0, endLine: 1, endColumn: 0 };
     const relationshipMetadata = isTypeRelationship
-      ? await getJavaTypeRelationshipMetadata(sourceCache, sourceFile, fromNode.range.startLine, referenceKind, target.name)
+      ? edge.calledAs && edge.occurrenceRange
+        ? { end_line: edge.occurrenceRange.endLine, end_column: edge.occurrenceRange.endColumn, called_as: edge.calledAs }
+        : await getJavaTypeRelationshipMetadata(sourceCache, sourceFile, fallbackRange.startLine, referenceKind, target.name).catch(() => undefined)
       : undefined;
+    const line = isTypeRelationship ? edge.occurrenceRange?.startLine ?? fallbackRange.startLine : edge.callsite?.line ?? edge.occurrenceRange?.startLine ?? fallbackRange.startLine;
+    const column = isTypeRelationship
+      ? 0
+      : referenceKind === 'instantiate' && edge.calledAs?.startsWith('new ')
+        ? Math.max(0, (edge.occurrenceRange?.startColumn ?? fallbackRange.startColumn) - 4)
+        : edge.callsite?.column ?? edge.occurrenceRange?.startColumn ?? fallbackRange.startColumn;
     references.push({
       file: sourceFile,
-      line: isTypeRelationship ? fromNode.range.startLine : edge.callsite?.line ?? fromNode.range.startLine,
-      column: isTypeRelationship ? 0 : edge.callsite?.column ?? fromNode.range.startColumn,
-      end_line: isTypeRelationship ? relationshipMetadata?.end_line : fromNode.range.endLine,
-      end_column: isTypeRelationship ? relationshipMetadata?.end_column : fromNode.range.endColumn,
+      line,
+      column,
+      end_line: isTypeRelationship ? relationshipMetadata?.end_line : edge.occurrenceRange?.endLine ?? fallbackRange.endLine,
+      end_column: isTypeRelationship ? relationshipMetadata?.end_column : edge.occurrenceRange?.endColumn ?? fallbackRange.endColumn,
       symbol: target.name,
       kind: target.symbolKind,
-      context_symbol: fromNode.name,
-      context_kind: fromNode.symbolKind,
-      context_class: isTypeRelationship ? fromNode.name : fromNode.owner,
-      owner_kind: isTypeRelationship ? (fromNode.symbolKind === 'interface' ? 'interface' : 'class') : fromNode.ownerKind ?? 'unknown',
+      context_symbol: fromNode.kind === 'symbol' ? fromNode.name : undefined,
+      context_kind: fromNode.kind === 'symbol' ? fromNode.symbolKind : undefined,
+      context_class: fromNode.kind === 'symbol' ? (isTypeRelationship ? fromNode.name : fromNode.owner) : undefined,
+      owner_kind: fromNode.kind === 'symbol' ? (isTypeRelationship ? (fromNode.symbolKind === 'interface' ? 'interface' : 'class') : fromNode.ownerKind ?? 'unknown') : 'unknown',
       reference_kind: referenceKind,
-      called_as: isTypeRelationship ? relationshipMetadata?.called_as : undefined,
+      called_as: isTypeRelationship ? relationshipMetadata?.called_as : referenceKind === 'instantiate' ? undefined : edge.calledAs,
       receiver_name: edge.callsite?.receiverName,
       receiver_type: edge.callsite?.receiverType,
       is_application: true,
@@ -91,6 +100,16 @@ export async function queryReferencesFromGraph(options: {
   }
 
   return references;
+}
+
+function graphEdgeReferenceKind(edge: GraphEdge): ReferenceLocation['reference_kind'] {
+  if (edge.kind === 'calls') return 'call';
+  if (edge.kind === 'imports') return 'import';
+  if (edge.kind === 'implements') return 'implements';
+  if (edge.kind === 'extends') return 'extends';
+  if (edge.reason === 'java_type_reference') return 'type_reference';
+  if (edge.reason === 'java_instantiate') return 'instantiate';
+  return 'read';
 }
 
 async function getJavaTypeRelationshipMetadata(

@@ -37,6 +37,10 @@ export interface IndexedField {
   symbolId: string;
   line: number;
   column: number;
+  typeLine: number;
+  typeColumn: number;
+  typeEndLine: number;
+  typeEndColumn: number;
 }
 
 export interface IndexedClass {
@@ -61,6 +65,21 @@ export interface FileImports {
   wildcardImports: string[];
 }
 
+export interface IndexedJavaTypeReference {
+  file: string;
+  targetSymbolId: string;
+  contextSymbolId?: string;
+  contextClassName?: string;
+  contextKind?: IndexedClass['kind'];
+  referenceKind: 'import' | 'type_reference' | 'instantiate' | 'read';
+  line: number;
+  column: number;
+  endLine: number;
+  endColumn: number;
+  calledAs?: string;
+  importSource?: string;
+}
+
 export interface IndexedJavaFile {
   file: string;
   package: string;
@@ -75,6 +94,7 @@ export interface ProjectIndex {
   classes: IndexedClass[];
   imports: Map<string, FileImports>;
   files: IndexedJavaFile[];
+  typeReferences: IndexedJavaTypeReference[];
 }
 
 export async function buildProjectIndex(rootDir: string): Promise<ProjectIndex> {
@@ -84,6 +104,7 @@ export async function buildProjectIndex(rootDir: string): Promise<ProjectIndex> 
     classes: [],
     imports: new Map(),
     files: [],
+    typeReferences: [],
   };
 
   const javaFiles = (await collectWorkspaceSourceFiles(rootDir)).filter((file) => file.endsWith('.java'));
@@ -102,6 +123,7 @@ export async function buildProjectIndex(rootDir: string): Promise<ProjectIndex> 
     indexFile(file, source, tree.rootNode, extraction, index);
   }
 
+  index.typeReferences = collectJavaTypeReferences(index);
   return index;
 }
 
@@ -218,6 +240,10 @@ function indexClassMembers(
             symbolId: fieldRecord.symbolId,
             line: child.startPosition.row + 1,
             column: child.startPosition.column,
+            typeLine: typeNode.startPosition.row + 1,
+            typeColumn: typeNode.startPosition.column,
+            typeEndLine: typeNode.endPosition.row + 1,
+            typeEndColumn: typeNode.endPosition.column,
           });
         }
       }
@@ -392,6 +418,175 @@ function resolveTypeReference(
 
   if (packageName) return `${packageName}.${scopedType}`;
   return scopedType;
+}
+
+function collectJavaTypeReferences(index: ProjectIndex): IndexedJavaTypeReference[] {
+  const results: IndexedJavaTypeReference[] = [];
+  for (const target of index.classes) {
+    for (const file of index.files) {
+      if (file.file === target.file) continue;
+      const fileImports = index.imports.get(file.file);
+      if (!fileImports) continue;
+      const imported = fileImports.imports.get(target.className);
+      if (imported === target.fullName) {
+        const position = findRegexPosition(file.source, new RegExp(`import\\s+${escapeRegExp(target.fullName)}\\s*;`));
+        if (position) {
+          results.push({
+            file: file.file,
+            targetSymbolId: target.symbolId,
+            referenceKind: 'import',
+            line: position.line,
+            column: position.column,
+            endLine: position.line,
+            endColumn: position.column + `import ${target.fullName};`.length,
+            calledAs: `import ${target.fullName};`,
+            importSource: target.fullName,
+          });
+        }
+      }
+      for (const field of index.fields) {
+        if (field.file !== file.file || !(field.typeName === target.className || field.fullTypeName === target.fullName)) continue;
+        const contextClass = index.classes.find((klass) => klass.file === field.file && klass.className === field.className);
+        results.push({
+          file: field.file,
+          targetSymbolId: target.symbolId,
+          contextSymbolId: contextClass?.symbolId,
+          contextClassName: field.className,
+          contextKind: 'class',
+          referenceKind: 'type_reference',
+          line: field.typeLine,
+          column: field.typeColumn,
+          endLine: field.typeEndLine,
+          endColumn: field.typeEndColumn,
+          calledAs: field.typeName,
+        });
+      }
+      collectSemanticReferencesForTarget(file, target, fileImports, index, results);
+    }
+  }
+  return dedupeTypeReferences(results);
+}
+
+function collectSemanticReferencesForTarget(
+  file: IndexedJavaFile,
+  target: IndexedClass,
+  fileImports: FileImports,
+  index: ProjectIndex,
+  results: IndexedJavaTypeReference[]
+): void {
+  function visit(node: any, ancestors: any[] = []) {
+    if (!node?.isNamed) return;
+    if (node.type === 'import_declaration') return;
+
+    const parent = ancestors[ancestors.length - 1];
+    if (isIndexedTypeNodeName(node, parent)) return;
+
+    if ((node.type === 'method_invocation' || node.type === 'field_access') && javaTypeTextMatchesTarget(node.childForFieldName('object')?.text, target, fileImports)) {
+      pushAstReference(file.file, target, index, results, 'read', node, ancestors, node.text);
+    }
+
+    if (node.type === 'object_creation_expression') {
+      const typeNode = node.childForFieldName('type') ?? node.children?.find((child: any) => child.type === 'type_identifier' || child.type === 'generic_type' || child.type === 'scoped_type_identifier');
+      if (javaTypeTextMatchesTarget(typeNode?.text, target, fileImports)) {
+        pushAstReference(file.file, target, index, results, 'instantiate', typeNode ?? node, ancestors, node.text);
+      }
+    }
+
+    if (
+      (node.type === 'type_identifier' || node.type === 'scoped_type_identifier') &&
+      !isInsideJavaObjectCreation(ancestors) &&
+      !isJavaRelationshipTypeNode(ancestors) &&
+      !isAlreadyIndexedSimpleFieldType(node, ancestors) &&
+      javaTypeTextMatchesTarget(node.text, target, fileImports)
+    ) {
+      pushAstReference(file.file, target, index, results, 'type_reference', node, ancestors, node.text);
+    }
+
+    for (const child of node.children ?? []) visit(child, [...ancestors, node]);
+  }
+  visit(file.rootNode);
+}
+
+function pushAstReference(
+  file: string,
+  target: IndexedClass,
+  index: ProjectIndex,
+  results: IndexedJavaTypeReference[],
+  referenceKind: IndexedJavaTypeReference['referenceKind'],
+  node: any,
+  ancestors: any[],
+  calledAs?: string
+): void {
+  const line = node.startPosition.row + 1;
+  const methodContext = index.methods.find((method) => method.file === file && method.line <= line && method.node.endPosition.row + 1 >= line);
+  const contextClass = methodContext ? undefined : index.classes.find((klass) => klass.file === file && klass.line <= line);
+  results.push({
+    file,
+    targetSymbolId: target.symbolId,
+    contextSymbolId: methodContext?.symbolId ?? contextClass?.symbolId,
+    contextClassName: methodContext?.className ?? contextClass?.className,
+    contextKind: methodContext ? 'class' : contextClass?.kind,
+    referenceKind,
+    line,
+    column: node.startPosition.column,
+    endLine: node.endPosition.row + 1,
+    endColumn: node.endPosition.column,
+    calledAs,
+  });
+}
+
+function isIndexedTypeNodeName(node: any, parent?: any): boolean {
+  if (!parent || !isIndexedTypeNode(parent)) return false;
+  return parent.childForFieldName('name') === node;
+}
+
+function isInsideJavaObjectCreation(ancestors: any[]): boolean {
+  return ancestors.some((ancestor) => ancestor.type === 'object_creation_expression');
+}
+
+function isJavaRelationshipTypeNode(ancestors: any[]): boolean {
+  return ancestors.some((ancestor) => ancestor.type === 'superclass' || ancestor.type === 'super_interfaces' || ancestor.type === 'extends_interfaces');
+}
+
+function isAlreadyIndexedSimpleFieldType(node: any, ancestors: any[]): boolean {
+  const fieldDeclaration = [...ancestors].reverse().find((ancestor: any) => ancestor.type === 'field_declaration');
+  if (!fieldDeclaration) return false;
+  const typeNode = fieldDeclaration.childForFieldName('type');
+  if (!typeNode) return false;
+  return typeNode === node && !/[<.]/.test(node.text);
+}
+
+function javaTypeTextMatchesTarget(typeText: string | undefined, target: IndexedClass, fileImports?: FileImports): boolean {
+  if (!typeText) return false;
+  const normalized = typeText.replace(/@[A-Za-z_$][\w$.]*(?:\([^)]*\))?\s*/g, '').replace(/<[^<>]*>/g, '').replace(/\[\]/g, '').replace(/\.\.\./g, '').trim();
+  if (normalized === target.fullName) return true;
+  if (normalized.endsWith(`.${target.className}`)) return normalized === target.fullName;
+  if (normalized !== target.className) return false;
+  const imported = fileImports?.imports.get(target.className);
+  if (imported) return imported === target.fullName;
+  return fileImports?.package === target.package;
+}
+
+function findRegexPosition(source: string, pattern: RegExp): { line: number; column: number } | undefined {
+  const match = pattern.exec(source);
+  if (!match || match.index === undefined) return undefined;
+  const prefix = source.slice(0, match.index);
+  const lines = prefix.split('\n');
+  return { line: lines.length, column: lines[lines.length - 1].length };
+}
+
+function dedupeTypeReferences(references: IndexedJavaTypeReference[]): IndexedJavaTypeReference[] {
+  const seen = new Set<string>();
+  return references.filter((item) => {
+    const key = [item.file, item.targetSymbolId, item.contextSymbolId ?? '', item.referenceKind, item.line, item.column, item.endLine, item.endColumn].join(':');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function arraysEqual(a: string[], b: string[]): boolean {

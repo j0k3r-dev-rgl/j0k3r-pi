@@ -306,18 +306,43 @@ function buildJavaGraph(
     for (const implemented of classRecord.implements ?? []) {
       const target = index.classes.find((candidate) => candidate.fullName === implemented || candidate.className === implemented);
       const to = target ? symbolIds.get(target.symbolId) ?? `external:java:${implemented}` : `external:java:${implemented}`;
-      edges.push({ id: createEdgeId('implements', fromId, to), kind: 'implements', from: fromId, to, targetStatus: to.startsWith('external:') ? 'external' : 'resolved', resolution: to.startsWith('external:') ? 'heuristic' : 'exact' });
+      const relationshipMetadata = getJavaTypeRelationshipMetadataForGraph(index, classRecord.file, classRecord.line, 'implements', target?.className ?? implemented.split('.').pop() ?? implemented);
+      edges.push({ id: createEdgeId('implements', fromId, to), kind: 'implements', from: fromId, to, occurrenceRange: relationshipMetadata?.range, calledAs: relationshipMetadata?.calledAs, targetStatus: to.startsWith('external:') ? 'external' : 'resolved', resolution: to.startsWith('external:') ? 'heuristic' : 'exact' });
     }
     for (const extended of classRecord.extends ?? []) {
       const target = index.classes.find((candidate) => candidate.fullName === extended || candidate.className === extended);
       const to = target ? symbolIds.get(target.symbolId) ?? `external:java:${extended}` : `external:java:${extended}`;
-      edges.push({ id: createEdgeId('extends', fromId, to), kind: 'extends', from: fromId, to, targetStatus: to.startsWith('external:') ? 'external' : 'resolved', resolution: to.startsWith('external:') ? 'heuristic' : 'exact' });
+      const relationshipMetadata = getJavaTypeRelationshipMetadataForGraph(index, classRecord.file, classRecord.line, 'extends', target?.className ?? extended.split('.').pop() ?? extended);
+      edges.push({ id: createEdgeId('extends', fromId, to), kind: 'extends', from: fromId, to, occurrenceRange: relationshipMetadata?.range, calledAs: relationshipMetadata?.calledAs, targetStatus: to.startsWith('external:') ? 'external' : 'resolved', resolution: to.startsWith('external:') ? 'heuristic' : 'exact' });
     }
     for (const permitted of classRecord.permits ?? []) {
       const target = index.classes.find((candidate) => candidate.fullName === permitted || candidate.className === permitted);
       const to = target ? symbolIds.get(target.symbolId) ?? `external:java:${permitted}` : `external:java:${permitted}`;
       edges.push({ id: createEdgeId('permits', fromId, to), kind: 'permits', from: fromId, to, targetStatus: to.startsWith('external:') ? 'external' : 'resolved', resolution: to.startsWith('external:') ? 'heuristic' : 'exact' });
     }
+  }
+
+  for (const typeReference of index.typeReferences) {
+    const targetId = symbolIds.get(typeReference.targetSymbolId);
+    if (!targetId) continue;
+    const relFile = toProjectRelativePath(projectRoot, typeReference.file);
+    const fileNodeId = fileNodeIds.get(relFile);
+    const fromId = typeReference.contextSymbolId ? symbolIds.get(typeReference.contextSymbolId) : fileNodeId;
+    if (!fromId) continue;
+    const edgeKind = typeReference.referenceKind === 'import' ? 'imports' : 'reads';
+    edges.push({
+      id: createEdgeId(edgeKind, fromId, targetId, `${typeReference.referenceKind}:${typeReference.line}:${typeReference.column}`),
+      kind: edgeKind,
+      from: fromId,
+      to: targetId,
+      occurrenceRange: { startLine: typeReference.line, startColumn: typeReference.column, endLine: typeReference.endLine, endColumn: typeReference.endColumn },
+      callsite: edgeKind === 'reads' ? { line: typeReference.line, column: typeReference.column } : undefined,
+      calledAs: typeReference.calledAs,
+      importSource: typeReference.importSource,
+      targetStatus: 'resolved',
+      resolution: 'exact',
+      reason: `java_${typeReference.referenceKind}`,
+    });
   }
 
   for (const method of index.methods) {
@@ -359,6 +384,24 @@ function buildJavaGraph(
     completeFiles: sortedCompleteFiles,
     skippedFiles,
     fileProofs,
+  };
+}
+
+function getJavaTypeRelationshipMetadataForGraph(
+  index: ProjectIndex,
+  file: string,
+  line: number,
+  relationship: 'extends' | 'implements',
+  targetName: string
+): { range: { startLine: number; startColumn: number; endLine: number; endColumn: number }; calledAs: string } | undefined {
+  const source = index.files.find((candidate) => candidate.file === file)?.source;
+  const lineText = source?.split('\n')[line - 1];
+  if (!lineText) return undefined;
+  const match = lineText.match(new RegExp(`\\b${relationship}\\s+[^\\{]*?\\b${escapeRegExp(targetName)}(?:\\b|\\s*<)`));
+  if (!match || match.index === undefined) return undefined;
+  return {
+    range: { startLine: line, startColumn: match.index, endLine: line, endColumn: match.index + match[0].length },
+    calledAs: match[0].trim().replace(/\s+</g, '<'),
   };
 }
 
