@@ -304,6 +304,10 @@ function extractMethodCalls(methodNode: any): MethodCall[] {
           callbacks: extractCallbacks(node),
         });
       }
+      for (const child of node.children) {
+        if (child === nameNode) continue;
+        visit(child);
+      }
       return;
     }
 
@@ -372,6 +376,10 @@ function extractMethodCallsFromNode(rootNode: any): MethodCall[] {
           column: node.startPosition.column,
           callbacks: extractCallbacks(node),
         });
+      }
+      for (const child of node.children) {
+        if (child === nameNode) continue;
+        visit(child);
       }
       return;
     }
@@ -546,6 +554,9 @@ function resolveInvocationExpressionType(
   expression: string,
   index: ProjectIndex
 ): ObjectTypeResolution | undefined {
+  const mockWrapped = unwrapSingleArgumentInvocation(expression, new Set(['verify', 'when']));
+  if (mockWrapped) return resolveObjectType(currentMethod, mockWrapped, inferExpressionNodeType(mockWrapped), index);
+
   const invocation = splitInvocationExpression(expression);
   if (!invocation) return undefined;
 
@@ -1013,6 +1024,14 @@ function extractFirstGenericType(typeText?: string): string | undefined {
   if (!typeText) return undefined;
   const match = typeText.match(/<\s*([A-Za-z_$][\w$.]*)/);
   return match ? simpleName(normalizeScopedTypeName(match[1])) : undefined;
+}
+
+function unwrapSingleArgumentInvocation(expression: string, methodNames: Set<string>): string | undefined {
+  const trimmed = expression.trim();
+  const match = trimmed.match(/^(?:[A-Za-z_$][\w$]*\.)?([A-Za-z_$][\w$]*)\s*\(([\s\S]*)\)$/);
+  if (!match || !methodNames.has(match[1])) return undefined;
+  const args = splitTopLevelArguments(match[2]);
+  return args.length === 1 ? args[0].trim() : undefined;
 }
 
 function looksLikeMethodInvocation(expression: string): boolean {

@@ -110,15 +110,16 @@ Parameters:
 - `kind` *(string, optional)*: `function`, `class`, `method`, `interface`, or `variable`.
 - `scope` *(string, optional)*: `file` or `directory`.
 - `glob` *(string, optional)*: optional file glob for directory scans.
+- `implementation_mode` *(string, optional)*: `representative` or `exhaustive`. Default: `representative`.
 - `test_mode` *(string, optional)*: `representative` or `exhaustive`. Default: `representative`.
 - `caller_mode` *(string, optional)*: `representative` or `exhaustive`. Default: `representative`.
-- `max_tests` / `max_callers` *(number, optional)*: caps for exhaustive mode. Default: `50`, max: `100`.
+- `max_implementations` / `max_tests` / `max_callers` *(number, optional)*: caps for exhaustive mode. Default: `50`, max: `100`.
 
 Result:
 
 - `content`: compact bounded summary separating contract, implementations, callers to inspect, likely tests, validation suggestions, risks, trust, and follow-up inspection needs.
 - `details.contract`, `details.implementations`, `details.callers`, and `details.likely_tests`: capped sections with `returned`, `total`, `omitted`, and `follow_up` metadata when additional inspection is needed.
-- `details.caller_reporting` and `details.test_reporting`: visible mode/completeness metadata, including `exhaustive-truncated` when an exhaustive result still hits its cap. Exhaustive means exhaustive over Code Research semantic evidence, not every raw textual match.
+- `details.implementation_reporting`, `details.caller_reporting`, and `details.test_reporting`: visible mode/completeness metadata, including `exhaustive-truncated` when an exhaustive result still hits its cap. Exhaustive means exhaustive over Code Research semantic evidence, not every raw textual match.
 - `details.validation_suggestions`: heuristic, file-oriented suggestions only; the tool does not fabricate exact repository-specific runner commands.
 - `details.trust` and `details.fallback`: explicit confidence state and exact existing-tool follow-up actions (`code_find` or `code_call_hierarchy`) when the map is ambiguous, missing, or truncated.
 
@@ -218,7 +219,7 @@ Reporta estado del graph, monorepo/subproyectos y cobertura por lenguaje.
 
 #### `code_change_surface`
 
-Devuelve un mapa acotado para un cambio anclado a un símbolo: contrato, implementaciones, callers a inspeccionar, tests probables, sugerencias heurísticas de validación, riesgos, confianza y acciones de fallback con `code_find` o `code_call_hierarchy`. Requiere `path` y `query`; acepta `language`, `kind`, `scope`, `glob`, `test_mode`, `caller_mode`, `max_tests` y `max_callers` como filtros opcionales. Los modos `exhaustive` amplían tests/callers hasta el límite configurado e indican `exhaustive-truncated` si todavía hay omitidos; exhaustivo significa sobre evidencia semántica de Code Research, no cada match textual crudo. No inventa comandos exactos de test runner del repositorio analizado.
+Devuelve un mapa acotado para un cambio anclado a un símbolo: contrato, implementaciones, callers a inspeccionar, tests probables, sugerencias heurísticas de validación, riesgos, confianza y acciones de fallback con `code_find` o `code_call_hierarchy`. Requiere `path` y `query`; acepta `language`, `kind`, `scope`, `glob`, `implementation_mode`, `test_mode`, `caller_mode`, `max_implementations`, `max_tests` y `max_callers` como filtros opcionales. Los modos `exhaustive` amplían implementaciones/tests/callers hasta el límite configurado e indican `exhaustive-truncated` si todavía hay omitidos; exhaustivo significa sobre evidencia semántica de Code Research, no cada match textual crudo. No inventa comandos exactos de test runner del repositorio analizado.
 
 ### Desarrollo
 

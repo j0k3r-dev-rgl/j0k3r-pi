@@ -240,6 +240,7 @@ describe('code_change_surface', () => {
     expect(JSON.stringify(tool.parameters.required)).toContain('path');
     expect(JSON.stringify(tool.parameters.required)).toContain('query');
     expect(JSON.stringify(tool.parameters)).toContain('glob');
+    expect(JSON.stringify(tool.parameters)).toContain('implementation_mode');
     expect(JSON.stringify(tool.parameters)).toContain('test_mode');
     expect(JSON.stringify(tool.parameters)).toContain('caller_mode');
     expect(JSON.stringify(tool.parameters)).not.toContain('py');

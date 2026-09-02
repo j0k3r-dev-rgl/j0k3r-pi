@@ -656,29 +656,39 @@ async function findVariableReferences(
   input: FindReferencesInput
 ): Promise<ReferenceLocation[]> {
   const targetFiles = [...index.files.values()].filter((file) => (isDirectory || file.file === rootPath) && matchesRequestedLanguage(file.language, input.language));
-  const declarationExists = targetFiles.some((file) => new RegExp(`\\b(?:export\\s+)?(?:let|const|var)\\s+${escapeRegExp(input.symbol)}\\b`).test(file.source));
-  if (!declarationExists) return [];
+  const declarationPattern = new RegExp(`\\b(?:export\\s+)?(?:let|const|var)\\s+${escapeRegExp(input.symbol)}\\b`);
+  const declarationFiles = new Set(targetFiles.filter((file) => declarationPattern.test(file.source)).map((file) => file.file));
+  if (declarationFiles.size === 0) return [];
 
   const references: ReferenceLocation[] = [];
   for (const file of index.files.values()) {
     if (!matchesRequestedLanguage(file.language, input.language)) continue;
+    const localNames = new Set<string>();
+    if (declarationFiles.has(file.file)) localNames.add(input.symbol);
+
+    for (const binding of file.imports.values()) {
+      const targetImport = resolveTypeScriptImportCandidates(file.file, binding.source, index.projectConfig).find((candidate) => declarationFiles.has(candidate));
+      if (targetImport && (binding.importedName === input.symbol || binding.localName === input.symbol)) {
+        localNames.add(binding.localName);
+        const match = findRegexPosition(file.source, new RegExp(`\\b${escapeRegExp(binding.localName)}\\b`));
+        if (match) references.push(createRef(file.file, input, 'import', match.line, match.column, file.source, index));
+      }
+    }
+
+    if (localNames.size === 0) continue;
     const lines = file.source.split('\n');
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      if (!new RegExp(`\\b${escapeRegExp(input.symbol)}\\b`).test(line)) continue;
-      if (new RegExp(`\\b(?:export\\s+)?(?:let|const|var)\\s+${escapeRegExp(input.symbol)}\\b`).test(line)) continue;
-
-      const context = findContext(index, file.file, i + 1);
-      if (!context) continue;
-
-      const writeMatch = line.match(new RegExp(`\\b${escapeRegExp(input.symbol)}\\b\\s*=`));
-      if (writeMatch) {
-        references.push(createRef(file.file, input, 'write', i + 1, writeMatch.index ?? 0, file.source, index));
-      }
-
-      const readMatch = line.match(new RegExp(`(?:return\\s+)?\\b${escapeRegExp(input.symbol)}\\b(?!\\s*=)`));
-      if (readMatch && !(writeMatch && readMatch.index === writeMatch.index)) {
-        references.push(createRef(file.file, input, 'read', i + 1, readMatch.index ?? 0, file.source, index));
+      if (/^\s*import\b/.test(line)) continue;
+      for (const localName of localNames) {
+        const symbolPattern = new RegExp(`\\b${escapeRegExp(localName)}\\b`, 'g');
+        let match: RegExpExecArray | null;
+        while ((match = symbolPattern.exec(line)) !== null) {
+          if (declarationPattern.test(line) && localName === input.symbol) continue;
+          const assignmentTail = line.slice(match.index + localName.length);
+          const kind: ReferenceKind = /^\s*=/.test(assignmentTail) ? 'write' : 'read';
+          references.push(createRef(file.file, input, kind, i + 1, match.index, file.source, index));
+        }
       }
     }
   }

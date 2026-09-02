@@ -18,6 +18,8 @@ import type { CanonicalTypeScriptSymbolRecord } from '../languages/typescript/sy
 import { buildSymbolLocation as buildJavaSymbolLocation, extractSymbols as extractJavaSymbols, findImplementationsOf as findJavaImplementationsOf } from '../languages/java/find-symbol.js';
 import { buildSymbolLocation as buildGoSymbolLocation, extractSymbols as extractGoSymbols, findImplementationsOf as findGoImplementationsOf } from '../languages/go/find-symbol.js';
 import { queryInclusionForJavaDeclarationKind } from '../languages/java/symbol-model.js';
+import { resolveJavaIndexRoot } from '../languages/java/function-call-tree.js';
+import { collectWorkspaceSourceFiles } from './source-policy.js';
 import type {
   CanonicalSymbolRecord,
   FindSymbolInput,
@@ -134,6 +136,7 @@ export async function resolveFindSymbol(cwd: string, input: FindSymbolInput): Pr
   const directFiles = resolved.filesToScan.filter((file) => requiresCanonicalDirectContext || !graphCompleteFiles.has(file));
   const parsedFiles = await parseFiles(cwd, directFiles, explicitLanguage, diagnostics);
   const directResults = collectDirectMatches(parsedFiles, input, includeSignature, includeCode, searchMode, effectiveScope);
+  const implementationContextFiles = await loadJavaInterfaceMethodImplementationContext(cwd, resolved.targetPath, resolved.isDirectory, explicitLanguage, input, directResults, parsedFiles, diagnostics);
 
   const graphLocations: SymbolLocation[] = [];
   for (const file of resolved.filesToScan) {
@@ -151,7 +154,7 @@ export async function resolveFindSymbol(cwd: string, input: FindSymbolInput): Pr
   }
 
   const results = reconcileLocations([...directResults, ...graphLocations]);
-  hydrateInterfaceImplementationLocations(results, explicitLanguage, graphRecords, parsedFiles);
+  hydrateInterfaceImplementationLocations(results, explicitLanguage, graphRecords, implementationContextFiles);
   const currentDiagnostics = diagnostics.build();
   if (graphCompleteFiles.size === resolved.filesToScan.length && directFiles.length === 0 && currentDiagnostics.graph_status === 'fresh') {
     diagnostics.setSourceMode('graph').setCompleteness('complete', null);
@@ -224,6 +227,25 @@ function collectDirectMatches(
   }
 
   return matches;
+}
+
+async function loadJavaInterfaceMethodImplementationContext(
+  cwd: string,
+  targetPath: string,
+  isDirectory: boolean,
+  explicitLanguage: SupportedLanguage,
+  input: FindSymbolInput,
+  directResults: SymbolLocation[],
+  parsedFiles: ParsedFile[],
+  diagnostics: SymbolQueryDiagnosticsBuilder
+): Promise<ParsedFile[]> {
+  if (isDirectory || explicitLanguage !== 'java' || input.kind !== 'method') return parsedFiles;
+  if (directResults.length === 0) return parsedFiles;
+  const indexRoot = await resolveJavaIndexRoot(targetPath).catch(() => undefined);
+  if (!indexRoot) return parsedFiles;
+  const files = (await collectWorkspaceSourceFiles(indexRoot).catch(() => [])).filter((file) => file.endsWith('.java') && !parsedFiles.some((entry) => entry.path === file));
+  if (files.length === 0) return parsedFiles;
+  return [...parsedFiles, ...await parseFiles(cwd, files, explicitLanguage, diagnostics)];
 }
 
 async function loadGraphRecords(
@@ -589,8 +611,13 @@ function hydrateInterfaceImplementationLocations(
   parsedFiles: ParsedFile[]
 ): void {
   for (const result of results) {
-    if (result.kind !== 'interface' || !result.is_definition || (result.implementation_locations?.length ?? 0) > 0) continue;
     const language = detectLanguage(result.file, explicitLanguage);
+    if (result.kind === 'method' && result.is_definition && (result.implementation_locations?.length ?? 0) === 0 && language === 'java') {
+      result.implementation_locations = collectJavaMethodImplementationLocations(result, graphRecords, parsedFiles);
+      continue;
+    }
+
+    if (result.kind !== 'interface' || !result.is_definition || (result.implementation_locations?.length ?? 0) > 0) continue;
     if (language === 'java') {
       result.implementation_locations = collectJavaImplementationLocationsFromGraph(result, graphRecords);
       if ((result.implementation_locations?.length ?? 0) > 0) continue;
@@ -598,6 +625,49 @@ function hydrateInterfaceImplementationLocations(
     const adapter = getLanguageAdapter(language);
     result.implementation_locations = dedupeImplementationLocations(adapter.findImplementationsOf(result.symbol, parsedFiles));
   }
+}
+
+function collectJavaMethodImplementationLocations(
+  target: SymbolLocation,
+  graphRecords: Map<string, CanonicalSymbolRecord[]>,
+  parsedFiles: ParsedFile[]
+): SymbolLocation[] {
+  const interfaceOwner = target.owner;
+  if (!interfaceOwner) return [];
+  const implementationOwners = new Set<string>();
+  const ownerSimple = simpleName(interfaceOwner) ?? interfaceOwner;
+  const implementsPattern = new RegExp(`\\bimplements\\b[^\\n{]*\\b${escapeRegExp(ownerSimple)}(?:\\b|\\s*<)`, 'u');
+
+  for (const records of graphRecords.values()) {
+    for (const record of records) {
+      if (record.declarationKind !== 'class' && record.declarationKind !== 'record') continue;
+      if (record.signature && implementsPattern.test(record.signature)) implementationOwners.add(record.qualifiedName);
+    }
+  }
+
+  for (const file of parsedFiles.filter((item) => item.language === 'java')) {
+    for (const sym of javaAdapter.extractSymbols(file.rootNode)) {
+      if ((sym.node.declarationKind === 'class' || sym.node.declarationKind === 'record') && sym.node.signature && implementsPattern.test(sym.node.signature)) implementationOwners.add(sym.node.qualifiedName);
+    }
+  }
+  for (const location of javaAdapter.findImplementationsOf(ownerSimple, parsedFiles)) {
+    if (location.qualified_name) implementationOwners.add(location.qualified_name);
+    implementationOwners.add(location.symbol);
+  }
+
+  const locations: SymbolLocation[] = [];
+  const maybeAdd = (filePath: string, record: CanonicalSymbolRecord) => {
+    if (record.name !== target.symbol || record.declarationKind !== 'method') return;
+    if (!record.owner || (!implementationOwners.has(record.owner) && !implementationOwners.has(simpleName(record.owner) ?? record.owner))) return;
+    locations.push(buildJavaSymbolLocation(filePath, record.name, record.coarseKind, record, true, true));
+  };
+
+  for (const [filePath, records] of graphRecords) for (const record of records) maybeAdd(filePath, record);
+  for (const file of parsedFiles.filter((item) => item.language === 'java')) {
+    for (const sym of javaAdapter.extractSymbols(file.rootNode)) maybeAdd(file.path, sym.node);
+  }
+
+  return dedupeImplementationLocations(locations);
 }
 
 function collectJavaImplementationLocationsFromGraph(
@@ -627,6 +697,10 @@ function dedupeImplementationLocations(locations: SymbolLocation[]): SymbolLocat
     a.start_column - b.start_column ||
     a.symbol.localeCompare(b.symbol)
   );
+}
+
+function simpleName(value: string): string | undefined {
+  return value.split('.').pop();
 }
 
 function escapeRegExp(value: string): string {

@@ -84,6 +84,29 @@ describe('findSymbol Java', () => {
     expect(results[0].implementation_locations?.[0].symbol).toBe('LocalService');
   });
 
+  it('finds Java interface method implementations from a file-scoped interface method', async () => {
+    const projectRoot = join(tmpDir, `method-implementation-project-${Date.now()}`);
+    await mkdir(projectRoot, { recursive: true });
+    await writeTestFile(
+      `${projectRoot.slice(tmpDir.length + 1)}/src/main/java/ports/Worker.java`,
+      `package ports;\npublic interface Worker {\n  void run(String id);\n}\n`
+    );
+    await writeTestFile(
+      `${projectRoot.slice(tmpDir.length + 1)}/src/main/java/impl/WorkerUseCase.java`,
+      `package impl;\n\nimport ports.Worker;\n\npublic class WorkerUseCase implements Worker {\n  public void run(String id) {}\n}\n`
+    );
+
+    const results = await findSymbol(tmpDir, {
+      path: join(projectRoot, 'src/main/java/ports/Worker.java'),
+      symbol: 'run',
+      language: 'java',
+      kind: 'method',
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].implementation_locations?.map((location) => location.qualified_name)).toEqual(['impl.WorkerUseCase.run']);
+  });
+
   it('finds Java interface implementations across a directory', async () => {
     const projectRoot = join(tmpDir, 'cross-file-project');
     await mkdir(projectRoot, { recursive: true });

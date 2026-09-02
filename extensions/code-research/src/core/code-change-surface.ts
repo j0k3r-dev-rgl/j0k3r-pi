@@ -26,6 +26,8 @@ export interface CodeChangeSurfaceInput {
   glob?: string;
   test_mode?: SurfaceMode;
   caller_mode?: SurfaceMode;
+  implementation_mode?: SurfaceMode;
+  max_implementations?: number;
   max_tests?: number;
   max_callers?: number;
 }
@@ -40,6 +42,7 @@ export interface CodeChangeSurfaceResult {
   implementations: BoundedSection<SymbolLocation>;
   callers: BoundedSection<CallTreeNode>;
   likely_tests: BoundedSection<ReferenceLocation>;
+  implementation_reporting: SectionReporting;
   caller_reporting: SectionReporting;
   test_reporting: SectionReporting;
   validation_suggestions: string[];
@@ -147,6 +150,7 @@ function likelyTestScore(cwd: string, item: ReferenceLocation, query: string): n
   if (/(^|\/)unit(\/|$)/u.test(file)) score += 40;
   if (/(^|\/)integration(\/|$)/u.test(file)) score += 10;
   if (item.reference_kind === 'call' || item.reference_kind === 'callback' || item.reference_kind === 'method_reference') score += 40;
+  if (item.context_symbol && item.context_symbol !== '<top-level>' && item.context_symbol !== '<test-file-import>') score += 25;
   if (item.reference_kind === 'import') score += isFileLevelTestImport(item) ? 1 : 5;
   if ((item.called_as ?? item.source_line ?? '').includes(query)) score += 20;
   return score;
@@ -316,7 +320,7 @@ async function enrichFileLevelTestImports(cwd: string, imports: ReferenceLocatio
   if (uniqueTerms.length === 0) return imports;
   const enriched: ReferenceLocation[] = [];
   for (const item of imports) {
-    if (!isFileLevelTestImport(item) && item.reference_kind !== 'import') {
+    if (!isFileLevelTestImport(item) && item.reference_kind !== 'import' && item.context_symbol !== '<top-level>') {
       enriched.push(item);
       continue;
     }
@@ -326,6 +330,10 @@ async function enrichFileLevelTestImports(cwd: string, imports: ReferenceLocatio
       continue;
     }
     const lines = source.split('\n');
+    if (!isFileLevelTestImport(item) && item.reference_kind !== 'import') {
+      enriched.push({ ...item, context_symbol: findNearestTestName(lines, Math.max(0, item.line - 1)) ?? item.context_symbol });
+      continue;
+    }
     let best: ReferenceLocation | undefined;
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index] ?? '';
@@ -437,6 +445,7 @@ function formatContent(cwd: string, result: Omit<CodeChangeSurfaceResult, 'conte
     count('Contract', result.contract),
     ...result.contract.items.map((item) => `- contract ${rel(cwd, item.file)}:${item.start_line} ${item.qualified_name ?? item.symbol} [${item.kind}]`),
     count('Implementations', result.implementations),
+    `Implementation reporting: ${reporting(result.implementation_reporting)}`,
     ...result.implementations.items.map((item) => `- implementation ${rel(cwd, item.file)}:${item.start_line} ${item.qualified_name ?? item.symbol} [${item.kind}]`),
     count('Callers to inspect', result.callers),
     `Caller reporting: ${reporting(result.caller_reporting)}`,
@@ -484,8 +493,10 @@ export async function buildCodeChangeSurface(cwd: string, input: CodeChangeSurfa
     ...await relatedTestReferences(cwd, input, callers, implementationItems),
     ...await graphTestImportsForFiles(cwd, input, surfaceFiles),
   ], testTerms);
-  const representativeTestReferences = uniqueBestBy(rawTestReferences, (item) => canonicalFile(cwd, item.file), (item) => likelyTestScore(cwd, item, input.query));
-  const exhaustiveTestReferences = uniqueBestBy(rawTestReferences, (item) => keyForLocation(item), (item) => likelyTestScore(cwd, item, input.query));
+  const testFilesWithBehaviorEvidence = new Set(rawTestReferences.filter((item) => item.reference_kind !== 'import' && !isFileLevelTestImport(item)).map((item) => canonicalFile(cwd, item.file)));
+  const filteredTestReferences = rawTestReferences.filter((item) => !testFilesWithBehaviorEvidence.has(canonicalFile(cwd, item.file)) || (item.reference_kind !== 'import' && !isFileLevelTestImport(item)));
+  const representativeTestReferences = uniqueBestBy(filteredTestReferences, (item) => canonicalFile(cwd, item.file), (item) => likelyTestScore(cwd, item, input.query));
+  const exhaustiveTestReferences = uniqueBestBy(filteredTestReferences, (item) => keyForLocation(item), (item) => likelyTestScore(cwd, item, input.query));
   const testReferences = (input.test_mode === 'exhaustive' ? exhaustiveTestReferences : representativeTestReferences)
     .sort((a, b) => likelyTestScore(cwd, b, input.query) - likelyTestScore(cwd, a, input.query) || canonicalFile(cwd, a.file).localeCompare(canonicalFile(cwd, b.file)) || (a.line ?? 0) - (b.line ?? 0));
   const testLimit = input.test_mode === 'exhaustive' ? normalizedLimit(input.max_tests, 50) : SECTION_LIMIT;
@@ -512,7 +523,11 @@ export async function buildCodeChangeSurface(cwd: string, input: CodeChangeSurfa
   if (callers.length === 0 && status === 'ready') risks.add('No callers were confirmed; validate with a focused references query before assuming no impact.');
 
   const contract = bounded(contractItems, followUpCodeFind(input, 'declaration', 'Continue contract/declaration inspection for omitted matches.'));
-  const implementations = bounded(implementationItems, followUpCodeFind(input, 'implementation', 'Continue implementation inspection for omitted matches.'));
+  const implementationLimit = input.implementation_mode === 'exhaustive' ? normalizedLimit(input.max_implementations, 50) : SECTION_LIMIT;
+  const implementations = bounded(implementationItems, followUpCodeFind(input, 'implementation', 'Continue implementation inspection for omitted matches.'), implementationLimit);
+  const implementation_reporting: SectionReporting = input.implementation_mode === 'exhaustive'
+    ? { mode: implementations.omitted > 0 ? 'exhaustive-truncated' : 'exhaustive', evidence_total: implementationItems.length, limit: implementationLimit, ...(implementations.omitted > 0 ? { reason: `Exhaustive implementation evidence was truncated to max_implementations=${implementationLimit}.` } : {}) }
+    : { mode: implementations.omitted > 0 ? 'representative' : 'complete', evidence_total: implementationItems.length, limit: implementationLimit, ...(implementations.omitted > 0 ? { reason: 'Implementation evidence was capped to representative entries.' } : {}) };
   const callerSection = bounded(callers, followUpCodeFind(input, 'references', 'Continue caller/reference inspection for omitted matches.'), callerLimit);
   const likely_tests = bounded(testReferences, followUpCodeFind(input, 'references', 'Continue test reference inspection for omitted matches.'), testLimit);
   const caller_reporting: SectionReporting = input.caller_mode === 'exhaustive'
@@ -548,6 +563,7 @@ export async function buildCodeChangeSurface(cwd: string, input: CodeChangeSurfa
     implementations,
     callers: callerSection,
     likely_tests,
+    implementation_reporting,
     caller_reporting,
     test_reporting,
     validation_suggestions,
@@ -555,7 +571,7 @@ export async function buildCodeChangeSurface(cwd: string, input: CodeChangeSurfa
     trust,
     fallback,
     summary,
-    diagnostics: { declarations: declarations.diagnostics, references: references.diagnostics, hierarchy: hierarchy.diagnostics, implementation_expansion: expandedImplementations.diagnostics, implementation_hierarchy: implementationIncoming.diagnostics, caller_reporting, test_reporting },
+    diagnostics: { declarations: declarations.diagnostics, references: references.diagnostics, hierarchy: hierarchy.diagnostics, implementation_expansion: expandedImplementations.diagnostics, implementation_hierarchy: implementationIncoming.diagnostics, implementation_reporting, caller_reporting, test_reporting },
   };
   return { ...partial, content: formatContent(cwd, partial) };
 }

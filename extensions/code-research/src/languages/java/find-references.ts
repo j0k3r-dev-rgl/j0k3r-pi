@@ -344,7 +344,7 @@ function offsetToLineColumn(source: string, offset: number) {
 function dedupeReferences(references: ReferenceLocation[]): ReferenceLocation[] {
   const seen = new Set<string>();
   return references.filter((item) => {
-    const key = `${item.file}:${item.line}:${item.column}:${item.reference_kind}:${item.context_symbol ?? ''}`;
+    const key = `${item.file}:${item.line}:${item.column}:${item.context_symbol ?? ''}:${item.called_as ?? ''}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

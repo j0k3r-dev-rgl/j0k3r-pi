@@ -26,6 +26,28 @@ function registerToolForTest(register: (pi: any) => void): any {
 }
 
 describe('find_references', () => {
+  it('finds TypeScript and JavaScript variable references, class references, and top-level chained calls', async () => {
+    const files = {
+      'src/constants.ts': `export const LIMIT = 2;\nexport const STATUS = { OPEN: 'open' };\nexport function main(): void {}\nmain().catch(console.error);\n`,
+      'src/consumer.tsx': `import { LIMIT, STATUS } from './constants';\nexport class WidgetError extends Error {}\nexport class Widget {}\nconst value = LIMIT + STATUS.OPEN.length;\nconst widget: Widget = new Widget();\nconst error = new WidgetError('x');\n`,
+      'src/consumer.test.ts': `import { Widget, WidgetError } from './consumer';\nit('uses classes', () => { expect(new Widget()).toBeInstanceOf(Widget); expect(new WidgetError('x')).toBeInstanceOf(Error); });\n`,
+    };
+    const directRoot = await createProject('pi-find-references-ts-vars-direct', files);
+    const graphRoot = await createProject('pi-find-references-ts-vars-graph', { '.pi/code-research.json': `{"graph":{"enable":true}}\n`, ...files });
+    await buildWorkspaceGraph(graphRoot);
+
+    for (const root of [directRoot, graphRoot]) {
+      const limitRefs = await findReferences(root, { path: 'src/constants.ts', symbol: 'LIMIT', language: 'ts', kind: 'variable' });
+      const statusRefs = await findReferences(root, { path: 'src/constants.ts', symbol: 'STATUS', language: 'ts', kind: 'variable' });
+      const classRefs = await findReferences(root, { path: 'src/consumer.tsx', symbol: 'WidgetError', language: 'ts', kind: 'class' });
+      const mainRefs = await findReferences(root, { path: 'src/constants.ts', symbol: 'main', language: 'ts', kind: 'function', reference_kinds: ['call'] });
+      expect(limitRefs.map((item) => item.reference_kind)).toContain('read');
+      expect(statusRefs.map((item) => item.reference_kind)).toContain('read');
+      expect(classRefs.map((item) => item.reference_kind)).toContain('instantiate');
+      expect(mainRefs.map((item) => item.called_as)).toContain('main().catch(console.error)');
+    }
+  });
+
   it('does not treat callback-consuming call results as callable reference targets', async () => {
     const rootDir = await createProject('pi-find-references-ts-non-callable', {
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
@@ -608,9 +630,9 @@ describe('find_references', () => {
   it('finds Java interface method calls through interface-typed fields and lambdas', async () => {
     const files = {
       'src/main/java/app/RootDeleteReview.java': `package app;\n\npublic interface RootDeleteReview {\n  void deleteById(String id);\n}\n`,
-      'src/main/java/app/RootDeleteReviewUseCase.java': `package app;\n\npublic class RootDeleteReviewUseCase implements RootDeleteReview {\n  public void deleteById(String id) {}\n}\n`,
+      'src/main/java/app/RootDeleteReviewUseCase.java': `package app;\n\npublic class RootDeleteReviewUseCase implements RootDeleteReview {\n  private int deletionGuards;\n  public void deleteById(String id) {\n    deletionGuards++;\n  }\n}\n`,
       'src/main/java/app/RootReviewRestController.java': `package app;\n\npublic class RootReviewRestController {\n  private final RootDeleteReview rootDeleteReview;\n\n  public RootReviewRestController(RootDeleteReview rootDeleteReview) {\n    this.rootDeleteReview = rootDeleteReview;\n  }\n\n  public void deleteReview(String id) {\n    rootDeleteReview.deleteById(id);\n  }\n}\n`,
-      'src/test/java/app/RootDeleteReviewUseCaseTest.java': `package app;\n\nimport static org.junit.jupiter.api.Assertions.assertThrows;\n\nclass RootDeleteReviewUseCaseTest {\n  private final RootDeleteReview useCase = new RootDeleteReviewUseCase();\n\n  void direct() {\n    useCase.deleteById("1");\n  }\n\n  void assertion() {\n    assertThrows(RuntimeException.class, () -> useCase.deleteById("2"));\n  }\n}\n`,
+      'src/test/java/app/RootDeleteReviewUseCaseTest.java': `package app;\n\nimport static org.junit.jupiter.api.Assertions.assertThrows;\n\nclass RootDeleteReviewUseCaseTest {\n  private final RootDeleteReview useCase = new RootDeleteReviewUseCase();\n\n  void direct() {\n    useCase.deleteById("1");\n  }\n\n  void assertion() {\n    assertThrows(RuntimeException.class, () -> useCase.deleteById("2"));\n  }\n\n  void mockito() {\n    verify(useCase).deleteById("3");\n    when(useCase.toString()).thenReturn("mock");\n  }\n}\n`,
     };
 
     const directRoot = await createProject('pi-find-references-java-interface-method-direct', files);
@@ -622,9 +644,11 @@ describe('find_references', () => {
 
     const direct = await findReferences(directRoot, { path: 'src/main/java/app/RootDeleteReview.java', symbol: 'deleteById', language: 'java', kind: 'method', reference_kinds: ['call'] });
     const graph = await findReferences(graphRoot, { path: 'src/main/java/app/RootDeleteReview.java', symbol: 'deleteById', language: 'java', kind: 'method', reference_kinds: ['call'] });
+    const fieldRefs = await findReferences(graphRoot, { path: 'src/main/java/app/RootDeleteReviewUseCase.java', symbol: 'deletionGuards', language: 'java', kind: 'variable', reference_kinds: ['read'] });
 
-    expect(new Set(direct.map((item) => `${item.context_class}.${item.context_symbol}`))).toEqual(new Set(['RootReviewRestController.deleteReview', 'RootDeleteReviewUseCaseTest.direct', 'RootDeleteReviewUseCaseTest.assertion']));
-    expect(new Set(graph.map((item) => `${item.context_class}.${item.context_symbol}`))).toEqual(new Set(['RootReviewRestController.deleteReview', 'RootDeleteReviewUseCaseTest.direct', 'RootDeleteReviewUseCaseTest.assertion']));
+    expect(new Set(direct.map((item) => `${item.context_class}.${item.context_symbol}`))).toEqual(new Set(['RootReviewRestController.deleteReview', 'RootDeleteReviewUseCaseTest.direct', 'RootDeleteReviewUseCaseTest.assertion', 'RootDeleteReviewUseCaseTest.mockito']));
+    expect(new Set(graph.map((item) => `${item.context_class}.${item.context_symbol}`))).toEqual(new Set(['RootReviewRestController.deleteReview', 'RootDeleteReviewUseCaseTest.direct', 'RootDeleteReviewUseCaseTest.assertion', 'RootDeleteReviewUseCaseTest.mockito']));
+    expect(fieldRefs.map((item) => `${item.context_class}.${item.context_symbol}`)).toContain('RootDeleteReviewUseCase.deleteById');
   });
 
   it('keeps Java field reads truthful, includes record implementations, and falls back for diamond instantiation references', async () => {

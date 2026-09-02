@@ -128,7 +128,9 @@ function shouldRunDirectComparison(input: FindReferencesInput): boolean {
 }
 
 function shouldAlwaysCompareDirectResults(input: FindReferencesInput): boolean {
-  return input.language === 'java' && input.kind === 'interface';
+  if (input.kind === 'variable') return true;
+  if (input.language === 'java' && input.kind === 'interface') return true;
+  return (input.language === 'ts' || input.language === 'js') && (input.kind === 'function' || input.kind === 'method' || input.kind === 'class' || input.kind === 'interface');
 }
 
 function shouldCompareDirectResults(input: FindReferencesInput): boolean {
