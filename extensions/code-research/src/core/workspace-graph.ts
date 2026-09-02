@@ -30,6 +30,7 @@ import { compareCanonicalPathStrings } from './shared.js';
 import { createWorkspaceGraphState, loadWorkspaceGraphState, writeWorkspaceGraphState } from './workspace-state.js';
 import {
   buildTypeScriptProjectIndex,
+  extractCalls as extractTypeScriptDirectCalls,
   resolveCall as resolveTypeScriptDirectCall,
   resolveExportedCallable,
   type IndexedCallable as TsIndexedCallable,
@@ -723,27 +724,8 @@ function ensureFileNode(
   return fileNodeId;
 }
 
-function extractTypeScriptCalls(callableNode: any): Array<{ symbol: string; receiver?: string; text: string; line: number; column: number }> {
-  const body = getTypeScriptCallableBodyNode(callableNode);
-  if (!body) return [];
-  const calls: Array<{ symbol: string; receiver?: string; text: string; line: number; column: number }> = [];
-  function visit(node: any) {
-    if (!node?.isNamed) return;
-    if (node.type === 'call_expression') {
-      const functionNode = node.childForFieldName('function');
-      if (functionNode?.type === 'identifier') {
-        calls.push({ symbol: functionNode.text, text: node.text, line: node.startPosition.row + 1, column: node.startPosition.column });
-      }
-      if (functionNode?.type === 'member_expression') {
-        const propertyNode = functionNode.childForFieldName('property');
-        const objectNode = functionNode.childForFieldName('object');
-        if (propertyNode) calls.push({ symbol: propertyNode.text.replace(/^#/, ''), receiver: objectNode?.text, text: node.text, line: node.startPosition.row + 1, column: node.startPosition.column });
-      }
-    }
-    for (const child of node.children) visit(child);
-  }
-  visit(body);
-  return calls;
+function extractTypeScriptCalls(callableNode: any): ReturnType<typeof extractTypeScriptDirectCalls> {
+  return extractTypeScriptDirectCalls(callableNode, { includeNestedCallableBodies: true });
 }
 
 function extractTypeScriptJsxReads(callableNode: any): Array<{ symbol: string; text: string; line: number; column: number }> {

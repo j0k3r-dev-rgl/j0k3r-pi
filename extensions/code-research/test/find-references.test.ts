@@ -168,6 +168,36 @@ describe('find_references', () => {
     expect(methodRefs.map((item) => item.called_as).sort()).toEqual(['processor.stop()', 'reviewAnalysisProcessor.stop()']);
   });
 
+  it('finds TypeScript optional-chained method call references in direct and graph modes', async () => {
+    const files = {
+      'src/repository.ts': `export class Repository {\n  save(input: object): Promise<void> { void input; return Promise.resolve(); }\n}\n`,
+      'src/processor.ts': `import { Repository } from './repository';\nexport class Processor {\n  constructor(private repo?: Repository) {}\n  async persist(repo: Repository): Promise<void> {\n    await this.repo?.save({ source: 'field' });\n    await repo?.save({ source: 'param' });\n    await repo.save({ source: 'normal' });\n    await repo.save?.({ source: 'optional-call' });\n  }\n}\n`,
+    };
+    const directRoot = await createProject('pi-find-references-ts-optional-chain-direct', files);
+    const graphRoot = await createProject('pi-find-references-ts-optional-chain-graph', { '.pi/code-research.json': `{"graph":{"enable":true}}\n`, ...files });
+    await buildWorkspaceGraph(graphRoot);
+
+    for (const root of [directRoot, graphRoot]) {
+      const refs = await findReferences(root, {
+        path: 'src/repository.ts',
+        symbol: 'save',
+        language: 'ts',
+        kind: 'method',
+        reference_kinds: ['call'],
+        compare_direct_fallback: true,
+      });
+
+      expect(refs.map((item) => item.called_as).sort()).toEqual([
+        "repo.save({ source: 'normal' })",
+        "repo.save?.({ source: 'optional-call' })",
+        "repo?.save({ source: 'param' })",
+        "this.repo?.save({ source: 'field' })",
+      ]);
+      expect(refs.every((item) => item.reference_kind === 'call')).toBe(true);
+      expect(refs.every((item) => item.line >= 5 && item.line <= 8)).toBe(true);
+    }
+  });
+
   it('finds JavaScript call references for a function across multiple files', async () => {
     const rootDir = await createProject('pi-find-references-js', {
       'src/service.js': `export function helper() {}\n\nexport function runService() {\n  helper();\n}\n\nexport function warmupService() {\n  helper();\n}\n`,

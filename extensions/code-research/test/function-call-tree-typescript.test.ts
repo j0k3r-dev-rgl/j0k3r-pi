@@ -238,6 +238,38 @@ describe('function_call_tree TypeScript', () => {
     expect(flatten(graph.result.root)).toEqual(flatten(direct.result.root));
   });
 
+  it('includes optional-chained TypeScript calls in direct and graph-backed outgoing call trees', async () => {
+    const files = {
+      'src/repository.ts': `export class Repository {\n  save(input: object): Promise<void> { void input; return Promise.resolve(); }\n}\n`,
+      'src/processor.ts': `import { Repository } from './repository';\nexport class Processor {\n  constructor(private repo?: Repository) {}\n  async persist(repo: Repository): Promise<void> {\n    await this.repo?.save({ source: 'field' });\n    await repo?.save({ source: 'param' });\n    await repo.save({ source: 'normal' });\n    await repo.save?.({ source: 'optional-call' });\n  }\n}\n`,
+    };
+    const directRoot = await createProject(files);
+    const graphRoot = await createProject({ '.pi/code-research.json': `{"graph":{"enable":true}}\n`, ...files });
+    await buildWorkspaceGraph(graphRoot);
+
+    const direct = await executeFunctionCallTree(directRoot, { path: 'src/processor.ts', symbol: 'persist', language: 'ts', kind: 'method', max_depth: 2 });
+    const graph = await executeFunctionCallTree(graphRoot, { path: 'src/processor.ts', symbol: 'persist', language: 'ts', kind: 'method', max_depth: 2 });
+
+    expect(graph.status).toBe('ok');
+    expect(direct.status).toBe('ok');
+    if (graph.status !== 'ok' || direct.status !== 'ok') return;
+
+    const summarize = (node: any): string[] => (node.children ?? []).map((child: any) => `${child.receiver_name}:${child.receiver_type}:${child.symbol}`).sort();
+    expect((direct.result.root.children ?? []).map((child: any) => child.called_as).sort()).toEqual([
+      "repo.save({ source: 'normal' })",
+      "repo.save?.({ source: 'optional-call' })",
+      "repo?.save({ source: 'param' })",
+      "this.repo?.save({ source: 'field' })",
+    ]);
+    expect(summarize(direct.result.root)).toEqual([
+      'repo:Repository:save',
+      'repo:Repository:save',
+      'repo:Repository:save',
+      'this.repo:Repository:save',
+    ]);
+    expect(summarize(graph.result.root)).toEqual(summarize(direct.result.root));
+  });
+
   it('keeps graph-backed inline-import typed receiver call trees aligned with direct mode', async () => {
     const files = {
       'src/service.ts': `export class A {\n  run(): void {\n    this.helper();\n  }\n\n  helper(): void {}\n}\n`,

@@ -654,30 +654,63 @@ function extractCall(node: any): ExtractedCall | undefined {
   const functionNode = node.childForFieldName('function');
   if (!functionNode) return undefined;
 
-  if (functionNode.type === 'identifier') {
+  const target = extractCallTarget(functionNode);
+  if (!target) return undefined;
+
+  return {
+    ...target,
+    text: node.text,
+    line: node.startPosition.row + 1,
+    column: node.startPosition.column,
+  };
+}
+
+function extractCallTarget(node: any): Pick<ExtractedCall, 'symbol' | 'receiver' | 'receiverNodeType'> | undefined {
+  if (!node?.isNamed) return undefined;
+
+  if (node.type === 'identifier') {
+    return { symbol: normalizeIdentifier(node.text) };
+  }
+
+  if (node.type === 'member_expression') {
+    const objectNode = node.childForFieldName('object');
+    const propertyNode = node.childForFieldName('property') ?? findLastCallablePropertyNode(node);
+    if (!propertyNode) return undefined;
     return {
-      symbol: functionNode.text,
-      text: node.text,
-      line: node.startPosition.row + 1,
-      column: node.startPosition.column,
+      symbol: normalizeIdentifier(propertyNode.text),
+      receiver: objectNode?.text,
+      receiverNodeType: objectNode?.type,
     };
   }
 
-  if (functionNode.type === 'member_expression') {
-    const objectNode = functionNode.childForFieldName('object');
-    const propertyNode = functionNode.childForFieldName('property');
-    if (!objectNode || !propertyNode) return undefined;
-    return {
-      symbol: normalizeIdentifier(propertyNode.text),
-      receiver: objectNode.text,
-      receiverNodeType: objectNode.type,
-      text: node.text,
-      line: node.startPosition.row + 1,
-      column: node.startPosition.column,
-    };
+  if (isTransparentCallTargetWrapper(node)) {
+    for (const child of node.children) {
+      const target = extractCallTarget(child);
+      if (target) return target;
+    }
   }
 
   return undefined;
+}
+
+function isTransparentCallTargetWrapper(node: any): boolean {
+  return node.type === 'optional_chain'
+    || node.type === 'chain_expression'
+    || node.type === 'parenthesized_expression'
+    || node.type === 'non_null_expression';
+}
+
+function findLastCallablePropertyNode(node: any): any | undefined {
+  let propertyNode: any | undefined;
+  function visit(current: any): void {
+    if (!current?.isNamed) return;
+    if (current.type === 'property_identifier' || current.type === 'identifier' || current.type === 'private_property_identifier') {
+      propertyNode = current;
+    }
+    for (const child of current.children) visit(child);
+  }
+  visit(node);
+  return propertyNode;
 }
 
 export function resolveCall(index: TypeScriptProjectIndex, current: IndexedCallable, call: ExtractedCall): ResolvedTarget {
@@ -814,9 +847,14 @@ function resolveReceiverType(
     return extractClassNameFromNewExpression(receiver);
   }
 
+  const ownerPropertyType = findOwnerPropertyType(index, current, receiver);
+  if (ownerPropertyType) {
+    return resolveClassReference(index, current.file, ownerPropertyType) ?? ownerPropertyType;
+  }
+
   const parameterType = findParameterType(current.node, receiver);
   if (parameterType) {
-    return resolveClassReference(index, current.file, parameterType);
+    return resolveClassReference(index, current.file, parameterType) ?? parameterType;
   }
 
   const variableType = findLocalVariableType(index, current.file, current.node, receiver);
@@ -830,6 +868,16 @@ function resolveReceiverType(
   }
 
   return undefined;
+}
+
+function findOwnerPropertyType(index: TypeScriptProjectIndex, current: IndexedCallable, receiver: string): string | undefined {
+  if (!receiver.startsWith('this.') || !current.ownerName) return undefined;
+  const propertyName = receiver.slice('this.'.length);
+  if (!/^[A-Za-z_$][\w$]*$/.test(propertyName)) return undefined;
+  const ownerClass = index.classes.find((item) => item.file === current.file && item.className === current.ownerName);
+  if (!ownerClass) return undefined;
+  const match = ownerClass.node.text.match(new RegExp(`\\b${escapeRegExp(propertyName)}\\??\\s*:\\s*([A-Za-z_$][\\w$]*)\\b`));
+  return match?.[1];
 }
 
 function findParameterType(callableNode: any, name: string): string | undefined {
@@ -1139,7 +1187,11 @@ function extractClassNameFromNewExpression(expression: string): string | undefin
 }
 
 function normalizeIdentifier(value: string): string {
-  return value.replace(/^#/, '');
+  return value.replace(/^#/, '').replace(/^\?\./, '').replace(/\?\.$/, '');
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function classifyImportSource(source: string, projectConfig: TypeScriptProjectConfig): CallSource {
