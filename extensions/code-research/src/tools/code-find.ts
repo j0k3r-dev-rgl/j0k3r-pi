@@ -54,8 +54,9 @@ function formatSymbolItems(cwd: string, query: string, items: SymbolLocation[], 
     const file = relative(cwd, item.file) || item.file;
     const qualified = item.qualified_name && item.qualified_name !== item.symbol ? ` (${item.qualified_name})` : '';
     const declarationKind = item.declaration_kind ? ` declaration_kind=${item.declaration_kind}` : '';
+    const blockRange = formatSymbolBlockRange(item);
     const signature = item.signature ? ` · ${item.signature}` : '';
-    const header = `${file}:${item.start_line}:${item.start_column}: ${item.symbol}${qualified} [${item.kind}]${declarationKind}${signature}`;
+    const header = `${file}:${item.start_line}:${item.start_column}: ${item.symbol}${qualified} [${item.kind}]${declarationKind}${blockRange}${signature}`;
     return item.code ? `${header}\n\n\`\`\`\n${item.code}\n\`\`\`` : header;
   });
   const more = nextCursor ? `\n\nMore results available. Re-run code_find with cursor=${nextCursor}.` : '';
@@ -126,6 +127,12 @@ function formatReferenceItems(cwd: string, query: string, items: ReferenceLocati
   });
   const more = nextCursor ? `\n\nMore results available. Re-run code_find with cursor=${nextCursor}.` : '';
   return `Found ${items.length} of ${total} reference(s) for '${query}':${formatClassificationCounts(counts)}\n\n${rows.join('\n')}${more}`;
+}
+
+function formatSymbolBlockRange(item: SymbolLocation): string {
+  if (!item.code_start_line || !item.code_end_line) return ' block=unknown';
+  const type = item.code_block_type ?? (item.code_start_line === item.code_end_line ? 'inline' : 'block');
+  return ` declaration=${item.start_line}:${item.start_column}-${item.end_line}:${item.end_column} code=${item.code_start_line}:${item.code_start_column}-${item.code_end_line}:${item.code_end_column} ${type}`;
 }
 
 function flattenImplementationResults(results: SymbolLocation[]): SymbolLocation[] {

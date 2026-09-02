@@ -115,6 +115,7 @@ export function buildSymbolLocation(
     anonymous: record.anonymous,
     dynamic_name: record.dynamicName,
     modifiers: record.modifiers,
+    ...blockRangeFields(record.codeRange),
   };
 
   if (includeSignature && record.signature) {
@@ -126,6 +127,17 @@ export function buildSymbolLocation(
   }
 
   return location;
+}
+
+function blockRangeFields(range: CanonicalTypeScriptSymbolRecord['codeRange']): Pick<SymbolLocation, 'code_start_line' | 'code_start_column' | 'code_end_line' | 'code_end_column' | 'code_block_type'> {
+  if (!range) return { code_block_type: 'unknown' };
+  return {
+    code_start_line: range.startLine,
+    code_start_column: range.startColumn,
+    code_end_line: range.endLine,
+    code_end_column: range.endColumn,
+    code_block_type: range.startLine === range.endLine ? 'inline' : 'block',
+  };
 }
 
 function extractCodeRange(source: string, startLine: number, startColumn: number, endLine: number, endColumn: number): string {

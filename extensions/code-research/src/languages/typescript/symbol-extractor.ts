@@ -225,7 +225,7 @@ function emitBindingName(
   initializer?: ts.Expression
 ) {
   if (ts.isIdentifier(name)) {
-    pushNamedNode(name.parent, ctx, declarationKind, true, isImplementation, name.text, exportedName, false, undefined, modifiers, name);
+    pushNamedNode(name.parent, ctx, declarationKind, true, isImplementation, name.text, exportedName, false, undefined, modifiers, name, variableStatementForBinding(name));
     if (initializer && ts.isObjectLiteralExpression(unwrap(initializer))) {
       const nextOwner = [...ctx.ownerChain, name.text];
       const objectLiteral = unwrap(initializer);
@@ -299,12 +299,13 @@ function pushNamedNode(
   anonymous?: boolean,
   dynamicName?: boolean,
   modifiers?: readonly ts.ModifierLike[],
-  explicitNameNode?: ts.Node
+  explicitNameNode?: ts.Node,
+  codeNode?: ts.Node
 ) {
   const targetNode = explicitNameNode ?? node;
   return pushRecord(ctx, name, ctx.ownerChain, declarationKind, isDefinition, isImplementation, node, {
     declarationRange: rangeFor(node, targetNode),
-    codeRange: rangeFor(node),
+    codeRange: rangeFor(codeNode ?? node),
     signature: node.getText(ctx.sourceFile).split('{')[0].trim(),
     exportedName,
     anonymous,
@@ -482,6 +483,13 @@ function collectTopLevelObjectCallableBindings(sourceFile: ts.SourceFile): Map<s
     }
   }
   return bindings;
+}
+
+function variableStatementForBinding(name: ts.BindingName): ts.Node | undefined {
+  const variableDeclaration = name.parent;
+  const declarationList = variableDeclaration?.parent;
+  const statement = declarationList?.parent;
+  return statement && ts.isVariableStatement(statement) ? statement : undefined;
 }
 
 function getBindingPropertyName(name: ts.PropertyName): string {

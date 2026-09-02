@@ -147,6 +147,11 @@ export interface SymbolLocation {
   start_column: number;
   end_line: number;
   end_column: number;
+  code_start_line?: number;
+  code_start_column?: number;
+  code_end_line?: number;
+  code_end_column?: number;
+  code_block_type?: 'inline' | 'block' | 'unknown';
   is_definition: boolean;
   is_implementation: boolean;
   definition_location?: SymbolLocation;

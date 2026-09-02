@@ -104,12 +104,24 @@ export function buildSymbolLocation(
     anonymous: record.anonymous,
     dynamic_name: record.dynamicName,
     modifiers: record.modifiers,
+    ...blockRangeFields(record.codeRange),
   };
   if (includeSignature && record.signature) location.signature = record.signature;
   if (includeCode && source && record.codeRange && allowsGoCodePayload(record.declarationKind)) {
     location.code = extractCodeRange(source, record.codeRange.startLine, record.codeRange.startColumn, record.codeRange.endLine, record.codeRange.endColumn);
   }
   return location;
+}
+
+function blockRangeFields(range: CanonicalGoSymbolRecord['codeRange']): Pick<SymbolLocation, 'code_start_line' | 'code_start_column' | 'code_end_line' | 'code_end_column' | 'code_block_type'> {
+  if (!range) return { code_block_type: 'unknown' };
+  return {
+    code_start_line: range.startLine,
+    code_start_column: range.startColumn,
+    code_end_line: range.endLine,
+    code_end_column: range.endColumn,
+    code_block_type: range.startLine === range.endLine ? 'inline' : 'block',
+  };
 }
 
 function extractCodeRange(source: string, startLine: number, startColumn: number, endLine: number, endColumn: number): string {

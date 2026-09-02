@@ -146,9 +146,43 @@ describe('code-research extension entry integration', () => {
       include_signature: true,
     }, undefined, undefined, { cwd: rootDir });
 
+    expect(result.details.items[0]).toMatchObject({
+      code_start_line: 4,
+      code_start_column: 2,
+      code_end_line: 6,
+      code_block_type: 'block',
+    });
     expect(result.details.items[0].code).toContain('public void run()');
+    expect(result.content[0].text).toContain('declaration=4:14-4:20 code=4:2-6:3 block');
     expect(result.content[0].text).toContain('public void run()');
     expect(result.content[0].text).toContain('```');
+  });
+
+  it('marks one-line TypeScript symbols as inline and reports their full code range', async () => {
+    const tools = registerTools();
+    const codeFind = tools.find((tool) => tool.name === 'code_find');
+    expect(codeFind).toBeDefined();
+
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/service.ts': `export const inlineValue = () => true;\nexport function blockValue() {\n  return true;\n}\n`,
+    });
+    await buildWorkspaceGraph(rootDir);
+
+    const result = await codeFind!.execute('test-call-inline-range', {
+      path: 'src/service.ts',
+      query: 'inlineValue',
+      relation: 'declaration',
+      language: 'ts',
+      kind: 'function',
+    }, undefined, undefined, { cwd: rootDir });
+
+    expect(result.details.items[0]).toMatchObject({
+      code_start_line: 1,
+      code_end_line: 1,
+      code_block_type: 'inline',
+    });
+    expect(result.content[0].text).toContain('code=1:0-1:38 inline');
   });
 
   it('executes code_find references lookup with auto language and bounded cursor metadata', async () => {
