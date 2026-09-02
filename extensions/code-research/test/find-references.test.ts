@@ -139,6 +139,31 @@ describe('find_references', () => {
     expect(moduleRefs[0].called_as).toContain('buildModulesByDependencyModuleVariables(modules)');
   });
 
+  it('does not widen unfiltered TypeScript function references to adjacent callback or body lines', async () => {
+    const rootDir = await createProject('pi-find-references-ts-unfiltered-occurrence-lines', {
+      'src/actions.ts': `export function chooseDestination(role: string): string { return role; }\nexport function collectModules(modules: string[]): string[] { return modules; }\nexport function normalizeRecord(input: unknown): Record<string, unknown> { return typeof input === 'object' && input !== null ? input as Record<string, unknown> : {}; }\n`,
+      'src/consumer.ts': `import { chooseDestination, collectModules, normalizeRecord } from './actions';\n\nexport function loader(role: string): string {\n  const route = chooseDestination(role);\n  return redirect(route);\n}\n\nexport function configure(): void {\n  const modules = collectModules(['reviews']);\n  modules.forEach((moduleName) => {\n    console.log(moduleName);\n  });\n}\n\nexport function render(rawDecision: unknown): string {\n  const rawRecord = normalizeRecord(rawDecision);\n  return formatDecision(rawDecision);\n}\n\ndeclare function redirect(route: string): string;\ndeclare function formatDecision(input: unknown): string;\n`,
+    });
+
+    const routeRefs = await findReferences(rootDir, { path: 'src/actions.ts', symbol: 'chooseDestination', language: 'ts', kind: 'function' });
+    const moduleRefs = await findReferences(rootDir, { path: 'src/actions.ts', symbol: 'collectModules', language: 'ts', kind: 'function' });
+    const recordRefs = await findReferences(rootDir, { path: 'src/actions.ts', symbol: 'normalizeRecord', language: 'ts', kind: 'function' });
+    const routeCallRefs = await findReferences(rootDir, { path: 'src/actions.ts', symbol: 'chooseDestination', language: 'ts', kind: 'function', reference_kinds: ['call'] });
+
+    expect(routeRefs.map((item) => `${item.reference_kind}:${item.line}:${item.called_as}`).sort()).toEqual([
+      'call:4:chooseDestination(role)',
+    ]);
+    expect(moduleRefs.map((item) => `${item.reference_kind}:${item.line}:${item.called_as}`).sort()).toEqual([
+      "call:9:collectModules(['reviews'])",
+    ]);
+    expect(recordRefs.map((item) => `${item.reference_kind}:${item.line}:${item.called_as}`).sort()).toEqual([
+      'call:16:normalizeRecord(rawDecision)',
+    ]);
+    expect([...routeRefs, ...moduleRefs, ...recordRefs].every((item) => item.end_line === item.line)).toBe(true);
+    expect(routeCallRefs).toHaveLength(1);
+    expect(routeCallRefs[0].called_as).toBe('chooseDestination(role)');
+  });
+
   it('finds TypeScript call references inside nested function bodies', async () => {
     const rootDir = await createProject('pi-find-references-ts-nested', {
       'src/runtime-state.ts': `export function setCurrentMemorySessionId(id: string | undefined): void {\n  void id;\n}\n`,
@@ -1156,6 +1181,46 @@ describe('find_references', () => {
     expect(text).toContain('[variable]');
     expect(text).toContain('declaration_kind=type_alias');
     expect(result.details.items[0]).toMatchObject({ kind: 'variable', declaration_kind: 'type_alias' });
+  });
+
+  it('keeps code_find unfiltered TypeScript function references on queried occurrence rows', async () => {
+    const rootDir = await createProject('pi-code-find-ts-unfiltered-occurrence-lines', {
+      'src/actions.ts': `export function chooseDestination(role: string): string { return role; }\nexport function collectModules(modules: string[]): string[] { return modules; }\n`,
+      'src/consumer.ts': `import { chooseDestination, collectModules } from './actions';\n\nexport function loader(role: string): string {\n  const route = chooseDestination(role);\n  return redirect(route);\n}\n\nexport function configure(): void {\n  const modules = collectModules(['reviews']);\n  modules.forEach((moduleName) => {\n    console.log(moduleName);\n  });\n}\n\ndeclare function redirect(route: string): string;\n`,
+    });
+
+    const tool = registerToolForTest(registerCodeFindTool);
+    const routeResult = await tool.execute('tool-call', {
+      path: 'src/actions.ts',
+      query: 'chooseDestination',
+      relation: 'references',
+      language: 'ts',
+      kind: 'function',
+    }, undefined, undefined, { cwd: rootDir });
+    const routeCallResult = await tool.execute('tool-call', {
+      path: 'src/actions.ts',
+      query: 'chooseDestination',
+      relation: 'references',
+      language: 'ts',
+      kind: 'function',
+      reference_kinds: ['call'],
+    }, undefined, undefined, { cwd: rootDir });
+    const moduleResult = await tool.execute('tool-call', {
+      path: 'src/actions.ts',
+      query: 'collectModules',
+      relation: 'references',
+      language: 'ts',
+      kind: 'function',
+    }, undefined, undefined, { cwd: rootDir });
+
+    expect(routeResult.details.items).toHaveLength(1);
+    expect(routeResult.details.items[0]).toMatchObject({ line: 4, source_line: 'const route = chooseDestination(role);', called_as: 'chooseDestination(role)' });
+    expect(routeResult.content[0].text).not.toContain('redirect(route)');
+    expect(routeCallResult.details.items).toHaveLength(1);
+    expect(routeCallResult.details.items[0].called_as).toBe('chooseDestination(role)');
+    expect(moduleResult.details.items).toHaveLength(1);
+    expect(moduleResult.details.items[0]).toMatchObject({ line: 9, source_line: "const modules = collectModules(['reviews']);" });
+    expect(moduleResult.content[0].text).not.toContain('console.log(moduleName)');
   });
 
   it('exposes visible classification counts and row-level classification with reason in code_find references output', async () => {

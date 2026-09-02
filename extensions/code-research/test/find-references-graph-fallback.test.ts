@@ -152,6 +152,49 @@ describe('findReferences graph fallback', () => {
     });
   });
 
+  it('keeps graph-backed unfiltered TypeScript function references on occurrence lines after target source removal', async () => {
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/actions.ts': `export function chooseDestination(role: string): string { return role; }\nexport function collectModules(modules: string[]): string[] { return modules; }\n`,
+      'src/consumer.ts': `import { chooseDestination, collectModules } from './actions.js';\n\nexport function loader(role: string): string {\n  const route = chooseDestination(role);\n  return redirect(route);\n}\n\nexport function configure(): void {\n  const modules = collectModules(['reviews']);\n  modules.forEach((moduleName) => {\n    console.log(moduleName);\n  });\n}\n\ndeclare function redirect(route: string): string;\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+    await rm(join(rootDir, 'src/actions.ts'));
+
+    const routeRefs = await findReferences(rootDir, {
+      path: 'src/actions.ts',
+      symbol: 'chooseDestination',
+      language: 'ts',
+      kind: 'function',
+      compare_direct_fallback: true,
+    });
+    const moduleRefs = await findReferences(rootDir, {
+      path: 'src/actions.ts',
+      symbol: 'collectModules',
+      language: 'ts',
+      kind: 'function',
+      compare_direct_fallback: true,
+    });
+    const routeCallRefs = await findReferences(rootDir, {
+      path: 'src/actions.ts',
+      symbol: 'chooseDestination',
+      language: 'ts',
+      kind: 'function',
+      reference_kinds: ['call'],
+      compare_direct_fallback: true,
+    });
+
+    expect(routeRefs.map((item) => `${item.reference_kind}:${item.line}:${item.context_symbol}`).sort()).toEqual([
+      'call:4:loader',
+    ]);
+    expect(moduleRefs.map((item) => `${item.reference_kind}:${item.line}:${item.context_symbol}`).sort()).toEqual([
+      'call:9:configure',
+    ]);
+    expect(routeCallRefs).toHaveLength(1);
+    expect(routeCallRefs[0]).toMatchObject({ line: 4, reference_kind: 'call', context_symbol: 'loader' });
+  });
+
   it('uses graph-backed direct call references for directory-scoped targets', async () => {
     const rootDir = await createProject({
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,

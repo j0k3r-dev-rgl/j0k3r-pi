@@ -617,9 +617,16 @@ function collectCallableAliases(caller: IndexedCallable, targetSymbol: string): 
   const aliasPattern = new RegExp(`\\b(?:const|let|var)\\s+(\\w+)\\s*=\\s*${escapeRegExp(targetSymbol)}\\b`, 'g');
   let match: RegExpExecArray | null;
   while ((match = aliasPattern.exec(body.text)) !== null) {
-    if (match[1]) aliases.add(match[1]);
+    if (!match[1]) continue;
+    if (isCallableResultAliasInitializer(body.text, aliasPattern.lastIndex)) continue;
+    aliases.add(match[1]);
   }
   return aliases;
+}
+
+function isCallableResultAliasInitializer(source: string, targetEndOffset: number): boolean {
+  const tail = source.slice(targetEndOffset);
+  return /^\s*(?:\?\.)?\s*\(/.test(tail);
 }
 
 function extractCallbackArguments(callableNode: any): Array<{ symbol: string; receiver?: string; receiverNodeType?: string; text: string; line: number; column: number }> {

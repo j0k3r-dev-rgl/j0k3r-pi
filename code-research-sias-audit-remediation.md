@@ -5,13 +5,11 @@ Repo audited: `/home/j0k3r/sias/app`
 
 ## Status
 
-**NEEDS_FIX — 1 confirmed TypeScript issue remains.**
+**IMPLEMENTED — needs final SIAS smoke after extension reload.**
 
-Most earlier issues are resolved. TypeScript type-alias graph consumption/rendering has been remediated in-repo and now needs SIAS smoke after extension reload.
+Most earlier issues are resolved. TypeScript type-alias graph consumption/rendering has been remediated in-repo and needs SIAS smoke after extension reload.
 
-Remaining confirmed active failure:
-
-1. Unfiltered TypeScript `relation=references` still emits adjacent/callback lines that do not contain the queried symbol.
+The final confirmed active failure, unfiltered TypeScript `relation=references` adjacent/callback false positives, has now been remediated in-repo and also needs SIAS smoke after extension reload.
 
 ## Confirmed Fixed
 
@@ -189,9 +187,41 @@ Expected retest result after reload:
 - `code_find relation=references` should consume `reads`/`imports` edges whose target has `declarationKind=type_alias`.
 - User-facing output should show precise `declaration_kind=type_alias` metadata while preserving `[variable]` compatibility if applicable.
 
-## Remaining Issue 1 — TypeScript unfiltered adjacent-line false positives
+## Recently Remediated — TypeScript unfiltered adjacent-line false positives
 
-Status: **FAIL in tool result; graph call edges look cleaner than output.**
+Status: **IMPLEMENTED / NEEDS SIAS RETEST AFTER EXTENSION RELOAD**
+
+Implemented change:
+
+```text
+fix-ts-unfiltered-reference-spans
+status: PASS / archived
+archive: openspec/archive/2026-09-02/fix-ts-unfiltered-reference-spans/
+```
+
+What changed:
+
+- TypeScript callable result aliases initialized by immediate calls are no longer treated as callable-value aliases.
+- This prevents follow-on variables such as `route`, `modules`, or `rawRecord` from producing independent references to the original queried callable on adjacent/body lines.
+- Call-only behavior is preserved.
+- Graph-backed fallback tests verify clean occurrence rows after target source removal.
+- Tool-level tests verify user-visible `code_find` output excludes adjacent lines that do not contain the queried symbol.
+
+Validation performed in Code Research repo:
+
+```bash
+cd /home/j0k3r/.pi/agent/extensions/code-research
+npm test -- test/find-references.test.ts test/find-references-graph-fallback.test.ts
+npm run typecheck
+```
+
+Result: **PASS**.
+
+Next smoke instruction:
+
+> Reload/restart the extension or CLI, then retest the unfiltered TypeScript reference queries below from `/home/j0k3r/sias/app`.
+
+Previous smoke status: **FAIL in tool result; graph call edges looked cleaner than output.**
 
 `reference_kinds=["call"]` returns correct call-only results, but unfiltered `relation=references` still emits callback/body lines that do not contain the queried symbol.
 
@@ -252,11 +282,11 @@ Call-only mode returns 11 correct call references.
 
 Graph inspection: graph has 11 true `asRecord` call edges and does not need the line `199` false positive.
 
-Expected next fix:
+Expected retest result after reload:
 
 - Unfiltered `relation=references` should not add parent callback/body lines as independent references.
-- If callback/body context is useful, expose it as contextual metadata, not as a reference row.
-- Prefer actual occurrence ranges from graph edges when present.
+- If callback/body context is useful, it should not appear as a separate reference row.
+- Actual occurrence ranges from graph edges or direct call spans should be preferred when present.
 
 ## Secondary / Later Follow-ups
 
@@ -268,7 +298,7 @@ These are not blocking the main audit but should be tracked:
 
 ## Minimal Validation Checklist for Next Agent
 
-Run from `/home/j0k3r/sias/app` after reload/regeneration if needed.
+Run from `/home/j0k3r/sias/app` after extension reload/restart and graph regeneration if needed.
 
 ### Graph status
 
@@ -309,7 +339,7 @@ Expected:
 - Java graph-generation remediation fixed sampled Java class/type/DTO refs after builder model version `3` graph regeneration.
 - TS optional-chain remediation fixed sampled `save` optional-chain references after extension reload.
 - TS type-alias graph-consumption/rendering remediation passed in-repo and awaits SIAS smoke after extension reload.
-- Current remaining confirmed active issue:
-  1. TS unfiltered adjacent-line false positives.
+- TS unfiltered adjacent-line false-positive remediation passed in-repo and awaits SIAS smoke after extension reload.
+- Current state: no known unremediated P0/P1 implementation issue remains in this checklist; final SIAS smoke is required.
 
 No SIAS source files were modified during the audits or remediations.
