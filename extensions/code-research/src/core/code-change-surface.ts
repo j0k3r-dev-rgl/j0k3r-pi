@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve as resolvePath } from 'node:path';
 import { resolveFindReferences } from './find-references-resolver.js';
 import { resolveFindSymbol } from './find-symbol-resolver.js';
@@ -8,9 +9,13 @@ import type { CallTreeNode, FindReferencesInput, FindSymbolInput, GraphNode, Ref
 const SUPPORTED_LANGUAGES: Exclude<SupportedLanguage, 'auto'>[] = ['ts', 'js', 'java', 'go'];
 const SECTION_LIMIT = 5;
 const RELATED_TEST_QUERY_LIMIT = 10;
+const MAX_EXHAUSTIVE_SECTION_LIMIT = 100;
 
 type FollowUp = { tool: 'code_find' | 'code_call_hierarchy'; params: Record<string, unknown>; reason: string };
 type BoundedSection<T> = { items: T[]; returned: number; total: number; omitted: number; follow_up?: FollowUp };
+type SurfaceMode = 'representative' | 'exhaustive';
+type TestReportingMode = 'complete' | 'representative' | 'exhaustive' | 'exhaustive-truncated';
+type SectionReporting = { mode: TestReportingMode; evidence_total: number; files_total?: number; limit?: number; reason?: string };
 
 export interface CodeChangeSurfaceInput {
   path: string;
@@ -19,6 +24,10 @@ export interface CodeChangeSurfaceInput {
   kind?: Extract<SymbolKind, 'function' | 'class' | 'method' | 'interface' | 'variable'>;
   scope?: 'file' | 'directory';
   glob?: string;
+  test_mode?: SurfaceMode;
+  caller_mode?: SurfaceMode;
+  max_tests?: number;
+  max_callers?: number;
 }
 
 export interface CodeChangeSurfaceResult {
@@ -31,6 +40,8 @@ export interface CodeChangeSurfaceResult {
   implementations: BoundedSection<SymbolLocation>;
   callers: BoundedSection<CallTreeNode>;
   likely_tests: BoundedSection<ReferenceLocation>;
+  caller_reporting: SectionReporting;
+  test_reporting: SectionReporting;
   validation_suggestions: string[];
   risks: string[];
   trust: { level: 'high' | 'medium' | 'low'; reasons: string[] };
@@ -70,10 +81,15 @@ function uniqueBestBy<T>(items: T[], key: (item: T) => string, score: (item: T) 
   return [...selected.values()];
 }
 
-function bounded<T>(items: T[], follow_up?: FollowUp): BoundedSection<T> {
-  const selected = items.slice(0, SECTION_LIMIT);
+function bounded<T>(items: T[], follow_up?: FollowUp, limit = SECTION_LIMIT): BoundedSection<T> {
+  const selected = items.slice(0, limit);
   const omitted = Math.max(0, items.length - selected.length);
   return { items: selected, returned: selected.length, total: items.length, omitted, ...(omitted > 0 && follow_up ? { follow_up } : {}) };
+}
+
+function normalizedLimit(value: number | undefined, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(1, Math.min(MAX_EXHAUSTIVE_SECTION_LIMIT, Math.floor(value as number)));
 }
 
 function sectionSummary<T>(section: BoundedSection<T>): { returned: number; total: number; omitted: number } {
@@ -121,13 +137,17 @@ function referenceMetadataScore(item: ReferenceLocation): number {
   return [item.called_as, item.receiver_name, item.receiver_type, item.context_symbol, item.context_class, item.classification, item.reason, item.source_line].filter(Boolean).length;
 }
 
+function isFileLevelTestImport(item: ReferenceLocation): boolean {
+  return item.context_symbol === '<test-file-import>' || item.reason === 'test imports change-surface file';
+}
+
 function likelyTestScore(cwd: string, item: ReferenceLocation, query: string): number {
   const file = canonicalFile(cwd, item.file);
   let score = referenceMetadataScore(item);
   if (/(^|\/)unit(\/|$)/u.test(file)) score += 40;
   if (/(^|\/)integration(\/|$)/u.test(file)) score += 10;
   if (item.reference_kind === 'call' || item.reference_kind === 'callback' || item.reference_kind === 'method_reference') score += 40;
-  if (item.reference_kind === 'import') score += 5;
+  if (item.reference_kind === 'import') score += isFileLevelTestImport(item) ? 1 : 5;
   if ((item.called_as ?? item.source_line ?? '').includes(query)) score += 20;
   return score;
 }
@@ -276,6 +296,59 @@ async function implementationCallers(cwd: string, input: CodeChangeSurfaceInput,
   return { callers, diagnostics };
 }
 
+function findNearestTestName(lines: string[], lineIndex: number): string | undefined {
+  for (let index = lineIndex; index >= 0; index -= 1) {
+    const line = lines[index] ?? '';
+    const match = line.match(/\b(?:it|test)\s*\(\s*['"`]([^'"`]+)/u) ?? line.match(/@Test\b/u);
+    if (match?.[1]) return match[1];
+    if (match) {
+      for (let cursor = index + 1; cursor < Math.min(lines.length, index + 6); cursor += 1) {
+        const method = lines[cursor]?.match(/\b(?:void|public\s+void|private\s+void)\s+([A-Za-z_$][\w$]*)\s*\(/u);
+        if (method?.[1]) return method[1];
+      }
+    }
+  }
+  return undefined;
+}
+
+async function enrichFileLevelTestImports(cwd: string, imports: ReferenceLocation[], terms: string[]): Promise<ReferenceLocation[]> {
+  const uniqueTerms = [...new Set(terms.filter(Boolean))];
+  if (uniqueTerms.length === 0) return imports;
+  const enriched: ReferenceLocation[] = [];
+  for (const item of imports) {
+    if (!isFileLevelTestImport(item) && item.reference_kind !== 'import') {
+      enriched.push(item);
+      continue;
+    }
+    const source = await readFile(item.file, 'utf8').catch(() => undefined);
+    if (!source) {
+      enriched.push(item);
+      continue;
+    }
+    const lines = source.split('\n');
+    let best: ReferenceLocation | undefined;
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index] ?? '';
+      const term = uniqueTerms.find((candidate) => line.includes(candidate));
+      if (!term) continue;
+      const column = line.indexOf(term);
+      const candidate: ReferenceLocation = {
+        ...item,
+        line: index + 1,
+        column: Math.max(0, column),
+        reference_kind: line.includes(`${term}(`) || line.includes(`.${term}`) ? 'call' : 'read',
+        called_as: line.trim(),
+        source_line: line.trim(),
+        context_symbol: findNearestTestName(lines, index) ?? term,
+        reason: `test references ${term}`,
+      };
+      if (!best || likelyTestScore(cwd, candidate, term) > likelyTestScore(cwd, best, term)) best = candidate;
+    }
+    enriched.push(best ?? item);
+  }
+  return enriched;
+}
+
 async function graphTestImportsForFiles(cwd: string, input: CodeChangeSurfaceInput, files: string[]): Promise<ReferenceLocation[]> {
   const state = await readWorkspaceGraphState(cwd);
   const manifest = await readWorkspaceGraphManifest(cwd);
@@ -351,6 +424,13 @@ function followUpHierarchy(input: CodeChangeSurfaceInput, reason: string): Follo
 
 function formatContent(cwd: string, result: Omit<CodeChangeSurfaceResult, 'content'>): string {
   const count = (label: string, section: BoundedSection<unknown>) => `${label}: ${section.returned}/${section.total}${section.omitted > 0 ? ` (${section.omitted} omitted)` : ''}`;
+  const reporting = (item: SectionReporting): string => {
+    const label = item.mode === 'exhaustive' || item.mode === 'exhaustive-truncated' ? `${item.mode} over Code Research semantic evidence` : item.mode;
+    const parts = [label];
+    if (item.mode === 'representative' || item.files_total !== undefined) parts.push(`${item.evidence_total} evidence matches${item.files_total !== undefined ? ` across ${item.files_total} files` : ''}`);
+    if (item.limit !== undefined && (item.mode === 'exhaustive' || item.mode === 'exhaustive-truncated')) parts.push(`limit ${item.limit}`);
+    return parts.length > 1 ? `${parts[0]} (${parts.slice(1).join('; ')})` : parts[0];
+  };
   const lines = [
     `Change surface for '${result.query}' in ${result.path}`,
     `Status: ${result.status}; trust=${result.trust.level}; fallback=${result.fallback.required ? 'yes' : 'no'}`,
@@ -359,8 +439,10 @@ function formatContent(cwd: string, result: Omit<CodeChangeSurfaceResult, 'conte
     count('Implementations', result.implementations),
     ...result.implementations.items.map((item) => `- implementation ${rel(cwd, item.file)}:${item.start_line} ${item.qualified_name ?? item.symbol} [${item.kind}]`),
     count('Callers to inspect', result.callers),
+    `Caller reporting: ${reporting(result.caller_reporting)}`,
     ...result.callers.items.map((item) => `- caller ${rel(cwd, item.file)}:${item.call_line ?? item.line ?? '?'} ${item.class ? `${item.class}.` : ''}${item.symbol}${item.reason ? ` (${item.reason})` : ''}`),
     count('Likely tests', result.likely_tests),
+    `Test reporting: ${reporting(result.test_reporting)}`,
     ...result.likely_tests.items.map((item) => `- test ${rel(cwd, item.file)}:${item.line} ${item.context_symbol ?? item.called_as ?? item.symbol}`),
     'Validation suggestions:',
     ...result.validation_suggestions.map((item) => `- ${item}`),
@@ -394,13 +476,24 @@ export async function buildCodeChangeSurface(cwd: string, input: CodeChangeSurfa
   const implementationIncoming = await implementationCallers(cwd, input, implementationItems);
   const referenceCallers = references.results.filter((item) => !isTestLike(item.file) && (item.reference_kind === 'call' || item.reference_kind === 'callback')).map(referenceToCaller);
   const callers = uniqueBestBy([...hierarchy.callers.filter((item) => !isTestLike(item.file ?? '')), ...implementationIncoming.callers.filter((item) => !isTestLike(item.file ?? '')), ...referenceCallers], (item) => callerKey(cwd, item), callerMetadataScore);
+  const callerLimit = input.caller_mode === 'exhaustive' ? normalizedLimit(input.max_callers, 50) : SECTION_LIMIT;
   const surfaceFiles = [...contractItems, ...implementationItems, ...callers].map((item: any) => item.file).filter((file: unknown): file is string => typeof file === 'string');
-  const testReferences = uniqueBestBy([
+  const testTerms = [input.query, ...callers.map((item) => item.symbol), ...implementationItems.map((item) => item.symbol), ...implementationItems.map((item) => simpleName(ownerName(item)) ?? '')];
+  const rawTestReferences = await enrichFileLevelTestImports(cwd, [
     ...references.results.filter((item) => isTestLike(item.file)),
     ...await relatedTestReferences(cwd, input, callers, implementationItems),
     ...await graphTestImportsForFiles(cwd, input, surfaceFiles),
-  ], (item) => canonicalFile(cwd, item.file), (item) => likelyTestScore(cwd, item, input.query))
-    .sort((a, b) => likelyTestScore(cwd, b, input.query) - likelyTestScore(cwd, a, input.query) || canonicalFile(cwd, a.file).localeCompare(canonicalFile(cwd, b.file)));
+  ], testTerms);
+  const representativeTestReferences = uniqueBestBy(rawTestReferences, (item) => canonicalFile(cwd, item.file), (item) => likelyTestScore(cwd, item, input.query));
+  const exhaustiveTestReferences = uniqueBestBy(rawTestReferences, (item) => keyForLocation(item), (item) => likelyTestScore(cwd, item, input.query));
+  const testReferences = (input.test_mode === 'exhaustive' ? exhaustiveTestReferences : representativeTestReferences)
+    .sort((a, b) => likelyTestScore(cwd, b, input.query) - likelyTestScore(cwd, a, input.query) || canonicalFile(cwd, a.file).localeCompare(canonicalFile(cwd, b.file)) || (a.line ?? 0) - (b.line ?? 0));
+  const testLimit = input.test_mode === 'exhaustive' ? normalizedLimit(input.max_tests, 50) : SECTION_LIMIT;
+  const test_reporting: SectionReporting = input.test_mode === 'exhaustive'
+    ? { mode: testReferences.length > testLimit ? 'exhaustive-truncated' as const : 'exhaustive' as const, evidence_total: exhaustiveTestReferences.length, files_total: representativeTestReferences.length, limit: testLimit, ...(testReferences.length > testLimit ? { reason: `Exhaustive test evidence was truncated to max_tests=${testLimit}.` } : {}) }
+    : rawTestReferences.length > representativeTestReferences.length
+      ? { mode: 'representative' as const, evidence_total: rawTestReferences.length, files_total: representativeTestReferences.length, reason: 'Multiple test evidence matches were collapsed to one representative entry per file.' }
+      : { mode: 'complete' as const, evidence_total: rawTestReferences.length, files_total: representativeTestReferences.length };
 
   const fallbackActions: FollowUp[] = [];
   let status: CodeChangeSurfaceResult['status'] = 'ready';
@@ -420,8 +513,11 @@ export async function buildCodeChangeSurface(cwd: string, input: CodeChangeSurfa
 
   const contract = bounded(contractItems, followUpCodeFind(input, 'declaration', 'Continue contract/declaration inspection for omitted matches.'));
   const implementations = bounded(implementationItems, followUpCodeFind(input, 'implementation', 'Continue implementation inspection for omitted matches.'));
-  const callerSection = bounded(callers, followUpCodeFind(input, 'references', 'Continue caller/reference inspection for omitted matches.'));
-  const likely_tests = bounded(testReferences, followUpCodeFind(input, 'references', 'Continue test reference inspection for omitted matches.'));
+  const callerSection = bounded(callers, followUpCodeFind(input, 'references', 'Continue caller/reference inspection for omitted matches.'), callerLimit);
+  const likely_tests = bounded(testReferences, followUpCodeFind(input, 'references', 'Continue test reference inspection for omitted matches.'), testLimit);
+  const caller_reporting: SectionReporting = input.caller_mode === 'exhaustive'
+    ? { mode: callerSection.omitted > 0 ? 'exhaustive-truncated' : 'exhaustive', evidence_total: callers.length, limit: callerLimit, ...(callerSection.omitted > 0 ? { reason: `Exhaustive caller evidence was truncated to max_callers=${callerLimit}.` } : {}) }
+    : { mode: callerSection.omitted > 0 ? 'representative' : 'complete', evidence_total: callers.length, limit: callerLimit, ...(callerSection.omitted > 0 ? { reason: 'Caller evidence was capped to representative entries.' } : {}) };
 
   for (const section of [contract, implementations, callerSection, likely_tests]) {
     if (section.follow_up) fallbackActions.push(section.follow_up);
@@ -452,12 +548,14 @@ export async function buildCodeChangeSurface(cwd: string, input: CodeChangeSurfa
     implementations,
     callers: callerSection,
     likely_tests,
+    caller_reporting,
+    test_reporting,
     validation_suggestions,
     risks: [...risks],
     trust,
     fallback,
     summary,
-    diagnostics: { declarations: declarations.diagnostics, references: references.diagnostics, hierarchy: hierarchy.diagnostics, implementation_expansion: expandedImplementations.diagnostics, implementation_hierarchy: implementationIncoming.diagnostics },
+    diagnostics: { declarations: declarations.diagnostics, references: references.diagnostics, hierarchy: hierarchy.diagnostics, implementation_expansion: expandedImplementations.diagnostics, implementation_hierarchy: implementationIncoming.diagnostics, caller_reporting, test_reporting },
   };
   return { ...partial, content: formatContent(cwd, partial) };
 }

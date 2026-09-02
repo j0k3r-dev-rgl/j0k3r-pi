@@ -22,6 +22,10 @@ export function registerCodeChangeSurfaceTool(pi: any) {
       kind: Type.Optional(Type.Union([Type.Literal('function'), Type.Literal('class'), Type.Literal('method'), Type.Literal('interface'), Type.Literal('variable')], { description: 'Coarse symbol kind for disambiguation.' })),
       scope: Type.Optional(Type.Union([Type.Literal('file'), Type.Literal('directory')], { description: 'Override whether path is treated as a file or directory.' })),
       glob: Type.Optional(Type.String({ description: 'Optional glob to restrict files while scanning a directory.' })),
+      test_mode: Type.Optional(Type.Union([Type.Literal('representative'), Type.Literal('exhaustive')], { description: 'Test reporting mode. Default: representative.' })),
+      caller_mode: Type.Optional(Type.Union([Type.Literal('representative'), Type.Literal('exhaustive')], { description: 'Caller reporting mode. Default: representative.' })),
+      max_tests: Type.Optional(Type.Number({ description: 'Maximum likely test entries when test_mode is exhaustive. Default: 50, max: 100.' })),
+      max_callers: Type.Optional(Type.Number({ description: 'Maximum caller entries when caller_mode is exhaustive. Default: 50, max: 100.' })),
     }, { additionalProperties: false }),
     prepareArguments(args: any) {
       if (!args || typeof args !== 'object') return args;
@@ -39,6 +43,10 @@ export function registerCodeChangeSurfaceTool(pi: any) {
         kind: params.kind,
         scope: params.scope,
         glob: params.glob,
+        test_mode: params.test_mode,
+        caller_mode: params.caller_mode,
+        max_tests: params.max_tests,
+        max_callers: params.max_callers,
       });
       return {
         content: [{ type: 'text', text: surface.content }],
