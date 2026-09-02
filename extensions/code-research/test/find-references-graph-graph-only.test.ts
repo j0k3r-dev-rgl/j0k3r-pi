@@ -50,11 +50,13 @@ describe('findReferences graph-only', () => {
     });
   });
 
-  it('builds a graph and finds TSX component JSX usage when no graph exists', async () => {
+  it('finds TSX component JSX usage from a prebuilt graph', async () => {
     const rootDir = await createProject({
       'src/ImageUploader.tsx': `export const ImageUploader = ({ label }: { label: string }) => {\n  return <section><span>{label}</span></section>;\n};\n`,
       'src/documentacion.tsx': `import { ImageUploader } from './ImageUploader';\n\nexport function Documentation() {\n  return <ImageUploader name="file" label="Documento" />;\n}\n`,
     });
+
+    await buildWorkspaceGraph(rootDir);
 
     const results = await findReferences(rootDir, {
       path: 'src/ImageUploader.tsx',
@@ -75,6 +77,8 @@ describe('findReferences graph-only', () => {
       'src/documentacion.tsx': `import { ImageUploader } from '@/components';\n\nexport function Documentation() {\n  return <ImageUploader name="file" label="Documento" />;\n}\n`,
     });
 
+    await buildWorkspaceGraph(rootDir);
+
     const results = await findReferences(rootDir, {
       path: 'src/components/ImageUploader.tsx',
       symbol: 'ImageUploader',
@@ -90,6 +94,8 @@ describe('findReferences graph-only', () => {
       'src/ImageUploader.tsx': `const ImageUploader = ({ label }: { label: string }) => {\n  return <section><span>{label}</span></section>;\n};\n\nexport default ImageUploader;\n`,
       'src/documentacion.tsx': `import Uploader from './ImageUploader';\n\nexport function Documentation() {\n  return <Uploader name="file" label="Documento" />;\n}\n`,
     });
+
+    await buildWorkspaceGraph(rootDir);
 
     const results = await findReferences(rootDir, {
       path: 'src/ImageUploader.tsx',
@@ -150,6 +156,74 @@ describe('findReferences graph-only', () => {
       context_symbol: 'handle',
       reference_kind: 'call',
     });
+  });
+
+  it('includes imported function calls from top-level test callbacks', async () => {
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/form_normalization.ts': `export function shouldNormalizeInputType(input: string): boolean { return input === 'text'; }\n`,
+      'src/form_normalization.test.ts': `import { shouldNormalizeInputType } from './form_normalization';\n\nit('normalizes text inputs', () => {\n  expect(shouldNormalizeInputType('text')).toBe(true);\n});\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+    await rm(join(rootDir, 'src/form_normalization.test.ts'));
+
+    const results = await findReferences(rootDir, {
+      path: 'src/form_normalization.ts',
+      symbol: 'shouldNormalizeInputType',
+      language: 'ts',
+      kind: 'function',
+      reference_kinds: ['call'],
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      file: join(rootDir, 'src/form_normalization.test.ts'),
+      line: 4,
+      reference_kind: 'call',
+    });
+  });
+
+  it('resolves imported function references through typed dependency-object properties', async () => {
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/server.ts': `export function buildServer(options: object): object { return options; }\n`,
+      'src/main.ts': `import { buildServer as defaultBuildServer } from './server';\n\ntype BuildServer = typeof defaultBuildServer;\ntype MainDeps = { buildServer: BuildServer; };\nconst defaultDeps: MainDeps = { buildServer: defaultBuildServer };\n\nexport function startSiasAi(deps: MainDeps = defaultDeps): object {\n  return deps.buildServer({});\n}\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+
+    const results = await findReferences(rootDir, {
+      path: 'src/server.ts',
+      symbol: 'buildServer',
+      language: 'ts',
+      kind: 'function',
+      reference_kinds: ['call'],
+    });
+
+    expect(results.some((result) => result.file === join(rootDir, 'src/main.ts') && result.line === 8 && result.called_as === 'deps.buildServer({})')).toBe(true);
+  });
+
+  it('deduplicates references from overlapping implicit root and nested subproject shards', async () => {
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'packages/front/package.json': `{"type":"module"}\n`,
+      'packages/front/src/service.ts': `export function runService(): void {}\n`,
+      'packages/front/src/controller.ts': `import { runService } from './service';\n\nexport function handle(): void {\n  runService();\n}\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+
+    const results = await findReferences(rootDir, {
+      path: 'packages/front/src/service.ts',
+      symbol: 'runService',
+      language: 'ts',
+      kind: 'function',
+      reference_kinds: ['call'],
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ line: 4, context_symbol: 'handle', reference_kind: 'call' });
   });
 
   it('keeps graph-backed unfiltered TypeScript function references on occurrence lines after target source removal', async () => {

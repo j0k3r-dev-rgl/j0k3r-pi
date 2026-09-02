@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os';
 import { buildWorkspaceGraph, ensureWorkspaceGraphFreshness } from '../../src/core/workspace-graph.js';
 import { readSubprojectGraphShard, readWorkspaceGraphState, readWorkspaceGraphManifest, writeWorkspaceGraphState } from '../../src/core/graph-persistence.js';
 import { ensureWorkspaceGraphReadable } from '../../src/core/graph-ensure.js';
-import { workspaceGraphScheduler } from '../../src/core/graph-scheduler.js';
 import { findReferences } from '../../src/core/find-references-resolver.js';
 
 async function createProject(files: Record<string, string>) {
@@ -39,42 +38,26 @@ describe('workspace graph ensure freshness', () => {
     expect(gitignore).toContain('.pi/workspace-code-graph/');
   });
 
-  it('schedules background refresh on stale-but-readable graph without making the current state unreadable', async () => {
+  it('reads stale-but-readable graph without scheduling refresh from query paths', async () => {
     const rootDir = await createProject({
       'package.json': `{"name":"fixture","type":"module"}\n`,
       'src/original.ts': `export function original() { return 1; }\n`,
     });
 
     await buildWorkspaceGraph(rootDir);
-    await writeFile(
-      join(rootDir, 'src/probe.ts'),
-      `import { original } from './original.js';\nexport function probe() { return original(); }\n`,
-      'utf8'
-    );
-    const stateBeforeSchedule = await readWorkspaceGraphState(rootDir);
-    expect(stateBeforeSchedule.status).toBe('ok');
-    if (stateBeforeSchedule.status !== 'ok') return;
-    await writeWorkspaceGraphState(rootDir, { ...stateBeforeSchedule.data, status: 'stale' });
+    const stateBeforeRead = await readWorkspaceGraphState(rootDir);
+    expect(stateBeforeRead.status).toBe('ok');
+    if (stateBeforeRead.status !== 'ok') return;
+    await writeWorkspaceGraphState(rootDir, { ...stateBeforeRead.data, status: 'stale' });
 
-    const readable = await ensureWorkspaceGraphReadable(rootDir, { refreshStale: true });
+    const readable = await ensureWorkspaceGraphReadable(rootDir);
     expect(readable.state.status).toBe('ok');
     if (readable.state.status !== 'ok') return;
     expect(readable.state.data.status).toBe('stale');
     expect(readable.manifest.status).toBe('ok');
-
-    const duringRefresh = await readWorkspaceGraphState(rootDir);
-    expect(duringRefresh.status).toBe('ok');
-    if (duringRefresh.status !== 'ok') return;
-    expect(duringRefresh.data.status).toBe('stale');
-
-    await workspaceGraphScheduler.flush();
-    const after = await readWorkspaceGraphState(rootDir);
-    expect(after.status).toBe('ok');
-    if (after.status !== 'ok') return;
-    expect(after.data.subprojects.some((subproject) => Object.keys(subproject.snapshot).includes('src/probe.ts'))).toBe(true);
   });
 
-  it('uses a controlled blocking build when graph artifacts are unreadable', async () => {
+  it('does not build from query paths when graph artifacts are unreadable', async () => {
     const rootDir = await createProject({
       'package.json': `{"name":"fixture","type":"module"}\n`,
       'src/original.ts': `export function original() { return 1; }\n`,
@@ -82,10 +65,10 @@ describe('workspace graph ensure freshness', () => {
     await buildWorkspaceGraph(rootDir);
     await writeFile(join(rootDir, '.pi/workspace-code-graph/graph-manifest.json'), '{not-json', 'utf8');
 
-    const readable = await ensureWorkspaceGraphReadable(rootDir, { refreshStale: true });
+    const readable = await ensureWorkspaceGraphReadable(rootDir);
     expect(readable.state.status).toBe('ok');
-    expect(readable.manifest.status).toBe('ok');
-    expect((await readWorkspaceGraphManifest(rootDir)).status).toBe('ok');
+    expect(readable.manifest.status).toBe('corrupt');
+    expect((await readWorkspaceGraphManifest(rootDir)).status).toBe('corrupt');
   });
 
   it('rebuilds only changed subproject shards when a safe source-only diff appears', async () => {

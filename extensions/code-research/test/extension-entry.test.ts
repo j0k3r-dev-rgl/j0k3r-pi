@@ -75,6 +75,7 @@ describe('code-research extension entry integration', () => {
       'src/main/java/ports/Service.java': `package ports;\npublic interface Service {\n  String run();\n}\n`,
       'src/main/java/impl/LocalService.java': `package impl;\n\nimport ports.Service;\n\npublic class LocalService implements Service {\n  public String run() {\n    return "local";\n  }\n}\n`,
     });
+    await buildWorkspaceGraph(rootDir);
 
     const result = await codeFind!.execute('test-call', {
       path: 'src/main/java',
@@ -102,6 +103,7 @@ describe('code-research extension entry integration', () => {
       'src/main/java/ports/Service.java': `package ports;\npublic interface Service {\n  String run();\n}\n`,
       'src/main/java/impl/LocalService.java': `package impl;\n\nimport ports.Service;\n\npublic class LocalService implements Service {\n  public String run() { return "local"; }\n}\n`,
     });
+    await buildWorkspaceGraph(rootDir);
 
     const interfaceResult = await codeFind!.execute('test-call-implementation-interface', {
       path: 'src/main/java',
@@ -158,6 +160,7 @@ describe('code-research extension entry integration', () => {
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'src/service.ts': `export function helper(): void {}\n\nexport function runService(): void {\n  helper();\n}\n\nexport function warmupService(): void {\n  helper();\n}\n`,
     });
+    await buildWorkspaceGraph(rootDir);
 
     const result = await codeFind!.execute('test-call-references', {
       path: 'src/service.ts',
@@ -186,6 +189,7 @@ describe('code-research extension entry integration', () => {
       'src/main/java/app/AppService.java': `package app;\n\nimport ports.Service;\n\npublic class AppService implements Service {\n  public void run() {\n    helper();\n  }\n\n  private void helper() {}\n}\n`,
       'src/main/java/web/Controller.java': `package web;\n\nimport ports.Service;\n\npublic class Controller {\n  private final Service service;\n\n  public Controller(Service service) {\n    this.service = service;\n  }\n\n  public void handle() {\n    service.run();\n  }\n}\n`,
     });
+    await buildWorkspaceGraph(rootDir);
 
     const outgoing = await hierarchy!.execute('test-call-outgoing', {
       path: 'src/main/java/web/Controller.java',
@@ -222,6 +226,7 @@ describe('code-research extension entry integration', () => {
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'src/main/java/app/DeepService.java': `package app;\n\npublic class DeepService {\n  public void root() {\n    stepOne();\n  }\n\n  private void stepOne() {\n    stepTwo();\n  }\n\n  private void stepTwo() {\n    CODE_RESEARCH_RENDER_FULL_CONTENT_MARKER();\n  }\n\n  private void CODE_RESEARCH_RENDER_FULL_CONTENT_MARKER() {}\n}\n`,
     });
+    await buildWorkspaceGraph(rootDir);
 
     const result = await hierarchy!.execute('test-call-render', {
       path: 'src/main/java/app/DeepService.java',
@@ -256,6 +261,7 @@ describe('code-research extension entry integration', () => {
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'src/main/java/app/App.java': `package app;\npublic class App { public void run() {} }\n`,
     });
+    await buildWorkspaceGraph(rootDir);
 
     const result = await codeFind!.execute('test-call-graph-disabled-gate', {
       path: 'src/main/java/app/App.java',

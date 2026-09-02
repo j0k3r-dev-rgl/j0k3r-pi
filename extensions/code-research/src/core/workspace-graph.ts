@@ -43,6 +43,7 @@ import {
   resolveExportedCallable,
   type IndexedCallable as TsIndexedCallable,
   type IndexedClass as TsIndexedClass,
+  type ImportBinding as TsImportBinding,
   type TypeScriptProjectIndex,
 } from '../languages/typescript/function-call-tree.js';
 import { extractSignature as extractTypeScriptSignature, resolveTypeScriptImportCandidates } from '../languages/typescript/shared.js';
@@ -688,6 +689,7 @@ function buildTypeScriptGraph(
   const fileNodeIds = new Map<string, string>();
   const fileNodes = new Map<string, Extract<GraphNode, { kind: 'file' }>>();
   const callableSymbolIds = new Map<string, string>();
+  const typeScriptClassSymbolIds = new Map<string, string>();
   const typeScriptMemberSymbolIds = new Map<string, string>();
   const typeScriptTypeAliasSymbolIds = new Map<string, string>();
   const subprojectNodeId = createSubprojectNodeId(subprojectId);
@@ -719,6 +721,9 @@ function buildTypeScriptGraph(
       if (isCallableGraphDeclaration(record.declarationKind)) {
         const callableKey = typeScriptCallableSymbolKey(file.file, record.owner, record.name);
         if (!callableSymbolIds.has(callableKey) || record.isImplementation) callableSymbolIds.set(callableKey, symbolId);
+      }
+      if ((record.declarationKind === 'class' || record.declarationKind === 'interface') && !record.owner) {
+        typeScriptClassSymbolIds.set(typeScriptExportedSymbolKey(file.file, record.name), symbolId);
       }
       if (record.declarationKind === 'type_alias' && !record.owner) {
         typeScriptTypeAliasSymbolIds.set(typeScriptExportedSymbolKey(file.file, record.name), symbolId);
@@ -765,6 +770,14 @@ function buildTypeScriptGraph(
   }
 
   for (const edge of collectTypeScriptTypeAliasReferenceEdges(projectRoot, index, typeScriptTypeAliasSymbolIds, fileNodeIds)) {
+    edges.push(edge);
+  }
+
+  for (const edge of collectTypeScriptSymbolReferenceEdges(projectRoot, index, callableSymbolIds, typeScriptClassSymbolIds, typeScriptTypeAliasSymbolIds, fileNodeIds)) {
+    edges.push(edge);
+  }
+
+  for (const edge of collectTypeScriptPropertyAliasCallEdges(projectRoot, index, callableSymbolIds, fileNodeIds)) {
     edges.push(edge);
   }
 
@@ -853,6 +866,205 @@ function inferTypeScriptReceiverTypeForGraph(
   return receiverType;
 }
 
+function collectTypeScriptSymbolReferenceEdges(
+  projectRoot: string,
+  index: TypeScriptProjectIndex,
+  callableSymbolIds: Map<string, string>,
+  classSymbolIds: Map<string, string>,
+  typeAliasSymbolIds: Map<string, string>,
+  fileNodeIds: Map<string, string>
+): GraphEdge[] {
+  const edges: GraphEdge[] = [];
+
+  for (const file of index.files.values()) {
+    const relFile = toProjectRelativePath(projectRoot, file.file);
+    const fileNodeId = fileNodeIds.get(relFile);
+    if (!fileNodeId) continue;
+
+    const localTargets = new Map<string, { id: string; kind: 'function' | 'class' | 'interface' | 'type_alias'; targetName: string; importSource?: string }>();
+    for (const callable of index.callables.filter((item) => item.file === file.file && item.exportedName && !item.ownerName)) {
+      const id = callableSymbolIds.get(typeScriptCallableSymbolKey(callable.file, callable.ownerName, callable.symbol));
+      if (id) localTargets.set(callable.symbol, { id, kind: 'function', targetName: callable.symbol });
+    }
+    for (const klass of index.classes.filter((item) => item.file === file.file && item.exportedName)) {
+      const id = classSymbolIds.get(typeScriptExportedSymbolKey(klass.file, klass.className));
+      if (!id) continue;
+      localTargets.set(klass.className, { id, kind: isTypeScriptInterfaceNode(klass.node) ? 'interface' : 'class', targetName: klass.className });
+    }
+
+    for (const binding of file.imports.values()) {
+      const resolved = resolveTypeScriptImportedGraphSymbol(index, binding, file.file, callableSymbolIds, classSymbolIds, typeAliasSymbolIds);
+      if (!resolved) continue;
+      localTargets.set(binding.localName, { ...resolved, importSource: binding.source });
+      const importRange = findTypeScriptImportBindingRange(file.source, binding.localName);
+      if (importRange && resolved.kind !== 'function') {
+        edges.push({
+          id: createEdgeId('imports', fileNodeId, resolved.id, `typescript_symbol:${binding.localName}:${importRange.startLine}:${importRange.startColumn}`),
+          kind: 'imports',
+          from: fileNodeId,
+          to: resolved.id,
+          occurrenceRange: importRange,
+          importSource: binding.source,
+          calledAs: binding.localName,
+          targetStatus: 'resolved',
+          resolution: 'exact',
+          reason: 'typescript_symbol_import',
+        });
+      }
+    }
+
+    for (const [localName, target] of localTargets) {
+      if (target.kind === 'function') {
+        for (const match of findAllTypeScriptRegexPositions(file.source, new RegExp(`\\b${escapeRegExp(localName)}\\s*\\(`, 'g'))) {
+          if (isTypeScriptImportLine(file.source, match.line) || isTypeScriptFunctionDeclarationLine(file.source, localName, match.line)) continue;
+          const contextId = findTypeScriptContextCallableSymbolId(projectRoot, index, callableSymbolIds, file.file, match.line);
+          if (contextId) continue;
+          edges.push({
+            id: createEdgeId('calls', fileNodeId, target.id, `typescript_top_level:${localName}:${match.line}:${match.column}`),
+            kind: 'calls',
+            from: fileNodeId,
+            to: target.id,
+            occurrenceRange: pointOccurrenceRange(match.line, match.column),
+            callsite: { line: match.line, column: match.column },
+            calledAs: extractTypeScriptLineCallText(file.source, match.line, match.column),
+            targetStatus: 'resolved',
+            resolution: 'exact',
+            reason: 'typescript_imported_function_call',
+          });
+        }
+      }
+
+      if (target.kind === 'class') {
+        for (const match of findAllTypeScriptRegexPositions(file.source, new RegExp(`\\bnew\\s+${escapeRegExp(localName)}\\s*\\(`, 'g'))) {
+          if (isTypeScriptImportLine(file.source, match.line)) continue;
+          const fromId = findTypeScriptContextCallableSymbolId(projectRoot, index, callableSymbolIds, file.file, match.line) ?? fileNodeId;
+          edges.push({
+            id: createEdgeId('reads', fromId, target.id, `typescript_instantiate:${localName}:${match.line}:${match.column}`),
+            kind: 'reads',
+            from: fromId,
+            to: target.id,
+            occurrenceRange: { startLine: match.line, startColumn: match.column, endLine: match.line, endColumn: match.column + match.text.length },
+            callsite: { line: match.line, column: match.column },
+            calledAs: match.text,
+            targetStatus: 'resolved',
+            resolution: 'exact',
+            reason: 'typescript_instantiate',
+          });
+        }
+      }
+
+      if (target.kind === 'interface') {
+        for (const match of findAllTypeScriptRegexPositions(file.source, new RegExp(`\\bimplements\\b[^\\n{]*\\b${escapeRegExp(localName)}(?:\\b|\\s*<)`, 'g'))) {
+          const fromId = findTypeScriptClassSymbolIdForLine(projectRoot, index, classSymbolIds, file.file, match.line) ?? fileNodeId;
+          edges.push({
+            id: createEdgeId('implements', fromId, target.id, `typescript_implements:${localName}:${match.line}:${match.column}`),
+            kind: 'implements',
+            from: fromId,
+            to: target.id,
+            occurrenceRange: { startLine: match.line, startColumn: match.column, endLine: match.line, endColumn: match.column + match.text.length },
+            calledAs: match.text.trim().replace(/\s+</g, '<'),
+            targetStatus: 'resolved',
+            resolution: 'exact',
+            reason: 'typescript_implements',
+          });
+        }
+      }
+    }
+  }
+
+  return dedupeGraphEdges(edges);
+}
+
+function collectTypeScriptPropertyAliasCallEdges(
+  projectRoot: string,
+  index: TypeScriptProjectIndex,
+  callableSymbolIds: Map<string, string>,
+  fileNodeIds: Map<string, string>
+): GraphEdge[] {
+  const importedFunctionTargets = new Map<string, Map<string, string>>();
+  for (const file of index.files.values()) {
+    const targets = new Map<string, string>();
+    for (const binding of file.imports.values()) {
+      if (binding.kind === 'namespace') continue;
+      const callable = resolveImportedCallableForGraph(index, file.file, binding);
+      if (!callable) continue;
+      const targetId = callableSymbolIds.get(typeScriptCallableSymbolKey(callable.file, callable.ownerName, callable.symbol));
+      if (targetId) targets.set(binding.localName, targetId);
+    }
+    importedFunctionTargets.set(file.file, targets);
+  }
+
+  const propertyAliases = new Map<string, string>();
+  for (const file of index.files.values()) {
+    const targets = importedFunctionTargets.get(file.file) ?? new Map<string, string>();
+    const objectPattern = /\b(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*:\s*([A-Za-z_$][\w$]*)\b\s*=\s*\{([\s\S]*?)\n\s*\}/g;
+    let objectMatch: RegExpExecArray | null;
+    while ((objectMatch = objectPattern.exec(file.source)) !== null) {
+      const typeName = objectMatch[1];
+      const body = objectMatch[2] ?? '';
+      if (!typeName) continue;
+      const propertyPattern = /\b([A-Za-z_$][\w$]*)\s*:\s*([A-Za-z_$][\w$]*)\b/g;
+      let propertyMatch: RegExpExecArray | null;
+      while ((propertyMatch = propertyPattern.exec(body)) !== null) {
+        const propertyName = propertyMatch[1];
+        const valueName = propertyMatch[2];
+        if (!propertyName || !valueName) continue;
+        const targetId = targets.get(valueName);
+        if (targetId) propertyAliases.set(`${typeName}\u0000${propertyName}`, targetId);
+      }
+    }
+  }
+  if (propertyAliases.size === 0) return [];
+
+  const edges: GraphEdge[] = [];
+  for (const file of index.files.values()) {
+    const relFile = toProjectRelativePath(projectRoot, file.file);
+    const fileNodeId = fileNodeIds.get(relFile);
+    if (!fileNodeId) continue;
+    const typedReceivers = collectTypeScriptReceiverTypesFromSource(file.source);
+    for (const [receiver, typeName] of typedReceivers) {
+      const receiverPattern = receiver.includes('.') ? escapeRegExp(receiver) : `(?<![.\\w$])${escapeRegExp(receiver)}`;
+      for (const [key, targetId] of propertyAliases) {
+        const [aliasType, propertyName] = key.split('\u0000');
+        if (aliasType !== typeName || !propertyName) continue;
+        for (const match of findAllTypeScriptRegexPositions(file.source, new RegExp(`${receiverPattern}\\s*\\.\\s*${escapeRegExp(propertyName)}\\s*\\(`, 'g'))) {
+          const fromId = findTypeScriptContextCallableSymbolId(projectRoot, index, callableSymbolIds, file.file, match.line) ?? fileNodeId;
+          edges.push({
+            id: createEdgeId('calls', fromId, targetId, `typescript_property_alias:${receiver}:${propertyName}:${match.line}:${match.column}`),
+            kind: 'calls',
+            from: fromId,
+            to: targetId,
+            occurrenceRange: pointOccurrenceRange(match.line, match.column),
+            callsite: { line: match.line, column: match.column, receiverName: receiver, receiverType: typeName },
+            calledAs: extractTypeScriptLineCallText(file.source, match.line, match.column),
+            targetStatus: 'resolved',
+            resolution: 'heuristic',
+            reason: 'typescript_property_alias_call',
+          });
+        }
+      }
+    }
+  }
+  return dedupeGraphEdges(edges);
+}
+
+function resolveImportedCallableForGraph(index: TypeScriptProjectIndex, currentFile: string, binding: TsImportBinding): TsIndexedCallable | undefined {
+  if (binding.kind === 'namespace') return undefined;
+  const targetFile = resolveTypeScriptImportCandidates(currentFile, binding.source, index.projectConfig).find((candidate) => index.files.has(candidate));
+  if (!targetFile) return undefined;
+  return resolveExportedCallable(index, targetFile, binding.importedName);
+}
+
+function collectTypeScriptReceiverTypesFromSource(source: string): Map<string, string> {
+  const result = new Map<string, string>();
+  for (const match of source.matchAll(/\b([A-Za-z_$][\w$]*)\??\s*:\s*([A-Za-z_$][\w$]*)\b/g)) {
+    if (!match[1] || !match[2]) continue;
+    result.set(match[1], match[2]);
+    result.set(`this.${match[1]}`, match[2]);
+  }
+  return result;
+}
+
 function collectTypeScriptTypeAliasReferenceEdges(
   projectRoot: string,
   index: TypeScriptProjectIndex,
@@ -931,6 +1143,115 @@ function collectTypeScriptTypeAliasReferenceEdges(
   }
 
   return edges;
+}
+
+function resolveTypeScriptImportedGraphSymbol(
+  index: TypeScriptProjectIndex,
+  binding: TsImportBinding,
+  currentFile: string,
+  callableSymbolIds: Map<string, string>,
+  classSymbolIds: Map<string, string>,
+  typeAliasSymbolIds: Map<string, string>
+): { id: string; kind: 'function' | 'class' | 'interface' | 'type_alias'; targetName: string } | undefined {
+  if (binding.kind === 'namespace') return undefined;
+  const targetFile = resolveTypeScriptImportCandidates(currentFile, binding.source, index.projectConfig).find((candidate) => index.files.has(candidate));
+  if (!targetFile) return undefined;
+
+  const callable = resolveExportedCallable(index, targetFile, binding.importedName);
+  if (callable) {
+    const id = callableSymbolIds.get(typeScriptCallableSymbolKey(callable.file, callable.ownerName, callable.symbol));
+    if (id) return { id, kind: 'function', targetName: callable.symbol };
+  }
+
+  const klass = index.classes.find((item) => item.file === targetFile && item.exportedName === binding.importedName);
+  if (klass) {
+    const id = classSymbolIds.get(typeScriptExportedSymbolKey(klass.file, klass.className));
+    if (id) return { id, kind: isTypeScriptInterfaceNode(klass.node) ? 'interface' : 'class', targetName: klass.className };
+  }
+
+  const typeAliasId = typeAliasSymbolIds.get(typeScriptExportedSymbolKey(targetFile, binding.importedName));
+  if (typeAliasId) return { id: typeAliasId, kind: 'type_alias', targetName: binding.importedName };
+  return undefined;
+}
+
+function isTypeScriptInterfaceNode(node: any): boolean {
+  return node?.type === 'interface_declaration';
+}
+
+function findTypeScriptContextCallableSymbolId(
+  projectRoot: string,
+  index: TypeScriptProjectIndex,
+  callableSymbolIds: Map<string, string>,
+  file: string,
+  line: number
+): string | undefined {
+  let best: TsIndexedCallable | undefined;
+  for (const callable of index.callables) {
+    if (callable.file !== file) continue;
+    const start = callable.line;
+    const end = callable.node?.endPosition?.row !== undefined ? callable.node.endPosition.row + 1 : start;
+    if (line < start || line > end) continue;
+    if (!best || start >= best.line) best = callable;
+  }
+  if (!best) return undefined;
+  return callableSymbolIds.get(typeScriptCallableSymbolKey(best.file, best.ownerName, best.symbol));
+}
+
+function findTypeScriptClassSymbolIdForLine(
+  projectRoot: string,
+  index: TypeScriptProjectIndex,
+  classSymbolIds: Map<string, string>,
+  file: string,
+  line: number
+): string | undefined {
+  let best: TsIndexedClass | undefined;
+  for (const klass of index.classes) {
+    if (klass.file !== file || isTypeScriptInterfaceNode(klass.node)) continue;
+    const start = klass.line;
+    const end = klass.node?.endPosition?.row !== undefined ? klass.node.endPosition.row + 1 : start;
+    if (line < start || line > end) continue;
+    if (!best || start >= best.line) best = klass;
+  }
+  if (!best) return undefined;
+  return classSymbolIds.get(typeScriptExportedSymbolKey(best.file, best.className));
+}
+
+function findTypeScriptImportBindingRange(source: string, token: string): SourceRange | undefined {
+  return findTypeScriptTokenRange(source, token, true);
+}
+
+function isTypeScriptImportLine(source: string, line: number): boolean {
+  return /^\s*import\b/.test(source.split('\n')[line - 1] ?? '');
+}
+
+function isTypeScriptFunctionDeclarationLine(source: string, name: string, line: number): boolean {
+  return new RegExp(`\\bfunction\\s+${escapeRegExp(name)}\\s*\\(`).test(source.split('\n')[line - 1] ?? '');
+}
+
+function findAllTypeScriptRegexPositions(source: string, pattern: RegExp): Array<{ line: number; column: number; text: string }> {
+  const results: Array<{ line: number; column: number; text: string }> = [];
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(source)) !== null) {
+    const position = offsetToLineColumn(source, match.index);
+    results.push({ ...position, text: match[0] });
+  }
+  return results;
+}
+
+function offsetToLineColumn(source: string, offset: number): { line: number; column: number } {
+  const lines = source.slice(0, offset).split('\n');
+  return { line: lines.length, column: lines[lines.length - 1]?.length ?? 0 };
+}
+
+function extractTypeScriptLineCallText(source: string, line: number, column: number): string {
+  const lineText = source.split('\n')[line - 1] ?? '';
+  const tail = lineText.slice(column);
+  const match = tail.match(/^[^;\n]+/);
+  return (match?.[0] ?? tail).trim();
+}
+
+function dedupeGraphEdges(items: GraphEdge[]): GraphEdge[] {
+  return [...new Map(items.map((item) => [item.id, item])).values()];
 }
 
 function findTypeScriptTokenRange(source: string, token: string, preferImportLine = false): SourceRange | undefined {

@@ -1,8 +1,6 @@
 import { Type } from 'typebox';
-import { loadCodeResearchConfig } from '../config.js';
 import { executeFunctionCallTree } from '../core/function-call-tree-resolver.js';
 import { executeReverseFunctionCallTree } from '../core/reverse-function-call-tree-resolver.js';
-import { scheduleWorkspaceGraphRefresh } from '../core/graph-scheduler.js';
 import { renderCodeResearchToolResult } from '../render.js';
 import type { CallTreeNode, ClassificationCounts, ConfidenceClassification, FunctionCallTreeInput, SupportedLanguage } from '../types.js';
 
@@ -122,8 +120,6 @@ export function registerCodeCallHierarchyTool(pi: any) {
       };
 
       const execution = await executeHierarchy(ctx.cwd, direction, input);
-      const config = await loadCodeResearchConfig(ctx.cwd);
-      if (config.graph.enable) scheduleWorkspaceGraphRefresh(ctx.cwd);
 
       if (execution.status === 'not_found') {
         return { content: [{ type: 'text', text: execution.message }], details: { query: input.symbol, path: input.path, language: input.language, kind: input.kind, direction, ...execution.details } };

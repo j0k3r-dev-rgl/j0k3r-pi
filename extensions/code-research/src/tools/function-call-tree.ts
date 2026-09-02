@@ -1,7 +1,5 @@
 import { Type } from 'typebox';
-import { loadCodeResearchConfig } from '../config.js';
 import { executeFunctionCallTree } from '../core/function-call-tree-resolver.js';
-import { scheduleWorkspaceGraphRefresh } from '../core/graph-scheduler.js';
 import { renderCodeResearchToolResult } from '../render.js';
 import type { FunctionCallTreeInput } from '../types.js';
 
@@ -44,8 +42,6 @@ export function registerFunctionCallTreeTool(pi: any) {
       };
 
       const execution = await executeFunctionCallTree(ctx.cwd, input);
-      const config = await loadCodeResearchConfig(ctx.cwd);
-      if (config.graph.enable) scheduleWorkspaceGraphRefresh(ctx.cwd);
 
       if (execution.status === 'not_found') {
         return { content: [{ type: 'text', text: execution.message }], details: execution.details };

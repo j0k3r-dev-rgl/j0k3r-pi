@@ -15,8 +15,14 @@ export async function queryReferencesFromGraph(options: {
   if (state.status === 'partial' || state.status === 'missing' || state.status === 'incompatible' || state.status === 'errored' || state.status === 'refreshing') return undefined;
   if (state.status === 'stale' && !policy.allowStale) return undefined;
 
+  const targetPath = resolve(cwd, input.path);
+  const targetStat = await stat(targetPath).catch(() => undefined);
+  const targetIsDirectory = input.scope === 'directory' || targetStat?.isDirectory() === true;
+  const relativeTarget = (targetPath.startsWith(cwd) ? targetPath.slice(cwd.length + 1).replace(/\\/g, '/') : input.path.replace(/\\/g, '/')).replace(/\/$/, '');
+
+  const scopedSubprojects = selectScopedSubprojects(manifest, relativeTarget);
   const shards = await Promise.all(
-    manifest.subprojects.map(async (subproject) => {
+    scopedSubprojects.map(async (subproject) => {
       const shard = await readSubprojectGraphShard(cwd, subproject.id, { generation: subproject.generation });
       return shard.status === 'ok' ? shard.data : undefined;
     })
@@ -25,10 +31,6 @@ export async function queryReferencesFromGraph(options: {
   const allShards = shards.filter(Boolean);
   if (allShards.length === 0) return undefined;
 
-  const targetPath = resolve(cwd, input.path);
-  const targetStat = await stat(targetPath).catch(() => undefined);
-  const targetIsDirectory = input.scope === 'directory' || targetStat?.isDirectory() === true;
-  const relativeTarget = (targetPath.startsWith(cwd) ? targetPath.slice(cwd.length + 1).replace(/\\/g, '/') : input.path.replace(/\\/g, '/')).replace(/\/$/, '');
   const allNodes = allShards.flatMap((shard) => shard!.nodes);
   const allEdges = allShards.flatMap((shard) => shard!.edges);
   const symbolNodes = allNodes.filter((node): node is Extract<(typeof allNodes)[number], { kind: 'symbol' }> => node.kind === 'symbol' && matchesLanguage(node.language, input.language));
@@ -106,7 +108,47 @@ export async function queryReferencesFromGraph(options: {
     });
   }
 
-  return references;
+  return dedupeReferences(references);
+}
+
+function dedupeReferences(references: ReferenceLocation[]): ReferenceLocation[] {
+  const selected = new Map<string, ReferenceLocation>();
+  for (const item of references) {
+    const key = [item.file, item.line, item.column, item.symbol, item.kind, item.context_symbol ?? '', item.context_class ?? '', item.reference_kind].join('\u0000');
+    const existing = selected.get(key);
+    if (!existing || referenceScore(item) > referenceScore(existing)) selected.set(key, item);
+  }
+  return [...selected.values()].sort((a, b) =>
+    a.file.localeCompare(b.file) ||
+    a.line - b.line ||
+    a.column - b.column ||
+    a.reference_kind.localeCompare(b.reference_kind) ||
+    (a.context_symbol ?? '').localeCompare(b.context_symbol ?? '')
+  );
+}
+
+function referenceScore(item: ReferenceLocation): number {
+  return [item.called_as, item.source_line, item.receiver_name, item.receiver_type, item.context_symbol, item.context_class, item.reason, item.end_line, item.end_column].filter((value) => value !== undefined && value !== '').length;
+}
+
+function selectScopedSubprojects(manifest: GraphManifest, relativeTarget: string): GraphManifest['subprojects'] {
+  const target = relativeTarget.replace(/\\/g, '/').replace(/^\.\/$/, '.').replace(/\/$/, '') || '.';
+  if (target === '.') return nonOverlappingSubprojects(manifest.subprojects);
+  const containing = manifest.subprojects.filter((subproject) => subprojectContainsPath(subproject.root, target));
+  if (containing.length === 0) return nonOverlappingSubprojects(manifest.subprojects);
+  const deepestLength = Math.max(...containing.map((subproject) => subproject.root === '.' ? 0 : subproject.root.length));
+  return containing.filter((subproject) => (subproject.root === '.' ? 0 : subproject.root.length) === deepestLength);
+}
+
+function nonOverlappingSubprojects(subprojects: GraphManifest['subprojects']): GraphManifest['subprojects'] {
+  return subprojects.filter((candidate) => !subprojects.some((other) => other !== candidate && subprojectContainsPath(candidate.root, other.root)));
+}
+
+function subprojectContainsPath(root: string, target: string): boolean {
+  const normalizedRoot = root.replace(/\\/g, '/').replace(/\/$/, '') || '.';
+  const normalizedTarget = target.replace(/\\/g, '/').replace(/\/$/, '') || '.';
+  if (normalizedRoot === '.') return true;
+  return normalizedTarget === normalizedRoot || normalizedTarget.startsWith(`${normalizedRoot}/`);
 }
 
 function graphEdgeReferenceKind(edge: GraphEdge): ReferenceLocation['reference_kind'] {
@@ -114,8 +156,8 @@ function graphEdgeReferenceKind(edge: GraphEdge): ReferenceLocation['reference_k
   if (edge.kind === 'imports') return 'import';
   if (edge.kind === 'implements') return 'implements';
   if (edge.kind === 'extends') return 'extends';
-  if (edge.reason === 'java_type_reference') return 'type_reference';
-  if (edge.reason === 'java_instantiate') return 'instantiate';
+  if (edge.reason === 'java_type_reference' || edge.reason === 'typescript_type_reference') return 'type_reference';
+  if (edge.reason === 'java_instantiate' || edge.reason === 'typescript_instantiate') return 'instantiate';
   return 'read';
 }
 

@@ -174,6 +174,7 @@ describe('code_change_surface', () => {
       'src/target.ts': `export function target(): void {}\n`,
       ...callers,
     });
+    await buildWorkspaceGraph(rootDir);
 
     const surface = await buildCodeChangeSurface(rootDir, {
       path: 'src/target.ts',
@@ -199,6 +200,7 @@ describe('code_change_surface', () => {
       'src/target.ts': `export function target(): void {}\n`,
       ...callers,
     });
+    await buildWorkspaceGraph(rootDir);
 
     const surface = await buildCodeChangeSurface(rootDir, {
       path: 'src/target.ts',

@@ -271,6 +271,23 @@ describe('function_call_tree TypeScript', () => {
     ]);
   });
 
+  it('uses graph-backed type-alias object members for outgoing call trees', async () => {
+    const rootDir = await createProject({
+      'src/use-case.ts': `export type Scheduler = {\n  enqueue(record: object): void;\n  acceptsNewWork(): boolean;\n};\n\nexport class UseCase {\n  constructor(private readonly scheduler: Scheduler) {}\n  execute(record: object): void {\n    if (!this.scheduler.acceptsNewWork()) return;\n    this.scheduler.enqueue(record);\n  }\n}\n`,
+    });
+    await buildWorkspaceGraph(rootDir);
+
+    const graph = await executeFunctionCallTree(rootDir, { path: 'src/use-case.ts', symbol: 'execute', language: 'ts', kind: 'method', max_depth: 2 });
+
+    expect(graph.status).toBe('ok');
+    if (graph.status !== 'ok') return;
+
+    expect((graph.result.root.children ?? []).map((child: any) => `${child.class}.${child.symbol}`).sort()).toEqual([
+      'Scheduler.acceptsNewWork',
+      'Scheduler.enqueue',
+    ]);
+  });
+
   it('uses graph-backed inline-import typed receiver call trees', async () => {
     const rootDir = await createProject({
       'src/service.ts': `export class A {\n  run(): void {\n    this.helper();\n  }\n\n  helper(): void {}\n}\n`,

@@ -320,10 +320,6 @@ async function enrichFileLevelTestImports(cwd: string, imports: ReferenceLocatio
   if (uniqueTerms.length === 0) return imports;
   const enriched: ReferenceLocation[] = [];
   for (const item of imports) {
-    if (!isFileLevelTestImport(item) && item.reference_kind !== 'import' && item.context_symbol !== '<top-level>') {
-      enriched.push(item);
-      continue;
-    }
     const source = await readFile(item.file, 'utf8').catch(() => undefined);
     if (!source) {
       enriched.push(item);
@@ -494,10 +490,15 @@ export async function buildCodeChangeSurface(cwd: string, input: CodeChangeSurfa
     ...await relatedTestReferences(cwd, input, callers, implementationItems),
     ...await graphTestImportsForFiles(cwd, input, surfaceFiles),
   ], testTerms);
-  const testFilesWithBehaviorEvidence = new Set(rawTestReferences.filter((item) => item.reference_kind !== 'import' && !isFileLevelTestImport(item)).map((item) => canonicalFile(cwd, item.file)));
-  const filteredTestReferences = rawTestReferences.filter((item) => !testFilesWithBehaviorEvidence.has(canonicalFile(cwd, item.file)) || (item.reference_kind !== 'import' && !isFileLevelTestImport(item)));
+  const behaviorTestReferences = rawTestReferences.filter((item) => item.reference_kind !== 'import' && !isFileLevelTestImport(item));
+  const testFilesWithBehaviorEvidence = new Set(behaviorTestReferences.map((item) => canonicalFile(cwd, item.file)));
+  const filteredTestReferences = rawTestReferences.filter((item) => {
+    if (item.reference_kind !== 'import' && !isFileLevelTestImport(item)) return true;
+    if (behaviorTestReferences.length > 0) return false;
+    return !testFilesWithBehaviorEvidence.has(canonicalFile(cwd, item.file));
+  });
   const representativeTestReferences = uniqueBestBy(filteredTestReferences, (item) => canonicalFile(cwd, item.file), (item) => likelyTestScore(cwd, item, input.query));
-  const exhaustiveTestReferences = uniqueBestBy(filteredTestReferences, (item) => keyForLocation(item), (item) => likelyTestScore(cwd, item, input.query));
+  const exhaustiveTestReferences = uniqueBestBy(filteredTestReferences, (item) => [canonicalFile(cwd, item.file), item.context_symbol ?? '', item.context_class ?? '', item.line].join('::'), (item) => likelyTestScore(cwd, item, input.query));
   const testReferences = (input.test_mode === 'exhaustive' ? exhaustiveTestReferences : representativeTestReferences)
     .sort((a, b) => likelyTestScore(cwd, b, input.query) - likelyTestScore(cwd, a, input.query) || canonicalFile(cwd, a.file).localeCompare(canonicalFile(cwd, b.file)) || (a.line ?? 0) - (b.line ?? 0));
   const testLimit = input.test_mode === 'exhaustive' ? normalizedLimit(input.max_tests, 50) : SECTION_LIMIT;

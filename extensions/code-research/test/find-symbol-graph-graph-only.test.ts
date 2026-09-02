@@ -593,11 +593,12 @@ describe('findSymbol graph-only', () => {
     expect(results).toHaveLength(0);
   });
 
-  it('finds TSX arrow function components with graph-only lookup when no graph exists', async () => {
+  it('finds TSX arrow function components with graph-only lookup from a prebuilt graph', async () => {
     const rootDir = await createProject({
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'src/ImageUploader.tsx': `export const ImageUploader = ({ label }: { label: string }) => {\n  return <section><span>{label}</span></section>;\n};\n`,
     });
+    await buildWorkspaceGraph(rootDir);
 
     const results = await findSymbol(rootDir, {
       path: 'src/ImageUploader.tsx',
@@ -653,6 +654,32 @@ describe('findSymbol graph-only', () => {
     expect(resolution.diagnostics.graph_status).toBe('fresh');
     expect(resolution.diagnostics.source_mode).toBe('graph');
     expect(resolution.diagnostics.graph_unavailable_reason).toBeNull();
+  });
+
+  it('keeps TypeScript interface implementation context scoped and duplicate-free in graph mode', async () => {
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'back/src/Audit.ts': `export interface CreateAuditLog {}\nexport class BackAuditLogUseCase implements CreateAuditLog {}\n`,
+      'back_files/src/Audit.ts': `export interface CreateAuditLog {}\nexport class BackFilesAuditLogUseCase implements CreateAuditLog {}\n`,
+      'back_files/test/Audit.test.ts': `import { CreateAuditLog } from '../src/Audit';\nclass TestAuditLogUseCase implements CreateAuditLog {}\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+
+    const result = await resolveFindSymbol(rootDir, {
+      path: 'back_files',
+      symbol: 'CreateAuditLog',
+      language: 'ts',
+      kind: 'interface',
+      scope: 'directory',
+    });
+
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]?.implementation_locations?.map((location) => location.symbol).sort()).toEqual([
+      'BackFilesAuditLogUseCase',
+      'TestAuditLogUseCase',
+    ]);
+    expect(result.results[0]?.implementation_locations?.some((location) => location.file.includes('/back/src/'))).toBe(false);
   });
 
   it('uses fresh java graph authority for mixed-case file paths without follow_up', async () => {

@@ -1,10 +1,19 @@
+import { watch, type FSWatcher } from 'node:fs';
+import { readdir, stat } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { loadCodeResearchConfig } from '../config.js';
 import { ensureWorkspaceGraphFreshness } from './workspace-graph.js';
+import { isExcludedPath, isSupportedGraphSourceFile } from './source-policy.js';
 
 export interface WorkspaceGraphScheduler {
   refresh(projectRoot: string): Promise<void>;
   schedule(projectRoot: string): void;
   flush(): Promise<void>;
+}
+
+export interface WorkspaceGraphSourceWatcher {
+  close(): void;
+  readonly root: string;
 }
 
 export function createWorkspaceGraphScheduler(options: { refresh: (projectRoot: string) => Promise<void>; debounceMs?: number }): WorkspaceGraphScheduler {
@@ -50,17 +59,102 @@ export function scheduleWorkspaceGraphRefresh(projectRoot: string): void {
   workspaceGraphScheduler.schedule(projectRoot);
 }
 
-export function registerWorkspaceGraphLifecycle(pi: any, scheduler: Pick<WorkspaceGraphScheduler, 'schedule'> = workspaceGraphScheduler) {
+async function isDirectory(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+export async function startWorkspaceGraphSourceWatcher(
+  projectRoot: string,
+  scheduler: Pick<WorkspaceGraphScheduler, 'schedule'> = workspaceGraphScheduler
+): Promise<WorkspaceGraphSourceWatcher> {
+  const root = resolve(projectRoot);
+  const watchers = new Map<string, FSWatcher>();
+  let closed = false;
+
+  const watchDirectory = async (dir: string): Promise<void> => {
+    if (closed || watchers.has(dir) || isExcludedPath(root, dir)) return;
+
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    try {
+      const watcher = watch(dir, { persistent: false }, (eventType, fileName) => {
+        if (closed || !fileName) return;
+        const candidate = resolve(dir, fileName.toString());
+        if (isExcludedPath(root, candidate)) return;
+
+        if (isSupportedGraphSourceFile(candidate)) {
+          scheduler.schedule(root);
+          return;
+        }
+
+        if (eventType === 'rename') {
+          void isDirectory(candidate).then((directory) => {
+            if (directory) void watchDirectory(candidate);
+          }).catch(() => undefined);
+        }
+      });
+      watcher.on('error', () => {
+        watcher.close();
+        watchers.delete(dir);
+      });
+      watchers.set(dir, watcher);
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const child = join(dir, entry.name);
+      if (isExcludedPath(root, child)) continue;
+      await watchDirectory(child);
+    }
+  };
+
+  await watchDirectory(root);
+
+  return {
+    root,
+    close() {
+      closed = true;
+      for (const watcher of watchers.values()) watcher.close();
+      watchers.clear();
+    },
+  };
+}
+
+export function registerWorkspaceGraphLifecycle(
+  pi: any,
+  scheduler: Pick<WorkspaceGraphScheduler, 'schedule'> = workspaceGraphScheduler,
+  startWatcher: (projectRoot: string, scheduler: Pick<WorkspaceGraphScheduler, 'schedule'>) => Promise<WorkspaceGraphSourceWatcher> = startWorkspaceGraphSourceWatcher
+) {
   if (typeof pi?.on !== 'function') return false;
+
+  let watcher: WorkspaceGraphSourceWatcher | undefined;
 
   const scheduleFromContext = (_payload: any, ctx: any) => {
     const cwd = ctx?.cwd ?? ctx?.projectRoot ?? process.cwd();
-    void loadCodeResearchConfig(cwd).then((config) => {
-      if (config.graph.enable) scheduler.schedule(cwd);
+    void loadCodeResearchConfig(cwd).then(async (config) => {
+      if (!config.graph.enable) return;
+      const reason = _payload?.reason ?? 'startup';
+      if (reason === 'startup' || reason === 'reload' || reason === 'new') scheduler.schedule(cwd);
+      watcher?.close();
+      watcher = await startWatcher(cwd, scheduler);
     }).catch(() => undefined);
   };
 
   pi.on('session_start', scheduleFromContext);
-  pi.on('turn_end', scheduleFromContext);
+  pi.on('session_shutdown', () => {
+    watcher?.close();
+    watcher = undefined;
+  });
   return true;
 }

@@ -25,18 +25,20 @@ export async function queryReverseFunctionCallTreeFromGraph(options: {
   }
   if (state.status === 'stale' && !policy.allowStale) return undefined;
 
+  const targetPath = resolve(cwd, input.path);
+  const targetStat = await stat(targetPath).catch(() => undefined);
+  const targetIsDirectory = targetStat?.isDirectory() === true;
+  const relativeTarget = (targetPath.startsWith(cwd) ? targetPath.slice(cwd.length + 1).replace(/\\/g, '/') : input.path.replace(/\\/g, '/')).replace(/\/$/, '');
+
+  const scopedSubprojects = selectScopedSubprojects(manifest, relativeTarget);
   const shards = await Promise.all(
-    manifest.subprojects.map(async (subproject) => {
+    scopedSubprojects.map(async (subproject) => {
       const shard = await readSubprojectGraphShard(cwd, subproject.id, { generation: subproject.generation });
       return shard.status === 'ok' ? shard.data : undefined;
     })
   );
 
   const allShards = shards.filter(Boolean) as SubprojectGraphShard[];
-  const targetPath = resolve(cwd, input.path);
-  const targetStat = await stat(targetPath).catch(() => undefined);
-  const targetIsDirectory = targetStat?.isDirectory() === true;
-  const relativeTarget = (targetPath.startsWith(cwd) ? targetPath.slice(cwd.length + 1).replace(/\\/g, '/') : input.path.replace(/\\/g, '/')).replace(/\/$/, '');
 
   const symbols = allShards.flatMap((shard) => shard.nodes.filter((node): node is Extract<GraphNode, { kind: 'symbol' }> => node.kind === 'symbol' && matchesLanguage(node.language, input.language)));
   const targetCandidates = symbols.filter((node) => {
@@ -118,7 +120,7 @@ function buildReverseTree(
     callers.push(callerNode);
   }
 
-  if (callers.length > 0) result.callers = callers;
+  if (callers.length > 0) result.callers = dedupeCallTreeNodes(callers);
   return result;
 }
 
@@ -153,6 +155,35 @@ function countNodes(node: CallTreeNode, depth: number, stats: FunctionCallTreeRe
   if (node.is_external) stats.external_nodes += 1;
   stats.max_depth_reached = Math.max(stats.max_depth_reached, depth);
   for (const caller of node.callers ?? []) countNodes(caller, depth + 1, stats);
+}
+
+function dedupeCallTreeNodes(nodes: CallTreeNode[]): CallTreeNode[] {
+  const selected = new Map<string, CallTreeNode>();
+  for (const node of nodes) {
+    const key = [node.file ?? '', node.class ?? '', node.symbol, node.call_line ?? node.line ?? '', node.call_column ?? node.column ?? '', node.receiver_name ?? '', node.receiver_type ?? ''].join('\u0000');
+    if (!selected.has(key)) selected.set(key, node);
+  }
+  return [...selected.values()];
+}
+
+function selectScopedSubprojects(manifest: GraphManifest, relativeTarget: string): GraphManifest['subprojects'] {
+  const target = relativeTarget.replace(/\\/g, '/').replace(/^\.\/$/, '.').replace(/\/$/, '') || '.';
+  if (target === '.') return nonOverlappingSubprojects(manifest.subprojects);
+  const containing = manifest.subprojects.filter((subproject) => subprojectContainsPath(subproject.root, target));
+  if (containing.length === 0) return nonOverlappingSubprojects(manifest.subprojects);
+  const deepestLength = Math.max(...containing.map((subproject) => subproject.root === '.' ? 0 : subproject.root.length));
+  return containing.filter((subproject) => (subproject.root === '.' ? 0 : subproject.root.length) === deepestLength);
+}
+
+function nonOverlappingSubprojects(subprojects: GraphManifest['subprojects']): GraphManifest['subprojects'] {
+  return subprojects.filter((candidate) => !subprojects.some((other) => other !== candidate && subprojectContainsPath(candidate.root, other.root)));
+}
+
+function subprojectContainsPath(root: string, target: string): boolean {
+  const normalizedRoot = root.replace(/\\/g, '/').replace(/\/$/, '') || '.';
+  const normalizedTarget = target.replace(/\\/g, '/').replace(/\/$/, '') || '.';
+  if (normalizedRoot === '.') return true;
+  return normalizedTarget === normalizedRoot || normalizedTarget.startsWith(`${normalizedRoot}/`);
 }
 
 function matchesLanguage(nodeLanguage: string, inputLanguage: FunctionCallTreeInput['language']): boolean {

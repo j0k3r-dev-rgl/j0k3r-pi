@@ -104,7 +104,7 @@ describe('TypeScript symbol syntax and graph parity', () => {
     expect(graph.map((resolution) => resolution.diagnostics.completeness)).toEqual(['complete', 'complete', 'complete']);
   });
 
-  it('builds graph artifacts for graph queries when no graph is built yet', async () => {
+  it('returns missing diagnostics for graph queries when no graph is built yet', async () => {
     const root = await mkdtemp(join(tmpdir(), 'pi-ts-symbol-diagnostics-'));
     await mkdir(join(root, '.pi'), { recursive: true });
     await writeFile(join(root, '.pi', 'code-research.json'), `{"graph":{"enable":true}}\n`, 'utf8');
@@ -112,8 +112,8 @@ describe('TypeScript symbol syntax and graph parity', () => {
     await writeFile(file, 'export const present = 1;\n');
     const resolution = await resolveFindSymbol(root, { path: file, symbol: 'absent', language: 'ts' });
     expect(resolution.results).toEqual([]);
-    expect(resolution.diagnostics).toMatchObject({ source_mode: 'graph', graph_status: 'fresh', completeness: 'complete', scanned_files_count: 1, skipped_files_count: 0, unreadable_shards_count: 0 });
-    expect(resolution.diagnostics.graph_unavailable_reason).toBeNull();
+    expect(resolution.diagnostics).toMatchObject({ source_mode: 'graph', graph_status: 'missing', completeness: 'unavailable', scanned_files_count: 1, skipped_files_count: 0, unreadable_shards_count: 0 });
+    expect(resolution.diagnostics.graph_unavailable_reason).toBe('graph_missing');
   });
 
   it('keeps fixture documentation synchronized with parser coverage cases and public constants', async () => {

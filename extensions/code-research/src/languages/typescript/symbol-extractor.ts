@@ -40,7 +40,7 @@ function visitNode(node: ts.Node, ctx: Context, inheritedModifiers?: readonly ts
   } else if (ts.isInterfaceDeclaration(node)) {
     pushInterface(node, ctx);
   } else if (ts.isTypeAliasDeclaration(node)) {
-    pushNamedNode(node, ctx, 'type_alias', true, false, node.name.text, undefined, undefined, undefined, ts.getModifiers(node) ?? undefined, node.name);
+    pushTypeAlias(node, ctx);
   } else if (ts.isEnumDeclaration(node)) {
     pushEnum(node, ctx);
   } else if (ts.isModuleDeclaration(node)) {
@@ -102,6 +102,19 @@ function pushInterface(node: ts.InterfaceDeclaration, ctx: Context) {
   pushNamedNode(node, ctx, 'interface', true, false, node.name.text, undefined, false, undefined, ts.getModifiers(node) ?? undefined, node.name);
   const nextOwner = [...ctx.ownerChain, node.name.text];
   for (const member of node.members) {
+    if (ts.isMethodSignature(member)) pushMember(member, ctx, nextOwner, 'interface_method', getPropertyNameText(member.name), false);
+    else if (ts.isPropertySignature(member)) pushMember(member, ctx, nextOwner, 'property', getPropertyNameText(member.name), false);
+    else if (ts.isCallSignatureDeclaration(member)) pushSyntheticMember(member, ctx, nextOwner, 'call_signature', 'call');
+    else if (ts.isConstructSignatureDeclaration(member)) pushSyntheticMember(member, ctx, nextOwner, 'construct_signature', 'new');
+    else if (ts.isIndexSignatureDeclaration(member)) pushSyntheticMember(member, ctx, nextOwner, 'index_signature', '[index]');
+  }
+}
+
+function pushTypeAlias(node: ts.TypeAliasDeclaration, ctx: Context) {
+  pushNamedNode(node, ctx, 'type_alias', true, false, node.name.text, undefined, false, undefined, ts.getModifiers(node) ?? undefined, node.name);
+  if (!ts.isTypeLiteralNode(node.type)) return;
+  const nextOwner = [...ctx.ownerChain, node.name.text];
+  for (const member of node.type.members) {
     if (ts.isMethodSignature(member)) pushMember(member, ctx, nextOwner, 'interface_method', getPropertyNameText(member.name), false);
     else if (ts.isPropertySignature(member)) pushMember(member, ctx, nextOwner, 'property', getPropertyNameText(member.name), false);
     else if (ts.isCallSignatureDeclaration(member)) pushSyntheticMember(member, ctx, nextOwner, 'call_signature', 'call');

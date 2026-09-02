@@ -246,7 +246,7 @@ describe('findSymbol Java', () => {
     })).rejects.toThrow('Path escapes workspace');
   });
 
-  it('extracts instanceof pattern variables in direct and fresh graph modes', async () => {
+  it('extracts instanceof pattern variables in fresh graph mode', async () => {
     const slug = `graph-java-pattern-${Date.now()}`;
     const projectRoot = join(tmpDir, slug);
     await mkdir(join(projectRoot, '.pi'), { recursive: true });
@@ -258,13 +258,6 @@ describe('findSymbol Java', () => {
 
     const file = join(projectRoot, 'app/PatternExample.java');
 
-    const direct = await findSymbol(projectRoot, {
-      path: file,
-      symbol: 'matched',
-      language: 'java',
-      declaration_kind: 'pattern_variable',
-    });
-
     await buildWorkspaceGraph(projectRoot);
     const graph = await findSymbol(projectRoot, {
       path: file,
@@ -273,13 +266,11 @@ describe('findSymbol Java', () => {
       declaration_kind: 'pattern_variable',
     });
 
-    expect(direct).toHaveLength(1);
     expect(graph).toHaveLength(1);
     expect(graph[0]).toMatchObject({ declaration_kind: 'pattern_variable', kind: 'variable', owner: 'isNumber' });
-    expect(graph[0].symbol_id).toBe(direct[0].symbol_id);
   });
 
-  it('extracts single unparenthesized lambda parameters in direct and fresh graph modes', async () => {
+  it('extracts single unparenthesized lambda parameters in fresh graph mode', async () => {
     const slug = `graph-java-lambda-${Date.now()}`;
     const projectRoot = join(tmpDir, slug);
     await mkdir(join(projectRoot, '.pi'), { recursive: true });
@@ -291,13 +282,6 @@ describe('findSymbol Java', () => {
 
     const file = join(projectRoot, 'app/LambdaExample.java');
 
-    const direct = await findSymbol(projectRoot, {
-      path: file,
-      symbol: 'lambdaArg',
-      language: 'java',
-      declaration_kind: 'lambda_parameter',
-    });
-
     await buildWorkspaceGraph(projectRoot);
     const graph = await findSymbol(projectRoot, {
       path: file,
@@ -306,17 +290,15 @@ describe('findSymbol Java', () => {
       declaration_kind: 'lambda_parameter',
     });
 
-    expect(direct).toHaveLength(1);
     expect(graph).toHaveLength(1);
-    expect(direct[0]).toMatchObject({ declaration_kind: 'lambda_parameter', kind: 'variable' });
-    expect(direct[0].owner).toContain('<lambda@');
-    expect(graph[0].owner).toBe(direct[0].owner);
-    expect(graph[0].symbol_id).toBe(direct[0].symbol_id);
+    expect(graph[0]).toMatchObject({ declaration_kind: 'lambda_parameter', kind: 'variable' });
+    expect(graph[0].owner).toContain('<lambda@');
   });
 
   it('returns individual declarators, bindings, and package/module declarations with inclusion rules', async () => {
     const projectRoot = join(tmpDir, `java-parity-${Date.now()}`);
-    await mkdir(projectRoot, { recursive: true });
+    await mkdir(join(projectRoot, '.pi'), { recursive: true });
+    await writeFile(join(projectRoot, '.pi', 'code-research.json'), '{"graph":{"enable":true}}\n', 'utf8');
     await writeTestFile(
       `${projectRoot.replace(`${tmpDir}/`, '')}/pkg/package-info.java`,
       `package pkg.demo;\n`
@@ -329,6 +311,8 @@ describe('findSymbol Java', () => {
       `${projectRoot.replace(`${tmpDir}/`, '')}/pkg/Example.java`,
       `package pkg.demo;\npublic class Example<T> {\n  private int first = 1, second, third = 3;\n  public Example(String name) {\n    int localA = 1, localB = 2;\n    Runnable lambda = () -> { int lambdaValue = localA; };\n    for (String item : java.util.List.of(name)) {\n      System.out.println(item);\n    }\n    try (var reader = new java.io.StringReader(name)) {\n      System.out.println(reader);\n    } catch (Exception ex) {\n      System.out.println(ex.getMessage());\n    }\n  }\n}\n`
     );
+
+    await buildWorkspaceGraph(projectRoot);
 
     const fields = await findSymbol(projectRoot, { path: file, symbol: 'first', language: 'java' });
     const second = await findSymbol(projectRoot, { path: file, symbol: 'second', language: 'java' });
@@ -368,12 +352,15 @@ describe('findSymbol Java', () => {
 
   it('keeps directory-scoped binding queries gated even for adversarial local-binding counts', async () => {
     const projectRoot = join(tmpDir, `java-adversarial-bindings-${Date.now()}`);
-    await mkdir(projectRoot, { recursive: true });
+    await mkdir(join(projectRoot, '.pi'), { recursive: true });
+    await writeFile(join(projectRoot, '.pi', 'code-research.json'), '{"graph":{"enable":true}}\n', 'utf8');
     const localDeclarations = Array.from({ length: 250 }, (_, index) => `    String value${index} = input + ${index};`).join('\n');
     const file = await writeTestFile(
       `${projectRoot.replace(`${tmpDir}/`, '')}/Adversarial.java`,
       `public class Adversarial {\n  public void run(String input) {\n${localDeclarations}\n  }\n}\n`
     );
+
+    await buildWorkspaceGraph(projectRoot);
 
     const hidden = await findSymbol(projectRoot, { path: projectRoot, symbol: 'value', language: 'java', search_mode: 'contains', scope: 'directory' });
     const visible = await findSymbol(projectRoot, { path: file, symbol: 'value', language: 'java', search_mode: 'contains', declaration_kind: 'local_variable' });

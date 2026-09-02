@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import ts from 'typescript';
 import { loadCodeResearchConfig } from '../config.js';
 import { readSubprojectGraphShard } from './graph-persistence.js';
@@ -92,9 +92,9 @@ export async function resolveFindSymbol(cwd: string, input: FindSymbolInput): Pr
   }
 
   if (needsGraphImplementationContext(input)) {
-    const contextFiles = await collectWorkspaceSourceFiles(cwd).catch(() => []);
+    const contextFiles = await collectImplementationContextFiles(cwd, resolved.targetPath, effectiveScope).catch(() => []);
     if (contextFiles.length > resolved.filesToScan.length) {
-      const contextGraph = await loadGraphRecords(cwd, contextFiles, { ...graphInput, path: cwd, scope: 'directory' });
+      const contextGraph = await loadGraphRecords(cwd, contextFiles, { ...graphInput, path: dirname(resolved.targetPath), scope: 'directory' });
       for (const [file, records] of contextGraph.records) if (!graphRecords.has(file)) graphRecords.set(file, records);
     }
   }
@@ -129,6 +129,28 @@ export async function findSymbol(cwd: string, input: FindSymbolInput): Promise<S
   return (await resolveFindSymbol(cwd, input)).results;
 }
 
+async function collectImplementationContextFiles(cwd: string, targetPath: string, scope: 'file' | 'directory'): Promise<string[]> {
+  if (scope === 'directory') return collectWorkspaceSourceFiles(targetPath);
+  const state = await ensureWorkspaceGraphReadable(cwd);
+  if (state.state.status === 'ok') {
+    const relativeTarget = targetPath.startsWith(`${cwd}/`) ? targetPath.slice(cwd.length + 1).replace(/\\/g, '/') : targetPath.replace(/\\/g, '/');
+    const containing = state.state.data.subprojects.filter((subproject) => subprojectContainsPath(subproject.root, relativeTarget));
+    if (containing.length > 0) {
+      const deepestLength = Math.max(...containing.map((subproject) => subproject.root === '.' ? 0 : subproject.root.length));
+      const selected = containing.find((subproject) => (subproject.root === '.' ? 0 : subproject.root.length) === deepestLength);
+      if (selected) return collectWorkspaceSourceFiles(resolve(cwd, selected.root === '.' ? '.' : selected.root));
+    }
+  }
+  return collectWorkspaceSourceFiles(dirname(targetPath));
+}
+
+function subprojectContainsPath(root: string, target: string): boolean {
+  const normalizedRoot = root.replace(/\\/g, '/').replace(/\/$/, '') || '.';
+  const normalizedTarget = target.replace(/\\/g, '/').replace(/\/$/, '') || '.';
+  if (normalizedRoot === '.') return true;
+  return normalizedTarget === normalizedRoot || normalizedTarget.startsWith(`${normalizedRoot}/`);
+}
+
 async function loadGraphRecords(
   cwd: string,
   filesToScan: string[],
@@ -158,7 +180,7 @@ async function loadGraphRecords(
     };
   }
 
-  const { state, manifest } = await ensureWorkspaceGraphReadable(cwd, { refreshStale: true });
+  const { state, manifest } = await ensureWorkspaceGraphReadable(cwd);
   const decision = evaluateGraphUsability({
     graphEnabled: config.graph.enable,
     query: 'find_symbol',
@@ -575,7 +597,7 @@ function collectJavaImplementationLocationsFromGraph(
 function dedupeImplementationLocations(locations: SymbolLocation[]): SymbolLocation[] {
   const deduped = new Map<string, SymbolLocation>();
   for (const location of locations) {
-    deduped.set(location.symbol, location);
+    deduped.set(`${location.file}:${location.symbol}:${location.start_line}:${location.start_column}`, location);
   }
   return [...deduped.values()].sort((a, b) =>
     a.file.localeCompare(b.file) ||

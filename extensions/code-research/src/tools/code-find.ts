@@ -95,6 +95,26 @@ function withReferenceClassifications(items: ReferenceLocation[]): ReferenceLoca
   });
 }
 
+function dedupeReferences(items: ReferenceLocation[]): ReferenceLocation[] {
+  const selected = new Map<string, ReferenceLocation>();
+  for (const item of items) {
+    const key = [item.file, item.line, item.column, item.symbol, item.kind, item.context_symbol ?? '', item.context_class ?? '', item.reference_kind].join('\u0000');
+    const existing = selected.get(key);
+    if (!existing || referenceMetadataScore(item) > referenceMetadataScore(existing)) selected.set(key, item);
+  }
+  return [...selected.values()].sort((a, b) =>
+    a.file.localeCompare(b.file) ||
+    a.line - b.line ||
+    a.column - b.column ||
+    a.reference_kind.localeCompare(b.reference_kind) ||
+    (a.context_symbol ?? '').localeCompare(b.context_symbol ?? '')
+  );
+}
+
+function referenceMetadataScore(item: ReferenceLocation): number {
+  return [item.called_as, item.source_line, item.receiver_name, item.receiver_type, item.context_symbol, item.context_class, item.classification, item.reason, item.end_line, item.end_column].filter((value) => value !== undefined && value !== '').length;
+}
+
 function formatReferenceItems(cwd: string, query: string, items: ReferenceLocation[], total: number, nextCursor?: string, counts?: ClassificationCounts): string {
   const rows = items.map((item) => {
     const file = relative(cwd, item.file) || item.file;
@@ -207,7 +227,7 @@ export function registerCodeFindTool(pi: any) {
           reference_kinds: params.reference_kinds,
         };
         const resolution = await resolveReferencesAcrossLanguages(ctx.cwd, input);
-        const allResults = withReferenceClassifications(await addSourceLines(resolution.results));
+        const allResults = dedupeReferences(withReferenceClassifications(await addSourceLines(resolution.results)));
         const page = boundedWindow(allResults, params.limit, params.cursor);
         const pageClassificationCounts = classificationCounts(page.items);
         if (allResults.length === 0) {
