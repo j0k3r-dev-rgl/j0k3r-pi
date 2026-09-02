@@ -8,6 +8,7 @@ tools:
   - workspace_graph_status
   - code_find
   - code_call_hierarchy
+  - code_change_surface
   - context7_status
   - context7_search_library
   - context7_get_context

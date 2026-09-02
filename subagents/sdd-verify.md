@@ -9,6 +9,7 @@ tools:
   - workspace_graph_status
   - code_find
   - code_call_hierarchy
+  - code_change_surface
   - mem_save
 ---
 
