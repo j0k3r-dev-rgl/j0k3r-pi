@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import codeResearchExtension from '../index.js';
@@ -262,6 +262,34 @@ describe('code-research extension entry integration', () => {
 
     expect(result.content[0].text).toContain('disabled');
     expect(result.details).toMatchObject({ status: 'disabled', graph: { enable: false, addGitignore: true } });
+  });
+
+  it('includes bounded unreadable directory paths in workspace_graph_status compact output', async () => {
+    const tools = registerTools();
+    const workspaceGraphStatusTool = tools.find((tool) => tool.name === 'workspace_graph_status');
+    expect(workspaceGraphStatusTool).toBeDefined();
+
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'package.json': `{"name":"fixture"}\n`,
+      'src/app.ts': `export function ok(): number { return 1; }\n`,
+      'blocked/package.json': `{"name":"blocked"}\n`,
+      'blocked/src/hidden.ts': `export const hidden = true;\n`,
+    });
+    const blockedDir = join(rootDir, 'blocked');
+    await chmod(blockedDir, 0o000);
+
+    try {
+      await buildWorkspaceGraph(rootDir);
+      const result = await workspaceGraphStatusTool!.execute('test-call-unreadable', {}, undefined, undefined, { cwd: rootDir });
+
+      expect(result.content[0].text).toContain('unreadable_dirs=1');
+      expect(result.content[0].text).toContain('unreadable_paths=blocked');
+      expect(result.details.coverage.unreadableDirectoryCount).toBe(1);
+      expect(result.details.unreadableDirectories).toContain('blocked');
+    } finally {
+      await chmod(blockedDir, 0o755);
+    }
   });
 
   it('registers workspace_graph_status with compact monorepo metadata when graph is enabled', async () => {

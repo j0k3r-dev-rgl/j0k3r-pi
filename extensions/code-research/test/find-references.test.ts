@@ -111,6 +111,34 @@ describe('find_references', () => {
     expect(results.every((item) => item.called_as === 'helper()')).toBe(true);
   });
 
+  it('keeps TypeScript callable reference ranges on the actual matched call line', async () => {
+    const rootDir = await createProject('pi-find-references-ts-tight-call-spans', {
+      'src/router.ts': `export function getDefaultRouteForRole(role: string): string { return role; }\nexport function buildModulesByDependencyModuleVariables(modules: string[]): string[] { return modules; }\n`,
+      'src/consumer.ts': `import { getDefaultRouteForRole, buildModulesByDependencyModuleVariables } from './router';\n\nexport function loader(role: string): string {\n  const route = getDefaultRouteForRole(role);\n  return route;\n}\n\nexport function configure(): void {\n  const modules = ['reviews'];\n  buildModulesByDependencyModuleVariables(modules).forEach((moduleName) => {\n    console.log(moduleName);\n  });\n}\n`,
+    });
+
+    const routeRefs = await findReferences(rootDir, {
+      path: 'src/router.ts',
+      symbol: 'getDefaultRouteForRole',
+      language: 'ts',
+      kind: 'function',
+      reference_kinds: ['call'],
+    });
+    const moduleRefs = await findReferences(rootDir, {
+      path: 'src/router.ts',
+      symbol: 'buildModulesByDependencyModuleVariables',
+      language: 'ts',
+      kind: 'function',
+      reference_kinds: ['call'],
+    });
+
+    expect(routeRefs).toHaveLength(1);
+    expect(moduleRefs).toHaveLength(1);
+    expect(routeRefs[0]).toMatchObject({ line: 4, end_line: 4, called_as: 'getDefaultRouteForRole(role)' });
+    expect(moduleRefs[0]).toMatchObject({ line: 10, end_line: 10 });
+    expect(moduleRefs[0].called_as).toContain('buildModulesByDependencyModuleVariables(modules)');
+  });
+
   it('finds TypeScript call references inside nested function bodies', async () => {
     const rootDir = await createProject('pi-find-references-ts-nested', {
       'src/runtime-state.ts': `export function setCurrentMemorySessionId(id: string | undefined): void {\n  void id;\n}\n`,

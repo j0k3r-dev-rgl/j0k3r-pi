@@ -358,7 +358,17 @@ describe('findSymbol', () => {
 
     expect(results).toHaveLength(1);
     expect(results[0].kind).toBe('variable');
+    expect(results[0].declaration_kind).toBe('type_alias');
     expect(results[0].is_definition).toBe(true);
+
+    const narrowed = await findSymbol(tmpDir, {
+      path: file,
+      symbol: 'UserID',
+      language: 'ts',
+      declaration_kind: 'type_alias',
+    });
+    expect(narrowed).toHaveLength(1);
+    expect(narrowed[0].declaration_kind).toBe('type_alias');
   });
 
   it('treats nested function declarations as definitions', async () => {

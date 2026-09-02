@@ -77,6 +77,13 @@ Result:
 - `details.summary`: `returned`, `total`, `has_more`, `next_cursor`, `offset`, and `limit`.
 - `details.provenance`: graph/direct/fallback diagnostics.
 
+Usage guidance:
+
+- For common names such as `execute`, `run`, `stop`, `handle`, or `Service`, pass the smallest relevant `path`, explicit `language`, and explicit `kind`. For common method names, use the declaring file path when you know it.
+- For call-only impact checks, use `relation="references"` with `reference_kinds=["call"]`; omit `reference_kinds` when you need all supported usages.
+- Keep Code Research semantic-first: use it before broad text search for supported languages, but validate suspicious misses or audit-grade gaps with targeted `rg` or `grep`.
+- TypeScript type aliases can be selected with `declaration_kind="type_alias"`; compatibility-oriented coarse `kind` fields may still appear as `variable`.
+
 #### `code_call_hierarchy`
 
 Directional call hierarchy tool for TypeScript, JavaScript, Java, and Go.
@@ -93,6 +100,10 @@ Parameters:
 - `compacted` *(boolean, optional)*: outgoing only; compact trivial data-access siblings where supported.
 
 Result shape matches the existing call-tree contract with `root` and `stats`, plus `details.direction`.
+
+Known limits:
+
+- Call hierarchy is syntax/graph based, not a compiler or runtime tracer. Dynamic dispatch, dependency injection, reflection, generated wiring, or injected receiver calls may be missed; cross-check important gaps with targeted `rg`/`grep` or source inspection.
 
 #### `workspace_graph_status`
 
@@ -150,6 +161,7 @@ code-research/
 
 ### Notes
 
+- Use the smallest relevant path, explicit language, and explicit kind for noisy/common-name queries; broaden only after reviewing provenance and pagination.
 - Uses native `tree-sitter` with pinned parsers and exact versions.
 - Resolution is syntax/graph based, not a full compiler or LSP server. Results include provenance and may be incomplete for dynamic dispatch, reflection, generated code, build tags, or unsupported language constructs.
 - Symbol coverage details live in `docs/typescript-symbol-contract-v1.md`, `docs/typescript-symbol-coverage-v1.md`, `docs/java-symbol-coverage-v1.md`, and `docs/go-symbol-coverage-v1.md`.

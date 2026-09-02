@@ -4,6 +4,15 @@ import { getWorkspaceGraphRoot, readSubprojectGraphShard, readWorkspaceGraphMani
 import { loadWorkspaceGraphState } from '../core/workspace-state.js';
 import type { GraphManifest, WorkspaceGraphState } from '../types.js';
 
+function formatUnreadableDirectorySummary(unreadableDirectories: string[]): string {
+  const limit = 5;
+  const visible = unreadableDirectories
+    .map((directory) => directory.replace(/^\/+/, '') || '.')
+    .slice(0, limit);
+  const omitted = unreadableDirectories.length - visible.length;
+  return omitted > 0 ? `${visible.join(',')} (+${omitted} more)` : visible.join(',');
+}
+
 async function summarizeWorkspaceGraphState(
   state: WorkspaceGraphState,
   manifestStatus: 'ok' | 'missing' | 'incompatible' | 'corrupt' | 'oversized' | 'errored',
@@ -151,10 +160,13 @@ export function registerWorkspaceGraphStatusTool(pi: any) {
         const manifest = await readWorkspaceGraphManifest(ctx.cwd);
         const summary = await summarizeWorkspaceGraphState(state.data, manifest.status, manifest.status === 'ok' ? manifest.data : undefined);
         const projectList = summary.projects.map((project) => project.workspaceRelativeRoot).join(',');
+        const unreadableSummary = summary.coverage.unreadableDirectoryCount > 0
+          ? ` | unreadable_paths=${formatUnreadableDirectorySummary(summary.unreadableDirectories)}`
+          : '';
         return {
           content: [{
             type: 'text',
-            text: `Workspace graph status: ${summary.status} | usable=${summary.graphUsableForQueries ? 'yes' : 'no'} | age_s=${summary.ageSeconds ?? 'unknown'} | monorepo=${summary.monorepo.detected ? 'yes' : 'no'} | shards=${summary.indexing.shardCount} | indexed_files=${summary.coverage.indexedFiles} | detected_projects=${summary.coverage.detectedProjects} | indexed_projects=${summary.coverage.indexedProjects} | empty_projects=${summary.coverage.emptyProjects} | partial_projects=${summary.coverage.partialProjects} | unreadable_dirs=${summary.coverage.unreadableDirectoryCount} | go_files=${summary.languageCoverage.go.fileCount} | go_symbols=${summary.languageCoverage.go.symbolCount} | workspace_projects=${projectList}`,
+            text: `Workspace graph status: ${summary.status} | usable=${summary.graphUsableForQueries ? 'yes' : 'no'} | age_s=${summary.ageSeconds ?? 'unknown'} | monorepo=${summary.monorepo.detected ? 'yes' : 'no'} | shards=${summary.indexing.shardCount} | indexed_files=${summary.coverage.indexedFiles} | detected_projects=${summary.coverage.detectedProjects} | indexed_projects=${summary.coverage.indexedProjects} | empty_projects=${summary.coverage.emptyProjects} | partial_projects=${summary.coverage.partialProjects} | unreadable_dirs=${summary.coverage.unreadableDirectoryCount}${unreadableSummary} | go_files=${summary.languageCoverage.go.fileCount} | go_symbols=${summary.languageCoverage.go.symbolCount} | workspace_projects=${projectList}`,
           }],
           details: summary,
         };

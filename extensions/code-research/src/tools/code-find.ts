@@ -160,10 +160,12 @@ export function registerCodeFindTool(pi: any) {
       'Use code_find as the default entry point for supported-language symbol lookup. Use rg only as a validation fallback or for unsupported text/config/doc searches.',
       'Choose relation deliberately: declaration finds where a symbol is defined; implementation finds implementers of an interface/base type; references finds usages/call sites for impact analysis.',
       'For references, omit reference_kinds when you want all supported usages. Use reference_kinds=["call"] only for function/method invocations, ["read"] for value/JSX/type-like reads, and ["implements"|"extends"] for inheritance relationships.',
-      'For methods with common names such as execute, run, stop, or handle, provide the declaring file path plus kind=method and language when known to avoid unrelated same-name results.',
+      'For common names such as execute, run, stop, handle, or Service, use the smallest relevant path plus explicit language and kind; for method references, prefer the declaring file path when known.',
+      'Call hierarchy is semantic/syntax based and may miss dynamic dispatch, dependency-injection, reflection, or injected receiver calls; validate audit-grade gaps with targeted rg/grep.',
       'Use include_code=true only with declaration/implementation and exact matching when you need a bounded source snippet; otherwise prefer include_signature=true for lower noise.',
       'Use match=contains only for broad discovery; it is substring-based and may match unrelated names such as main inside remainder. Prefer exact by default.',
       'Use language=auto for unknown code, but pass ts/js/java/go when known, especially in monorepos.',
+      'TypeScript type aliases can be selected with declaration_kind=type_alias; the coarse kind may still render as variable in compatibility-oriented result fields.',
       'Use cursor from a previous code_find result when has_more is true instead of broadening the search unnecessarily.',
     ],
     parameters: Type.Object({
