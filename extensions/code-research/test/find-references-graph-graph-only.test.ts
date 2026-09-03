@@ -134,7 +134,8 @@ describe('findReferences graph-only', () => {
     const rootDir = await createProject({
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
       'src/constants.ts': `export const CROP_PRESETS = { square: 1, wide: 2 } as const;\n`,
-      'src/status.mjs': `export const STATUS = { SIN_LOCATION: 'sin-location', OK: 'ok' };\nexport const REVIEWABLE_STATUSES = [STATUS.OK];\nexport function buildSheetData(group) { return group; }\nexport function toRingPoints(points) { return points; }\nexport function reconcile(groups, coordinates) {\n  const value = STATUS.SIN_LOCATION;\n  const allowed = REVIEWABLE_STATUSES.includes(value);\n  const rows = groups.map(buildSheetData);\n  const rings = coordinates.map(toRingPoints);\n  return { allowed, rows, rings };\n}\n`,
+      'src/status.mjs': `export const STATUS = { SIN_LOCATION: 'sin-location', OK: 'ok' };\nexport const REVIEWABLE_STATUSES = [STATUS.OK];\nexport function buildSheetData(group) { return { autoFilterRef: 'A3:C10' }; }\nexport function toRingPoints(points) { return points; }\nexport function reconcile(groups, coordinates) {\n  const value = STATUS.SIN_LOCATION;\n  const allowed = REVIEWABLE_STATUSES.includes(value);\n  const rows = groups.map(buildSheetData);\n  const sheet = rows[0];\n  const filter = sheet.autoFilterRef;\n  const rings = coordinates.map(toRingPoints);\n  return { allowed, filter, rows, rings };\n}\n`,
+      'src/graphql.ts': `export function fetchToGraphql<T>(query: string): T { return {} as T; }\nexport function loadCount() { return fetchToGraphql<number>('query'); }\n`,
       'src/ImageUploader.tsx': `import { CROP_PRESETS } from './constants';\n\nexport function ImageUploader() {\n  const presets = Object.values(CROP_PRESETS);\n  return <button>{CROP_PRESETS.square + presets.length}</button>;\n}\n`,
     });
 
@@ -193,6 +194,72 @@ describe('findReferences graph-only', () => {
       reference_kinds: ['read'],
     });
     expect(ringRefs.map((item) => item.called_as)).toEqual(['toRingPoints']);
+
+    const genericCallRefs = await findReferences(rootDir, {
+      path: 'src/graphql.ts',
+      symbol: 'fetchToGraphql',
+      language: 'ts',
+      kind: 'function',
+      reference_kinds: ['call'],
+    });
+    expect(genericCallRefs.map((item) => item.called_as)).toEqual(["fetchToGraphql<number>('query')"]);
+
+    const propertyReadRefs = await findReferences(rootDir, {
+      path: 'src/status.mjs',
+      symbol: 'autoFilterRef',
+      language: 'js',
+      kind: 'variable',
+      reference_kinds: ['read'],
+    });
+    expect(propertyReadRefs.map((item) => item.called_as)).toEqual(['sheet.autoFilterRef']);
+  });
+
+  it('exposes graph-backed external/library call references by external method name', async () => {
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/report.mjs': `export function writeReport(workbook, rows) {\n  rows.map((row) => row.id);\n  workbook.xlsx.writeFile('report.xlsx');\n  workbook.close();\n}\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+
+    const writeFileRefs = await findReferences(rootDir, {
+      path: 'src',
+      symbol: 'writeFile',
+      language: 'js',
+      kind: 'method',
+      reference_kinds: ['call'],
+    });
+    expect(writeFileRefs.map((item) => `${item.file.replace(rootDir + '/', '')}:${item.line}:${item.called_as}`)).toEqual([
+      "src/report.mjs:3:workbook.xlsx.writeFile('report.xlsx')",
+    ]);
+
+    const closeRefs = await findReferences(rootDir, {
+      path: 'src',
+      symbol: 'close',
+      language: 'js',
+      kind: 'method',
+      reference_kinds: ['call'],
+    });
+    expect(closeRefs.map((item) => item.called_as)).toEqual(['workbook.close()']);
+  });
+
+  it('resolves class references through typed DI object property aliases', async () => {
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/publisher.ts': `export class BackNotificationPublisher { constructor(url: string) { void url; } }\n`,
+      'src/main.ts': `import { BackNotificationPublisher as DefaultBackNotificationPublisher } from './publisher';\n\ntype PublisherCtor = new (url: string) => BackNotificationPublisher;\ntype MainDeps = { BackNotificationPublisher: PublisherCtor };\nconst defaultDeps: MainDeps = { BackNotificationPublisher: DefaultBackNotificationPublisher };\nexport function start(deps: MainDeps = defaultDeps) {\n  return new deps.BackNotificationPublisher('http://localhost');\n}\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+
+    const results = await findReferences(rootDir, {
+      path: 'src/publisher.ts',
+      symbol: 'BackNotificationPublisher',
+      language: 'ts',
+      kind: 'class',
+    });
+
+    expect(results.some((item) => item.file.endsWith('src/main.ts') && item.reference_kind === 'read' && item.reason === 'typescript_property_alias_instantiate')).toBe(true);
   });
 
   it('uses graph-backed direct call references when requested explicitly', async () => {

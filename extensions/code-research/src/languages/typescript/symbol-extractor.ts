@@ -65,6 +65,7 @@ function pushFunctionLike(node: ts.FunctionDeclaration, ctx: Context, modifiers?
   const name = node.name?.text ?? 'default';
   const declarationKind: TypeScriptDeclarationKind = node.body ? 'function' : 'function_overload';
   pushNamedNode(node, ctx, declarationKind, true, Boolean(node.body), name, exportedName, anonymous, undefined, modifiers, node.name);
+  if (node.body) pushReturnedObjectProperties(node.body, ctx, [...ctx.ownerChain, name]);
 }
 
 function pushClass(node: ts.ClassDeclaration, ctx: Context, modifiers?: readonly ts.ModifierLike[]) {
@@ -139,6 +140,28 @@ function pushEnum(node: ts.EnumDeclaration, ctx: Context) {
       codeRange: rangeFor(member),
     });
   }
+}
+
+function pushReturnedObjectProperties(body: ts.Block, ctx: Context, ownerChain: string[]) {
+  const visit = (node: ts.Node) => {
+    if (ts.isFunctionLike(node) && node !== body.parent) return;
+    if (ts.isReturnStatement(node)) {
+      const expression = node.expression ? unwrap(node.expression) : undefined;
+      if (expression && ts.isObjectLiteralExpression(expression)) {
+        for (const property of expression.properties) {
+          if (ts.isMethodDeclaration(property)) pushMember(property, ctx, ownerChain, 'object_method', getPropertyNameText(property.name), true);
+          else if (ts.isPropertyAssignment(property)) {
+            const propName = getPropertyNameText(property.name);
+            if (propName) pushMember(property, ctx, ownerChain, 'object_property', propName, Boolean(property.initializer));
+          } else if (ts.isShorthandPropertyAssignment(property)) {
+            pushMember(property, ctx, ownerChain, 'object_property', property.name.text, true);
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(body, visit);
 }
 
 function pushModule(node: ts.ModuleDeclaration, ctx: Context) {

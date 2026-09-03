@@ -235,6 +235,42 @@ describe('findSymbol', () => {
     expect(results[0].symbol).toBe('serviceA');
   });
 
+  it('matches directory globs relative to the searched path and workspace root', async () => {
+    await mkdir(join(tmpDir, 'front/app/routes'), { recursive: true });
+    await mkdir(join(tmpDir, 'front/app/components'), { recursive: true });
+    await writeTestFile('front/app/routes/index.tsx', `export function loader() { return null; }\n`);
+    await writeTestFile('front/app/components/Widget.tsx', `export function loader() { return null; }\n`);
+
+    const results = await findSymbol(tmpDir, {
+      path: 'front',
+      symbol: 'loader',
+      language: 'ts',
+      glob: 'app/routes/**/*.tsx',
+    });
+
+    expect(results.map((result) => result.file.replace(`${tmpDir}/`, ''))).toEqual(['front/app/routes/index.tsx']);
+  });
+
+  it('indexes properties from returned object literals under the owning function', async () => {
+    await writeTestFile('returned-object.mjs', `export function buildSheetData() {\n  return {\n    sheet: 'A',\n    data: [],\n    columns: [],\n    stickyRowsCount: 3,\n    autoFilterRef: 'A3:C10',\n  };\n}\n`);
+
+    const results = await findSymbol(tmpDir, {
+      path: 'returned-object.mjs',
+      symbol: '',
+      language: 'js',
+      search_mode: 'contains',
+      declaration_kind: 'object_property',
+    });
+
+    expect(results.map((result) => `${result.owner}.${result.symbol}`).sort()).toEqual([
+      'buildSheetData.autoFilterRef',
+      'buildSheetData.columns',
+      'buildSheetData.data',
+      'buildSheetData.sheet',
+      'buildSheetData.stickyRowsCount',
+    ]);
+  });
+
   it('supports prefix search mode', async () => {
     const file = await writeTestFile(
       'prefix.ts',

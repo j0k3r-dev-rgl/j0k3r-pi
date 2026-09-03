@@ -67,13 +67,19 @@ export function detectLanguage(filePath: string, explicit: SupportedLanguage): E
 
 async function collectSupportedFiles(dir: string, workspaceRoot: string, glob?: string, language: SupportedLanguage = 'auto'): Promise<string[]> {
   const files: string[] = [];
+  const normalizedWorkspaceRoot = workspaceRoot.replace(/\\/g, '/');
+  const normalizedSearchRoot = dir.replace(/\\/g, '/');
   await walkWorkspaceSourceFiles(dir, async (fullPath) => {
     if (!matchesLanguage(fullPath, language)) return;
-    const relative = fullPath.replace(/\\/g, '/').startsWith(workspaceRoot.replace(/\\/g, '/'))
-      ? fullPath.replace(/\\/g, '/').slice(workspaceRoot.replace(/\\/g, '/').length + 1)
-      : fullPath.replace(/\\/g, '/');
-    const base = relative.split('/').pop() ?? relative;
-    if (glob && !minimatch(relative, glob) && !minimatch(base, glob)) return;
+    const normalizedFile = fullPath.replace(/\\/g, '/');
+    const workspaceRelative = normalizedFile.startsWith(normalizedWorkspaceRoot)
+      ? normalizedFile.slice(normalizedWorkspaceRoot.length + 1)
+      : normalizedFile;
+    const searchRootRelative = normalizedFile.startsWith(normalizedSearchRoot)
+      ? normalizedFile.slice(normalizedSearchRoot.length + 1)
+      : workspaceRelative;
+    const base = workspaceRelative.split('/').pop() ?? workspaceRelative;
+    if (glob && !minimatch(workspaceRelative, glob) && !minimatch(searchRootRelative, glob) && !minimatch(base, glob)) return;
     files.push(fullPath);
   });
   return files.sort((a, b) => a.localeCompare(b));

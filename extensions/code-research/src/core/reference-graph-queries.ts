@@ -40,7 +40,9 @@ export async function queryReferencesFromGraph(options: {
     if (input.kind && node.symbolKind !== input.kind) return false;
     return matchesTargetFile(node.file, relativeTarget, targetIsDirectory);
   });
-  if (targets.length === 0) return [];
+  if (targets.length === 0) {
+    return collectExternalCallReferences(cwd, input, allEdges, new Map<string, GraphNode>(allNodes.map((node) => [node.id, node])));
+  }
   const target = targets[0];
   const targetIds = new Set(targets.map((node) => node.id));
   const targetRelationshipIds = new Set(targets.map((node) => node.relationshipId).filter((value): value is string => Boolean(value)));
@@ -113,6 +115,47 @@ export async function queryReferencesFromGraph(options: {
     });
   }
 
+  return dedupeReferences(references);
+}
+
+async function collectExternalCallReferences(
+  cwd: string,
+  input: FindReferencesInput,
+  edges: GraphEdge[],
+  nodeById: Map<string, GraphNode>
+): Promise<ReferenceLocation[]> {
+  const requestedKinds = new Set(input.reference_kinds ?? []);
+  if (requestedKinds.size > 0 && !requestedKinds.has('call')) return [];
+  const references: ReferenceLocation[] = [];
+  for (const edge of edges) {
+    if (edge.kind !== 'calls' || edge.targetStatus !== 'external' || edge.externalName !== input.symbol) continue;
+    const fromNode = nodeById.get(edge.from);
+    if (!fromNode || (fromNode.kind !== 'symbol' && fromNode.kind !== 'file')) continue;
+    const sourceFile = resolve(cwd, fromNode.kind === 'file' ? fromNode.path : fromNode.file);
+    const line = edge.callsite?.line ?? edge.occurrenceRange?.startLine ?? (fromNode.kind === 'symbol' ? fromNode.range.startLine : 1);
+    const column = edge.callsite?.column ?? edge.occurrenceRange?.startColumn ?? (fromNode.kind === 'symbol' ? fromNode.range.startColumn : 0);
+    const calledAs = edge.calledAs ?? await getCallExpressionText(new Map(), sourceFile, line, column, input.symbol).catch(() => undefined);
+    references.push({
+      file: sourceFile,
+      line,
+      column,
+      end_line: edge.occurrenceRange?.endLine,
+      end_column: edge.occurrenceRange?.endColumn,
+      symbol: input.symbol,
+      kind: input.kind === 'function' ? 'function' : 'method',
+      context_symbol: fromNode.kind === 'symbol' ? fromNode.name : undefined,
+      context_kind: fromNode.kind === 'symbol' ? fromNode.symbolKind : undefined,
+      context_class: fromNode.kind === 'symbol' ? fromNode.owner : undefined,
+      owner_kind: fromNode.kind === 'symbol' ? fromNode.ownerKind ?? 'unknown' : 'unknown',
+      reference_kind: 'call',
+      called_as: calledAs,
+      receiver_name: edge.callsite?.receiverName,
+      receiver_type: edge.callsite?.receiverType,
+      is_application: false,
+      source: edge.externalSource ?? 'library',
+      reason: edge.reason,
+    });
+  }
   return dedupeReferences(references);
 }
 

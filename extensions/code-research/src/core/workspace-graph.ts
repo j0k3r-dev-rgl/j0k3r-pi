@@ -706,6 +706,7 @@ function buildTypeScriptGraph(
   const callableSymbolIds = new Map<string, string>();
   const typeScriptClassSymbolIds = new Map<string, string>();
   const typeScriptMemberSymbolIds = new Map<string, string>();
+  const typeScriptObjectPropertySymbolIdsByName = new Map<string, string[]>();
   const typeScriptTypeAliasSymbolIds = new Map<string, string>();
   const typeScriptValueSymbolIds = new Map<string, string>();
   const subprojectNodeId = createSubprojectNodeId(subprojectId);
@@ -733,6 +734,11 @@ function buildTypeScriptGraph(
       const symbolId = createSymbolNodeId(subprojectId, relFile, record.owner, record.name, record.declarationRange.startLine, record.declarationRange.startColumn);
       if (record.owner) {
         typeScriptMemberSymbolIds.set(typeScriptMemberSymbolKey(record.owner, record.name), symbolId);
+        if (record.declarationKind === 'object_property') {
+          const current = typeScriptObjectPropertySymbolIdsByName.get(record.name) ?? [];
+          current.push(symbolId);
+          typeScriptObjectPropertySymbolIdsByName.set(record.name, current);
+        }
       }
       if (isCallableGraphDeclaration(record.declarationKind)) {
         const callableKey = typeScriptCallableSymbolKey(file.file, record.owner, record.name);
@@ -796,11 +802,11 @@ function buildTypeScriptGraph(
     edges.push(edge);
   }
 
-  for (const edge of collectTypeScriptMemberReadEdges(projectRoot, index, typeScriptMemberSymbolIds, callableSymbolIds, fileNodeIds)) {
+  for (const edge of collectTypeScriptMemberReadEdges(projectRoot, index, typeScriptMemberSymbolIds, typeScriptObjectPropertySymbolIdsByName, callableSymbolIds, fileNodeIds)) {
     edges.push(edge);
   }
 
-  for (const edge of collectTypeScriptPropertyAliasCallEdges(projectRoot, index, callableSymbolIds, fileNodeIds)) {
+  for (const edge of collectTypeScriptPropertyAliasCallEdges(projectRoot, index, callableSymbolIds, typeScriptClassSymbolIds, fileNodeIds)) {
     edges.push(edge);
   }
 
@@ -984,19 +990,21 @@ function collectTypeScriptSymbolReferenceEdges(
       if (target.kind === 'function' || target.kind === 'value') {
         for (const match of findAllTypeScriptRegexPositions(file.source, new RegExp(`\\b${escapeRegExp(localName)}\\b`, 'g'))) {
           if (isTypeScriptImportLine(file.source, match.line) || isTypeScriptDeclarationLine(file.source, localName, match.line)) continue;
-          if (target.kind === 'function' && (isTypeScriptCallAt(file.source, match.line, match.column, localName) || isTypeScriptJsxTagAt(file.source, match.line, match.column))) continue;
+          if (target.kind === 'function' && isTypeScriptJsxTagAt(file.source, match.line, match.column)) continue;
+          const isFunctionCall = target.kind === 'function' && isTypeScriptCallAt(file.source, match.line, match.column, localName);
           const fromId = findTypeScriptContextCallableSymbolId(projectRoot, index, callableSymbolIds, file.file, match.line) ?? fileNodeId;
           edges.push({
-            id: createEdgeId('reads', fromId, target.id, `typescript_identifier_read:${localName}:${match.line}:${match.column}`),
-            kind: 'reads',
+            id: createEdgeId(isFunctionCall ? 'calls' : 'reads', fromId, target.id, `typescript_identifier_${isFunctionCall ? 'call' : 'read'}:${localName}:${match.line}:${match.column}`),
+            kind: isFunctionCall ? 'calls' : 'reads',
             from: fromId,
             to: target.id,
             occurrenceRange: { startLine: match.line, startColumn: match.column, endLine: match.line, endColumn: match.column + localName.length },
             callsite: { line: match.line, column: match.column },
-            calledAs: localName,
+            calledAs: isFunctionCall ? extractTypeScriptLineCallText(file.source, match.line, match.column) : localName,
             targetStatus: 'resolved',
             resolution: 'exact',
-            reason: target.kind === 'function' ? 'typescript_function_value_read' : 'typescript_value_read',
+            external: false,
+            reason: isFunctionCall ? 'typescript_function_identifier_call' : target.kind === 'function' ? 'typescript_function_value_read' : 'typescript_value_read',
           });
         }
       }
@@ -1027,6 +1035,7 @@ function collectTypeScriptMemberReadEdges(
   projectRoot: string,
   index: TypeScriptProjectIndex,
   memberSymbolIds: Map<string, string>,
+  objectPropertySymbolIdsByName: Map<string, string[]>,
   callableSymbolIds: Map<string, string>,
   fileNodeIds: Map<string, string>
 ): GraphEdge[] {
@@ -1055,6 +1064,26 @@ function collectTypeScriptMemberReadEdges(
         });
       }
     }
+    for (const [memberName, targetIds] of objectPropertySymbolIdsByName) {
+      if (targetIds.length !== 1) continue;
+      const targetId = targetIds[0];
+      for (const match of findAllTypeScriptRegexPositions(file.source, new RegExp(`\\b[A-Za-z_$][\\w$]*\\s*\\.\\s*${escapeRegExp(memberName)}\\b`, 'g'))) {
+        if (isTypeScriptDeclarationLine(file.source, memberName, match.line)) continue;
+        const fromId = findTypeScriptContextCallableSymbolId(projectRoot, index, callableSymbolIds, file.file, match.line) ?? fileNodeId;
+        edges.push({
+          id: createEdgeId('reads', fromId, targetId, `typescript_object_property_name_read:${memberName}:${match.line}:${match.column}`),
+          kind: 'reads',
+          from: fromId,
+          to: targetId,
+          occurrenceRange: { startLine: match.line, startColumn: match.column, endLine: match.line, endColumn: match.column + match.text.length },
+          callsite: { line: match.line, column: match.column },
+          calledAs: match.text.replace(/\s+/g, ''),
+          targetStatus: 'resolved',
+          resolution: 'heuristic',
+          reason: 'typescript_object_property_name_read',
+        });
+      }
+    }
   }
   return dedupeGraphEdges(edges);
 }
@@ -1063,24 +1092,32 @@ function collectTypeScriptPropertyAliasCallEdges(
   projectRoot: string,
   index: TypeScriptProjectIndex,
   callableSymbolIds: Map<string, string>,
+  classSymbolIds: Map<string, string>,
   fileNodeIds: Map<string, string>
 ): GraphEdge[] {
-  const importedFunctionTargets = new Map<string, Map<string, string>>();
+  const importedTargetsByFile = new Map<string, Map<string, { id: string; kind: 'function' | 'class' }>>();
   for (const file of index.files.values()) {
-    const targets = new Map<string, string>();
+    const targets = new Map<string, { id: string; kind: 'function' | 'class' }>();
     for (const binding of file.imports.values()) {
       if (binding.kind === 'namespace') continue;
       const callable = resolveImportedCallableForGraph(index, file.file, binding);
-      if (!callable) continue;
-      const targetId = callableSymbolIds.get(typeScriptCallableSymbolKey(callable.file, callable.ownerName, callable.symbol));
-      if (targetId) targets.set(binding.localName, targetId);
+      if (callable) {
+        const targetId = callableSymbolIds.get(typeScriptCallableSymbolKey(callable.file, callable.ownerName, callable.symbol));
+        if (targetId) targets.set(binding.localName, { id: targetId, kind: 'function' });
+      }
+      const klass = resolveImportedClassForGraph(index, file.file, binding);
+      if (klass) {
+        const targetId = classSymbolIds.get(typeScriptExportedSymbolKey(klass.file, klass.className));
+        if (targetId) targets.set(binding.localName, { id: targetId, kind: 'class' });
+      }
     }
-    importedFunctionTargets.set(file.file, targets);
+    importedTargetsByFile.set(file.file, targets);
   }
 
-  const propertyAliases = new Map<string, string>();
+  const propertyAliases = new Map<string, { id: string; kind: 'function' | 'class' }>();
+  const edges: GraphEdge[] = [];
   for (const file of index.files.values()) {
-    const targets = importedFunctionTargets.get(file.file) ?? new Map<string, string>();
+    const targets = importedTargetsByFile.get(file.file) ?? new Map<string, { id: string; kind: 'function' | 'class' }>();
     const objectPattern = /\b(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*:\s*([A-Za-z_$][\w$]*)\b\s*=\s*\{([\s\S]*?)\n\s*\}/g;
     let objectMatch: RegExpExecArray | null;
     while ((objectMatch = objectPattern.exec(file.source)) !== null) {
@@ -1093,14 +1130,32 @@ function collectTypeScriptPropertyAliasCallEdges(
         const propertyName = propertyMatch[1];
         const valueName = propertyMatch[2];
         if (!propertyName || !valueName) continue;
-        const targetId = targets.get(valueName);
-        if (targetId) propertyAliases.set(`${typeName}\u0000${propertyName}`, targetId);
+        const target = targets.get(valueName);
+        if (target) {
+          propertyAliases.set(`${typeName}\u0000${propertyName}`, target);
+          const valueOffset = objectMatch.index + (objectMatch[0].indexOf(body) >= 0 ? objectMatch[0].indexOf(body) : 0) + propertyMatch.index + propertyMatch[0].lastIndexOf(valueName);
+          const position = offsetToLineColumn(file.source, valueOffset);
+          const fileNodeId = fileNodeIds.get(toProjectRelativePath(projectRoot, file.file));
+          if (fileNodeId) {
+            edges.push({
+              id: createEdgeId('reads', fileNodeId, target.id, `typescript_property_alias_assignment:${propertyName}:${position.line}:${position.column}`),
+              kind: 'reads',
+              from: fileNodeId,
+              to: target.id,
+              occurrenceRange: { startLine: position.line, startColumn: position.column, endLine: position.line, endColumn: position.column + valueName.length },
+              callsite: { line: position.line, column: position.column },
+              calledAs: valueName,
+              targetStatus: 'resolved',
+              resolution: 'exact',
+              reason: 'typescript_property_alias_assignment',
+            });
+          }
+        }
       }
     }
   }
-  if (propertyAliases.size === 0) return [];
+  if (propertyAliases.size === 0) return edges;
 
-  const edges: GraphEdge[] = [];
   for (const file of index.files.values()) {
     const relFile = toProjectRelativePath(projectRoot, file.file);
     const fileNodeId = fileNodeIds.get(relFile);
@@ -1108,22 +1163,26 @@ function collectTypeScriptPropertyAliasCallEdges(
     const typedReceivers = collectTypeScriptReceiverTypesFromSource(file.source);
     for (const [receiver, typeName] of typedReceivers) {
       const receiverPattern = receiver.includes('.') ? escapeRegExp(receiver) : `(?<![.\\w$])${escapeRegExp(receiver)}`;
-      for (const [key, targetId] of propertyAliases) {
+      for (const [key, target] of propertyAliases) {
         const [aliasType, propertyName] = key.split('\u0000');
         if (aliasType !== typeName || !propertyName) continue;
-        for (const match of findAllTypeScriptRegexPositions(file.source, new RegExp(`${receiverPattern}\\s*\\.\\s*${escapeRegExp(propertyName)}\\s*\\(`, 'g'))) {
+        const expressionPattern = target.kind === 'class'
+          ? `\\bnew\\s+${receiverPattern}\\s*\\.\\s*${escapeRegExp(propertyName)}\\s*\\(`
+          : `${receiverPattern}\\s*\\.\\s*${escapeRegExp(propertyName)}\\s*\\(`;
+        for (const match of findAllTypeScriptRegexPositions(file.source, new RegExp(expressionPattern, 'g'))) {
           const fromId = findTypeScriptContextCallableSymbolId(projectRoot, index, callableSymbolIds, file.file, match.line) ?? fileNodeId;
+          const edgeKind = target.kind === 'class' ? 'reads' : 'calls';
           edges.push({
-            id: createEdgeId('calls', fromId, targetId, `typescript_property_alias:${receiver}:${propertyName}:${match.line}:${match.column}`),
-            kind: 'calls',
+            id: createEdgeId(edgeKind, fromId, target.id, `typescript_property_alias:${receiver}:${propertyName}:${match.line}:${match.column}`),
+            kind: edgeKind,
             from: fromId,
-            to: targetId,
+            to: target.id,
             occurrenceRange: pointOccurrenceRange(match.line, match.column),
             callsite: { line: match.line, column: match.column, receiverName: receiver, receiverType: typeName },
             calledAs: extractTypeScriptLineCallText(file.source, match.line, match.column),
             targetStatus: 'resolved',
             resolution: 'heuristic',
-            reason: 'typescript_property_alias_call',
+            reason: target.kind === 'class' ? 'typescript_property_alias_instantiate' : 'typescript_property_alias_call',
           });
         }
       }
@@ -1137,6 +1196,13 @@ function resolveImportedCallableForGraph(index: TypeScriptProjectIndex, currentF
   const targetFile = resolveTypeScriptImportCandidates(currentFile, binding.source, index.projectConfig).find((candidate) => index.files.has(candidate));
   if (!targetFile) return undefined;
   return resolveExportedCallable(index, targetFile, binding.importedName);
+}
+
+function resolveImportedClassForGraph(index: TypeScriptProjectIndex, currentFile: string, binding: TsImportBinding): TsIndexedClass | undefined {
+  if (binding.kind === 'namespace') return undefined;
+  const targetFile = resolveTypeScriptImportCandidates(currentFile, binding.source, index.projectConfig).find((candidate) => index.files.has(candidate));
+  if (!targetFile) return undefined;
+  return index.classes.find((item) => item.file === targetFile && item.exportedName === binding.importedName);
 }
 
 function collectTypeScriptReceiverTypesFromSource(source: string): Map<string, string> {
@@ -1323,7 +1389,7 @@ function isTypeScriptDeclarationLine(source: string, name: string, line: number)
 
 function isTypeScriptCallAt(source: string, line: number, column: number, name: string): boolean {
   const lineText = source.split('\n')[line - 1] ?? '';
-  return /^\s*\(/.test(lineText.slice(column + name.length));
+  return /^\s*(?:<[^>\n]+>\s*)?\(/.test(lineText.slice(column + name.length));
 }
 
 function isTypeScriptJsxTagAt(source: string, line: number, column: number): boolean {
