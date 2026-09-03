@@ -1109,6 +1109,12 @@ function extractFirstGenericType(typeText?: string): string | undefined {
 
 function unwrapMockitoReceiverInvocation(expression: string): string | undefined {
   const trimmed = expression.trim();
+  const trailingWhen = trimmed.match(/\.when\s*\(([\s\S]*)\)$/);
+  if (trailingWhen) {
+    const args = splitTopLevelArguments(trailingWhen[1] ?? '');
+    if (args.length === 1) return args[0].trim();
+  }
+
   const match = trimmed.match(/^(?:[A-Za-z_$][\w$]*\.)?([A-Za-z_$][\w$]*)\s*\(([\s\S]*)\)$/);
   if (!match || (match[1] !== 'verify' && match[1] !== 'when')) return undefined;
   const args = splitTopLevelArguments(match[2]);

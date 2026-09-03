@@ -119,7 +119,13 @@ describe('reverse_function_call_tree', () => {
     expect(execution.status).toBe('ok');
     if (execution.status !== 'ok') return;
     expect(execution.result.root.symbol).toBe('main');
-    expect(execution.result.root.callers ?? []).toEqual([]);
+    expect(execution.result.root.callers?.[0]).toMatchObject({
+      file: 'src/main.mjs',
+      symbol: '<top-level>',
+      kind: 'function',
+      call_line: 5,
+      call_column: 0,
+    });
   });
 
   it('returns JavaScript callers recursively with callers arrays and multiple incoming branches across higher levels', async () => {

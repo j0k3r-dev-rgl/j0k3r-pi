@@ -109,15 +109,40 @@ function buildReverseTree(
   const callers: CallTreeNode[] = [];
   for (const edge of callerEdges) {
     const caller = nodeById.get(edge.from);
-    if (caller?.kind !== 'symbol') continue;
-    const callerNode = buildReverseTree(caller.id, nodeById, edges, maxDepth, depth + 1, visited);
-    if (!callerNode) continue;
-    callerNode.receiver_name = edge.callsite?.receiverName;
-    callerNode.receiver_type = edge.callsite?.receiverType;
-    callerNode.call_line = edge.callsite?.line;
-    callerNode.call_column = edge.callsite?.column;
-    callerNode.reason = edge.reason;
-    callers.push(callerNode);
+    if (caller?.kind === 'symbol') {
+      const callerNode = buildReverseTree(caller.id, nodeById, edges, maxDepth, depth + 1, visited);
+      if (!callerNode) continue;
+      callerNode.receiver_name = edge.callsite?.receiverName;
+      callerNode.receiver_type = edge.callsite?.receiverType;
+      callerNode.call_line = edge.callsite?.line;
+      callerNode.call_column = edge.callsite?.column;
+      callerNode.reason = edge.reason;
+      callers.push(callerNode);
+      continue;
+    }
+    if (caller?.kind === 'file') {
+      callers.push({
+        file: caller.path,
+        symbol: '<top-level>',
+        kind: 'function',
+        node_type: 'application',
+        owner_kind: 'unknown',
+        line: edge.occurrenceRange?.startLine ?? edge.callsite?.line ?? 1,
+        column: edge.occurrenceRange?.startColumn ?? edge.callsite?.column ?? 0,
+        start_line: edge.occurrenceRange?.startLine ?? edge.callsite?.line ?? 1,
+        start_column: edge.occurrenceRange?.startColumn ?? edge.callsite?.column ?? 0,
+        end_line: edge.occurrenceRange?.endLine ?? edge.callsite?.line ?? 1,
+        end_column: edge.occurrenceRange?.endColumn ?? edge.callsite?.column ?? 0,
+        is_application: true,
+        is_external: false,
+        source: 'application',
+        call_line: edge.callsite?.line,
+        call_column: edge.callsite?.column,
+        receiver_name: edge.callsite?.receiverName,
+        receiver_type: edge.callsite?.receiverType,
+        reason: edge.reason,
+      });
+    }
   }
 
   if (callers.length > 0) result.callers = dedupeCallTreeNodes(callers);

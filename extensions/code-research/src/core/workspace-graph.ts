@@ -707,6 +707,7 @@ function buildTypeScriptGraph(
   const typeScriptClassSymbolIds = new Map<string, string>();
   const typeScriptMemberSymbolIds = new Map<string, string>();
   const typeScriptTypeAliasSymbolIds = new Map<string, string>();
+  const typeScriptValueSymbolIds = new Map<string, string>();
   const subprojectNodeId = createSubprojectNodeId(subprojectId);
   const completeFiles: string[] = [];
   const skippedFiles: Array<{ file: string; reason: 'parse_error' | 'input_unreadable' | 'unsupported_language' | 'unsupported_source' }> = [];
@@ -742,6 +743,9 @@ function buildTypeScriptGraph(
       }
       if (record.declarationKind === 'type_alias' && !record.owner) {
         typeScriptTypeAliasSymbolIds.set(typeScriptExportedSymbolKey(file.file, record.name), symbolId);
+      }
+      if (!record.owner && record.coarseKind === 'variable' && record.declarationKind !== 'type_alias') {
+        typeScriptValueSymbolIds.set(typeScriptExportedSymbolKey(file.file, record.exportedName ?? record.name), symbolId);
       }
       nodes.push({
         id: symbolId,
@@ -788,7 +792,11 @@ function buildTypeScriptGraph(
     edges.push(edge);
   }
 
-  for (const edge of collectTypeScriptSymbolReferenceEdges(projectRoot, index, callableSymbolIds, typeScriptClassSymbolIds, typeScriptTypeAliasSymbolIds, fileNodeIds)) {
+  for (const edge of collectTypeScriptSymbolReferenceEdges(projectRoot, index, callableSymbolIds, typeScriptClassSymbolIds, typeScriptTypeAliasSymbolIds, typeScriptValueSymbolIds, fileNodeIds)) {
+    edges.push(edge);
+  }
+
+  for (const edge of collectTypeScriptMemberReadEdges(projectRoot, index, typeScriptMemberSymbolIds, callableSymbolIds, fileNodeIds)) {
     edges.push(edge);
   }
 
@@ -887,6 +895,7 @@ function collectTypeScriptSymbolReferenceEdges(
   callableSymbolIds: Map<string, string>,
   classSymbolIds: Map<string, string>,
   typeAliasSymbolIds: Map<string, string>,
+  valueSymbolIds: Map<string, string>,
   fileNodeIds: Map<string, string>
 ): GraphEdge[] {
   const edges: GraphEdge[] = [];
@@ -896,19 +905,23 @@ function collectTypeScriptSymbolReferenceEdges(
     const fileNodeId = fileNodeIds.get(relFile);
     if (!fileNodeId) continue;
 
-    const localTargets = new Map<string, { id: string; kind: 'function' | 'class' | 'interface' | 'type_alias'; targetName: string; importSource?: string }>();
-    for (const callable of index.callables.filter((item) => item.file === file.file && item.exportedName && !item.ownerName)) {
+    const localTargets = new Map<string, { id: string; kind: 'function' | 'class' | 'interface' | 'type_alias' | 'value'; targetName: string; importSource?: string }>();
+    for (const callable of index.callables.filter((item) => item.file === file.file && !item.ownerName)) {
       const id = callableSymbolIds.get(typeScriptCallableSymbolKey(callable.file, callable.ownerName, callable.symbol));
       if (id) localTargets.set(callable.symbol, { id, kind: 'function', targetName: callable.symbol });
     }
-    for (const klass of index.classes.filter((item) => item.file === file.file && item.exportedName)) {
+    for (const klass of index.classes.filter((item) => item.file === file.file)) {
       const id = classSymbolIds.get(typeScriptExportedSymbolKey(klass.file, klass.className));
       if (!id) continue;
       localTargets.set(klass.className, { id, kind: isTypeScriptInterfaceNode(klass.node) ? 'interface' : 'class', targetName: klass.className });
     }
+    for (const [key, id] of valueSymbolIds) {
+      const [targetFile, targetName] = key.split('\u0000');
+      if (targetFile === file.file && targetName) localTargets.set(targetName, { id, kind: 'value', targetName });
+    }
 
     for (const binding of file.imports.values()) {
-      const resolved = resolveTypeScriptImportedGraphSymbol(index, binding, file.file, callableSymbolIds, classSymbolIds, typeAliasSymbolIds);
+      const resolved = resolveTypeScriptImportedGraphSymbol(index, binding, file.file, callableSymbolIds, classSymbolIds, typeAliasSymbolIds, valueSymbolIds);
       if (!resolved) continue;
       localTargets.set(binding.localName, { ...resolved, importSource: binding.source });
       const importRange = findTypeScriptImportBindingRange(file.source, binding.localName);
@@ -968,6 +981,26 @@ function collectTypeScriptSymbolReferenceEdges(
         }
       }
 
+      if (target.kind === 'function' || target.kind === 'value') {
+        for (const match of findAllTypeScriptRegexPositions(file.source, new RegExp(`\\b${escapeRegExp(localName)}\\b`, 'g'))) {
+          if (isTypeScriptImportLine(file.source, match.line) || isTypeScriptDeclarationLine(file.source, localName, match.line)) continue;
+          if (target.kind === 'function' && (isTypeScriptCallAt(file.source, match.line, match.column, localName) || isTypeScriptJsxTagAt(file.source, match.line, match.column))) continue;
+          const fromId = findTypeScriptContextCallableSymbolId(projectRoot, index, callableSymbolIds, file.file, match.line) ?? fileNodeId;
+          edges.push({
+            id: createEdgeId('reads', fromId, target.id, `typescript_identifier_read:${localName}:${match.line}:${match.column}`),
+            kind: 'reads',
+            from: fromId,
+            to: target.id,
+            occurrenceRange: { startLine: match.line, startColumn: match.column, endLine: match.line, endColumn: match.column + localName.length },
+            callsite: { line: match.line, column: match.column },
+            calledAs: localName,
+            targetStatus: 'resolved',
+            resolution: 'exact',
+            reason: target.kind === 'function' ? 'typescript_function_value_read' : 'typescript_value_read',
+          });
+        }
+      }
+
       if (target.kind === 'interface') {
         for (const match of findAllTypeScriptRegexPositions(file.source, new RegExp(`\\bimplements\\b[^\\n{]*\\b${escapeRegExp(localName)}(?:\\b|\\s*<)`, 'g'))) {
           const fromId = findTypeScriptClassSymbolIdForLine(projectRoot, index, classSymbolIds, file.file, match.line) ?? fileNodeId;
@@ -987,6 +1020,42 @@ function collectTypeScriptSymbolReferenceEdges(
     }
   }
 
+  return dedupeGraphEdges(edges);
+}
+
+function collectTypeScriptMemberReadEdges(
+  projectRoot: string,
+  index: TypeScriptProjectIndex,
+  memberSymbolIds: Map<string, string>,
+  callableSymbolIds: Map<string, string>,
+  fileNodeIds: Map<string, string>
+): GraphEdge[] {
+  const edges: GraphEdge[] = [];
+  for (const file of index.files.values()) {
+    const relFile = toProjectRelativePath(projectRoot, file.file);
+    const fileNodeId = fileNodeIds.get(relFile);
+    if (!fileNodeId) continue;
+    for (const [key, targetId] of memberSymbolIds) {
+      const [owner, memberName] = key.split('\u0000');
+      if (!owner || !memberName) continue;
+      for (const match of findAllTypeScriptRegexPositions(file.source, new RegExp(`\\b${escapeRegExp(owner)}\\s*\\.\\s*${escapeRegExp(memberName)}\\b`, 'g'))) {
+        if (isTypeScriptDeclarationLine(file.source, memberName, match.line)) continue;
+        const fromId = findTypeScriptContextCallableSymbolId(projectRoot, index, callableSymbolIds, file.file, match.line) ?? fileNodeId;
+        edges.push({
+          id: createEdgeId('reads', fromId, targetId, `typescript_member_read:${owner}.${memberName}:${match.line}:${match.column}`),
+          kind: 'reads',
+          from: fromId,
+          to: targetId,
+          occurrenceRange: { startLine: match.line, startColumn: match.column, endLine: match.line, endColumn: match.column + match.text.length },
+          callsite: { line: match.line, column: match.column, receiverName: owner },
+          calledAs: match.text.replace(/\s+/g, ''),
+          targetStatus: 'resolved',
+          resolution: 'exact',
+          reason: 'typescript_member_read',
+        });
+      }
+    }
+  }
   return dedupeGraphEdges(edges);
 }
 
@@ -1166,8 +1235,9 @@ function resolveTypeScriptImportedGraphSymbol(
   currentFile: string,
   callableSymbolIds: Map<string, string>,
   classSymbolIds: Map<string, string>,
-  typeAliasSymbolIds: Map<string, string>
-): { id: string; kind: 'function' | 'class' | 'interface' | 'type_alias'; targetName: string } | undefined {
+  typeAliasSymbolIds: Map<string, string>,
+  valueSymbolIds: Map<string, string>
+): { id: string; kind: 'function' | 'class' | 'interface' | 'type_alias' | 'value'; targetName: string } | undefined {
   if (binding.kind === 'namespace') return undefined;
   const targetFile = resolveTypeScriptImportCandidates(currentFile, binding.source, index.projectConfig).find((candidate) => index.files.has(candidate));
   if (!targetFile) return undefined;
@@ -1186,6 +1256,9 @@ function resolveTypeScriptImportedGraphSymbol(
 
   const typeAliasId = typeAliasSymbolIds.get(typeScriptExportedSymbolKey(targetFile, binding.importedName));
   if (typeAliasId) return { id: typeAliasId, kind: 'type_alias', targetName: binding.importedName };
+
+  const valueId = valueSymbolIds.get(typeScriptExportedSymbolKey(targetFile, binding.importedName));
+  if (valueId) return { id: valueId, kind: 'value', targetName: binding.importedName };
   return undefined;
 }
 
@@ -1241,6 +1314,21 @@ function isTypeScriptImportLine(source: string, line: number): boolean {
 
 function isTypeScriptFunctionDeclarationLine(source: string, name: string, line: number): boolean {
   return new RegExp(`\\bfunction\\s+${escapeRegExp(name)}\\s*\\(`).test(source.split('\n')[line - 1] ?? '');
+}
+
+function isTypeScriptDeclarationLine(source: string, name: string, line: number): boolean {
+  const lineText = source.split('\n')[line - 1] ?? '';
+  return new RegExp(`\\b(?:export\\s+)?(?:const|let|var|function|class|interface|type)\\s+${escapeRegExp(name)}\\b`).test(lineText);
+}
+
+function isTypeScriptCallAt(source: string, line: number, column: number, name: string): boolean {
+  const lineText = source.split('\n')[line - 1] ?? '';
+  return /^\s*\(/.test(lineText.slice(column + name.length));
+}
+
+function isTypeScriptJsxTagAt(source: string, line: number, column: number): boolean {
+  const lineText = source.split('\n')[line - 1] ?? '';
+  return /<\/?\s*$/.test(lineText.slice(0, column));
 }
 
 function findAllTypeScriptRegexPositions(source: string, pattern: RegExp): Array<{ line: number; column: number; text: string }> {

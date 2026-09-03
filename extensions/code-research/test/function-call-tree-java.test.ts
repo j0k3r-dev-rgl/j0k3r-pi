@@ -377,6 +377,8 @@ describe('function_call_tree Java', () => {
     verify(service).method();
     verify(service, never()).method();
     verify(service, times(1)).method();
+    doAnswer(invocation -> null).when(service).method();
+    doThrow(new RuntimeException()).doNothing().when(service).method();
   }
 
   public void assertion() {
@@ -407,7 +409,10 @@ class AppService {
       'verify(service).method()',
       'verify(service, never()).method()',
       'verify(service, times(1)).method()',
+      'doAnswer(invocation -> null).when(service).method()',
+      'doThrow(new RuntimeException()).doNothing().when(service).method()',
     ]);
+    expect(mockitoTree.root.children?.filter((child) => child.symbol === 'method').every((child) => child.is_application)).toBe(true);
 
     const assertionTree = buildCallTree({
       rootFile: assertion!.file,

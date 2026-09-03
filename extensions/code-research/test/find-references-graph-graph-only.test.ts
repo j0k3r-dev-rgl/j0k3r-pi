@@ -130,6 +130,71 @@ describe('findReferences graph-only', () => {
     expect(results.every((item) => item.file.endsWith('consumer.ts'))).toBe(true);
   });
 
+  it('uses graph-backed TS/JS value, member, and callback-passed function read references', async () => {
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/constants.ts': `export const CROP_PRESETS = { square: 1, wide: 2 } as const;\n`,
+      'src/status.mjs': `export const STATUS = { SIN_LOCATION: 'sin-location', OK: 'ok' };\nexport const REVIEWABLE_STATUSES = [STATUS.OK];\nexport function buildSheetData(group) { return group; }\nexport function toRingPoints(points) { return points; }\nexport function reconcile(groups, coordinates) {\n  const value = STATUS.SIN_LOCATION;\n  const allowed = REVIEWABLE_STATUSES.includes(value);\n  const rows = groups.map(buildSheetData);\n  const rings = coordinates.map(toRingPoints);\n  return { allowed, rows, rings };\n}\n`,
+      'src/ImageUploader.tsx': `import { CROP_PRESETS } from './constants';\n\nexport function ImageUploader() {\n  const presets = Object.values(CROP_PRESETS);\n  return <button>{CROP_PRESETS.square + presets.length}</button>;\n}\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+
+    const cropRefs = await findReferences(rootDir, {
+      path: 'src/constants.ts',
+      symbol: 'CROP_PRESETS',
+      language: 'ts',
+      kind: 'variable',
+      reference_kinds: ['read'],
+    });
+    expect(cropRefs.map((item) => item.line).sort()).toEqual([4, 5]);
+
+    const statusRefs = await findReferences(rootDir, {
+      path: 'src/status.mjs',
+      symbol: 'STATUS',
+      language: 'js',
+      kind: 'variable',
+      reference_kinds: ['read'],
+    });
+    expect(statusRefs.map((item) => item.line).sort()).toEqual([2, 6]);
+
+    const memberRefs = await findReferences(rootDir, {
+      path: 'src/status.mjs',
+      symbol: 'SIN_LOCATION',
+      language: 'js',
+      kind: 'variable',
+      reference_kinds: ['read'],
+    });
+    expect(memberRefs.map((item) => item.called_as)).toEqual(['STATUS.SIN_LOCATION']);
+
+    const reviewableRefs = await findReferences(rootDir, {
+      path: 'src/status.mjs',
+      symbol: 'REVIEWABLE_STATUSES',
+      language: 'js',
+      kind: 'variable',
+      reference_kinds: ['read'],
+    });
+    expect(reviewableRefs.map((item) => item.line)).toEqual([7]);
+
+    const callbackRefs = await findReferences(rootDir, {
+      path: 'src/status.mjs',
+      symbol: 'buildSheetData',
+      language: 'js',
+      kind: 'function',
+      reference_kinds: ['read'],
+    });
+    expect(callbackRefs.map((item) => item.called_as)).toEqual(['buildSheetData']);
+
+    const ringRefs = await findReferences(rootDir, {
+      path: 'src/status.mjs',
+      symbol: 'toRingPoints',
+      language: 'js',
+      kind: 'function',
+      reference_kinds: ['read'],
+    });
+    expect(ringRefs.map((item) => item.called_as)).toEqual(['toRingPoints']);
+  });
+
   it('uses graph-backed direct call references when requested explicitly', async () => {
     const rootDir = await createProject({
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
@@ -437,6 +502,32 @@ public class Controller implements MongoConfigs {
     });
 
     expect(results).toEqual([]);
+  });
+
+  it('uses graph-backed Java interface method references through implementation relationship ids', async () => {
+    const rootDir = await createProject({
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/main/java/ports/Repository.java': `package ports;\n\npublic interface Repository {\n  void markCoreDeleted(String id);\n}\n`,
+      'src/main/java/app/MongoRepository.java': `package app;\n\nimport ports.Repository;\n\npublic class MongoRepository implements Repository {\n  public void markCoreDeleted(String id) {}\n}\n`,
+      'src/test/java/app/InMemoryRepository.java': `package app;\n\nimport ports.Repository;\n\npublic class InMemoryRepository implements Repository {\n  public void markCoreDeleted(String id) {}\n}\n`,
+      'src/main/java/app/UseCase.java': `package app;\n\nimport ports.Repository;\n\npublic class UseCase {\n  private final Repository repository;\n  public UseCase(Repository repository) { this.repository = repository; }\n  public void run() { repository.markCoreDeleted("review-1"); }\n}\n`,
+      'src/test/java/app/UseCaseTest.java': `package app;\n\nimport static org.mockito.Mockito.doThrow;\nimport ports.Repository;\n\npublic class UseCaseTest {\n  private final Repository repository = null;\n  public void stubs() { doThrow(new RuntimeException()).when(repository).markCoreDeleted("review-1"); }\n}\n`,
+    });
+
+    await buildWorkspaceGraph(rootDir);
+
+    const results = await findReferences(rootDir, {
+      path: 'src/main/java/ports/Repository.java',
+      symbol: 'markCoreDeleted',
+      language: 'java',
+      kind: 'method',
+      reference_kinds: ['call'],
+    });
+
+    expect(results.map((item) => `${item.file.replace(rootDir + '/', '')}:${item.line}`).sort()).toEqual([
+      'src/main/java/app/UseCase.java:8',
+      'src/test/java/app/UseCaseTest.java:8',
+    ]);
   });
 
   it('returns only graph-modeled Java interface relationship references', async () => {
