@@ -55,7 +55,7 @@ export async function detectWorkspaceSubprojects(
     };
   });
 
-  if (!detected.some((candidate) => candidate.root === '.')) {
+  if (detected.length === 0) {
     detected.unshift({ id: createSubprojectId('.'), root: '.', absoluteRoot: projectRoot, markers: [], implicit: true });
   }
 

@@ -16,15 +16,39 @@ export interface WorkspaceGraphSourceWatcher {
   readonly root: string;
 }
 
+const DEFAULT_GRAPH_REFRESH_DEBOUNCE_MS = 250;
+
 export function createWorkspaceGraphScheduler(options: { refresh: (projectRoot: string) => Promise<void>; debounceMs?: number }): WorkspaceGraphScheduler {
   const pending = new Map<string, Promise<void>>();
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
-  const debounceMs = options.debounceMs ?? 50;
+  const dirty = new Set<string>();
+  const debounceMs = options.debounceMs ?? DEFAULT_GRAPH_REFRESH_DEBOUNCE_MS;
+
+  const scheduleTimer = (projectRoot: string) => {
+    const existing = timers.get(projectRoot);
+    if (existing) clearTimeout(existing);
+    timers.set(projectRoot, setTimeout(() => {
+      timers.delete(projectRoot);
+      void run(projectRoot).catch(() => undefined);
+    }, debounceMs));
+  };
 
   const run = (projectRoot: string) => {
     const inFlight = pending.get(projectRoot);
     if (inFlight) return inFlight;
-    const promise = Promise.resolve().then(() => options.refresh(projectRoot)).finally(() => pending.delete(projectRoot));
+
+    const timer = timers.get(projectRoot);
+    if (timer) {
+      clearTimeout(timer);
+      timers.delete(projectRoot);
+    }
+
+    const promise = Promise.resolve()
+      .then(() => options.refresh(projectRoot))
+      .finally(() => {
+        pending.delete(projectRoot);
+        if (dirty.delete(projectRoot)) scheduleTimer(projectRoot);
+      });
     pending.set(projectRoot, promise);
     return promise;
   };
@@ -34,17 +58,17 @@ export function createWorkspaceGraphScheduler(options: { refresh: (projectRoot: 
       return run(projectRoot);
     },
     schedule(projectRoot: string) {
-      if (pending.has(projectRoot)) return;
-      const existing = timers.get(projectRoot);
-      if (existing) clearTimeout(existing);
-      timers.set(projectRoot, setTimeout(() => {
-        timers.delete(projectRoot);
-        void run(projectRoot).catch(() => undefined);
-      }, debounceMs));
+      if (pending.has(projectRoot)) {
+        dirty.add(projectRoot);
+        return;
+      }
+      scheduleTimer(projectRoot);
     },
     async flush() {
-      await new Promise((resolve) => setTimeout(resolve, debounceMs + 5));
-      await Promise.all([...pending.values()]);
+      while (timers.size > 0 || pending.size > 0 || dirty.size > 0) {
+        if (timers.size > 0) await new Promise((resolve) => setTimeout(resolve, debounceMs + 5));
+        if (pending.size > 0) await Promise.all([...pending.values()]);
+      }
     },
   };
 }

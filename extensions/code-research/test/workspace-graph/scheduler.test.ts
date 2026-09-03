@@ -4,6 +4,16 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createWorkspaceGraphScheduler, registerWorkspaceGraphLifecycle, startWorkspaceGraphSourceWatcher } from '../../src/core/graph-scheduler.js';
 
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 describe('workspace graph scheduler', () => {
   it('single-flights immediate refresh requests', async () => {
     const refresh = vi.fn(async () => undefined);
@@ -18,6 +28,86 @@ describe('workspace graph scheduler', () => {
     scheduler.schedule('/tmp/project');
     scheduler.schedule('/tmp/project');
     await scheduler.flush();
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs one follow-up refresh when a source change arrives during an in-flight refresh', async () => {
+    const firstRun = deferred();
+    const refresh = vi.fn()
+      .mockImplementationOnce(() => firstRun.promise)
+      .mockResolvedValue(undefined);
+    const scheduler = createWorkspaceGraphScheduler({ refresh, debounceMs: 5 });
+
+    const initialRefresh = scheduler.refresh('/tmp/project');
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+
+    scheduler.schedule('/tmp/project');
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    firstRun.resolve();
+    await initialRefresh;
+    await scheduler.flush();
+
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it('coalesces repeated in-flight source changes into one follow-up refresh', async () => {
+    const firstRun = deferred();
+    const refresh = vi.fn()
+      .mockImplementationOnce(() => firstRun.promise)
+      .mockResolvedValue(undefined);
+    const scheduler = createWorkspaceGraphScheduler({ refresh, debounceMs: 5 });
+
+    const initialRefresh = scheduler.refresh('/tmp/project');
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+
+    scheduler.schedule('/tmp/project');
+    scheduler.schedule('/tmp/project');
+    scheduler.schedule('/tmp/project');
+    firstRun.resolve();
+    await initialRefresh;
+    await scheduler.flush();
+
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not overlap refreshes when source changes arrive during an in-flight refresh', async () => {
+    const firstRun = deferred();
+    let activeRefreshes = 0;
+    let maxActiveRefreshes = 0;
+    const refresh = vi.fn(async () => {
+      activeRefreshes += 1;
+      maxActiveRefreshes = Math.max(maxActiveRefreshes, activeRefreshes);
+      try {
+        if (refresh.mock.calls.length === 1) await firstRun.promise;
+      } finally {
+        activeRefreshes -= 1;
+      }
+    });
+    const scheduler = createWorkspaceGraphScheduler({ refresh, debounceMs: 5 });
+
+    const initialRefresh = scheduler.refresh('/tmp/project');
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    scheduler.schedule('/tmp/project');
+    await new Promise((resolve) => setTimeout(resolve, 15));
+
+    firstRun.resolve();
+    await initialRefresh;
+    await scheduler.flush();
+
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(maxActiveRefreshes).toBe(1);
+  });
+
+  it('keeps direct refresh single-flight while a debounced refresh is pending', async () => {
+    const refresh = vi.fn(async () => undefined);
+    const scheduler = createWorkspaceGraphScheduler({ refresh, debounceMs: 5 });
+
+    scheduler.schedule('/tmp/project');
+    await Promise.all([scheduler.refresh('/tmp/project'), scheduler.refresh('/tmp/project')]);
+    await scheduler.flush();
+
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 

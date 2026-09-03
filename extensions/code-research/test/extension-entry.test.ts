@@ -355,13 +355,13 @@ describe('code-research extension entry integration', () => {
 
     expect(result.details).toMatchObject({
       status: 'fresh',
-      monorepo: { detected: true, subprojectCount: 3, roots: ['.', 'back', 'front'] },
+      monorepo: { detected: true, subprojectCount: 2, roots: ['back', 'front'] },
       graphUsableForQueries: true,
-      coverage: { indexedFiles: 2, detectedProjects: 3, indexedProjects: 2, emptyProjects: 1 },
+      coverage: { indexedFiles: 2, detectedProjects: 2, indexedProjects: 2, emptyProjects: 0 },
       languages: { java: 1, ts: 1, js: 0 },
     });
     expect(result.content[0].text).toContain('usable=yes');
     expect(result.content[0].text).toContain('monorepo=yes');
-    expect(result.content[0].text).toContain('workspace_projects=.,back,front');
+    expect(result.content[0].text).toContain('workspace_projects=back,front');
   });
 });

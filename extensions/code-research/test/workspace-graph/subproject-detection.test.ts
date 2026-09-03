@@ -34,7 +34,8 @@ describe('workspace subproject detection', () => {
     });
 
     const subprojects = await detectWorkspaceSubprojects(rootDir);
-    expect(subprojects.map((item) => item.root).sort()).toEqual(['.', 'apps/web', 'packages/shared', 'services/api']);
+    expect(subprojects.map((item) => item.root).sort()).toEqual(['apps/web', 'packages/shared', 'services/api']);
+    expect(subprojects.some((item) => item.root === '.')).toBe(false);
   });
 
   it('ignores python-only project markers', async () => {
@@ -52,7 +53,7 @@ describe('workspace subproject detection', () => {
     expect(subprojects[0]).toMatchObject({ root: '.', implicit: true });
   });
 
-  it('returns graph-only results instead of falling back to an implicit workspace root when no markers exist', async () => {
+  it('falls back to an implicit workspace root when no markers exist', async () => {
     const rootDir = await createProject({ 'src/app.ts': 'export const ok = true;\n' });
     const subprojects = await detectWorkspaceSubprojects(rootDir);
     expect(subprojects).toHaveLength(1);
