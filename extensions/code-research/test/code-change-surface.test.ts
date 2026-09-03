@@ -217,6 +217,40 @@ describe('code_change_surface', () => {
     expect(surface.content).toContain('Caller reporting: exhaustive');
   });
 
+  it('filters broad bootstrap test noise when direct change-intent tests exist', async () => {
+    const rootDir = await createProject('pi-change-surface-bootstrap-noise', {
+      '.pi/code-research.json': `{"graph":{"enable":true}}\n`,
+      'src/use-case.ts': `export class StartReviewAnalysisUseCase {\n  execute(): void {}\n}\n`,
+      'src/server.ts': `import { StartReviewAnalysisUseCase } from './use-case';\n\nexport function buildServer(): object {\n  const useCase = new StartReviewAnalysisUseCase();\n  return { useCase };\n}\n`,
+      'test/unit/start-review-analysis.use-case.test.ts': `import { StartReviewAnalysisUseCase } from '../../src/use-case';\n\nit('starts review analysis directly', () => {\n  new StartReviewAnalysisUseCase().execute();\n});\n`,
+      'test/integration/review-analysis-start.route.test.ts': `import { buildServer } from '../../src/server';\n\ndescribe('POST /internal/ia/review-analysis/start', () => {\n  it('starts review analysis', () => {\n    buildServer();\n  });\n});\n`,
+      'test/integration/fetch-to-ia.route.test.ts': `import { buildServer } from '../../src/server';\n\ndescribe('POST /internal/ia/fetch-to-ia', () => {\n  it('fetches data', () => {\n    buildServer();\n  });\n});\n`,
+      'test/integration/review-analysis-status.route.test.ts': `import { buildServer } from '../../src/server';\n\ndescribe('GET /internal/ia/review-analysis/status', () => {\n  it('reads status', () => {\n    buildServer();\n  });\n});\n`,
+      'test/integration/image-readability.route.test.ts': `import { buildServer } from '../../src/server';\n\ndescribe('POST /internal/ia/image-readability', () => {\n  it('checks image readability', () => {\n    buildServer();\n  });\n});\n`,
+      'test/integration/internal-auth.test.ts': `import { buildServer } from '../../src/server';\n\ndescribe('internal auth for fetch route', () => {\n  it('rejects bad tokens', () => {\n    buildServer();\n  });\n});\n`,
+    });
+    await buildWorkspaceGraph(rootDir);
+
+    const surface = await buildCodeChangeSurface(rootDir, {
+      path: 'src/use-case.ts',
+      query: 'StartReviewAnalysisUseCase',
+      language: 'ts',
+      kind: 'class',
+      test_mode: 'exhaustive',
+      max_tests: 20,
+    });
+
+    const files = surface.likely_tests.items.map((item: any) => item.file.replace(/\\/g, '/')).sort();
+    expect(files).toEqual([
+      expect.stringContaining('review-analysis-start.route.test.ts'),
+      expect.stringContaining('start-review-analysis.use-case.test.ts'),
+    ]);
+    expect(files.some((file) => file.includes('fetch-to-ia.route.test.ts'))).toBe(false);
+    expect(files.some((file) => file.includes('image-readability.route.test.ts'))).toBe(false);
+    expect(files.some((file) => file.includes('internal-auth.test.ts'))).toBe(false);
+    expect(files.some((file) => file.includes('review-analysis-status.route.test.ts'))).toBe(false);
+  });
+
   it('returns exhaustive test evidence up to max_tests', async () => {
     const rootDir = await createProject('pi-change-surface-exhaustive-tests', {
       '.pi/code-research.json': `{"graph":{"enable":true}}\n`,

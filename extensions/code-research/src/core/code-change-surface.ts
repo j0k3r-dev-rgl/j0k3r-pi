@@ -410,12 +410,99 @@ async function relatedTestReferences(cwd: string, input: CodeChangeSurfaceInput,
         scope: input.scope,
         glob: input.glob,
       });
-      tests.push(...references.results.filter((item) => isTestLike(item.file)));
+      const testReferences = references.results.filter((item) => isTestLike(item.file));
+      tests.push(...await filterBroadBootstrapTestReferences(cwd, input, query, testReferences));
     } catch {
       // Related test discovery is best-effort; unavailable actions already cover uncertain surfaces.
     }
   }
   return tests;
+}
+
+async function filterBroadBootstrapTestReferences(
+  cwd: string,
+  input: CodeChangeSurfaceInput,
+  relatedQuery: { path: string; query: string; kind?: CodeChangeSurfaceInput['kind'] },
+  references: ReferenceLocation[]
+): Promise<ReferenceLocation[]> {
+  if (references.length < 4 || relatedQuery.query === input.query || !isBroadBootstrapSymbol(relatedQuery.query)) return references;
+  const intentTokens = changeIntentTokens(input.query);
+  if (intentTokens.length === 0) return references;
+
+  const filtered: ReferenceLocation[] = [];
+  const sourceCache = new Map<string, string | undefined>();
+  for (const reference of references) {
+    const file = canonicalFile(cwd, reference.file);
+    const source = sourceCache.has(reference.file) ? sourceCache.get(reference.file) : await readFile(reference.file, 'utf8').catch(() => undefined);
+    sourceCache.set(reference.file, source);
+    const haystack = normalizeIntentText(`${file}\n${source ?? ''}`);
+    if (intentTokens.every((token) => haystack.includes(token))) filtered.push({
+      ...reference,
+      reason: reference.reason ? `${reference.reason}; filtered broad bootstrap by change intent` : 'filtered broad bootstrap by change intent',
+    });
+  }
+  return filtered;
+}
+
+function isBroadBootstrapSymbol(symbol: string): boolean {
+  return /^(build|create|make|init|start|bootstrap).*(server|app|application|router|routes?)$/iu.test(symbol) || /^(buildServer|createServer|createApp|main)$/u.test(symbol);
+}
+
+function changeIntentTokens(query: string): string[] {
+  const stopWords = new Set(['use', 'case', 'usecase', 'service', 'controller', 'repository', 'processor', 'handler', 'manager', 'factory', 'impl', 'implementation']);
+  const normalized = normalizeIntentText(query.replace(/([a-z0-9])([A-Z])/g, '$1 $2'));
+  return [...new Set(normalized.split(/\s+/).filter((token) => token.length >= 4 && !stopWords.has(token)))];
+}
+
+function normalizeIntentText(value: string): string {
+  return value.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function filterIntentRelevantTestReferences(cwd: string, input: CodeChangeSurfaceInput, references: ReferenceLocation[]): Promise<ReferenceLocation[]> {
+  const files = new Set(references.map((item) => canonicalFile(cwd, item.file)));
+  if (references.length < 8 || files.size < 4) return references;
+
+  const kept: ReferenceLocation[] = [];
+  const sourceCache = new Map<string, string | undefined>();
+  for (const reference of references) {
+    const source = sourceCache.has(reference.file) ? sourceCache.get(reference.file) : await readFile(reference.file, 'utf8').catch(() => undefined);
+    sourceCache.set(reference.file, source);
+    if (isStrongIntentTestReference(cwd, input.query, reference, source)) kept.push(reference);
+  }
+  return kept.length > 0 ? kept : references;
+}
+
+function isStrongIntentTestReference(cwd: string, query: string, reference: ReferenceLocation, source: string | undefined): boolean {
+  const file = canonicalFile(cwd, reference.file);
+  const haystack = `${file}\n${source ?? ''}`;
+  if (haystack.includes(query)) return true;
+
+  const tokens = changeIntentTokens(query);
+  if (tokens.length === 0) return true;
+  if (isRouteStyleTestFile(file) && !matchesIntentPhrase(file, tokens)) {
+    return matchesIntentPhrase(source ?? '', tokens);
+  }
+  const normalized = normalizeIntentText(haystack);
+  return matchesIntentPhrase(normalized, tokens);
+}
+
+function isRouteStyleTestFile(file: string): boolean {
+  return /(?:^|\/)(?:integration\/)?(?:[^/]+\.route\.test\.[cm]?[jt]sx?|internal-auth\.test\.[cm]?[jt]sx?)$/u.test(file);
+}
+
+function matchesIntentPhrase(value: string, tokens: string[]): boolean {
+  const normalized = normalizeIntentText(value);
+  const ordered = tokens.map(escapeRegExp).join('(?:\\s+|-|_)+');
+  if (new RegExp(`\\b${ordered}\\b`, 'u').test(normalized)) return true;
+  if (tokens.length >= 3) {
+    const rotated = [...tokens.slice(1), tokens[0]].map(escapeRegExp).join('(?:\\s+|-|_)+');
+    if (new RegExp(`\\b${rotated}\\b`, 'u').test(normalized)) return true;
+  }
+  return false;
 }
 
 function followUpHierarchy(input: CodeChangeSurfaceInput, reason: string): FollowUp {
@@ -483,7 +570,7 @@ export async function buildCodeChangeSurface(cwd: string, input: CodeChangeSurfa
   const referenceCallers = references.results.filter((item) => !isTestLike(item.file) && (input.kind === 'variable' ? item.reference_kind === 'read' || item.reference_kind === 'write' : item.reference_kind === 'call' || item.reference_kind === 'callback')).map(referenceToCaller);
   const callers = uniqueBestBy([...hierarchy.callers.filter((item) => !isTestLike(item.file ?? '')), ...implementationIncoming.callers.filter((item) => !isTestLike(item.file ?? '')), ...referenceCallers], (item) => callerKey(cwd, item), callerMetadataScore);
   const callerLimit = input.caller_mode === 'exhaustive' ? normalizedLimit(input.max_callers, 50) : SECTION_LIMIT;
-  const surfaceFiles = [...contractItems, ...implementationItems, ...callers].map((item: any) => item.file).filter((file: unknown): file is string => typeof file === 'string');
+  const surfaceFiles = [...contractItems, ...implementationItems, ...callers.filter((item) => !isBroadBootstrapSymbol(item.symbol))].map((item: any) => item.file).filter((file: unknown): file is string => typeof file === 'string');
   const testTerms = [input.query, ...callers.map((item) => item.symbol), ...implementationItems.map((item) => item.symbol), ...implementationItems.map((item) => simpleName(ownerName(item)) ?? '')];
   const rawTestReferences = await enrichFileLevelTestImports(cwd, [
     ...references.results.filter((item) => isTestLike(item.file)),
@@ -497,8 +584,9 @@ export async function buildCodeChangeSurface(cwd: string, input: CodeChangeSurfa
     if (behaviorTestReferences.length > 0) return false;
     return !testFilesWithBehaviorEvidence.has(canonicalFile(cwd, item.file));
   });
-  const representativeTestReferences = uniqueBestBy(filteredTestReferences, (item) => canonicalFile(cwd, item.file), (item) => likelyTestScore(cwd, item, input.query));
-  const exhaustiveTestReferences = uniqueBestBy(filteredTestReferences, (item) => [canonicalFile(cwd, item.file), item.context_symbol ?? '', item.context_class ?? '', item.line].join('::'), (item) => likelyTestScore(cwd, item, input.query));
+  const intentFilteredTestReferences = await filterIntentRelevantTestReferences(cwd, input, filteredTestReferences);
+  const representativeTestReferences = uniqueBestBy(intentFilteredTestReferences, (item) => canonicalFile(cwd, item.file), (item) => likelyTestScore(cwd, item, input.query));
+  const exhaustiveTestReferences = uniqueBestBy(intentFilteredTestReferences, (item) => [canonicalFile(cwd, item.file), item.context_symbol ?? '', item.context_class ?? '', item.line].join('::'), (item) => likelyTestScore(cwd, item, input.query));
   const testReferences = (input.test_mode === 'exhaustive' ? exhaustiveTestReferences : representativeTestReferences)
     .sort((a, b) => likelyTestScore(cwd, b, input.query) - likelyTestScore(cwd, a, input.query) || canonicalFile(cwd, a.file).localeCompare(canonicalFile(cwd, b.file)) || (a.line ?? 0) - (b.line ?? 0));
   const testLimit = input.test_mode === 'exhaustive' ? normalizedLimit(input.max_tests, 50) : SECTION_LIMIT;
