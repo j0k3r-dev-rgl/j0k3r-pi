@@ -357,8 +357,8 @@ describe('code-research extension entry integration', () => {
       status: 'fresh',
       monorepo: { detected: true, subprojectCount: 3, roots: ['.', 'back', 'front'] },
       graphUsableForQueries: true,
-      coverage: { indexedFiles: 4, detectedProjects: 3, indexedProjects: 3, emptyProjects: 0 },
-      languages: { java: 2, ts: 2, js: 0 },
+      coverage: { indexedFiles: 2, detectedProjects: 3, indexedProjects: 2, emptyProjects: 1 },
+      languages: { java: 1, ts: 1, js: 0 },
     });
     expect(result.content[0].text).toContain('usable=yes');
     expect(result.content[0].text).toContain('monorepo=yes');

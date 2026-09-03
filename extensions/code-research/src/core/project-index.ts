@@ -97,7 +97,7 @@ export interface ProjectIndex {
   typeReferences: IndexedJavaTypeReference[];
 }
 
-export async function buildProjectIndex(rootDir: string): Promise<ProjectIndex> {
+export async function buildProjectIndex(rootDir: string, options?: { excludeDirectories?: string[] }): Promise<ProjectIndex> {
   const index: ProjectIndex = {
     methods: [],
     fields: [],
@@ -107,7 +107,7 @@ export async function buildProjectIndex(rootDir: string): Promise<ProjectIndex> 
     typeReferences: [],
   };
 
-  const javaFiles = (await collectWorkspaceSourceFiles(rootDir)).filter((file) => file.endsWith('.java'));
+  const javaFiles = (await collectWorkspaceSourceFiles(rootDir, { excludeDirectories: options?.excludeDirectories })).filter((file) => file.endsWith('.java'));
 
   for (const file of javaFiles) {
     let source: string;

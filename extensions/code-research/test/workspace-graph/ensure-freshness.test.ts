@@ -118,6 +118,38 @@ describe('workspace graph ensure freshness', () => {
     expect(apiShardResult.status).toBe('ok');
   });
 
+  it('does not duplicate nested subproject files into ancestor shards', async () => {
+    const rootDir = await createProject({
+      'tsconfig.json': `{"compilerOptions":{}}
+`,
+      'src/root.ts': `export function rootValue() { return 1; }
+`,
+      'packages/api/package.json': `{"name":"api","type":"module"}
+`,
+      'packages/api/src/api.ts': `export function apiValue() { return 1; }
+`,
+    });
+
+    const built = await buildWorkspaceGraph(rootDir);
+    const rootSubproject = built.state.subprojects.find((subproject) => subproject.root === '.');
+    const apiSubproject = built.state.subprojects.find((subproject) => subproject.root === 'packages/api');
+    expect(rootSubproject).toBeTruthy();
+    expect(apiSubproject).toBeTruthy();
+    if (!rootSubproject || !apiSubproject) return;
+
+    const rootShardResult = await readSubprojectGraphShard(rootDir, rootSubproject.id, { generation: rootSubproject.generation });
+    expect(rootShardResult.status).toBe('ok');
+    if (rootShardResult.status !== 'ok') return;
+    expect(rootShardResult.data.nodes.some((node) => node.kind === 'file' && node.path === 'packages/api/src/api.ts')).toBe(false);
+
+    await writeFile(join(rootDir, 'packages/api/src/api.ts'), `export function apiValue() { return 2; }\n`, 'utf8');
+    const after = await ensureWorkspaceGraphFreshness(rootDir);
+    const preservedRoot = after.state.subprojects.find((subproject) => subproject.id === rootSubproject.id);
+    const refreshedApi = after.state.subprojects.find((subproject) => subproject.id === apiSubproject.id);
+    expect(preservedRoot?.generation).toBe(rootSubproject.generation);
+    expect(refreshedApi?.generation).toBeGreaterThan(apiSubproject.generation);
+  });
+
   it('serves graph-backed references from refreshed shards after a safe incremental update', async () => {
     const rootDir = await createProject({
       'tsconfig.json': `{"compilerOptions":{}}

@@ -59,8 +59,8 @@ export interface GoExtractedCall {
   column: number;
 }
 
-export async function buildGoProjectIndex(rootDir: string): Promise<GoProjectIndex> {
-  const files = (await collectWorkspaceSourceFiles(rootDir)).filter((file) => file.endsWith('.go')).sort();
+export async function buildGoProjectIndex(rootDir: string, options?: { excludeDirectories?: string[] }): Promise<GoProjectIndex> {
+  const files = (await collectWorkspaceSourceFiles(rootDir, { excludeDirectories: options?.excludeDirectories })).filter((file) => file.endsWith('.go')).sort();
   const index: GoProjectIndex = { rootDir, files: [], callables: [], types: [], explicitAssertions: [] };
 
   for (const file of files) {

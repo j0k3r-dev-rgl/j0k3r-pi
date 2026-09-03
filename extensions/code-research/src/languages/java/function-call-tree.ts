@@ -71,6 +71,70 @@ interface JavaArgumentInfo {
   objectType?: string;
 }
 
+interface JavaMethodScopeTypeIndex {
+  parameters: Map<string, string>;
+  locals: Map<string, string>;
+}
+
+interface JavaLookupIndex {
+  classesByFullName: Map<string, IndexedClass>;
+  classesByFile: Map<string, IndexedClass[]>;
+  classesByPackage: Map<string, IndexedClass[]>;
+  classesBySuffix: Map<string, IndexedClass[]>;
+  fieldsByClassAndName: Map<string, IndexedField>;
+  methodsByClassAndSymbol: Map<string, IndexedMethod[]>;
+  methodsByClassNameAndSymbol: Map<string, IndexedMethod[]>;
+  implementationsByInterfaceSymbolId: Map<string, IndexedClass[]>;
+}
+
+const javaLookupIndexes = new WeakMap<ProjectIndex, JavaLookupIndex>();
+const javaMethodScopeTypes = new WeakMap<IndexedMethod, JavaMethodScopeTypeIndex>();
+
+function getJavaLookupIndex(index: ProjectIndex): JavaLookupIndex {
+  const cached = javaLookupIndexes.get(index);
+  if (cached) return cached;
+
+  const lookup: JavaLookupIndex = {
+    classesByFullName: new Map(),
+    classesByFile: new Map(),
+    classesByPackage: new Map(),
+    classesBySuffix: new Map(),
+    fieldsByClassAndName: new Map(),
+    methodsByClassAndSymbol: new Map(),
+    methodsByClassNameAndSymbol: new Map(),
+    implementationsByInterfaceSymbolId: new Map(),
+  };
+
+  const push = <T>(map: Map<string, T[]>, key: string, value: T) => {
+    const current = map.get(key);
+    if (current) current.push(value);
+    else map.set(key, [value]);
+  };
+
+  for (const klass of index.classes) {
+    lookup.classesByFullName.set(klass.fullName, klass);
+    push(lookup.classesByFile, klass.file, klass);
+    push(lookup.classesByPackage, klass.package, klass);
+    push(lookup.classesBySuffix, klass.className, klass);
+    const parts = klass.fullName.split('.');
+    for (let index = 1; index < parts.length; index++) {
+      push(lookup.classesBySuffix, parts.slice(index).join('.'), klass);
+    }
+  }
+
+  for (const field of index.fields) {
+    lookup.fieldsByClassAndName.set(`${field.qualifiedClassName}\0${field.fieldName}`, field);
+  }
+
+  for (const method of index.methods) {
+    push(lookup.methodsByClassAndSymbol, `${method.qualifiedClassName}\0${method.symbol}`, method);
+    push(lookup.methodsByClassNameAndSymbol, `${method.className}\0${method.symbol}`, method);
+  }
+
+  javaLookupIndexes.set(index, lookup);
+  return lookup;
+}
+
 export async function resolveJavaIndexRoot(filePath: string): Promise<string> {
   const fileDir = dirname(filePath);
   const conventionalProjectRoot = findConventionalJavaProjectRoot(fileDir);
@@ -421,7 +485,7 @@ function resolveCall(currentMethod: IndexedMethod, call: MethodCall, index: Proj
 
   if (!call.object || call.object === 'this') {
     const selection = selectMethodCandidate(
-      index.methods.filter((method) => method.qualifiedClassName === currentMethod.qualifiedClassName && method.symbol === call.methodName),
+      getJavaLookupIndex(index).methodsByClassAndSymbol.get(`${currentMethod.qualifiedClassName}\0${call.methodName}`) ?? [],
       call
     );
     if (selection.targetMethod) {
@@ -527,7 +591,8 @@ function resolveMethodScopedType(
   objectName: string,
   index: ProjectIndex
 ): ObjectTypeResolution | undefined {
-  const parameterType = findParameterType(currentMethod.node, objectName);
+  const scopeTypes = getJavaMethodScopeTypes(currentMethod);
+  const parameterType = scopeTypes.parameters.get(objectName);
   if (parameterType) {
     return {
       typeName: simpleName(parameterType),
@@ -535,7 +600,7 @@ function resolveMethodScopedType(
     };
   }
 
-  const localType = findLocalVariableType(currentMethod.node, objectName);
+  const localType = scopeTypes.locals.get(objectName);
   if (localType) {
     return {
       typeName: simpleName(localType),
@@ -598,29 +663,25 @@ function resolveInvocationExpressionType(
   return resolveFluentReceiverType(baseType, invocation.methodName);
 }
 
-function findParameterType(methodNode: any, parameterName: string): string | undefined {
-  const parameters = methodNode.childForFieldName('parameters');
-  if (!parameters) return undefined;
+function getJavaMethodScopeTypes(method: IndexedMethod): JavaMethodScopeTypeIndex {
+  const cached = javaMethodScopeTypes.get(method);
+  if (cached) return cached;
 
-  for (const child of parameters.children) {
-    if (child.type !== 'formal_parameter') continue;
-    const nameNode = child.childForFieldName('name');
-    if (!nameNode || nameNode.text !== parameterName) continue;
-    const typeNode = child.childForFieldName('type');
-    return normalizeScopedTypeName(typeNode?.text);
+  const scopeTypes: JavaMethodScopeTypeIndex = { parameters: new Map(), locals: new Map() };
+  const parameters = method.node.childForFieldName('parameters');
+  if (parameters) {
+    for (const child of parameters.children) {
+      if (child.type !== 'formal_parameter') continue;
+      const nameNode = child.childForFieldName('name');
+      const typeNode = child.childForFieldName('type');
+      const typeName = normalizeScopedTypeName(typeNode?.text);
+      if (nameNode?.text && typeName) scopeTypes.parameters.set(nameNode.text, typeName);
+    }
   }
 
-  return undefined;
-}
-
-function findLocalVariableType(methodNode: any, variableName: string): string | undefined {
-  const body = methodNode.childForFieldName('body');
-  if (!body) return undefined;
-
-  let found: string | undefined;
-
-  function visit(node: any) {
-    if (found || !node.isNamed) return;
+  const body = method.node.childForFieldName('body');
+  const visit = (node: any) => {
+    if (!node.isNamed) return;
 
     if (node.type === 'local_variable_declaration') {
       const typeNode = node.childForFieldName('type');
@@ -628,9 +689,9 @@ function findLocalVariableType(methodNode: any, variableName: string): string | 
       for (const child of node.children) {
         if (child.type !== 'variable_declarator') continue;
         const nameNode = child.childForFieldName('name');
-        if (nameNode?.text === variableName) {
-          found = typeName === 'var' ? inferLocalVariableTypeFromInitializer(child) : typeName;
-          return;
+        if (nameNode?.text && !scopeTypes.locals.has(nameNode.text)) {
+          const resolvedType = typeName === 'var' ? inferLocalVariableTypeFromInitializer(child) : typeName;
+          if (resolvedType) scopeTypes.locals.set(nameNode.text, resolvedType);
         }
       }
     }
@@ -638,10 +699,11 @@ function findLocalVariableType(methodNode: any, variableName: string): string | 
     for (const child of node.children) {
       visit(child);
     }
-  }
+  };
+  if (body) visit(body);
 
-  visit(body);
-  return found;
+  javaMethodScopeTypes.set(method, scopeTypes);
+  return scopeTypes;
 }
 
 function inferLocalVariableTypeFromInitializer(variableDeclarator: any): string | undefined {
@@ -664,11 +726,11 @@ function resolveTypeToCallTarget(
   if (classRecord) {
     if (classRecord.kind === 'interface') {
       const implementations = findInterfaceImplementations(classRecord, index).filter((candidate) =>
-        Boolean(selectMethodCandidate(index.methods.filter((method) => method.qualifiedClassName === candidate.fullName && method.symbol === call.methodName), call).targetMethod)
+        Boolean(selectMethodCandidate(getJavaLookupIndex(index).methodsByClassAndSymbol.get(`${candidate.fullName}\0${call.methodName}`) ?? [], call).targetMethod)
       );
 
       if (implementations.length === 1) {
-        const selection = selectMethodCandidate(index.methods.filter((method) => method.qualifiedClassName === implementations[0].fullName && method.symbol === call.methodName), call);
+        const selection = selectMethodCandidate(getJavaLookupIndex(index).methodsByClassAndSymbol.get(`${implementations[0].fullName}\0${call.methodName}`) ?? [], call);
         if (selection.targetMethod) {
           return {
             className: selection.targetMethod.className,
@@ -686,7 +748,7 @@ function resolveTypeToCallTarget(
 
       if (implementations.length > 1) {
         const candidates = implementations.flatMap((candidate) =>
-          index.methods.filter((method) => method.qualifiedClassName === candidate.fullName && method.symbol === call.methodName)
+          getJavaLookupIndex(index).methodsByClassAndSymbol.get(`${candidate.fullName}\0${call.methodName}`) ?? []
         );
         const selection = selectMethodCandidate(candidates, call);
         if (selection.targetMethod) {
@@ -715,7 +777,7 @@ function resolveTypeToCallTarget(
       }
     }
 
-    const selection = selectMethodCandidate(index.methods.filter((method) => method.qualifiedClassName === classRecord.fullName && method.symbol === call.methodName), call);
+    const selection = selectMethodCandidate(getJavaLookupIndex(index).methodsByClassAndSymbol.get(`${classRecord.fullName}\0${call.methodName}`) ?? [], call);
     if (selection.targetMethod) {
       return {
         className: selection.targetMethod.className,
@@ -827,52 +889,59 @@ function resolveTypeInFile(file: string, typeName: string, index: ProjectIndex):
     return `${imported}${suffix}`;
   }
 
-  const sameFileType = index.classes.find((candidate) => candidate.file === file && (candidate.fullName === normalizedType || candidate.fullName.endsWith(`.${normalizedType}`)));
+  const lookup = getJavaLookupIndex(index);
+  const sameFileType = lookup.classesByFile.get(file)?.find((candidate) => candidate.fullName === normalizedType || candidate.fullName.endsWith(`.${normalizedType}`));
   if (sameFileType) return sameFileType.fullName;
 
   const currentPackage = fileImports?.package;
-  const samePackageClass = index.classes.find((candidate) => {
-    if (candidate.package !== currentPackage) return false;
-    return candidate.fullName === `${currentPackage}.${normalizedType}` || candidate.fullName.endsWith(`.${normalizedType}`);
-  });
+  const samePackageClass = lookup.classesByPackage.get(currentPackage ?? '')?.find((candidate) => candidate.fullName === `${currentPackage}.${normalizedType}` || candidate.fullName.endsWith(`.${normalizedType}`));
   if (samePackageClass) return samePackageClass.fullName;
 
-  const uniqueSuffixMatch = index.classes.filter((candidate) => candidate.fullName.endsWith(`.${normalizedType}`) || candidate.className === normalizedType);
+  const uniqueSuffixMatch = lookup.classesBySuffix.get(normalizedType) ?? [];
   if (uniqueSuffixMatch.length === 1) return uniqueSuffixMatch[0].fullName;
 
   return currentPackage ? `${currentPackage}.${normalizedType}` : normalizedType;
 }
 
 function findFieldInIndex(qualifiedClassName: string, fieldName: string, index: ProjectIndex): IndexedField | undefined {
-  return index.fields.find((field) => field.qualifiedClassName === qualifiedClassName && field.fieldName === fieldName);
+  return getJavaLookupIndex(index).fieldsByClassAndName.get(`${qualifiedClassName}\0${fieldName}`);
 }
 
 function findClassByQualifiedName(fullName: string, index: ProjectIndex): IndexedClass | undefined {
-  return index.classes.find((candidate) => candidate.fullName === fullName);
+  return getJavaLookupIndex(index).classesByFullName.get(fullName);
 }
 
 function findClassInIndex(objectType: ObjectTypeResolution, index: ProjectIndex): IndexedClass | undefined {
-  const matches = index.classes.filter((candidate) => {
-    if (objectType.fullTypeName && candidate.fullName === objectType.fullTypeName) return true;
-    if (candidate.className === objectType.typeName) return true;
-    return objectType.fullTypeName ? candidate.fullName.endsWith(`.${objectType.fullTypeName}`) : false;
-  });
+  const lookup = getJavaLookupIndex(index);
+  if (objectType.fullTypeName) {
+    const exact = lookup.classesByFullName.get(objectType.fullTypeName);
+    if (exact) return exact;
+  }
+  const matches = [
+    ...(lookup.classesBySuffix.get(objectType.typeName) ?? []),
+    ...(objectType.fullTypeName ? lookup.classesBySuffix.get(objectType.fullTypeName) ?? [] : []),
+  ].filter((candidate, index, self) => self.findIndex((item) => item.symbolId === candidate.symbolId) === index);
   return matches.length === 1 ? matches[0] : matches.find((candidate) => candidate.fullName === objectType.fullTypeName) ?? matches[0];
 }
 
 function findMethodsForType(objectType: ObjectTypeResolution, methodName: string, index: ProjectIndex): IndexedMethod[] {
-  return index.methods.filter((method) => {
-    if (method.symbol !== methodName) return false;
-    if (objectType.fullTypeName && method.qualifiedClassName === objectType.fullTypeName) return true;
-    return method.className === objectType.typeName;
-  });
+  const lookup = getJavaLookupIndex(index);
+  const byFullName = objectType.fullTypeName ? lookup.methodsByClassAndSymbol.get(`${objectType.fullTypeName}\0${methodName}`) ?? [] : [];
+  const bySimpleName = lookup.methodsByClassNameAndSymbol.get(`${objectType.typeName}\0${methodName}`) ?? [];
+  if (!objectType.fullTypeName) return bySimpleName;
+  return [...byFullName, ...bySimpleName].filter((method, index, self) => self.findIndex((item) => item.symbolId === method.symbolId) === index);
 }
 
 function findInterfaceImplementations(target: IndexedClass, index: ProjectIndex): IndexedClass[] {
-  return index.classes.filter((candidate) => {
+  const lookup = getJavaLookupIndex(index);
+  const cached = lookup.implementationsByInterfaceSymbolId.get(target.symbolId);
+  if (cached) return cached;
+  const implementations = index.classes.filter((candidate) => {
     if (candidate.kind !== 'class' && candidate.kind !== 'record' && candidate.kind !== 'enum') return false;
     return candidate.implements.some((implemented) => implemented === target.fullName || simpleName(implemented) === target.className);
   });
+  lookup.implementationsByInterfaceSymbolId.set(target.symbolId, implementations);
+  return implementations;
 }
 
 function selectMethodCandidate(

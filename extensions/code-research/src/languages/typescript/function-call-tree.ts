@@ -221,7 +221,7 @@ export function buildCallTree(options: {
   return { root, stats };
 }
 
-export async function buildTypeScriptProjectIndex(rootDir: string): Promise<TypeScriptProjectIndex> {
+export async function buildTypeScriptProjectIndex(rootDir: string, options?: { excludeDirectories?: string[] }): Promise<TypeScriptProjectIndex> {
   const index: TypeScriptProjectIndex = {
     projectRoot: rootDir,
     projectConfig: await loadTypeScriptProjectConfig(rootDir),
@@ -230,7 +230,7 @@ export async function buildTypeScriptProjectIndex(rootDir: string): Promise<Type
     files: new Map(),
   };
 
-  const files = await collectSupportedFiles(rootDir);
+  const files = await collectSupportedFiles(rootDir, options);
   for (const file of files) {
     let source: string;
     try {
@@ -267,8 +267,8 @@ export async function buildTypeScriptProjectIndex(rootDir: string): Promise<Type
   return index;
 }
 
-async function collectSupportedFiles(dir: string): Promise<string[]> {
-  return (await collectWorkspaceSourceFiles(dir)).filter((file) => isSupportedFile(file));
+async function collectSupportedFiles(dir: string, options?: { excludeDirectories?: string[] }): Promise<string[]> {
+  return (await collectWorkspaceSourceFiles(dir, { excludeDirectories: options?.excludeDirectories })).filter((file) => isSupportedFile(file));
 }
 
 function indexImports(file: IndexedFile): void {

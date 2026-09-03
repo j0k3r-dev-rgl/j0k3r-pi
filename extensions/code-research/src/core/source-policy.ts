@@ -91,7 +91,7 @@ export async function shouldIndexSourceFile(projectRoot: string, filePath: strin
 
 export async function collectWorkspaceSourceFiles(
   rootDir: string,
-  options?: { onUnreadableDirectory?: (dir: string, error: NodeJS.ErrnoException) => void }
+  options?: { onUnreadableDirectory?: (dir: string, error: NodeJS.ErrnoException) => void; excludeDirectories?: string[] }
 ): Promise<string[]> {
   const files: string[] = [];
   await walk(rootDir, async (fullPath) => {
@@ -105,7 +105,7 @@ export async function collectWorkspaceSourceFiles(
 export async function walkWorkspaceSourceFiles(
   rootDir: string,
   onFile: (fullPath: string) => Promise<void> | void,
-  options?: { onUnreadableDirectory?: (dir: string, error: NodeJS.ErrnoException) => void }
+  options?: { onUnreadableDirectory?: (dir: string, error: NodeJS.ErrnoException) => void; excludeDirectories?: string[] }
 ): Promise<void> {
   await walk(rootDir, async (fullPath) => {
     if (await shouldIndexSourceFile(rootDir, fullPath)) {
@@ -117,16 +117,17 @@ export async function walkWorkspaceSourceFiles(
 async function walk(
   dir: string,
   onFile: (fullPath: string) => Promise<void> | void,
-  options?: { onUnreadableDirectory?: (dir: string, error: NodeJS.ErrnoException) => void }
+  options?: { onUnreadableDirectory?: (dir: string, error: NodeJS.ErrnoException) => void; excludeDirectories?: string[] }
 ): Promise<void> {
-  await walkWithRoot(dir, dir, onFile, options);
+  await walkWithRoot(dir, dir, onFile, options, new Set((options?.excludeDirectories ?? []).map((entry) => resolve(entry))));
 }
 
 async function walkWithRoot(
   projectRoot: string,
   dir: string,
   onFile: (fullPath: string) => Promise<void> | void,
-  options?: { onUnreadableDirectory?: (dir: string, error: NodeJS.ErrnoException) => void }
+  options?: { onUnreadableDirectory?: (dir: string, error: NodeJS.ErrnoException) => void; excludeDirectories?: string[] },
+  excludeDirectories: Set<string> = new Set()
 ): Promise<void> {
   let entries;
   try {
@@ -142,8 +143,10 @@ async function walkWithRoot(
   for (const entry of entries) {
     const fullPath = join(dir, entry.name);
     if (entry.isDirectory()) {
+      const resolvedPath = resolve(fullPath);
+      if (excludeDirectories.has(resolvedPath)) continue;
       if (isExcludedPath(projectRoot, fullPath)) continue;
-      await walkWithRoot(projectRoot, fullPath, onFile, options);
+      await walkWithRoot(projectRoot, fullPath, onFile, options, excludeDirectories);
       continue;
     }
     if (entry.isFile()) {
