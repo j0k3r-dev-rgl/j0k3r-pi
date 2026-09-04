@@ -97,8 +97,8 @@ export interface ProjectIndex {
   typeReferences: IndexedJavaTypeReference[];
 }
 
-export async function buildProjectIndex(rootDir: string, options?: { excludeDirectories?: string[] }): Promise<ProjectIndex> {
-  const index: ProjectIndex = {
+export async function buildProjectIndex(rootDir: string, options?: { excludeDirectories?: string[]; onlyFiles?: string[]; seed?: ProjectIndex }): Promise<ProjectIndex> {
+  const index: ProjectIndex = options?.seed ? cloneProjectIndex(options.seed) : {
     methods: [],
     fields: [],
     classes: [],
@@ -107,7 +107,7 @@ export async function buildProjectIndex(rootDir: string, options?: { excludeDire
     typeReferences: [],
   };
 
-  const javaFiles = (await collectWorkspaceSourceFiles(rootDir, { excludeDirectories: options?.excludeDirectories })).filter((file) => file.endsWith('.java'));
+  const javaFiles = options?.onlyFiles ?? (await collectWorkspaceSourceFiles(rootDir, { excludeDirectories: options?.excludeDirectories })).filter((file) => file.endsWith('.java'));
 
   for (const file of javaFiles) {
     let source: string;
@@ -125,6 +125,17 @@ export async function buildProjectIndex(rootDir: string, options?: { excludeDire
 
   index.typeReferences = collectJavaTypeReferences(index);
   return index;
+}
+
+function cloneProjectIndex(index: ProjectIndex): ProjectIndex {
+  return {
+    methods: [...index.methods],
+    fields: [...index.fields],
+    classes: [...index.classes],
+    imports: new Map(index.imports),
+    files: [...index.files],
+    typeReferences: [...index.typeReferences],
+  };
 }
 
 function indexFile(file: string, source: string, rootNode: any, extraction: JavaExtractionResult, index: ProjectIndex): void {

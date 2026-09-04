@@ -30,6 +30,7 @@ import {
   resolveExportedCallable,
   type IndexedCallable as TsIndexedCallable,
   type IndexedClass as TsIndexedClass,
+  type IndexedFile as TsIndexedFile,
   type ImportBinding as TsImportBinding,
   type TypeScriptProjectIndex,
 } from '../languages/typescript/function-call-tree.js';
@@ -57,12 +58,15 @@ export async function createFastTypeScriptFileIncrementalShard(
     if (language !== 'ts' && language !== 'js') return undefined;
   }
 
-  const index = await buildTypeScriptProjectIndex(subprojectRoot, { excludeDirectories: excludedNestedRoots });
   const changedAbsoluteFiles = new Set<string>();
-  for (const file of changed) {
-    const absolute = join(projectRoot, file);
+  for (const file of changed) changedAbsoluteFiles.add(join(projectRoot, file));
+  const index = await buildTypeScriptProjectIndex(subprojectRoot, {
+    excludeDirectories: excludedNestedRoots,
+    onlyFiles: [...changedAbsoluteFiles],
+    seed: createTypeScriptSeedIndexFromPreviousShard(projectRoot, subprojectRoot, previous, changed),
+  });
+  for (const absolute of changedAbsoluteFiles) {
     if (!index.files.has(absolute)) return undefined;
-    changedAbsoluteFiles.add(absolute);
   }
 
   const nodes: GraphNode[] = [];
@@ -120,6 +124,62 @@ export async function createFastTypeScriptFileIncrementalShard(
     },
   });
   return validateSubprojectGraphShard(candidate) ? candidate : undefined;
+}
+
+function createTypeScriptSeedIndexFromPreviousShard(projectRoot: string, subprojectRoot: string, shard: SubprojectGraphShard, changed: Set<string>): TypeScriptProjectIndex {
+  const files = new Map<string, TsIndexedFile>();
+  for (const node of shard.nodes) {
+    if (node.kind !== 'file' || changed.has(node.path)) continue;
+    const file = join(projectRoot, node.path);
+    files.set(file, {
+      file,
+      language: node.language === 'js' ? 'js' : 'ts',
+      rootNode: { children: [] },
+      source: '',
+      imports: new Map(),
+      reExports: [],
+    });
+  }
+
+  const callables: TsIndexedCallable[] = [];
+  const classes: TsIndexedClass[] = [];
+  for (const node of shard.nodes) {
+    if (node.kind !== 'symbol' || changed.has(node.file)) continue;
+    const file = join(projectRoot, node.file);
+    if (isCallableGraphDeclaration(node.declarationKind ?? '')) {
+      callables.push({
+        file,
+        language: node.language === 'js' ? 'js' : 'ts',
+        symbol: node.name,
+        kind: node.owner ? 'method' : 'function',
+        ownerName: node.owner,
+        ownerKind: node.ownerKind ?? 'unknown',
+        line: node.range.startLine,
+        column: node.range.startColumn,
+        node: undefined,
+        exportedName: node.exportedName ?? (node.exported ? node.name : undefined),
+      });
+    }
+    if ((node.declarationKind === 'class' || node.declarationKind === 'interface') && !node.owner) {
+      classes.push({
+        file,
+        language: node.language === 'js' ? 'js' : 'ts',
+        className: node.name,
+        line: node.range.startLine,
+        column: node.range.startColumn,
+        node: { type: node.declarationKind === 'interface' ? 'interface_declaration' : 'class_declaration' },
+        exportedName: node.exportedName ?? (node.exported ? node.name : undefined),
+      });
+    }
+  }
+
+  return {
+    projectRoot: subprojectRoot,
+    projectConfig: { projectRoot: subprojectRoot, baseUrl: subprojectRoot, pathAliases: [] },
+    callables,
+    classes,
+    files,
+  };
 }
 
 export function buildTypeScriptGraph(

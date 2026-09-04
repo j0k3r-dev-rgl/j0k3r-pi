@@ -16,7 +16,7 @@ export interface WorkspaceGraphSourceWatcher {
   readonly root: string;
 }
 
-const DEFAULT_GRAPH_REFRESH_DEBOUNCE_MS = 250;
+const DEFAULT_GRAPH_REFRESH_DEBOUNCE_MS = 2500;
 
 export function createWorkspaceGraphScheduler(options: { refresh: (projectRoot: string) => Promise<void>; debounceMs?: number }): WorkspaceGraphScheduler {
   const pending = new Map<string, Promise<void>>();

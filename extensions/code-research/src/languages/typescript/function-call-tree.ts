@@ -221,8 +221,8 @@ export function buildCallTree(options: {
   return { root, stats };
 }
 
-export async function buildTypeScriptProjectIndex(rootDir: string, options?: { excludeDirectories?: string[] }): Promise<TypeScriptProjectIndex> {
-  const index: TypeScriptProjectIndex = {
+export async function buildTypeScriptProjectIndex(rootDir: string, options?: { excludeDirectories?: string[]; onlyFiles?: string[]; seed?: TypeScriptProjectIndex }): Promise<TypeScriptProjectIndex> {
+  const index: TypeScriptProjectIndex = options?.seed ? cloneTypeScriptProjectIndex(options.seed) : {
     projectRoot: rootDir,
     projectConfig: await loadTypeScriptProjectConfig(rootDir),
     callables: [],
@@ -230,7 +230,7 @@ export async function buildTypeScriptProjectIndex(rootDir: string, options?: { e
     files: new Map(),
   };
 
-  const files = await collectSupportedFiles(rootDir, options);
+  const files = options?.onlyFiles ?? await collectSupportedFiles(rootDir, options);
   for (const file of files) {
     let source: string;
     try {
@@ -265,6 +265,16 @@ export async function buildTypeScriptProjectIndex(rootDir: string, options?: { e
   }
 
   return index;
+}
+
+function cloneTypeScriptProjectIndex(index: TypeScriptProjectIndex): TypeScriptProjectIndex {
+  return {
+    projectRoot: index.projectRoot,
+    projectConfig: index.projectConfig,
+    callables: [...index.callables],
+    classes: [...index.classes],
+    files: new Map(index.files),
+  };
 }
 
 async function collectSupportedFiles(dir: string, options?: { excludeDirectories?: string[] }): Promise<string[]> {

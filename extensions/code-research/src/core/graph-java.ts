@@ -39,12 +39,15 @@ export async function createFastJavaFileIncrementalShard(
     if (detectGraphLanguage(file) !== 'java') return undefined;
   }
 
-  const index = await buildProjectIndex(subprojectRoot, { excludeDirectories: excludedNestedRoots });
   const changedAbsoluteFiles = new Set<string>();
-  for (const file of changed) {
-    const absolute = join(projectRoot, file);
+  for (const file of changed) changedAbsoluteFiles.add(join(projectRoot, file));
+  const index = await buildProjectIndex(subprojectRoot, {
+    excludeDirectories: excludedNestedRoots,
+    onlyFiles: [...changedAbsoluteFiles],
+    seed: createJavaSeedIndexFromPreviousShard(projectRoot, previous, changed),
+  });
+  for (const absolute of changedAbsoluteFiles) {
     if (!index.files.some((candidate) => candidate.file === absolute)) return undefined;
-    changedAbsoluteFiles.add(absolute);
   }
 
   const nodes: GraphNode[] = [];
@@ -118,6 +121,83 @@ function createPreviousSymbolIdMap(shard: SubprojectGraphShard): Map<string, str
   return result;
 }
 
+function createJavaSeedIndexFromPreviousShard(projectRoot: string, shard: SubprojectGraphShard, changed: Set<string>): ProjectIndex {
+  const index: ProjectIndex = { methods: [], fields: [], classes: [], imports: new Map(), files: [], typeReferences: [] };
+  for (const node of shard.nodes) {
+    if (node.kind !== 'symbol' || !node.symbolId || changed.has(node.file)) continue;
+    const packageName = javaPackageNameFromQualifiedName(node.qualifiedName, node.name);
+    const owner = node.owner ?? javaOwnerNameFromQualifiedName(node.qualifiedName, node.name);
+    if (node.declarationKind === 'class' || node.declarationKind === 'interface' || node.declarationKind === 'enum' || node.declarationKind === 'record' || node.declarationKind === 'annotation') {
+      index.classes.push({
+        file: join(projectRoot, node.file),
+        package: packageName,
+        className: node.name,
+        fullName: node.qualifiedName ?? node.name,
+        kind: node.declarationKind,
+        ownerChain: node.owner ? node.owner.split('.') : [],
+        symbolId: node.symbolId,
+        implements: [],
+        extends: [],
+        permits: [],
+        line: node.range.startLine,
+        column: node.range.startColumn,
+      });
+      continue;
+    }
+    if (node.declarationKind === 'method' || node.declarationKind === 'constructor' || node.declarationKind === 'compact_constructor' || node.declarationKind === 'annotation_element') {
+      index.methods.push({
+        file: join(projectRoot, node.file),
+        package: packageName,
+        className: owner.split('.').pop() ?? owner,
+        qualifiedClassName: owner,
+        symbol: node.name,
+        qualifiedName: node.qualifiedName ?? node.name,
+        ownerChain: node.owner ? node.owner.split('.') : [],
+        declarationKind: node.declarationKind,
+        normalizedParameterTypes: [],
+        arity: 0,
+        varargs: false,
+        symbolId: node.symbolId,
+        relationshipId: node.relationshipId,
+        line: node.range.startLine,
+        column: node.range.startColumn,
+        node: undefined,
+      });
+      continue;
+    }
+    if (node.declarationKind === 'field') {
+      index.fields.push({
+        file: join(projectRoot, node.file),
+        package: packageName,
+        className: owner.split('.').pop() ?? owner,
+        qualifiedClassName: owner,
+        fieldName: node.name,
+        qualifiedName: node.qualifiedName ?? node.name,
+        typeName: '',
+        symbolId: node.symbolId,
+        line: node.range.startLine,
+        column: node.range.startColumn,
+        typeLine: node.range.startLine,
+        typeColumn: node.range.startColumn,
+        typeEndLine: node.range.startLine,
+        typeEndColumn: node.range.startColumn,
+      });
+    }
+  }
+  return index;
+}
+
+function javaOwnerNameFromQualifiedName(qualifiedName: string | undefined, name: string): string {
+  if (!qualifiedName || !qualifiedName.endsWith(`.${name}`)) return '';
+  return qualifiedName.slice(0, -name.length - 1);
+}
+
+function javaPackageNameFromQualifiedName(qualifiedName: string | undefined, name: string): string {
+  const owner = javaOwnerNameFromQualifiedName(qualifiedName, name);
+  const parts = owner.split('.').filter(Boolean);
+  return parts.slice(0, -1).join('.');
+}
+
 export function buildJavaGraph(
   projectRoot: string,
   subprojectId: string,
@@ -132,6 +212,8 @@ export function buildJavaGraph(
   const fileNodeIds = new Map<string, string>();
   const fileNodes = new Map<string, Extract<GraphNode, { kind: 'file' }>>();
   const symbolIds = new Map<string, string>(options.seedSymbolIds);
+  const classLookup = createJavaClassLookup(index);
+  const sourceLookup = createJavaSourceLookup(index);
   const subprojectNodeId = createSubprojectNodeId(subprojectId);
   const completeFiles: string[] = [];
   const skippedFiles: Array<{ file: string; reason: 'parse_error' | 'input_unreadable' | 'unsupported_source' }> = [];
@@ -161,7 +243,7 @@ export function buildJavaGraph(
         range: record.declarationRange,
         codeRange: record.codeRange,
         owner: record.owner,
-        ownerKind: record.owner ? (index.classes.find((klass) => klass.fullName === record.owner || klass.className === record.owner)?.kind === 'interface' ? 'interface' : 'class') : 'unknown',
+        ownerKind: record.owner ? (classLookup.byName.get(record.owner)?.kind === 'interface' ? 'interface' : 'class') : 'unknown',
         exported: true,
         signature: sanitizePersistedSignature(record.signature),
         declarationKind: record.declarationKind,
@@ -187,19 +269,19 @@ export function buildJavaGraph(
     const fromId = symbolIds.get(classRecord.symbolId);
     if (!fromId) continue;
     for (const implemented of classRecord.implements ?? []) {
-      const target = index.classes.find((candidate) => candidate.fullName === implemented || candidate.className === implemented);
+      const target = classLookup.byName.get(implemented);
       const to = target ? symbolIds.get(target.symbolId) ?? `external:java:${implemented}` : `external:java:${implemented}`;
-      const relationshipMetadata = getJavaTypeRelationshipMetadataForGraph(index, classRecord.file, classRecord.line, 'implements', target?.className ?? implemented.split('.').pop() ?? implemented);
+      const relationshipMetadata = getJavaTypeRelationshipMetadataForGraph(sourceLookup, classRecord.file, classRecord.line, 'implements', target?.className ?? implemented.split('.').pop() ?? implemented);
       edges.push({ id: createEdgeId('implements', fromId, to), kind: 'implements', from: fromId, to, occurrenceRange: relationshipMetadata?.range, calledAs: relationshipMetadata?.calledAs, targetStatus: to.startsWith('external:') ? 'external' : 'resolved', resolution: to.startsWith('external:') ? 'heuristic' : 'exact' });
     }
     for (const extended of classRecord.extends ?? []) {
-      const target = index.classes.find((candidate) => candidate.fullName === extended || candidate.className === extended);
+      const target = classLookup.byName.get(extended);
       const to = target ? symbolIds.get(target.symbolId) ?? `external:java:${extended}` : `external:java:${extended}`;
-      const relationshipMetadata = getJavaTypeRelationshipMetadataForGraph(index, classRecord.file, classRecord.line, 'extends', target?.className ?? extended.split('.').pop() ?? extended);
+      const relationshipMetadata = getJavaTypeRelationshipMetadataForGraph(sourceLookup, classRecord.file, classRecord.line, 'extends', target?.className ?? extended.split('.').pop() ?? extended);
       edges.push({ id: createEdgeId('extends', fromId, to), kind: 'extends', from: fromId, to, occurrenceRange: relationshipMetadata?.range, calledAs: relationshipMetadata?.calledAs, targetStatus: to.startsWith('external:') ? 'external' : 'resolved', resolution: to.startsWith('external:') ? 'heuristic' : 'exact' });
     }
     for (const permitted of classRecord.permits ?? []) {
-      const target = index.classes.find((candidate) => candidate.fullName === permitted || candidate.className === permitted);
+      const target = classLookup.byName.get(permitted);
       const to = target ? symbolIds.get(target.symbolId) ?? `external:java:${permitted}` : `external:java:${permitted}`;
       edges.push({ id: createEdgeId('permits', fromId, to), kind: 'permits', from: fromId, to, targetStatus: to.startsWith('external:') ? 'external' : 'resolved', resolution: to.startsWith('external:') ? 'heuristic' : 'exact' });
     }
@@ -272,15 +354,37 @@ export function buildJavaGraph(
   };
 }
 
+interface JavaClassLookup {
+  byName: Map<string, ProjectIndex['classes'][number]>;
+}
+
+interface JavaSourceLookup {
+  linesByFile: Map<string, string[]>;
+}
+
+function createJavaClassLookup(index: ProjectIndex): JavaClassLookup {
+  const byName = new Map<string, ProjectIndex['classes'][number]>();
+  for (const klass of index.classes) {
+    byName.set(klass.fullName, klass);
+    byName.set(klass.className, klass);
+  }
+  return { byName };
+}
+
+function createJavaSourceLookup(index: ProjectIndex): JavaSourceLookup {
+  const linesByFile = new Map<string, string[]>();
+  for (const file of index.files) linesByFile.set(file.file, file.source.split('\n'));
+  return { linesByFile };
+}
+
 function getJavaTypeRelationshipMetadataForGraph(
-  index: ProjectIndex,
+  sourceLookup: JavaSourceLookup,
   file: string,
   line: number,
   relationship: 'extends' | 'implements',
   targetName: string
 ): { range: { startLine: number; startColumn: number; endLine: number; endColumn: number }; calledAs: string } | undefined {
-  const source = index.files.find((candidate) => candidate.file === file)?.source;
-  const lineText = source?.split('\n')[line - 1];
+  const lineText = sourceLookup.linesByFile.get(file)?.[line - 1];
   if (!lineText) return undefined;
   const match = lineText.match(new RegExp(`\\b${relationship}\\s+[^\\{]*?\\b${escapeRegExp(targetName)}(?:\\b|\\s*<)`));
   if (!match || match.index === undefined) return undefined;
