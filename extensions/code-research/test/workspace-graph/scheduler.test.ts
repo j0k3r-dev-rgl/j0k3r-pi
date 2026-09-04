@@ -31,6 +31,17 @@ describe('workspace graph scheduler', () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+  it('coalesces changed paths into one debounced refresh payload', async () => {
+    const refresh = vi.fn(async () => undefined);
+    const scheduler = createWorkspaceGraphScheduler({ refresh, debounceMs: 5 });
+    scheduler.schedule('/tmp/project', '/tmp/project/src/a.ts');
+    scheduler.schedule('/tmp/project', '/tmp/project/src/b.ts');
+    scheduler.schedule('/tmp/project', '/tmp/project/src/a.ts');
+    await scheduler.flush();
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledWith('/tmp/project', ['/tmp/project/src/a.ts', '/tmp/project/src/b.ts']);
+  });
+
   it('runs one follow-up refresh when a source change arrives during an in-flight refresh', async () => {
     const firstRun = deferred();
     const refresh = vi.fn()
@@ -216,7 +227,7 @@ describe('workspace graph scheduler', () => {
       expect(schedule).not.toHaveBeenCalled();
 
       await writeFile(join(rootDir, 'src', 'app.ts'), 'export const value = 2;\n', 'utf8');
-      await vi.waitFor(() => expect(schedule).toHaveBeenCalledWith(rootDir));
+      await vi.waitFor(() => expect(schedule).toHaveBeenCalledWith(rootDir, join(rootDir, 'src', 'app.ts')));
     } finally {
       watcher.close();
     }

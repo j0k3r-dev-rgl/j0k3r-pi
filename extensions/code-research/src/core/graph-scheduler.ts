@@ -7,7 +7,7 @@ import { isExcludedPath, isSupportedGraphSourceFile } from './source-policy.js';
 
 export interface WorkspaceGraphScheduler {
   refresh(projectRoot: string): Promise<void>;
-  schedule(projectRoot: string): void;
+  schedule(projectRoot: string, changedPath?: string): void;
   flush(): Promise<void>;
 }
 
@@ -18,11 +18,34 @@ export interface WorkspaceGraphSourceWatcher {
 
 const DEFAULT_GRAPH_REFRESH_DEBOUNCE_MS = 2500;
 
-export function createWorkspaceGraphScheduler(options: { refresh: (projectRoot: string) => Promise<void>; debounceMs?: number }): WorkspaceGraphScheduler {
+export function createWorkspaceGraphScheduler(options: { refresh: (projectRoot: string, changedPaths?: string[]) => Promise<void>; debounceMs?: number }): WorkspaceGraphScheduler {
   const pending = new Map<string, Promise<void>>();
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
-  const dirty = new Set<string>();
+  const queuedChanges = new Map<string, Set<string>>();
+  const queuedFullRefresh = new Set<string>();
   const debounceMs = options.debounceMs ?? DEFAULT_GRAPH_REFRESH_DEBOUNCE_MS;
+
+  const enqueue = (projectRoot: string, changedPath?: string) => {
+    if (!changedPath) {
+      queuedFullRefresh.add(projectRoot);
+      queuedChanges.delete(projectRoot);
+      return;
+    }
+    if (queuedFullRefresh.has(projectRoot)) return;
+    const changes = queuedChanges.get(projectRoot) ?? new Set<string>();
+    changes.add(changedPath);
+    queuedChanges.set(projectRoot, changes);
+  };
+
+  const takeQueuedChanges = (projectRoot: string): string[] | undefined => {
+    if (queuedFullRefresh.delete(projectRoot)) {
+      queuedChanges.delete(projectRoot);
+      return undefined;
+    }
+    const changes = queuedChanges.get(projectRoot);
+    queuedChanges.delete(projectRoot);
+    return changes?.size ? [...changes].sort() : undefined;
+  };
 
   const scheduleTimer = (projectRoot: string) => {
     const existing = timers.get(projectRoot);
@@ -43,11 +66,12 @@ export function createWorkspaceGraphScheduler(options: { refresh: (projectRoot: 
       timers.delete(projectRoot);
     }
 
+    const changedPaths = takeQueuedChanges(projectRoot);
     const promise = Promise.resolve()
-      .then(() => options.refresh(projectRoot))
+      .then(() => options.refresh(projectRoot, changedPaths))
       .finally(() => {
         pending.delete(projectRoot);
-        if (dirty.delete(projectRoot)) scheduleTimer(projectRoot);
+        if (queuedFullRefresh.has(projectRoot) || queuedChanges.has(projectRoot)) scheduleTimer(projectRoot);
       });
     pending.set(projectRoot, promise);
     return promise;
@@ -57,15 +81,13 @@ export function createWorkspaceGraphScheduler(options: { refresh: (projectRoot: 
     async refresh(projectRoot: string) {
       return run(projectRoot);
     },
-    schedule(projectRoot: string) {
-      if (pending.has(projectRoot)) {
-        dirty.add(projectRoot);
-        return;
-      }
+    schedule(projectRoot: string, changedPath?: string) {
+      enqueue(projectRoot, changedPath);
+      if (pending.has(projectRoot)) return;
       scheduleTimer(projectRoot);
     },
     async flush() {
-      while (timers.size > 0 || pending.size > 0 || dirty.size > 0) {
+      while (timers.size > 0 || pending.size > 0 || queuedFullRefresh.size > 0 || queuedChanges.size > 0) {
         if (timers.size > 0) await new Promise((resolve) => setTimeout(resolve, debounceMs + 5));
         if (pending.size > 0) await Promise.all([...pending.values()]);
       }
@@ -74,13 +96,13 @@ export function createWorkspaceGraphScheduler(options: { refresh: (projectRoot: 
 }
 
 export const workspaceGraphScheduler = createWorkspaceGraphScheduler({
-  refresh: async (projectRoot) => {
-    await ensureWorkspaceGraphFreshness(projectRoot);
+  refresh: async (projectRoot, changedPaths) => {
+    await ensureWorkspaceGraphFreshness(projectRoot, { changedPaths });
   },
 });
 
-export function scheduleWorkspaceGraphRefresh(projectRoot: string): void {
-  workspaceGraphScheduler.schedule(projectRoot);
+export function scheduleWorkspaceGraphRefresh(projectRoot: string, changedPath?: string): void {
+  workspaceGraphScheduler.schedule(projectRoot, changedPath);
 }
 
 async function isDirectory(path: string): Promise<boolean> {
@@ -116,7 +138,7 @@ export async function startWorkspaceGraphSourceWatcher(
         if (isExcludedPath(root, candidate)) return;
 
         if (isSupportedGraphSourceFile(candidate)) {
-          scheduler.schedule(root);
+          scheduler.schedule(root, candidate);
           return;
         }
 
