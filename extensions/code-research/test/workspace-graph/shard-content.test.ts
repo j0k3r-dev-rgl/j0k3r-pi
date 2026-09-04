@@ -151,8 +151,8 @@ describe('workspace graph shard content', () => {
   });
 
   it('keeps ensureFileNode free of deferred stat updates that rescan the full node array', async () => {
-    const source = await readFile(join(dirname(new URL(import.meta.url).pathname), '../../src/core/workspace-graph.ts'), 'utf8');
-    const ensureFileNodeBlock = source.match(/function ensureFileNode\([\s\S]*?\n}\n\nfunction extractTypeScriptCalls/);
+    const source = await readFile(join(dirname(new URL(import.meta.url).pathname), '../../src/core/graph-language-shared.ts'), 'utf8');
+    const ensureFileNodeBlock = source.match(/function ensureFileNode\([\s\S]*?\n}\n\nexport function collectFileScopedNodeIds/);
     expect(ensureFileNodeBlock?.[0]).toBeTruthy();
     expect(ensureFileNodeBlock?.[0]).not.toContain('void stat(');
     expect(ensureFileNodeBlock?.[0]).not.toContain('nodes.find(');
