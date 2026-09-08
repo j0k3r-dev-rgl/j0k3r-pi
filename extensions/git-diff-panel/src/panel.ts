@@ -1,0 +1,243 @@
+import type { Theme } from "@earendil-works/pi-coding-agent";
+import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { readFileDiff, readGitSnapshot, type GitChangedFile, type GitSnapshot } from "./git.js";
+import { buildTreeRows, nearestFileIndex, type TreeRow } from "./tree.js";
+
+const CYAN = "accent";
+
+type FocusPane = "tree" | "diff";
+
+type TuiLike = { requestRender(): void };
+
+type Done = (value: undefined) => void;
+
+function pad(text: string, width: number): string {
+	const clipped = truncateToWidth(text, Math.max(0, width), "");
+	return clipped + " ".repeat(Math.max(0, width - visibleWidth(clipped)));
+}
+
+function relCwd(cwd: string): string {
+	const home = process.env.HOME;
+	return home && cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd;
+}
+
+export class GitDiffPanel {
+	private snapshot: GitSnapshot | undefined;
+	private rows: TreeRow[] = [];
+	private selected = 0;
+	private treeScroll = 0;
+	private diffScroll = 0;
+	private focus: FocusPane = "tree";
+	private diff = "Loading git changes…";
+	private collapsedDirs = new Set<string>();
+	private loading = false;
+	private error: string | undefined;
+
+	constructor(
+		private readonly cwd: string,
+		private readonly tui: TuiLike,
+		private readonly theme: Theme,
+		private readonly done: Done,
+	) {
+		void this.refresh();
+	}
+
+	async refresh(): Promise<void> {
+		this.loading = true;
+		this.error = undefined;
+		this.tui.requestRender();
+		try {
+			this.snapshot = await readGitSnapshot(this.cwd);
+			this.rebuildRows();
+			this.selected = this.rows.length === 0 ? 0 : Math.min(this.selected, this.rows.length - 1);
+			if (this.rows[this.selected]?.kind !== "file") this.selected = nearestFileIndex(this.rows, this.selected, 1);
+			await this.loadSelectedDiff();
+		} catch (error) {
+			this.error = error instanceof Error ? error.message : String(error);
+		} finally {
+			this.loading = false;
+			this.tui.requestRender();
+		}
+	}
+
+	private rebuildRows(): void {
+		this.rows = buildTreeRows(this.snapshot?.files ?? [], this.collapsedDirs);
+	}
+
+	private selectedFile(): GitChangedFile | undefined {
+		return this.rows[this.selected]?.file;
+	}
+
+	private async loadSelectedDiff(): Promise<void> {
+		this.diffScroll = 0;
+		this.diff = await readFileDiff(this.cwd, this.selectedFile());
+	}
+
+	private move(delta: number): void {
+		if (this.rows.length === 0) return;
+		this.selected = Math.max(0, Math.min(this.rows.length - 1, this.selected + delta));
+		void this.loadSelectedDiff().finally(() => this.tui.requestRender());
+	}
+
+	handleInput(data: string): void {
+		if (matchesKey(data, "escape") || data === "q") return this.done(undefined);
+		if (data === "r") return void this.refresh();
+		if (matchesKey(data, "tab")) {
+			this.focus = this.focus === "tree" ? "diff" : "tree";
+			this.tui.requestRender();
+			return;
+		}
+		if (data === "j" || matchesKey(data, "down")) {
+			this.focus === "tree" ? this.move(1) : this.scrollDiff(1);
+			this.tui.requestRender();
+			return;
+		}
+		if (data === "k" || matchesKey(data, "up")) {
+			this.focus === "tree" ? this.move(-1) : this.scrollDiff(-1);
+			this.tui.requestRender();
+			return;
+		}
+		if (data === "l" || matchesKey(data, "right")) {
+			const row = this.rows[this.selected];
+			if (this.focus === "tree" && row?.kind === "dir") this.setDirCollapsed(row, false);
+			else this.focus = "diff";
+			this.tui.requestRender();
+			return;
+		}
+		if (data === "h" || matchesKey(data, "left")) {
+			const row = this.rows[this.selected];
+			if (this.focus === "tree" && row?.kind === "dir") this.setDirCollapsed(row, true);
+			else this.focus = "tree";
+			this.tui.requestRender();
+			return;
+		}
+		if (data === "g") {
+			if (this.focus === "tree") this.move(-this.rows.length);
+			else this.diffScroll = 0;
+			this.tui.requestRender();
+			return;
+		}
+		if (data === "G") {
+			if (this.focus === "tree") this.move(this.rows.length);
+			else this.diffScroll = Math.max(0, this.diffLines().length - 1);
+			this.tui.requestRender();
+			return;
+		}
+		if (matchesKey(data, "pageDown") || matchesKey(data, "ctrl+d")) {
+			this.scrollDiff(12);
+			this.tui.requestRender();
+			return;
+		}
+		if (matchesKey(data, "pageUp") || matchesKey(data, "ctrl+u")) {
+			this.scrollDiff(-12);
+			this.tui.requestRender();
+		}
+	}
+
+	private setDirCollapsed(row: TreeRow, collapsed: boolean): void {
+		if (row.kind !== "dir") return;
+		if (collapsed) this.collapsedDirs.add(row.path);
+		else this.collapsedDirs.delete(row.path);
+		const previousPath = row.path;
+		this.rebuildRows();
+		this.selected = Math.max(0, this.rows.findIndex((candidate) => candidate.path === previousPath));
+	}
+
+	private scrollDiff(delta: number): void {
+		this.diffScroll = Math.max(0, Math.min(Math.max(0, this.diffLines().length - 1), this.diffScroll + delta));
+	}
+
+	private diffLines(): string[] {
+		return this.diff.split("\n");
+	}
+
+	render(width: number): string[] {
+		if (width <= 0) return [];
+		const panelWidth = Math.max(70, Math.min(width, Math.floor(width * 0.96)));
+		const inner = panelWidth - 2;
+		const treeWidth = Math.max(26, Math.floor(inner * 0.34));
+		const diffWidth = Math.max(20, inner - treeWidth - 1);
+		const height = 28;
+		const bodyHeight = height - 5;
+		const title = ` git changes `;
+		const top = `${this.theme.fg(CYAN, "╭")}${this.theme.fg(CYAN, "─".repeat(5))}${this.theme.fg("success", title)}${this.theme.fg(CYAN, "─".repeat(Math.max(0, inner - visibleWidth(title) - 5)))}${this.theme.fg(CYAN, "╮")}`;
+		const sep = `${this.theme.fg(CYAN, "├")}${this.theme.fg(CYAN, "─".repeat(treeWidth))}${this.theme.fg(CYAN, "┬")}${this.theme.fg(CYAN, "─".repeat(diffWidth))}${this.theme.fg(CYAN, "┤")}`;
+		const bottomSep = `${this.theme.fg(CYAN, "├")}${this.theme.fg(CYAN, "─".repeat(treeWidth))}${this.theme.fg(CYAN, "┴")}${this.theme.fg(CYAN, "─".repeat(diffWidth))}${this.theme.fg(CYAN, "┤")}`;
+		const bottom = `${this.theme.fg(CYAN, "╰")}${this.theme.fg(CYAN, "─".repeat(inner))}${this.theme.fg(CYAN, "╯")}`;
+		const summary = this.summary();
+		const lines = [top, this.fullRow(summary, inner), sep];
+		const treeRows = this.renderTree(bodyHeight, treeWidth - 2);
+		const diffRows = this.renderDiff(bodyHeight, diffWidth - 2);
+		for (let i = 0; i < bodyHeight; i++) {
+			lines.push(`${this.theme.fg(CYAN, "│")} ${pad(treeRows[i] ?? "", treeWidth - 2)} ${this.theme.fg(CYAN, "│")} ${pad(diffRows[i] ?? "", diffWidth - 2)} ${this.theme.fg(CYAN, "│")}`);
+		}
+		lines.push(bottomSep);
+		lines.push(this.fullRow(this.theme.fg("dim", "j/k ↑↓ move · h/l focus · ctrl+d/u page · g/G top/bottom · r refresh · q/esc close"), inner));
+		lines.push(bottom);
+		return lines;
+	}
+
+	private fullRow(content: string, inner: number): string {
+		return `${this.theme.fg(CYAN, "│")} ${pad(content, inner - 2)} ${this.theme.fg(CYAN, "│")}`;
+	}
+
+	private summary(): string {
+		if (this.error) return this.theme.fg("error", `git error: ${this.error}`);
+		if (!this.snapshot) return this.theme.fg("warning", "loading git status…");
+		const files = this.snapshot.files.length;
+		return [
+			this.theme.fg("accent", relCwd(this.cwd)),
+			this.theme.fg("muted", "branch"),
+			this.theme.fg("warning", this.snapshot.branch),
+			this.theme.fg("success", `+${this.snapshot.totalAdditions}`),
+			this.theme.fg("error", `-${this.snapshot.totalDeletions}`),
+			this.theme.fg("accent", `${files} changed file${files === 1 ? "" : "s"}`),
+			this.theme.fg(this.focus === "tree" ? "success" : "accent", `focus ${this.focus}`),
+			this.loading ? this.theme.fg("warning", "refreshing…") : "",
+		].filter(Boolean).join(this.theme.fg("muted", " · "));
+	}
+
+	private renderTree(height: number, width: number): string[] {
+		const header = this.paneHeader("tree", "files");
+		const listHeight = Math.max(0, height - 1);
+		if (this.rows.length === 0) return [header, this.theme.fg("success", "clean working tree")];
+		if (this.selected < this.treeScroll) this.treeScroll = this.selected;
+		if (this.selected >= this.treeScroll + listHeight) this.treeScroll = this.selected - listHeight + 1;
+		return [header, ...this.rows.slice(this.treeScroll, this.treeScroll + listHeight).map((row, offset) => {
+			const index = this.treeScroll + offset;
+			const selected = index === this.selected;
+			const prefix = selected ? this.theme.fg("accent", "▶ ") : "  ";
+			const indent = "  ".repeat(row.depth);
+			if (row.kind === "dir") return this.theme.fg(row.expanded ? "accent" : "muted", `${prefix}${indent}${row.expanded ? "▾" : "▸"} ${row.name}`);
+			const status = row.file?.untracked ? "??" : row.file?.status ?? "";
+			const color = row.file?.untracked ? "warning" : row.file?.staged ? "success" : "accent";
+			const stat = row.file ? this.theme.fg("success", `+${row.file.additions ?? 0}`) + this.theme.fg("muted", "/") + this.theme.fg("error", `-${row.file.deletions ?? 0}`) : "";
+			return `${prefix}${indent}${this.theme.fg(color, status.padEnd(2))} ${this.theme.fg("text", row.name)} ${stat}`;
+		})];
+	}
+
+	private paneHeader(pane: FocusPane, label: string): string {
+		const active = this.focus === pane;
+		const marker = active ? this.theme.fg("success", "●") : this.theme.fg("muted", "○");
+		const text = active ? this.theme.fg("accent", label.toUpperCase()) : this.theme.fg("muted", label);
+		return `${marker} ${text} ${this.theme.fg("muted", "─".repeat(24))}`;
+	}
+
+	private renderDiff(height: number, width: number): string[] {
+		const file = this.selectedFile();
+		const header = `${this.paneHeader("diff", "diff")} ${file ? this.theme.fg("accent", file.path) : this.theme.fg("muted", "no file selected")}`;
+		const diff = this.diffLines().slice(this.diffScroll, this.diffScroll + Math.max(0, height - 1)).map((line) => this.colorDiffLine(line));
+		return [header, ...diff].slice(0, height).map((line) => truncateToWidth(line, width, ""));
+	}
+
+	private colorDiffLine(line: string): string {
+		if (line.startsWith("+++ ") || line.startsWith("--- ") || line.startsWith("diff --git")) return this.theme.fg("accent", line);
+		if (line.startsWith("@@")) return this.theme.fg("warning", line);
+		if (line.startsWith("+")) return this.theme.fg("success", line);
+		if (line.startsWith("-")) return this.theme.fg("error", line);
+		return this.theme.fg("muted", line);
+	}
+
+	invalidate(): void {}
+	dispose(): void {}
+}
