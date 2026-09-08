@@ -32,12 +32,27 @@ async function git(cwd: string, args: string[]): Promise<string> {
 	return stdout;
 }
 
+function cleanGitPath(raw: string): string {
+	let p = raw.trim();
+	if (p.startsWith('"') && p.endsWith('"')) {
+		try {
+			p = JSON.parse(p);
+		} catch {
+			p = p.slice(1, -1);
+		}
+	}
+	return p;
+}
+
 function parseStatus(output: string): GitChangedFile[] {
 	return output.split("\n").filter(Boolean).map((line) => {
 		const x = line[0] ?? " ";
 		const y = line[1] ?? " ";
-		const rawPath = line.slice(3);
-		const path = rawPath.includes(" -> ") ? rawPath.split(" -> ").at(-1)! : rawPath;
+		let rawPath = line.slice(3);
+		if (rawPath.includes(" -> ")) {
+			rawPath = rawPath.split(" -> ").at(-1)!;
+		}
+		const path = cleanGitPath(rawPath);
 		const untracked = x === "?" && y === "?";
 		return {
 			path,
@@ -54,14 +69,34 @@ function parseNumstat(output: string): Map<string, { additions: number; deletion
 	for (const line of output.split("\n")) {
 		if (!line.trim()) continue;
 		const [added, deleted, ...pathParts] = line.split("\t");
-		const filePath = pathParts.join("\t");
+		let filePath = pathParts.join("\t");
 		if (!filePath) continue;
+		filePath = cleanGitPath(filePath);
+		if (filePath.includes(" => ")) {
+			filePath = filePath.replace(/\{.*? => (.*?)\}/g, "$1").replace(/.*? => (.*)/, "$1");
+		}
 		const additions = added === "-" ? 0 : Number(added) || 0;
 		const deletions = deleted === "-" ? 0 : Number(deleted) || 0;
 		const current = stats.get(filePath) ?? { additions: 0, deletions: 0 };
 		stats.set(filePath, { additions: current.additions + additions, deletions: current.deletions + deletions });
 	}
 	return stats;
+}
+
+async function countUntrackedLines(cwd: string, filePath: string): Promise<number> {
+	try {
+		const buffer = await readFile(join(cwd, filePath));
+		const checkLen = Math.min(buffer.length, 8000);
+		for (let i = 0; i < checkLen; i++) {
+			if (buffer[i] === 0) return 0;
+		}
+		const content = buffer.toString("utf8");
+		if (!content) return 0;
+		const trimmed = content.endsWith("\n") ? content.slice(0, -1) : content;
+		return trimmed.length === 0 ? 0 : trimmed.split("\n").length;
+	} catch {
+		return 0;
+	}
 }
 
 export async function readGitSnapshot(cwd: string): Promise<GitSnapshot> {
@@ -72,7 +107,21 @@ export async function readGitSnapshot(cwd: string): Promise<GitSnapshot> {
 		git(cwd, ["diff", "--cached", "--numstat"]).catch(() => ""),
 	]);
 	const stats = parseNumstat(`${unstagedStat}\n${stagedStat}`);
-	const files = parseStatus(statusOutput).map((file) => ({ ...file, ...stats.get(file.path) })).sort((a, b) => a.path.localeCompare(b.path));
+	const parsedFiles = parseStatus(statusOutput);
+	const files: GitChangedFile[] = await Promise.all(
+		parsedFiles.map(async (file) => {
+			const stat = stats.get(file.path);
+			if (stat) {
+				return { ...file, additions: stat.additions, deletions: stat.deletions };
+			}
+			if (file.untracked) {
+				const additions = await countUntrackedLines(cwd, file.path);
+				return { ...file, additions, deletions: 0 };
+			}
+			return { ...file, additions: 0, deletions: 0 };
+		}),
+	);
+	files.sort((a, b) => a.path.localeCompare(b.path));
 	return {
 		cwd,
 		branch: branchOutput.trim() || "detached",
@@ -82,9 +131,22 @@ export async function readGitSnapshot(cwd: string): Promise<GitSnapshot> {
 	};
 }
 
-function syntheticUntrackedDiff(cwd: string, filePath: string): Promise<string> {
-	return readFile(join(cwd, filePath), "utf8").then((content) => {
-		const lines = content.split("\n");
+async function syntheticUntrackedDiff(cwd: string, filePath: string): Promise<string> {
+	try {
+		const buffer = await readFile(join(cwd, filePath));
+		const checkLen = Math.min(buffer.length, 8000);
+		for (let i = 0; i < checkLen; i++) {
+			if (buffer[i] === 0) {
+				return [
+					`diff --git a/${filePath} b/${filePath}`,
+					"new file mode 100644",
+					`Binary file ${filePath} added.`,
+				].join("\n");
+			}
+		}
+		const content = buffer.toString("utf8");
+		const trimmed = content.endsWith("\n") ? content.slice(0, -1) : content;
+		const lines = trimmed.length === 0 ? [] : trimmed.split("\n");
 		const truncated = lines.length > 2000;
 		const shown = truncated ? lines.slice(0, 2000) : lines;
 		return [
@@ -96,7 +158,9 @@ function syntheticUntrackedDiff(cwd: string, filePath: string): Promise<string> 
 			...shown.map((line) => `+${line}`),
 			...(truncated ? [`+… truncated ${lines.length - shown.length} more lines`] : []),
 		].join("\n");
-	}).catch(() => `Untracked file: ${filePath}\nBinary or unreadable file.`);
+	} catch {
+		return `Untracked file: ${filePath}\nBinary or unreadable file.`;
+	}
 }
 
 export async function readFileDiff(cwd: string, file: GitChangedFile | undefined): Promise<string> {

@@ -13,7 +13,7 @@ async function openGitDiffPanel(ctx: ExtensionContext): Promise<void> {
 			overlay: true,
 			overlayOptions: {
 				width: "96%",
-				maxHeight: "88%",
+				maxHeight: "95%",
 				anchor: "center",
 				margin: 1,
 			},

@@ -28,6 +28,7 @@ export class GitDiffPanel {
 	private treeScroll = 0;
 	private diffScroll = 0;
 	private focus: FocusPane = "tree";
+	private activeFile: GitChangedFile | undefined;
 	private diff = "Loading git changes…";
 	private collapsedDirs = new Set<string>();
 	private loading = false;
@@ -69,14 +70,19 @@ export class GitDiffPanel {
 	}
 
 	private async loadSelectedDiff(): Promise<void> {
+		const file = this.selectedFile();
+		if (!file) return;
+		this.activeFile = file;
 		this.diffScroll = 0;
-		this.diff = await readFileDiff(this.cwd, this.selectedFile());
+		this.diff = await readFileDiff(this.cwd, file);
 	}
 
 	private move(delta: number): void {
 		if (this.rows.length === 0) return;
 		this.selected = Math.max(0, Math.min(this.rows.length - 1, this.selected + delta));
-		void this.loadSelectedDiff().finally(() => this.tui.requestRender());
+		if (this.rows[this.selected]?.kind === "file") {
+			void this.loadSelectedDiff().finally(() => this.tui.requestRender());
+		}
 	}
 
 	handleInput(data: string): void {
@@ -86,6 +92,28 @@ export class GitDiffPanel {
 			this.focus = this.focus === "tree" ? "diff" : "tree";
 			this.tui.requestRender();
 			return;
+		}
+		if (matchesKey(data, "ctrl+j") && data !== "\r") {
+			this.scrollDiff(1);
+			this.tui.requestRender();
+			return;
+		}
+		if (matchesKey(data, "ctrl+k")) {
+			this.scrollDiff(-1);
+			this.tui.requestRender();
+			return;
+		}
+		if (matchesKey(data, "return") || data === " ") {
+			if (this.focus === "tree") {
+				const row = this.rows[this.selected];
+				if (row?.kind === "dir") {
+					this.setDirCollapsed(row, row.expanded ?? true);
+				} else if (row?.kind === "file") {
+					this.focus = "diff";
+				}
+				this.tui.requestRender();
+				return;
+			}
 		}
 		if (data === "j" || matchesKey(data, "down")) {
 			this.focus === "tree" ? this.move(1) : this.scrollDiff(1);
@@ -141,11 +169,8 @@ export class GitDiffPanel {
 			const amount = Math.abs(delta) || 3;
 
 			// Split boundary: check if cursor is over tree or diff based on X coordinate
-			// Layout calculation: inner = width - 2; treeWidth = Math.max(26, Math.floor(inner * 0.34))
 			const inner = Math.max(0, event.width - 2);
-			const treeWidth = Math.max(26, Math.floor(inner * 0.34));
-
-			// Left column is x <= treeWidth + 1
+			const treeWidth = Math.max(26, Math.floor(inner * 0.35));
 			const overTree = event.x <= treeWidth + 1;
 
 			if (overTree) {
@@ -162,8 +187,23 @@ export class GitDiffPanel {
 
 		if (event.type === "press" && event.button === "left") {
 			const inner = Math.max(0, event.width - 2);
-			const treeWidth = Math.max(26, Math.floor(inner * 0.34));
-			this.focus = event.x <= treeWidth + 1 ? "tree" : "diff";
+			const treeWidth = Math.max(26, Math.floor(inner * 0.35));
+			const overTree = event.x <= treeWidth + 1;
+			this.focus = overTree ? "tree" : "diff";
+
+			if (overTree && event.y >= 4) {
+				const rowIdx = this.treeScroll + (event.y - 4);
+				if (rowIdx >= 0 && rowIdx < this.rows.length) {
+					const row = this.rows[rowIdx];
+					this.selected = rowIdx;
+					if (row?.kind === "dir") {
+						this.setDirCollapsed(row, row.expanded ?? true);
+					} else if (row?.kind === "file") {
+						void this.loadSelectedDiff().finally(() => this.tui.requestRender());
+					}
+				}
+			}
+
 			this.tui.requestRender();
 			return { handled: true };
 		}
@@ -192,9 +232,11 @@ export class GitDiffPanel {
 		if (width <= 0) return [];
 		const panelWidth = Math.max(70, Math.min(width, Math.floor(width * 0.96)));
 		const inner = panelWidth - 2;
-		const treeWidth = Math.max(26, Math.floor(inner * 0.34));
+		const treeWidth = Math.max(26, Math.floor(inner * 0.35));
 		const diffWidth = Math.max(20, inner - treeWidth - 1);
-		const height = 28;
+		const termRows = (this.tui as { terminal?: { rows?: number } })?.terminal?.rows ?? process.stdout.rows ?? 40;
+		const targetHeight = Math.max(24, Math.floor(termRows * 0.90));
+		const height = Math.min(targetHeight, Math.max(20, termRows - 2));
 		const bodyHeight = height - 5;
 		const title = ` git changes `;
 		const top = `${this.theme.fg(CYAN, "╭")}${this.theme.fg(CYAN, "─".repeat(5))}${this.theme.fg("success", title)}${this.theme.fg(CYAN, "─".repeat(Math.max(0, inner - visibleWidth(title) - 5)))}${this.theme.fg(CYAN, "╮")}`;
@@ -209,7 +251,7 @@ export class GitDiffPanel {
 			lines.push(`${this.theme.fg(CYAN, "│")} ${pad(treeRows[i] ?? "", treeWidth - 2)} ${this.theme.fg(CYAN, "│")} ${pad(diffRows[i] ?? "", diffWidth - 2)} ${this.theme.fg(CYAN, "│")}`);
 		}
 		lines.push(bottomSep);
-		lines.push(this.fullRow(this.theme.fg("dim", "j/k ↑↓ move · h/l focus · ctrl+d/u page · g/G top/bottom · r refresh · q/esc close"), inner));
+		lines.push(this.fullRow(this.theme.fg("dim", "j/k move · ctrl+j/k scroll · h/l focus · ctrl+d/u page · g/G ends · r refresh · q close"), inner));
 		lines.push(bottom);
 		return lines;
 	}
@@ -271,7 +313,7 @@ export class GitDiffPanel {
 	}
 
 	private renderDiff(height: number, width: number): string[] {
-		const file = this.selectedFile();
+		const file = this.activeFile ?? this.selectedFile();
 		const header = `${this.paneHeader("diff", "diff")} ${file ? this.theme.fg("accent", file.path) : this.theme.fg("muted", "no file selected")}`;
 		const diff = this.diffLines().slice(this.diffScroll, this.diffScroll + Math.max(0, height - 1)).map((line) => this.colorDiffLine(line));
 		return [header, ...diff].slice(0, height).map((line) => truncateToWidth(line, width, ""));
