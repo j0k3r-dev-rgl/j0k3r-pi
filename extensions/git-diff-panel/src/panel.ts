@@ -93,13 +93,13 @@ export class GitDiffPanel {
 			this.tui.requestRender();
 			return;
 		}
-		if (matchesKey(data, "ctrl+j") && data !== "\r") {
-			this.scrollDiff(1);
+		if ((matchesKey(data, "ctrl+j") && data !== "\r") || matchesKey(data, "pageDown") || matchesKey(data, "ctrl+d")) {
+			this.scrollDiff(15);
 			this.tui.requestRender();
 			return;
 		}
-		if (matchesKey(data, "ctrl+k")) {
-			this.scrollDiff(-1);
+		if (matchesKey(data, "ctrl+k") || matchesKey(data, "pageUp") || matchesKey(data, "ctrl+u")) {
+			this.scrollDiff(-15);
 			this.tui.requestRender();
 			return;
 		}
@@ -150,15 +150,6 @@ export class GitDiffPanel {
 			else this.diffScroll = Math.max(0, this.diffLines().length - 1);
 			this.tui.requestRender();
 			return;
-		}
-		if (matchesKey(data, "pageDown") || matchesKey(data, "ctrl+d")) {
-			this.scrollDiff(12);
-			this.tui.requestRender();
-			return;
-		}
-		if (matchesKey(data, "pageUp") || matchesKey(data, "ctrl+u")) {
-			this.scrollDiff(-12);
-			this.tui.requestRender();
 		}
 	}
 
@@ -251,7 +242,7 @@ export class GitDiffPanel {
 			lines.push(`${this.theme.fg(CYAN, "│")} ${pad(treeRows[i] ?? "", treeWidth - 2)} ${this.theme.fg(CYAN, "│")} ${pad(diffRows[i] ?? "", diffWidth - 2)} ${this.theme.fg(CYAN, "│")}`);
 		}
 		lines.push(bottomSep);
-		lines.push(this.fullRow(this.theme.fg("dim", "j/k move · ctrl+j/k scroll · h/l focus · ctrl+d/u page · g/G ends · r refresh · q close"), inner));
+		lines.push(this.fullRow(this.theme.fg("dim", "j/k move · ctrl+j/k scroll · h/l focus · g/G ends · r refresh · q close"), inner));
 		lines.push(bottom);
 		return lines;
 	}

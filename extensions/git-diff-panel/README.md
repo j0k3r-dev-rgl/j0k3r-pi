@@ -15,19 +15,20 @@ Pi TUI extension that opens a themed split overlay for reviewing local Git chang
 
 ## Keys
 
-- `j` / `down`: move down in the tree or diff.
-- `k` / `up`: move up in the tree or diff.
+- `j` / `down`: move down in tree, or scroll 1 line down in diff.
+- `k` / `up`: move up in tree, or scroll 1 line up in diff.
+- `ctrl+j`: scroll 15 lines down in diff (nvim style).
+- `ctrl+k`: scroll 15 lines up in diff (nvim style).
 - `h` / `left`: focus tree, or collapse selected folder while tree is focused.
 - `l` / `right`: focus diff, or expand selected folder while tree is focused.
+- `enter` / `space`: toggle folder expand/collapse, or focus diff on file.
 - `tab`: toggle focus.
-- `ctrl+d` / `pageDown`: page down in diff.
-- `ctrl+u` / `pageUp`: page up in diff.
 - `g`: top.
 - `G`: bottom.
 - `r`: refresh.
 - `q` / `escape`: close.
 - Mouse wheel: scroll tree when hovering over the left panel, or scroll diff when hovering over the right panel.
-- Mouse left click: switch focus between tree and diff panes.
+- Mouse left click: switch focus between tree and diff panes, or toggle folders/select files in tree.
 
 ## Notes
 
