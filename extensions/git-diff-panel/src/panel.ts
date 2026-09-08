@@ -1,5 +1,5 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { matchesKey, truncateToWidth, visibleWidth, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { readFileDiff, readGitSnapshot, type GitChangedFile, type GitSnapshot } from "./git.js";
 import { buildTreeRows, nearestFileIndex, type TreeRow } from "./tree.js";
 
@@ -132,6 +132,43 @@ export class GitDiffPanel {
 			this.scrollDiff(-12);
 			this.tui.requestRender();
 		}
+	}
+
+	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+		if (event.type === "wheel") {
+			const delta = event.wheelDelta ?? (event.button === "none" ? 3 : 0);
+			const direction = delta === 0 ? 0 : delta > 0 ? 1 : -1;
+			const amount = Math.abs(delta) || 3;
+
+			// Split boundary: check if cursor is over tree or diff based on X coordinate
+			// Layout calculation: inner = width - 2; treeWidth = Math.max(26, Math.floor(inner * 0.34))
+			const inner = Math.max(0, event.width - 2);
+			const treeWidth = Math.max(26, Math.floor(inner * 0.34));
+
+			// Left column is x <= treeWidth + 1
+			const overTree = event.x <= treeWidth + 1;
+
+			if (overTree) {
+				this.focus = "tree";
+				this.move(direction > 0 ? 1 : -1);
+			} else {
+				this.focus = "diff";
+				this.scrollDiff(direction * amount);
+			}
+
+			this.tui.requestRender();
+			return { handled: true };
+		}
+
+		if (event.type === "press" && event.button === "left") {
+			const inner = Math.max(0, event.width - 2);
+			const treeWidth = Math.max(26, Math.floor(inner * 0.34));
+			this.focus = event.x <= treeWidth + 1 ? "tree" : "diff";
+			this.tui.requestRender();
+			return { handled: true };
+		}
+
+		return undefined;
 	}
 
 	private setDirCollapsed(row: TreeRow, collapsed: boolean): void {

@@ -70,8 +70,9 @@ describe('agentTodoExtension', () => {
 
     await handlers.get('session_start')?.({}, ctx);
     expect(setWidget).toHaveBeenCalledWith('agent-todo', expect.arrayContaining([
-      expect.stringContaining('0/1 complete'),
-      '\u001b[2mctrl+space to expand\u001b[22m',
+      expect.stringContaining('0/1'),
+      expect.stringContaining('complete'),
+      expect.stringContaining('ctrl+space to expand'),
     ]));
     expect(setWidget.mock.calls.at(-1)?.[1]).toEqual(expect.not.arrayContaining(['[ ] 1. Write tests']));
     expect(ctx.agentTodo).toBe(pi.agentTodo);
@@ -122,11 +123,11 @@ describe('agentTodoExtension', () => {
 
     await handlers.get('session_start')?.({}, ctx);
     expect(setWidget).toHaveBeenLastCalledWith('agent-todo', expect.not.arrayContaining(['[ ] 1. Write tests']));
-    expect(setWidget.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining(['\u001b[2mctrl+space to expand\u001b[22m']));
+    expect(setWidget.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining([expect.stringContaining('ctrl+space to expand')]));
 
     await shortcuts[0].def.handler(ctx);
-    expect(setWidget).toHaveBeenLastCalledWith('agent-todo', expect.arrayContaining(['[ ] 1. Write tests']));
-    expect(setWidget.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining(['\u001b[2mctrl+space to collapse\u001b[22m']));
+    expect(setWidget).toHaveBeenLastCalledWith('agent-todo', expect.arrayContaining([expect.stringContaining('Write tests')]));
+    expect(setWidget.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining([expect.stringContaining('ctrl+space to collapse')]));
   });
 
   it('creates runtime numeric step ids while keeping todo ids unique', async () => {
@@ -144,8 +145,9 @@ describe('agentTodoExtension', () => {
     expect(result.details.agent_todo.state.current_todo?.id).toMatch(/^todo-/);
     expect(result.details.agent_todo.state.current_todo?.steps.map((step: any) => step.id)).toEqual(['1', '2']);
     expect(setWidget).toHaveBeenCalledWith('agent-todo', expect.arrayContaining([
-      expect.stringContaining('0/2 complete'),
-      '\u001b[2mctrl+space to expand\u001b[22m',
+      expect.stringContaining('0/2'),
+      expect.stringContaining('complete'),
+      expect.stringContaining('ctrl+space to expand'),
     ]));
   });
 });

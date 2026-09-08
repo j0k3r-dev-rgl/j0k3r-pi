@@ -26,6 +26,8 @@ Pi TUI extension that opens a themed split overlay for reviewing local Git chang
 - `G`: bottom.
 - `r`: refresh.
 - `q` / `escape`: close.
+- Mouse wheel: scroll tree when hovering over the left panel, or scroll diff when hovering over the right panel.
+- Mouse left click: switch focus between tree and diff panes.
 
 ## Notes
 
