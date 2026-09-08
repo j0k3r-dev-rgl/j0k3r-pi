@@ -197,6 +197,17 @@ export class GitDiffPanel {
 		].filter(Boolean).join(this.theme.fg("muted", " · "));
 	}
 
+	private fileChangeStyle(file: GitChangedFile | undefined): { label: string; color: Parameters<Theme["fg"]>[0] } {
+		if (!file) return { label: "", color: "text" };
+		const raw = file.untracked ? "A" : file.status || "M";
+		if (raw.includes("D")) return { label: "D", color: "error" };
+		if (raw.includes("R")) return { label: "R", color: "warning" };
+		if (raw.includes("C")) return { label: "C", color: "warning" };
+		if (raw.includes("A") || file.untracked) return { label: "A", color: "success" };
+		if (raw.includes("M")) return { label: "M", color: "accent" };
+		return { label: raw.trim() || "M", color: "text" };
+	}
+
 	private renderTree(height: number, width: number): string[] {
 		const header = this.paneHeader("tree", "files");
 		const listHeight = Math.max(0, height - 1);
@@ -209,10 +220,9 @@ export class GitDiffPanel {
 			const prefix = selected ? this.theme.fg("accent", "▶ ") : "  ";
 			const indent = "  ".repeat(row.depth);
 			if (row.kind === "dir") return this.theme.fg(row.expanded ? "accent" : "muted", `${prefix}${indent}${row.expanded ? "▾" : "▸"} ${row.name}`);
-			const status = row.file?.untracked ? "??" : row.file?.status ?? "";
-			const color = row.file?.untracked ? "warning" : row.file?.staged ? "success" : "accent";
+			const style = this.fileChangeStyle(row.file);
 			const stat = row.file ? this.theme.fg("success", `+${row.file.additions ?? 0}`) + this.theme.fg("muted", "/") + this.theme.fg("error", `-${row.file.deletions ?? 0}`) : "";
-			return `${prefix}${indent}${this.theme.fg(color, status.padEnd(2))} ${this.theme.fg("text", row.name)} ${stat}`;
+			return `${prefix}${indent}${this.theme.fg(style.color, style.label.padEnd(2))} ${this.theme.fg(style.color, row.name)} ${stat}`;
 		})];
 	}
 
