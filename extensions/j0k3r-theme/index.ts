@@ -3,7 +3,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { J0k3rThemeEditor } from "./src/J0k3rThemeEditor.js";
-import { J0k3rThemeFooter } from "./src/J0k3rThemeFooter.js";
+import { J0k3rThemeFooter, type RepoGitInfo } from "./src/J0k3rThemeFooter.js";
 import { J0k3rThemeHeader, type J0k3rThemeHeaderData } from "./src/J0k3rThemeHeader.js";
 
 const extensionDir = dirname(fileURLToPath(import.meta.url));
@@ -93,6 +93,14 @@ function listGlobalExtensions(): string[] {
 	}).map((entry) => entry.replace(/\.(?:ts|js)$/, "")).sort();
 }
 
+function parseRepoName(remoteUrl: string): string | undefined {
+	const trimmed = remoteUrl.trim();
+	if (!trimmed) return undefined;
+	// Match git@host:owner/repo.git or https://host/owner/repo.git or https://host/owner/repo
+	const match = trimmed.match(/[:/]([^/:]+?)(?:\.git)?$/);
+	return match?.[1] || undefined;
+}
+
 export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 	pi.on("session_start", (_event, ctx) => {
 		if (ctx.mode !== "tui") return;
@@ -102,24 +110,55 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 			skillNames: listDetectedSkills(ctx.cwd),
 			extensionNames: listGlobalExtensions(),
 		};
+		const footerGitInfo: RepoGitInfo = {
+			dir: ctx.cwd,
+		};
 		let activeHeader: J0k3rThemeHeader | undefined;
-		let requestHeaderRender: (() => void) | undefined;
+		let activeFooter: J0k3rThemeFooter | undefined;
+		let requestUIRender: (() => void) | undefined;
 
-		void pi.exec("git", ["branch", "--show-current"], { cwd: ctx.cwd, timeout: 1000 }).then((result) => {
-			const branch = result.code === 0 ? result.stdout.trim() : "";
-			if (branch.length === 0) return;
-			headerData.branch = branch;
-			activeHeader?.setData(headerData);
-			requestHeaderRender?.();
+		void Promise.all([
+			pi.exec("git", ["branch", "--show-current"], { cwd: ctx.cwd, timeout: 1000 }).catch(() => null),
+			pi.exec("git", ["remote", "get-url", "origin"], { cwd: ctx.cwd, timeout: 1000 })
+				.then((res) => (res && res.code === 0 ? res : pi.exec("git", ["remote"], { cwd: ctx.cwd, timeout: 1000 })
+					.then((rList) => {
+						const firstRemote = rList && rList.code === 0 ? rList.stdout.trim().split("\n")[0]?.trim() : "";
+						return firstRemote ? pi.exec("git", ["remote", "get-url", firstRemote], { cwd: ctx.cwd, timeout: 1000 }) : null;
+					})
+				))
+				.catch(() => null),
+		]).then(([branchRes, remoteRes]) => {
+			let changed = false;
+			const branch = branchRes && branchRes.code === 0 ? branchRes.stdout.trim() : "";
+			if (branch.length > 0) {
+				headerData.branch = branch;
+				footerGitInfo.branch = branch;
+				changed = true;
+			}
+			const remoteUrl = remoteRes && remoteRes.code === 0 ? remoteRes.stdout.trim() : "";
+			const repoName = parseRepoName(remoteUrl);
+			if (repoName) {
+				footerGitInfo.repoName = repoName;
+				changed = true;
+			}
+			if (changed) {
+				activeHeader?.setData(headerData);
+				activeFooter?.setGitInfo(footerGitInfo);
+				requestUIRender?.();
+			}
 		}).catch(() => undefined);
 
 		ctx.ui.setHeader((tui, theme) => {
 			activeHeader = new J0k3rThemeHeader(theme, headerData, ctx.ui.getToolsExpanded());
-			requestHeaderRender = () => tui.requestRender();
+			requestUIRender = () => tui.requestRender();
 			return activeHeader;
 		});
 		ctx.ui.setEditorComponent((tui, theme, keybindings) => new J0k3rThemeEditor(tui, theme, keybindings));
-		ctx.ui.setFooter((tui, theme, footerData) => new J0k3rThemeFooter(tui, theme, footerData, ctx, () => pi.getThinkingLevel()));
+		ctx.ui.setFooter((tui, theme, footerData) => {
+			activeFooter = new J0k3rThemeFooter(tui, theme, footerData, ctx, () => pi.getThinkingLevel(), footerGitInfo);
+			requestUIRender = () => tui.requestRender();
+			return activeFooter;
+		});
 	});
 
 	pi.on("before_agent_start", (event) => ({

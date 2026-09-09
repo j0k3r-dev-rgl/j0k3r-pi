@@ -62,6 +62,20 @@ function joinSegments(segments: string[]): string {
 	return segments.filter(Boolean).join(electric(VIOLET, " ┃ "));
 }
 
+export interface RepoGitInfo {
+	dir: string;
+	repoName?: string;
+	branch?: string;
+}
+
+function formatPath(dirPath: string): string {
+	const home = process.env.HOME;
+	if (home && (dirPath === home || dirPath.startsWith(`${home}/`))) {
+		return `~${dirPath.slice(home.length)}`;
+	}
+	return dirPath;
+}
+
 export class J0k3rThemeFooter implements Component {
 	constructor(
 		private readonly tui: TUI,
@@ -69,7 +83,12 @@ export class J0k3rThemeFooter implements Component {
 		private readonly footerData: ReadonlyFooterDataProvider,
 		private readonly ctx: ExtensionContext,
 		private readonly getThinkingLevel: () => string,
+		private gitInfo?: RepoGitInfo,
 	) {}
+
+	setGitInfo(gitInfo: RepoGitInfo): void {
+		this.gitInfo = gitInfo;
+	}
 
 	render(width: number): string[] {
 		if (width <= 0) return [];
@@ -91,7 +110,17 @@ export class J0k3rThemeFooter implements Component {
 		const right = electric(CYAN, getEngramStatus(this.footerData));
 		const gap = Math.max(1, width - visibleWidth(left) - visibleWidth(right));
 
-		return [truncateToWidth(`${left}${" ".repeat(gap)}${right}`, width, "")];
+		const bottomLine = truncateToWidth(`${left}${" ".repeat(gap)}${right}`, width, "");
+
+		const dir = formatPath(this.gitInfo?.dir ?? this.ctx.cwd);
+		const repoSegment = this.gitInfo?.repoName ? `${this.theme.fg("muted", "repo:")} ${electric(LIME, this.gitInfo.repoName)}` : "";
+		const branchSegment = this.gitInfo?.branch ? `${this.theme.fg("muted", "branch:")} ${electric(PINK, this.gitInfo.branch)}` : "";
+		const dirSegment = `${this.theme.fg("muted", "dir:")} ${electric(CYAN, dir)}`;
+
+		const topLineLeft = joinSegments([dirSegment, repoSegment, branchSegment]);
+		const topLine = truncateToWidth(topLineLeft, width, "");
+
+		return [topLine, bottomLine];
 	}
 
 	invalidate(): void {}
