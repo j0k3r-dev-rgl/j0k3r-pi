@@ -1,13 +1,27 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+	DefaultPackageManager,
+	SettingsManager,
+	getAgentDir,
+	type ExtensionAPI,
+} from "@earendil-works/pi-coding-agent";
 import { J0k3rThemeEditor } from "./src/J0k3rThemeEditor.js";
 import { J0k3rThemeFooter, type RepoGitInfo } from "./src/J0k3rThemeFooter.js";
 import { J0k3rThemeHeader, type J0k3rThemeHeaderData } from "./src/J0k3rThemeHeader.js";
 
 const extensionDir = dirname(fileURLToPath(import.meta.url));
 const globalAgentDir = dirname(dirname(extensionDir));
+
+function parseJsonFile(filePath: string): any {
+	try {
+		if (!existsSync(filePath)) return null;
+		return JSON.parse(readFileSync(filePath, "utf8"));
+	} catch {
+		return null;
+	}
+}
 
 function getSkillNameFromMarkdown(filePath: string, fallback: string): string {
 	try {
@@ -24,21 +38,25 @@ function discoverSkillsInDir(root: string, includeRootMarkdown: boolean): string
 	if (!existsSync(root)) return [];
 	const names: string[] = [];
 	const walk = (dir: string, isRoot: boolean) => {
-		for (const entry of readdirSync(dir)) {
-			const fullPath = join(dir, entry);
-			const stat = statSync(fullPath);
-			if (stat.isDirectory()) {
-				const skillFile = join(fullPath, "SKILL.md");
-				if (existsSync(skillFile)) {
-					names.push(getSkillNameFromMarkdown(skillFile, entry));
+		try {
+			for (const entry of readdirSync(dir)) {
+				const fullPath = join(dir, entry);
+				const stat = statSync(fullPath);
+				if (stat.isDirectory()) {
+					const skillFile = join(fullPath, "SKILL.md");
+					if (existsSync(skillFile)) {
+						names.push(getSkillNameFromMarkdown(skillFile, entry));
+						continue;
+					}
+					walk(fullPath, false);
 					continue;
 				}
-				walk(fullPath, false);
-				continue;
+				if (includeRootMarkdown && isRoot && stat.isFile() && entry.endsWith(".md") && entry !== "SKILL.md") {
+					names.push(getSkillNameFromMarkdown(fullPath, entry.replace(/\.md$/, "")));
+				}
 			}
-			if (includeRootMarkdown && isRoot && stat.isFile() && entry.endsWith(".md") && entry !== "SKILL.md") {
-				names.push(getSkillNameFromMarkdown(fullPath, entry.replace(/\.md$/, "")));
-			}
+		} catch {
+			// ignore unreadable directory
 		}
 	};
 	walk(root, true);
@@ -70,27 +88,180 @@ function projectAncestors(cwd: string): string[] {
 	return dirs;
 }
 
-function listDetectedSkills(cwd: string): string[] {
-	const home = process.env.HOME;
-	const names = [
-		...discoverSkillsInDir(join(globalAgentDir, "skills"), true),
-		...(home ? discoverSkillsInDir(join(home, ".agents", "skills"), false) : []),
-		...discoverSkillsInDir(join(cwd, ".pi", "skills"), true),
-		...projectAncestors(cwd).flatMap((dir) => discoverSkillsInDir(join(dir, ".agents", "skills"), false)),
-	];
-	return [...new Set(names)].sort();
+function detectLocalExtensionsInDir(dir: string): string[] {
+	if (!existsSync(dir)) return [];
+	const names: string[] = [];
+	try {
+		for (const entry of readdirSync(dir)) {
+			const fullPath = join(dir, entry);
+			const stat = statSync(fullPath);
+			if (stat.isDirectory()) {
+				if (
+					existsSync(join(fullPath, "index.ts")) ||
+					existsSync(join(fullPath, "index.js")) ||
+					existsSync(join(fullPath, "package.json"))
+				) {
+					names.push(entry);
+				}
+			} else if (stat.isFile() && [".ts", ".js"].includes(extname(entry))) {
+				names.push(entry.replace(/\.(?:ts|js)$/, ""));
+			}
+		}
+	} catch {
+		// ignore
+	}
+	return names;
 }
 
-function listGlobalExtensions(): string[] {
-	const extensionsDir = join(globalAgentDir, "extensions");
-	if (!existsSync(extensionsDir)) return [];
+function getExtensionDisplayName(resource: { path: string; metadata?: any }): string {
+	if (resource.metadata?.origin === "package") {
+		if (typeof resource.metadata.source === "string") {
+			const src = resource.metadata.source;
+			const clean = src.replace(/^(?:npm|git):/, "").split("@")[0];
+			if (clean) return clean;
+		}
+		if (resource.metadata.baseDir) {
+			const pkg = parseJsonFile(join(resource.metadata.baseDir, "package.json"));
+			if (pkg?.name) return pkg.name;
+			return basename(resource.metadata.baseDir);
+		}
+	}
 
-	return readdirSync(extensionsDir).filter((entry) => {
-		const fullPath = join(extensionsDir, entry);
-		const stat = statSync(fullPath);
-		if (stat.isDirectory()) return existsSync(join(fullPath, "index.ts")) || existsSync(join(fullPath, "index.js"));
-		return stat.isFile() && [".ts", ".js"].includes(extname(entry));
-	}).map((entry) => entry.replace(/\.(?:ts|js)$/, "")).sort();
+	const fileName = basename(resource.path);
+	if (fileName === "index.ts" || fileName === "index.js") {
+		return basename(dirname(resource.path));
+	}
+	return fileName.replace(/\.(?:ts|js)$/, "");
+}
+
+function getSkillDisplayName(skillPath: string): string {
+	const fileName = basename(skillPath);
+	if (fileName === "SKILL.md") {
+		return getSkillNameFromMarkdown(skillPath, basename(dirname(skillPath)));
+	}
+	if (fileName.endsWith(".md")) {
+		return getSkillNameFromMarkdown(skillPath, fileName.replace(/\.md$/, ""));
+	}
+	return basename(dirname(skillPath));
+}
+
+function detectResourcesSync(cwd: string): { extensionNames: string[]; skillNames: string[] } {
+	const extensionNames = new Set<string>();
+	const skillNames = new Set<string>();
+
+	// 1. Local extensions
+	for (const ext of detectLocalExtensionsInDir(join(globalAgentDir, "extensions"))) {
+		extensionNames.add(ext);
+	}
+	for (const ext of detectLocalExtensionsInDir(join(cwd, ".pi", "extensions"))) {
+		extensionNames.add(ext);
+	}
+
+	// 2. Local skills
+	const home = process.env.HOME;
+	for (const sk of discoverSkillsInDir(join(globalAgentDir, "skills"), true)) skillNames.add(sk);
+	if (home) {
+		for (const sk of discoverSkillsInDir(join(home, ".agents", "skills"), false)) skillNames.add(sk);
+	}
+	for (const sk of discoverSkillsInDir(join(cwd, ".pi", "skills"), true)) skillNames.add(sk);
+	for (const dir of projectAncestors(cwd)) {
+		for (const sk of discoverSkillsInDir(join(dir, ".agents", "skills"), false)) skillNames.add(sk);
+	}
+
+	// 3. Settings packages & extensions
+	const settingsFiles = [join(globalAgentDir, "settings.json"), join(cwd, ".pi", "settings.json")];
+	for (const sf of settingsFiles) {
+		const settings = parseJsonFile(sf);
+		if (!settings) continue;
+
+		if (Array.isArray(settings.extensions)) {
+			for (const extPath of settings.extensions) {
+				if (typeof extPath === "string") {
+					extensionNames.add(basename(extPath).replace(/\.(?:ts|js)$/, ""));
+				}
+			}
+		}
+
+		if (Array.isArray(settings.packages)) {
+			for (const pkgItem of settings.packages) {
+				const source = typeof pkgItem === "string" ? pkgItem : pkgItem.source;
+				if (!source || typeof source !== "string") continue;
+
+				const cleanName = source.replace(/^(?:npm|git):/, "").split("@")[0];
+				let pkgDir: string | null = null;
+
+				const npmUser = join(globalAgentDir, "npm", "node_modules", cleanName);
+				const npmProj = join(cwd, ".pi", "npm", "node_modules", cleanName);
+				if (existsSync(npmUser)) pkgDir = npmUser;
+				else if (existsSync(npmProj)) pkgDir = npmProj;
+
+				if (!pkgDir) {
+					const gitUser = join(globalAgentDir, "git", cleanName);
+					const gitProj = join(cwd, ".pi", "git", cleanName);
+					if (existsSync(gitUser)) pkgDir = gitUser;
+					else if (existsSync(gitProj)) pkgDir = gitProj;
+				}
+
+				if (pkgDir) {
+					const pkgJson = parseJsonFile(join(pkgDir, "package.json"));
+					const displayName = pkgJson?.name || cleanName;
+
+					const hasExtension =
+						(pkgJson?.pi?.extensions && pkgJson.pi.extensions.length > 0) ||
+						existsSync(join(pkgDir, "extensions")) ||
+						existsSync(join(pkgDir, "index.ts")) ||
+						existsSync(join(pkgDir, "index.js"));
+
+					if (hasExtension) {
+						extensionNames.add(displayName);
+					}
+
+					if (pkgJson?.pi?.skills && Array.isArray(pkgJson.pi.skills)) {
+						for (const relSkill of pkgJson.pi.skills) {
+							const skillRoot = join(pkgDir, relSkill);
+							for (const s of discoverSkillsInDir(skillRoot, true)) skillNames.add(s);
+						}
+					} else if (existsSync(join(pkgDir, "skills"))) {
+						for (const s of discoverSkillsInDir(join(pkgDir, "skills"), true)) skillNames.add(s);
+					}
+				}
+			}
+		}
+	}
+
+	return {
+		extensionNames: [...extensionNames].sort(),
+		skillNames: [...skillNames].sort(),
+	};
+}
+
+async function resolveViaPackageManager(cwd: string): Promise<{ extensionNames: string[]; skillNames: string[] } | null> {
+	try {
+		const agentDir = typeof getAgentDir === "function" ? getAgentDir() : globalAgentDir;
+		const settingsManager = SettingsManager.create(cwd, agentDir);
+		const pm = new DefaultPackageManager({ cwd, agentDir, settingsManager });
+		const resolved = await pm.resolve();
+
+		const extensionNames = [
+			...new Set(
+				resolved.extensions
+					.filter((ext) => ext.enabled)
+					.map(getExtensionDisplayName),
+			),
+		].sort();
+
+		const skillNames = [
+			...new Set(
+				resolved.skills
+					.filter((skill) => skill.enabled)
+					.map((skill) => getSkillDisplayName(skill.path)),
+			),
+		].sort();
+
+		return { extensionNames, skillNames };
+	} catch {
+		return null;
+	}
 }
 
 function parseRepoName(remoteUrl: string): string | undefined {
@@ -102,54 +273,86 @@ function parseRepoName(remoteUrl: string): string | undefined {
 }
 
 export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
+	let activeHeader: J0k3rThemeHeader | undefined;
+	let activeFooter: J0k3rThemeFooter | undefined;
+	let requestUIRender: (() => void) | undefined;
+
+	const hideBanner = () => {
+		if (activeHeader?.isBannerVisible()) {
+			activeHeader.setBannerVisible(false);
+			requestUIRender?.();
+		}
+	};
+
+	pi.on("input", () => {
+		hideBanner();
+	});
+
 	pi.on("session_start", (_event, ctx) => {
 		if (ctx.mode !== "tui") return;
 
+		const hasUserMessages =
+			ctx.sessionManager?.getEntries?.()?.some?.(
+				(entry: any) => entry.type === "message" && entry.message?.role === "user",
+			) ?? false;
+
+		const initial = detectResourcesSync(ctx.cwd);
 		const headerData: J0k3rThemeHeaderData = {
 			projectName: basename(ctx.cwd),
-			skillNames: listDetectedSkills(ctx.cwd),
-			extensionNames: listGlobalExtensions(),
+			skillNames: initial.skillNames,
+			extensionNames: initial.extensionNames,
 		};
 		const footerGitInfo: RepoGitInfo = {
 			dir: ctx.cwd,
 		};
-		let activeHeader: J0k3rThemeHeader | undefined;
-		let activeFooter: J0k3rThemeFooter | undefined;
-		let requestUIRender: (() => void) | undefined;
 
 		void Promise.all([
+			resolveViaPackageManager(ctx.cwd).catch(() => null),
 			pi.exec("git", ["branch", "--show-current"], { cwd: ctx.cwd, timeout: 1000 }).catch(() => null),
 			pi.exec("git", ["remote", "get-url", "origin"], { cwd: ctx.cwd, timeout: 1000 })
-				.then((res) => (res && res.code === 0 ? res : pi.exec("git", ["remote"], { cwd: ctx.cwd, timeout: 1000 })
-					.then((rList) => {
-						const firstRemote = rList && rList.code === 0 ? rList.stdout.trim().split("\n")[0]?.trim() : "";
-						return firstRemote ? pi.exec("git", ["remote", "get-url", firstRemote], { cwd: ctx.cwd, timeout: 1000 }) : null;
-					})
-				))
+				.then((res) =>
+					res && res.code === 0
+						? res
+						: pi.exec("git", ["remote"], { cwd: ctx.cwd, timeout: 1000 }).then((rList) => {
+								const firstRemote = rList && rList.code === 0 ? rList.stdout.trim().split("\n")[0]?.trim() : "";
+								return firstRemote ? pi.exec("git", ["remote", "get-url", firstRemote], { cwd: ctx.cwd, timeout: 1000 }) : null;
+							}),
+				)
 				.catch(() => null),
-		]).then(([branchRes, remoteRes]) => {
-			let changed = false;
-			const branch = branchRes && branchRes.code === 0 ? branchRes.stdout.trim() : "";
-			if (branch.length > 0) {
-				headerData.branch = branch;
-				footerGitInfo.branch = branch;
-				changed = true;
-			}
-			const remoteUrl = remoteRes && remoteRes.code === 0 ? remoteRes.stdout.trim() : "";
-			const repoName = parseRepoName(remoteUrl);
-			if (repoName) {
-				footerGitInfo.repoName = repoName;
-				changed = true;
-			}
-			if (changed) {
-				activeHeader?.setData(headerData);
-				activeFooter?.setGitInfo(footerGitInfo);
-				requestUIRender?.();
-			}
-		}).catch(() => undefined);
+		])
+			.then(([pmRes, branchRes, remoteRes]) => {
+				let changed = false;
+
+				if (pmRes) {
+					headerData.extensionNames = pmRes.extensionNames;
+					headerData.skillNames = pmRes.skillNames;
+					changed = true;
+				}
+
+				const branch = branchRes && branchRes.code === 0 ? branchRes.stdout.trim() : "";
+				if (branch.length > 0) {
+					headerData.branch = branch;
+					footerGitInfo.branch = branch;
+					changed = true;
+				}
+
+				const remoteUrl = remoteRes && remoteRes.code === 0 ? remoteRes.stdout.trim() : "";
+				const repoName = parseRepoName(remoteUrl);
+				if (repoName) {
+					footerGitInfo.repoName = repoName;
+					changed = true;
+				}
+
+				if (changed) {
+					activeHeader?.setData(headerData);
+					activeFooter?.setGitInfo(footerGitInfo);
+					requestUIRender?.();
+				}
+			})
+			.catch(() => undefined);
 
 		ctx.ui.setHeader((tui, theme) => {
-			activeHeader = new J0k3rThemeHeader(theme, headerData, ctx.ui.getToolsExpanded());
+			activeHeader = new J0k3rThemeHeader(theme, headerData, ctx.ui.getToolsExpanded(), !hasUserMessages);
 			requestUIRender = () => tui.requestRender();
 			return activeHeader;
 		});
@@ -161,7 +364,10 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 		});
 	});
 
-	pi.on("before_agent_start", (event) => ({
-		systemPrompt: `${event.systemPrompt}\n\nYou are j0k3r-pi. The user's preferred pseudonym is j0k3r; greet and address them as j0k3r when it is natural.`,
-	}));
+	pi.on("before_agent_start", (event) => {
+		hideBanner();
+		return {
+			systemPrompt: `${event.systemPrompt}\n\nYou are j0k3r-pi. The user's preferred pseudonym is j0k3r; greet and address them as j0k3r when it is natural.`,
+		};
+	});
 }

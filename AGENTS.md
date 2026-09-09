@@ -24,6 +24,7 @@ If equal-authority sources conflict, stop and surface the exact conflict.
 ## Execution Authorization
 
 - A concrete request to change, fix, build, review, investigate, configure, or otherwise perform work authorizes execution within the stated scope.
+- **Configuration Lock (Strict & Non-negotiable)**: Never touch, modify, or create configuration files or settings (project configs, tooling, environment, Pi configuration, dependencies, linters, build configs, system settings) unless the user explicitly requested it or gave direct, unambiguous authorization. Never modify configurations as an incidental fix, shortcut, or unrequested adaptation.
 - Do not ask for a second “start” or “go ahead”.
 - Advice-only, comparison, explanation, and hypothetical requests do not authorize inspection or mutation.
 - Ask one concise question only when a material fact is missing: intent, scope, desired outcome, executor, or a user-owned decision.
@@ -59,7 +60,7 @@ PRD and discovery are optional artifacts or activities, not workflows.
 
 ## Workflow Routing Rules
 
-- Use `skills/workflow-triage/SKILL.md` to choose among the three workflows.
+- **Workflow Triage for Complex Tasks**: When a complex or non-trivial task is requested (features, non-trivial bug fixes, refactoring, multi-file changes, or planning), you must load and follow `skills/workflow-triage/SKILL.md` to determine the proper workflow (Mini-SDD or Formal SDD). Loading it once per session is sufficient—do not reload it repeatedly for subsequent steps unless scope changes materially. For simple, trivial, or direct single-step queries/edits, loading `workflow-triage` is not required.
 - Prefer Mini-SDD for non-trivial but bounded work.
 - Escalate to Formal SDD only for materially coupled contracts, major architecture change, migration/security consequences, or review that cannot stay coherent in one lightweight plan.
 - Re-triage only when scope changes materially.
@@ -68,7 +69,7 @@ PRD and discovery are optional artifacts or activities, not workflows.
 
 Use the smallest useful skill set.
 
-1. Route with `workflow-triage` when workflow choice matters.
+1. Route with `skills/workflow-triage/SKILL.md` when handling complex tasks; loading it once per session is sufficient, and simple/trivial tasks do not require it.
 2. Resolve candidate skills with `skill_registry_resolve` when intent, touched paths, or SDD phase matter.
 3. Read only the selected `SKILL.md` files before acting.
 4. Load at most one workflow owner plus the minimum guardrail/domain skills needed for the task.

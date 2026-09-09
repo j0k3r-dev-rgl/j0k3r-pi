@@ -53,3 +53,5 @@ bin
 .pi/workspace-code-graph/
 .pi/subagents-debug.log
 models-store.json
+# Local Pi runtime state
+.atl/
