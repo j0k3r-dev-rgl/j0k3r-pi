@@ -276,8 +276,31 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 	let activeHeader: J0k3rThemeHeader | undefined;
 	let activeFooter: J0k3rThemeFooter | undefined;
 	let requestUIRender: (() => void) | undefined;
+	let bannerAnimTimer: ReturnType<typeof setInterval> | undefined;
+
+	const stopBannerAnimation = () => {
+		if (bannerAnimTimer) {
+			clearInterval(bannerAnimTimer);
+			bannerAnimTimer = undefined;
+		}
+	};
+
+	const startBannerAnimation = () => {
+		stopBannerAnimation();
+		if (activeHeader?.isBannerVisible()) {
+			bannerAnimTimer = setInterval(() => {
+				if (!activeHeader?.isBannerVisible()) {
+					stopBannerAnimation();
+					return;
+				}
+				activeHeader.nextFrame();
+				requestUIRender?.();
+			}, 95);
+		}
+	};
 
 	const hideBanner = () => {
+		stopBannerAnimation();
 		if (activeHeader?.isBannerVisible()) {
 			activeHeader.setBannerVisible(false);
 			requestUIRender?.();
@@ -352,8 +375,12 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 			.catch(() => undefined);
 
 		ctx.ui.setHeader((tui, theme) => {
+			stopBannerAnimation();
 			activeHeader = new J0k3rThemeHeader(theme, headerData, ctx.ui.getToolsExpanded(), !hasUserMessages);
 			requestUIRender = () => tui.requestRender();
+			if (!hasUserMessages) {
+				startBannerAnimation();
+			}
 			return activeHeader;
 		});
 		ctx.ui.setEditorComponent((tui, theme, keybindings) => new J0k3rThemeEditor(tui, theme, keybindings));
@@ -369,5 +396,9 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 		return {
 			systemPrompt: `${event.systemPrompt}\n\nYou are j0k3r-pi. The user's preferred pseudonym is j0k3r; greet and address them as j0k3r when it is natural.`,
 		};
+	});
+
+	pi.on("session_shutdown", () => {
+		stopBannerAnimation();
 	});
 }
