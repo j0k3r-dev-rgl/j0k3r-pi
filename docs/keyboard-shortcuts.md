@@ -150,14 +150,16 @@ Reserved for extension conflict checks:
 
 Picker-specific bindings are not reserved by Pi's extension conflict check. For example, `ctrl+x` is used by the scoped models selector (`app.models.clearAll`) but is not reserved globally.
 
-## Project extension shortcuts
+## Project extension shortcuts and commands
 
 | Extension | Shortcut | Command / action | Status |
 |---|---:|---|---|
 | `agent-todo` | `ctrl+space` | Toggle the above-chat todo widget expanded/collapsed | Active |
-| `sidebar` | `ctrl+.` | Toggle Pi Sidebar overlay | Active |
-| `subagents` | `/subagents` | Open the subagent history panel | Active command |
-| `subagents` | `ctrl+,` | Open the subagent history panel | Active |
+| `git-diff-panel` | `alt+g` | `/git-diff [worktree]` — Open split overlay for reviewing Git changes and worktrees | Active |
+| `cpamc-usage` | none | `/usage` — Open CLIProxyAPI quota and usage modal | Active command |
+| `j0k3r-model-picker` | none | `/model-select [ref]`, `/ms` — Open model selector modal | Active command |
+| `skill-registry` | none | `/skill-registry generate` — Generate skill registry files | Active command |
+| `subagents` | `ctrl+,` | `/subagents` — Open the subagent history panel | Active |
 | `subagents` | `ctrl+h` | Send the running Claude-mode subagent task to background | Active default; configurable via `subagents.json` |
 | `subagents` | `ctrl+o` | Expand/collapse rendered tool output inside the subagent history panel | Panel-local; uses Pi `app.tools.expand` binding |
 

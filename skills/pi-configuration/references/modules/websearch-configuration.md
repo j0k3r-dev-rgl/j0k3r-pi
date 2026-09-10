@@ -40,7 +40,7 @@ Do not read this module for ordinary web search, individual websearch tool usage
 - Required setup for the default configuration: none.
 - Websearch configuration is global/agent-root only: `~/.pi/agent/websearch.json`.
 - In this repository checkout, when the checkout itself is `~/.pi/agent`, the same config appears as repo-root `websearch.json`.
-- `install.sh` does not install or overwrite `websearch.json`; users should create or edit `~/.pi/agent/websearch.json` manually when they need non-default behavior.
+- `websearch.json` is not auto-generated; users should create or edit `~/.pi/agent/websearch.json` manually when they need non-default behavior.
 - Project-level websearch configuration is not supported. Do not create or recommend `.pi/websearch.json` or project overrides.
 - If `~/.pi/agent/websearch.json` is missing, the effective default is:
 
@@ -90,7 +90,7 @@ Do not read this module for ordinary web search, individual websearch tool usage
    - no required setup for the default configuration;
    - global config path is `~/.pi/agent/websearch.json`;
    - when this repo is checked out as `~/.pi/agent`, the path is repo-root `websearch.json`;
-   - `install.sh` does not install or overwrite this config file;
+   - `websearch.json` is not auto-generated;
    - missing config defaults GitHub to `api`;
    - `github.provider` may be `api` or `gh`;
    - `request.timeoutMs` defaults to `120000` and `request.maxRetries` defaults to `1`;
@@ -120,6 +120,5 @@ Do not include a catalog of individual websearch tools or their parameters.
 
 - `~/.pi/agent/websearch.json` — global user configuration for the websearch extension.
 - `websearch.json` — repo-root equivalent when this checkout is the Pi agent root (`~/.pi/agent`).
-- `install.sh` — installer intentionally copies extension/skill/subagent files, not local runtime config like `websearch.json`.
 - `extensions/websearch/README.md` — configuration path, environment variables, and credential policy.
 - `extensions/websearch/src/config.ts` — global config loading, defaults, and validation.
