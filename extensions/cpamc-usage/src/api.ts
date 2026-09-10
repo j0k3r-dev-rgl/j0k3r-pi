@@ -268,6 +268,8 @@ async function fetchOpenCodeGoQuota(signal?: AbortSignal): Promise<AccountUsage 
         return null;
     }
 }
+
+function parseJsonBody(bodyStr?: string): any {
     if (!bodyStr || typeof bodyStr !== "string") return null;
     try {
         return JSON.parse(bodyStr);
