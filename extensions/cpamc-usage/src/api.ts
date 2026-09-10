@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 export type Quota = {
     used?: number;
     total?: number | null;
@@ -147,7 +151,123 @@ async function executeApiCall(
     return (await response.json()) as ApiCallResponse;
 }
 
-function parseJsonBody(bodyStr?: string): any {
+function getOpenCodeGoApiKey(): string | null {
+    if (process.env.OPENCODE_API_KEY?.trim()) return process.env.OPENCODE_API_KEY.trim();
+    if (process.env.OPENCODE_GO_API_KEY?.trim()) return process.env.OPENCODE_GO_API_KEY.trim();
+
+    try {
+        const authPath = join(homedir(), ".pi", "agent", "auth.json");
+        const raw = readFileSync(authPath, "utf8");
+        const parsed = JSON.parse(raw);
+        const cred = parsed?.["opencode-go"] || parsed?.["opencode"];
+        if (cred?.key && typeof cred.key === "string") {
+            return cred.key.trim();
+        }
+    } catch {
+        // ignore
+    }
+    return null;
+}
+
+async function fetchOpenCodeGoQuota(signal?: AbortSignal): Promise<AccountUsage | null> {
+    const key = getOpenCodeGoApiKey();
+    if (!key) return null;
+
+    try {
+        const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+        const res = await fetch("https://opencode.ai/zen/go/v1/usage", {
+            headers: {
+                Authorization: `Bearer ${key}`,
+                Accept: "application/json",
+                "User-Agent": "opencode/1.0",
+            },
+            signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        });
+
+        if (!res.ok) {
+            // If 401 Unauthorized or 403 Forbidden (no Go subscription or invalid key), treat as non-logged / not available
+            return null;
+        }
+
+        const data = await res.json() as any;
+        const usage = data?.usage;
+        if (!usage) return null;
+
+        const pools: UsagePool[] = [];
+
+        if (usage.rolling) {
+            const used = Number(usage.rolling.percent ?? 0);
+            const remaining = Math.max(0, 100 - used);
+            pools.push({
+                label: "5h Rolling",
+                displayName: "OpenCode · 5h Rolling",
+                currency: null,
+                used,
+                available: remaining,
+                total: 100,
+                unlimited: false,
+                availablePercentage: remaining,
+                resetAt: usage.rolling.resetsAt || null,
+                windowLabel: "5h",
+                modelCount: 0,
+                models: [],
+            });
+        }
+
+        if (usage.weekly) {
+            const used = Number(usage.weekly.percent ?? 0);
+            const remaining = Math.max(0, 100 - used);
+            pools.push({
+                label: "Semanal",
+                displayName: "OpenCode · Semanal",
+                currency: null,
+                used,
+                available: remaining,
+                total: 100,
+                unlimited: false,
+                availablePercentage: remaining,
+                resetAt: usage.weekly.resetsAt || null,
+                windowLabel: "7d",
+                modelCount: 0,
+                models: [],
+            });
+        }
+
+        if (usage.monthly) {
+            const used = Number(usage.monthly.percent ?? 0);
+            const remaining = Math.max(0, 100 - used);
+            pools.push({
+                label: "Mensual",
+                displayName: "OpenCode · Mensual",
+                currency: null,
+                used,
+                available: remaining,
+                total: 100,
+                unlimited: false,
+                availablePercentage: remaining,
+                resetAt: usage.monthly.resetsAt || null,
+                windowLabel: "30d",
+                modelCount: 0,
+                models: [],
+            });
+        }
+
+        return {
+            id: "opencode-go",
+            provider: "opencode",
+            account: "OpenCode Go",
+            authType: "api_key",
+            plan: "Go ($10/mo)",
+            tier: null,
+            limitReached: false,
+            bankedCredits: null,
+            rateLimitType: null,
+            pools,
+        };
+    } catch {
+        return null;
+    }
+}
     if (!bodyStr || typeof bodyStr !== "string") return null;
     try {
         return JSON.parse(bodyStr);
@@ -333,6 +453,18 @@ export async function fetchUsage(signal?: AbortSignal): Promise<ProviderGroup[]>
         const list = byProvider.get(entry.provider);
         if (list) list.push(entry);
         else byProvider.set(entry.provider, [entry]);
+    }
+
+    // OpenCode Go subscription check
+    try {
+        const opencodeUsage = await fetchOpenCodeGoQuota(signal);
+        if (opencodeUsage) {
+            const list = byProvider.get("opencode");
+            if (list) list.push(opencodeUsage);
+            else byProvider.set("opencode", [opencodeUsage]);
+        }
+    } catch {
+        // ignore
     }
 
     return [...byProvider.entries()]

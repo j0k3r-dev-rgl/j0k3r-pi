@@ -60,7 +60,7 @@ export default function cpamcUsage(pi: ExtensionAPI) {
                 await ctx.ui.custom(
                     (tui, theme, _keybindings, done) => {
                         modal = new UsageModal({
-                            theme: theme as unknown as { fg: (color: string, text: string) => string },
+                            theme: theme as never,
                             tui,
                             done,
                             load: (force) => loadUsage(force, ctx.signal),
