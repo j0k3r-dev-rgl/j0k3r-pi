@@ -70,9 +70,9 @@ function accountLine(account: AccountUsage): string {
     const flags: string[] = [];
     if (account.limitReached) flags.push("LIMIT REACHED");
     if (account.bankedCredits != null) flags.push(`banked ${account.bankedCredits}`);
-    const head = account.note
+    const head = account.note && account.pools.length === 0
         ? `${account.account} · sin cuota expuesta`
-        : `${account.account} · plan ${account.plan}${account.tier ? ` · ${account.tier}` : ""} · ${account.pools.length} uso(s)`;
+        : `${account.account} · plan ${account.plan}${account.tier ? ` · ${account.tier}` : ""} · ${account.pools.length} cuota(s)`;
     return flags.length ? `${head} · ${flags.join(" · ")}` : head;
 }
 
@@ -213,31 +213,31 @@ export class UsageModal {
         const lines: string[] = [];
 
         if (this.loading && this.groups.length === 0) {
-            lines.push(`${SPINNER[this.frameIndex]} Cargando suscripciones…`);
+            lines.push(`${SPINNER[this.frameIndex]} Cargando suscripciones de CLIProxyAPI…`);
             lines.push("");
             lines.push(theme.fg("dim", "Esc cancelar"));
-            return this.frame("OmniRoute usage", lines, width);
+            return this.frame("CLIProxyAPI usage", lines, width);
         }
 
         if (this.error && this.groups.length === 0) {
             lines.push(`✖ ${this.error}`);
             lines.push("");
             lines.push(theme.fg("dim", "r reintentar · Esc cerrar"));
-            return this.frame("OmniRoute usage", lines, width);
+            return this.frame("CLIProxyAPI usage", lines, width);
         }
 
         if (this.groups.length === 0) {
-            lines.push("No hay conexiones activas en OmniRoute.");
+            lines.push("No hay cuentas activas en CLIProxyAPI.");
             lines.push("");
             lines.push(theme.fg("dim", "r refrescar · Esc cerrar"));
-            return this.frame("OmniRoute usage", lines, width);
+            return this.frame("CLIProxyAPI usage", lines, width);
         }
 
         // Provider tabs
         lines.push(
             this.groups
                 .map((group, index) => {
-                    const label = `${group.provider} (${group.accounts.length})`;
+                    const label = `${group.provider.toUpperCase()} (${group.accounts.length})`;
                     return index === this.providerIndex ? theme.fg("accent", `[${label}]`) : theme.fg("dim", label);
                 })
                 .join("  "),
@@ -246,7 +246,7 @@ export class UsageModal {
 
         const accounts = this.groups[this.providerIndex]?.accounts ?? [];
 
-        // Every account of the selected provider, however many there are
+        // Every account of the selected provider
         for (const [index, account] of accounts.entries()) {
             const marker = index === this.accountIndex ? "▸" : "·";
             const text = `${marker} ${accountLine(account)}`;
@@ -257,9 +257,8 @@ export class UsageModal {
         const account = accounts[this.accountIndex];
         if (account) {
             lines.push(theme.fg("dim", "─".repeat(innerWidth(width))));
-            // With a single account the list above already renders this header.
             if (accounts.length > 1) lines.push(accountLine(account));
-            if (account.note) lines.push(theme.fg("dim", `  ${account.note.slice(0, 160)}`));
+            if (account.note && account.pools.length === 0) lines.push(theme.fg("dim", `  ${account.note.slice(0, 160)}`));
             if (account.error) lines.push(theme.fg("warning", `  error: ${account.error}`));
             if (this.loading) lines.push(`${SPINNER[this.frameIndex]} actualizando…`);
             for (const pool of account.pools) lines.push(...poolLines(pool, theme));
@@ -272,7 +271,7 @@ export class UsageModal {
         lines.push(theme.fg("dim", "h/l proveedor · j/k cuenta · r refrescar · Esc cerrar"));
 
         const total = this.groups.reduce((sum, group) => sum + group.accounts.length, 0);
-        return this.frame(`OmniRoute usage · ${total} suscripción(es)`, lines, width);
+        return this.frame(`CLIProxyAPI usage · ${total} suscripción(es)`, lines, width);
     }
 
     /** Bordered box with a title, horizontal and vertical padding. */

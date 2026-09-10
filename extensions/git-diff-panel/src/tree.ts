@@ -1,12 +1,14 @@
-import type { GitChangedFile } from "./git.js";
+import type { GitChangedFile, GitWorktree, GitWorktreeSnapshot } from "./git.js";
 
 export interface TreeRow {
-	kind: "dir" | "file";
+	kind: "worktree" | "dir" | "file";
 	name: string;
 	path: string;
 	depth: number;
 	expanded?: boolean;
 	file?: GitChangedFile;
+	worktree?: GitWorktree;
+	stats?: { additions: number; deletions: number; fileCount: number };
 }
 
 interface TreeNode {
@@ -71,6 +73,45 @@ export function buildTreeRows(files: GitChangedFile[], collapsedDirs = new Set<s
 		}
 	};
 	visit(compactedRoot, 0);
+	return rows;
+}
+
+export function buildMultiWorktreeTreeRows(
+	worktrees: GitWorktree[],
+	snapshots: Map<string, GitWorktreeSnapshot>,
+	collapsedDirs = new Set<string>(),
+): TreeRow[] {
+	const rows: TreeRow[] = [];
+
+	for (const wt of worktrees) {
+		const snap = snapshots.get(wt.path);
+		const files = snap?.files ?? [];
+		const additions = snap?.totalAdditions ?? 0;
+		const deletions = snap?.totalDeletions ?? 0;
+		const isCollapsed = collapsedDirs.has(`__wt__:${wt.path}`);
+
+		const wtRow: TreeRow = {
+			kind: "worktree",
+			name: wt.branch,
+			path: `__wt__:${wt.path}`,
+			depth: 0,
+			expanded: !isCollapsed,
+			worktree: wt,
+			stats: { additions, deletions, fileCount: files.length },
+		};
+		rows.push(wtRow);
+
+		if (!isCollapsed && files.length > 0) {
+			const subRows = buildTreeRows(files, collapsedDirs);
+			for (const sub of subRows) {
+				rows.push({
+					...sub,
+					depth: sub.depth + 1,
+				});
+			}
+		}
+	}
+
 	return rows;
 }
 

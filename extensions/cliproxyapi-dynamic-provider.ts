@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-type OmniRouteModel = {
+type CLIProxyModel = {
     id?: unknown;
     owned_by?: unknown;
     context_length?: unknown;
@@ -15,26 +15,38 @@ type OmniRouteModel = {
     };
 };
 
-type OmniRouteModelsResponse = {
-    data?: OmniRouteModel[];
+type CLIProxyModelsResponse = {
+    data?: CLIProxyModel[];
 };
 
-const PROVIDER_ID = "omniroute";
-const DEFAULT_BASE_URL = "http://127.0.0.1:20128/v1";
-const DEFAULT_CONTEXT_WINDOW = 128_000;
+const PROVIDER_ID = "cliproxyapi";
+const DEFAULT_BASE_URL = "http://127.0.0.1:8317/v1";
+const DEFAULT_CONTEXT_WINDOW = 272_000;
 const DEFAULT_MAX_TOKENS = 16_384;
-const MAX_SAFE_CONTEXT_WINDOW = 272_000;
 const MAX_SAFE_OUTPUT_TOKENS = 384_000;
 
+function resolveSafeContextWindow(modelId: string, upstreamValue: unknown): number {
+    const id = modelId.toLowerCase();
+    let maxSafe = 370_000;
+
+    if (id.includes("gpt") || id.includes("codex") || id.includes("openai")) {
+        maxSafe = 272_000;
+    } else if (id.includes("gemini") || id.includes("claude")) {
+        maxSafe = 370_000;
+    }
+
+    return boundedPositiveInteger(upstreamValue, maxSafe, maxSafe);
+}
+
 function resolveBaseUrl(): string {
-    return (process.env.OMNIROUTE_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, "");
+    return (process.env.CLIPROXYAPI_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, "");
 }
 
 function requireApiKey(): string {
-    const apiKey = process.env.OMNIROUTE_API_KEY?.trim();
+    const apiKey = (process.env.CLIPROXYAPI_API_KEY || "").trim();
     if (!apiKey) {
         throw new Error(
-            "OMNIROUTE_API_KEY is not set in the Pi process environment. Export the OmniRoute endpoint API key before starting pi.",
+            "CLIPROXYAPI_API_KEY is not set in the Pi process environment. Export the CLIProxyAPI endpoint API key before starting pi.",
         );
     }
     return apiKey;
@@ -46,15 +58,14 @@ function boundedPositiveInteger(value: unknown, fallback: number, max: number): 
     return Math.min(Math.floor(numeric), max);
 }
 
-function toPiModel(model: OmniRouteModel) {
+function toPiModel(model: CLIProxyModel) {
     const id = typeof model.id === "string" ? model.id.trim() : "";
     if (!id) return undefined;
 
     const capabilities = model.capabilities ?? {};
-    const contextWindow = boundedPositiveInteger(
+    const contextWindow = resolveSafeContextWindow(
+        id,
         model.context_length ?? model.max_input_tokens,
-        DEFAULT_CONTEXT_WINDOW,
-        MAX_SAFE_CONTEXT_WINDOW,
     );
     const maxTokens = boundedPositiveInteger(
         model.max_output_tokens,
@@ -63,13 +74,27 @@ function toPiModel(model: OmniRouteModel) {
     );
     const owner = typeof model.owned_by === "string" && model.owned_by.trim()
         ? model.owned_by.trim()
-        : "OmniRoute";
-    const supportsImages = Boolean(capabilities.vision || capabilities.image || capabilities.images);
+        : "CLIProxyAPI";
+    const supportsImages = Boolean(
+        capabilities.vision ||
+        capabilities.image ||
+        capabilities.images ||
+        id.includes("image") ||
+        id.includes("vision"),
+    );
+
+    const isReasoning = Boolean(
+        capabilities.reasoning ||
+        capabilities.thinking ||
+        id.includes("thinking") ||
+        id.includes("high") ||
+        id.includes("pro"),
+    );
 
     return {
         id,
         name: `${id} (${owner})`,
-        reasoning: Boolean(capabilities.reasoning || capabilities.thinking),
+        reasoning: isReasoning,
         input: supportsImages ? ["text", "image"] : ["text"],
         contextWindow,
         maxTokens,
@@ -77,10 +102,10 @@ function toPiModel(model: OmniRouteModel) {
     };
 }
 
-async function fetchOmniRouteModels(signal?: AbortSignal) {
+async function fetchCLIProxyModels(signal?: AbortSignal) {
     const baseUrl = resolveBaseUrl();
     const apiKey = requireApiKey();
-    const response = await fetch(`${baseUrl}/models?configuredOnly=true`, {
+    const response = await fetch(`${baseUrl}/models`, {
         headers: { Authorization: `Bearer ${apiKey}` },
         signal,
     });
@@ -88,20 +113,20 @@ async function fetchOmniRouteModels(signal?: AbortSignal) {
     if (!response.ok) {
         const body = await response.text().catch(() => "");
         const detail = body ? `: ${body.slice(0, 300)}` : "";
-        throw new Error(`OmniRoute /v1/models failed with HTTP ${response.status}${detail}`);
+        throw new Error(`CLIProxyAPI /v1/models failed with HTTP ${response.status}${detail}`);
     }
 
-    const payload = (await response.json()) as OmniRouteModelsResponse;
+    const payload = (await response.json()) as CLIProxyModelsResponse;
     return (payload.data ?? [])
         .map(toPiModel)
         .filter((model): model is NonNullable<ReturnType<typeof toPiModel>> => Boolean(model));
 }
 
-export default function omnirouteDynamicProvider(pi: ExtensionAPI) {
+export default function cliproxyapiDynamicProvider(pi: ExtensionAPI) {
     pi.registerProvider(PROVIDER_ID, {
-        name: "OmniRoute",
+        name: "CLIProxyAPI",
         baseUrl: resolveBaseUrl(),
-        apiKey: "$OMNIROUTE_API_KEY",
+        apiKey: "$CLIPROXYAPI_API_KEY",
         api: "openai-completions",
         compat: {
             supportsDeveloperRole: false,
@@ -110,7 +135,7 @@ export default function omnirouteDynamicProvider(pi: ExtensionAPI) {
             maxTokensField: "max_tokens",
         },
         async refreshModels({ signal }: { signal?: AbortSignal } = {}) {
-            return fetchOmniRouteModels(signal);
+            return fetchCLIProxyModels(signal);
         },
     });
 }

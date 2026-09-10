@@ -3,7 +3,7 @@ import { fetchUsage, renderTextReport, type ProviderGroup } from "./src/api.ts";
 import { UsageModal } from "./src/modal.ts";
 
 /**
- * `/usage` — OmniRoute subscriptions and quota limits for the human operator.
+ * `/usage` — CLIProxyAPI subscriptions and quota limits for the human operator.
  *
  * The data is rendered through the UI only (floating overlay in TUI mode, a
  * notification otherwise). It is never injected into the session, so the model
@@ -26,9 +26,9 @@ async function loadUsage(force: boolean, signal?: AbortSignal): Promise<Provider
     return groups;
 }
 
-export default function omnirouteUsage(pi: ExtensionAPI) {
+export default function cpamcUsage(pi: ExtensionAPI) {
     pi.registerCommand("usage", {
-        description: "Show OmniRoute subscriptions and quota limits in a floating panel (user-only: never sent to the model)",
+        description: "Show CLIProxyAPI subscriptions and quota limits in a floating panel (user-only: never sent to the model)",
         handler: async (args, ctx) => {
             const wantsText = (args ?? "").trim().toLowerCase().includes("--text");
 
