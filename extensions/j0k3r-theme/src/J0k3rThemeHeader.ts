@@ -4,6 +4,7 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 export interface J0k3rThemeHeaderData {
 	projectName: string;
+	repoName?: string;
 	branch?: string;
 	skillNames: string[];
 	extensionNames: string[];
@@ -307,11 +308,23 @@ export class J0k3rThemeHeader implements Component {
 
 	render(width: number): string[] {
 		if (width <= 0) return [];
-		if (width < 24) return [fit(`j0k3r-pi ${this.data.projectName}`, width)];
+		if (width < 24) return [fit(`j0k3r-pi ${this.data.repoName || this.data.projectName}`, width)];
 
 		const innerWidth = Math.max(0, width - 2);
-		const project = `${electric(BLUE, "Project")} ${electric(LIME, this.data.projectName)}`;
-		const branch = this.data.branch ? ` ${electric(VIOLET, "|")} ${electric(BLUE, "branch")} ${electric(PINK, `- ${this.data.branch}`)}` : "";
+
+		const segments: string[] = [];
+		const hasDistinctProject = !this.data.repoName || this.data.projectName !== this.data.repoName;
+		if (hasDistinctProject) {
+			segments.push(`${electric(BLUE, "Project")} ${electric(LIME, this.data.projectName)}`);
+		}
+		if (this.data.repoName) {
+			segments.push(`${electric(BLUE, "repo")} ${electric(CYAN, `- ${this.data.repoName}`)}`);
+		}
+		if (this.data.branch) {
+			segments.push(`${electric(BLUE, "branch")} ${electric(PINK, `- ${this.data.branch}`)}`);
+		}
+		const projectLine = segments.join(` ${electric(VIOLET, "|")} `);
+
 		const summary = [
 			metric("skills", this.data.skillNames.length, AMBER),
 			metric("extensions", this.data.extensionNames.length, CYAN),
@@ -320,7 +333,7 @@ export class J0k3rThemeHeader implements Component {
 
 		const lines = [
 			titledBorder("welcome to j0k3r-pi", innerWidth),
-			boxLine(`${project}${branch}`, innerWidth),
+			boxLine(projectLine, innerWidth),
 			boxLine(summary, innerWidth),
 		];
 		if (this.expanded) {

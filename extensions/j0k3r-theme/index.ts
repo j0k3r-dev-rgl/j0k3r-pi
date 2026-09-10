@@ -272,6 +272,44 @@ function parseRepoName(remoteUrl: string): string | undefined {
 	return match?.[1] || undefined;
 }
 
+function detectGitInfoSync(cwd: string): { repoName?: string; branch?: string } {
+	try {
+		const root = gitRoot(cwd);
+		if (!root) return {};
+		const gitPath = join(root, ".git");
+		let gitDir = gitPath;
+		if (existsSync(gitPath) && statSync(gitPath).isFile()) {
+			const content = readFileSync(gitPath, "utf8").trim();
+			const match = content.match(/^gitdir:\s*(.+)$/);
+			if (match?.[1]) gitDir = resolve(root, match[1]);
+		}
+
+		let repoName: string | undefined;
+		const gitConfigFile = join(gitDir, "config");
+		if (existsSync(gitConfigFile)) {
+			const configContent = readFileSync(gitConfigFile, "utf8");
+			const match = configContent.match(/^\s*url\s*=\s*(.+)$/m);
+			if (match?.[1]) {
+				repoName = parseRepoName(match[1]);
+			}
+		}
+		if (!repoName) repoName = basename(root);
+
+		let branch: string | undefined;
+		const headFile = join(gitDir, "HEAD");
+		if (existsSync(headFile)) {
+			const headContent = readFileSync(headFile, "utf8").trim();
+			const match = headContent.match(/^ref:\s*refs\/heads\/(.+)$/);
+			if (match?.[1]) branch = match[1];
+			else if (/^[0-9a-f]{7,}$/i.test(headContent)) branch = `detached@${headContent.slice(0, 7)}`;
+		}
+
+		return { repoName, branch };
+	} catch {
+		return {};
+	}
+}
+
 export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 	let activeHeader: J0k3rThemeHeader | undefined;
 	let activeFooter: J0k3rThemeFooter | undefined;
@@ -320,13 +358,18 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 			) ?? false;
 
 		const initial = detectResourcesSync(ctx.cwd);
+		const initialGit = detectGitInfoSync(ctx.cwd);
 		const headerData: J0k3rThemeHeaderData = {
 			projectName: basename(ctx.cwd),
+			repoName: initialGit.repoName,
+			branch: initialGit.branch,
 			skillNames: initial.skillNames,
 			extensionNames: initial.extensionNames,
 		};
 		const footerGitInfo: RepoGitInfo = {
 			dir: ctx.cwd,
+			repoName: initialGit.repoName,
+			branch: initialGit.branch,
 		};
 
 		void Promise.all([
@@ -353,15 +396,16 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 				}
 
 				const branch = branchRes && branchRes.code === 0 ? branchRes.stdout.trim() : "";
-				if (branch.length > 0) {
+				if (branch.length > 0 && branch !== headerData.branch) {
 					headerData.branch = branch;
 					footerGitInfo.branch = branch;
 					changed = true;
 				}
 
 				const remoteUrl = remoteRes && remoteRes.code === 0 ? remoteRes.stdout.trim() : "";
-				const repoName = parseRepoName(remoteUrl);
-				if (repoName) {
+				const repoName = parseRepoName(remoteUrl) || headerData.repoName;
+				if (repoName && repoName !== headerData.repoName) {
+					headerData.repoName = repoName;
 					footerGitInfo.repoName = repoName;
 					changed = true;
 				}
