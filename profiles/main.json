@@ -1,0 +1,102 @@
+{
+  "name": "main",
+  "description": "Perfil creado el 9/10/2026",
+  "default_model": "cliproxyapi/main/gpt-5.5",
+  "default_effort": "medium",
+  "model_profiles": {
+    "sdd-explore": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    },
+    "sdd-propose": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    },
+    "sdd-spec": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    },
+    "sdd-design": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    },
+    "sdd-tasks": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    },
+    "sdd-apply": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    },
+    "sdd-verify": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    },
+    "sdd-archive": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    },
+    "jd-judge-a": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    },
+    "jd-judge-b": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    },
+    "jd-fix-agent": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    },
+    "security-auditor": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    },
+    "review-readability": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    },
+    "review-reliability": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    },
+    "review-resilience": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    },
+    "review-validator": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    },
+    "review-refuter": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    },
+    "review-risk": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    },
+    "gentle-ai-explore": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    },
+    "gentle-ai-worker": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    },
+    "gentle-ai-verify": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    },
+    "ui-specialist": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    },
+    "task-tracker-manager": {
+      "model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
+      "effort": "medium"
+    }
+  },
+  "created_at": "2026-09-11T01:08:34.721Z",
+  "updated_at": "2026-09-11T01:08:34.721Z"
+}

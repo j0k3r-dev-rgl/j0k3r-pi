@@ -75,12 +75,16 @@ function toPiModel(model: CLIProxyModel) {
     const owner = typeof model.owned_by === "string" && model.owned_by.trim()
         ? model.owned_by.trim()
         : "CLIProxyAPI";
+    const lowerId = id.toLowerCase();
     const supportsImages = Boolean(
         capabilities.vision ||
         capabilities.image ||
         capabilities.images ||
-        id.includes("image") ||
-        id.includes("vision"),
+        lowerId.includes("image") ||
+        lowerId.includes("vision") ||
+        lowerId.includes("gemini") ||
+        lowerId.includes("claude") ||
+        lowerId.includes("gpt"),
     );
 
     const isReasoning = Boolean(

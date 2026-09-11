@@ -38,6 +38,8 @@ export type AccountUsage = {
     tier: string | null;
     limitReached: boolean;
     bankedCredits: number | null;
+    resetCredits?: number | null;
+    resetRenewalDate?: string | null;
     rateLimitType: string | null;
     pools: UsagePool[];
     note?: string;
@@ -278,9 +280,15 @@ function parseJsonBody(bodyStr?: string): any {
     }
 }
 
-async function fetchCodexQuota(auth: AuthFileEntry, signal?: AbortSignal): Promise<UsagePool[]> {
+type CodexQuotaResult = {
+    pools: UsagePool[];
+    resetCredits: number | null;
+    limitReached: boolean;
+};
+
+async function fetchCodexQuota(auth: AuthFileEntry, signal?: AbortSignal): Promise<CodexQuotaResult> {
     const authIndex = auth.auth_index;
-    if (!authIndex) return [];
+    if (!authIndex) return { pools: [], resetCredits: null, limitReached: false };
 
     try {
         const res = await executeApiCall(
@@ -296,10 +304,15 @@ async function fetchCodexQuota(auth: AuthFileEntry, signal?: AbortSignal): Promi
             signal,
         );
 
-        if (res.status_code !== 200) return [];
+        if (res.status_code !== 200) return { pools: [], resetCredits: null, limitReached: false };
         const parsed = parseJsonBody(res.body);
         const rateLimit = parsed?.rate_limit;
-        if (!rateLimit) return [];
+        if (!rateLimit) return { pools: [], resetCredits: null, limitReached: false };
+
+        const resetCredits = typeof parsed?.rate_limit_reset_credits?.available_count === "number"
+            ? parsed.rate_limit_reset_credits.available_count
+            : null;
+        const limitReached = Boolean(rateLimit.limit_reached);
 
         const pools: UsagePool[] = [];
         const prim = rateLimit.primary_window;
@@ -309,7 +322,7 @@ async function fetchCodexQuota(auth: AuthFileEntry, signal?: AbortSignal): Promi
             const resetAt = prim.reset_at ? new Date(prim.reset_at * 1000).toISOString() : null;
             pools.push({
                 label: "5h Window (Primaria)",
-                displayName: "Codex / Plus 5h",
+                displayName: "OpenAI · 5h Window",
                 currency: null,
                 used: usedPct,
                 available: remainingPct,
@@ -330,7 +343,7 @@ async function fetchCodexQuota(auth: AuthFileEntry, signal?: AbortSignal): Promi
             const resetAt = sec.reset_at ? new Date(sec.reset_at * 1000).toISOString() : null;
             pools.push({
                 label: "Semanal (Secundaria)",
-                displayName: "Codex / Plus Semanal",
+                displayName: "OpenAI · Semanal",
                 currency: null,
                 used: usedPct,
                 available: remainingPct,
@@ -344,9 +357,9 @@ async function fetchCodexQuota(auth: AuthFileEntry, signal?: AbortSignal): Promi
             });
         }
 
-        return pools;
+        return { pools, resetCredits, limitReached };
     } catch {
-        return [];
+        return { pools: [], resetCredits: null, limitReached: false };
     }
 }
 
@@ -416,16 +429,28 @@ export async function fetchUsage(signal?: AbortSignal): Promise<ProviderGroup[]>
 
     const accounts: AccountUsage[] = await Promise.all(
         activeFiles.map(async (f) => {
-            const provider = (f.provider || f.type || "unknown").toLowerCase();
+            let provider = (f.provider || f.type || "unknown").toLowerCase();
+            if (provider === "codex") {
+                provider = "openai";
+            }
             const account = f.email || f.account || f.name || f.id || "account";
             const plan = f.id_token?.plan_type || "standard";
 
             let pools: UsagePool[] = [];
             let errStr: string | undefined;
+            let resetCredits: number | null = null;
+            let limitReached = f.status === "quota_exhausted";
+            let resetRenewalDate: string | null = null;
 
             try {
-                if (provider === "codex" || provider === "openai") {
-                    pools = await fetchCodexQuota(f, signal);
+                if (provider === "openai" || (f.provider || "").toLowerCase() === "codex") {
+                    const res = await fetchCodexQuota(f, signal);
+                    pools = res.pools;
+                    resetCredits = res.resetCredits;
+                    if (res.limitReached) limitReached = true;
+                    if (f.id_token?.chatgpt_subscription_active_until) {
+                        resetRenewalDate = f.id_token.chatgpt_subscription_active_until;
+                    }
                 } else if (provider === "antigravity" || provider === "google" || provider === "gemini") {
                     pools = await fetchAntigravityQuota(f, signal);
                 }
@@ -440,8 +465,10 @@ export async function fetchUsage(signal?: AbortSignal): Promise<ProviderGroup[]>
                 authType: f.account_type || null,
                 plan,
                 tier: null,
-                limitReached: f.status === "quota_exhausted",
+                limitReached,
                 bankedCredits: null,
+                resetCredits,
+                resetRenewalDate,
                 rateLimitType: null,
                 pools,
                 error: errStr,
@@ -477,11 +504,44 @@ export async function fetchUsage(signal?: AbortSignal): Promise<ProviderGroup[]>
         .sort((a, b) => a.provider.localeCompare(b.provider));
 }
 
+export function formatRenewalDate(dateStr?: string | null): string | null {
+    if (!dateStr) return null;
+    const date = new Date(dateStr);
+    if (Number.isNaN(date.getTime())) return null;
+    const day = String(date.getDate()).padStart(2, "0");
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const year = date.getFullYear();
+    const diffDays = Math.ceil((date.getTime() - Date.now()) / 86400000);
+    const diffStr = diffDays > 0 ? ` (en ${diffDays}d)` : diffDays === 0 ? " (hoy)" : " (vencido)";
+    return `${day}/${month}/${year}${diffStr}`;
+}
+
 export function formatReset(resetAt: string | null): string {
     if (!resetAt) return "reset n/a";
     const date = new Date(resetAt);
-    if (Number.isNaN(date.getTime())) return "reset n/a";
-    return `reset ${date.toISOString().slice(11, 16)}Z`;
+    const time = date.getTime();
+    if (Number.isNaN(time)) return "reset n/a";
+
+    const diff = time - Date.now();
+    if (diff <= 0) return "reset inminente";
+
+    const mins = Math.max(1, Math.ceil(diff / 60000));
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+
+    const timeStr = `${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")}Z`;
+
+    if (days >= 1) {
+        const remHours = Math.floor((diff % 86400000) / 3600000);
+        const day = String(date.getDate()).padStart(2, "0");
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        return `reset en ${days}d ${remHours}h (${day}/${month})`;
+    }
+    if (hours >= 1) {
+        const remMins = Math.floor((diff % 3600000) / 60000);
+        return `reset en ${hours}h ${String(remMins).padStart(2, "0")}m (${timeStr})`;
+    }
+    return `reset en ${mins}m (${timeStr})`;
 }
 
 export function availabilityBar(percentage: number, width = 20): string {
@@ -513,6 +573,12 @@ export function renderTextReport(groups: ProviderGroup[]): string {
         for (const account of group.accounts) {
             const flags: string[] = [];
             if (account.limitReached) flags.push("LIMIT REACHED");
+            if (account.resetCredits != null) {
+                const renewText = formatRenewalDate(account.resetRenewalDate);
+                const renew = renewText ? ` (vencen: ${renewText})` : "";
+                flags.push(`${account.resetCredits} reset(s)${renew}`);
+            }
+            if (account.bankedCredits != null) flags.push(`banked ${account.bankedCredits}`);
             const header = `${account.account} · plan ${account.plan} · ${account.pools.length} cuota(s)`;
             lines.push(`  ${header}${flags.length ? ` · ${flags.join(" · ")}` : ""}`);
             if (account.error) lines.push(`    error: ${account.error}`);

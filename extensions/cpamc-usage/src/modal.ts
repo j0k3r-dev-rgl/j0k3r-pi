@@ -1,6 +1,6 @@
 import type { Component, Focusable, TuiMouseEvent, TuiMouseEventResult } from "@earendil-works/pi-tui";
 import type { AccountUsage, ProviderGroup, UsagePool } from "./api.ts";
-import { formatAmount, formatReset, poolAvailable, poolTitle } from "./api.ts";
+import { formatAmount, formatRenewalDate, formatReset, poolAvailable, poolTitle } from "./api.ts";
 
 /**
  * Floating usage modal: providers on a tab row, all of their accounts inside, and
@@ -132,6 +132,13 @@ function formatAccountLine(account: AccountUsage, isSelected: boolean, isHovered
     if (account.limitReached) {
         flags.push(bold(theme, fg(theme, "error", "⚠ LIMIT REACHED")));
     }
+    if (account.resetCredits != null) {
+        if (account.resetCredits > 0) {
+            flags.push(bold(theme, fg(theme, "accent", `⚡ ${account.resetCredits} reset${account.resetCredits === 1 ? "" : "s"}`)));
+        } else {
+            flags.push(fg(theme, "dim", "0 resets"));
+        }
+    }
     if (account.bankedCredits != null) {
         flags.push(fg(theme, "warning", `banked ${account.bankedCredits}`));
     }
@@ -150,14 +157,15 @@ function poolLines(pool: UsagePool, theme: ModalTheme): string[] {
     else if (pct < 50) statusColor = "warning";
 
     const title = `${fg(theme, "accent", "◆")} ${bold(theme, fg(theme, "syntaxFunction", poolTitle(pool)))}`;
-    const pctText = bold(theme, fg(theme, statusColor, `${pct.toFixed(1)}% libre`));
-    const availText = pool.unlimited ? fg(theme, "success", "∞ libre") : fg(theme, "text", poolAvailable(pool));
+    const availText = pool.unlimited
+        ? fg(theme, "success", "∞ libre")
+        : bold(theme, fg(theme, statusColor, `${pct.toFixed(1)}% libre`));
     const resetText = fg(theme, "muted", formatReset(pool.resetAt));
     const modelsText = pool.modelCount > 0 ? fg(theme, "syntaxType", ` · ${pool.modelCount} modelo(s)`) : "";
 
     return [
         `  ${title}`,
-        `    ${renderThemedBar(pool.availablePercentage, 16, theme)} ${pctText} · ${availText} · ${resetText}${modelsText}`,
+        `    ${renderThemedBar(pool.availablePercentage, 16, theme)} ${availText} · ${resetText}${modelsText}`,
     ];
 }
 
@@ -561,6 +569,17 @@ export class UsageModal implements Component, Focusable {
             if (account.error) {
                 lines.push(bold(theme, fg(theme, "warning", `  ⚠ error: ${account.error}`)));
             }
+            if (account.resetCredits != null) {
+                const icon = fg(theme, "accent", "⚡");
+                const count = bold(theme, fg(theme, account.resetCredits > 0 ? "success" : "dim", `${account.resetCredits}`));
+                const noun = account.resetCredits === 1 ? "reset disponible" : "resets disponibles";
+                const renewFormatted = formatRenewalDate(account.resetRenewalDate);
+                const actionWord = account.resetCredits === 0 ? "renuevan" : account.resetCredits === 1 ? "vence" : "vencen";
+                const renewSuffix = renewFormatted
+                    ? fg(theme, "dim", ` · ${actionWord} el ${bold(theme, fg(theme, "text", renewFormatted))}`)
+                    : "";
+                lines.push(`  ${icon} ${count} ${fg(theme, "text", noun)}${renewSuffix}`);
+            }
             if (this.loading) {
                 lines.push(fg(theme, "accent", `  ${SPINNER[this.frameIndex]} actualizando cuotas…`));
             }
@@ -609,7 +628,7 @@ export class UsageModal implements Component, Focusable {
         footerParts.push(closeBtn);
 
         lines.push(footerParts.join("  "));
-        lines.push(fg(theme, "dim", "h/l: proveedor · j/k o rueda: cuenta · r: refrescar · Esc: cerrar · mouse: click / scroll"));
+        lines.push(fg(theme, "dim", "h/l: proveedor · j/k: cuenta · r: refrescar · Esc: cerrar · click/rueda"));
 
         const total = this.groups.reduce((sum, group) => sum + group.accounts.length, 0);
         const modalTitle = `${bold(theme, fg(theme, "accent", "CLIProxyAPI usage"))} ${fg(theme, "muted", `· ${total} cuenta(s)`)}`;

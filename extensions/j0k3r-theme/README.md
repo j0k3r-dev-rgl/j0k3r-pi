@@ -17,7 +17,8 @@ Pi TUI theme extension providing custom interactive header, editor, and footer c
   - Multi-tier adaptive layout that gracefully scales across wide and narrow terminal viewports.
   - Shows Git repository and branch, current model, token counts, context window usage progress bar, thinking level, and Engram memory status.
 - **Custom Editor (`J0k3rThemeEditor`)**:
-  - Custom styled input editor component integrating seamlessly with the theme colors.
+  - Custom styled input editor component with electric cyan borders.
+  - Animated working status indicator in the top border featuring the Arch Linux logo (`󰣇`) with a pulsing neon breathing effect (scaling brightness and contrast) while smoothly cycling through electric cyberpunk gradient colors (Cyan, Arch Blue, Cyber Violet, Neon Pink, Electric Amber, Neon Green) during agent processing and thinking.
 - **Theme `arch-electric` (`themes/arch-electric.json`)**:
   - Cyberpunk color palette inspired by Arch Linux: electric cyan (`#00e5ff`), Arch blue (`#1793d1`), cyberpunk violet (`#9b5cff`), neon pink (`#ff2df7`), lime green (`#66ff66`), and deep dark panel backgrounds (`#05080d`).
 
@@ -38,6 +39,7 @@ Extensión de tema e interfaz para Pi que provee componentes interactivos person
   - Diseño responsivo adaptativo que se ajusta a terminales estrechas y anchas sin cortes abruptos.
   - Muestra repositorio y rama Git, modelo activo, conteo de tokens, barra de progreso de uso de contexto (%), nivel de thinking y estado de Engram.
 - **Editor Personalizado (`J0k3rThemeEditor`)**:
-  - Componente de editor de entrada estilizado que se integra con los tonos del tema.
+  - Componente de editor de entrada estilizado con bordes en cian eléctrico.
+  - Indicador animado de estado de trabajo (worker / spinner) en el borde superior con el logo de Arch Linux (`󰣇`) con efecto de latido/respiración neón (pulsación de brillo y contraste) mientras cicla suavemente a través de colores cyberpunk (cian eléctrico, azul Arch, violeta, rosa neón, ámbar, verde lima) cuando el agente procesa o piensa.
 - **Tema `arch-electric` (`themes/arch-electric.json`)**:
   - Paleta cyberpunk con estética Arch Linux: cian eléctrico (`#00e5ff`), azul Arch (`#1793d1`), violeta cyberpunk (`#9b5cff`), rosa neón (`#ff2df7`), verde lima (`#66ff66`) y fondos oscuros profundos (`#05080d`).

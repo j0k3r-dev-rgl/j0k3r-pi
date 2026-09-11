@@ -7,7 +7,7 @@ import {
 	getAgentDir,
 	type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
-import { J0k3rThemeEditor } from "./src/J0k3rThemeEditor.js";
+import { ARCH_WORKING_INDICATOR, J0k3rThemeEditor } from "./src/J0k3rThemeEditor.js";
 import { J0k3rThemeFooter, type RepoGitInfo } from "./src/J0k3rThemeFooter.js";
 import { J0k3rThemeHeader, type J0k3rThemeHeaderData } from "./src/J0k3rThemeHeader.js";
 
@@ -427,6 +427,9 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 			}
 			return activeHeader;
 		});
+		if (typeof (ctx.ui as any)?.setWorkingIndicator === "function") {
+			(ctx.ui as any).setWorkingIndicator(ARCH_WORKING_INDICATOR);
+		}
 		ctx.ui.setEditorComponent((tui, theme, keybindings) => new J0k3rThemeEditor(tui, theme, keybindings));
 		ctx.ui.setFooter((tui, theme, footerData) => {
 			activeFooter = new J0k3rThemeFooter(tui, theme, footerData, ctx, () => pi.getThinkingLevel(), footerGitInfo);
