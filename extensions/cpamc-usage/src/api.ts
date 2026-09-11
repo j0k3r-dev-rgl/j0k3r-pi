@@ -363,6 +363,29 @@ async function fetchCodexQuota(auth: AuthFileEntry, signal?: AbortSignal): Promi
     }
 }
 
+function quotaWindowRank(pool: UsagePool): number {
+    const raw = `${pool.windowLabel ?? ""} ${pool.label} ${pool.displayName ?? ""}`.toLowerCase();
+    if (/\b5\s*(h|hs|hr|hour|hours|hora|horas)\b/.test(raw) || raw.includes("5h")) return 10;
+    if (/\b(weekly|week|semana|semanal|7\s*d|7\s*day|7\s*día|7\s*dias|7\s*días)\b/.test(raw)) return 20;
+    if (/\b(30\s*d|month|monthly|mes|mensual)\b/.test(raw)) return 30;
+    return 100;
+}
+
+function quotaModelRank(pool: UsagePool): number {
+    const raw = `${pool.label} ${pool.displayName ?? ""}`.toLowerCase();
+    if (raw.includes("gemini")) return 10;
+    if (raw.includes("claude") || raw.includes("gpt")) return 20;
+    return 100;
+}
+
+function formatQuotaWindowLabel(window: string): string {
+    const raw = window.trim().toLowerCase();
+    if (/\b5\s*(h|hs|hr|hour|hours|hora|horas)\b/.test(raw) || raw.includes("5h")) return "5 hs";
+    if (/\b(weekly|week|semana|semanal|7\s*d|7\s*day|7\s*día|7\s*dias|7\s*días)\b/.test(raw)) return "Semanal";
+    if (/\b(30\s*d|month|monthly|mes|mensual)\b/.test(raw)) return "Mensual";
+    return window;
+}
+
 async function fetchAntigravityQuota(auth: AuthFileEntry, signal?: AbortSignal): Promise<UsagePool[]> {
     const authIndex = auth.auth_index;
     const projectId = auth.project_id || "aicode-consumers";
@@ -398,9 +421,10 @@ async function fetchAntigravityQuota(auth: AuthFileEntry, signal?: AbortSignal):
                 const remainingPct = Math.max(0, Math.min(100, fraction * 100));
                 const usedPct = 100 - remainingPct;
                 const window = b.window || "window";
+                const windowLabel = formatQuotaWindowLabel(window);
                 pools.push({
-                    label: `${groupName} (${window})`,
-                    displayName: `${groupName} · ${b.displayName || window}`,
+                    label: `${groupName} (${windowLabel})`,
+                    displayName: `${groupName} · ${windowLabel}`,
                     currency: null,
                     used: usedPct,
                     available: remainingPct,
@@ -408,14 +432,20 @@ async function fetchAntigravityQuota(auth: AuthFileEntry, signal?: AbortSignal):
                     unlimited: false,
                     availablePercentage: remainingPct,
                     resetAt: b.resetTime || null,
-                    windowLabel: window,
+                    windowLabel,
                     modelCount: 0,
                     models: [],
                 });
             }
         }
 
-        return pools;
+        return pools.sort((a, b) => {
+            const modelRankDiff = quotaModelRank(a) - quotaModelRank(b);
+            if (modelRankDiff !== 0) return modelRankDiff;
+            const windowRankDiff = quotaWindowRank(a) - quotaWindowRank(b);
+            if (windowRankDiff !== 0) return windowRankDiff;
+            return poolTitle(a).localeCompare(poolTitle(b));
+        });
     } catch {
         return [];
     }
