@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -9,7 +9,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { ARCH_WORKING_INDICATOR, J0k3rThemeEditor } from "./src/J0k3rThemeEditor.js";
 import { J0k3rThemeFooter, type RepoGitInfo } from "./src/J0k3rThemeFooter.js";
-import { J0k3rThemeHeader, type J0k3rThemeHeaderData } from "./src/J0k3rThemeHeader.js";
+import { J0k3rThemeHeader, type J0k3rThemeHeaderData, type WelcomeBannerStyle } from "./src/J0k3rThemeHeader.js";
+import { registerNativeToolOverrides } from "./src/tools/index.js";
 
 const extensionDir = dirname(fileURLToPath(import.meta.url));
 const globalAgentDir = dirname(dirname(extensionDir));
@@ -310,22 +311,72 @@ function detectGitInfoSync(cwd: string): { repoName?: string; branch?: string } 
 	}
 }
 
+export function resolveWelcomeBannerSetting(cwd: string): WelcomeBannerStyle {
+	const settingsFiles = [
+		join(cwd, ".pi", "settings.json"),
+		join(globalAgentDir, "settings.json"),
+	];
+	for (const sf of settingsFiles) {
+		const settings = parseJsonFile(sf);
+		if (!settings || typeof settings !== "object") continue;
+		const raw = settings["j0k3rTheme.welcomeBanner"] ?? settings.j0k3rTheme?.welcomeBanner;
+		if (raw === "mustache" || raw === "default" || raw === "cat") {
+			return raw;
+		}
+	}
+	return "default";
+}
+
+export function saveWelcomeBannerSetting(style: WelcomeBannerStyle): void {
+	const settingsPath = join(globalAgentDir, "settings.json");
+	try {
+		const existing = parseJsonFile(settingsPath);
+		const baseObj = existing && typeof existing === "object" ? { ...existing } : {};
+		if (!baseObj.j0k3rTheme || typeof baseObj.j0k3rTheme !== "object") {
+			baseObj.j0k3rTheme = {};
+		}
+		baseObj.j0k3rTheme.welcomeBanner = style;
+		writeFileSync(settingsPath, JSON.stringify(baseObj, null, 2) + "\n", "utf-8");
+	} catch {
+		// Non-fatal if global settings cannot be written
+	}
+}
+
 export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
+	registerNativeToolOverrides(pi);
+
 	let activeHeader: J0k3rThemeHeader | undefined;
 	let activeFooter: J0k3rThemeFooter | undefined;
 	let requestUIRender: (() => void) | undefined;
 	let bannerAnimTimer: ReturnType<typeof setInterval> | undefined;
+	let mustacheAnimTimer: ReturnType<typeof setInterval> | undefined;
+	let catAnimTimer: ReturnType<typeof setInterval> | undefined;
+	let currentBannerStyle: WelcomeBannerStyle = "default";
 
 	const stopBannerAnimation = () => {
 		if (bannerAnimTimer) {
 			clearInterval(bannerAnimTimer);
 			bannerAnimTimer = undefined;
 		}
+		if (mustacheAnimTimer) {
+			clearInterval(mustacheAnimTimer);
+			mustacheAnimTimer = undefined;
+		}
+		if (catAnimTimer) {
+			clearInterval(catAnimTimer);
+			catAnimTimer = undefined;
+		}
+		if (activeHeader) {
+			activeHeader.setMustacheFrame(0);
+			activeHeader.setCatFrame(0);
+		}
 	};
 
 	const startBannerAnimation = () => {
 		stopBannerAnimation();
-		if (activeHeader?.isBannerVisible()) {
+		if (!activeHeader?.isBannerVisible()) return;
+
+		if (currentBannerStyle === "default") {
 			bannerAnimTimer = setInterval(() => {
 				if (!activeHeader?.isBannerVisible()) {
 					stopBannerAnimation();
@@ -334,6 +385,28 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 				activeHeader.nextFrame();
 				requestUIRender?.();
 			}, 95);
+		} else if (currentBannerStyle === "mustache") {
+			// Lively, buoyant 60-frame continuous loop at 80ms/frame (~4.8s total cycle):
+			// Fast, energetic, and 100% fluid motion without sluggishness
+			mustacheAnimTimer = setInterval(() => {
+				if (!activeHeader?.isBannerVisible() || currentBannerStyle !== "mustache") {
+					stopBannerAnimation();
+					return;
+				}
+				activeHeader.nextMustacheFrame();
+				requestUIRender?.();
+			}, 80);
+		} else if (currentBannerStyle === "cat") {
+			// Buoyant, rhythmic 60-frame cat animation loop at 80ms/frame (~4.8s total cycle):
+			// Constant tempo sway, bouncy float, and adorable winking eye
+			catAnimTimer = setInterval(() => {
+				if (!activeHeader?.isBannerVisible() || currentBannerStyle !== "cat") {
+					stopBannerAnimation();
+					return;
+				}
+				activeHeader.nextCatFrame();
+				requestUIRender?.();
+			}, 80);
 		}
 	};
 
@@ -345,11 +418,86 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 		}
 	};
 
+	const applyBannerStyle = (style: WelcomeBannerStyle) => {
+		currentBannerStyle = style;
+		if (activeHeader) {
+			activeHeader.setBannerStyle(style);
+			activeHeader.setBannerVisible(true);
+		}
+		startBannerAnimation();
+		requestUIRender?.();
+	};
+
+	pi.registerCommand("banner", {
+		description: "Select or switch the welcome banner style (default, mustache, or cat)",
+		handler: async (args, ctx) => {
+			const raw = (args ?? "").trim();
+			const lower = raw.toLowerCase();
+
+			let chosen: WelcomeBannerStyle | undefined;
+
+			if (!raw) {
+				const options = [
+					"default (Arch 3D plus j0k3r)",
+					"mustache (Pink Mustache)",
+					"cat (Cyber Michi)",
+				];
+				const selection = await ctx.ui.select("Select Welcome Banner", options);
+				if (!selection) return;
+				chosen = selection.startsWith("mustache")
+					? "mustache"
+					: selection.startsWith("cat")
+						? "cat"
+						: "default";
+			} else if (lower === "default" || lower === "arch") {
+				chosen = "default";
+			} else if (lower === "mustache" || lower === "pink" || lower === "pink mustache" || lower === "pink-mustache") {
+				chosen = "mustache";
+			} else if (
+				lower === "cat" ||
+				lower === "michi" ||
+				lower === "gato" ||
+				lower === "gatito" ||
+				lower === "cat-pi" ||
+				lower === "michi-pi"
+			) {
+				chosen = "cat";
+			} else {
+				ctx.ui.notify(`Invalid banner style: "${raw}". Accepted values: default, mustache, cat.`, "warning");
+				const options = [
+					"default (Arch 3D plus j0k3r)",
+					"mustache (Pink Mustache)",
+					"cat (Cyber Michi)",
+				];
+				const selection = await ctx.ui.select("Select Welcome Banner", options);
+				if (!selection) return;
+				chosen = selection.startsWith("mustache")
+					? "mustache"
+					: selection.startsWith("cat")
+						? "cat"
+						: "default";
+			}
+
+			if (chosen) {
+				applyBannerStyle(chosen);
+				saveWelcomeBannerSetting(chosen);
+				const label =
+					chosen === "mustache"
+						? "mostachi-pi (Pink Mustache)"
+						: chosen === "cat"
+							? "michi-pi (Cyber Michi)"
+							: "j0k3r-pi (Arch 3D)";
+				ctx.ui.notify(`Welcome banner set to ${chosen} (${label}) [saved to settings]`, "info");
+			}
+		},
+	});
+
 	pi.on("input", () => {
 		hideBanner();
 	});
 
 	pi.on("session_start", (_event, ctx) => {
+		registerNativeToolOverrides(pi, ctx.cwd);
 		if (ctx.mode !== "tui") return;
 
 		const hasUserMessages =
@@ -420,7 +568,14 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 
 		ctx.ui.setHeader((tui, theme) => {
 			stopBannerAnimation();
-			activeHeader = new J0k3rThemeHeader(theme, headerData, ctx.ui.getToolsExpanded(), !hasUserMessages);
+			currentBannerStyle = resolveWelcomeBannerSetting(ctx.cwd);
+			activeHeader = new J0k3rThemeHeader(
+				theme,
+				headerData,
+				ctx.ui.getToolsExpanded(),
+				!hasUserMessages,
+				currentBannerStyle,
+			);
 			requestUIRender = () => tui.requestRender();
 			if (!hasUserMessages) {
 				startBannerAnimation();

@@ -1,6 +1,9 @@
 import { keyHint, type Theme } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { CAT_ANIM_FRAMES, CAT_BANNER_LINES, CAT_BANNER_WIDTH, MUSTACHE_ANIM_FRAMES, MUSTACHE_BANNER_LINES, MUSTACHE_BANNER_WIDTH, type WelcomeBannerStyle } from "./banners.js";
+
+export { type WelcomeBannerStyle } from "./banners.js";
 
 export interface J0k3rThemeHeaderData {
 	projectName: string;
@@ -271,15 +274,26 @@ export class J0k3rThemeHeader implements Component {
 	private expanded: boolean;
 	private bannerVisible: boolean;
 	private frameIndex = 0;
+	private mustacheLoopIndex = 0;
+	private catLoopIndex = 0;
 
 	constructor(
 		private readonly theme: Theme,
 		private data: J0k3rThemeHeaderData,
 		expanded = false,
 		bannerVisible = true,
+		private bannerStyle: WelcomeBannerStyle = "default",
 	) {
 		this.expanded = expanded;
 		this.bannerVisible = bannerVisible;
+	}
+
+	setBannerStyle(style: WelcomeBannerStyle): void {
+		this.bannerStyle = style === "mustache" ? "mustache" : style === "cat" ? "cat" : "default";
+	}
+
+	getBannerStyle(): WelcomeBannerStyle {
+		return this.bannerStyle;
 	}
 
 	setExpanded(expanded: boolean): void {
@@ -302,13 +316,30 @@ export class J0k3rThemeHeader implements Component {
 		this.frameIndex = (this.frameIndex + 1) % TOTAL_3D_FRAMES;
 	}
 
+	nextMustacheFrame(): void {
+		this.mustacheLoopIndex = (this.mustacheLoopIndex + 1) % MUSTACHE_ANIM_FRAMES.length;
+	}
+
+	setMustacheFrame(frameIndex: number): void {
+		this.mustacheLoopIndex = Math.max(0, Math.min(frameIndex, MUSTACHE_ANIM_FRAMES.length - 1));
+	}
+
+	nextCatFrame(): void {
+		this.catLoopIndex = (this.catLoopIndex + 1) % CAT_ANIM_FRAMES.length;
+	}
+
+	setCatFrame(frameIndex: number): void {
+		this.catLoopIndex = Math.max(0, Math.min(frameIndex, CAT_ANIM_FRAMES.length - 1));
+	}
+
 	dispose(): void {
 		this.bannerVisible = false;
 	}
 
 	render(width: number): string[] {
 		if (width <= 0) return [];
-		if (width < 24) return [fit(`j0k3r-pi ${this.data.repoName || this.data.projectName}`, width)];
+		const appTitle = this.bannerStyle === "mustache" ? "mostachi-pi" : this.bannerStyle === "cat" ? "michi-pi" : "j0k3r-pi";
+		if (width < 24) return [fit(`${appTitle} ${this.data.repoName || this.data.projectName}`, width)];
 
 		const innerWidth = Math.max(0, width - 2);
 
@@ -331,8 +362,9 @@ export class J0k3rThemeHeader implements Component {
 			this.expanded ? keyHint("app.tools.expand", "contract") : keyHint("app.tools.expand", "expand"),
 		].join(electric(VIOLET, " · "));
 
+		const welcomeTitle = this.bannerStyle === "mustache" ? "welcome to mostachi-pi" : this.bannerStyle === "cat" ? "welcome to michi-pi" : "welcome to j0k3r-pi";
 		const lines = [
-			titledBorder("welcome to j0k3r-pi", innerWidth),
+			titledBorder(welcomeTitle, innerWidth),
 			boxLine(projectLine, innerWidth),
 			boxLine(summary, innerWidth),
 		];
@@ -344,35 +376,59 @@ export class J0k3rThemeHeader implements Component {
 		lines.push(bottomBorder(innerWidth));
 
 		if (this.bannerVisible) {
-			const archFrame = ARCH_3D_FRAMES[this.frameIndex];
-			const canShowBoth = width >= 104;
-			const canShowArchOnly = width >= 36;
-
-			if (canShowBoth) {
-				const gap = 6;
-				const j0k3rWidth = 60;
-				const totalW = ARCH_3D_W + gap + j0k3rWidth; // 34 + 6 + 60 = 100 cols
-				const leftPad = Math.max(0, Math.floor((width - totalW) / 2));
-				const padStr = " ".repeat(leftPad);
-				lines.push("");
-				lines.push("");
-				lines.push("");
-				lines.push("");
-				for (let y = 0; y < ARCH_3D_H; y++) {
-					const left = archFrame[y];
-					const jy = y - 3;
-					const right = jy >= 0 && jy < COLORED_J0K3R.length ? COLORED_J0K3R[jy] : "";
-					lines.push(`${padStr}${left}${" ".repeat(gap)}${right}`);
+			if (this.bannerStyle === "mustache") {
+				if (width >= 68) {
+					lines.push("");
+					lines.push("");
+					const leftPad = Math.max(0, Math.floor((width - MUSTACHE_BANNER_WIDTH) / 2));
+					const padStr = " ".repeat(leftPad);
+					const bannerArt = MUSTACHE_ANIM_FRAMES[this.mustacheLoopIndex] ?? MUSTACHE_BANNER_LINES;
+					for (const line of bannerArt) {
+						lines.push(fit(`${padStr}${line}`, width));
+					}
 				}
-			} else if (canShowArchOnly) {
-				const leftPad = Math.max(0, Math.floor((width - ARCH_3D_W) / 2));
-				const padStr = " ".repeat(leftPad);
-				lines.push("");
-				lines.push("");
-				lines.push("");
-				lines.push("");
-				for (let y = 0; y < ARCH_3D_H; y++) {
-					lines.push(`${padStr}${archFrame[y]}`);
+			} else if (this.bannerStyle === "cat") {
+				if (width >= 68) {
+					lines.push("");
+					lines.push("");
+					const leftPad = Math.max(0, Math.floor((width - CAT_BANNER_WIDTH) / 2));
+					const padStr = " ".repeat(leftPad);
+					const bannerArt = CAT_ANIM_FRAMES[this.catLoopIndex] ?? CAT_BANNER_LINES;
+					for (const line of bannerArt) {
+						lines.push(fit(`${padStr}${line}`, width));
+					}
+				}
+			} else {
+				const archFrame = ARCH_3D_FRAMES[this.frameIndex];
+				const canShowBoth = width >= 104;
+				const canShowArchOnly = width >= 56;
+
+				if (canShowBoth) {
+					const gap = 6;
+					const j0k3rWidth = 60;
+					const totalW = ARCH_3D_W + gap + j0k3rWidth; // 34 + 6 + 60 = 100 cols
+					const leftPad = Math.max(0, Math.floor((width - totalW) / 2));
+					const padStr = " ".repeat(leftPad);
+					lines.push("");
+					lines.push("");
+					lines.push("");
+					lines.push("");
+					for (let y = 0; y < ARCH_3D_H; y++) {
+						const left = archFrame[y];
+						const jy = y - 3;
+						const right = jy >= 0 && jy < COLORED_J0K3R.length ? COLORED_J0K3R[jy] : "";
+						lines.push(fit(`${padStr}${left}${" ".repeat(gap)}${right}`, width));
+					}
+				} else if (canShowArchOnly) {
+					const leftPad = Math.max(0, Math.floor((width - ARCH_3D_W) / 2));
+					const padStr = " ".repeat(leftPad);
+					lines.push("");
+					lines.push("");
+					lines.push("");
+					lines.push("");
+					for (let y = 0; y < ARCH_3D_H; y++) {
+						lines.push(fit(`${padStr}${archFrame[y]}`, width));
+					}
 				}
 			}
 		}
