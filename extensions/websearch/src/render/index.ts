@@ -1,8 +1,19 @@
-type Component = { invalidate(): void; render(width: number): string[] };
+export type Component = { invalidate(): void; render(width: number): string[] };
 
-type WebsearchRenderOptions = { expanded?: boolean; isPartial?: boolean };
-type Theme = { fg?: (name: string, text: string) => string; bold?: (text: string) => string };
+export type WebsearchRenderOptions = { expanded?: boolean; isPartial?: boolean };
+export type Theme = {
+  fg?: (name: string, text: string) => string;
+  bold?: (text: string) => string;
+  keybinding?: (action: string) => string | undefined;
+};
 type ToolContent = { type?: string; text?: string };
+
+export const RESET = '\x1b[0m';
+export const CYAN = '\x1b[1;38;2;0;229;255m';
+export const LIME = '\x1b[1;38;2;102;255;102m';
+export const RED = '\x1b[1;38;2;255;77;109m';
+export const DIM = '\x1b[2m';
+export const BOLD = '\x1b[1m';
 
 const ANSI_RE = /\u001b\][^\u001b\u0007]*(?:\u001b\\|\u0007)|\u001b\[[0-?]*[ -/]*[@-~]/g;
 const ANSI_TOKEN_RE = /(?:\u001b\][^\u001b\u0007]*(?:\u001b\\|\u0007)|\u001b\[[0-?]*[ -/]*[@-~])/g;
@@ -36,7 +47,7 @@ function isAnsi(token: string): boolean {
   return token.startsWith('\u001b');
 }
 
-function stripAnsi(text: string): string {
+export function stripAnsi(text: string): string {
   return text.replace(ANSI_RE, '');
 }
 
@@ -102,6 +113,10 @@ function lineWidth(text: string): number {
   return segmentText(stripAnsi(text).replace(/\t/g, '   ')).reduce((width, segment) => width + graphemeWidth(segment), 0);
 }
 
+export function visibleWidth(text: string): number {
+  return lineWidth(text);
+}
+
 function truncate(text: string, width: number): string {
   if (width <= 0) return '';
   if (lineWidth(text) <= width) return text;
@@ -123,6 +138,68 @@ function truncate(text: string, width: number): string {
   }
 
   return `${output}…`;
+}
+
+export function fit(text: string, width: number): string {
+  return truncate(text, Math.max(0, width));
+}
+
+export function pad(text: string, width: number): string {
+  const fitted = fit(text, width);
+  const vis = visibleWidth(fitted);
+  return fitted + ' '.repeat(Math.max(0, width - vis));
+}
+
+export function boxLine(content: string, innerWidth: number, borderColor: string = CYAN): string {
+  const innerContentWidth = Math.max(0, innerWidth - 2);
+  return `${borderColor}│${RESET} ${pad(content, innerContentWidth)} ${borderColor}│${RESET}`;
+}
+
+export function cardTopBorder(
+  toolName: string,
+  actionOrTarget: string | undefined,
+  innerWidth: number,
+  borderColor: string = CYAN,
+  titleColor: string = borderColor,
+): string {
+  const cleanAction = actionOrTarget ? actionOrTarget.replace(/[\r\n]+/g, ' ').trim() : undefined;
+  let label = cleanAction ? `${toolName} [${cleanAction}]` : toolName;
+
+  const maxTitleWidth = Math.max(4, innerWidth - 4);
+  if (visibleWidth(label) + 2 > maxTitleWidth && cleanAction) {
+    const maxActionWidth = Math.max(3, maxTitleWidth - visibleWidth(toolName) - 5);
+    const truncatedAction = fit(cleanAction, maxActionWidth);
+    label = `${toolName} [${truncatedAction}]`;
+  }
+
+  let titleText = ` ${label} `;
+  if (visibleWidth(titleText) > innerWidth) {
+    titleText = ` ${fit(label, Math.max(1, innerWidth - 2))} `;
+  }
+
+  const rest = Math.max(0, innerWidth - visibleWidth(titleText));
+  const leftDash = Math.min(2, rest);
+  const rightDash = Math.max(0, rest - leftDash);
+  return `${borderColor}╭${'─'.repeat(leftDash)}${RESET}${titleColor}${titleText}${RESET}${borderColor}${'─'.repeat(rightDash)}╮${RESET}`;
+}
+
+export function cardBottomBorder(innerWidth: number, borderColor: string = CYAN): string {
+  return `${borderColor}╰${'─'.repeat(Math.max(0, innerWidth))}╯${RESET}`;
+}
+
+export function frameContent(
+  lines: string[],
+  innerWidth: number,
+  borderColor: string = CYAN,
+): string[] {
+  const framed: string[] = [];
+  for (const rawLine of lines) {
+    const subLines = rawLine.split(/\r?\n/);
+    for (const sub of subLines) {
+      framed.push(boxLine(sub, innerWidth, borderColor));
+    }
+  }
+  return framed;
 }
 
 function clip(text: unknown, limit: number): string {
@@ -187,20 +264,6 @@ function wrapLine(text: string, width: number): string[] {
   return lines;
 }
 
-function wrapLines(lines: string[], width: number): string[] {
-  return lines.flatMap((line) => wrapLine(line, width));
-}
-
-function textComponent(linesForWidth: (width: number) => string[]): Component {
-  return {
-    invalidate() {},
-    render(width: number) {
-      const w = Math.max(40, width);
-      return linesForWidth(w).map((line) => truncate(line, w));
-    },
-  };
-}
-
 function resultText(result: any): string {
   const content = Array.isArray(result?.content) ? result.content as ToolContent[] : [];
   return content.filter((part) => part?.type === 'text').map((part) => part.text ?? '').join('\n');
@@ -229,6 +292,11 @@ function itemLabel(item: any): string {
   return `${source}${title}${ref}`;
 }
 
+function getKeyHint(theme: Theme | undefined, action: 'expand' | 'collapse'): string {
+  const key = theme?.keybinding?.('app.tools.expand') ?? 'ctrl+o';
+  return `${DIM}${key} ${action}${RESET}`;
+}
+
 function compactSearchData(toolName: string, value: any, theme: Theme): string[] {
   const title = (text: string) => theme?.fg?.('toolTitle', theme?.bold?.(text) ?? text) ?? text;
   const accent = (text: string) => theme?.fg?.('accent', text) ?? text;
@@ -239,8 +307,7 @@ function compactSearchData(toolName: string, value: any, theme: Theme): string[]
   const source = value?.selected_source ? ` · ${String(value.selected_source)}` : '';
   const lines = [`${title(toolName)} · ${items.length} result${items.length === 1 ? '' : 's'}${source}${query}`];
   for (const item of items.slice(0, 5)) lines.push(`• ${clip(itemLabel(item), 150)}`);
-  if (errors.length) lines.push(dim(`${errors.length} source error${errors.length === 1 ? '' : 's'} · ctrl+o expand`));
-  else lines.push(dim('ctrl+o expand'));
+  if (errors.length) lines.push(dim(`${errors.length} source error${errors.length === 1 ? '' : 's'}`));
   return lines;
 }
 
@@ -261,32 +328,153 @@ function compactDetailData(toolName: string, value: any, result: any, theme: The
     ...(url ? [dim(clip(url, 180))] : []),
     ...(counts ? [dim(counts)] : []),
     ...(preview && preview !== main ? [`preview: ${preview}`] : []),
-    dim('ctrl+o expand'),
   ];
 }
 
 function compactResult(toolName: string, result: any, theme: Theme): string[] {
-  if (status(result) === 'failure' || result?.isError) {
-    const title = (text: string) => theme?.fg?.('toolTitle', theme?.bold?.(text) ?? text) ?? text;
-    const error = result?.details?.error;
-    return [`${title(toolName)} · error`, clip(error?.message ?? resultText(result), 240), 'ctrl+o expand'];
-  }
   const value = data(result);
   if (Array.isArray(value?.items) || Array.isArray(value?.source_errors)) return compactSearchData(toolName, value, theme);
   return compactDetailData(toolName, value, result, theme);
 }
 
-export function renderWebsearchToolResult(toolName: string, result: any, options: WebsearchRenderOptions = {}, theme: Theme = {}): Component {
-  return textComponent((width) => {
-    if (options.isPartial) return [`${toolName} · running…`];
-    if (!options.expanded) return compactResult(toolName, result, theme);
-    const title = (text: string) => theme?.fg?.('toolTitle', theme?.bold?.(text) ?? text) ?? text;
-    const dim = (text: string) => theme?.fg?.('dim', text) ?? text;
-    return wrapLines([
-      `${title(toolName)} · expanded`,
-      dim('ctrl+o collapse'),
-      '',
-      ...resultText(result).split('\n'),
-    ], width);
-  });
+export function toolActionBadge(toolName: string, args: any): string | undefined {
+  if (!args || typeof args !== 'object') return undefined;
+  if (toolName === 'web_search' || toolName === 'github_code_search' || toolName === 'github_search_issues' || toolName === 'academic_search') {
+    return typeof args.query === 'string' && args.query.trim() ? args.query.trim() : undefined;
+  }
+  if (toolName === 'web_fetch') {
+    return typeof args.url === 'string' && args.url.trim() ? args.url.trim() : undefined;
+  }
+  if (toolName === 'web_research') {
+    const topic = args.topic ?? args.query;
+    return typeof topic === 'string' && topic.trim() ? topic.trim() : undefined;
+  }
+  if (toolName === 'site_search') {
+    const site = typeof args.site === 'string' ? args.site.trim() : '';
+    const query = typeof args.query === 'string' ? args.query.trim() : '';
+    const combined = `${site} ${query}`.trim();
+    return combined || undefined;
+  }
+  if (toolName === 'discussion_search') {
+    return typeof args.query === 'string' && args.query.trim() ? args.query.trim() : undefined;
+  }
+  if (toolName === 'discussion_get') {
+    const target = args.issue ?? args.question_id ?? args.item_id ?? args.url ?? args.source;
+    return typeof target === 'string' && target.trim() ? target.trim() : undefined;
+  }
+  if (toolName === 'github_get') {
+    const target = args.issue ?? args.pull_request ?? args.release ?? args.url;
+    return typeof target === 'string' && target.trim() ? target.trim() : undefined;
+  }
+  if (toolName === 'academic_paper') {
+    const target = args.paper_id ?? args.doi ?? args.title;
+    return typeof target === 'string' && target.trim() ? target.trim() : undefined;
+  }
+  const fallback = args.query ?? args.url ?? args.topic ?? args.title ?? args.symbol;
+  return typeof fallback === 'string' && fallback.trim() ? fallback.trim() : undefined;
+}
+
+export function renderWebsearchToolCall(
+  toolName: string,
+  args: any,
+  _theme?: Theme,
+  context?: any,
+): Component {
+  return {
+    invalidate() {},
+    render(width: number): string[] {
+      if (width <= 0) return [];
+      const actionBadge = toolActionBadge(toolName, args);
+
+      if (width < 24) {
+        return [fit(actionBadge ? `${toolName} [${actionBadge}]` : toolName, width)];
+      }
+
+      const innerWidth = Math.max(0, width - 2);
+      const state = context?.state;
+      const isError = Boolean(context?.isError);
+      const borderColor = state?.borderColor ?? (isError ? RED : CYAN);
+      const topBorder = cardTopBorder(toolName, actionBadge, innerWidth, borderColor, borderColor);
+
+      if (state?.hasResult) {
+        return [topBorder];
+      }
+
+      const pendingDetail = actionBadge ? `Pending: ${actionBadge}` : 'Pending...';
+      const pendingLine = `${CYAN}●${RESET} ${pendingDetail}`;
+
+      return [
+        topBorder,
+        boxLine(pendingLine, innerWidth, borderColor),
+        cardBottomBorder(innerWidth, borderColor),
+      ];
+    },
+  };
+}
+
+export function renderWebsearchToolResult(
+  toolName: string,
+  result: any,
+  options: WebsearchRenderOptions = {},
+  theme: Theme = {},
+  context?: any,
+): Component {
+  const isError = Boolean(
+    context?.isError ||
+    result?.isError ||
+    status(result) === 'failure' ||
+    result?.details?.status === 'failure' ||
+    result?.details?.error,
+  );
+  const borderColor = isError ? RED : LIME;
+
+  if (context?.state) {
+    context.state.hasResult = true;
+    context.state.borderColor = borderColor;
+  }
+
+  return {
+    invalidate() {},
+    render(width: number): string[] {
+      if (width <= 0) return [];
+      const isExpanded = options?.expanded === true;
+      const keyHint = getKeyHint(theme, isExpanded ? 'collapse' : 'expand');
+      const bodyLines: string[] = [];
+      const title = (text: string) => theme?.fg?.('toolTitle', theme?.bold?.(text) ?? text) ?? text;
+
+      if (options?.isPartial) {
+        bodyLines.push(`${title(toolName)} · running…`);
+      } else if (isError) {
+        const errorMsg = (result?.details?.error?.message ?? result?.details?.error ?? resultText(result)) || 'tool failed';
+        bodyLines.push(`${title(toolName)} · error`);
+        bodyLines.push(`${RED}Error: ${stripAnsi(String(errorMsg))}${RESET}`);
+        bodyLines.push(keyHint);
+      } else if (!isExpanded) {
+        bodyLines.push(...compactResult(toolName, result, theme));
+        bodyLines.push(keyHint);
+      } else {
+        bodyLines.push(`${title(toolName)} · expanded`);
+        bodyLines.push(keyHint);
+        bodyLines.push('');
+        bodyLines.push(...resultText(result).split('\n'));
+      }
+
+      if (width < 24) {
+        return bodyLines.map((line) => fit(stripAnsi(line), width));
+      }
+
+      const innerWidth = Math.max(0, width - 2);
+      const innerContentWidth = Math.max(0, innerWidth - 2);
+      const wrappedBodyLines: string[] = [];
+      for (const rawLine of bodyLines) {
+        for (const sub of rawLine.split(/\r?\n/)) {
+          wrappedBodyLines.push(...wrapLine(sub, innerContentWidth));
+        }
+      }
+
+      const framed = frameContent(wrappedBodyLines, innerWidth, borderColor);
+      const bottomBorder = cardBottomBorder(innerWidth, borderColor);
+      return [...framed, bottomBorder];
+    },
+  };
 }

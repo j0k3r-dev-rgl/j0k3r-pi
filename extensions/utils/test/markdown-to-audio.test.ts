@@ -262,6 +262,11 @@ describe('utils extension tool', () => {
       outputPath: join(file.dir, 'tool-progress.wav'),
       engine: 'espeak-ng',
       language: 'es',
+      findCommand: async (cmd: string) => (cmd === 'espeak-ng' ? '/usr/bin/espeak-ng' : null),
+      runCommand: vi.fn(async () => {
+        await writeFile(join(file.dir, 'tool-progress.wav'), 'RIFF....WAVE');
+        return { stdout: '', stderr: '', code: 0 };
+      }),
     }, undefined, (update: unknown) => updates.push(update), {
       cwd: file.dir,
       ui: { setStatus: (_key: string, text?: string) => statuses.push(text) },

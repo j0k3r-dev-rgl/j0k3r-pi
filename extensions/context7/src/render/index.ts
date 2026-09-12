@@ -1,7 +1,7 @@
 import { keyHint, type Theme } from '@earendil-works/pi-coding-agent';
-import { Text, type Component } from '@earendil-works/pi-tui';
+import type { Component } from '@earendil-works/pi-tui';
 
-interface ToolResultLike {
+export interface ToolResultLike {
   content?: Array<{ type?: string; text?: string }>;
   details?: Record<string, any>;
   isError?: boolean;
@@ -12,18 +12,124 @@ export interface Context7RenderOptions {
   isPartial?: boolean;
 }
 
+export const RESET = '\x1b[0m';
+export const CYAN = '\x1b[1;38;2;0;229;255m';
+export const LIME = '\x1b[1;38;2;102;255;102m';
+export const RED = '\x1b[1;38;2;255;77;109m';
+export const DIM = '\x1b[2m';
+export const BOLD = '\x1b[1m';
+
+const ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]/g;
+
+export function stripAnsi(str: string): string {
+  return str.replace(ANSI_REGEX, '');
+}
+
+export function visibleWidth(str: string): number {
+  return stripAnsi(str).length;
+}
+
+export function truncateWithAnsi(str: string, maxWidth: number): string {
+  if (maxWidth <= 0) return '';
+  if (visibleWidth(str) <= maxWidth) return str;
+
+  let visible = 0;
+  let result = '';
+  const ansiTokenRegex = /^\x1b\[[0-9;]*[a-zA-Z]/;
+  let i = 0;
+
+  while (i < str.length && visible < maxWidth) {
+    const match = str.slice(i).match(ansiTokenRegex);
+    if (match) {
+      result += match[0];
+      i += match[0].length;
+    } else {
+      result += str[i];
+      visible++;
+      i++;
+    }
+  }
+
+  result += RESET;
+  return result;
+}
+
+export function fit(text: string, width: number): string {
+  return truncateWithAnsi(text, Math.max(0, width));
+}
+
+export function pad(text: string, width: number): string {
+  const fitted = fit(text, width);
+  const vis = visibleWidth(fitted);
+  return fitted + ' '.repeat(Math.max(0, width - vis));
+}
+
+export function boxLine(content: string, innerWidth: number, borderColor: string = CYAN): string {
+  const innerContentWidth = Math.max(0, innerWidth - 2);
+  return `${borderColor}│${RESET} ${pad(content, innerContentWidth)} ${borderColor}│${RESET}`;
+}
+
+export function cardTopBorder(
+  toolName: string,
+  actionOrTarget: string | undefined,
+  innerWidth: number,
+  borderColor: string = CYAN,
+  titleColor: string = borderColor,
+): string {
+  const cleanAction = actionOrTarget ? actionOrTarget.replace(/[\r\n]+/g, ' ').trim() : undefined;
+  let label = cleanAction ? `${toolName} [${cleanAction}]` : toolName;
+
+  const maxTitleWidth = Math.max(4, innerWidth - 4);
+  if (visibleWidth(label) + 2 > maxTitleWidth && cleanAction) {
+    const maxActionWidth = Math.max(3, maxTitleWidth - visibleWidth(toolName) - 5);
+    const truncatedAction = fit(cleanAction, maxActionWidth);
+    label = `${toolName} [${truncatedAction}]`;
+  }
+
+  let titleText = ` ${label} `;
+  if (visibleWidth(titleText) > innerWidth) {
+    titleText = ` ${fit(label, Math.max(1, innerWidth - 2))} `;
+  }
+
+  const rest = Math.max(0, innerWidth - visibleWidth(titleText));
+  const leftDash = Math.min(2, rest);
+  const rightDash = Math.max(0, rest - leftDash);
+  return `${borderColor}╭${'─'.repeat(leftDash)}${RESET}${titleColor}${titleText}${RESET}${borderColor}${'─'.repeat(rightDash)}╮${RESET}`;
+}
+
+export function cardBottomBorder(innerWidth: number, borderColor: string = CYAN): string {
+  return `${borderColor}╰${'─'.repeat(Math.max(0, innerWidth))}╯${RESET}`;
+}
+
+export function frameContent(
+  lines: string[],
+  innerWidth: number,
+  borderColor: string = CYAN,
+): string[] {
+  const framed: string[] = [];
+  for (const rawLine of lines) {
+    const subLines = rawLine.split(/\r?\n/);
+    for (const sub of subLines) {
+      framed.push(boxLine(sub, innerWidth, borderColor));
+    }
+  }
+  return framed;
+}
+
 function clip(value: unknown, maxChars = 100): string {
   const text = String(value ?? '').replace(/\s+/g, ' ').trim();
   if (text.length <= maxChars) return text;
   return `${text.slice(0, Math.max(0, maxChars - 1))}…`;
 }
 
-function title(toolName: string, theme: Theme): string {
+function title(toolName: string, theme?: Theme): string {
+  if (!theme) return toolName;
   return theme.fg('toolTitle', theme.bold(toolName));
 }
 
-function dim(text: string, theme: Theme): string {
-  return theme.fg('dim', text);
+function getKeyHint(theme: any, action: 'expand' | 'collapse'): string {
+  const key = theme?.keybinding?.('app.tools.expand') ?? 'ctrl+o';
+  return `${DIM}${key} to ${action}${RESET}`;
 }
 
 function warningCount(details: Record<string, any>): string | undefined {
@@ -65,6 +171,12 @@ function requestIdentity(toolName: string, args: Record<string, unknown>): strin
     return [library, clip(args.query, 100)].filter(Boolean);
   }
   return [];
+}
+
+export function toolActionBadge(toolName: string, args: Record<string, unknown>): string | undefined {
+  if (toolName === 'context7_status') return 'status';
+  const identity = requestIdentity(toolName, args);
+  return identity.length > 0 ? identity.join(' · ') : undefined;
 }
 
 function statusSummary(details: Record<string, any>): string[] {
@@ -124,7 +236,7 @@ function resolveSummary(details: Record<string, any>): string[] {
   ].filter(Boolean) as string[];
 }
 
-function compactSummary(toolName: string, result: ToolResultLike, theme: Theme): string {
+function compactSummary(toolName: string, result: ToolResultLike, theme?: Theme): string {
   const details = result.details ?? {};
   let parts: string[];
   if (result.isError) parts = ['error'];
@@ -138,39 +250,175 @@ function compactSummary(toolName: string, result: ToolResultLike, theme: Theme):
   return `${title(toolName, theme)} · ${summaryParts.join(' · ')}`;
 }
 
-export function renderContext7ToolCall(toolName: string, args: Record<string, unknown>, theme: Theme): Component {
-  const identity = requestIdentity(toolName, args);
-  const suffix = identity.length > 0 ? ` · ${identity.join(' · ')}` : '';
-  return new Text(`${title(toolName, theme)}${theme.fg('muted', suffix)}`, 0, 0);
+function wrapLineToWidth(text: string, width: number): string[] {
+  if (width <= 0) return [''];
+  if (!text) return [''];
+  if (visibleWidth(text) <= width) return [text];
+
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [''];
+
+  const lines: string[] = [];
+  let current = '';
+
+  for (const word of words) {
+    if (visibleWidth(word) > width) {
+      if (current) {
+        lines.push(current);
+        current = '';
+      }
+      let rem = word;
+      while (visibleWidth(rem) > width) {
+        const chunk = fit(rem, width);
+        lines.push(chunk);
+        const chunkStripped = stripAnsi(chunk);
+        let remIdx = 0;
+        let counted = 0;
+        while (remIdx < rem.length && counted < chunkStripped.length) {
+          const m = rem.slice(remIdx).match(/^\x1b\[[0-9;]*[a-zA-Z]/);
+          if (m) {
+            remIdx += m[0].length;
+          } else {
+            remIdx++;
+            counted++;
+          }
+        }
+        rem = rem.slice(remIdx);
+        if (remIdx === 0) break;
+      }
+      if (rem) {
+        current = rem;
+      }
+      continue;
+    }
+
+    if (!current) {
+      current = word;
+      continue;
+    }
+
+    const candidate = `${current} ${word}`;
+    if (visibleWidth(candidate) <= width) {
+      current = candidate;
+    } else {
+      lines.push(current);
+      current = word;
+    }
+  }
+
+  if (current) lines.push(current);
+  return lines;
+}
+
+export function renderContext7ToolCall(
+  toolName: string,
+  args: Record<string, unknown>,
+  _theme?: Theme,
+  context?: any,
+): Component {
+  return {
+    invalidate() {},
+    render(width: number): string[] {
+      if (width <= 0) return [];
+      const actionBadge = toolActionBadge(toolName, args);
+
+      if (width < 24) {
+        return [fit(actionBadge ? `${toolName} [${actionBadge}]` : toolName, width)];
+      }
+
+      const innerWidth = Math.max(0, width - 2);
+      const state = context?.state;
+      const isError = Boolean(context?.isError);
+      const borderColor = state?.borderColor ?? (isError ? RED : CYAN);
+      const topBorder = cardTopBorder(toolName, actionBadge, innerWidth, borderColor, borderColor);
+
+      if (state?.hasResult) {
+        return [topBorder];
+      }
+
+      const pendingDetail = actionBadge ? `Pending: ${actionBadge}` : 'Pending...';
+      const pendingLine = `${CYAN}●${RESET} ${pendingDetail}`;
+
+      return [
+        topBorder,
+        boxLine(pendingLine, innerWidth, borderColor),
+        cardBottomBorder(innerWidth, borderColor),
+      ];
+    },
+  };
 }
 
 export function renderContext7ToolResult(
   toolName: string,
   result: ToolResultLike,
-  options: Context7RenderOptions,
-  theme: Theme,
+  options: Context7RenderOptions = {},
+  theme?: Theme,
+  context?: any,
 ): Component {
-  if (options.isPartial) {
-    return new Text(`${title(toolName, theme)} · ${theme.fg('warning', 'running…')}`, 0, 0);
+  const isError = Boolean(context?.isError || result.isError || result.details?.error || result.details?.sdkAvailable === false);
+  const borderColor = isError ? RED : LIME;
+
+  if (context?.state) {
+    context.state.hasResult = true;
+    context.state.borderColor = borderColor;
   }
 
-  const summary = compactSummary(toolName, result, theme);
-  if (!options.expanded) {
-    return new Text(`${summary}\n${dim(keyHint('app.tools.expand', 'to expand'), theme)}`, 0, 0);
-  }
+  return {
+    invalidate() {},
+    render(width: number): string[] {
+      if (width <= 0) return [];
 
-  const content = resultText(result);
-  const body = content ? `\n\n${content}` : '';
-  return new Text(`${summary}\n${dim(keyHint('app.tools.expand', 'to collapse'), theme)}${body}`, 0, 0);
+      const isExpanded = options?.expanded === true;
+      const keyHint = getKeyHint(theme, isExpanded ? 'collapse' : 'expand');
+      const bodyLines: string[] = [];
+
+      if (options?.isPartial) {
+        bodyLines.push(`${title(toolName, theme)} · running…`);
+      } else if (isError) {
+        const errorMsg = (result.details?.error?.message ?? result.details?.error ?? resultText(result)) || 'tool failed';
+        bodyLines.push(`${RED}Error: ${stripAnsi(String(errorMsg))}${RESET}`);
+        bodyLines.push(keyHint);
+      } else if (!isExpanded) {
+        bodyLines.push(compactSummary(toolName, result, theme));
+        bodyLines.push(keyHint);
+      } else {
+        bodyLines.push(compactSummary(toolName, result, theme));
+        bodyLines.push(keyHint);
+        const content = resultText(result);
+        if (content) {
+          bodyLines.push('');
+          bodyLines.push(...content.split('\n'));
+        }
+      }
+
+      if (width < 24) {
+        return bodyLines.map((line) => fit(stripAnsi(line), width));
+      }
+
+      const innerWidth = Math.max(0, width - 2);
+      const innerContentWidth = Math.max(0, innerWidth - 2);
+      const wrappedBodyLines: string[] = [];
+      for (const rawLine of bodyLines) {
+        for (const sub of rawLine.split(/\r?\n/)) {
+          wrappedBodyLines.push(...wrapLineToWidth(sub, innerContentWidth));
+        }
+      }
+
+      const framed = frameContent(wrappedBodyLines, innerWidth, borderColor);
+      const bottomBorder = cardBottomBorder(innerWidth, borderColor);
+      return [...framed, bottomBorder];
+    },
+  };
 }
 
 export function context7ToolRenderers(toolName: string) {
   return {
-    renderCall(args: Record<string, unknown>, theme: Theme) {
-      return renderContext7ToolCall(toolName, args, theme);
+    renderShell: 'self' as const,
+    renderCall(args: Record<string, unknown>, theme: Theme, context?: any) {
+      return renderContext7ToolCall(toolName, args, theme, context);
     },
-    renderResult(result: ToolResultLike, options: Context7RenderOptions, theme: Theme) {
-      return renderContext7ToolResult(toolName, result, options, theme);
+    renderResult(result: ToolResultLike, options: Context7RenderOptions, theme: Theme, context?: any) {
+      return renderContext7ToolResult(toolName, result, options, theme, context);
     },
   };
 }

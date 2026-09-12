@@ -1,6 +1,6 @@
 import { Type } from 'typebox';
 import { buildCodeChangeSurface } from '../core/code-change-surface.js';
-import { renderCodeResearchToolResult } from '../render.js';
+import { renderCodeResearchToolCall, renderCodeResearchToolResult } from '../render.js';
 import type { SupportedLanguage } from '../types.js';
 
 export function registerCodeChangeSurfaceTool(pi: any) {
@@ -34,8 +34,12 @@ export function registerCodeChangeSurfaceTool(pi: any) {
       if (typeof args.symbol === 'string' && typeof args.query !== 'string') return { ...args, query: args.symbol };
       return args;
     },
-    renderResult(result: any, options: any, theme: any) {
-      return renderCodeResearchToolResult('code_change_surface', result, options, theme);
+    renderShell: 'self' as const,
+    renderCall(args: any, theme: any, context?: any) {
+      return renderCodeResearchToolCall('code_change_surface', args, theme, context);
+    },
+    renderResult(result: any, options: any, theme: any, context?: any) {
+      return renderCodeResearchToolResult('code_change_surface', result, options, theme, context);
     },
     async execute(_toolCallId: any, params: any, _signal: any, _onUpdate: any, ctx: any) {
       const surface = await buildCodeChangeSurface(ctx.cwd, {

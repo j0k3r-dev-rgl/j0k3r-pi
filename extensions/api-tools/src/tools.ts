@@ -10,7 +10,7 @@ import { failureDocument, frameText, record, successDocument } from './result-fo
 import { getAuthMetadataStatus, redactDeep } from './security.js';
 import { executeSwaggerAction } from './swagger.js';
 import { DISCOVERY_PAGE_SIZE as SWAGGER_DISCOVERY_PAGE_SIZE } from './swagger/discovery.js';
-import { renderApiToolResult } from './render.js';
+import { renderApiToolCall, renderApiToolResult } from './render.js';
 import type { ApiActionDocument, ApiClient, ApiToolResult, ApiToolsConfig, ApiWarning } from './types.js';
 
 export const API_TOOL_NAMES = [
@@ -290,9 +290,9 @@ function continuationPageLimit(tool: 'api_rest_request' | 'api_swagger' | 'api_g
 
 function buildRenderers(toolName: string) {
   return {
-    renderResult(result: ApiToolResult, options: any, theme: any, context: any) {
-      return renderApiToolResult(toolName, result, options, theme, context);
-    },
+    renderShell: 'self' as const,
+    renderCall: (args: any, theme: any, context?: any) => renderApiToolCall(toolName, args, theme, context),
+    renderResult: (result: ApiToolResult, options: any, theme: any, context?: any) => renderApiToolResult(toolName, result, options, theme, context),
   };
 }
 

@@ -3,6 +3,8 @@ export type Tool = {
   description: string;
   parameters: { type: string; [key: string]: unknown };
   execute: (...args: unknown[]) => Promise<unknown> | unknown;
+  renderShell?: string;
+  renderCall?: (...args: any[]) => any;
   renderResult?: (...args: any[]) => { render(width: number): string[] };
 };
 

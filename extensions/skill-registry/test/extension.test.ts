@@ -130,7 +130,7 @@ describe('skill registry extension', () => {
       expect(collapsed).toContain('skill registry');
       expect(collapsed).toContain('direct');
       expect(collapsed).toMatch(/Ctrl\+O|ctrl\+o/i);
-      expect(collapsed.length).toBeLessThan(90);
+      expect(collapsed.split('\n').length).toBeLessThan(5);
       expect(collapsed).not.toContain('.pi/skills/basic/SKILL.md');
       expect(collapsed).not.toContain('reasons:');
 

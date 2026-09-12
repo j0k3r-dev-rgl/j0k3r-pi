@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { Type } from 'typebox';
 import { captureBrowserPageScreenshot, getBrowserCdpStatus, listBrowserPageTargets, navigateBrowserPage, type CdpTransportFactory, type FetchLike } from './cdp.js';
 import { ensureDefaultScreenshotGitIgnored, modelCanAcceptImages, normalizeMaxInlineBytes } from './config.js';
+import { renderBrowserCall, renderBrowserResult } from './render.js';
 import type { BrowserGoToPageResult, BrowserPageScreenshotResult, BrowserTabsListResult, PiToolResult, ToolExecutionContext, ToolContent } from './types.js';
 
 interface BrowserToolOverrides {
@@ -72,6 +73,13 @@ export function registerBrowserScreenshotTools(pi: any): void {
       'Use browser_cdp_status before browser tab or screenshot actions when you need to verify local Chrome DevTools Protocol connectivity without exposing debugger URLs.',
     ],
     parameters: statusParameters,
+    renderShell: 'self',
+    renderCall(args: any, theme: any, context: any) {
+      return renderBrowserCall('browser_cdp_status', args, theme, context);
+    },
+    renderResult(result: any, options: any, theme: any, context: any) {
+      return renderBrowserResult('browser_cdp_status', result, options, theme, context);
+    },
     async execute(_id: string, params: BrowserCdpStatusParams, _signal?: AbortSignal, _onUpdate?: unknown, ctx?: ToolExecutionContext): Promise<PiToolResult> {
       try {
         const data = await getBrowserCdpStatus(params.cdpUrl, params.fetchFn);
@@ -91,6 +99,13 @@ export function registerBrowserScreenshotTools(pi: any): void {
       'Use browser_tabs_list when you need to choose an existing Chrome page target before go_to_page or browser_page_screenshot.',
     ],
     parameters: listParameters,
+    renderShell: 'self',
+    renderCall(args: any, theme: any, context: any) {
+      return renderBrowserCall('browser_tabs_list', args, theme, context);
+    },
+    renderResult(result: any, options: any, theme: any, context: any) {
+      return renderBrowserResult('browser_tabs_list', result, options, theme, context);
+    },
     async execute(_id: string, params: BrowserTabsListParams, _signal?: AbortSignal, _onUpdate?: unknown, _ctx?: ToolExecutionContext): Promise<PiToolResult<BrowserTabsListResult>> {
       try {
         const targets = await listBrowserPageTargets(params.cdpUrl, params.fetchFn);
@@ -125,6 +140,13 @@ export function registerBrowserScreenshotTools(pi: any): void {
       'Use go_to_page results with browser_page_screenshot when the user needs visual confirmation after navigation.',
     ],
     parameters: goToPageParameters,
+    renderShell: 'self',
+    renderCall(args: any, theme: any, context: any) {
+      return renderBrowserCall('go_to_page', args, theme, context);
+    },
+    renderResult(result: any, options: any, theme: any, context: any) {
+      return renderBrowserResult('go_to_page', result, options, theme, context);
+    },
     async execute(_id: string, params: GoToPageParams, signal?: AbortSignal): Promise<PiToolResult<BrowserGoToPageResult>> {
       const navigation = await navigateBrowserPage({ ...params, signal });
       const data: BrowserGoToPageResult = { ...navigation, targetId: navigation.target.id };
@@ -142,6 +164,13 @@ export function registerBrowserScreenshotTools(pi: any): void {
       'Use browser_page_screenshot with targetId from browser_tabs_list or go_to_page when multiple tabs may match.',
     ],
     parameters: screenshotParameters,
+    renderShell: 'self',
+    renderCall(args: any, theme: any, context: any) {
+      return renderBrowserCall('browser_page_screenshot', args, theme, context);
+    },
+    renderResult(result: any, options: any, theme: any, context: any) {
+      return renderBrowserResult('browser_page_screenshot', result, options, theme, context);
+    },
     async execute(_id: string, params: BrowserPageScreenshotParams, signal?: AbortSignal, _onUpdate?: unknown, ctx?: ToolExecutionContext): Promise<PiToolResult<BrowserPageScreenshotResult>> {
       try {
         const cwd = ctx?.cwd ?? process.cwd();

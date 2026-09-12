@@ -1,18 +1,109 @@
-type Component = { invalidate(): void; render(width: number): string[] };
+export type Component = { invalidate(): void; render(width: number): string[] };
 
-type CodeResearchRenderOptions = { expanded?: boolean; isPartial?: boolean };
+export type CodeResearchRenderOptions = { expanded?: boolean; isPartial?: boolean };
 
-function stripAnsi(text: string): string {
-  return text.replace(/\u001b\[[0-9;]*m/g, '');
+export const RESET = '\x1b[0m';
+export const CYAN = '\x1b[1;38;2;0;229;255m';
+export const LIME = '\x1b[1;38;2;102;255;102m';
+export const RED = '\x1b[1;38;2;255;77;109m';
+export const DIM = '\x1b[2m';
+export const BOLD = '\x1b[1m';
+
+const ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]/g;
+
+export function stripAnsi(str: string): string {
+  return str.replace(ANSI_REGEX, '');
 }
 
-function lineWidth(text: string): number {
-  return [...stripAnsi(text)].length;
+export function visibleWidth(str: string): number {
+  return stripAnsi(str).length;
 }
 
-function truncate(text: string, width: number): string {
-  if (lineWidth(text) <= width) return text;
-  return `${text.slice(0, Math.max(0, width - 1))}…`;
+export function truncateWithAnsi(str: string, maxWidth: number): string {
+  if (maxWidth <= 0) return '';
+  if (visibleWidth(str) <= maxWidth) return str;
+
+  let visible = 0;
+  let result = '';
+  const ansiTokenRegex = /^\x1b\[[0-9;]*[a-zA-Z]/;
+  let i = 0;
+
+  while (i < str.length && visible < maxWidth) {
+    const match = str.slice(i).match(ansiTokenRegex);
+    if (match) {
+      result += match[0];
+      i += match[0].length;
+    } else {
+      result += str[i];
+      visible++;
+      i++;
+    }
+  }
+
+  result += RESET;
+  return result;
+}
+
+export function fit(text: string, width: number): string {
+  return truncateWithAnsi(text, Math.max(0, width));
+}
+
+export function pad(text: string, width: number): string {
+  const fitted = fit(text, width);
+  const vis = visibleWidth(fitted);
+  return fitted + ' '.repeat(Math.max(0, width - vis));
+}
+
+export function boxLine(content: string, innerWidth: number, borderColor: string = CYAN): string {
+  const innerContentWidth = Math.max(0, innerWidth - 2);
+  return `${borderColor}│${RESET} ${pad(content, innerContentWidth)} ${borderColor}│${RESET}`;
+}
+
+export function cardTopBorder(
+  toolName: string,
+  actionOrTarget: string | undefined,
+  innerWidth: number,
+  borderColor: string = CYAN,
+  titleColor: string = borderColor,
+): string {
+  const cleanAction = actionOrTarget ? actionOrTarget.replace(/[\r\n]+/g, ' ').trim() : undefined;
+  let label = cleanAction ? `${toolName} [${cleanAction}]` : toolName;
+
+  const maxTitleWidth = Math.max(4, innerWidth - 4);
+  if (visibleWidth(label) + 2 > maxTitleWidth && cleanAction) {
+    const maxActionWidth = Math.max(3, maxTitleWidth - visibleWidth(toolName) - 5);
+    const truncatedAction = fit(cleanAction, maxActionWidth);
+    label = `${toolName} [${truncatedAction}]`;
+  }
+
+  let titleText = ` ${label} `;
+  if (visibleWidth(titleText) > innerWidth) {
+    titleText = ` ${fit(label, Math.max(1, innerWidth - 2))} `;
+  }
+
+  const rest = Math.max(0, innerWidth - visibleWidth(titleText));
+  const leftDash = Math.min(2, rest);
+  const rightDash = Math.max(0, rest - leftDash);
+  return `${borderColor}╭${'─'.repeat(leftDash)}${RESET}${titleColor}${titleText}${RESET}${borderColor}${'─'.repeat(rightDash)}╮${RESET}`;
+}
+
+export function cardBottomBorder(innerWidth: number, borderColor: string = CYAN): string {
+  return `${borderColor}╰${'─'.repeat(Math.max(0, innerWidth))}╯${RESET}`;
+}
+
+export function frameContent(
+  lines: string[],
+  innerWidth: number,
+  borderColor: string = CYAN,
+): string[] {
+  const framed: string[] = [];
+  for (const rawLine of lines) {
+    const subLines = rawLine.split(/\r?\n/);
+    for (const sub of subLines) {
+      framed.push(boxLine(sub, innerWidth, borderColor));
+    }
+  }
+  return framed;
 }
 
 function clip(value: unknown, max = 160): string {
@@ -21,45 +112,64 @@ function clip(value: unknown, max = 160): string {
   return text.length > max ? `${text.slice(0, Math.max(0, max - 1))}…` : text;
 }
 
-function wrapLine(text: string, width: number): string[] {
+function wrapLineToWidth(text: string, width: number): string[] {
+  if (width <= 0) return [''];
   if (!text) return [''];
-  if (lineWidth(text) <= width) return [text];
+  if (visibleWidth(text) <= width) return [text];
+
   const words = text.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [''];
+
   const lines: string[] = [];
   let current = '';
+
   for (const word of words) {
+    if (visibleWidth(word) > width) {
+      if (current) {
+        lines.push(current);
+        current = '';
+      }
+      let rem = word;
+      while (visibleWidth(rem) > width) {
+        const chunk = fit(rem, width);
+        lines.push(chunk);
+        const chunkStripped = stripAnsi(chunk);
+        let remIdx = 0;
+        let counted = 0;
+        while (remIdx < rem.length && counted < chunkStripped.length) {
+          const m = rem.slice(remIdx).match(/^\x1b\[[0-9;]*[a-zA-Z]/);
+          if (m) {
+            remIdx += m[0].length;
+          } else {
+            remIdx++;
+            counted++;
+          }
+        }
+        rem = rem.slice(remIdx);
+        if (remIdx === 0) break;
+      }
+      if (rem) {
+        current = rem;
+      }
+      continue;
+    }
+
     if (!current) {
       current = word;
       continue;
     }
+
     const candidate = `${current} ${word}`;
-    if (lineWidth(candidate) <= width) current = candidate;
-    else {
+    if (visibleWidth(candidate) <= width) {
+      current = candidate;
+    } else {
       lines.push(current);
       current = word;
     }
   }
+
   if (current) lines.push(current);
-  return lines.flatMap((line) => {
-    if (lineWidth(line) <= width) return [line];
-    const chunks: string[] = [];
-    for (let index = 0; index < line.length; index += width) chunks.push(line.slice(index, index + width));
-    return chunks;
-  });
-}
-
-function wrapLines(lines: string[], width: number): string[] {
-  return lines.flatMap((line) => wrapLine(line, width));
-}
-
-function textComponent(linesForWidth: (width: number) => string[]): Component {
-  return {
-    invalidate() {},
-    render(width: number) {
-      const safeWidth = Math.max(40, width || 80);
-      return linesForWidth(safeWidth).map((line) => truncate(line, safeWidth));
-    },
-  };
+  return lines;
 }
 
 function resultText(result: any): string {
@@ -75,8 +185,9 @@ function dim(text: string, theme: any): string {
   return theme?.fg?.('dim', text) ?? text;
 }
 
-function expandHint(description: 'expand' | 'collapse'): string {
-  return `ctrl+o ${description}`;
+function getKeyHint(theme: any, action: 'expand' | 'collapse'): string {
+  const key = theme?.keybinding?.('app.tools.expand') ?? 'ctrl+o';
+  return `${DIM}${key} ${action}${RESET}`;
 }
 
 function relativeFile(file: string | undefined): string {
@@ -113,7 +224,7 @@ function compactFindSymbol(result: any, theme: any, toolName = 'find_symbol'): s
   const lines = [`${titleFor(toolName, theme)} · ${countText} match(es)`];
   const search = querySummary(result);
   if (search) lines.push(search);
-  lines.push(`mode ${result?.details?.source_mode ?? result?.details?.provenance?.source_mode ?? 'graph'} · graph ${result?.details?.graph_status ?? result?.details?.provenance?.graph_status ?? 'disabled'} · ${result?.details?.completeness ?? result?.details?.provenance?.completeness ?? 'unavailable'}`, dim(expandHint('expand'), theme));
+  lines.push(`mode ${result?.details?.source_mode ?? result?.details?.provenance?.source_mode ?? 'graph'} · graph ${result?.details?.graph_status ?? result?.details?.provenance?.graph_status ?? 'disabled'} · ${result?.details?.completeness ?? result?.details?.provenance?.completeness ?? 'unavailable'}`);
   for (const row of rows.slice(0, 5)) {
     const loc = `${relativeFile(row.file)}:${row.start_line ?? '?'}:${row.start_column ?? '?'}`;
     lines.push(`- ${row.symbol ?? '<unknown>'} (${row.kind ?? 'unknown'}) ${loc}`);
@@ -145,7 +256,6 @@ function compactFindReferences(result: any, theme: any, toolName = 'find_referen
   if (search) lines.push(search);
   const counts = classificationCountsText(summary?.classification_counts);
   if (counts) lines.push(counts);
-  lines.push(dim(expandHint('expand'), theme));
   for (const row of rows.slice(0, 7)) {
     const loc = `${relativeFile(row.file)}:${row.line ?? '?'}:${row.column ?? '?'}`;
     const context = row.context_symbol ? ` in ${row.context_symbol}` : '';
@@ -177,14 +287,13 @@ function compactChangeSurface(result: any, theme: any): string[] {
   if (search) lines.push(search);
   lines.push([count('contract'), count('implementations'), count('callers'), count('likely_tests')].join(' · '));
   if (details.follow_up?.reason) lines.push(`follow_up: ${clip(details.follow_up.reason, 120)}`);
-  lines.push(dim(expandHint('expand'), theme));
   return lines;
 }
 
 function compactCallTree(toolName: string, result: any, theme: any): string[] {
   const root = result?.details?.root;
   const stats = result?.details?.stats;
-  if (!root) return [`${titleFor(toolName, theme)} · result`, dim(expandHint('expand'), theme), clip(resultText(result), 220)];
+  if (!root) return [`${titleFor(toolName, theme)} · result`, clip(resultText(result), 220)];
 
   const owner = root.class ? `${root.class}.` : '';
   const lines = [
@@ -197,7 +306,6 @@ function compactCallTree(toolName: string, result: any, theme: any): string[] {
   );
   const counts = classificationCountsText(result?.details?.summary?.classification_counts);
   if (counts) lines.push(counts);
-  lines.push(dim(expandHint('expand'), theme));
 
   const children = Array.isArray(root.children) ? root.children : Array.isArray(root.callers) ? root.callers : [];
   for (const child of children.slice(0, 5)) lines.push(childSummary(child));
@@ -205,26 +313,155 @@ function compactCallTree(toolName: string, result: any, theme: any): string[] {
   return lines;
 }
 
+function compactWorkspaceGraphStatus(result: any, theme: any): string[] {
+  const details = result?.details ?? {};
+  const status = details.status ?? 'unknown';
+  if (status === 'disabled') {
+    return [`${titleFor('workspace_graph_status', theme)} · disabled`];
+  }
+  if (status === 'missing') {
+    return [`${titleFor('workspace_graph_status', theme)} · missing`];
+  }
+  const usable = details.graphUsableForQueries ? 'yes' : 'no';
+  const shards = details.indexing?.shardCount ?? 0;
+  const files = details.coverage?.indexedFiles ?? 0;
+  const detected = details.coverage?.detectedProjects ?? 0;
+  const indexed = details.coverage?.indexedProjects ?? 0;
+  return [
+    `${titleFor('workspace_graph_status', theme)} · ${status} · usable=${usable}`,
+    `shards=${shards} · indexed_files=${files} · projects=${indexed}/${detected}`,
+  ];
+}
+
 function compactResult(toolName: string, result: any, theme: any): string[] {
   if (toolName === 'find_symbol') return compactFindSymbol(result, theme);
   if (toolName === 'find_references') return compactFindReferences(result, theme);
   if (toolName === 'code_find') return result?.details?.relation === 'references' ? compactFindReferences(result, theme, toolName) : compactFindSymbol(result, theme, toolName);
   if (toolName === 'code_change_surface') return compactChangeSurface(result, theme);
+  if (toolName === 'workspace_graph_status') return compactWorkspaceGraphStatus(result, theme);
   if (toolName === 'function_call_tree' || toolName === 'reverse_function_call_tree' || toolName === 'code_call_hierarchy') return compactCallTree(toolName, result, theme);
-  return [`${titleFor(toolName, theme)} · result`, dim(expandHint('expand'), theme), clip(resultText(result), 220)];
+  return [`${titleFor(toolName, theme)} · result`, clip(resultText(result), 220)];
 }
 
-export function renderCodeResearchToolResult(toolName: string, result: any, options: CodeResearchRenderOptions = {}, theme: any = {}): Component {
-  return textComponent((width) => {
-    if (options.isPartial) return [`${toolName} · running…`];
-    if (!options.expanded) return compactResult(toolName, result, theme);
-    const search = querySummary(result);
-    return wrapLines([
-      `${titleFor(toolName, theme)} · expanded`,
-      ...(search ? [search] : []),
-      dim(expandHint('collapse'), theme),
-      '',
-      ...resultText(result).split('\n'),
-    ], width);
-  });
+export function toolActionBadge(toolName: string, args: any): string | undefined {
+  if (!args || typeof args !== 'object') return undefined;
+  if (toolName === 'workspace_graph_status') {
+    return 'status';
+  }
+  if (toolName === 'code_find' || toolName === 'find_symbol' || toolName === 'find_references') {
+    const q = args.query ?? args.symbol;
+    const rel = args.relation && args.relation !== 'declaration' ? ` relation=${args.relation}` : '';
+    const lang = args.language && args.language !== 'auto' ? ` lang=${args.language}` : '';
+    return q ? `${q}${rel}${lang}` : rel.trim() || undefined;
+  }
+  if (toolName === 'code_call_hierarchy' || toolName === 'function_call_tree' || toolName === 'reverse_function_call_tree') {
+    const s = args.symbol;
+    const dir = args.direction ? ` ${args.direction}` : '';
+    return s ? `${s}${dir}` : undefined;
+  }
+  if (toolName === 'code_change_surface') {
+    const q = args.query ?? args.symbol;
+    return q ? `${q}` : undefined;
+  }
+  return args.query ?? args.symbol ?? undefined;
+}
+
+export function renderCodeResearchToolCall(
+  toolName: string,
+  args: any,
+  _theme?: any,
+  context?: any,
+): Component {
+  return {
+    invalidate() {},
+    render(width: number): string[] {
+      if (width <= 0) return [];
+      const actionBadge = toolActionBadge(toolName, args);
+
+      if (width < 24) {
+        return [fit(actionBadge ? `${toolName} [${actionBadge}]` : toolName, width)];
+      }
+
+      const innerWidth = Math.max(0, width - 2);
+      const state = context?.state;
+      const isError = Boolean(context?.isError);
+      const borderColor = state?.borderColor ?? (isError ? RED : CYAN);
+      const topBorder = cardTopBorder(toolName, actionBadge, innerWidth, borderColor, borderColor);
+
+      if (state?.hasResult) {
+        return [topBorder];
+      }
+
+      const pendingDetail = actionBadge ? `Pending: ${actionBadge}` : 'Pending...';
+      const pendingLine = `${CYAN}●${RESET} ${pendingDetail}`;
+
+      return [
+        topBorder,
+        boxLine(pendingLine, innerWidth, borderColor),
+        cardBottomBorder(innerWidth, borderColor),
+      ];
+    },
+  };
+}
+
+export function renderCodeResearchToolResult(
+  toolName: string,
+  result: any,
+  options: CodeResearchRenderOptions = {},
+  theme: any = {},
+  context?: any,
+): Component {
+  const isError = Boolean(context?.isError || result?.isError || result?.details?.status === 'failure' || result?.details?.error);
+  const borderColor = isError ? RED : LIME;
+
+  if (context?.state) {
+    context.state.hasResult = true;
+    context.state.borderColor = borderColor;
+  }
+
+  return {
+    invalidate() {},
+    render(width: number): string[] {
+      if (width <= 0) return [];
+
+      const isExpanded = options?.expanded === true;
+      const keyHint = getKeyHint(theme, isExpanded ? 'collapse' : 'expand');
+      const bodyLines: string[] = [];
+
+      if (options?.isPartial) {
+        bodyLines.push(`${toolName} · running…`);
+      } else if (isError) {
+        const errorMsg = (result?.details?.error?.message ?? result?.details?.error ?? resultText(result)) || 'tool failed';
+        bodyLines.push(`${RED}Error: ${stripAnsi(String(errorMsg))}${RESET}`);
+        bodyLines.push(keyHint);
+      } else if (!isExpanded) {
+        bodyLines.push(...compactResult(toolName, result, theme));
+        bodyLines.push(keyHint);
+      } else {
+        const search = querySummary(result);
+        bodyLines.push(`${titleFor(toolName, theme)} · expanded`);
+        if (search) bodyLines.push(search);
+        bodyLines.push(keyHint);
+        bodyLines.push('');
+        bodyLines.push(...resultText(result).split('\n'));
+      }
+
+      if (width < 24) {
+        return bodyLines.map((line) => fit(stripAnsi(line), width));
+      }
+
+      const innerWidth = Math.max(0, width - 2);
+      const innerContentWidth = Math.max(0, innerWidth - 2);
+      const wrappedBodyLines: string[] = [];
+      for (const rawLine of bodyLines) {
+        for (const sub of rawLine.split(/\r?\n/)) {
+          wrappedBodyLines.push(...wrapLineToWidth(sub, innerContentWidth));
+        }
+      }
+
+      const framed = frameContent(wrappedBodyLines, innerWidth, borderColor);
+      const bottomBorder = cardBottomBorder(innerWidth, borderColor);
+      return [...framed, bottomBorder];
+    },
+  };
 }

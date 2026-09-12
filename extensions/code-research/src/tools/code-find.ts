@@ -3,7 +3,7 @@ import { relative } from 'node:path';
 import { Type } from 'typebox';
 import { resolveFindReferences } from '../core/find-references-resolver.js';
 import { resolveFindSymbol } from '../core/find-symbol-resolver.js';
-import { renderCodeResearchToolResult } from '../render.js';
+import { renderCodeResearchToolCall, renderCodeResearchToolResult } from '../render.js';
 import type { ClassificationCounts, ConfidenceClassification, FindReferencesInput, FindSymbolInput, ReferenceLocation, SupportedLanguage, SymbolLocation } from '../types.js';
 
 const SUPPORTED_LANGUAGES = ['ts', 'js', 'java', 'go'] as const;
@@ -217,8 +217,12 @@ export function registerCodeFindTool(pi: any) {
       if (typeof args.symbol === 'string' && typeof args.query !== 'string') return { ...args, query: args.symbol };
       return args;
     },
-    renderResult(result: any, options: any, theme: any) {
-      return renderCodeResearchToolResult('code_find', result, options, theme);
+    renderShell: 'self' as const,
+    renderCall(args: any, theme: any, context?: any) {
+      return renderCodeResearchToolCall('code_find', args, theme, context);
+    },
+    renderResult(result: any, options: any, theme: any, context?: any) {
+      return renderCodeResearchToolResult('code_find', result, options, theme, context);
     },
     async execute(_toolCallId: any, params: any, _signal: any, _onUpdate: any, ctx: any) {
       const relation = params.relation ?? 'declaration';

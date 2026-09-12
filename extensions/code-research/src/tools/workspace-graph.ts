@@ -2,6 +2,7 @@ import { Type } from 'typebox';
 import { loadCodeResearchConfig } from '../config.js';
 import { getWorkspaceGraphRoot, readSubprojectGraphShard, readWorkspaceGraphManifest } from '../core/graph-persistence.js';
 import { loadWorkspaceGraphState } from '../core/workspace-state.js';
+import { renderCodeResearchToolCall, renderCodeResearchToolResult } from '../render.js';
 import type { GraphManifest, WorkspaceGraphState } from '../types.js';
 
 function formatUnreadableDirectorySummary(unreadableDirectories: string[]): string {
@@ -135,6 +136,13 @@ export function registerWorkspaceGraphStatusTool(pi: any) {
       'If status is missing, incompatible, stale, partial, disabled, or errored, prefer direct validation or rerun after the lifecycle refresh/reload completes.',
     ],
     parameters: Type.Object({}),
+    renderShell: 'self' as const,
+    renderCall(args: any, theme: any, context?: any) {
+      return renderCodeResearchToolCall('workspace_graph_status', args, theme, context);
+    },
+    renderResult(result: any, options: any, theme: any, context?: any) {
+      return renderCodeResearchToolResult('workspace_graph_status', result, options, theme, context);
+    },
     async execute(_toolCallId: any, _params: any, _signal: any, _onUpdate: any, ctx: any) {
       const config = await loadCodeResearchConfig(ctx.cwd);
       if (!config.graph.enable) {

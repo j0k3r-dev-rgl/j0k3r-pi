@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Type } from 'typebox';
 import { checkYtDlpRuntime, YT_DLP_INSTALL_HINT } from './runtime.js';
-import { renderYoutubeToolResult } from './render.js';
+import { renderYoutubeToolCall, renderYoutubeToolResult } from './render.js';
 import { YoutubeResearchClient } from './client.js';
 import {
   validateSearchFilters,
@@ -1210,7 +1210,9 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
       'Use youtube_search results with youtube_video_get, youtube_channel_search, or youtube_playlist_get when deeper YouTube metadata is needed.',
     ],
     parameters: searchParameters,
-    renderResult: renderYoutubeToolResult,
+    renderShell: 'self' as const,
+    renderCall: (args: any, theme: any, context?: any) => renderYoutubeToolCall('youtube_search', args, theme, context),
+    renderResult: (result: any, options: any, theme: any, context?: any) => renderYoutubeToolResult('youtube_search', result, options, theme, context),
     async execute(_id: string, params: YoutubeSearchInput) {
       try {
         return await runSearch(params, checkRuntime, createClient);
@@ -1230,7 +1232,9 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
       'Use youtube_video_get before youtube_transcript_get when you need to confirm video identity or transcript availability signals.',
     ],
     parameters: videoParameters,
-    renderResult: renderYoutubeToolResult,
+    renderShell: 'self' as const,
+    renderCall: (args: any, theme: any, context?: any) => renderYoutubeToolCall('youtube_video_get', args, theme, context),
+    renderResult: (result: any, options: any, theme: any, context?: any) => renderYoutubeToolResult('youtube_video_get', result, options, theme, context),
     async execute(_id: string, params: VideoRefInput) {
       try {
         return await runVideoGet(params, checkRuntime, createClient);
@@ -1250,7 +1254,9 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
       'Use youtube_transcript_get with the requested transcript mode rather than youtube_video_get when transcript text is the main need.',
     ],
     parameters: transcriptParameters,
-    renderResult: renderYoutubeToolResult,
+    renderShell: 'self' as const,
+    renderCall: (args: any, theme: any, context?: any) => renderYoutubeToolCall('youtube_transcript_get', args, theme, context),
+    renderResult: (result: any, options: any, theme: any, context?: any) => renderYoutubeToolResult('youtube_transcript_get', result, options, theme, context),
     async execute(_id: string, params: YoutubeTranscriptInput) {
       try {
         return await runTranscriptGet(params, checkRuntime, createClient);
@@ -1269,7 +1275,9 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
       'Use youtube_channel_search when the user asks about a YouTube channel, creator, handle, channel URL, or recent uploads/playlists from a recurring source.',
     ],
     parameters: channelSearchParameters,
-    renderResult: renderYoutubeToolResult,
+    renderShell: 'self' as const,
+    renderCall: (args: any, theme: any, context?: any) => renderYoutubeToolCall('youtube_channel_search', args, theme, context),
+    renderResult: (result: any, options: any, theme: any, context?: any) => renderYoutubeToolResult('youtube_channel_search', result, options, theme, context),
     async execute(_id: string, params: YoutubeChannelSearchInput) {
       try {
         return await runChannelSearch(params, checkRuntime, createClient);
@@ -1288,7 +1296,9 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
       'Use youtube_playlist_get when the user provides or selects a YouTube playlist URL or ID and needs playlist metadata or paginated entries.',
     ],
     parameters: playlistParameters,
-    renderResult: renderYoutubeToolResult,
+    renderShell: 'self' as const,
+    renderCall: (args: any, theme: any, context?: any) => renderYoutubeToolCall('youtube_playlist_get', args, theme, context),
+    renderResult: (result: any, options: any, theme: any, context?: any) => renderYoutubeToolResult('youtube_playlist_get', result, options, theme, context),
     async execute(_id: string, params: PlaylistRefInput) {
       try {
         return await runPlaylistGet(params, checkRuntime, createClient);

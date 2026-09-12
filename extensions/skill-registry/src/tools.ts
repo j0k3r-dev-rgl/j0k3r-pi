@@ -1,25 +1,7 @@
 import { Type } from 'typebox';
 import { generateSkillRegistry, writeSkillRegistry } from './registry.js';
+import { renderSkillRegistryCall, renderSkillRegistryResult } from './render.js';
 import { resolveSkillRegistry, type ResolveMatchReason, type ResolveSkillRegistryResult } from './resolve.js';
-
-class PlainTextComponent {
-  private text: string;
-
-  constructor(text: string) {
-    this.text = text;
-  }
-
-  setText(text: string): void {
-    this.text = text;
-  }
-
-  render(width: number): string[] {
-    const maxWidth = Math.max(0, width);
-    return this.text.split('\n').map((line) => maxWidth ? line.slice(0, maxWidth) : '');
-  }
-
-  invalidate(): void {}
-}
 
 function formatResultLines(result: ResolveSkillRegistryResult): string[] {
   const lines = [
@@ -91,27 +73,6 @@ function resultFromDetails(details: unknown): ResolveSkillRegistryResult | undef
   } as ResolveSkillRegistryResult;
 }
 
-function compactResolveRender(result: { content?: Array<{ type: string; text?: string }>; details?: unknown }, options: { expanded?: boolean; isPartial?: boolean }, theme: any): PlainTextComponent {
-  if (options.isPartial) return new PlainTextComponent(theme?.fg?.('warning', 'Resolving skill registry...') ?? 'Resolving skill registry...');
-
-  const resolved = resultFromDetails(result.details);
-  if (!resolved) {
-    const fallback = result.content?.find((item) => item.type === 'text')?.text ?? '';
-    return new PlainTextComponent(fallback);
-  }
-
-  if (options.expanded) return new PlainTextComponent(formatResultLines(resolved).join('\n'));
-
-  const direct = resolved.matches.length;
-  const related = resolved.related_matches.length;
-  const warnings = resolved.warnings.length;
-  const cache = resolved.registry_status.cache;
-  let text = `✓ skill registry: ${direct} direct, ${related} related, cache ${cache}`;
-  if (warnings) text += `, ${warnings} warn`;
-  text += ' · Ctrl+O';
-  return new PlainTextComponent(text);
-}
-
 function summaryText(registry: Awaited<ReturnType<typeof generateSkillRegistry>>, writeResult?: { json_changed: boolean; markdown_changed: boolean; gitignore_changed?: boolean }) {
   const lines = [`skill registry: ${registry.skill_count} skill(s), ${registry.warnings.length} warning(s)`];
   if (writeResult) lines.push(`json ${writeResult.json_changed ? 'updated' : 'unchanged'}, markdown ${writeResult.markdown_changed ? 'updated' : 'unchanged'}, gitignore ${writeResult.gitignore_changed ? 'updated' : 'unchanged'}`);
@@ -145,6 +106,13 @@ export function registerSkillRegistryTools(pi: any): void {
     parameters: Type.Object({
       write: Type.Optional(Type.Boolean({ description: 'Whether to write .pi/skill-registry.json and .pi/skill-registry.md. Defaults to true.' })),
     }),
+    renderShell: 'self',
+    renderCall(args: any, theme: any, context: any) {
+      return renderSkillRegistryCall('skill_registry_generate', args, theme, context);
+    },
+    renderResult(result: any, options: any, theme: any, context: any) {
+      return renderSkillRegistryResult('skill_registry_generate', result, options, theme, context);
+    },
     async execute(_id: string, params: { write?: boolean } | undefined, _signal: unknown, _onUpdate: unknown, ctx: any) {
       try {
         const cwd = ctx?.cwd ?? process.cwd();
@@ -176,6 +144,13 @@ export function registerSkillRegistryTools(pi: any): void {
       stale_check: Type.Optional(Type.Boolean({ description: 'Compare live registry hash with cached .pi/skill-registry.json. Defaults to true.' })),
       max_results: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: 'Maximum number of direct matches. Defaults to 10.' })),
     }),
+    renderShell: 'self',
+    renderCall(args: any, theme: any, context: any) {
+      return renderSkillRegistryCall('skill_registry_resolve', args, theme, context);
+    },
+    renderResult(result: any, options: any, theme: any, context: any) {
+      return renderSkillRegistryResult('skill_registry_resolve', result, options, theme, context);
+    },
     async execute(_id: string, params: { intent?: string; paths?: string[]; sdd_phase?: typeof SDD_PHASES[number]; include_related?: boolean; stale_check?: boolean; max_results?: number } | undefined, _signal: unknown, _onUpdate: unknown, ctx: any) {
       try {
         const cwd = ctx?.cwd ?? process.cwd();
@@ -186,9 +161,6 @@ export function registerSkillRegistryTools(pi: any): void {
       } catch (error) {
         return fail(error);
       }
-    },
-    renderResult(result: { content?: Array<{ type: string; text?: string }>; details?: unknown }, options: { expanded?: boolean; isPartial?: boolean }, theme: any) {
-      return compactResolveRender(result, options, theme);
     },
   });
 }

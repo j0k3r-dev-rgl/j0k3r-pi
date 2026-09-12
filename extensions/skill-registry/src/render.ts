@@ -3,10 +3,10 @@ export type Component = {
   invalidate(): void;
 };
 
-export type YoutubeRenderOptions = {
+export interface SkillRegistryRenderOptions {
   expanded?: boolean;
   isPartial?: boolean;
-};
+}
 
 export const RESET = '\x1b[0m';
 export const CYAN = '\x1b[1;38;2;0;229;255m';
@@ -16,7 +16,8 @@ export const DIM = '\x1b[2m';
 export const BOLD = '\x1b[1m';
 
 const ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]/g;
-const CJK_REGEX = /[\u1100-\u115f\u231a-\u231b\u2329-\u232a\u23e9-\u23ec\u23f0\u23f3\u25fd-\u25fe\u2614-\u2615\u2648-\u2653\u267f\u2693\u26a1\u26aa-\u26ab\u26bd-\u26be\u26c4-\u26c5\u26ce\u26d4\u26ea\u26f2-\u26f3\u26f5\u26fa\u26fd\u2705\u270a-\u270b\u2728\u274c\u274e\u2753-\u2755\u2757\u2795-\u2797\u27b0\u27bf\u2b1b-\u2b1c\u2b50\u2b55\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe10-\ufe19\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6]/u;
+const CJK_REGEX =
+  /[\u1100-\u115f\u231a-\u231b\u2329-\u232a\u23e9-\u23ec\u23f0\u23f3\u25fd-\u25fe\u2614-\u2615\u2648-\u2653\u267f\u2693\u26a1\u26aa-\u26ab\u26bd-\u26be\u26c4-\u26c5\u26ce\u26d4\u26ea\u26f2-\u26f3\u26f5\u26fa\u26fd\u2705\u270a-\u270b\u2728\u274c\u274e\u2753-\u2755\u2757\u2795-\u2797\u27b0\u27bf\u2b1b-\u2b1c\u2b50\u2b55\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe10-\ufe19\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6]/u;
 
 export function stripAnsi(str: string): string {
   return str.replace(ANSI_REGEX, '');
@@ -191,94 +192,38 @@ export function wrapLineToWidth(text: string, width: number): string[] {
   return lines;
 }
 
-export function extractYoutubeAction(toolName: string, args: any): string | undefined {
-  if (!args || typeof args !== 'object') return undefined;
-  switch (toolName) {
-    case 'youtube_search':
-      return typeof args.query === 'string' && args.query.trim() ? args.query.trim() : undefined;
-    case 'youtube_video_get': {
-      const ref = args.video_ref ?? args.url ?? args.id;
-      return typeof ref === 'string' && ref.trim() ? ref.trim() : undefined;
-    }
-    case 'youtube_transcript_get': {
-      const ref = typeof (args.video_ref ?? args.url) === 'string' ? (args.video_ref ?? args.url).trim() : '';
-      const mode = typeof args.mode === 'string' && args.mode.trim() ? ` [${args.mode.trim()}]` : '';
-      const combined = `${ref}${mode}`.trim();
-      return combined || undefined;
-    }
-    case 'youtube_channel_search': {
-      const target = args.query ?? args.channel_id ?? args.handle ?? args.url;
-      return typeof target === 'string' && target.trim() ? target.trim() : undefined;
-    }
-    case 'youtube_playlist_get': {
-      const ref = args.playlist_ref ?? args.url ?? args.playlist_id;
-      return typeof ref === 'string' && ref.trim() ? ref.trim() : undefined;
-    }
-    default:
-      return undefined;
+export function extractSkillRegistryAction(toolName: string, args: any): string | undefined {
+  if (!args || typeof args !== 'object') {
+    return toolName === 'skill_registry_generate' ? 'generate' : 'resolve';
   }
+
+  if (toolName === 'skill_registry_generate') {
+    if (args.write === false) return 'write: false';
+    return 'generate';
+  }
+
+  if (toolName === 'skill_registry_resolve') {
+    if (typeof args.sdd_phase === 'string' && args.sdd_phase) {
+      return `phase: ${args.sdd_phase}`;
+    }
+    if (Array.isArray(args.paths) && args.paths.length > 0) {
+      return `paths: ${args.paths.join(', ')}`;
+    }
+    if (typeof args.intent === 'string' && args.intent) {
+      return `intent: ${args.intent}`;
+    }
+    return 'resolve';
+  }
+
+  return undefined;
 }
 
-function getKeyHint(theme: any, action: 'expand' | 'collapse'): string {
+export function getKeyHint(theme: any, action: 'expand' | 'collapse'): string {
   const key = theme?.keybinding?.('app.tools.expand') ?? 'ctrl+o';
   return `${DIM}${key} ${action}${RESET}`;
 }
 
-function clip(text: unknown, limit: number): string {
-  const normalized = String(text ?? '').replace(/\s+/g, ' ').trim();
-  if (!normalized) return '';
-  return normalized.length > limit ? `${normalized.slice(0, Math.max(0, limit - 1))}…` : normalized;
-}
-
-function resultText(result: any): string {
-  return String(result?.content?.find?.((part: any) => part?.type === 'text')?.text ?? result?.content?.[0]?.text ?? '');
-}
-
-function status(result: any): string {
-  return result?.details?.status ?? (result?.isError ? 'failure' : 'success');
-}
-
-function data(result: any): any {
-  return result?.details?.data ?? {};
-}
-
-function inferToolLabel(result: any): string {
-  const text = resultText(result);
-  const match = text.match(/^(youtube_[a-z_]+):/);
-  return match?.[1] ?? 'youtube_research';
-}
-
-function transcriptStats(text: string): string {
-  const chars = text.length;
-  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
-  return `${words.toLocaleString('en-US')} words · ${chars.toLocaleString('en-US')} chars`;
-}
-
-function compactTranscript(result: any, theme: any, toolName = 'youtube_transcript_get'): string[] {
-  const d = data(result);
-  const transcript = String(d.text ?? '');
-  const title = (value: string) => theme?.fg?.('toolTitle', theme?.bold?.(value) ?? value) ?? value;
-  const accent = (value: string) => theme?.fg?.('accent', value) ?? value;
-  const dim = (value: string) => theme?.fg?.('dim', value) ?? value;
-  const header = `${title(toolName)} · ${accent(d.content_source ?? 'transcript')} · ${d.language ?? 'unknown'} · ${transcriptStats(transcript)}`;
-  return [
-    header,
-    dim(`video ${d.video_ref ?? 'unknown'} · full transcript available`),
-    `preview: ${clip(transcript, 220)}`,
-  ];
-}
-
-function compactGeneric(result: any, theme: any, toolName = 'youtube_research'): string[] {
-  const label = toolName || inferToolLabel(result);
-  const title = (value: string) => theme?.fg?.('toolTitle', theme?.bold?.(value) ?? value) ?? value;
-  const first = resultText(result).split('\n').find(Boolean) ?? label;
-  return [
-    `${title(label)} · ${status(result)}`,
-    clip(first, 180),
-  ];
-}
-
-export function renderYoutubeToolCall(
+export function renderSkillRegistryCall(
   toolName: string,
   args: any,
   _theme?: any,
@@ -288,7 +233,8 @@ export function renderYoutubeToolCall(
     invalidate() {},
     render(width: number): string[] {
       if (width <= 0) return [];
-      const actionBadge = extractYoutubeAction(toolName, args);
+      const actionBadge = extractSkillRegistryAction(toolName, args);
+
       if (width < 24) {
         return [fit(actionBadge ? `${toolName} [${actionBadge}]` : toolName, width)];
       }
@@ -303,8 +249,11 @@ export function renderYoutubeToolCall(
         return [topBorder];
       }
 
-      const pendingDetail = actionBadge ? `Pending: ${actionBadge}` : 'Pending...';
-      const pendingLine = `${CYAN}●${RESET} ${pendingDetail}`;
+      const pendingDetail =
+        toolName === 'skill_registry_generate'
+          ? 'Generating skill registry...'
+          : 'Resolving skill registry...';
+      const pendingLine = `${CYAN}●${RESET} Pending: ${pendingDetail}`;
 
       return [
         topBorder,
@@ -315,38 +264,118 @@ export function renderYoutubeToolCall(
   };
 }
 
-export function renderYoutubeToolResult(
-  first: any,
-  second?: any,
-  third?: any,
-  fourth?: any,
-  fifth?: any,
-): Component {
-  let toolName: string;
-  let result: any;
-  let options: YoutubeRenderOptions;
-  let theme: any;
-  let context: any;
+function buildGenerateSummary(result: any): string {
+  const reg = result?.details?.registry;
+  const count = reg?.skill_count ?? 0;
+  const warnCount = reg?.warnings?.length ?? 0;
+  const writeRes = result?.details?.write_result;
 
-  if (typeof first === 'string') {
-    toolName = first;
-    result = second ?? {};
-    options = third ?? {};
-    theme = fourth ?? {};
-    context = fifth;
-  } else {
-    result = first ?? {};
-    options = second ?? {};
-    theme = third ?? {};
-    context = fourth;
-    toolName = inferToolLabel(result);
+  let writeStatus = 'dry run';
+  if (writeRes) {
+    const jsonStr = writeRes.json_changed ? 'json updated' : 'json unchanged';
+    const mdStr = writeRes.markdown_changed ? 'markdown updated' : 'markdown unchanged';
+    writeStatus = `${jsonStr}, ${mdStr}`;
+  } else if (result?.details?.write_result === null) {
+    writeStatus = 'write skipped';
   }
 
+  return `✓ ${count} skill(s), ${warnCount} warning(s) · ${writeStatus}`;
+}
+
+function buildResolveSummary(result: any): string {
+  const details = result?.details;
+  const direct = Array.isArray(details?.matches) ? details.matches.length : 0;
+  const related = Array.isArray(details?.related_matches) ? details.related_matches.length : 0;
+  const cache = details?.registry_status?.cache ?? 'unknown';
+  const warnings = Array.isArray(details?.warnings) ? details.warnings.length : 0;
+
+  let text = `✓ skill registry: ${direct} direct, ${related} related, cache ${cache}`;
+  if (warnings > 0) {
+    text += `, ${warnings} warn`;
+  }
+  return text;
+}
+
+function formatResolveExpandedLines(details: any): string[] {
+  const lines: string[] = [];
+  if (details?.registry_status) {
+    lines.push(
+      `source ${details.registry_status.source}, cache ${details.registry_status.cache} · hash ${String(details.registry_status.live_hash ?? '').slice(0, 10)}...`,
+    );
+  }
+  if (details?.query?.paths?.length) {
+    lines.push(`paths: ${details.query.paths.join(', ')}`);
+  }
+
+  const matches = Array.isArray(details?.matches) ? details.matches : [];
+  if (matches.length > 0) {
+    lines.push('', 'direct matches:');
+    for (const [index, match] of matches.entries()) {
+      const role = index === 0 ? 'primary' : index <= 2 ? 'secondary' : 'direct';
+      lines.push(
+        `${String(match.score).padStart(3, ' ')} · ${String(match.priority).padStart(2, ' ')} · ${match.name} · ${match.path} · ${role}`,
+      );
+      if (Array.isArray(match.reasons) && match.reasons.length > 0) {
+        const topReasons = match.reasons.slice(0, 3).map((r: any) => r.detail ?? r);
+        lines.push(`  - reasons: ${topReasons.join(', ')}`);
+      }
+      if (match.read_before_acting) {
+        lines.push(`  - ${match.read_before_acting}`);
+      }
+    }
+  }
+
+  const related = Array.isArray(details?.related_matches) ? details.related_matches : [];
+  if (related.length > 0) {
+    lines.push('', 'related matches:');
+    for (const match of related) {
+      lines.push(`  - ${match.name} · ${match.path}`);
+      if (match.related_from?.length) {
+        lines.push(`    - related from: ${match.related_from.join(', ')}`);
+      }
+      if (match.relation_reasons?.length) {
+        lines.push(`    - reasons: ${match.relation_reasons.join(', ')}`);
+      }
+      if (match.read_before_acting) {
+        lines.push(`    - ${match.read_before_acting}`);
+      }
+    }
+  }
+
+  const guidance = Array.isArray(details?.guidance) ? details.guidance : [];
+  if (guidance.length > 0) {
+    lines.push('', 'guidance:');
+    for (const item of guidance.slice(0, 4)) {
+      lines.push(`- ${item}`);
+    }
+  }
+
+  const warnings = Array.isArray(details?.warnings) ? details.warnings : [];
+  if (warnings.length > 0) {
+    lines.push('', 'warnings:');
+    for (const warning of warnings.slice(0, 20)) {
+      lines.push(`- ${warning}`);
+    }
+    if (warnings.length > 20) {
+      lines.push(`- ... and ${warnings.length - 20} more warnings`);
+    }
+  }
+
+  return lines;
+}
+
+export function renderSkillRegistryResult(
+  toolName: string,
+  result: any,
+  options: SkillRegistryRenderOptions = {},
+  theme?: any,
+  context?: any,
+): Component {
   const isError = Boolean(
     context?.isError ||
-    result?.isError ||
-    status(result) === 'failure' ||
-    result?.details?.error,
+      result?.isError ||
+      result?.details?.status === 'failure' ||
+      result?.details?.error,
   );
   const borderColor = isError ? RED : LIME;
 
@@ -360,27 +389,52 @@ export function renderYoutubeToolResult(
     render(width: number): string[] {
       if (width <= 0) return [];
       const isExpanded = Boolean(options?.expanded);
-      const keyHintStr = getKeyHint(theme, isExpanded ? 'collapse' : 'expand');
+      const hint = getKeyHint(theme, isExpanded ? 'collapse' : 'expand');
       const bodyLines: string[] = [];
 
       if (options?.isPartial) {
-        bodyLines.push(`${toolName} · running…`);
+        const runningText =
+          toolName === 'skill_registry_generate'
+            ? 'Generating skill registry…'
+            : 'Resolving skill registry…';
+        bodyLines.push(runningText);
       } else if (isError) {
-        const errorMsg = result?.details?.error?.message ?? resultText(result) ?? 'tool failed';
+        const errorMsg =
+          result?.details?.error?.message ??
+          result?.details?.error ??
+          result?.content?.[0]?.text ??
+          'tool failed';
         bodyLines.push(`${RED}Error: ${stripAnsi(String(errorMsg))}${RESET}`);
-        bodyLines.push(keyHintStr);
+        bodyLines.push(hint);
       } else if (!isExpanded) {
-        if (toolName === 'youtube_transcript_get' || result?.details?.data?.content_source) {
-          bodyLines.push(...compactTranscript(result, theme, toolName));
-        } else {
-          bodyLines.push(...compactGeneric(result, theme, toolName));
-        }
-        bodyLines.push(keyHintStr);
+        const summary =
+          toolName === 'skill_registry_generate'
+            ? buildGenerateSummary(result)
+            : buildResolveSummary(result);
+        bodyLines.push(summary);
+        bodyLines.push(hint);
       } else {
-        bodyLines.push(`${toolName} · expanded`);
-        bodyLines.push(keyHintStr);
-        bodyLines.push('');
-        bodyLines.push(...resultText(result).split('\n'));
+        if (toolName === 'skill_registry_generate') {
+          const summary = buildGenerateSummary(result);
+          bodyLines.push(summary);
+          bodyLines.push(hint);
+          const rawContent =
+            result?.content?.find?.((c: any) => c?.type === 'text')?.text ??
+            result?.content?.[0]?.text;
+          if (rawContent) {
+            bodyLines.push('');
+            bodyLines.push(...String(rawContent).split('\n'));
+          }
+        } else {
+          const summary = buildResolveSummary(result);
+          bodyLines.push(summary);
+          bodyLines.push(hint);
+          const detailLines = formatResolveExpandedLines(result?.details);
+          if (detailLines.length > 0) {
+            bodyLines.push('');
+            bodyLines.push(...detailLines);
+          }
+        }
       }
 
       if (width < 24) {

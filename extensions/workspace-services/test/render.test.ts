@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { renderWorkspaceServiceResult } from '../src/render/index.js';
+import {
+  renderWorkspaceServiceCall,
+  renderWorkspaceServiceResult,
+  extractWorkspaceServiceAction,
+  stripAnsi,
+  LIME,
+  RED,
+  CYAN,
+} from '../src/render/index.js';
 
 const theme = { fg: (_name: string, text: string) => text, bold: (text: string) => text };
 
@@ -8,7 +16,7 @@ const CJK_RE = /[\u1100-\u115f\u231a-\u231b\u2329-\u232a\u23e9-\u23ec\u23f0\u23f
 function visibleTestWidth(text: string): number { let width = 0; for (const char of text.replace(ANSI_RE, '')) width += CJK_RE.test(char) ? 2 : 1; return width; }
 
 describe('workspace service rendering', () => {
-  it('renders compact and expanded states without dropping redaction or continuation metadata', () => {
+  it('renders compact and expanded states with hollow card borders', () => {
     const result = {
       details: {
         ok: false,
@@ -19,9 +27,17 @@ describe('workspace service rendering', () => {
         truncation: { returned: 1, total: 3, hasMore: true, continuation: 'Call again' },
       },
     };
-    const compact = renderWorkspaceServiceResult(result, { expanded: false, isPartial: false }, theme).render(80).join('\n');
-    const expanded = renderWorkspaceServiceResult(result, { expanded: true, isPartial: false }, theme).render(80).join('\n');
+    const compactLines = renderWorkspaceServiceResult(result, { expanded: false, isPartial: false }, theme).render(80);
+    const compact = compactLines.join('\n');
+    expect(compact).toContain('╰');
+    expect(compact).toContain('│');
     expect(compact).toContain('expand');
+    expect(compact).toContain('Needs reconciliation.');
+
+    const expandedLines = renderWorkspaceServiceResult(result, { expanded: true, isPartial: false }, theme).render(80);
+    const expanded = expandedLines.join('\n');
+    expect(expanded).toContain('╰');
+    expect(expanded).toContain('│');
     expect(expanded).toContain('Restart after manual review.');
     expect(expanded).toContain('[REDACTED]');
     expect(expanded).toContain('Call again');
@@ -31,5 +47,81 @@ describe('workspace service rendering', () => {
     const result = { details: { ok: true, status: 'running', summary: '日本語の非常に長い要約 '.repeat(10), data: { service: 'svc', text: '詳細 '.repeat(20) } } };
     const lines = renderWorkspaceServiceResult(result, { expanded: true, isPartial: false }, theme).render(80);
     for (const line of lines) expect(visibleTestWidth(line)).toBeLessThanOrEqual(80);
+  });
+
+  it('renders pending card during call phase and extracts action badge', () => {
+    const context: any = { state: {} };
+    const callComponent = renderWorkspaceServiceCall('workspace_service_start', { service: 'web-api' }, theme, context);
+    const lines = callComponent.render(80);
+
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain('╭');
+    expect(lines[0]).toContain('workspace_service_start [web-api]');
+    expect(lines[0]).toContain('╮');
+    expect(lines[1]).toContain('│');
+    expect(lines[1]).toContain('Pending: web-api');
+    expect(lines[2]).toContain('╰');
+    expect(lines[2]).toContain('╯');
+  });
+
+  it('coordinates two-phase slot assembly via context.state', () => {
+    const context: any = { state: {} };
+
+    // Initial call render before result
+    const callComponent = renderWorkspaceServiceCall('workspace_service_stop', { service: 'indexer' }, theme, context);
+    const initialCallLines = callComponent.render(80);
+    expect(initialCallLines).toHaveLength(3);
+
+    // Result arrives and marks state
+    const resultComponent = renderWorkspaceServiceResult(
+      'workspace_service_stop',
+      { details: { ok: true, status: 'stopped', summary: 'Stopped indexer successfully.', data: { service: 'indexer' } } },
+      { expanded: false },
+      theme,
+      context,
+    );
+    expect(context.state.hasResult).toBe(true);
+    expect(context.state.borderColor).toBe(LIME);
+
+    // Result component renders framed body and bottom border
+    const resultLines = resultComponent.render(80);
+    expect(resultLines[0]).toContain('│');
+    expect(resultLines[resultLines.length - 1]).toContain('╰');
+    expect(resultLines[resultLines.length - 1]).toContain(LIME);
+
+    // Re-rendering call now collapses to only the top border in LIME
+    const afterCallLines = callComponent.render(80);
+    expect(afterCallLines).toHaveLength(1);
+    expect(afterCallLines[0]).toContain('╭');
+    expect(afterCallLines[0]).toContain(LIME);
+  });
+
+  it('sets RED border on error result', () => {
+    const context: any = { state: {} };
+    const resultComponent = renderWorkspaceServiceResult(
+      'workspace_service_start',
+      { details: { ok: false, status: 'error', summary: 'Process failed to launch.' }, isError: true },
+      { expanded: false },
+      theme,
+      context,
+    );
+    expect(context.state.hasResult).toBe(true);
+    expect(context.state.borderColor).toBe(RED);
+
+    const resultLines = resultComponent.render(80);
+    expect(resultLines[resultLines.length - 1]).toContain(RED);
+  });
+
+  it('falls back to single fit line when width < 24', () => {
+    const callComponent = renderWorkspaceServiceCall('workspace_service_start', { service: 'api' }, theme, {});
+    const lines = callComponent.render(20);
+    expect(lines).toHaveLength(1);
+    expect(visibleTestWidth(lines[0])).toBeLessThanOrEqual(20);
+  });
+
+  it('extracts workspace service action properly', () => {
+    expect(extractWorkspaceServiceAction('workspace_services_list', {})).toBeUndefined();
+    expect(extractWorkspaceServiceAction('workspace_service_start', { service: 'frontend' })).toBe('frontend');
+    expect(extractWorkspaceServiceAction('workspace_service_restart', { service: 'worker' })).toBe('worker');
   });
 });

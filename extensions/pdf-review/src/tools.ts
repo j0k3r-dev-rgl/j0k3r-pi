@@ -1,5 +1,6 @@
 import { Type } from 'typebox';
 import { extractPdf, type PdfExtractInput, type PdfExtractResult } from './pdf.js';
+import { renderPdfExtractCall, renderPdfExtractResult } from './render.js';
 
 type ToolResponse<T> =
   | { status: 'success'; data: T; warnings?: unknown[] }
@@ -44,6 +45,13 @@ export function registerPdfReviewTools(pi: any): void {
       'Use pdf_extract renderPages or OCR options only when the user needs page-render metadata or the PDF text layer may be empty.',
     ],
     parameters: pdfExtractParameters,
+    renderShell: 'self',
+    renderCall(args: any, theme: any, context: any) {
+      return renderPdfExtractCall(args, theme, context);
+    },
+    renderResult(result: any, options: any, theme: any, context: any) {
+      return renderPdfExtractResult(result, options, theme, context);
+    },
     async execute(_id: string, params: PdfExtractParams, _signal?: AbortSignal, _onUpdate?: unknown, ctx?: { cwd?: string }) {
       try {
         const data = await extractPdf({

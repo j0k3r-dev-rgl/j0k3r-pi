@@ -1,8 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
 import { registerWebsearchTools, WEBSEARCH_TOOL_NAMES } from '../src/tools.js';
+import {
+  cardBottomBorder,
+  cardTopBorder,
+  CYAN,
+  LIME,
+  RED,
+  renderWebsearchToolCall,
+  renderWebsearchToolResult,
+  toolActionBadge,
+  visibleWidth,
+} from '../src/render/index.js';
 import { createMockPi, execute } from './helpers.js';
 
-const theme = { fg: (_name: string, text: string) => text, bold: (text: string) => text };
+const theme = {
+  fg: (_name: string, text: string) => text,
+  bold: (text: string) => text,
+  keybinding: (action: string) => (action === 'app.tools.expand' ? 'ctrl+o' : undefined),
+};
 const fullIssueBody = `${'GitHub body paragraph with implementation details. '.repeat(80)}WEBSEARCH_RENDER_FULL_BODY_END`;
 
 const ANSI_RE = /\u001b\][^\u001b\u0007]*(?:\u001b\\|\u0007)|\u001b\[[0-?]*[ -/]*[@-~]/g;
@@ -20,14 +35,78 @@ function renderLines(tool: { renderResult?: (...args: any[]) => { render(width: 
 }
 
 describe('websearch TUI rendering', () => {
-  it('registers compact/expandable renderers for every public tool', () => {
+  it('registers renderShell self, renderCall, and renderResult for every public tool', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: {}, fetch: vi.fn<typeof fetch>() });
 
     expect(pi.tools.map((tool) => tool.name)).toEqual(WEBSEARCH_TOOL_NAMES);
     for (const tool of pi.tools) {
+      expect(tool.renderShell, `${tool.name} renderShell`).toBe('self');
+      expect(tool.renderCall, `${tool.name} renderCall`).toBeTypeOf('function');
       expect(tool.renderResult, `${tool.name} renderResult`).toBeTypeOf('function');
     }
+  });
+
+  it('extracts action badges accurately for all tools', () => {
+    expect(toolActionBadge('web_search', { query: 'vitest mocks' })).toBe('vitest mocks');
+    expect(toolActionBadge('web_fetch', { url: 'https://example.com' })).toBe('https://example.com');
+    expect(toolActionBadge('web_research', { topic: 'quantum computing' })).toBe('quantum computing');
+    expect(toolActionBadge('site_search', { site: 'docs.rs', query: 'tokio' })).toBe('docs.rs tokio');
+    expect(toolActionBadge('discussion_search', { query: 'async await' })).toBe('async await');
+    expect(toolActionBadge('discussion_get', { issue: 'nodejs/node#123' })).toBe('nodejs/node#123');
+    expect(toolActionBadge('github_search_issues', { query: 'is:open' })).toBe('is:open');
+    expect(toolActionBadge('github_get', { pull_request: 'owner/repo#456' })).toBe('owner/repo#456');
+    expect(toolActionBadge('github_code_search', { query: 'repo:owner/repo filename:package.json' })).toBe('repo:owner/repo filename:package.json');
+    expect(toolActionBadge('academic_search', { query: 'attention is all you need' })).toBe('attention is all you need');
+    expect(toolActionBadge('academic_paper', { doi: '10.1234/5678' })).toBe('10.1234/5678');
+  });
+
+  it('coordinates two-phase slot assembly via context.state', () => {
+    const context: any = { state: {} };
+    const callComponent = renderWebsearchToolCall('web_search', { query: 'vitest mocks' }, theme, context);
+    const callLines = callComponent.render(80);
+
+    expect(callLines).toHaveLength(3);
+    expect(callLines[0]).toContain('╭');
+    expect(callLines[0]).toContain('web_search [vitest mocks]');
+    expect(callLines[1]).toContain('Pending: vitest mocks');
+    expect(callLines[2]).toContain('╰');
+
+    const result = {
+      details: {
+        status: 'success',
+        data: { items: [{ title: 'Mocks guide', url: 'https://vitest.dev' }] },
+      },
+      content: [{ type: 'text', text: 'ok' }],
+    };
+    const resultComponent = renderWebsearchToolResult('web_search', result, { expanded: false }, theme, context);
+
+    expect(context.state.hasResult).toBe(true);
+    expect(context.state.borderColor).toBe(LIME);
+
+    const callLinesAfterResult = callComponent.render(80);
+    expect(callLinesAfterResult).toHaveLength(1);
+    expect(callLinesAfterResult[0]).toContain('╭');
+    expect(callLinesAfterResult[0]).toContain(LIME);
+
+    const resultLines = resultComponent.render(80);
+    expect(resultLines[resultLines.length - 1]).toContain('╰');
+  });
+
+  it('uses electric red border on failure', () => {
+    const context: any = { state: {} };
+    const result = {
+      isError: true,
+      details: { status: 'failure', error: { message: 'Network timeout' } },
+      content: [{ type: 'text', text: 'failed' }],
+    };
+
+    const resultComponent = renderWebsearchToolResult('web_search', result, { expanded: false }, theme, context);
+    expect(context.state.borderColor).toBe(RED);
+
+    const lines = resultComponent.render(80);
+    expect(lines[0]).toContain(RED);
+    expect(lines.some((l) => l.includes('Error: Network timeout'))).toBe(true);
   });
 
   it('keeps compact search result lines within the requested visible width for CJK titles', () => {

@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { Type } from 'typebox';
 import { convertMarkdownToAudio, type MarkdownToAudioEngine, type MarkdownToAudioProgressEvent, type MarkdownToAudioResult, type MarkdownToAudioVoiceQuality } from './markdown-to-audio.js';
+import { renderMarkdownToAudioCall, renderMarkdownToAudioResult, renderScreenshotCall, renderScreenshotResult } from './render.js';
 import { executeScreenshotAction, ScreenshotError, summarizeScreenshotResult, summarizeWindowListResult, type OsReleaseReader, type ScreenshotAction, type ScreenshotCaptureTarget, type ScreenshotCommandFinder, type ScreenshotCommandRunner, type ScreenshotResult, type ScreenshotToolResult, type ScreenshotWindowMatchMode } from './screenshot.js';
 
 type ToolContent = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
@@ -92,6 +93,13 @@ export function registerUtilsTools(pi: any): void {
       'screenshot captures return a PNG inline in the same tool call when the active model supports images; action=list-windows returns text/details only.',
     ],
     parameters: screenshotParameters,
+    renderShell: 'self',
+    renderCall(args: any, theme: any, context: any) {
+      return renderScreenshotCall(args, theme, context);
+    },
+    renderResult(result: any, options: any, theme: any, context: any) {
+      return renderScreenshotResult(result, options, theme, context);
+    },
     async execute(_id: string, params: ScreenshotParams, signal?: AbortSignal, _onUpdate?: ToolUpdateCallback, ctx?: ToolExecutionContext) {
       try {
         const executionParams = params as ScreenshotParams & ScreenshotExecutionOverrides;
@@ -132,6 +140,13 @@ export function registerUtilsTools(pi: any): void {
       'For more natural Piper narration, tune speed, sentenceSilence, noiseScale, and noiseW instead of rewriting the source Markdown.',
     ],
     parameters: markdownToAudioParameters,
+    renderShell: 'self',
+    renderCall(args: any, theme: any, context: any) {
+      return renderMarkdownToAudioCall(args, theme, context);
+    },
+    renderResult(result: any, options: any, theme: any, context: any) {
+      return renderMarkdownToAudioResult(result, options, theme, context);
+    },
     async execute(_id: string, params: MarkdownToAudioParams, signal?: AbortSignal, onUpdate?: ToolUpdateCallback, ctx?: ToolExecutionContext) {
       try {
         const data = await convertMarkdownToAudio({

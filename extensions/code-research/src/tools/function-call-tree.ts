@@ -1,6 +1,6 @@
 import { Type } from 'typebox';
 import { executeFunctionCallTree } from '../core/function-call-tree-resolver.js';
-import { renderCodeResearchToolResult } from '../render.js';
+import { renderCodeResearchToolCall, renderCodeResearchToolResult } from '../render.js';
 import type { FunctionCallTreeInput } from '../types.js';
 
 export function registerFunctionCallTreeTool(pi: any) {
@@ -26,8 +26,12 @@ export function registerFunctionCallTreeTool(pi: any) {
       compacted: Type.Optional(Type.Boolean({ description: 'If true, compact trivial data-access sibling nodes while preserving the call tree structure.' })),
     }),
 
-    renderResult(result: any, options: any, theme: any) {
-      return renderCodeResearchToolResult('function_call_tree', result, options, theme);
+    renderShell: 'self' as const,
+    renderCall(args: any, theme: any, context?: any) {
+      return renderCodeResearchToolCall('function_call_tree', args, theme, context);
+    },
+    renderResult(result: any, options: any, theme: any, context?: any) {
+      return renderCodeResearchToolResult('function_call_tree', result, options, theme, context);
     },
 
     async execute(_toolCallId: any, params: any, _signal: any, _onUpdate: any, ctx: any) {

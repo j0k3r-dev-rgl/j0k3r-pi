@@ -1,6 +1,6 @@
 import { Type } from 'typebox';
 import { resolveFindSymbol } from '../core/find-symbol-resolver.js';
-import { renderCodeResearchToolResult } from '../render.js';
+import { renderCodeResearchToolCall, renderCodeResearchToolResult } from '../render.js';
 import type { FindSymbolInput } from '../types.js';
 
 const declarationKinds = [
@@ -35,8 +35,12 @@ export function registerFindSymbolTool(pi: any) {
       search_mode: Type.Optional(Type.Union([Type.Literal('exact'), Type.Literal('prefix'), Type.Literal('contains')], { description: 'Search mode for symbol names. Default: exact. When not exact, include_code is disabled.' })),
     }),
 
-    renderResult(result: any, options: any, theme: any) {
-      return renderCodeResearchToolResult('find_symbol', result, options, theme);
+    renderShell: 'self' as const,
+    renderCall(args: any, theme: any, context?: any) {
+      return renderCodeResearchToolCall('find_symbol', args, theme, context);
+    },
+    renderResult(result: any, options: any, theme: any, context?: any) {
+      return renderCodeResearchToolResult('find_symbol', result, options, theme, context);
     },
 
     async execute(_toolCallId: any, params: any, _signal: any, _onUpdate: any, ctx: any) {

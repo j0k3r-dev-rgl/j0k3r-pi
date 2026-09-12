@@ -1,7 +1,12 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
-import { Text } from '../src/pi-runtime.js';
-import { renderApiToolResult } from '../src/render.js';
+import {
+  renderApiToolCall,
+  renderApiToolResult,
+  extractApiToolAction,
+  LIME,
+  RED,
+} from '../src/render.js';
 
 describe('renderApiToolResult', () => {
   it('uses API Tools-owned Pi runtime packages through the local adapter seam', async () => {
@@ -17,7 +22,7 @@ describe('renderApiToolResult', () => {
 
     expect(renderSource).toContain("from './pi-runtime.js'");
     expect(renderSource).toContain("keyHint('app.tools.expand'");
-    expect(renderSource).toContain('new Text(');
+    expect(renderSource).toContain('renderApiToolCall');
 
     expect(runtimeSource).toContain("from '@earendil-works/pi-coding-agent'");
     expect(runtimeSource).toContain("from '@earendil-works/pi-tui'");
@@ -28,7 +33,7 @@ describe('renderApiToolResult', () => {
     });
   });
 
-  it('surfaces safe metadata plus current chunk content', () => {
+  it('surfaces safe metadata plus current chunk content inside hollow cards', () => {
     const result: any = {
       content: [{ type: 'text' as const, text: 'GET /users · listUsers · auth: declared' }],
       details: {
@@ -42,13 +47,17 @@ describe('renderApiToolResult', () => {
     };
 
     const collapsed = renderApiToolResult('api_swagger', result, { expanded: false });
-    expect(collapsed).toBeInstanceOf(Text);
-    expect(collapsed.render(80).join('\n')).toContain('more available');
-    expect(collapsed.render(80).join('\n')).toContain('to expand');
+    const collapsedLines = collapsed.render(80);
+    const collapsedStr = collapsedLines.join('\n');
+    expect(collapsedStr).toContain('│');
+    expect(collapsedStr).toContain('╰');
+    expect(collapsedStr).toContain('more available');
+    expect(collapsedStr).toContain('expand');
 
     const expanded = renderApiToolResult('api_swagger', result, { expanded: true });
-    expect(expanded).toBeInstanceOf(Text);
     const expandedWide = expanded.render(80).join('\n');
+    expect(expandedWide).toContain('│');
+    expect(expandedWide).toContain('╰');
     expect(expandedWide).toContain('discover');
     expect(expandedWide).toContain('authorization: declared');
     expect(expandedWide).toContain('cursor-opa');
@@ -66,12 +75,93 @@ describe('renderApiToolResult', () => {
       },
       isError: true,
     }, { expanded: true });
-    expect(failure.render(80).join('\n')).toContain('graphql_error');
-    expect(failure.render(80).join('\n')).toContain('Inspect the GraphQL query.');
+    const failureRender = failure.render(80).join('\n');
+    expect(failureRender).toContain('│');
+    expect(failureRender).toContain('╰');
+    expect(failureRender).toContain('graphql_error');
+    expect(failureRender).toContain('Inspect the GraphQL query.');
 
     const partial = renderApiToolResult('api_graphql', { content: [], details: { status: 'success' } as any }, { isPartial: true });
-    expect(partial).toBeInstanceOf(Text);
-    expect(partial.render(80).join('\n')).toContain('running…');
-    expect(partial.render(80).join('\n')).not.toContain('to expand');
+    const partialRender = partial.render(80).join('\n');
+    expect(partialRender).toContain('│');
+    expect(partialRender).toContain('╰');
+    expect(partialRender).toContain('running…');
+    expect(partialRender).not.toContain('expand');
+  });
+
+  it('renders pending card during call phase and extracts action badge', () => {
+    const context: any = { state: {} };
+    const callComponent = renderApiToolCall('api_rest_request', { method: 'POST', path: '/api/v1/items' }, {}, context);
+    const lines = callComponent.render(80);
+
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain('╭');
+    expect(lines[0]).toContain('api_rest_request [POST /api/v1/items]');
+    expect(lines[0]).toContain('╮');
+    expect(lines[1]).toContain('│');
+    expect(lines[1]).toContain('Pending: POST /api/v1/items');
+    expect(lines[2]).toContain('╰');
+  });
+
+  it('coordinates two-phase slot assembly and border colors', () => {
+    const context: any = { state: {} };
+    const callComponent = renderApiToolCall('api_swagger', { action: 'discover', tag: 'pets' }, {}, context);
+    expect(callComponent.render(80)).toHaveLength(3);
+
+    // Successful result
+    const resultComponent = renderApiToolResult(
+      'api_swagger',
+      {
+        content: [{ type: 'text', text: 'Pets API' }],
+        details: { status: 'success', action: 'discover' } as any,
+      },
+      { expanded: false },
+      {},
+      context,
+    );
+    expect(context.state.hasResult).toBe(true);
+    expect(context.state.borderColor).toBe(LIME);
+
+    // Call now returns single top border in LIME
+    const afterCall = callComponent.render(80);
+    expect(afterCall).toHaveLength(1);
+    expect(afterCall[0]).toContain('╭');
+    expect(afterCall[0]).toContain(LIME);
+
+    // Result ends with bottom border in LIME
+    const resultLines = resultComponent.render(80);
+    expect(resultLines[resultLines.length - 1]).toContain(LIME);
+  });
+
+  it('sets RED border on failed result', () => {
+    const context: any = { state: {} };
+    renderApiToolResult(
+      'api_graphql',
+      {
+        content: [{ type: 'text', text: 'syntax error' }],
+        details: { status: 'failure' } as any,
+        isError: true,
+      },
+      {},
+      {},
+      context,
+    );
+    expect(context.state.hasResult).toBe(true);
+    expect(context.state.borderColor).toBe(RED);
+  });
+
+  it('extracts API action badge correctly for all tool types', () => {
+    expect(extractApiToolAction('api_status', {})).toBeUndefined();
+    expect(extractApiToolAction('api_auth_status', { provider: 'github' })).toBe('github');
+    expect(extractApiToolAction('api_login', { provider: 'okta' })).toBe('okta');
+    expect(extractApiToolAction('api_rest_request', { method: 'GET', path: '/users' })).toBe('GET /users');
+    expect(extractApiToolAction('api_swagger', { action: 'detail', operation: 'getUser' })).toBe('detail getUser');
+    expect(extractApiToolAction('api_graphql', { action: 'execute', operationName: 'GetViewer' })).toBe('execute GetViewer');
+  });
+
+  it('falls back to single fit line when width < 24', () => {
+    const callComponent = renderApiToolCall('api_login', { provider: 'google' }, {}, {});
+    const lines = callComponent.render(20);
+    expect(lines).toHaveLength(1);
   });
 });

@@ -1,5 +1,4 @@
 import { keyHint, type ExtensionAPI, type ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { Text } from '@earendil-works/pi-tui';
 import {
   getServiceLogs,
   getServicesStatus,
@@ -8,7 +7,7 @@ import {
   startService,
   stopService,
 } from '../core/manager.js';
-import { renderWorkspaceServiceResult } from '../render/index.js';
+import { renderWorkspaceServiceCall, renderWorkspaceServiceResult } from '../render/index.js';
 import {
   EMPTY_PARAMETERS,
   LOGS_PARAMETERS,
@@ -36,12 +35,12 @@ function cwdFrom(ctx: ExtensionContext | undefined, options: RegisterWorkspaceSe
 }
 
 function renderCall(toolName: string) {
-  return (args: any, theme: any, context: any) => {
-    const text = (context.lastComponent as Text | undefined) ?? new Text('', 0, 0);
-    const service = typeof args.service === 'string' ? ` ${args.service}` : '';
-    text.setText(`${theme.fg('toolTitle', theme.bold(toolName))}${theme.fg('toolOutput', service)}`);
-    return text;
-  };
+  return (args: any, theme: any, context: any) => renderWorkspaceServiceCall(toolName, args, theme, context);
+}
+
+function renderResult(toolName: string) {
+  return (result: any, renderOptions: any, theme: any, context: any) =>
+    renderWorkspaceServiceResult(toolName, result as any, renderOptions, theme as any, context);
 }
 
 async function ensureTrusted(ctx: ExtensionContext | undefined): Promise<boolean> {
@@ -87,8 +86,9 @@ export function registerWorkspaceServicesTools(pi: ExtensionAPI, options: Regist
           : `workspace_services_list: ${result.services.length} configured service(s)`;
       return textResult({ ok: true, status: 'running', summary: text, data: result as any }, text);
     },
+    renderShell: 'self' as const,
     renderCall: renderCall('workspace_services_list'),
-    renderResult: (result, renderOptions, theme) => renderWorkspaceServiceResult(result as any, renderOptions, theme as any),
+    renderResult: renderResult('workspace_services_list'),
   });
 
   pi.registerTool({
@@ -103,8 +103,9 @@ export function registerWorkspaceServicesTools(pi: ExtensionAPI, options: Regist
       const outcome = await startService(cwdFrom(ctx, options), serviceName(params), { signal });
       return textResult(outcome, `workspace_service_start: ${outcome.summary}`);
     },
+    renderShell: 'self' as const,
     renderCall: renderCall('workspace_service_start'),
-    renderResult: (result, renderOptions, theme) => renderWorkspaceServiceResult(result as any, renderOptions, theme as any),
+    renderResult: renderResult('workspace_service_start'),
   });
 
   pi.registerTool({
@@ -119,8 +120,9 @@ export function registerWorkspaceServicesTools(pi: ExtensionAPI, options: Regist
       const outcome = await stopService(cwdFrom(ctx, options), serviceName(params), { signal, timeoutMs: timeoutMs(params) });
       return textResult(outcome, `workspace_service_stop: ${outcome.summary}`);
     },
+    renderShell: 'self' as const,
     renderCall: renderCall('workspace_service_stop'),
-    renderResult: (result, renderOptions, theme) => renderWorkspaceServiceResult(result as any, renderOptions, theme as any),
+    renderResult: renderResult('workspace_service_stop'),
   });
 
   pi.registerTool({
@@ -140,8 +142,9 @@ export function registerWorkspaceServicesTools(pi: ExtensionAPI, options: Regist
       });
       return textResult(outcome, `workspace_service_logs: ${outcome.summary}`);
     },
+    renderShell: 'self' as const,
     renderCall: renderCall('workspace_service_logs'),
-    renderResult: (result, renderOptions, theme) => renderWorkspaceServiceResult(result as any, renderOptions, theme as any),
+    renderResult: renderResult('workspace_service_logs'),
   });
 
   pi.registerTool({
@@ -157,16 +160,9 @@ export function registerWorkspaceServicesTools(pi: ExtensionAPI, options: Regist
       const text = formatStatusText(result);
       return textResult({ ok: true, status: 'running', summary: text.split('\n')[0] ?? 'workspace_services_status', data: result as any }, text);
     },
+    renderShell: 'self' as const,
     renderCall: renderCall('workspace_services_status'),
-    renderResult: (result, renderOptions, theme, context) => {
-      const details = (result as any).details;
-      if (details?.data?.services && !renderOptions.expanded) {
-        const text = (context.lastComponent as Text | undefined) ?? new Text('', 0, 0);
-        text.setText(`${theme.fg('toolTitle', theme.bold('workspace_services_status'))}\n${theme.fg('toolOutput', `${details.data.services.length} service(s) · ${safeExpandHint()}`)}`);
-        return text;
-      }
-      return renderWorkspaceServiceResult(result as any, renderOptions, theme as any);
-    },
+    renderResult: renderResult('workspace_services_status'),
   });
 
   pi.registerTool({
@@ -181,7 +177,8 @@ export function registerWorkspaceServicesTools(pi: ExtensionAPI, options: Regist
       const outcome = await restartService(cwdFrom(ctx, options), serviceName(params), { signal, timeoutMs: timeoutMs(params) });
       return textResult(outcome, `workspace_service_restart: ${outcome.summary}`);
     },
+    renderShell: 'self' as const,
     renderCall: renderCall('workspace_service_restart'),
-    renderResult: (result, renderOptions, theme) => renderWorkspaceServiceResult(result as any, renderOptions, theme as any),
+    renderResult: renderResult('workspace_service_restart'),
   });
 }

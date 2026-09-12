@@ -1,7 +1,7 @@
 import { Type } from 'typebox';
 import { executeFunctionCallTree } from '../core/function-call-tree-resolver.js';
 import { executeReverseFunctionCallTree } from '../core/reverse-function-call-tree-resolver.js';
-import { renderCodeResearchToolResult } from '../render.js';
+import { renderCodeResearchToolCall, renderCodeResearchToolResult } from '../render.js';
 import type { CallTreeNode, ClassificationCounts, ConfidenceClassification, FunctionCallTreeInput, SupportedLanguage } from '../types.js';
 
 const SUPPORTED_LANGUAGES = ['ts', 'js', 'java', 'go'] as const;
@@ -104,8 +104,12 @@ export function registerCodeCallHierarchyTool(pi: any) {
       include_external: Type.Optional(Type.Boolean({ description: 'Outgoing only: include unresolved/library/framework calls as external leaves. Default false to reduce noise.' })),
       compacted: Type.Optional(Type.Boolean({ description: 'Outgoing only: compact trivial data-access siblings where supported. Default false.' })),
     }, { additionalProperties: false }),
-    renderResult(result: any, options: any, theme: any) {
-      return renderCodeResearchToolResult('code_call_hierarchy', result, options, theme);
+    renderShell: 'self' as const,
+    renderCall(args: any, theme: any, context?: any) {
+      return renderCodeResearchToolCall('code_call_hierarchy', args, theme, context);
+    },
+    renderResult(result: any, options: any, theme: any, context?: any) {
+      return renderCodeResearchToolResult('code_call_hierarchy', result, options, theme, context);
     },
     async execute(_toolCallId: any, params: any, _signal: any, _onUpdate: any, ctx: any) {
       const direction = params.direction as Direction;
