@@ -372,6 +372,7 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 			oniAnimTimer = undefined;
 		}
 		if (activeHeader) {
+			activeHeader.setArchFrame(0);
 			activeHeader.setMustacheFrame(0);
 			activeHeader.setCatFrame(0);
 			activeHeader.setOniFrame(0);
@@ -384,13 +385,13 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 
 		if (currentBannerStyle === "default") {
 			bannerAnimTimer = setInterval(() => {
-				if (!activeHeader?.isBannerVisible()) {
+				if (!activeHeader?.isBannerVisible() || currentBannerStyle !== "default") {
 					stopBannerAnimation();
 					return;
 				}
-				activeHeader.nextFrame();
+				activeHeader.nextArchFrame();
 				requestUIRender?.();
-			}, 95);
+			}, 80);
 		} else if (currentBannerStyle === "mustache") {
 			// Lively, buoyant 60-frame continuous loop at 80ms/frame (~4.8s total cycle):
 			// Fast, energetic, and 100% fluid motion without sluggishness
@@ -447,7 +448,7 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 
 			if (!raw) {
 				const options = [
-					"default (Arch 3D plus j0k3r)",
+					"default (Arch 3D Emblem)",
 					"mustache (Pink Mustache)",
 					"cat (Cyber Michi)",
 					"oni (Neon Pink Oni)",
@@ -488,7 +489,7 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 			} else {
 				ctx.ui.notify(`Invalid banner style: "${raw}". Accepted values: default, mustache, cat, oni.`, "warning");
 				const options = [
-					"default (Arch 3D plus j0k3r)",
+					"default (Arch 3D Emblem)",
 					"mustache (Pink Mustache)",
 					"cat (Cyber Michi)",
 					"oni (Neon Pink Oni)",
@@ -514,7 +515,7 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 							? "michi-pi (Cyber Michi)"
 							: chosen === "oni"
 								? "oni-pi (Neon Pink Oni)"
-								: "j0k3r-pi (Arch 3D)";
+								: "j0k3r-pi (Arch 3D Emblem)";
 				ctx.ui.notify(`Welcome banner set to ${chosen} (${label}) [saved to settings]`, "info");
 			}
 		},
