@@ -1,5 +1,5 @@
 {
-  "default_model": "cliproxyapi/main/gpt-5.5",
+  "default_model": "cliproxyapi/j0k3r/gemini-3.8-flash-high",
   "default_mode": "background",
   "timeout_ms": 2400000,
   "stall_timeout_ms": 300000,
