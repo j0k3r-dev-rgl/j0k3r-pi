@@ -1,7 +1,18 @@
 import { keyHint, type Theme } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { CAT_ANIM_FRAMES, CAT_BANNER_LINES, CAT_BANNER_WIDTH, MUSTACHE_ANIM_FRAMES, MUSTACHE_BANNER_LINES, MUSTACHE_BANNER_WIDTH, type WelcomeBannerStyle } from "./banners.js";
+import {
+	CAT_ANIM_FRAMES,
+	CAT_BANNER_LINES,
+	CAT_BANNER_WIDTH,
+	MUSTACHE_ANIM_FRAMES,
+	MUSTACHE_BANNER_LINES,
+	MUSTACHE_BANNER_WIDTH,
+	ONI_ANIM_FRAMES,
+	ONI_BANNER_LINES,
+	ONI_BANNER_WIDTH,
+	type WelcomeBannerStyle,
+} from "./banners.js";
 
 export { type WelcomeBannerStyle } from "./banners.js";
 
@@ -276,6 +287,7 @@ export class J0k3rThemeHeader implements Component {
 	private frameIndex = 0;
 	private mustacheLoopIndex = 0;
 	private catLoopIndex = 0;
+	private oniLoopIndex = 0;
 
 	constructor(
 		private readonly theme: Theme,
@@ -289,7 +301,8 @@ export class J0k3rThemeHeader implements Component {
 	}
 
 	setBannerStyle(style: WelcomeBannerStyle): void {
-		this.bannerStyle = style === "mustache" ? "mustache" : style === "cat" ? "cat" : "default";
+		this.bannerStyle =
+			style === "mustache" ? "mustache" : style === "cat" ? "cat" : style === "oni" ? "oni" : "default";
 	}
 
 	getBannerStyle(): WelcomeBannerStyle {
@@ -332,13 +345,28 @@ export class J0k3rThemeHeader implements Component {
 		this.catLoopIndex = Math.max(0, Math.min(frameIndex, CAT_ANIM_FRAMES.length - 1));
 	}
 
+	nextOniFrame(): void {
+		this.oniLoopIndex = (this.oniLoopIndex + 1) % ONI_ANIM_FRAMES.length;
+	}
+
+	setOniFrame(frameIndex: number): void {
+		this.oniLoopIndex = Math.max(0, Math.min(frameIndex, ONI_ANIM_FRAMES.length - 1));
+	}
+
 	dispose(): void {
 		this.bannerVisible = false;
 	}
 
 	render(width: number): string[] {
 		if (width <= 0) return [];
-		const appTitle = this.bannerStyle === "mustache" ? "mostachi-pi" : this.bannerStyle === "cat" ? "michi-pi" : "j0k3r-pi";
+		const appTitle =
+			this.bannerStyle === "mustache"
+				? "mostachi-pi"
+				: this.bannerStyle === "cat"
+					? "michi-pi"
+					: this.bannerStyle === "oni"
+						? "oni-pi"
+						: "j0k3r-pi";
 		if (width < 24) return [fit(`${appTitle} ${this.data.repoName || this.data.projectName}`, width)];
 
 		const innerWidth = Math.max(0, width - 2);
@@ -362,7 +390,14 @@ export class J0k3rThemeHeader implements Component {
 			this.expanded ? keyHint("app.tools.expand", "contract") : keyHint("app.tools.expand", "expand"),
 		].join(electric(VIOLET, " · "));
 
-		const welcomeTitle = this.bannerStyle === "mustache" ? "welcome to mostachi-pi" : this.bannerStyle === "cat" ? "welcome to michi-pi" : "welcome to j0k3r-pi";
+		const welcomeTitle =
+			this.bannerStyle === "mustache"
+				? "welcome to mostachi-pi"
+				: this.bannerStyle === "cat"
+					? "welcome to michi-pi"
+					: this.bannerStyle === "oni"
+						? "welcome to oni-pi"
+						: "welcome to j0k3r-pi";
 		const lines = [
 			titledBorder(welcomeTitle, innerWidth),
 			boxLine(projectLine, innerWidth),
@@ -394,6 +429,17 @@ export class J0k3rThemeHeader implements Component {
 					const leftPad = Math.max(0, Math.floor((width - CAT_BANNER_WIDTH) / 2));
 					const padStr = " ".repeat(leftPad);
 					const bannerArt = CAT_ANIM_FRAMES[this.catLoopIndex] ?? CAT_BANNER_LINES;
+					for (const line of bannerArt) {
+						lines.push(fit(`${padStr}${line}`, width));
+					}
+				}
+			} else if (this.bannerStyle === "oni") {
+				if (width >= 68) {
+					lines.push("");
+					lines.push("");
+					const leftPad = Math.max(0, Math.floor((width - ONI_BANNER_WIDTH) / 2));
+					const padStr = " ".repeat(leftPad);
+					const bannerArt = ONI_BANNER_LINES;
 					for (const line of bannerArt) {
 						lines.push(fit(`${padStr}${line}`, width));
 					}

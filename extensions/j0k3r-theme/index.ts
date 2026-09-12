@@ -320,7 +320,7 @@ export function resolveWelcomeBannerSetting(cwd: string): WelcomeBannerStyle {
 		const settings = parseJsonFile(sf);
 		if (!settings || typeof settings !== "object") continue;
 		const raw = settings["j0k3rTheme.welcomeBanner"] ?? settings.j0k3rTheme?.welcomeBanner;
-		if (raw === "mustache" || raw === "default" || raw === "cat") {
+		if (raw === "mustache" || raw === "default" || raw === "cat" || raw === "oni") {
 			return raw;
 		}
 	}
@@ -351,6 +351,7 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 	let bannerAnimTimer: ReturnType<typeof setInterval> | undefined;
 	let mustacheAnimTimer: ReturnType<typeof setInterval> | undefined;
 	let catAnimTimer: ReturnType<typeof setInterval> | undefined;
+	let oniAnimTimer: ReturnType<typeof setInterval> | undefined;
 	let currentBannerStyle: WelcomeBannerStyle = "default";
 
 	const stopBannerAnimation = () => {
@@ -366,9 +367,14 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 			clearInterval(catAnimTimer);
 			catAnimTimer = undefined;
 		}
+		if (oniAnimTimer) {
+			clearInterval(oniAnimTimer);
+			oniAnimTimer = undefined;
+		}
 		if (activeHeader) {
 			activeHeader.setMustacheFrame(0);
 			activeHeader.setCatFrame(0);
+			activeHeader.setOniFrame(0);
 		}
 	};
 
@@ -407,6 +413,9 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 				activeHeader.nextCatFrame();
 				requestUIRender?.();
 			}, 80);
+		} else if (currentBannerStyle === "oni") {
+			// Static pure neon pink oni mask banner (quieto, zero CPU/render ticker)
+			// No setInterval timer needed, displays the static frame cleanly
 		}
 	};
 
@@ -429,7 +438,7 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 	};
 
 	pi.registerCommand("banner", {
-		description: "Select or switch the welcome banner style (default, mustache, or cat)",
+		description: "Select or switch the welcome banner style (default, mustache, cat, or oni)",
 		handler: async (args, ctx) => {
 			const raw = (args ?? "").trim();
 			const lower = raw.toLowerCase();
@@ -441,6 +450,7 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 					"default (Arch 3D plus j0k3r)",
 					"mustache (Pink Mustache)",
 					"cat (Cyber Michi)",
+					"oni (Neon Pink Oni)",
 				];
 				const selection = await ctx.ui.select("Select Welcome Banner", options);
 				if (!selection) return;
@@ -448,7 +458,9 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 					? "mustache"
 					: selection.startsWith("cat")
 						? "cat"
-						: "default";
+						: selection.startsWith("oni")
+							? "oni"
+							: "default";
 			} else if (lower === "default" || lower === "arch") {
 				chosen = "default";
 			} else if (lower === "mustache" || lower === "pink" || lower === "pink mustache" || lower === "pink-mustache") {
@@ -462,12 +474,24 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 				lower === "michi-pi"
 			) {
 				chosen = "cat";
+			} else if (
+				lower === "oni" ||
+				lower === "mask" ||
+				lower === "neon" ||
+				lower === "neon pink" ||
+				lower === "neon-pink" ||
+				lower === "oni-pi" ||
+				lower === "demon" ||
+				lower === "skull"
+			) {
+				chosen = "oni";
 			} else {
-				ctx.ui.notify(`Invalid banner style: "${raw}". Accepted values: default, mustache, cat.`, "warning");
+				ctx.ui.notify(`Invalid banner style: "${raw}". Accepted values: default, mustache, cat, oni.`, "warning");
 				const options = [
 					"default (Arch 3D plus j0k3r)",
 					"mustache (Pink Mustache)",
 					"cat (Cyber Michi)",
+					"oni (Neon Pink Oni)",
 				];
 				const selection = await ctx.ui.select("Select Welcome Banner", options);
 				if (!selection) return;
@@ -475,7 +499,9 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 					? "mustache"
 					: selection.startsWith("cat")
 						? "cat"
-						: "default";
+						: selection.startsWith("oni")
+							? "oni"
+							: "default";
 			}
 
 			if (chosen) {
@@ -486,7 +512,9 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 						? "mostachi-pi (Pink Mustache)"
 						: chosen === "cat"
 							? "michi-pi (Cyber Michi)"
-							: "j0k3r-pi (Arch 3D)";
+							: chosen === "oni"
+								? "oni-pi (Neon Pink Oni)"
+								: "j0k3r-pi (Arch 3D)";
 				ctx.ui.notify(`Welcome banner set to ${chosen} (${label}) [saved to settings]`, "info");
 			}
 		},
