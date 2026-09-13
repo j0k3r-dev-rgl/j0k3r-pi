@@ -259,10 +259,44 @@ function trimNumber(value: number): string {
     return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0$/, "");
 }
 
+const IGNORED_EFFORTS = new Set(["off", "none"]);
+
+/** Available reasoning effort levels for a model. */
+export function modelEfforts(model: Model<any>): string[] {
+    const custom = (model as any).reasoningEfforts;
+    if (Array.isArray(custom) && custom.length > 0) {
+        return custom
+            .map((item) => String(item).trim())
+            .filter((item) => item && !IGNORED_EFFORTS.has(item.toLowerCase()));
+    }
+
+    if (model.thinkingLevelMap) {
+        const seen = new Set<string>();
+        const list: string[] = [];
+        for (const val of Object.values(model.thinkingLevelMap)) {
+            if (typeof val === "string" && val.trim()) {
+                const normalized = val.trim().toLowerCase();
+                if (!IGNORED_EFFORTS.has(normalized) && !seen.has(normalized)) {
+                    seen.add(normalized);
+                    list.push(val.trim());
+                }
+            }
+        }
+        if (list.length > 0) return list;
+    }
+
+    return [];
+}
+
 /** Capability badges shown next to a model. */
 export function modelBadges(model: Model<any>): string[] {
     const badges: string[] = [];
-    if (model.reasoning) badges.push("razonamiento");
+    const efforts = modelEfforts(model);
+    if (efforts.length > 0) {
+        badges.push(`effort: ${efforts.join("/")}`);
+    } else if (model.reasoning) {
+        badges.push("razonamiento");
+    }
     if (model.input?.includes("image")) badges.push("visión");
     return badges;
 }

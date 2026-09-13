@@ -9,6 +9,7 @@ import {
     formatContext,
     formatCost,
     modelBadges,
+    modelEfforts,
     type AccountNode,
     type Catalog,
     type Model,
@@ -226,11 +227,13 @@ export class ModelPickerModal extends Container implements Focusable {
     private modelMatches(model: Model<any>, provider: ProviderNode): boolean {
         if (!this.query) return true;
         const needle = this.query.toLowerCase();
+        const efforts = modelEfforts(model);
         return (
             model.id.toLowerCase().includes(needle) ||
             (model.name ?? "").toLowerCase().includes(needle) ||
             provider.id.toLowerCase().includes(needle) ||
-            provider.displayName.toLowerCase().includes(needle)
+            provider.displayName.toLowerCase().includes(needle) ||
+            efforts.some((e) => e.toLowerCase().includes(needle))
         );
     }
 
