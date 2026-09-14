@@ -73,9 +73,13 @@ export function fit(text: string, width: number): string {
 }
 
 export function pad(text: string, width: number): string {
+  const vis = visibleWidth(text);
+  if (vis <= width) {
+    return text + ' '.repeat(width - vis);
+  }
   const fitted = fit(text, width);
-  const vis = visibleWidth(fitted);
-  return fitted + ' '.repeat(Math.max(0, width - vis));
+  const visFitted = visibleWidth(fitted);
+  return fitted + ' '.repeat(Math.max(0, width - visFitted));
 }
 
 export function boxLine(content: string, innerWidth: number, borderColor: string = CYAN): string {
@@ -274,8 +278,16 @@ export function renderApiToolCall(
   _theme?: any,
   context?: any,
 ): Component {
+  let cachedBorderWidth: number | undefined;
+  let cachedBorderColor: string | undefined;
+  let cachedTopBorder: string[] | undefined;
+
   return {
-    invalidate() {},
+    invalidate() {
+      cachedBorderWidth = undefined;
+      cachedBorderColor = undefined;
+      cachedTopBorder = undefined;
+    },
     render(width: number): string[] {
       if (width <= 0) return [];
       const actionBadge = extractApiToolAction(toolName, args);
@@ -287,12 +299,23 @@ export function renderApiToolCall(
       const state = context?.state;
       const isError = Boolean(context?.isError);
       const borderColor = state?.borderColor ?? (isError ? RED : CYAN);
-      const topBorder = cardTopBorder(toolName, actionBadge, innerWidth, borderColor, borderColor);
 
       if (state?.hasResult) {
-        return [topBorder];
+        if (
+          cachedBorderWidth === innerWidth &&
+          cachedBorderColor === borderColor &&
+          cachedTopBorder
+        ) {
+          return cachedTopBorder;
+        }
+        const topBorder = cardTopBorder(toolName, actionBadge, innerWidth, borderColor, borderColor);
+        cachedBorderWidth = innerWidth;
+        cachedBorderColor = borderColor;
+        cachedTopBorder = [topBorder];
+        return cachedTopBorder;
       }
 
+      const topBorder = cardTopBorder(toolName, actionBadge, innerWidth, borderColor, borderColor);
       const pendingDetail = actionBadge ? `Pending: ${actionBadge}` : 'Pending...';
       const pendingLine = `${CYAN}●${RESET} ${pendingDetail}`;
 
@@ -325,10 +348,20 @@ export function renderApiToolResult(
     context.state.borderColor = borderColor;
   }
 
+  let cachedWidth: number | undefined;
+  let cachedLines: string[] | undefined;
+
   return {
-    invalidate() {},
+    invalidate() {
+      cachedWidth = undefined;
+      cachedLines = undefined;
+    },
     render(width: number): string[] {
       if (width <= 0) return [];
+      if (!options?.isPartial && cachedWidth === width && cachedLines !== undefined) {
+        return cachedLines;
+      }
+
       const isExpanded = Boolean(options?.expanded);
       const keyHintStr = getKeyHint(theme, isExpanded ? 'collapse' : 'expand');
       const bodyLines: string[] = [];
@@ -370,7 +403,14 @@ export function renderApiToolResult(
 
       const framed = frameContent(wrappedBodyLines, innerWidth, borderColor);
       const bottomBorder = cardBottomBorder(innerWidth, borderColor);
-      return [...framed, bottomBorder];
+      const finalLines = [...framed, bottomBorder];
+
+      if (!options?.isPartial) {
+        cachedWidth = width;
+        cachedLines = finalLines;
+      }
+
+      return finalLines;
     },
   };
 }

@@ -140,6 +140,7 @@ export const bashRenderers = {
 		// Si terminó la ejecución o hubo error, congelar el tiempo y detener timer
 		if (!options.isPartial || state.isError) {
 			state.endedAt ??= Date.now();
+			state.isPartial = false;
 			if (state.interval) {
 				clearInterval(state.interval);
 				state.interval = undefined;

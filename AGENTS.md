@@ -35,15 +35,17 @@ If equal-authority sources conflict, stop and surface the exact conflict.
 - Treat relevant supplied context as already read.
 - Do not reread files or rerun discovery only to restate unchanged context.
 - When a fresh read is justified, use the narrowest file, path, symbol, or section that resolves the next action.
-- The orchestrator coordinates by default. It may inspect implementation code directly only when the user names exact files or symbols and the task is trivial.
-- For unknown code, behavior, dependencies, tests, or project structure, delegate bounded read-only `discovery` before implementation.
-- Direct orchestrator execution is limited to routing, answers, exact known reads, trivial localized edits, and lightweight validation.
+- The orchestrator coordinates by default. It may inspect implementation code directly only when the user names exact files or symbols and the task is trivial, unless the user explicitly authorizes direct execution without delegation.
+- For unknown code, behavior, dependencies, tests, or project structure, delegate bounded read-only `discovery` before implementation unless the user explicitly requests or authorizes direct investigation.
+- Direct orchestrator execution is normally limited to routing, answers, exact known reads, trivial localized edits, and lightweight validation. Explicit user authorization to work without delegation expands this boundary to the approved task scope.
+- When direct execution without delegation is explicitly authorized, the orchestrator may inspect, plan, implement, and validate the requested work itself, while preserving all scope, configuration-lock, validation, and Git policies.
 - Unexpected scope growth, new repositories, new services, or new product/architecture decisions require renewed approval.
 
 ## Research and Code Inspection
 
-- Use delegated read-only `discovery` for unknown project, implementation-code, behavior, dependency, test, or external research.
-- Do not duplicate a completed discovery report unless freshness or an unresolved gap requires it.
+- Use delegated read-only `discovery` for unknown project, implementation-code, behavior, dependency, test, or external research, unless the user explicitly authorizes direct execution without delegation.
+- Under explicit no-delegation authorization, perform the narrowest direct inspection needed and do not use subagents.
+- Do not duplicate completed investigation unless freshness or an unresolved gap requires it.
 - For TypeScript/JavaScript, Java, and Go code lookups, call `workspace_graph_status` first and then use `code_find` or `code_call_hierarchy` before any text search.
 - Use `rg`, `grep`, or `find` on supported-language code only after graph-backed lookup is unavailable, unusable, or failed for the exact query.
 - For documentation, config, generated data, and unsupported languages, targeted reads or bounded text search are fine.
@@ -60,8 +62,9 @@ PRD and discovery are optional artifacts or activities, not workflows.
 
 ## Workflow Routing Rules
 
-- **Workflow Triage for Complex Tasks**: When a complex or non-trivial task is requested (features, non-trivial bug fixes, refactoring, multi-file changes, or planning), you must load and follow `skills/workflow-triage/SKILL.md` to determine the proper workflow (Mini-SDD or Formal SDD). Loading it once per session is sufficient—do not reload it repeatedly for subsequent steps unless scope changes materially. For simple, trivial, or direct single-step queries/edits, loading `workflow-triage` is not required.
-- Prefer Mini-SDD for non-trivial but bounded work.
+- **Workflow Triage for Complex Tasks**: When a complex or non-trivial task is requested (features, non-trivial bug fixes, refactoring, multi-file changes, or planning), load and follow `skills/workflow-triage/SKILL.md` to determine the normal workflow (Mini-SDD or Formal SDD). Loading it once per session is sufficient—do not reload it repeatedly unless scope changes materially. For simple, trivial, or direct single-step queries/edits, loading `workflow-triage` is not required.
+- **Explicit Direct-Execution Override**: If the user explicitly requests or authorizes execution without delegation, use Direct Orchestrator for that approved scope regardless of normal Mini-SDD or Formal SDD routing. Do not delegate any phase. This override does not waive scope control, Configuration Lock, change validation, Git policy, or the need to ask about material product decisions.
+- Prefer Mini-SDD for non-trivial but bounded work when the explicit direct-execution override is not active.
 - Escalate to Formal SDD only for materially coupled contracts, major architecture change, migration/security consequences, or review that cannot stay coherent in one lightweight plan.
 - Re-triage only when scope changes materially.
 
@@ -93,9 +96,10 @@ Never label a step RED unless it fails for the expected reason.
 
 - Store active changes under `openspec/changes/<change-slug>/`.
 - SDD artifact and handoff formats live in `skills/subagent-artifact-contracts/SKILL.md`.
-- In Mini-SDD and Formal SDD, delegation is mandatory for every phase.
-- If the required phase subagent is unavailable, stop and report the configuration blocker instead of doing the phase directly.
-- The orchestrator coordinates, prepares bounded prompts, reads handoffs/artifacts, runs structural gates, summarizes, and asks user decisions; it does not author phase artifacts.
+- In Mini-SDD and Formal SDD, delegation is mandatory for every phase unless the user has explicitly activated the Direct-Execution Override for the approved scope.
+- When that override is active, do not run Mini-SDD or Formal SDD phases: execute directly and retain the applicable validation policy.
+- Without the override, if the required phase subagent is unavailable, stop and report the configuration blocker instead of doing the phase directly.
+- Without the override, the orchestrator coordinates, prepares bounded prompts, reads handoffs/artifacts, runs structural gates, summarizes, and asks user decisions; it does not author phase artifacts.
 - The orchestrator reads the relevant artifact before advancing phases.
 - `BLOCKED` stops advancement.
 - `sdd-apply` requires an implementation summary plus explicit user authorization.

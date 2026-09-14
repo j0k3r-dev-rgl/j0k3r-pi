@@ -35,6 +35,10 @@ export interface ToolRenderContext<TState = ToolCardState, TArgs = any> {
 }
 
 export class ToolCardCallComponent implements Component {
+	private cachedWidth?: number;
+	private cachedBorderColor?: string;
+	private cachedTopBorder?: string[];
+
 	constructor(
 		private readonly toolName: string,
 		private readonly getAction: () => string | undefined,
@@ -52,12 +56,23 @@ export class ToolCardCallComponent implements Component {
 		}
 		const innerWidth = Math.max(0, width - 2);
 		const borderColor = this.getBorderColor(this.state);
-		const topBorder = cardTopBorder(this.toolName, action, innerWidth, borderColor, borderColor);
 
 		if (this.state.hasResult) {
-			return [topBorder];
+			if (
+				this.cachedWidth === innerWidth &&
+				this.cachedBorderColor === borderColor &&
+				this.cachedTopBorder
+			) {
+				return this.cachedTopBorder;
+			}
+			const topBorder = cardTopBorder(this.toolName, action, innerWidth, borderColor, borderColor);
+			this.cachedWidth = innerWidth;
+			this.cachedBorderColor = borderColor;
+			this.cachedTopBorder = [topBorder];
+			return this.cachedTopBorder;
 		}
 
+		const topBorder = cardTopBorder(this.toolName, action, innerWidth, borderColor, borderColor);
 		const bodyLines = this.getBodyLines ? this.getBodyLines(width, innerWidth) : [];
 		const statusLine = this.getPendingStatus();
 		const framed = frameContent([...bodyLines, statusLine], innerWidth, borderColor, true);
@@ -69,10 +84,17 @@ export class ToolCardCallComponent implements Component {
 		];
 	}
 
-	invalidate(): void {}
+	invalidate(): void {
+		this.cachedWidth = undefined;
+		this.cachedBorderColor = undefined;
+		this.cachedTopBorder = undefined;
+	}
 }
 
 export class ToolCardResultComponent implements Component {
+	private cachedWidth?: number;
+	private cachedLines?: string[];
+
 	constructor(
 		private readonly getBodyLines: (width: number, innerWidth: number) => string[],
 		private readonly getBorderColor: (state: ToolCardState) => string,
@@ -84,13 +106,29 @@ export class ToolCardResultComponent implements Component {
 		if (width <= 0 || width < 24) {
 			return [];
 		}
+
+		// Si el resultado ya no es parcial (ejecución terminada), cachear las líneas por ancho
+		if (!this.state.isPartial && this.cachedWidth === width && this.cachedLines !== undefined) {
+			return this.cachedLines;
+		}
+
 		const innerWidth = Math.max(0, width - 2);
 		const borderColor = this.getBorderColor(this.state);
 		const bodyLines = this.getBodyLines(width, innerWidth);
 		const framed = frameContent(bodyLines, innerWidth, borderColor, this.wrap);
 		const bottom = cardBottomBorder(innerWidth, borderColor);
-		return [...framed, bottom];
+		const lines = [...framed, bottom];
+
+		if (!this.state.isPartial) {
+			this.cachedWidth = width;
+			this.cachedLines = lines;
+		}
+
+		return lines;
 	}
 
-	invalidate(): void {}
+	invalidate(): void {
+		this.cachedWidth = undefined;
+		this.cachedLines = undefined;
+	}
 }

@@ -24,9 +24,13 @@ export function fit(text: string, width: number): string {
 }
 
 export function pad(text: string, width: number): string {
+	const vis = visibleWidth(text);
+	if (vis <= width) {
+		return text + " ".repeat(width - vis);
+	}
 	const fitted = fit(text, width);
-	const vis = visibleWidth(fitted);
-	return fitted + " ".repeat(Math.max(0, width - vis));
+	const visFitted = visibleWidth(fitted);
+	return fitted + " ".repeat(Math.max(0, width - visFitted));
 }
 
 export function boxLine(content: string, innerWidth: number, borderColor: string = CYAN): string {
@@ -91,7 +95,7 @@ export function frameContent(
 					framed.push(boxLine(segment, innerWidth, borderColor));
 				}
 			} else {
-				framed.push(boxLine(fit(sub, innerContentWidth), innerWidth, borderColor));
+				framed.push(boxLine(sub, innerWidth, borderColor));
 			}
 		}
 	}

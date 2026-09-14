@@ -31,21 +31,6 @@ function formatContextTokens(value: number | null | undefined): string {
 	return formatNumber(value);
 }
 
-function getTokenTotals(ctx: ExtensionContext): { input: number; output: number } {
-	let input = 0;
-	let output = 0;
-
-	for (const entry of ctx.sessionManager.getBranch()) {
-		if (entry.type !== "message" || entry.message.role !== "assistant") continue;
-
-		const message = entry.message as AssistantMessage;
-		input += message.usage?.input ?? 0;
-		output += message.usage?.output ?? 0;
-	}
-
-	return { input, output };
-}
-
 function getExtensionStatus(footerData: ReadonlyFooterDataProvider): string {
 	const entries = Array.from(footerData.getExtensionStatuses().entries());
 	if (entries.length === 0) return "engram";
@@ -159,6 +144,23 @@ function simplifyModelForTiny(modelId: string): string {
 }
 
 export class J0k3rThemeFooter implements Component {
+	private cachedTokenTotals?: {
+		leafId: string | null;
+		timestamp: number;
+		totals: { input: number; output: number };
+	};
+	private cachedTopLine?: {
+		width: number;
+		dir: string;
+		repoName?: string;
+		branch?: string;
+		output: string;
+	};
+	private cachedBottomLine?: {
+		key: string;
+		output: string;
+	};
+
 	constructor(
 		private readonly tui: TUI,
 		private readonly theme: ThemeLike,
@@ -170,6 +172,39 @@ export class J0k3rThemeFooter implements Component {
 
 	setGitInfo(gitInfo: RepoGitInfo): void {
 		this.gitInfo = gitInfo;
+		this.cachedTopLine = undefined;
+	}
+
+	private getTokenTotals(): { input: number; output: number } {
+		const now = Date.now();
+		const currentLeafId = this.ctx.sessionManager.getLeafId?.() ?? null;
+
+		if (
+			this.cachedTokenTotals &&
+			this.cachedTokenTotals.leafId === currentLeafId &&
+			now - this.cachedTokenTotals.timestamp < 1000
+		) {
+			return this.cachedTokenTotals.totals;
+		}
+
+		let input = 0;
+		let output = 0;
+
+		for (const entry of this.ctx.sessionManager.getBranch()) {
+			if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+
+			const message = entry.message as AssistantMessage;
+			input += message.usage?.input ?? 0;
+			output += message.usage?.output ?? 0;
+		}
+
+		const totals = { input, output };
+		this.cachedTokenTotals = {
+			leafId: currentLeafId,
+			timestamp: now,
+			totals,
+		};
+		return totals;
 	}
 
 	private renderTopLine(width: number): string {
@@ -178,6 +213,34 @@ export class J0k3rThemeFooter implements Component {
 		const dir = formatPath(this.gitInfo?.dir ?? this.ctx.cwd);
 		const rawRepo = this.gitInfo?.repoName?.trim();
 		const rawBranch = this.gitInfo?.branch?.trim();
+
+		if (
+			this.cachedTopLine &&
+			this.cachedTopLine.width === width &&
+			this.cachedTopLine.dir === dir &&
+			this.cachedTopLine.repoName === rawRepo &&
+			this.cachedTopLine.branch === rawBranch
+		) {
+			return this.cachedTopLine.output;
+		}
+
+		const output = this.computeTopLine(width, dir, rawRepo, rawBranch);
+		this.cachedTopLine = {
+			width,
+			dir,
+			repoName: rawRepo,
+			branch: rawBranch,
+			output,
+		};
+		return output;
+	}
+
+	private computeTopLine(
+		width: number,
+		dir: string,
+		rawRepo: string | undefined,
+		rawBranch: string | undefined,
+	): string {
 		const hasRepo = Boolean(rawRepo && rawRepo.length > 0);
 		const hasBranch = Boolean(rawBranch && rawBranch.length > 0);
 
@@ -267,17 +330,25 @@ export class J0k3rThemeFooter implements Component {
 	private renderBottomLine(width: number): string {
 		if (width <= 0) return "";
 
-		const { input, output } = getTokenTotals(this.ctx);
+		const { input, output } = this.getTokenTotals();
 		const context = this.ctx.getContextUsage();
 		const rawModel = this.ctx.model ? `${this.ctx.model.provider}/${this.ctx.model.id}` : "no-model";
 		const effort = this.getThinkingLevel();
+		const engramStatus = getExtensionStatus(this.footerData);
 
+		const usedTokens = context?.tokens ?? 0;
+		const winTokens = context?.contextWindow ?? this.ctx.model?.contextWindow ?? 0;
 		const percentVal = context?.percent ?? null;
+		const cacheKey = `${width}:${rawModel}:${effort}:${input}:${output}:${usedTokens}:${winTokens}:${percentVal}:${engramStatus}`;
+
+		if (this.cachedBottomLine && this.cachedBottomLine.key === cacheKey) {
+			return this.cachedBottomLine.output;
+		}
+
 		const percentColor = percentVal === null ? LIME : percentVal >= 90 ? RED : percentVal >= 70 ? AMBER : LIME;
 		const percentStr = percentVal === null ? "?%" : `${percentVal.toFixed(1)}%`;
 		const usedContextStr = formatContextTokens(context?.tokens);
 		const agentContextStr = formatContextTokens(context?.contextWindow ?? this.ctx.model?.contextWindow);
-		const engramStatus = getExtensionStatus(this.footerData);
 
 		const modelParts = rawModel.split("/");
 		const rawModelShort = modelParts[modelParts.length - 1] || rawModel;
@@ -326,7 +397,9 @@ export class J0k3rThemeFooter implements Component {
 			const gap = width - leftW - rightW;
 
 			if (gap >= 2) {
-				return `${leftStr}${" ".repeat(gap)}${rightStr}`;
+				const res = `${leftStr}${" ".repeat(gap)}${rightStr}`;
+				this.cachedBottomLine = { key: cacheKey, output: res };
+				return res;
 			}
 		}
 
@@ -343,12 +416,15 @@ export class J0k3rThemeFooter implements Component {
 		for (const prof of inlineProfiles) {
 			const line = joinSegments(prof);
 			if (visibleWidth(line) <= width) {
+				this.cachedBottomLine = { key: cacheKey, output: line };
 				return line;
 			}
 		}
 
 		// Safety fallback
-		return truncateToWidth(joinSegments([mTiny, cSlim]), width, "…");
+		const fallback = truncateToWidth(joinSegments([mTiny, cSlim]), width, "…");
+		this.cachedBottomLine = { key: cacheKey, output: fallback };
+		return fallback;
 	}
 
 	render(width: number): string[] {
@@ -356,5 +432,9 @@ export class J0k3rThemeFooter implements Component {
 		return [this.renderTopLine(width), this.renderBottomLine(width)];
 	}
 
-	invalidate(): void {}
+	invalidate(): void {
+		this.cachedTokenTotals = undefined;
+		this.cachedTopLine = undefined;
+		this.cachedBottomLine = undefined;
+	}
 }

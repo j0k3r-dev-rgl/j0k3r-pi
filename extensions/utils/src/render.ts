@@ -71,9 +71,13 @@ export function fit(text: string, width: number): string {
 }
 
 export function pad(text: string, width: number): string {
+  const vis = visibleWidth(text);
+  if (vis <= width) {
+    return text + ' '.repeat(width - vis);
+  }
   const fitted = fit(text, width);
-  const vis = visibleWidth(fitted);
-  return fitted + ' '.repeat(Math.max(0, width - vis));
+  const visFitted = visibleWidth(fitted);
+  return fitted + ' '.repeat(Math.max(0, width - visFitted));
 }
 
 export function boxLine(content: string, innerWidth: number, borderColor: string = CYAN): string {
@@ -213,8 +217,16 @@ export function extractScreenshotBadge(args: any): string {
 }
 
 export function renderScreenshotCall(args: any, _theme?: any, context?: any): Component {
+  let cachedBorderWidth: number | undefined;
+  let cachedBorderColor: string | undefined;
+  let cachedTopBorder: string[] | undefined;
+
   return {
-    invalidate() {},
+    invalidate() {
+      cachedBorderWidth = undefined;
+      cachedBorderColor = undefined;
+      cachedTopBorder = undefined;
+    },
     render(width: number): string[] {
       if (width <= 0) return [];
       const badge = extractScreenshotBadge(args);
@@ -227,12 +239,23 @@ export function renderScreenshotCall(args: any, _theme?: any, context?: any): Co
       const state = context?.state;
       const isError = Boolean(context?.isError);
       const borderColor = state?.borderColor ?? (isError ? RED : CYAN);
-      const topBorder = cardTopBorder('screenshot', badge, innerWidth, borderColor, borderColor);
 
       if (state?.hasResult) {
-        return [topBorder];
+        if (
+          cachedBorderWidth === innerWidth &&
+          cachedBorderColor === borderColor &&
+          cachedTopBorder
+        ) {
+          return cachedTopBorder;
+        }
+        const topBorder = cardTopBorder('screenshot', badge, innerWidth, borderColor, borderColor);
+        cachedBorderWidth = innerWidth;
+        cachedBorderColor = borderColor;
+        cachedTopBorder = [topBorder];
+        return cachedTopBorder;
       }
 
+      const topBorder = cardTopBorder('screenshot', badge, innerWidth, borderColor, borderColor);
       const isList = args?.action === 'list-windows';
       const pendingDetail = isList ? 'Listing windows...' : 'Capturing screenshot...';
       const pendingLine = `${CYAN}●${RESET} Pending: ${pendingDetail}`;
@@ -325,10 +348,20 @@ export function renderScreenshotResult(
     context.state.borderColor = borderColor;
   }
 
+  let cachedWidth: number | undefined;
+  let cachedLines: string[] | undefined;
+
   return {
-    invalidate() {},
+    invalidate() {
+      cachedWidth = undefined;
+      cachedLines = undefined;
+    },
     render(width: number): string[] {
       if (width <= 0) return [];
+      if (!options?.isPartial && cachedWidth === width && cachedLines !== undefined) {
+        return cachedLines;
+      }
+
       const isExpanded = Boolean(options?.expanded);
       const hint = getKeyHint(theme, isExpanded ? 'collapse' : 'expand');
       const bodyLines: string[] = [];
@@ -375,7 +408,14 @@ export function renderScreenshotResult(
 
       const framed = frameContent(wrappedBodyLines, innerWidth, borderColor);
       const bottomBorder = cardBottomBorder(innerWidth, borderColor);
-      return [...framed, bottomBorder];
+      const finalLines = [...framed, bottomBorder];
+
+      if (!options?.isPartial) {
+        cachedWidth = width;
+        cachedLines = finalLines;
+      }
+
+      return finalLines;
     },
   };
 }
@@ -392,8 +432,16 @@ export function extractMarkdownToAudioBadge(args: any): string {
 }
 
 export function renderMarkdownToAudioCall(args: any, _theme?: any, context?: any): Component {
+  let cachedBorderWidth: number | undefined;
+  let cachedBorderColor: string | undefined;
+  let cachedTopBorder: string[] | undefined;
+
   return {
-    invalidate() {},
+    invalidate() {
+      cachedBorderWidth = undefined;
+      cachedBorderColor = undefined;
+      cachedTopBorder = undefined;
+    },
     render(width: number): string[] {
       if (width <= 0) return [];
       const badge = extractMarkdownToAudioBadge(args);
@@ -406,6 +454,28 @@ export function renderMarkdownToAudioCall(args: any, _theme?: any, context?: any
       const state = context?.state;
       const isError = Boolean(context?.isError);
       const borderColor = state?.borderColor ?? (isError ? RED : CYAN);
+
+      if (state?.hasResult) {
+        if (
+          cachedBorderWidth === innerWidth &&
+          cachedBorderColor === borderColor &&
+          cachedTopBorder
+        ) {
+          return cachedTopBorder;
+        }
+        const topBorder = cardTopBorder(
+          'markdown_to_audio',
+          badge,
+          innerWidth,
+          borderColor,
+          borderColor,
+        );
+        cachedBorderWidth = innerWidth;
+        cachedBorderColor = borderColor;
+        cachedTopBorder = [topBorder];
+        return cachedTopBorder;
+      }
+
       const topBorder = cardTopBorder(
         'markdown_to_audio',
         badge,
@@ -413,11 +483,6 @@ export function renderMarkdownToAudioCall(args: any, _theme?: any, context?: any
         borderColor,
         borderColor,
       );
-
-      if (state?.hasResult) {
-        return [topBorder];
-      }
-
       const pendingLine = `${CYAN}●${RESET} Pending: Converting markdown to audio...`;
 
       return [
@@ -480,10 +545,20 @@ export function renderMarkdownToAudioResult(
     context.state.borderColor = borderColor;
   }
 
+  let cachedWidth: number | undefined;
+  let cachedLines: string[] | undefined;
+
   return {
-    invalidate() {},
+    invalidate() {
+      cachedWidth = undefined;
+      cachedLines = undefined;
+    },
     render(width: number): string[] {
       if (width <= 0) return [];
+      if (!options?.isPartial && cachedWidth === width && cachedLines !== undefined) {
+        return cachedLines;
+      }
+
       const isExpanded = Boolean(options?.expanded);
       const hint = getKeyHint(theme, isExpanded ? 'collapse' : 'expand');
       const bodyLines: string[] = [];
@@ -530,7 +605,14 @@ export function renderMarkdownToAudioResult(
 
       const framed = frameContent(wrappedBodyLines, innerWidth, borderColor);
       const bottomBorder = cardBottomBorder(innerWidth, borderColor);
-      return [...framed, bottomBorder];
+      const finalLines = [...framed, bottomBorder];
+
+      if (!options?.isPartial) {
+        cachedWidth = width;
+        cachedLines = finalLines;
+      }
+
+      return finalLines;
     },
   };
 }

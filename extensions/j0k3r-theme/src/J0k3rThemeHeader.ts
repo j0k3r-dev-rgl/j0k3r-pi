@@ -106,6 +106,9 @@ export class J0k3rThemeHeader implements Component {
 	private mustacheLoopIndex = 0;
 	private catLoopIndex = 0;
 	private oniLoopIndex = 0;
+	private cachedWidth?: number;
+	private cachedExpanded?: boolean;
+	private cachedLines?: string[];
 
 	constructor(
 		private readonly theme: Theme,
@@ -121,6 +124,7 @@ export class J0k3rThemeHeader implements Component {
 	setBannerStyle(style: WelcomeBannerStyle): void {
 		this.bannerStyle =
 			style === "mustache" ? "mustache" : style === "cat" ? "cat" : style === "oni" ? "oni" : "default";
+		this.clearCache();
 	}
 
 	getBannerStyle(): WelcomeBannerStyle {
@@ -128,15 +132,28 @@ export class J0k3rThemeHeader implements Component {
 	}
 
 	setExpanded(expanded: boolean): void {
-		this.expanded = expanded;
+		if (this.expanded !== expanded) {
+			this.expanded = expanded;
+			this.clearCache();
+		}
 	}
 
 	setData(data: J0k3rThemeHeaderData): void {
 		this.data = data;
+		this.clearCache();
 	}
 
 	setBannerVisible(visible: boolean): void {
-		this.bannerVisible = visible;
+		if (this.bannerVisible !== visible) {
+			this.bannerVisible = visible;
+			this.clearCache();
+		}
+	}
+
+	private clearCache(): void {
+		this.cachedWidth = undefined;
+		this.cachedExpanded = undefined;
+		this.cachedLines = undefined;
 	}
 
 	isBannerVisible(): boolean {
@@ -181,10 +198,14 @@ export class J0k3rThemeHeader implements Component {
 
 	dispose(): void {
 		this.bannerVisible = false;
+		this.clearCache();
 	}
 
 	render(width: number): string[] {
 		if (width <= 0) return [];
+		if (!this.bannerVisible && this.cachedWidth === width && this.cachedExpanded === this.expanded && this.cachedLines) {
+			return this.cachedLines;
+		}
 		const appTitle =
 			this.bannerStyle === "mustache"
 				? "mostachi-pi"
@@ -284,8 +305,16 @@ export class J0k3rThemeHeader implements Component {
 			}
 		}
 
+		if (!this.bannerVisible) {
+			this.cachedWidth = width;
+			this.cachedExpanded = this.expanded;
+			this.cachedLines = lines;
+		}
+
 		return lines;
 	}
 
-	invalidate(): void {}
+	invalidate(): void {
+		this.clearCache();
+	}
 }

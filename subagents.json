@@ -103,6 +103,10 @@
     "task-tracker-manager": {
       "model": "cliproxyapi/ytest664/gemini-3.8-flash-high",
       "effort": "medium"
+    },
+    "deep-researcher": {
+      "model": "cliproxyapi/second/gpt-5.6-sol",
+      "effort": "low"
     }
   }
 }

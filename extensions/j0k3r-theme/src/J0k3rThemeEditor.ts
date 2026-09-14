@@ -7,8 +7,13 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 function fitLine(text: string, width: number): string {
 	if (width <= 0) return "";
+	const vis = visibleWidth(text);
+	if (vis <= width) {
+		return text + " ".repeat(width - vis);
+	}
 	const clipped = truncateToWidth(text, width, "");
-	return clipped + " ".repeat(Math.max(0, width - visibleWidth(clipped)));
+	const clippedVis = visibleWidth(clipped);
+	return clipped + " ".repeat(Math.max(0, width - clippedVis));
 }
 
 const ELECTRIC_BORDER = "\x1b[1;38;2;0;229;255m";
@@ -80,7 +85,7 @@ export function createArchWorkingFrames(totalFrames = 12): string[] {
 
 export const ARCH_WORKING_INDICATOR = {
 	frames: createArchWorkingFrames(12),
-	intervalMs: 50,
+	intervalMs: 100,
 };
 
 export class J0k3rThemeEditor extends CustomEditor {
