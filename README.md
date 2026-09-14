@@ -10,6 +10,8 @@ Personal/global Pi agent configuration used from `~/.pi/agent`. It contains the 
 
 ![j0k3r Pi agent interface](images/2026-09-14_14-26.png)
 
+![Pi agent workflow interface](images/2026-09-14_14-22.png)
+
 <details>
 <summary><strong>Pi theme and interactive interface</strong></summary>
 
@@ -291,6 +293,8 @@ Configuración global/personal de Pi usada desde `~/.pi/agent`. Contiene la guí
 ### Vista previa
 
 ![Interfaz del agente Pi de j0k3r](images/2026-09-14_14-26.png)
+
+![Interfaz del workflow del agente Pi](images/2026-09-14_14-22.png)
 
 <details>
 <summary><strong>Tema e interfaz interactiva de Pi</strong></summary>
