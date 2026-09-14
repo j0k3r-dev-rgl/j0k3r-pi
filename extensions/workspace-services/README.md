@@ -43,6 +43,7 @@ When any service is started, the extension ensures `.gitignore` contains `.pi/wo
 - Linux-only lifecycle semantics.
 - Process identity uses procfs-backed PID, process-group, session, boot id, start-time, command-line, and cwd validation.
 - On trusted Pi session start, the extension reconciles persisted runtime state against real processes without auto-starting services.
+- Service startup enforces a 30s timeout by default (configurable via `timeout_ms`), kills partially spawned runners on timeout, and cleans up any pending state.
 - Stop and restart require confirmed managed-group absence before state deletion or replacement start; restart truncates the managed log before writing the new start header.
 - Lifecycle operations are serialized across processes that share the same runtime-state path.
 - Runtime state is schema-versioned, atomically replaced, and recovered from `state.last-good.json` when possible.

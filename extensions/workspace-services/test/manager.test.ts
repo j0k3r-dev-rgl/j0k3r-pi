@@ -181,8 +181,28 @@ describe('workspace service manager', () => {
   it('reconciles stale status before returning the snapshot', async () => {
     const cwd = await configuredWorkspace('node -e "process.exit(0)"');
     await startService(cwd, 'svc').catch(() => undefined);
-    await writeFile(join(cwd, '.pi', 'workspace-services', 'state.json'), JSON.stringify({ schemaVersion: 1, generation: 1, workspaceId: '.', services: { svc: { phase: 'running', operationId: 'op', identity: { pid: 999999, processGroupId: 999999, sessionId: 999999, bootId: 'x', startTimeTicks: '1', cmdlineSha256: 'x', cwdRelative: 'svc', cwdDevice: '1', cwdInode: '1', serviceCommandSha256: 'x' }, updatedAt: new Date().toISOString() } } }), 'utf8');
+    const validSha = 'a'.repeat(64);
+    await writeFile(join(cwd, '.pi', 'workspace-services', 'state.json'), JSON.stringify({ schemaVersion: 1, generation: 1, workspaceId: '.', services: { svc: { phase: 'running', operationId: 'op', identity: { pid: 999999, processGroupId: 999999, sessionId: 999999, bootId: 'x', startTimeTicks: '1', cmdlineSha256: validSha, cwdRelative: 'svc', cwdDevice: '1', cwdInode: '1', serviceCommandSha256: validSha }, updatedAt: new Date().toISOString() } } }), 'utf8');
     const status = await getServicesStatus(cwd);
     expect(status.services.find((service) => service.name === 'svc')?.status).toBe('stale');
+  });
+
+  it('returns a timeout outcome when startup exceeds timeoutMs and does not leave starting state', async () => {
+    const cwd = await configuredWorkspace();
+    // Use an impossibly low timeoutMs (100ms) where spawn/health check cannot complete in time
+    const outcome = await startService(cwd, 'svc', { timeoutMs: 100 });
+    expect(outcome.ok).toBe(false);
+    expect(outcome.status).toBe('timeout');
+    expect(outcome.summary).toContain('timed out');
+    const status = await getServicesStatus(cwd);
+    // Service state should be stopped, not starting
+    expect(status.services.find((service) => service.name === 'svc')?.status).toBe('stopped');
+  });
+
+  it('cleans up starting state when service fails immediately', async () => {
+    const cwd = await configuredWorkspace('node -e "process.exit(1)"');
+    await expect(startService(cwd, 'svc')).rejects.toThrow(/exited immediately/);
+    const rawState = JSON.parse(await readFile(join(cwd, '.pi', 'workspace-services', 'state.json'), 'utf8'));
+    expect(rawState.services.svc).toBeUndefined();
   });
 });

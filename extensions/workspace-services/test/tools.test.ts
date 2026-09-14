@@ -112,4 +112,12 @@ describe('workspace services extension tools', () => {
     expect(expanded).toContain('continue: Call again');
     expect(expanded).toContain('[REDACTED]');
   });
+
+  it('declares optional timeout_ms parameter on workspace_service_start', () => {
+    const pi = createPi();
+    workspaceServicesExtension(pi as any);
+    const tool = pi.tools.find((entry) => entry.name === 'workspace_service_start');
+    expect(tool).toBeDefined();
+    expect(tool.parameters.properties).toHaveProperty('timeout_ms');
+  });
 });

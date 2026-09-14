@@ -18,6 +18,7 @@ import { commitRuntimeState, initializeLastGoodState, openRuntimeState } from '.
 import { confirmGroupAbsent, captureManagedIdentity, processStillRunning, validateManagedIdentity } from './process-identity.js';
 import { withLifecycleTransaction } from './transaction.js';
 
+const DEFAULT_START_TIMEOUT_MS = 30_000;
 const DEFAULT_STOP_TIMEOUT_MS = 5_000;
 const START_HEALTH_DELAY_MS = 120;
 const DEFAULT_LOG_LINES = 100;
@@ -26,6 +27,7 @@ const DEFAULT_LOG_BYTES = 50 * 1024;
 const MAX_LOG_BYTES = 200 * 1024;
 const DEFAULT_TRANSACTION_DEADLINE_MS = 10_000;
 const MAX_RUNNER_PAYLOAD_BYTES = 256 * 1024;
+const RUNNER_PAYLOAD_WRITE_TIMEOUT_MS = 5_000;
 
 export interface ListServicesResult {
   configPath: string;
@@ -53,6 +55,7 @@ export interface LogsOptions {
 
 export interface StartOptions {
   truncateLog?: boolean;
+  timeoutMs?: number;
   signal?: AbortSignal;
 }
 
@@ -144,28 +147,70 @@ async function readTail(path: string, maxBytes: number): Promise<{ text: string;
   }
 }
 
-function writeRunnerPayload(target: Writable, payload: string, signal?: AbortSignal): Promise<void> {
+function writeRunnerPayload(
+  child: import('node:child_process').ChildProcess,
+  target: Writable,
+  payload: string,
+  signal?: AbortSignal,
+  timeoutMs = RUNNER_PAYLOAD_WRITE_TIMEOUT_MS,
+): Promise<void> {
   return new Promise((resolve, reject) => {
+    if (target.destroyed || !target.writable || ('writableEnded' in target && (target as any).writableEnded)) {
+      reject(new Error('Runner handoff pipe is closed or unavailable'));
+      return;
+    }
     let settled = false;
+    let timer: NodeJS.Timeout | undefined;
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      target.off('error', onError);
+      target.off('finish', onFinish);
+      target.off('close', onClose);
+      child.off('error', onChildError);
+      child.off('exit', onChildExit);
+      signal?.removeEventListener('abort', onAbort);
+    };
+
     const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
-      target.off('error', onError);
-      target.off('finish', onFinish);
-      signal?.removeEventListener('abort', onAbort);
+      cleanup();
       if (error) reject(error);
       else resolve();
     };
+
     const onError = (error: Error) => finish(error);
     const onFinish = () => finish();
+    const onClose = () => {
+      finish(new Error('Runner handoff pipe closed before payload transfer completed'));
+    };
+    const onChildError = (error: Error) => finish(error);
+    const onChildExit = (code: number | null, sig: string | null) => {
+      finish(new Error(`Runner process exited prematurely with code ${code ?? 'null'} signal ${sig ?? 'null'}`));
+    };
     const onAbort = () => {
       target.destroy(new Error('Operation aborted'));
       finish(new Error('Operation aborted'));
     };
+
+    timer = setTimeout(() => {
+      target.destroy(new Error('Runner payload write timed out'));
+      finish(new Error('Runner payload write timed out'));
+    }, timeoutMs);
+
     target.once('error', onError);
     target.once('finish', onFinish);
+    target.once('close', onClose);
+    child.once('error', onChildError);
+    child.once('exit', onChildExit);
     signal?.addEventListener('abort', onAbort, { once: true });
-    target.end(payload);
+
+    try {
+      target.end(payload);
+    } catch (err: any) {
+      finish(err);
+    }
   });
 }
 
@@ -191,9 +236,18 @@ async function spawnRunner(config: WorkspaceServicesConfig, service: WorkspaceSe
   child.unref();
   if (!child.pid) throw new Error(`Failed to start service "${service.name}": process pid was not available.`);
   const handoff = child.stdio[3];
-  if (!handoff) throw new Error(`Failed to start service "${service.name}": runner handoff pipe was unavailable.`);
-  await writeRunnerPayload(handoff as Writable, payload, signal);
-  await delay(START_HEALTH_DELAY_MS * 2);
+  if (!handoff) {
+    try { process.kill(-child.pid, 'SIGKILL'); } catch { try { process.kill(child.pid, 'SIGKILL'); } catch { /* ignore */ } }
+    throw new Error(`Failed to start service "${service.name}": runner handoff pipe was unavailable.`);
+  }
+  handoff.on('error', () => undefined);
+  try {
+    await writeRunnerPayload(child, handoff as Writable, payload, signal);
+    await delay(START_HEALTH_DELAY_MS * 2);
+  } catch (error) {
+    try { process.kill(-child.pid, 'SIGKILL'); } catch { try { process.kill(child.pid, 'SIGKILL'); } catch { /* ignore */ } }
+    throw error;
+  }
   if (!(await processStillRunning(child.pid))) throw new Error(`Service "${service.name}" exited immediately. Check logs at ${service.logPath}.`);
   return child.pid;
 }
@@ -262,54 +316,130 @@ export async function getServicesStatus(cwd: string, signal?: AbortSignal): Prom
 export async function startService(cwd: string, serviceName: string, options: StartOptions = {}): Promise<WorkspaceServiceOutcome> {
   const config = await loadWorkspaceServicesConfig(cwd);
   const service = getService(config, serviceName);
+  const timeoutMs = clampInteger(options.timeoutMs, DEFAULT_START_TIMEOUT_MS, 100, 300_000);
   await ensureRuntimeDirs(config);
   await ensureRuntimeGitignore(config.workspaceRoot);
   if (!(await pathExists(service.cwd))) throw new Error(`Service "${service.name}" path does not exist: ${service.cwd}`);
 
+  const timeoutController = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    timeoutController.abort(new Error(`Service "${service.name}" start timed out after ${timeoutMs}ms.`));
+  }, timeoutMs);
+
+  const onExternalAbort = () => {
+    timeoutController.abort(options.signal?.reason ?? new Error('Operation aborted'));
+  };
+
+  if (options.signal) {
+    if (options.signal.aborted) {
+      clearTimeout(timer);
+      timeoutController.abort(options.signal.reason ?? new Error('Operation aborted'));
+    } else {
+      options.signal.addEventListener('abort', onExternalAbort, { once: true });
+    }
+  }
+
+  let spawnedPid: number | undefined;
+
   try {
-    return await withLifecycleTransaction(config.statePath, { signal: options.signal, deadlineMs: DEFAULT_TRANSACTION_DEADLINE_MS, ownerPath: config.ownerPath }, async () => {
-    await initializeLastGoodState(config);
-    const opened = await openRuntimeState(config);
-    const next = { ...opened.state, services: { ...opened.state.services } };
-    const runtime = next.services[service.name];
-    if (runtime?.identity) {
-      const validation = await validateManagedIdentity(config, runtime.identity, service.command);
-      if (validation.ok) {
+    return await withLifecycleTransaction(
+      config.statePath,
+      {
+        signal: timeoutController.signal,
+        deadlineMs: Math.min(timeoutMs, DEFAULT_TRANSACTION_DEADLINE_MS),
+        ownerPath: config.ownerPath,
+      },
+      async () => {
+        await initializeLastGoodState(config);
+        const opened = await openRuntimeState(config);
+        const next = { ...opened.state, services: { ...opened.state.services } };
+        const runtime = next.services[service.name];
+        if (runtime?.identity) {
+          const validation = await validateManagedIdentity(config, runtime.identity, service.command);
+          if (validation.ok) {
+            return {
+              ok: true,
+              status: 'already_running',
+              summary: `${service.name} is already running.`,
+              data: { service: service.name, pid: validation.identity.pid, logPath: service.logPath, startedAt: runtime.startedAt },
+            };
+          }
+          delete next.services[service.name];
+        }
+
+        const operationId = randomUUID();
+        next.services[service.name] = stateEntry('starting', operationId);
+        const starting = await commitRuntimeState(config, opened.state, next);
+
+        let pid: number;
+        try {
+          pid = await spawnRunner(config, service, options.truncateLog ?? false, timeoutController.signal);
+          spawnedPid = pid;
+        } catch (spawnError) {
+          delete starting.services[service.name];
+          await commitRuntimeState(config, starting, starting).catch(() => undefined);
+          throw spawnError;
+        }
+
+        let identity: ManagedProcessIdentityV1;
+        try {
+          identity = await captureManagedIdentity(config, pid, service.command);
+        } catch (captureError) {
+          try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ } }
+          delete starting.services[service.name];
+          await commitRuntimeState(config, starting, starting).catch(() => undefined);
+          throw captureError;
+        }
+
+        starting.services[service.name] = { phase: 'running', operationId, identity, startedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+        await commitRuntimeState(config, starting, starting);
+
+        if (timedOut) {
+          try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ } }
+          delete starting.services[service.name];
+          await commitRuntimeState(config, starting, starting).catch(() => undefined);
+          return {
+            ok: false,
+            status: 'timeout',
+            summary: `${service.name} start timed out after ${timeoutMs}ms.`,
+            nextAction: `Check logs at ${service.logPath} or verify service configuration.`,
+            data: { service: service.name, timeoutMs },
+          };
+        }
+
+        if (options.signal?.aborted) {
+          return {
+            ok: false,
+            status: 'cancelled',
+            summary: `${service.name} start was cancelled after the service was spawned; runtime state was reconciled.`,
+            nextAction: 'Inspect workspace_services_status or stop the running service if it is no longer needed.',
+            data: { service: service.name, pid, logPath: service.logPath, startedAt: starting.services[service.name].startedAt },
+          };
+        }
         return {
           ok: true,
-          status: 'already_running',
-          summary: `${service.name} is already running.`,
-          data: { service: service.name, pid: validation.identity.pid, logPath: service.logPath, startedAt: runtime.startedAt },
+          status: 'started',
+          summary: `${service.name} started.`,
+          data: { service: service.name, pid, logPath: service.logPath, startedAt: starting.services[service.name].startedAt },
         };
-      }
-      delete next.services[service.name];
+      },
+    );
+  } catch (error) {
+    if (spawnedPid) {
+      try { process.kill(-spawnedPid, 'SIGKILL'); } catch { try { process.kill(spawnedPid, 'SIGKILL'); } catch { /* ignore */ } }
     }
-
-    const operationId = randomUUID();
-    next.services[service.name] = stateEntry('starting', operationId);
-    const starting = await commitRuntimeState(config, opened.state, next);
-    const pid = await spawnRunner(config, service, options.truncateLog ?? false, options.signal);
-    const identity = await captureManagedIdentity(config, pid, service.command);
-    starting.services[service.name] = { phase: 'running', operationId, identity, startedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-    await commitRuntimeState(config, starting, starting);
-    if (options.signal?.aborted) {
+    if (timedOut || (error instanceof Error && error.message.includes('timed out'))) {
       return {
         ok: false,
-        status: 'cancelled',
-        summary: `${service.name} start was cancelled after the service was spawned; runtime state was reconciled.`,
-        nextAction: 'Inspect workspace_services_status or stop the running service if it is no longer needed.',
-        data: { service: service.name, pid, logPath: service.logPath, startedAt: starting.services[service.name].startedAt },
+        status: 'timeout',
+        summary: `${service.name} start timed out after ${timeoutMs}ms.`,
+        nextAction: `Check logs at ${service.logPath} or verify service configuration.`,
+        data: { service: service.name, timeoutMs },
       };
     }
-    return {
-      ok: true,
-      status: 'started',
-      summary: `${service.name} started.`,
-      data: { service: service.name, pid, logPath: service.logPath, startedAt: starting.services[service.name].startedAt },
-    };
-  });
-  } catch (error) {
-    if (error instanceof Error && error.message === 'Operation aborted') {
+    if (error instanceof Error && (error.message === 'Operation aborted' || error.name === 'AbortError' || options.signal?.aborted)) {
       return {
         ok: false,
         status: 'cancelled',
@@ -319,6 +449,11 @@ export async function startService(cwd: string, serviceName: string, options: St
       };
     }
     throw error;
+  } finally {
+    clearTimeout(timer);
+    if (options.signal) {
+      options.signal.removeEventListener('abort', onExternalAbort);
+    }
   }
 }
 
@@ -406,8 +541,23 @@ export async function restartService(cwd: string, serviceName: string, options: 
     const operationId = randomUUID();
     const pending = { ...refreshed.state, services: { ...refreshed.state.services, [service.name]: stateEntry('starting', operationId) } };
     const starting = await commitRuntimeState(config, refreshed.state, pending);
-    const pid = await spawnRunner(config, service, true, options.signal);
-    const identity = await captureManagedIdentity(config, pid, service.command);
+    let pid: number;
+    try {
+      pid = await spawnRunner(config, service, true, options.signal);
+    } catch (spawnError) {
+      delete starting.services[service.name];
+      await commitRuntimeState(config, starting, starting).catch(() => undefined);
+      throw spawnError;
+    }
+    let identity: ManagedProcessIdentityV1;
+    try {
+      identity = await captureManagedIdentity(config, pid, service.command);
+    } catch (captureError) {
+      try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ } }
+      delete starting.services[service.name];
+      await commitRuntimeState(config, starting, starting).catch(() => undefined);
+      throw captureError;
+    }
     starting.services[service.name] = { phase: 'running', operationId, identity, startedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     await commitRuntimeState(config, starting, starting);
     if (options.signal?.aborted) {

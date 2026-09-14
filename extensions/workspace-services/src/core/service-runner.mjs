@@ -71,6 +71,19 @@ const writeChunk = (chunk) => {
 child.stdout?.on('data', writeChunk);
 child.stderr?.on('data', writeChunk);
 
+child.on('error', (err) => {
+  try {
+    logStream.write(`\n[workspace-services] Failed to spawn command: ${err.message}\n`);
+  } catch {
+    // ignore
+  }
+  process.exit(1);
+});
+
+logStream.on('error', () => {
+  // Prevent unhandled error event on logStream
+});
+
 let shuttingDown = false;
 const terminateGroup = (signal) => {
   if (!child.pid) return;

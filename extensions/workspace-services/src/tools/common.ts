@@ -5,6 +5,10 @@ export const EMPTY_PARAMETERS = Type.Object({}, { additionalProperties: false })
 export const SERVICE_PARAMETERS = Type.Object({
   service: Type.String({ description: 'Configured service name from .pi/workspace-services.json.' }),
 }, { additionalProperties: false });
+export const START_PARAMETERS = Type.Object({
+  service: Type.String({ description: 'Configured service name from .pi/workspace-services.json.' }),
+  timeout_ms: Type.Optional(Type.Number({ description: 'Milliseconds to wait for service startup. Default 30000.' })),
+}, { additionalProperties: false });
 export const STOP_PARAMETERS = Type.Object({
   service: Type.String({ description: 'Configured service name from .pi/workspace-services.json.' }),
   timeout_ms: Type.Optional(Type.Number({ description: 'Milliseconds to wait after SIGTERM before SIGKILL. Default 5000.' })),

@@ -12,6 +12,7 @@ import {
   EMPTY_PARAMETERS,
   LOGS_PARAMETERS,
   SERVICE_PARAMETERS,
+  START_PARAMETERS,
   STOP_PARAMETERS,
   serviceName,
   textResult,
@@ -97,10 +98,13 @@ export function registerWorkspaceServicesTools(pi: ExtensionAPI, options: Regist
     description: 'Start one configured workspace service. Runs only the command declared for that service.',
     promptSnippet: 'Start one manually configured workspace service.',
     promptGuidelines: ['Use workspace_service_start only with configured service names.'],
-    parameters: SERVICE_PARAMETERS,
+    parameters: START_PARAMETERS,
     execute: async (_id, params, signal, _onUpdate, ctx) => {
       if (!(await ensureTrusted(ctx))) return textResult(trustFailure(), trustFailure().summary);
-      const outcome = await startService(cwdFrom(ctx, options), serviceName(params), { signal });
+      const outcome = await startService(cwdFrom(ctx, options), serviceName(params), {
+        signal,
+        timeoutMs: timeoutMs(params),
+      });
       return textResult(outcome, `workspace_service_start: ${outcome.summary}`);
     },
     renderShell: 'self' as const,
