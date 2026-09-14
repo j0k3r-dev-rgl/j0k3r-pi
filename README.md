@@ -6,6 +6,24 @@
 
 Personal/global Pi agent configuration used from `~/.pi/agent`. It contains the agent operating guide, workflow skills, Markdown subagents, permission configuration, local extension copies, and external Pi packages managed by the installer.
 
+### Preview
+
+![j0k3r Pi agent interface](images/2026-09-14_14-26.png)
+
+<details>
+<summary><strong>Pi theme and interactive interface</strong></summary>
+
+![Pi theme demo](images/pi-theme-demo.gif)
+
+</details>
+
+<details>
+<summary><strong>Agent workflow in action</strong></summary>
+
+![Pi workflow demo](images/pi-workflow-demo.gif)
+
+</details>
+
 ### Layout
 
 | Path | Purpose |
@@ -269,6 +287,24 @@ Extension READMEs should describe the implementation in this checkout using repo
 ## Español
 
 Configuración global/personal de Pi usada desde `~/.pi/agent`. Contiene la guía operativa del agente, skills de workflow, subagentes Markdown, configuración de permisos, copias locales de extensiones y paquetes externos de Pi gestionados por el instalador.
+
+### Vista previa
+
+![Interfaz del agente Pi de j0k3r](images/2026-09-14_14-26.png)
+
+<details>
+<summary><strong>Tema e interfaz interactiva de Pi</strong></summary>
+
+![Demostración del tema de Pi](images/pi-theme-demo.gif)
+
+</details>
+
+<details>
+<summary><strong>Workflow del agente en acción</strong></summary>
+
+![Demostración del workflow de Pi](images/pi-workflow-demo.gif)
+
+</details>
 
 ### Estructura
 
