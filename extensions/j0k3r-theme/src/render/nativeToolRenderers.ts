@@ -5,7 +5,6 @@ import {
 	formatSize,
 	getLanguageFromPath,
 	highlightCode,
-	keyHint,
 	renderDiff,
 } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
@@ -14,8 +13,11 @@ import {
 	CYAN,
 	DIM,
 	LIME,
+	PINK,
 	RED,
+	VIOLET,
 	electric,
+	toolHint,
 } from "./borders.js";
 import {
 	ToolCardCallComponent,
@@ -24,12 +26,28 @@ import {
 	type ToolRenderContext,
 } from "./ToolCard.js";
 
-export function getNonBashBorderColor(state: ToolCardState): string {
+export function getReadBorderColor(state: ToolCardState): string {
 	if (state.isError) {
 		return RED;
 	}
 	return CYAN;
 }
+
+export function getEditBorderColor(state: ToolCardState): string {
+	if (state.isError) {
+		return RED;
+	}
+	return VIOLET;
+}
+
+export function getWriteBorderColor(state: ToolCardState): string {
+	if (state.isError) {
+		return RED;
+	}
+	return PINK;
+}
+
+export const getNonBashBorderColor = getReadBorderColor;
 
 function extractText(result: AgentToolResult<any>): string {
 	if (!result?.content || !Array.isArray(result.content)) return "";
@@ -65,7 +83,7 @@ export const readRenderers = {
 			"read",
 			() => formatReadTarget(args),
 			() => `${electric(CYAN, "●")} ${electric(DIM, "Reading file...")}`,
-			getNonBashBorderColor,
+			getReadBorderColor,
 			context.state,
 		);
 	},
@@ -99,7 +117,7 @@ export const readRenderers = {
 					const allLines = text.split("\n");
 					const lineCount = text.length > 0 ? allLines.length : 0;
 					const byteCount = Buffer.byteLength(text, "utf-8");
-					const hint = keyHint("app.tools.expand", "to expand");
+					const hint = toolHint("to expand");
 					lines.push(`${lineCount} lines, ${formatSize(byteCount)} · ${hint}`);
 				} else {
 					// Expanded view: full preview with syntax highlighting
@@ -116,12 +134,12 @@ export const readRenderers = {
 							),
 						);
 					}
-					lines.push(electric(DIM, keyHint("app.tools.expand", "to collapse")));
+					lines.push(electric(DIM, toolHint("to collapse")));
 				}
 
 				return lines;
 			},
-			getNonBashBorderColor,
+			getReadBorderColor,
 			state,
 		);
 	},
@@ -144,8 +162,8 @@ export const editRenderers = {
 		return new ToolCardCallComponent(
 			"edit",
 			() => target,
-			() => `${electric(CYAN, "●")} ${electric(DIM, "Applying edits...")}`,
-			getNonBashBorderColor,
+			() => `${electric(VIOLET, "●")} ${electric(DIM, "Applying edits...")}`,
+			getEditBorderColor,
 			context.state,
 		);
 	},
@@ -178,7 +196,7 @@ export const editRenderers = {
 				if (!options.expanded) {
 					// Collapsed view: display target path and edit chunk count
 					const chunkStr = editsCount === 1 ? "1 edit chunk" : `${editsCount} edit chunks`;
-					const hint = keyHint("app.tools.expand", "to expand");
+					const hint = toolHint("to expand");
 					lines.push(`${electric(LIME, "✓")} ${chunkStr} applied · ${hint}`);
 				} else {
 					// Expanded view: unified diff summary
@@ -191,12 +209,12 @@ export const editRenderers = {
 					} else {
 						lines.push(electric(DIM, "(no diff output)"));
 					}
-					lines.push(electric(DIM, keyHint("app.tools.expand", "to collapse")));
+					lines.push(electric(DIM, toolHint("to collapse")));
 				}
 
 				return lines;
 			},
-			getNonBashBorderColor,
+			getEditBorderColor,
 			state,
 		);
 	},
@@ -214,12 +232,47 @@ export interface WriteArgs {
 export const writeRenderers = {
 	renderCall(args: WriteArgs, _theme: Theme, context: ToolRenderContext<ToolCardState, WriteArgs>): Component {
 		const target = args?.path ?? args?.file_path ?? "";
+		const content = args?.content ?? "";
+		const rawLines = content ? content.split(/\r?\n/) : [];
+		const totalLines = rawLines.length;
+
+		const getStatus = () => {
+			if (context.state.hasResult) {
+				return `${electric(PINK, "●")} ${electric(DIM, `File written (${totalLines} lines)`)}`;
+			}
+			if (context.argsComplete) {
+				return `${electric(PINK, "●")} ${electric(DIM, `Saving file... (${totalLines} lines)`)}`;
+			}
+			if (totalLines > 0) {
+				return `${electric(PINK, "●")} ${electric(DIM, `Writing... (${totalLines} lines)`)}`;
+			}
+			return `${electric(PINK, "●")} ${electric(DIM, "Writing file...")}`;
+		};
+
 		return new ToolCardCallComponent(
 			"write",
 			() => target,
-			() => `${electric(CYAN, "●")} ${electric(DIM, "Writing file...")}`,
-			getNonBashBorderColor,
+			getStatus,
+			getWriteBorderColor,
 			context.state,
+			(_width: number, innerWidth: number) => {
+				if (!content) {
+					return [];
+				}
+				const contentWidth = Math.max(0, innerWidth - 2);
+				const lang = getLanguageFromPath(target);
+				const highlighted = lang ? highlightCode(content, lang) : rawLines;
+				const maxPreview = 10;
+				const previewLines = highlighted.slice(-maxPreview);
+				const lines: string[] = [];
+
+				if (highlighted.length > maxPreview) {
+					lines.push(electric(DIM, `... (${highlighted.length - maxPreview} earlier lines)`));
+				}
+				lines.push(...previewLines);
+				lines.push(electric(DIM, "─".repeat(contentWidth)));
+				return lines;
+			},
 		);
 	},
 
@@ -252,19 +305,19 @@ export const writeRenderers = {
 					// Collapsed view: display target path and byte count written
 					const byteCount = Buffer.byteLength(content, "utf-8");
 					const lineCount = content.length > 0 ? content.split("\n").length : 0;
-					const hint = keyHint("app.tools.expand", "to expand");
+					const hint = toolHint("to expand");
 					lines.push(`${electric(LIME, "✓")} Wrote ${formatSize(byteCount)} (${lineCount} lines) · ${hint}`);
 				} else {
 					// Expanded view: content preview
 					const lang = getLanguageFromPath(target);
 					const codeLines = lang ? highlightCode(content, lang) : content.split("\n");
 					lines.push(...codeLines);
-					lines.push(electric(DIM, keyHint("app.tools.expand", "to collapse")));
+					lines.push(electric(DIM, toolHint("to collapse")));
 				}
 
 				return lines;
 			},
-			getNonBashBorderColor,
+			getWriteBorderColor,
 			state,
 		);
 	},

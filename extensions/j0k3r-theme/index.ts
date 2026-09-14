@@ -345,6 +345,16 @@ export function saveWelcomeBannerSetting(style: WelcomeBannerStyle): void {
 export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 	registerNativeToolOverrides(pi);
 
+	pi.registerMarkdownTransformer((markdown, context) => {
+		if (context.messageType === "user") {
+			const promptPrefix = "**`󰣇 j0k3r >`** ";
+			if (!markdown.startsWith("**`󰣇 j0k3r")) {
+				return `${promptPrefix}${markdown}`;
+			}
+		}
+		return markdown;
+	});
+
 	let activeHeader: J0k3rThemeHeader | undefined;
 	let activeFooter: J0k3rThemeFooter | undefined;
 	let requestUIRender: (() => void) | undefined;

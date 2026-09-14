@@ -41,6 +41,7 @@ export class ToolCardCallComponent implements Component {
 		private readonly getPendingStatus: () => string,
 		private readonly getBorderColor: (state: ToolCardState) => string,
 		private readonly state: ToolCardState,
+		private readonly getBodyLines?: (width: number, innerWidth: number) => string[],
 	) {}
 
 	render(width: number): string[] {
@@ -57,10 +58,13 @@ export class ToolCardCallComponent implements Component {
 			return [topBorder];
 		}
 
+		const bodyLines = this.getBodyLines ? this.getBodyLines(width, innerWidth) : [];
 		const statusLine = this.getPendingStatus();
+		const framed = frameContent([...bodyLines, statusLine], innerWidth, borderColor, true);
+
 		return [
 			topBorder,
-			boxLine(statusLine, innerWidth, borderColor),
+			...framed,
 			cardBottomBorder(innerWidth, borderColor),
 		];
 	}

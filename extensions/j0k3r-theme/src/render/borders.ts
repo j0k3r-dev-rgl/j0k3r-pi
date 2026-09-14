@@ -7,8 +7,13 @@ export const PINK = "\x1b[1;38;2;255;45;247m";
 export const VIOLET = "\x1b[1;38;2;153;92;255m";
 export const LIME = "\x1b[1;38;2;102;255;102m"; // Neon green
 export const AMBER = "\x1b[1;38;2;255;184;77m";
+export const ORANGE = "\x1b[1;38;2;255;140;0m"; // Neon orange
 export const RED = "\x1b[1;38;2;255;77;109m"; // Neon red
 export const DIM = "\x1b[2m";
+
+export function toolHint(action: string): string {
+	return `${electric(DIM, "Ctrl+O")} ${electric(DIM, action)}`;
+}
 
 export function electric(color: string, text: string): string {
 	return `${color}${text}${RESET}`;

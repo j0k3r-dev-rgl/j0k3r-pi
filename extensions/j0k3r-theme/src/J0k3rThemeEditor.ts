@@ -116,7 +116,33 @@ export class J0k3rThemeEditor extends CustomEditor {
 		}
 
 		let statusWidth = visibleWidth(status);
-		if (statusWidth === 0) return super.renderTopBorder(width, hiddenLineCount);
+		if (statusWidth === 0) {
+			const userBadge = ` \x1b[1;38;2;0;229;255m${ARCH_ICON}\x1b[0m \x1b[1;38;2;255;45;247mj0k3r\x1b[0m `;
+			const badgeWidth = visibleWidth(userBadge);
+			const overflowLabel = hiddenLineCount > 0 ? ` ↑ ${hiddenLineCount} more ` : undefined;
+			const overflowLabelWidth = overflowLabel ? visibleWidth(overflowLabel) : 0;
+
+			if (width >= badgeWidth + overflowLabelWidth + 6 && overflowLabel) {
+				const rest = width - badgeWidth - overflowLabelWidth - 2;
+				return (
+					this.borderColor("──") +
+					userBadge +
+					this.borderColor("─".repeat(Math.max(1, rest))) +
+					this.borderColor(overflowLabel) +
+					this.borderColor("──")
+				);
+			}
+
+			if (width >= badgeWidth + 4) {
+				return (
+					this.borderColor("──") +
+					userBadge +
+					this.borderColor("─".repeat(Math.max(0, width - badgeWidth - 2)))
+				);
+			}
+
+			return super.renderTopBorder(width, hiddenLineCount);
+		}
 
 		const overflowLabel = hiddenLineCount > 0 ? ` ↑ ${hiddenLineCount} more ` : undefined;
 		const overflowLabelWidth = overflowLabel ? visibleWidth(overflowLabel) : 0;

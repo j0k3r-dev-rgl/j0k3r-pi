@@ -8,12 +8,27 @@ import {
 import { bashRenderers } from "../render/bashRenderer.js";
 import { editRenderers, readRenderers, writeRenderers } from "../render/nativeToolRenderers.js";
 
+export const DEFAULT_BASH_TIMEOUT_SECONDS = 120; // 2 minutos default si la tool o el LLM no envían timeout
+
 export function registerNativeToolOverrides(pi: ExtensionAPI, cwd: string = process.cwd()): void {
 	// 1. bash
 	const bashDef = createBashToolDefinition(cwd);
+	const originalBashExecute = bashDef.execute;
+
 	pi.registerTool({
 		...bashDef,
 		renderShell: "self",
+		execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+			const effectiveTimeout =
+				params?.timeout !== undefined && params?.timeout > 0
+					? params.timeout
+					: DEFAULT_BASH_TIMEOUT_SECONDS;
+			const effectiveParams = {
+				...params,
+				timeout: effectiveTimeout,
+			};
+			return originalBashExecute(toolCallId, effectiveParams as any, signal, onUpdate, ctx);
+		},
 		renderCall: bashRenderers.renderCall as ToolDefinition["renderCall"],
 		renderResult: bashRenderers.renderResult as ToolDefinition["renderResult"],
 	});
