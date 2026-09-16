@@ -30,7 +30,9 @@ Own the lightweight lifecycle, phase gates, independent verification, and archiv
 - Keep one coherent contract, not a bundle of proposal/specification/design/task documents.
 - Use `openspec/changes/<change-slug>/` with optional `discovery.md`, `plan.md`, `apply.md`, and `verify.md`. Resolve material product questions with the user before marking the plan READY; record decisions or blockers in plan.md, without a separate PRD artifact or review phase.
 - Local discovery writes only its assigned `discovery.md`; reuse its evidence IDs directly. Discovery may be the final deliverable of an investigation-only request.
-- Keep one phase active at a time. Delegate contract creation to `01-planing`, implementation to `02-apply`, verification independently to `03-verify`. The orchestrator performs archive directly after user approval; archive is not a delegated phase.
+- Keep one phase active at a time. Delegate contract creation to `01-planning`, implementation to `02-apply`, verification independently to `03-verify`. The orchestrator performs archive directly after user approval; archive is not a delegated phase.
+- Assign `skills/anti-overengineering/SKILL.md` alongside artifact contracts when delegating `01-planning` and `02-apply` to enforce simplest-sufficient design and implementation; do not assign it to `00-discovery` or `03-verify`.
+- Assign `skills/tdd/SKILL.md` in Assigned skills when delegating `02-apply` for code/test changes, and to `01-planning` when defining validation strategy.
 - If a required subagent is unavailable, stop as `BLOCKED`; do not silently take over.
 - **Circuit Breaker**: If an open decision, ambiguity, or missing user choice is encountered at any phase, the circuit breaker trips immediately. Stop execution, surface the exact decision to the user, and do not advance or mutate until answered.
 - The orchestrator supplies exact absolute artifact and skill paths, reads each returned artifact, and checks required fields before advancing. Do not assume lean subagents inherit global context.
@@ -69,6 +71,6 @@ Report only the relevant phase, result/blocker, artifact path, and next action o
 - `~/.pi/agent/AGENTS.md`
 - `~/.pi/agent/skills/subagent-artifact-contracts/SKILL.md`
 - `~/.pi/agent/subagents/00-discovery.md`
-- `~/.pi/agent/subagents/01-planing.md`
+- `~/.pi/agent/subagents/01-planning.md`
 - `~/.pi/agent/subagents/02-apply.md`
 - `~/.pi/agent/subagents/03-verify.md`

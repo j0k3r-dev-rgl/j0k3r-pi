@@ -266,7 +266,7 @@ Current global/user subagents are under [`subagents/*.md`](subagents/):
 
 - [`00-discovery`](subagents/00-discovery.md) — local investigation; its assigned `discovery.md` is the sole write exception. No internet.
 - [`deep-researcher`](subagents/deep-researcher.md) — internet-capable deep research that writes `report.md` and `sources.md` in an assigned directory.
-- [`01-planing`](subagents/01-planing.md) — creates the bounded Planned Workflow implementation contract.
+- [`01-planning`](subagents/01-planning.md) — creates the bounded Planned Workflow implementation contract.
 - [`news-researcher`](subagents/news-researcher.md) — tech news intelligence gathering and briefing report generation.
 - [`02-apply`](subagents/02-apply.md) — approved implementation.
 - [`03-verify`](subagents/03-verify.md) — independent verification without fixing.
@@ -544,7 +544,7 @@ Los subagentes globales/de usuario actuales están en [`subagents/*.md`](subagen
 
 - [`00-discovery`](subagents/00-discovery.md) — investigación local; el `discovery.md` asignado es su única excepción de escritura. Sin internet.
 - [`deep-researcher`](subagents/deep-researcher.md) — investigación profunda con internet que escribe `report.md` y `sources.md` en un directorio asignado.
-- [`01-planing`](subagents/01-planing.md) — crea el contrato Planned Workflow para cambios acotados.
+- [`01-planning`](subagents/01-planning.md) — crea el contrato Planned Workflow para cambios acotados.
 - [`news-researcher`](subagents/news-researcher.md) — investigación de noticias tecnológicas y generación de reportes de briefing.
 - [`02-apply`](subagents/02-apply.md) — implementación autorizada.
 - [`03-verify`](subagents/03-verify.md) — verificación independiente sin arreglar.

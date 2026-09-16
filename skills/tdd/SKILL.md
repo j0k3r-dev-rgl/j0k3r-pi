@@ -4,7 +4,7 @@ description: "guide test and regression strategy for code changes. Use for behav
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "2.0"
+  version: "3.0"
 registry:
   category: "quality"
   domains: "tdd, testing, regression-testing"
@@ -57,7 +57,7 @@ It does not own workflow choice, repository-wide reorganization, dependency inst
 
 ## Decision Gates
 
-Stop and ask when:
+Stop and trigger the decision protocol when:
 
 - no usable test framework or environment exists;
 - multiple frameworks plausibly own the same layer;
@@ -66,6 +66,10 @@ Stop and ask when:
 - relevant tests are colocated and migration is undecided;
 - the right existing file needs a structural split first; or
 - RED is required but the issue is not reproducible.
+
+- **Circuit Breaker**: When any of the test gates above are triggered:
+  - **Subagent execution**: trip the circuit breaker and return `BLOCKED` immediately, specifying the exact test failure, missing environment, or irreproducible condition. Never skip tests, fake results, or mark implementation ready without required evidence.
+  - **Orchestrator execution**: stop immediately, report the test blocker concisely, and ask the user for the missing decision before modifying code.
 
 ## Execution Steps
 

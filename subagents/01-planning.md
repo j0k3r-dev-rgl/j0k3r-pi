@@ -1,16 +1,20 @@
 ---
-name: 01-planing
+name: 01-planning
 description: "Creates or updates plan.md as the delegated Planned Workflow implementation contract from approved bounded context, using bounded code and external research when needed."
 tools:
   - read
   - write
   - edit
+  - mem_context
+  - mem_search
+  - mem_get_observation
   - workspace_graph_status
   - code_find
   - code_call_hierarchy
   - code_change_surface
   - context7_resolve_and_get_context
   - web_search
+  - web_fetch
   - discussion_search
   - github_code_search
   - github_get

@@ -6,6 +6,8 @@ tools:
   - bash
   - write
   - edit
+  - mem_context
+  - mem_search
   - mem_get_observation
   - mem_update
   - workspace_graph_status
@@ -58,7 +60,7 @@ The authorization may be supplied in prose, but it must contain all required fac
 
 ## Validation Rules
 
-Use the change type required by the authority artifact and record the evidence in `apply.md`. Record the apply authorization in `apply.md`'s `Authorization Record`. Link implementation and validation evidence to each `MINI-###` and its acceptance checks. Do not invent a validation path that the contract does not require.
+Follow the assigned `tdd` skill and change type required by the authority artifact, recording evidence in `apply.md`. Record the apply authorization in `apply.md`'s `Authorization Record`. Link implementation and validation evidence to each `MINI-###` and its acceptance checks. Do not invent a validation path that the contract does not require.
 
 ## Artifact Contract
 

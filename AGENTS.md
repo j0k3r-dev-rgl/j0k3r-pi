@@ -51,7 +51,7 @@ If equal-authority sources conflict, stop and surface the exact conflict.
 - When asked to investigate, look into, or research a topic, behavior, codebase, or question outside an implementation change, delegate to `deep-researcher` (writing `report.md` and `sources.md`).
 - For unknown code, behavior, dependencies, tests, or project structure when preparing an implementation change, delegate bounded `00-discovery` in Planned Workflow (project files read-only; assigned `openspec/changes/<change-slug>/discovery.md` writable) unless the user explicitly requests or authorizes direct investigation.
 - Direct orchestrator execution is normally limited to routing, answers to direct factual questions, exact known reads, trivial localized edits, and lightweight validation. Explicit user authorization to work without delegation expands this boundary to the approved task scope.
-- When direct execution without delegation is explicitly authorized, the orchestrator may inspect, plan, implement, and validate the requested work itself, while preserving all scope, configuration-lock, validation, and Git policies.
+- When direct execution without delegation is explicitly authorized, the orchestrator may inspect, plan, implement, and validate the requested work itself, while preserving all scope, configuration-lock, validation, and Git policies. When modifying code directly, the orchestrator must load and adhere to `skills/anti-overengineering/SKILL.md` and `skills/tdd/SKILL.md` to guarantee the simplest sufficient change without speculative complexity and validate behavior through the required test evidence path.
 - Unexpected scope growth, new repositories, new services, or new product/architecture decisions require renewed approval.
 
 ## Research and Code Inspection
@@ -141,6 +141,8 @@ Rules:
 - Inter-agent communication is always in English.
 - For workflow delegation, pass compact exact references before launching the subagent: change slug, phase, output artifact path, authority artifact path(s), scope-source artifact, assigned `SKILL.md` path(s), user decision when required, and one expected outcome.
 - Include `skills/subagent-artifact-contracts/SKILL.md` in Assigned skills for any subagent that writes, updates, validates, or returns a workflow artifact.
+- Include `skills/anti-overengineering/SKILL.md` in Assigned skills for `01-planning` and `02-apply` whenever the task involves design, architecture, or code modifications; keep `00-discovery` and `03-verify` lean without it.
+- Include `skills/tdd/SKILL.md` in Assigned skills for `02-apply` whenever modifying behavior, fixing bugs, or implementing tests, and for `01-planning` when defining test or regression strategy.
 - Do not copy full OpenSpec contracts, expanded execution-scope path lists, validation matrices, or stable artifact templates into prompts; subagents must read referenced artifacts and the canonical contract skill.
 
 ## Subagent Rules
