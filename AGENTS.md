@@ -86,7 +86,7 @@ Discovery is an optional evidence-gathering activity, not a workflow. Resolve ma
 Use the smallest useful skill set.
 
 1. Route with `skills/workflow-triage/SKILL.md` when handling complex tasks; loading it once per session is sufficient, and simple/trivial tasks do not require it.
-2. Resolve candidate skills with `skill_registry_resolve` when intent, touched paths, or workflow phase matter.
+2. Resolve candidate skills with `skill_registry_resolve` when intent, touched paths, or workflow phase matter. In projects with local skills (e.g. `.pi/skills/`), use candidate matches to identify project-specific domain rules to pass to subagents.
 3. Read only the selected `SKILL.md` files before acting.
 4. Load at most one workflow owner plus the minimum guardrail/domain skills needed for the task.
 5. Do not scan `skills/` blindly.
@@ -143,6 +143,7 @@ Rules:
 - Include `skills/subagent-artifact-contracts/SKILL.md` in Assigned skills for any subagent that writes, updates, validates, or returns a workflow artifact.
 - Include `skills/anti-overengineering/SKILL.md` in Assigned skills for `01-planning` and `02-apply` whenever the task involves design, architecture, or code modifications; keep `00-discovery` and `03-verify` lean without it.
 - Include `skills/tdd/SKILL.md` in Assigned skills for `02-apply` whenever modifying behavior, fixing bugs, or implementing tests, and for `01-planning` when defining test or regression strategy.
+- When the target project has project-specific skills (e.g. in `.pi/skills/` or `.agents/skills/`), or when `skill_registry_resolve` identifies relevant project-scoped skills for the touched paths or intent, include their exact absolute `SKILL.md` paths in Assigned skills for `00-discovery`, `01-planning`, and `02-apply` so subagents strictly follow the project's local architecture, patterns, and conventions.
 - Do not copy full OpenSpec contracts, expanded execution-scope path lists, validation matrices, or stable artifact templates into prompts; subagents must read referenced artifacts and the canonical contract skill.
 
 ## Subagent Rules

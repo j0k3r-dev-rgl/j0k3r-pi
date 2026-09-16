@@ -33,6 +33,7 @@ Own the lightweight lifecycle, phase gates, independent verification, and archiv
 - Keep one phase active at a time. Delegate contract creation to `01-planning`, implementation to `02-apply`, verification independently to `03-verify`. The orchestrator performs archive directly after user approval; archive is not a delegated phase.
 - Assign `skills/anti-overengineering/SKILL.md` alongside artifact contracts when delegating `01-planning` and `02-apply` to enforce simplest-sufficient design and implementation; do not assign it to `00-discovery` or `03-verify`.
 - Assign `skills/tdd/SKILL.md` in Assigned skills when delegating `02-apply` for code/test changes, and to `01-planning` when defining validation strategy.
+- Resolve and assign project-specific skills (from `.pi/skills/`, `.agents/skills/`, or `skill_registry_resolve`) in Assigned skills for delegated subagents whenever the task touches project code or domain logic.
 - If a required subagent is unavailable, stop as `BLOCKED`; do not silently take over.
 - **Circuit Breaker**: If an open decision, ambiguity, or missing user choice is encountered at any phase, the circuit breaker trips immediately. Stop execution, surface the exact decision to the user, and do not advance or mutate until answered.
 - The orchestrator supplies exact absolute artifact and skill paths, reads each returned artifact, and checks required fields before advancing. Do not assume lean subagents inherit global context.
