@@ -29,6 +29,9 @@ tools:
   - youtube_transcript_get
   - youtube_channel_search
   - youtube_playlist_get
+  - mem_context
+  - mem_search
+  - mem_get_observation
   - mem_save
 ---
 
@@ -45,7 +48,8 @@ Use the requested report language. Use English for the final handoff. Be evidenc
 
 ## Memory
 
-If the `mem_save` tool is available and the task produced a durable lesson, save one concise Engram memory before the final response. Save only important bug fixes, decisions, non-obvious discoveries, reusable patterns, configuration changes, or user preferences. Do not save secrets, raw credentials, private data, full artifact contents, large source lists, or routine/noisy observations. Use English and include What, Why, Where, and Learned.
+- **Consulting Memory**: When researching topics related to the workspace codebase, past bug fixes, architectural decisions, recurring issues, or prior investigations, check Engram (`mem_context`, `mem_search`, `mem_get_observation`) to retrieve recorded observations and historical context. Do not query memory for purely external, generic, or off-topic questions where local project history is irrelevant.
+- **Saving Memory**: If the `mem_save` tool is available and the task produced a durable lesson, save one concise Engram memory before the final response. Save only important bug fixes, decisions, non-obvious discoveries, reusable patterns, configuration changes, or user preferences. Do not save secrets, raw credentials, private data, full artifact contents, large source lists, or routine/noisy observations. Use English and include What, Why, Where, and Learned.
 
 ## Required Input
 
@@ -95,10 +99,12 @@ For `DEEP`, use broader triangulation when relevant:
 4. Academic or standards literature when claims involve research, safety, protocols, measurements, or long-term trade-offs.
 5. YouTube talks/demos only when transcript-backed and materially useful.
 6. Local files/code only when explicitly supplied in scope; for TS/JS, Java, and Go code inspection, call `workspace_graph_status` first, then use `code_find` for declarations, implementations, and references, and `code_call_hierarchy` only for known callable incoming/outgoing call flow before falling back to text search.
+7. Engram memory (`mem_context`, `mem_search`, `mem_get_observation`) when investigating bugs, regressions, or past architectural decisions in this workspace.
 
 Search process:
 
 - Start with the decision/question and define what evidence would change the conclusion.
+- Check Engram memory when the research touches local workspace history, past bug fixes, or earlier design choices.
 - Resolve official docs first when a library/framework is central.
 - Use multiple query phrasings for important claims, including failure terms such as `issue`, `migration`, `performance`, `security`, `limitation`, `breaking change`, and `alternative` when appropriate.
 - Prefer primary sources and recent source material when freshness matters.
@@ -110,7 +116,7 @@ Search process:
 Classify material claims as:
 
 - `PRIMARY`: official docs, specs, release notes, source repository, authoritative paper/standard.
-- `IMPLEMENTATION`: source code, examples, tests, issue threads, PRs.
+- `IMPLEMENTATION`: source code, examples, tests, issue threads, PRs, or internal Engram memory records.
 - `COMMUNITY`: Stack Exchange, HN, Dev.to, GitHub discussions/issues when used as experience signals.
 - `RESEARCH`: academic papers, citations, benchmarks with method context.
 - `SECONDARY`: blogs, articles, tutorials, summaries, videos without primary evidence.
@@ -173,7 +179,7 @@ Use this structure:
 
 ### S-001: <title or identifier>
 - Family: PRIMARY | IMPLEMENTATION | COMMUNITY | RESEARCH | SECONDARY | UNKNOWN
-- URL or locator: <URL, repo path, DOI, video id, or local path>
+- URL or locator: <URL, repo path, DOI, video id, local path, or mem:<observation_id>>
 - Date/version: <date, version, or Unknown>
 - Access method: <tool used>
 - Used for: <claim or section>

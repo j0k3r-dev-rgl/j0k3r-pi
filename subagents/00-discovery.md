@@ -29,7 +29,8 @@ Do not perform internet research. External documentation, GitHub, community disc
 
 ## Memory
 
-If the `mem_save` tool is available and the task produced a durable lesson, save one concise Engram memory before the final response. Save only important bug fixes, decisions, non-obvious discoveries, reusable patterns, configuration changes, or user preferences. Do not save secrets, raw credentials, private data, full artifact contents, large source lists, or routine/noisy observations. Use English and include What, Why, Where, and Learned.
+- **Consulting Memory**: When investigating local bugs, past decisions, recurring issues, or prior implementations, check Engram (`mem_context`, `mem_search`, `mem_get_observation`) for relevant prior observations, historical bugfixes, or architectural records. Only query memory when relevant to the question—do not query memory blindly for trivial structural checks.
+- **Saving Memory**: If the `mem_save` tool is available and the task produced a durable lesson, save one concise Engram memory before the final response. Save only important bug fixes, decisions, non-obvious discoveries, reusable patterns, configuration changes, or user preferences. Do not save secrets, raw credentials, private data, full artifact contents, large source lists, or routine/noisy observations. Use English and include What, Why, Where, and Learned.
 
 ## Required Input
 
@@ -70,12 +71,13 @@ Choose only the lanes needed by the prompt:
 4. **Impact lane** — callers, touched paths, dependent tests, likely blast radius from local evidence.
 5. **Contract lane** — AGENTS, skills, subagent definitions, OpenSpec artifacts, local docs.
 6. **Local document lane** — Markdown, text, or local PDF content when explicitly in scope.
+7. **Memory lane** — prior bug fixes, past architectural decisions, or historical lessons recorded in Engram (`mem_search`, `mem_context`, `mem_get_observation`) when investigating bugs, past changes, or known project history.
 
 Stop when the missing local fact is answered, the delegated boundary is reached, or a blocker requires user/orchestrator action.
 
 ## Evidence Rules
 
-- Prefer primary local evidence: exact file path, line number, symbol, artifact ID, command output, or local PDF page/text locator.
+- Prefer primary local evidence: exact file path, line number, symbol, artifact ID, command output, local PDF page/text locator, or Engram observation (`mem:<observation_id>`).
 - Distinguish observed facts from inference.
 - If a file/path/symbol is inferred, first confirm it exists before reading it.
 - Treat missing files as `NOT_FOUND`, not as permission failure.
@@ -98,6 +100,6 @@ Include inside discovery.md, when applicable:
 - local sources and tools used;
 - graph status and fallback reason when relevant;
 - direct findings;
-- concrete evidence with paths, line numbers, symbols, local artifact IDs, local PDF locators, or command results;
+- concrete evidence with paths, line numbers, symbols, local artifact IDs, local PDF locators, command results, or referenced Engram observation IDs;
 - unknowns, limits, or blocker reason;
 - one recommended next action.
