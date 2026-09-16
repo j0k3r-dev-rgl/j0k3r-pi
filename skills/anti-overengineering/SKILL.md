@@ -4,7 +4,7 @@ description: "control scope and prevent overengineering during planning, impleme
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "2.0"
+  version: "3.0"
 registry:
   category: "transversal"
   domains: "scope-control, implementation, planning"
@@ -43,13 +43,17 @@ This skill owns only:
 
 ## Decision Gates
 
-Stop and ask when the change would introduce:
+Stop and trigger the decision protocol when the change would introduce:
 
 - a new dependency or service;
 - any migration or compatibility bridge;
 - materially different architecture or API behavior;
 - destructive or externally visible behavior; or
 - expansion beyond approved scope.
+
+- **Circuit Breaker**: When any of the gates above are triggered, or when speculative complexity or out-of-scope choices appear:
+  - **Subagent execution**: trip the circuit breaker and return `BLOCKED` immediately, specifying the exact decision or trade-off needed. Never guess, assume speculative defaults, or proceed autonomously.
+  - **Orchestrator execution**: stop immediately, present the trade-off concisely, and ask the user for the missing decision before performing any file mutation.
 
 ## Execution Steps
 
