@@ -1,10 +1,10 @@
 ---
 name: tdd
-description: "guide test and regression strategy for code changes. Use for behavior changes, bug fixes, risky refactors, removals, and validation planning."
+description: "guide test-driven development (TDD) and regression strategy. Use for behavior changes, bug fixes, reproducing bugs with failing RED tests, risky refactors, RED-GREEN-REFACTOR cycles, and test baseline validation."
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "3.0"
+  version: "3.1"
 registry:
   category: "quality"
   domains: "tdd, testing, regression-testing"

@@ -1,10 +1,10 @@
 ---
 name: anti-overengineering
-description: "control scope and prevent overengineering during planning, implementation, bug fixing, refactoring, and review. Use when work may introduce abstractions, dependencies, migrations, compatibility layers, or speculative scope."
+description: "enforce simplest-sufficient solutions (KISS, YAGNI) and prevent overengineering. Use during planning, implementation, bug fixing, and refactoring to stop unnecessary abstractions, premature generalizations, unsolicited dependencies, or speculative scope."
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "3.0"
+  version: "3.1"
 registry:
   category: "transversal"
   domains: "scope-control, implementation, planning"

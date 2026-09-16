@@ -1,10 +1,10 @@
 ---
 name: work-workflow
-description: "run the authorized planned workflow: optional persistent discovery, one implementation contract, approved apply, independent verify, and authorized archive."
+description: "run the authorized Planned Workflow across 00-discovery, 01-planning, 02-apply, and 03-verify. Use when creating or tracking discovery.md, plan.md, apply.md, and verify.md artifacts, independent verification, or change archival."
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "15.0"
+  version: "16.0"
 registry:
   category: "workflow"
   domains: "openspec, planned-workflow, artifact-lifecycle"

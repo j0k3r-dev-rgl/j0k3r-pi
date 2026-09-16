@@ -1,10 +1,10 @@
 ---
 name: subagent-artifact-contracts
-description: "define canonical discovery and Planned Workflow Markdown artifacts, Execution Scope, verification evidence, and compact READY/BLOCKED handoffs."
+description: "define canonical discovery and Planned Workflow Markdown artifacts. Use when delegating to subagents, formatting discovery.md, plan.md, apply.md, or verify.md, defining Execution Scope boundaries, or producing compact READY/BLOCKED handoffs."
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "2.1"
+  version: "2.2"
 registry:
   category: "workflow"
   domains: "subagents, markdown-artifacts, openspec, handoff-contracts, execution-scope"
