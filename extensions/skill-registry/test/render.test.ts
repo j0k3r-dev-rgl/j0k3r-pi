@@ -48,7 +48,7 @@ describe('skill-registry renderers', () => {
     expect(extractSkillRegistryAction('skill_registry_generate', { write: true })).toBe('generate');
 
     expect(extractSkillRegistryAction('skill_registry_resolve', {})).toBe('resolve');
-    expect(extractSkillRegistryAction('skill_registry_resolve', { sdd_phase: 'apply' })).toBe('phase: apply');
+    expect(extractSkillRegistryAction('skill_registry_resolve', { workflow_phase: 'apply' })).toBe('phase: apply');
     expect(extractSkillRegistryAction('skill_registry_resolve', { paths: ['src/a.ts', 'src/b.ts'] })).toBe('paths: src/a.ts, src/b.ts');
     expect(extractSkillRegistryAction('skill_registry_resolve', { intent: 'find auth' })).toBe('intent: find auth');
   });

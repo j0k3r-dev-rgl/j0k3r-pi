@@ -16,7 +16,7 @@ Field conventions:
 - `paths`: configuration and runtime paths that should route to this module, including nested project workspaces outside the agent root.
 - `keywords`: configuration-only phrases, tool names, and field names that should route to this module.
 - `phases`: keep empty for configuration-only skills so phase routing alone does not load it.
-- `related`: configuration-adjacent skills only; do not add implementation or SDD skills for normal config help.
+- `related`: configuration-adjacent skills only; do not add implementation or workflow skills for normal config help.
 - `priority`: route similarly to other extension configuration skills.
 
 ## Activation Contract

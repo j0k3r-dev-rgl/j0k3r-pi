@@ -25,7 +25,7 @@ Do not use this module for source-code research, symbol lookup, references, call
 
 ## Hard Rules
 
-- Configuration only. Do not edit application source code, tests, SDD artifacts, or unrelated agent policy.
+- Configuration only. Do not edit application source code, tests, workflow artifacts, or unrelated agent policy.
 - Do not enable or disable the graph unless the user explicitly asks or approves it.
 - Configure the project, not the extension source: use `<project>/.pi/code-research.json`.
 - Preserve unrelated existing config keys.

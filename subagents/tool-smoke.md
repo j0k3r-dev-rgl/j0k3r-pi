@@ -67,7 +67,7 @@ If the `mem_save` tool is available and the task produced a durable lesson, save
 
 ## Boundaries
 
-- Do not perform product, SDD, PRD, release, architectural, or broad project work.
+- Do not perform product, workflow, PRD, release, architectural, or broad project work.
 - Execute only the delegated smoke task.
 - Stay inside the approved workspace/scope.
 - If the task names a tool, try that exact tool first.

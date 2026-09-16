@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { generateSkillRegistry, type SkillRegistry, type SkillRegistryEntry, type SkillScope } from './registry.js';
 
-export const SDD_PHASES = [
+export const WORKFLOW_PHASES = [
   'explore',
   'proposal',
   'spec',
@@ -15,7 +15,7 @@ export const SDD_PHASES = [
   'archive',
 ] as const;
 
-export type SddPhase = (typeof SDD_PHASES)[number];
+export type WorkflowPhase = (typeof WORKFLOW_PHASES)[number];
 export type CacheStatus = 'fresh' | 'stale' | 'missing' | 'invalid' | 'not_checked';
 
 type PathInput = string[];
@@ -23,7 +23,7 @@ type PathInput = string[];
 export type ResolveSkillRegistryQuery = {
   intent?: string;
   paths?: PathInput;
-  sdd_phase?: SddPhase;
+  workflow_phase?: WorkflowPhase;
   include_related?: boolean;
   stale_check?: boolean;
   max_results?: number;
@@ -39,7 +39,7 @@ export type RegistryStatus = {
 };
 
 export type ResolveMatchReason = {
-  signal: 'path' | 'keyword' | 'sdd_phase' | 'name' | 'category' | 'domain' | 'description' | 'default';
+  signal: 'path' | 'keyword' | 'workflow_phase' | 'name' | 'category' | 'domain' | 'description' | 'default';
   detail: string;
   weight: number;
 };
@@ -55,7 +55,7 @@ export type ResolveSkillMatch = {
     category: string | null;
     domains: string[];
     triggers: Record<string, unknown>;
-    sdd_phases: string[];
+    workflow_phases: string[];
     related_skills: string[];
   };
   read_before_acting: string;
@@ -68,7 +68,7 @@ export type RelatedSkillMatch = Omit<ResolveSkillMatch, 'score' | 'reasons'> & {
 
 export type ResolveSkillRegistryResult = {
   query: Required<Pick<ResolveSkillRegistryQuery, 'include_related' | 'stale_check' | 'max_results'>> &
-    Pick<ResolveSkillRegistryQuery, 'intent' | 'sdd_phase'> & {
+    Pick<ResolveSkillRegistryQuery, 'intent' | 'workflow_phase'> & {
       paths: PathInput;
     };
   registry_status: RegistryStatus;
@@ -83,7 +83,7 @@ export type CachedRegistryRecord =
   | { status: 'missing'; path: string }
   | { status: 'invalid'; path: string; error: string };
 
-const SDD_PHASE_SET = new Set<string>(SDD_PHASES);
+const WORKFLOW_PHASE_SET = new Set<string>(WORKFLOW_PHASES);
 
 function normalizeSlashPath(value: string): string {
   const normalized = value.replace(/\\/g, '/');
@@ -159,7 +159,7 @@ function normalizeQueryPaths(paths?: string[]): string[] {
 function normalizeQuery(query: ResolveSkillRegistryQuery = {}): {
   intent?: string;
   paths: string[];
-  sdd_phase?: SddPhase;
+  workflow_phase?: WorkflowPhase;
   include_related: boolean;
   stale_check: boolean;
   max_results: number;
@@ -167,14 +167,14 @@ function normalizeQuery(query: ResolveSkillRegistryQuery = {}): {
   const paths = normalizeQueryPaths(query.paths);
   const trimmedIntent = typeof query.intent === 'string' ? query.intent.trim() : '';
   const intent = trimmedIntent.length > 0 ? trimmedIntent.toLowerCase() : undefined;
-  const sdd_phase = query.sdd_phase && SDD_PHASE_SET.has(query.sdd_phase) ? query.sdd_phase : undefined;
+  const workflow_phase = query.workflow_phase && WORKFLOW_PHASE_SET.has(query.workflow_phase) ? query.workflow_phase : undefined;
   const requestedMaxResults = query.max_results === undefined ? 10 : query.max_results;
   const boundedMaxResults = Math.floor(Number.isFinite(requestedMaxResults) ? (requestedMaxResults as number) : 10);
 
   return {
     intent,
     paths,
-    sdd_phase,
+    workflow_phase,
     include_related: query.include_related ?? true,
     stale_check: query.stale_check ?? true,
     max_results: Math.min(50, Math.max(1, boundedMaxResults)),
@@ -260,12 +260,12 @@ function scoreKeywordMatches(skill: SkillRegistryEntry, intent: string | undefin
 
 function scorePhaseMatch(skill: SkillRegistryEntry, phase: string | undefined): { score: number; reasons: ResolveMatchReason[] } {
   if (!phase) return { score: 0, reasons: [] };
-  if (!skill.routing.sdd_phases.includes(phase)) return { score: 0, reasons: [] };
+  if (!skill.routing.workflow_phases.includes(phase)) return { score: 0, reasons: [] };
   return {
     score: 70,
     reasons: [{
-      signal: 'sdd_phase',
-      detail: `sdd phase "${phase}" is in routing`,
+      signal: 'workflow_phase',
+      detail: `workflow phase "${phase}" is in routing`,
       weight: 70,
     }],
   };
@@ -311,7 +311,7 @@ function scoreFallbackMatches(skill: SkillRegistryEntry, intent: string | undefi
 function scoreSkill(skill: SkillRegistryEntry, query: ReturnType<typeof normalizeQuery>): { match: ResolveSkillMatch; totalScore: number } {
   const pathMatch = scorePathMatches(skill, query.paths);
   const keywordMatch = scoreKeywordMatches(skill, query.intent);
-  const phaseMatch = scorePhaseMatch(skill, query.sdd_phase);
+  const phaseMatch = scorePhaseMatch(skill, query.workflow_phase);
   const hasDirectSignals = Boolean(pathMatch.score || keywordMatch.score || phaseMatch.score);
   const fallbackMatch = scoreFallbackMatches(skill, query.intent);
 
@@ -328,7 +328,7 @@ function scoreSkill(skill: SkillRegistryEntry, query: ReturnType<typeof normaliz
     category: skill.routing.category,
     domains: skill.routing.domains,
     triggers: skill.routing.triggers,
-    sdd_phases: skill.routing.sdd_phases,
+    workflow_phases: skill.routing.workflow_phases,
     related_skills: skill.routing.related_skills,
   };
 
@@ -348,20 +348,20 @@ function scoreSkill(skill: SkillRegistryEntry, query: ReturnType<typeof normaliz
 }
 
 function resolveDirectMatches(liveRegistry: SkillRegistry, query: ReturnType<typeof normalizeQuery>): ResolveSkillMatch[] {
-  const hasQuerySignals = Boolean(query.intent || query.paths.length || query.sdd_phase);
+  const hasQuerySignals = Boolean(query.intent || query.paths.length || query.workflow_phase);
 
   const rankedScored = liveRegistry.skills
     .map((skill) => {
       const scored = scoreSkill(skill, query);
       const directSignals = new Set(scored.match.reasons.map((reason) => reason.signal).filter((signal) =>
-        signal === 'path' || signal === 'keyword' || signal === 'sdd_phase',
+        signal === 'path' || signal === 'keyword' || signal === 'workflow_phase',
       ));
       return {
         match: scored.match,
         score: scored.totalScore,
         hasDirectSignal: directSignals.size > 0,
         hasPathOrKeywordSignal: directSignals.has('path') || directSignals.has('keyword'),
-        hasPhaseOnlySignal: directSignals.size === 1 && directSignals.has('sdd_phase'),
+        hasPhaseOnlySignal: directSignals.size === 1 && directSignals.has('workflow_phase'),
       };
     });
   const hasAnyDirectSignal = rankedScored.some((item) => item.hasDirectSignal);
@@ -433,7 +433,7 @@ function resolveRelated(
           category: relatedSkill.routing.category,
           domains: relatedSkill.routing.domains,
           triggers: relatedSkill.routing.triggers,
-          sdd_phases: relatedSkill.routing.sdd_phases,
+          workflow_phases: relatedSkill.routing.workflow_phases,
           related_skills: relatedSkill.routing.related_skills,
         },
         read_before_acting: `Read ${relatedSkill.path} before acting.`,
@@ -559,7 +559,7 @@ export async function resolveSkillRegistry(options: { cwd?: string; homeDir?: st
   return {
     query: {
       intent: query.intent,
-      sdd_phase: query.sdd_phase,
+      workflow_phase: query.workflow_phase,
       include_related: query.include_related,
       stale_check: query.stale_check,
       max_results: query.max_results,

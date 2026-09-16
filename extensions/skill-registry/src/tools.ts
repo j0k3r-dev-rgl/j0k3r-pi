@@ -80,7 +80,7 @@ function summaryText(registry: Awaited<ReturnType<typeof generateSkillRegistry>>
   return lines.join('\n');
 }
 
-const SDD_PHASES = [
+const WORKFLOW_PHASES = [
   'explore',
   'proposal',
   'spec',
@@ -91,16 +91,16 @@ const SDD_PHASES = [
   'archive',
 ] as const;
 
-const sddPhaseSchema = Type.Union(SDD_PHASES.map((phase) => Type.Literal(phase)) as any);
+const workflowPhaseSchema = Type.Union(WORKFLOW_PHASES.map((phase) => Type.Literal(phase)) as any);
 
 export function registerSkillRegistryTools(pi: any): void {
   pi.registerTool({
     name: 'skill_registry_generate',
     label: 'Skill Registry Generate',
     description: 'Generate the project skill registry from global and project Pi/Agent skills. Stack-agnostic and dependency-free at runtime except this extension.',
-    promptSnippet: 'Generate the skill registry before SDD planning/delegation when skills may affect routing.',
+    promptSnippet: 'Generate the skill registry before workflow planning/delegation when skills may affect routing.',
     promptGuidelines: [
-      'Use skill_registry_generate before formal SDD planning or SDD subagent delegation when the active workflow requires fresh skill routing context.',
+      'Use skill_registry_generate before formal workflow planning or workflow subagent delegation when the active workflow requires fresh skill routing context.',
       'After skill_registry_generate, read selected SKILL.md files before relying on their detailed instructions.',
     ],
     parameters: Type.Object({
@@ -129,8 +129,8 @@ export function registerSkillRegistryTools(pi: any): void {
   pi.registerTool({
     name: 'skill_registry_resolve',
     label: 'Skill Registry Resolve',
-    description: 'Resolve candidate skills from the live registry for intent/paths/sdd phase with read-only cache-awareness.',
-    promptSnippet: 'Read-only skill routing helper for matching intent, touched paths, and SDD phase. The output is a routing candidate index, not a playbook.',
+    description: 'Resolve candidate skills from the live registry for intent/paths/workflow phase with read-only cache-awareness.',
+    promptSnippet: 'Read-only skill routing helper for matching intent, touched paths, and workflow phase. The output is a routing candidate index, not a playbook.',
     promptGuidelines: [
       'Use skill_registry_resolve when you need candidate skills before taking routing decisions.',
       'Read the returned SKILL.md files before acting.',
@@ -139,7 +139,7 @@ export function registerSkillRegistryTools(pi: any): void {
     parameters: Type.Object({
       intent: Type.Optional(Type.String({ description: 'Natural-language routing intent.' })),
       paths: Type.Optional(Type.Array(Type.String(), { description: 'Project paths to match against skill path triggers.' })),
-      sdd_phase: Type.Optional(sddPhaseSchema),
+      workflow_phase: Type.Optional(workflowPhaseSchema),
       include_related: Type.Optional(Type.Boolean({ description: 'Include one-hop related skills. Defaults to true.' })),
       stale_check: Type.Optional(Type.Boolean({ description: 'Compare live registry hash with cached .pi/skill-registry.json. Defaults to true.' })),
       max_results: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: 'Maximum number of direct matches. Defaults to 10.' })),
@@ -151,7 +151,7 @@ export function registerSkillRegistryTools(pi: any): void {
     renderResult(result: any, options: any, theme: any, context: any) {
       return renderSkillRegistryResult('skill_registry_resolve', result, options, theme, context);
     },
-    async execute(_id: string, params: { intent?: string; paths?: string[]; sdd_phase?: typeof SDD_PHASES[number]; include_related?: boolean; stale_check?: boolean; max_results?: number } | undefined, _signal: unknown, _onUpdate: unknown, ctx: any) {
+    async execute(_id: string, params: { intent?: string; paths?: string[]; workflow_phase?: typeof WORKFLOW_PHASES[number]; include_related?: boolean; stale_check?: boolean; max_results?: number } | undefined, _signal: unknown, _onUpdate: unknown, ctx: any) {
       try {
         const cwd = ctx?.cwd ?? process.cwd();
         const homeDir = ctx?.homeDir;

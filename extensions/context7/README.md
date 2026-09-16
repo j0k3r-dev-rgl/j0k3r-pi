@@ -218,7 +218,7 @@ All tool outputs are designed to be safe for LLM context:
 2. Run `context7_search_library` for the dependency and focused topic.
 3. Pick the correct `libraryId` from candidates.
 4. Run `context7_get_context` with a narrow query.
-5. Summarize only the relevant facts in the answer or SDD artifact.
+5. Summarize only the relevant facts in the answer or workflow artifact.
 6. Do not copy full Context7 dumps into durable memory or planning artifacts; keep concise source metadata instead.
 
 Example focused query:
@@ -228,11 +228,11 @@ libraryName: next.js
 query: app router route handlers cookies api
 ```
 
-### SDD usage policy
+### workflow usage policy
 
-Use Context7 during SDD only when current external dependency documentation materially affects a requirement, design decision, implementation detail, or verification judgment.
+Use Context7 during workflow only when current external dependency documentation materially affects a requirement, design decision, implementation detail, or verification judgment.
 
-When Context7 influences an SDD artifact, record concise source metadata, not full documentation dumps:
+When Context7 influences an workflow artifact, record concise source metadata, not full documentation dumps:
 
 - library ID;
 - focused query;
@@ -491,7 +491,7 @@ Todas las salidas de tools están diseñadas para ser seguras para contexto LLM:
 2. Ejecutar `context7_search_library` para la dependencia y tema enfocado.
 3. Elegir el `libraryId` correcto entre candidatos.
 4. Ejecutar `context7_get_context` con una query estrecha.
-5. Resumir solo los hechos relevantes en la respuesta o artefacto SDD.
+5. Resumir solo los hechos relevantes en la respuesta o artefacto workflow.
 6. No copiar dumps completos de Context7 en memoria durable ni artefactos de planificación; conservar metadata de fuente concisa.
 
 Ejemplo de query enfocada:
@@ -501,11 +501,11 @@ libraryName: next.js
 query: app router route handlers cookies api
 ```
 
-### Política de uso SDD
+### Política de uso workflow
 
-Usa Context7 durante SDD solo cuando documentación externa actual de dependencias afecte materialmente un requisito, decisión de diseño, detalle de implementación o juicio de verificación.
+Usa Context7 durante workflow solo cuando documentación externa actual de dependencias afecte materialmente un requisito, decisión de diseño, detalle de implementación o juicio de verificación.
 
-Cuando Context7 influya un artefacto SDD, registra metadata de fuente concisa, no dumps completos de documentación:
+Cuando Context7 influya un artefacto workflow, registra metadata de fuente concisa, no dumps completos de documentación:
 
 - ID de librería;
 - query enfocada;

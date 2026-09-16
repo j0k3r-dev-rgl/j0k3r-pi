@@ -26,7 +26,7 @@ async function makeSkill(filePath: string, input: { name: string; description: s
       `  domains: ${Array.isArray(contract.domains) ? contract.domains.join(', ') : ''}`,
       `  paths: ${Array.isArray(triggerRecord.paths) ? triggerRecord.paths.join(', ') : ''}`,
       `  keywords: ${Array.isArray(triggerRecord.keywords) ? triggerRecord.keywords.join(', ') : ''}`,
-      `  phases: ${Array.isArray(contract.sdd_phases) ? contract.sdd_phases.join(', ') : ''}`,
+      `  phases: ${Array.isArray(contract.workflow_phases) ? contract.workflow_phases.join(', ') : ''}`,
       `  related: ${Array.isArray(contract.related_skills) ? contract.related_skills.join(', ') : ''}`,
       `  priority: ${String(contract.priority ?? '')}`,
     );
@@ -48,7 +48,7 @@ describe('skill registry core', () => {
         category: 'base',
         domains: ['frontend', 'forms'],
         triggers: { paths: ['front/app/routes/**/*.tsx'], keywords: ['useFetcher', 'fetcher.Form'] },
-        sdd_phases: ['explore', 'design', 'apply', 'verify'],
+        workflow_phases: ['explore', 'design', 'apply', 'verify'],
         related_skills: ['project-testing'],
         priority: 70,
       },
@@ -60,7 +60,7 @@ describe('skill registry core', () => {
         category: 'quality',
         domains: ['testing'],
         triggers: { paths: ['**/*.test.*'], keywords: ['test', 'validation'] },
-        sdd_phases: ['task', 'verify'],
+        workflow_phases: ['task', 'verify'],
         related_skills: [],
         priority: 40,
       },
@@ -68,7 +68,7 @@ describe('skill registry core', () => {
 
     const registry = await generateSkillRegistry({ cwd, homeDir });
 
-    expect(registry.schema_version).toBe(1);
+    expect(registry.schema_version).toBe(2);
     expect(registry.skills.map((skill) => skill.name)).toEqual(['project-forms', 'global-testing']);
     expect(registry.skills[0]).toMatchObject({
       scope: 'project',
@@ -77,7 +77,7 @@ describe('skill registry core', () => {
         category: 'base',
         domains: ['frontend', 'forms'],
         triggers: { paths: ['front/app/routes/**/*.tsx'], keywords: ['useFetcher', 'fetcher.Form'] },
-        sdd_phases: ['explore', 'design', 'apply', 'verify'],
+        workflow_phases: ['explore', 'design', 'apply', 'verify'],
         related_skills: ['project-testing'],
         priority: 70,
       },
@@ -85,7 +85,7 @@ describe('skill registry core', () => {
         category: 'base',
         domains: ['frontend', 'forms'],
         triggers: { paths: ['front/app/routes/**/*.tsx'], keywords: ['useFetcher', 'fetcher.Form'] },
-        sdd_phases: ['explore', 'design', 'apply', 'verify'],
+        workflow_phases: ['explore', 'design', 'apply', 'verify'],
         related_skills: ['project-testing'],
         priority: 70,
       },
@@ -109,7 +109,7 @@ describe('skill registry core', () => {
         category: 'workflow',
         domains: ['root'],
         triggers: { paths: [], keywords: ['root'] },
-        sdd_phases: ['explore'],
+        workflow_phases: ['explore'],
         related_skills: [],
         priority: 10,
       },
@@ -148,7 +148,7 @@ describe('skill registry core', () => {
         category: 'product',
         domains: ['product'],
         triggers: { paths: [], keywords: [] },
-        sdd_phases: ['apply'],
+        workflow_phases: ['apply'],
         related_skills: ['phase-only'],
         priority: 20,
       },
@@ -161,7 +161,7 @@ describe('skill registry core', () => {
         category: 'mystery',
         domains: ['misc'],
         triggers: { paths: ['docs/**/*.md'], keywords: ['misc'] },
-        sdd_phases: [],
+        workflow_phases: [],
         related_skills: [],
         priority: 10,
       },
@@ -186,7 +186,7 @@ describe('skill registry core', () => {
         category: 'quality',
         domains: ['testing'],
         triggers: { paths: ['**/*.test.*'], keywords: ['test'] },
-        sdd_phases: ['task', 'verify'],
+        workflow_phases: ['task', 'verify'],
         related_skills: [],
         priority: 50,
       },

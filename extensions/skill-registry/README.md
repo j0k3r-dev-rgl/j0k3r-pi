@@ -45,7 +45,7 @@ Agent-facing configuration guidance is routed through `pi-configuration`, which 
 | Tool | Purpose |
 |---|---|
 | `skill_registry_generate` | Generate the registry and optionally write output files. Defaults to write. |
-| `skill_registry_resolve` | Resolve candidate skills from the live registry using intent/path/sdd-phase with optional stale-check semantics and one-hop related expansion. Read-only. |
+| `skill_registry_resolve` | Resolve candidate skills from the live registry using intent/path/workflow-phase with optional stale-check semantics and one-hop related expansion. Read-only. |
 
 #### `skill_registry_generate`
 
@@ -67,7 +67,7 @@ Parameters:
 {
   intent?: string;
   paths?: string[]; // project paths; accepts '\\' or '/' and duplicate slashes are normalized
-  sdd_phase?: 'explore' | 'proposal' | 'spec' | 'design' | 'task' | 'apply' | 'verify' | 'archive';
+  workflow_phase?: 'explore' | 'proposal' | 'spec' | 'design' | 'task' | 'apply' | 'verify' | 'archive';
   include_related?: boolean; // default: true
   stale_check?: boolean; // default: true
   max_results?: number; // 1..50, default: 10
@@ -96,7 +96,7 @@ Response shape includes:
   query: {
     intent?: string,
     paths: string[],
-    sdd_phase?: string,
+    workflow_phase?: string,
     include_related: boolean,
     stale_check: boolean,
     max_results: number,
@@ -119,7 +119,7 @@ Response shape includes:
       category: string | null,
       domains: string[],
       triggers: Record<string, unknown>,
-      sdd_phases: string[],
+      workflow_phases: string[],
       related_skills: string[],
     },
     read_before_acting: string,
@@ -161,6 +161,8 @@ Command behavior:
 - `list` reads the existing registry when present, otherwise generates in memory without writing.
 
 ### Registry behavior
+
+Registry schema version 2 uses `workflow_phases`; resolve requests use `workflow_phase`. Regenerate derived registry files after updating and reload Pi before invoking the renamed parameter. Existing historical artifacts and sessions are not rewritten.
 
 - Registry output is ordered by priority descending, then skill name ascending.
 - A skill with valid `registry:` metadata is indexed for routing.
@@ -255,7 +257,7 @@ La guía de configuración para agentes se enruta mediante `pi-configuration`, q
 | Tool | Propósito |
 |---|---|
 | `skill_registry_generate` | Genera el registry y opcionalmente escribe archivos de salida. Escribe por defecto. |
-| `skill_registry_resolve` | Resuelve skills candidatas desde el registry vivo usando intención/ruta/fase SDD, con semántica opcional de stale-check y expansión de relacionados a un salto. Read-only. |
+| `skill_registry_resolve` | Resuelve skills candidatas desde el registry vivo usando intención/ruta/fase workflow, con semántica opcional de stale-check y expansión de relacionados a un salto. Read-only. |
 
 #### `skill_registry_generate`
 
@@ -277,7 +279,7 @@ Parámetros:
 {
   intent?: string;
   paths?: string[]; // rutas de proyecto; acepta '\\' o '/' y normaliza slashes duplicados
-  sdd_phase?: 'explore' | 'proposal' | 'spec' | 'design' | 'task' | 'apply' | 'verify' | 'archive';
+  workflow_phase?: 'explore' | 'proposal' | 'spec' | 'design' | 'task' | 'apply' | 'verify' | 'archive';
   include_related?: boolean; // default: true
   stale_check?: boolean; // default: true
   max_results?: number; // 1..50, default: 10
@@ -305,7 +307,7 @@ La forma de respuesta incluye:
   query: {
     intent?: string,
     paths: string[],
-    sdd_phase?: string,
+    workflow_phase?: string,
     include_related: boolean,
     stale_check: boolean,
     max_results: number,
@@ -328,7 +330,7 @@ La forma de respuesta incluye:
       category: string | null,
       domains: string[],
       triggers: Record<string, unknown>,
-      sdd_phases: string[],
+      workflow_phases: string[],
       related_skills: string[],
     },
     read_before_acting: string,

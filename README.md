@@ -32,7 +32,7 @@ Personal/global Pi agent configuration used from `~/.pi/agent`. It contains the 
 |---|---|
 | [`AGENTS.md`](AGENTS.md) | Primary orchestrator instructions, workflow gates, TDD/commit policy, memory behavior, and safety rules. |
 | [`skills/`](skills/) | Global/user skills used by the skill registry. Broad domains such as project documentation and Pi configuration are exposed as one router skill with internal reference modules, not many separate `SKILL.md` files. |
-| [`subagents/`](subagents/) | Markdown-defined global/user subagents. SDD phase agents live here along with local-only `discovery`, durable `deep-researcher`, and news briefing agents. |
+| [`subagents/`](subagents/) | Markdown-defined global/user subagents. workflow phase agents live here along with local-only `00-discovery`, durable `deep-researcher`, and news briefing agents. |
 | [`extensions/`](extensions/) | Agent-dir extension implementations and their READMEs. In project-local installs these map to `.pi/extensions/*`. |
 | [`docs/`](docs/) | Supporting docs for this agent configuration, such as [keyboard shortcuts](docs/keyboard-shortcuts.md). |
 | [`subagents.json`](subagents.json) | Global/user subagent configuration and model profile defaults. |
@@ -72,11 +72,11 @@ Package-managed installs or updates without an explicit version follow the packa
 
 ### Core operating model
 
-The agent follows these operating rules. Execution itself is limited to exactly three workflows: **Direct Orchestrator**, **Mini-SDD**, and **Formal SDD**.
+The agent follows these operating rules. Execution itself is limited to exactly two workflows: **Direct Orchestrator** and **Planned Workflow**.
 
 1. Answer advice-only questions directly without inspecting or changing the project.
-2. Route concrete software work through [`workflow-triage`](skills/workflow-triage/SKILL.md): **Direct Orchestrator**, **Mini-SDD**, or **Formal SDD**. A named workflow begins without redundant confirmation.
-3. Use read-only local [`discovery`](subagents/discovery.md) as bounded codebase/context exploration when authorized; use [`deep-researcher`](subagents/deep-researcher.md) for internet-backed research reports. Neither is another workflow.
+2. Route concrete software work through [`workflow-triage`](skills/workflow-triage/SKILL.md): **Direct Orchestrator** or **Planned Workflow**. Explicit no-delegation authorization selects direct execution for the approved scope. Broad work is narrowed or split rather than escalating to another workflow.
+3. Use [`deep-researcher`](subagents/deep-researcher.md) for user-requested investigations and deep research reports (local code, docs, web, GitHub, etc.); use local [`00-discovery`](subagents/00-discovery.md) for bounded pre-implementation exploration in Planned Workflow (`openspec/changes/<change-slug>/discovery.md`). Neither is another workflow.
 4. Apply [`anti-overengineering`](skills/anti-overengineering/SKILL.md) as a transversal scope/complexity guardrail after the workflow and canonical owner are known. Ordinary local reversible choices remain agent decisions; material product, architecture, migration, dependency, risk, or external-effect choices remain user-owned.
 5. Apply strict [`tdd`](skills/tdd/SKILL.md) to code changes: establish a safety baseline, prove the expected **RED**, implement the minimum **GREEN**, then **REFACTOR** while green. Documentation/configuration-only changes use focused structural or syntax validation.
 6. Treat policy-sensitive files (`AGENTS.md`, skills, subagents, permissions, memory/context config, workflow extensions) as higher-risk.
@@ -87,11 +87,12 @@ Workflow artifacts:
 
 | Workflow | Use | Lifecycle |
 |---|---|---|
-| Direct Orchestrator | Small, explicit, bounded work with no broad investigation | Implement directly; use TDD for code and focused validation for docs/config. |
-| Mini-SDD | Medium multi-file work needing a lightweight shared contract | `mini-sdd.md` → `apply.md` → independent `verify.md` → archive. |
-| Formal SDD | Large, cross-cutting, architectural, security, migration, or contract work | `explore.md` → `proposal.md` → `spec.md` → `design.md` → `tasks.md` → `apply.md` → independent `verify.md` → archive. |
+| Direct Orchestrator | Trivial bounded work, or any approved scope explicitly authorized without delegation | Execute directly with change-type validation and existing authorization limits. |
+| Planned Workflow | Bounded work needing one lightweight implementation contract | Optional `discovery.md` → `plan.md` → authorized `apply.md` → independent `verify.md` → authorized archive. |
 
-[`sdd-workflow`](skills/sdd-workflow/SKILL.md) governs Mini-SDD/Formal phase gates, handoffs, candidate continuity, verification, and archive. Mini-SDD archive preflights `mini-sdd.md`; Formal SDD archive preflights `tasks.md`.
+[`work-workflow`](skills/work-workflow/SKILL.md) governs Planned Workflow gates, handoffs, continuity, verification, and archive. Discovery alone does not authorize implementation or require further phases. Reuse its evidence directly in the same change folder. Historical artifacts remain unchanged; retired workflows are not automatically migrated. Material product questions are resolved with the user and recorded in plan.md; there is no separate PRD review phase.
+
+Delegations use seven compact fields, referencing existing artifacts instead of copying them. Assign the narrowest common parent directory covering the approved work, not an upfront list of files or child directories. Separate additional reading from writing; agents choose necessary files within the goal and exclusions. Exact input/output artifact paths remain mandatory, and actual changed files are recorded afterward for verification.
 
 See [`AGENTS.md`](AGENTS.md) for the full authority, consent, TDD, verification, delivery, and Git policy.
 
@@ -128,7 +129,7 @@ Post-MVP change intake reuses approved documentation instead of restarting the l
 - uncertain problem/value → product-discovery owner module and, when useful, bounded validation;
 - architecture boundary → architecture-definition owner module;
 - significant technology/dependency/integration choice → technical-decisions owner module;
-- approved change ready for implementation → delivery-planning owner module, then one of the three Pi workflows.
+- approved change ready for implementation → delivery-planning owner module, then Direct Orchestrator or Planned Workflow.
 
 A completed increment records TDD and acceptance/conformance evidence, broader checks, validation status, learning/change-request links, release authorization, and next-increment eligibility. Documentation defines and traces intended behavior; it never authorizes implementation or release by itself.
 
@@ -263,22 +264,15 @@ The Subagents extension is maintained as the independent [`pi-subagents-j0k3r`](
 
 Current global/user subagents are under [`subagents/*.md`](subagents/):
 
-- [`discovery`](subagents/discovery.md) — read-only local codebase/context discovery; no internet or artifact writes.
+- [`00-discovery`](subagents/00-discovery.md) — local investigation; its assigned `discovery.md` is the sole write exception. No internet.
 - [`deep-researcher`](subagents/deep-researcher.md) — internet-capable deep research that writes `report.md` and `sources.md` in an assigned directory.
-- [`mini-sdd`](subagents/mini-sdd.md) — bounded Mini-SDD implementation lifecycle agent.
+- [`01-planing`](subagents/01-planing.md) — creates the bounded Planned Workflow implementation contract.
 - [`news-researcher`](subagents/news-researcher.md) — tech news intelligence gathering and briefing report generation.
-- [`prd-review`](subagents/prd-review.md) — PRD readiness, ambiguity, and requirement debt review.
-- [`sdd-explore`](subagents/sdd-explore.md) — formal SDD exploration.
-- [`sdd-proposal`](subagents/sdd-proposal.md) — PRD/product proposal.
-- [`sdd-spec`](subagents/sdd-spec.md) — normative requirements/spec.
-- [`sdd-design`](subagents/sdd-design.md) — technical design.
-- [`sdd-task`](subagents/sdd-task.md) — implementation task plan.
-- [`sdd-apply`](subagents/sdd-apply.md) — approved implementation tasks.
-- [`sdd-verify`](subagents/sdd-verify.md) — verification without fixing.
-- [`sdd-archive`](subagents/sdd-archive.md) — archive verified SDD changes.
+- [`02-apply`](subagents/02-apply.md) — approved implementation.
+- [`03-verify`](subagents/03-verify.md) — independent verification without fixing.
 - [`tool-smoke`](subagents/tool-smoke.md) — smoke testing tool execution and environment verification.
 
-The main agent remains the orchestrator. Subagents must not delegate to other subagents.
+The main agent remains the orchestrator. Subagents must not delegate to other subagents. After passing verification and explicit user archive approval, the orchestrator moves the complete change folder directly, checking continuity and destination safety; there is no archive subagent.
 
 ### Documentation maintenance
 
@@ -316,7 +310,7 @@ Configuración global/personal de Pi usada desde `~/.pi/agent`. Contiene la guí
 |---|---|
 | [`AGENTS.md`](AGENTS.md) | Instrucciones principales del orquestador, gates de workflow, política de TDD/commits, memoria y seguridad. |
 | [`skills/`](skills/) | Skills globales/de usuario usadas por el Skill Registry. Dominios amplios como documentación de proyecto y configuración de Pi se exponen como una skill router con módulos internos de referencia, no como muchos `SKILL.md` separados. |
-| [`subagents/`](subagents/) | Subagentes globales/de usuario definidos en Markdown. Aquí viven los agentes de fases SDD junto con `discovery` local-only, `deep-researcher` durable y agentes de briefing. |
+| [`subagents/`](subagents/) | Subagentes globales/de usuario definidos en Markdown. Aquí viven los agentes de fases workflow junto con `00-discovery` local-only, `deep-researcher` durable y agentes de briefing. |
 | [`extensions/`](extensions/) | Implementaciones de extensiones del directorio de agente y sus READMEs. En instalaciones por proyecto equivalen a `.pi/extensions/*`. |
 | [`docs/`](docs/) | Documentos de apoyo para esta configuración, como [atajos de teclado](docs/keyboard-shortcuts.md). |
 | [`subagents.json`](subagents.json) | Configuración global/de usuario para subagentes y perfiles de modelo. |
@@ -356,11 +350,11 @@ Las instalaciones o actualizaciones de paquetes sin versión explícita siguen l
 
 ### Modelo operativo principal
 
-El agente sigue estas reglas operativas. La ejecución está limitada exactamente a tres workflows: **Direct Orchestrator**, **Mini-SDD** y **Formal SDD**.
+El agente sigue estas reglas operativas. La ejecución está limitada exactamente a dos workflows: **Direct Orchestrator** y **Planned Workflow**.
 
 1. Responder consultas de asesoramiento sin inspeccionar ni modificar el proyecto.
-2. Enrutar trabajo concreto mediante [`workflow-triage`](skills/workflow-triage/SKILL.md): **Direct Orchestrator**, **Mini-SDD** o **Formal SDD**. Si el usuario ya nombra el workflow, comienza sin confirmación redundante.
-3. Usar [`discovery`](subagents/discovery.md) local y de solo lectura como exploración acotada de código/contexto cuando esté autorizada; usar [`deep-researcher`](subagents/deep-researcher.md) para reportes con investigación en internet. Ninguno es otro workflow.
+2. Enrutar trabajo concreto mediante [`workflow-triage`](skills/workflow-triage/SKILL.md): **Direct Orchestrator** o **Planned Workflow**. La autorización explícita de trabajar sin delegación selecciona ejecución directa para ese alcance. El trabajo excesivo se acota o divide, sin activar otro workflow.
+3. Usar [`deep-researcher`](subagents/deep-researcher.md) para investigaciones solicitadas por el usuario y reportes de investigación profunda (código local, documentación, web, GitHub, etc.); usar [`00-discovery`](subagents/00-discovery.md) local para exploración previa a la implementación en Planned Workflow (`openspec/changes/<change-slug>/discovery.md`). Ninguno es otro workflow.
 4. Aplicar [`anti-overengineering`](skills/anti-overengineering/SKILL.md) como guardrail transversal después de conocer workflow y owner. Los detalles locales, reversibles y ordinarios pertenecen al agente; producto, arquitectura, migraciones, dependencias, riesgo y efectos externos materiales pertenecen al usuario.
 5. Aplicar [`tdd`](skills/tdd/SKILL.md) estricto a cambios de código: baseline de seguridad, **RED** esperado, mínimo **GREEN** y **REFACTOR** manteniendo verde. Los cambios solo de documentación/configuración usan validación estructural o sintáctica enfocada.
 6. Tratar archivos sensibles de política (`AGENTS.md`, skills, subagentes, permisos, configuración de memoria/contexto y extensiones de workflow) como superficies de mayor riesgo.
@@ -371,11 +365,12 @@ Artefactos de workflow:
 
 | Workflow | Uso | Ciclo |
 |---|---|---|
-| Direct Orchestrator | Trabajo pequeño, explícito y acotado sin investigación amplia | Implementación directa; TDD para código y validación enfocada para docs/config. |
-| Mini-SDD | Trabajo medio/multiarchivo que necesita un contrato ligero | `mini-sdd.md` → `apply.md` → `verify.md` independiente → archivo. |
-| Formal SDD | Trabajo grande, transversal, arquitectónico, de seguridad, migración o contratos | `explore.md` → `proposal.md` → `spec.md` → `design.md` → `tasks.md` → `apply.md` → `verify.md` independiente → archivo. |
+| Direct Orchestrator | Trabajo trivial acotado o alcance aprobado explícitamente sin delegación | Ejecución directa con validación según el cambio y límites de autorización. |
+| Planned Workflow | Trabajo acotado que necesita un único contrato ligero | `discovery.md` opcional → `plan.md` → `apply.md` autorizado → `verify.md` independiente → archivo autorizado. |
 
-[`sdd-workflow`](skills/sdd-workflow/SKILL.md) gobierna gates, handoffs, continuidad del candidato, verificación y archivo de Mini/Formal. El archivado de Mini-SDD valida `mini-sdd.md`; Formal SDD valida `tasks.md`.
+[`work-workflow`](skills/work-workflow/SKILL.md) gobierna gates, handoffs, continuidad, verificación y archivo de Planned Workflow. Discovery por sí solo no autoriza implementación ni obliga a seguir fases. Su evidencia se reutiliza directamente en la misma carpeta del cambio. Los artefactos históricos se conservan sin migración automática. Las dudas materiales de producto se resuelven con el usuario y se registran en plan.md; no hay una fase separada de revisión de PRD.
+
+Las delegaciones usan siete campos compactos y referencian los artefactos existentes sin copiarlos. Se asigna el directorio padre común más acotado, no una lista anticipada de archivos o subdirectorios. La lectura adicional se separa de la escritura; el agente elige los archivos necesarios dentro del objetivo y las exclusiones. Se mantienen rutas exactas de entrada/salida de artefactos y se registran después los archivos realmente modificados para verificar.
 
 Ver [`AGENTS.md`](AGENTS.md) para la política completa de autoridad, consentimiento, TDD, verificación, entrega y Git.
 
@@ -412,7 +407,7 @@ Después del MVP se reutiliza la documentación aprobada en vez de reiniciar el 
 - problema/valor incierto → módulo de product-discovery y, cuando aporte valor, validación acotada;
 - cambio de límites arquitectónicos → módulo de architecture-definition;
 - decisión significativa de tecnología/dependencia/integración → módulo de technical-decisions;
-- cambio aprobado listo para implementar → módulo de delivery-planning y después uno de los tres workflows Pi.
+- cambio aprobado listo para implementar → módulo de delivery-planning y después Direct Orchestrator o Planned Workflow.
 
 Un incremento completo registra evidencia TDD y de aceptación/conformidad, checks adicionales, estado de Validation, enlaces de aprendizaje/change request, autorización de release y elegibilidad del siguiente incremento. La documentación define y traza el comportamiento previsto; nunca autoriza por sí sola implementación ni release.
 
@@ -547,22 +542,15 @@ La extensión Subagents se mantiene como el paquete independiente [`pi-subagents
 
 Los subagentes globales/de usuario actuales están en [`subagents/*.md`](subagents/):
 
-- [`discovery`](subagents/discovery.md) — discovery local de código/contexto, solo lectura, sin internet ni escritura de artefactos.
+- [`00-discovery`](subagents/00-discovery.md) — investigación local; el `discovery.md` asignado es su única excepción de escritura. Sin internet.
 - [`deep-researcher`](subagents/deep-researcher.md) — investigación profunda con internet que escribe `report.md` y `sources.md` en un directorio asignado.
-- [`mini-sdd`](subagents/mini-sdd.md) — ciclo de vida Mini-SDD para cambios acotados.
+- [`01-planing`](subagents/01-planing.md) — crea el contrato Planned Workflow para cambios acotados.
 - [`news-researcher`](subagents/news-researcher.md) — investigación de noticias tecnológicas y generación de reportes de briefing.
-- [`prd-review`](subagents/prd-review.md) — revisión de preparación de PRD, ambigüedad y deuda de requisitos.
-- [`sdd-explore`](subagents/sdd-explore.md) — exploración formal SDD.
-- [`sdd-proposal`](subagents/sdd-proposal.md) — propuesta de producto/PRD.
-- [`sdd-spec`](subagents/sdd-spec.md) — requisitos/spec normativos.
-- [`sdd-design`](subagents/sdd-design.md) — diseño técnico.
-- [`sdd-task`](subagents/sdd-task.md) — plan de tareas de implementación.
-- [`sdd-apply`](subagents/sdd-apply.md) — tareas de implementación aprobadas.
-- [`sdd-verify`](subagents/sdd-verify.md) — verificación sin arreglar.
-- [`sdd-archive`](subagents/sdd-archive.md) — archivo de cambios SDD verificados.
+- [`02-apply`](subagents/02-apply.md) — implementación autorizada.
+- [`03-verify`](subagents/03-verify.md) — verificación independiente sin arreglar.
 - [`tool-smoke`](subagents/tool-smoke.md) — pruebas de humo para validación del entorno y ejecución de herramientas.
 
-El agente principal sigue siendo el orquestador. Los subagentes no deben delegar a otros subagentes.
+El agente principal sigue siendo el orquestador. Los subagentes no deben delegar a otros subagentes. Tras verificación aprobada y autorización explícita del usuario para archivar, el orquestador mueve directamente la carpeta completa, comprobando continuidad y seguridad del destino; no hay subagente de archivo.
 
 ### Mantenimiento de documentación
 

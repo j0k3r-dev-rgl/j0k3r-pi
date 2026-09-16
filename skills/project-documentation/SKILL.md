@@ -20,7 +20,7 @@ registry:
 
 Use this skill when the user asks to document a software project, route a project-documentation decision, or decide which modular Markdown artifact owns a fact or decision.
 
-This is the one lightweight documentation router. It selects exactly one canonical owner for the current decision and then stops. It does not create a fourth Pi workflow, authorize implementation, scan code, define product scope, choose architecture, select technology, plan delivery, or validate product outcomes.
+This is the one lightweight documentation router. It selects exactly one canonical owner for the current decision and then stops. It does not create another Pi workflow, authorize implementation, scan code, define product scope, choose architecture, select technology, plan delivery, or validate product outcomes.
 
 Prefer direct path ownership when the request names a `docs/` path. Prefer intent ownership when no path is supplied. Read only the selected internal owner module and mandatory guardrails needed for that owner; do not fan out across the lifecycle.
 
@@ -38,7 +38,7 @@ It does not own:
 - shared Markdown structure and traceability details, which remain in `references/document-contract.md`;
 - AS_IS evidence reconstruction, owned by `references/owners/existing-project-onboarding.md`;
 - product discovery, definition, requirements, architecture, ADRs, delivery, or validation module content; or
-- Direct Orchestrator, Mini-SDD, or Formal SDD execution routing.
+- Direct Orchestrator or Planned Workflow execution routing.
 
 ## Hard Rules
 
@@ -48,7 +48,7 @@ It does not own:
 - Use existing approved artifacts as authority; do not restart discovery or onboarding when current contracts already answer the request.
 - Do not create placeholder documentation trees or speculative future documents.
 - Do not treat `phase`, `stage`, `etapa`, `milestone`, or `sprint` as product structure by default. Decide whether the term means current product scope, future extension/exclusion, or delivery sequencing.
-- Documentation defines and traces decisions. Code changes still proceed only through Direct Orchestrator, Mini-SDD, or Formal SDD after workflow triage.
+- Documentation defines and traces decisions. Code changes still proceed only through Direct Orchestrator or Planned Workflow after workflow triage.
 - Keep registry `related` minimal. Owner-specific handoffs are selected from the routing table, not by automatic related expansion.
 
 ## Routing Table
@@ -72,7 +72,7 @@ It does not own:
 2. Match the request by explicit path first, then by the smallest unresolved decision in the routing table.
 3. Read exactly the selected owner module plus `anti-overengineering` when not already loaded.
 4. Apply the selected module only to the current decision, known approved context, relevant path, exclusions, and next expected artifact.
-5. If implementation is requested after documentation readiness, route execution separately through Direct Orchestrator, Mini-SDD, or Formal SDD.
+5. If implementation is requested after documentation readiness, route execution separately through Direct Orchestrator or Planned Workflow.
 6. Regenerate the skill registry and run routing checks only when skill definitions or routing metadata changed.
 
 ## Output Contract

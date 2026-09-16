@@ -13,7 +13,7 @@ metadata:
 
 Use this skill after `project-documentation` routes a new software application or startup-project documentation request to new-project lifecycle setup.
 
-This is a new-project documentation lifecycle skill, not the broad documentation router. Broad routing belongs to `project-documentation`. It does not create a fourth Pi execution workflow and does not replace Direct Orchestrator, Mini-SDD, or Formal SDD. This skill intentionally has no registry metadata, so direct registry resolution does not select it or fan out from it; the router loads it explicitly when needed. Use `existing-project-onboarding` when an existing implementation must be scanned and reconstructed into the modular documentation baseline. Use `product-discovery` when a new project's problem, users, evidence, assumptions, or product direction are not yet established.
+This is a new-project documentation lifecycle skill, not the broad documentation router. Broad routing belongs to `project-documentation`. It does not create another Pi execution workflow and does not replace Direct Orchestrator or Planned Workflow. This skill intentionally has no registry metadata, so direct registry resolution does not select it or fan out from it; the router loads it explicitly when needed. Use `existing-project-onboarding` when an existing implementation must be scanned and reconstructed into the modular documentation baseline. Use `product-discovery` when a new project's problem, users, evidence, assumptions, or product direction are not yet established.
 
 Do not create the complete documentation tree eagerly, generate empty placeholder files, split the official project narrative into development phases, or use this skill to decide product scope, architecture, technology, sprint content, or validation thresholds.
 
@@ -34,7 +34,7 @@ For an MVP or application already being evolved, route only the first unresolved
 | Outcome evidence, conformance evidence, experiment result, or learning decision | `product-validation`. |
 | Existing codebase without a trustworthy modular documentation baseline | Principal-only `existing-project-onboarding`. |
 
-Documentation defines and traces the intended change; it does not authorize implementation. Code changes proceed only through Direct Orchestrator, Mini-SDD, or Formal SDD as selected by workflow triage and must follow the applicable change-type validation protocol. Do not run onboarding for an ordinary feature or bug, repeat discovery for an already supported problem, or regenerate unaffected documentation.
+Documentation defines and traces the intended change; it does not authorize implementation. Code changes proceed only through Direct Orchestrator or Planned Workflow as selected by workflow triage and must follow the applicable change-type validation protocol. Do not run onboarding for an ordinary feature or bug, repeat discovery for an already supported problem, or regenerate unaffected documentation.
 
 ## Implementation Readiness Gate
 
@@ -46,7 +46,7 @@ Before routing lifecycle-backed work into implementation, produce one compact re
 - applicable change-type validation and broader acceptance expectations;
 - delivery or Definition of Done expectations only when relevant;
 - unresolved user-owned decisions and blockers: `None`; and
-- selected Direct, Mini-SDD, or Formal SDD route.
+- selected Direct Orchestrator or Planned Workflow route.
 
 Missing non-applicable lifecycle groups do not block readiness. Missing behavior, acceptance, required architecture/ADR, validation expectations, or user-owned decisions do. The readiness packet proves bounded inputs; it does not itself authorize implementation.
 

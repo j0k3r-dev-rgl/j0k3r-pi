@@ -24,17 +24,45 @@ Related skills are handoff hints, not additional owners. A lower-ranked generic 
 | ID | Request | Expected result |
 |---|---|---|
 | WF-01 | “Which workflow should I use?” | `workflow-triage`; `ADVICE_ONLY`; no project inspection or execution. |
-| WF-02 | Small explicit bounded code fix | Direct Orchestrator only when exact files/symbols and trivial patch are already known; otherwise delegated `discovery` first, then TDD and anti-overengineering. |
-| WF-03 | Medium multi-file feature with shared plan | Mini-SDD with mandatory matching-subagent delegation for phase artifacts/execution: `mini-sdd.md` → `apply.md` → independent `verify.md` → archive. |
-| WF-04 | Large cross-contract/security/migration change | Formal SDD with mandatory matching-subagent delegation through `tasks.md`, apply, independent verify, and archive. |
-| WF-05 | User explicitly selects Mini-SDD or Formal SDD | Begin selected workflow without reopening triage unless scope materially changes. |
+| WF-02 | Small explicit bounded code fix | Direct Orchestrator only when exact files/symbols and trivial patch are already known; otherwise delegated `00-discovery` first, then TDD and anti-overengineering. |
+| WF-03 | Medium multi-file feature with shared plan | Planned Workflow delegates planning, apply, and independent verify; after user approval, the orchestrator archives directly. |
+| WF-04 | Work cannot fit a coherent lightweight contract | Resolve material decisions or split scope with the user; do not introduce another workflow. |
+| WF-05 | User explicitly requests execution without delegation | Direct Orchestrator investigates, plans, implements, and validates within approved scope; no delegated phases. |
 | WF-06 | Advice-only architecture or workflow comparison | Explain without execution; comparison does not authorize reads or changes. |
-| WF-07 | SDD artifact is `BLOCKED` | Do not advance; request only the missing material decision/dependency. |
-| WF-08 | Mini-SDD archive preflight | Require ready `mini-sdd.md` and passing `verify.md`; do not require `tasks.md`. |
-| WF-09 | Formal SDD archive preflight | Require ready `tasks.md` and passing `verify.md`. |
+| WF-07 | workflow artifact is `BLOCKED` | Do not advance; request only the missing material decision/dependency. |
+| WF-08 | Planned Workflow archive preflight | Orchestrator requires ready plan.md, passing verify.md, unchanged continuity evidence, explicit archive approval, and a safe absent destination; never delegate archive. |
+| WF-09 | Pre-implementation discovery only | Assign exact discovery.md path and contract skill in Planned Workflow; preserve EVID-### evidence, read artifact, and stop without automatic planning or implementation. |
 | WF-10 | Verified candidate changed before archive/delivery | Recompute the verified continuity manifest immediately before the boundary; any record or aggregate SHA-256 mismatch blocks mutation/delivery, invalidates prior verification continuity, and requires a new applicable verification decision. |
-| WF-11 | Workflow-relevant delegation requires a canonical handoff | Include the exact six-field handoff envelope in the prompt; a reference to an unavailable contract is insufficient. |
-| WF-12 | User calls OpenSpec a separate workflow | Treat OpenSpec as the artifact namespace/convention for Mini-SDD and Formal SDD, never as a fourth workflow or external authority. |
+| WF-11 | Workflow-relevant delegation requires a canonical handoff | Supply seven delegation fields and the exact accessible artifact-contract skill path; agent reads it and returns only the four-field Handoff block. |
+| WF-12 | User calls OpenSpec a separate workflow | Treat OpenSpec as the artifact namespace for Planned Workflow and discovery, not another workflow. |
+| WF-13 | Standalone investigation or research is requested | Route to deep-researcher (producing report.md and sources.md), using local code and external sources as needed, never 00-discovery, unless direct execution is authorized. |
+| WF-14 | discovery.md already exists for another investigation | Do not overwrite; resolve ownership or assign a distinct change folder. |
+| WF-15 | Planned Workflow apply or remediation | Validate every MINI-### and acceptance check; do not require legacy tasks/spec artifacts. |
+| WF-16 | Existing historical workflow artifacts | Preserve them; do not automatically migrate, delete, or resume retired phases. |
+| WF-17 | Configuration file is inside writable scope | Require explicit configuration authorization; generic implementation permission is insufficient. |
+
+| WF-18 | Archive destination exists, path is unsafe, or atomic rename is unavailable | Stop without overwrite/merge or automatic copy/delete fallback; request the missing decision. |
+| WF-19 | Archive completed | Confirm complete destination tree, absent source, and no owned residue; report destination without a new phase artifact. |
+
+| WF-20 | Material product question before implementation | Ask the user and record the decision or blocker in plan.md; no separate PRD artifact, review agent, or mandatory product-documentation detour. |
+| WF-21 | User explicitly requests product documentation | Use project-documentation independently; its ownership modules are not Planned Workflow phases. |
+| WF-22 | Decision is missing or ambiguous | Trip circuit breaker immediately: stop execution, ask user directly for the decision, do not mutate files or guess defaults. |
+| WF-23 | Orchestrator prepares to mutate files | Present Pre-Mutation Summary Gate to user (files, changes, rationale, validation) before applying modifications. |
+
+## Compact delegation and directory scope
+
+| ID | Situation | Expected result |
+|---|---|---|
+| SCOPE-01 | Controllers, services, and tests under one module | Use the narrowest common module parent once; no sibling-directory or predicted-file inventory. |
+| SCOPE-02 | Separate approved backend and frontend areas | Use the minimal distinct roots; do not silently grant repository-wide writes. |
+| SCOPE-03 | Implementation needs another directory | Stop and request scope expansion before modifying outside the boundary. |
+| SCOPE-04 | Shared types outside writable module | Grant only necessary additional read access; no implicit write permission. |
+| SCOPE-05 | Config file lies inside writable directory | Configuration Lock still requires explicit authorization. |
+| SCOPE-06 | Upstream contract already has scope and acceptance | Seven compact fields reference it; each exact path appears once, no copied inventories/criteria/commands. |
+| SCOPE-07 | First discovery has no upstream contract | Send question, consolidated read area, exclusions, exact output and skill references; do not invent a context document. |
+| SCOPE-08 | Apply completed | Actual changed files appear in apply evidence; verify checks completeness independently. |
+| SCOPE-09 | User explicitly restricts one file | Preserve that tighter boundary; parent consolidation cannot broaden explicit authorization. |
+| SCOPE-10 | Prompt exceeds soft word target due to essential authority | Preserve authority, not an arbitrary truncation; remove duplication first. |
 
 ## Anti-overengineering and TDD scenarios
 
@@ -68,9 +96,9 @@ Related skills are handoff hints, not additional owners. A lower-ranked generic 
 | NEW-09 | Experiment or conformance evidence | `project-documentation` routes to product-validation owner module; predeclared criteria and correct trace IDs. |
 | NEW-10 | Evidence challenges approved canonical content | Initiator requests CR; Validation creates/routes it; target owner returns disposition; Validation closes with evidence. |
 | NEW-11 | Router loads one canonical domain owner module | `project-documentation` reads only the selected internal owner module and shared contract; owner modules are not separate skills. |
-| NEW-12 | Registry resolves project-documentation for an SDD phase | Treat phase relevance as routing metadata only; it does not create a phase owner or fourth workflow. |
+| NEW-12 | Registry resolves project-documentation for an workflow phase | Treat phase relevance as routing metadata only; it does not create a phase owner or another workflow. |
 | NEW-13 | CR record says `APPROVED` but no owner disposition exists | Do not infer acceptance; lifecycle status and target-owner semantic disposition are distinct. |
-| NEW-14 | English and Spanish README lifecycle summaries are reviewed after a contract change | Both describe the same three workflows, routing boundaries, and startup lifecycle without creating separate authority. |
+| NEW-14 | English and Spanish README lifecycle summaries are reviewed after a contract change | Both describe the same two workflows, routing boundaries, and startup lifecycle without creating separate authority. |
 | NEW-15 | Registry owner selection could expand related skills by default | Resolve the canonical owner with `include_related:false`; related skills remain handoff hints and never become co-owners. |
 
 ## Existing-project onboarding scenarios

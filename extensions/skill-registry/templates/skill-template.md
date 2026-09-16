@@ -24,7 +24,7 @@ Registry metadata conventions:
 - `domains`: comma-separated routing domains.
 - `paths`: comma-separated path globs.
 - `keywords`: comma-separated trigger phrases.
-- `phases`: optional comma-separated SDD phases. Leave empty for most domain/helper skills; use only for workflow owners and true transversal guardrails.
+- `phases`: optional comma-separated workflow phases. Leave empty for most domain/helper skills; use only for workflow owners and true transversal guardrails.
 - `related`: optional comma-separated nearby skills.
 - `priority`: routing priority from 0 to 100.
 - Omit empty optional fields instead of leaving blanks.

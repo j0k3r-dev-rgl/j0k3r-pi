@@ -10,7 +10,7 @@ registry:
   domains: "skills, routing, agent-configuration"
   paths: ".pi/skills/**/SKILL.md, .agents/skills/**/SKILL.md, skills/**/SKILL.md, ~/.pi/agent/skills/**/SKILL.md, ~/.agents/skills/**/SKILL.md, extensions/skill-registry/templates/skill-template.md, .pi/skill-registry.json, .pi/skill-registry.md"
   keywords: "create skill, update skill, modify skill, skill template, skill registry, skill routing, SKILL.md"
-  related: "sdd-workflow"
+  related: "work-workflow"
   priority: 85
 ---
 

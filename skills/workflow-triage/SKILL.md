@@ -1,17 +1,16 @@
 ---
 name: workflow-triage
-description: "route software requests among exactly three workflows: Direct Orchestrator, Mini-SDD, or Formal SDD. Use when choosing a workflow, classifying execution versus advice, or deciding whether bounded discovery is required."
+description: "route software requests between Direct Orchestrator and Planned Workflow. Use to classify execution versus advice, honor explicit no-delegation authorization, and select bounded local or external research."
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "11.0"
+  version: "12.0"
 registry:
   category: "workflow"
   domains: "workflow-routing, orchestration, openspec"
-  paths: "AGENTS.md, openspec/changes/**/*.md, skills/workflow-triage/SKILL.md, skills/sdd-workflow/SKILL.md"
-  keywords: "choose workflow, workflow triage, direct orchestrator, mini-sdd, formal sdd, compare workflows, openspec workflow"
-  phases: "explore, proposal, spec, design, task, apply, verify, archive"
-  related: "sdd-workflow, tdd"
+  paths: "AGENTS.md, openspec/changes/**/*.md, skills/workflow-triage/SKILL.md, skills/work-workflow/SKILL.md"
+  keywords: "choose workflow, workflow triage, direct orchestrator, planned-workflow, compare workflows, openspec workflow"
+  related: "work-workflow, tdd"
   priority: 95
 ---
 
@@ -19,65 +18,38 @@ registry:
 
 ## Activation Contract
 
-Use this skill when the agent must choose or explain the workflow, or when the user asks about Direct Orchestrator, Mini-SDD, or Formal SDD.
-
-Do not load it again once the workflow is already chosen unless scope changed materially.
+Use for non-trivial software work or workflow selection. Load once per session; re-triage only after material scope changes. Global authorization and precedence live in `AGENTS.md`.
 
 ## Canonical Scope
 
-This skill owns only:
-
-- workflow selection among exactly three workflows;
-- execution-authorized vs advice-only classification; and
-- re-triage after material scope change.
-
-Global authorization, access, and delegation rules live in `AGENTS.md`.
+This skill selects Direct Orchestrator or Planned Workflow, classifies advice versus execution, and selects the research lane (`deep-researcher` for user-requested investigations or standalone research; `00-discovery` for pre-implementation discovery). It does not authorize implementation or own artifact formats.
 
 ## Hard Rules
 
-- Support exactly three workflows: Direct Orchestrator, Mini-SDD, Formal SDD.
-- A concrete work request is `EXECUTION_AUTHORIZED` within the stated scope.
-- Advice-only requests are `ADVICE_ONLY` and do not authorize inspection or mutation.
-- Do not ask for a second start confirmation.
-- Prefer Mini-SDD for non-trivial but bounded work.
-- Choose Formal SDD only when there is a concrete escalation signal: materially coupled contracts, unresolved architecture, migration/security consequences, or review that cannot stay coherent in one lightweight plan.
-- Use bounded `discovery` whenever safe execution requires unknown implementation-code, behavior, dependency, test, project-structure, or external research.
-- Direct Orchestrator must not inspect implementation code unless the user names exact files or symbols and the task is trivial.
-- If implementation is non-trivial after discovery, choose Mini-SDD or Formal SDD instead of continuing as Direct Orchestrator.
-
-## Routing Table
-
-| Situation | Workflow |
-|---|---|
-| Answer, routing, exact known read, trivial localized edit, or lightweight validation | Direct Orchestrator |
-| Work needing unknown code/behavior/test/dependency research | Likely workflow + delegated `discovery` first |
-| Medium implementation inside one coherent boundary | Mini-SDD |
-| Large, cross-cutting, migration-heavy, or architecture-heavy work | Formal SDD |
-| Material unknown blocks the route | Likely workflow + bounded discovery |
+- Apply explicit no-delegation authorization first: use Direct Orchestrator for the approved scope, including investigation, planning, implementation, and validation. Do not delegate or create mandatory Planned Workflow ceremony under this override.
+- Without that override, use Direct Orchestrator for answers to direct factual questions, exact known reads, trivial localized edits, and lightweight validation; use Planned Workflow for bounded implementation needing a shared contract.
+- When requested to investigate, research, or inspect a topic, behavior, question, architecture, or codebase outside an implementation change, delegate to `deep-researcher` (which writes `report.md` and `sources.md`).
+- For unknown local code, behavior, tests, or structure before an implementation change in Planned Workflow, delegate `00-discovery` with an exact absolute `openspec/changes/<change-slug>/discovery.md` output path. Project files remain read-only; only that artifact may be written.
+- Research alone may finish with its artifact; it does not mandate implementation or Planned Workflow continuation.
+- If work is too broad or material decisions are unresolved, trip the circuit breaker and narrow/split it with the user rather than introducing another workflow.
+- A concrete request authorizes work within its scope, subject to the Pre-Mutation Summary Gate before any file modification; advice-only does not authorize inspection or mutation.
 
 ## Execution Steps
 
-1. Reuse current context without reading files.
-2. Identify only material unknowns.
-3. If unknown code, behavior, tests, dependencies, project structure, or external facts are needed, delegate bounded `discovery` before implementation.
-4. Select one workflow with one concise reason.
-5. Classify the request as `EXECUTION_AUTHORIZED` or `ADVICE_ONLY`.
-6. For `EXECUTION_AUTHORIZED`, proceed immediately with the selected workflow.
-7. Re-triage only if scope changes materially.
+1. Reuse supplied context and classify request mode.
+2. Check explicit executor decisions before normal routing.
+3. Select the smallest valid route and resolve only material unknowns.
+4. If local discovery is needed, reuse the active change directory or assign a topic slug; confirm the destination is not owned by another investigation. Pass the exact output path and artifact-contract skill.
+5. Read the resulting artifact before relying on its evidence. Stop on a material blocker.
+6. For Planned Workflow, load `work-workflow`; for direct code changes, apply the relevant validation and scope skills.
 
 ## Output Contract
 
-Return:
-
-- recommended workflow;
-- request mode: `EXECUTION_AUTHORIZED` or `ADVICE_ONLY`;
-- concise rationale;
-- material unknowns, if any;
-- whether discovery is required; and
-- related execution skill to load next (`tdd` or `sdd-workflow`).
+Briefly state the route, material blocker if any, and next action when useful. Do not add a routing ceremony to trivial answers.
 
 ## References
 
-- `AGENTS.md`
-- `skills/sdd-workflow/SKILL.md`
-- `skills/tdd/SKILL.md`
+- `~/.pi/agent/AGENTS.md` — authorization, precedence, direct override.
+- `~/.pi/agent/skills/work-workflow/SKILL.md` — lightweight lifecycle.
+- `~/.pi/agent/skills/subagent-artifact-contracts/SKILL.md` — discovery and handoff formats.
+- `~/.pi/agent/skills/tdd/SKILL.md` — validation by change type.

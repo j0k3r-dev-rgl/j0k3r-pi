@@ -207,8 +207,8 @@ export function extractSkillRegistryAction(toolName: string, args: any): string 
   }
 
   if (toolName === 'skill_registry_resolve') {
-    if (typeof args.sdd_phase === 'string' && args.sdd_phase) {
-      return `phase: ${args.sdd_phase}`;
+    if (typeof args.workflow_phase === 'string' && args.workflow_phase) {
+      return `phase: ${args.workflow_phase}`;
     }
     if (Array.isArray(args.paths) && args.paths.length > 0) {
       return `paths: ${args.paths.join(', ')}`;

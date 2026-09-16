@@ -13,7 +13,7 @@ Use this order whenever instructions overlap:
 3. this `AGENTS.md` for global policy;
 4. the selected workflow owner:
    - `skills/workflow-triage/SKILL.md` for routing;
-   - `skills/sdd-workflow/SKILL.md` for Mini-SDD and Formal SDD lifecycle;
+   - `skills/work-workflow/SKILL.md` for the Planned Workflow lifecycle;
 5. `skills/subagent-artifact-contracts/SKILL.md` for subagent-produced Markdown artifact and handoff formats;
 6. the selected domain or guardrail skills;
 7. ready change-local artifacts;
@@ -25,10 +25,22 @@ If equal-authority sources conflict, stop and surface the exact conflict.
 
 - A concrete request to change, fix, build, review, investigate, configure, or otherwise perform work authorizes execution within the stated scope.
 - **Configuration Lock (Strict & Non-negotiable)**: Never touch, modify, or create configuration files or settings (project configs, tooling, environment, Pi configuration, dependencies, linters, build configs, system settings) unless the user explicitly requested it or gave direct, unambiguous authorization. Never modify configurations as an incidental fix, shortcut, or unrequested adaptation.
-- Do not ask for a second “start” or “go ahead”.
+- **Pre-Mutation Summary Gate**: Before applying any file modification or executing modifying operations (`edit`, `write`, destructive/mutating commands), the orchestrator MUST notify the user with a concise summary of:
+  1. What will be changed (exact files and targets).
+  2. Summary of changes (what is being altered and why).
+  3. Intended validation or impact.
+  Never modify files silently or jump straight into mutations without first presenting what will be done.
 - Advice-only, comparison, explanation, and hypothetical requests do not authorize inspection or mutation.
 - Ask one concise question only when a material fact is missing: intent, scope, desired outcome, executor, or a user-owned decision.
 - Respect explicit workflow or executor choices unless scope changed materially.
+
+## Circuit Breaker Protocol
+
+- When a required decision is missing, ambiguous, or unresolved (in the orchestrator or reported by a subagent as `BLOCKED`), the **circuit breaker trips immediately**:
+  1. **Stop execution**: Do not attempt mutations, guess assumptions, choose speculative defaults, or advance phases.
+  2. **Ask the user directly**: Formulate a single, concise question surfacing the exact trade-off or decision needed.
+  3. **Wait for user input**: Resume execution only after the user provides the missing decision.
+- **Subagent Circuit Breaker**: Subagents must trip the circuit breaker and return `BLOCKED` immediately whenever a product, architecture, scope, or design decision is unresolved or requires human judgment. Subagents must never guess or invent requirements.
 
 ## Context and Access Boundaries
 
@@ -36,14 +48,16 @@ If equal-authority sources conflict, stop and surface the exact conflict.
 - Do not reread files or rerun discovery only to restate unchanged context.
 - When a fresh read is justified, use the narrowest file, path, symbol, or section that resolves the next action.
 - The orchestrator coordinates by default. It may inspect implementation code directly only when the user names exact files or symbols and the task is trivial, unless the user explicitly authorizes direct execution without delegation.
-- For unknown code, behavior, dependencies, tests, or project structure, delegate bounded read-only `discovery` before implementation unless the user explicitly requests or authorizes direct investigation.
-- Direct orchestrator execution is normally limited to routing, answers, exact known reads, trivial localized edits, and lightweight validation. Explicit user authorization to work without delegation expands this boundary to the approved task scope.
+- When asked to investigate, look into, or research a topic, behavior, codebase, or question outside an implementation change, delegate to `deep-researcher` (writing `report.md` and `sources.md`).
+- For unknown code, behavior, dependencies, tests, or project structure when preparing an implementation change, delegate bounded `00-discovery` in Planned Workflow (project files read-only; assigned `openspec/changes/<change-slug>/discovery.md` writable) unless the user explicitly requests or authorizes direct investigation.
+- Direct orchestrator execution is normally limited to routing, answers to direct factual questions, exact known reads, trivial localized edits, and lightweight validation. Explicit user authorization to work without delegation expands this boundary to the approved task scope.
 - When direct execution without delegation is explicitly authorized, the orchestrator may inspect, plan, implement, and validate the requested work itself, while preserving all scope, configuration-lock, validation, and Git policies.
 - Unexpected scope growth, new repositories, new services, or new product/architecture decisions require renewed approval.
 
 ## Research and Code Inspection
 
-- Use delegated read-only `discovery` for unknown project, implementation-code, behavior, dependency, test, or external research, unless the user explicitly authorizes direct execution without delegation.
+- Unless direct execution is explicitly authorized, delegate standalone investigation, technical research, architecture review, or requests to "look into" a topic or codebase to `deep-researcher`; it conducts the investigation across local code and external sources as needed and writes `report.md` and `sources.md`.
+- Delegate pre-implementation exploration of unknown local project/code/test behavior in Planned Workflow to `00-discovery`; it preserves evidence in the exact assigned `openspec/changes/<change-slug>/discovery.md` and leaves project files unchanged.
 - Under explicit no-delegation authorization, perform the narrowest direct inspection needed and do not use subagents.
 - Do not duplicate completed investigation unless freshness or an unresolved gap requires it.
 - For TypeScript/JavaScript, Java, and Go code lookups, call `workspace_graph_status` first and then use `code_find` or `code_call_hierarchy` before any text search.
@@ -52,20 +66,19 @@ If equal-authority sources conflict, stop and surface the exact conflict.
 
 ## Workflow Model
 
-Pi supports exactly three workflows:
+Pi supports exactly two workflows:
 
-1. **Direct Orchestrator** — coordination, answers, exact known reads, trivial localized edits, and lightweight validation.
-2. **Mini-SDD** — bounded implementation that needs investigation or a shared plan.
-3. **Formal SDD** — larger or more coupled work needing explicit proposal/spec/design/tasks lifecycle.
+1. **Direct Orchestrator** — coordination, answers, trivial localized edits, lightweight validation, or the full scope explicitly authorized without delegation.
+2. **Planned Workflow** — bounded implementation using one lightweight contract, approved apply, and independent verification.
 
-PRD and discovery are optional artifacts or activities, not workflows.
+Discovery is an optional evidence-gathering activity, not a workflow. Resolve material product questions with the user and record decisions in plan.md; do not add a separate PRD review phase. Large or uncertain work is narrowed or split with the user into coherent Planned Workflow changes; it does not activate another lifecycle. Existing historical artifacts are preserved, not automatically migrated or deleted.
 
 ## Workflow Routing Rules
 
-- **Workflow Triage for Complex Tasks**: When a complex or non-trivial task is requested (features, non-trivial bug fixes, refactoring, multi-file changes, or planning), load and follow `skills/workflow-triage/SKILL.md` to determine the normal workflow (Mini-SDD or Formal SDD). Loading it once per session is sufficient—do not reload it repeatedly unless scope changes materially. For simple, trivial, or direct single-step queries/edits, loading `workflow-triage` is not required.
-- **Explicit Direct-Execution Override**: If the user explicitly requests or authorizes execution without delegation, use Direct Orchestrator for that approved scope regardless of normal Mini-SDD or Formal SDD routing. Do not delegate any phase. This override does not waive scope control, Configuration Lock, change validation, Git policy, or the need to ask about material product decisions.
-- Prefer Mini-SDD for non-trivial but bounded work when the explicit direct-execution override is not active.
-- Escalate to Formal SDD only for materially coupled contracts, major architecture change, migration/security consequences, or review that cannot stay coherent in one lightweight plan.
+- **Workflow Triage for Complex Tasks**: When a complex or non-trivial task is requested (features, non-trivial bug fixes, refactoring, multi-file changes, or planning), load and follow `skills/workflow-triage/SKILL.md` to determine the normal workflow (Direct Orchestrator or Planned Workflow). Loading it once per session is sufficient—do not reload it repeatedly unless scope changes materially. For simple, trivial, or direct single-step queries/edits, loading `workflow-triage` is not required.
+- **Explicit Direct-Execution Override**: If the user explicitly requests or authorizes execution without delegation, use Direct Orchestrator for that approved scope regardless of normal Planned Workflow routing. Do not delegate any phase. This override does not waive scope control, Configuration Lock, change validation, Git policy, or the need to ask about material product decisions.
+- Prefer Planned Workflow for non-trivial but bounded work when the explicit direct-execution override is not active.
+- For work that cannot stay coherent in one lightweight contract, resolve material decisions or split the approved scope with the user before implementation; do not expand the contract into a multi-phase specification lifecycle.
 - Re-triage only when scope changes materially.
 
 ## Skill Loading Rules
@@ -73,7 +86,7 @@ PRD and discovery are optional artifacts or activities, not workflows.
 Use the smallest useful skill set.
 
 1. Route with `skills/workflow-triage/SKILL.md` when handling complex tasks; loading it once per session is sufficient, and simple/trivial tasks do not require it.
-2. Resolve candidate skills with `skill_registry_resolve` when intent, touched paths, or SDD phase matter.
+2. Resolve candidate skills with `skill_registry_resolve` when intent, touched paths, or workflow phase matter.
 3. Read only the selected `SKILL.md` files before acting.
 4. Load at most one workflow owner plus the minimum guardrail/domain skills needed for the task.
 5. Do not scan `skills/` blindly.
@@ -92,20 +105,19 @@ Use the smallest evidence path that fits the change:
 
 Never label a step RED unless it fails for the expected reason.
 
-## SDD Rules
+## workflow Rules
 
 - Store active changes under `openspec/changes/<change-slug>/`.
-- SDD artifact and handoff formats live in `skills/subagent-artifact-contracts/SKILL.md`.
-- In Mini-SDD and Formal SDD, delegation is mandatory for every phase unless the user has explicitly activated the Direct-Execution Override for the approved scope.
-- When that override is active, do not run Mini-SDD or Formal SDD phases: execute directly and retain the applicable validation policy.
+- workflow artifact and handoff formats live in `skills/subagent-artifact-contracts/SKILL.md`.
+- In Planned Workflow, delegation is mandatory for planning, implementation, and independent verification. Archive is a direct orchestrator operation, not a delegated phase. Under the explicit Direct-Execution Override, execute directly instead of running delegated Planned Workflow phases; retain scope, authorization, configuration-lock, and validation policies.
 - Without the override, if the required phase subagent is unavailable, stop and report the configuration blocker instead of doing the phase directly.
 - Without the override, the orchestrator coordinates, prepares bounded prompts, reads handoffs/artifacts, runs structural gates, summarizes, and asks user decisions; it does not author phase artifacts.
 - The orchestrator reads the relevant artifact before advancing phases.
 - `BLOCKED` stops advancement.
-- `sdd-apply` requires an implementation summary plus explicit user authorization.
-- `sdd-verify` must be independent.
-- `sdd-archive` requires passing verification plus explicit user authorization.
-- Lifecycle details live in `skills/sdd-workflow/SKILL.md`.
+- `02-apply` requires an implementation summary plus explicit user authorization.
+- `03-verify` must be independent.
+- The orchestrator archives the complete change directory directly only after passing verification, unchanged continuity evidence, and explicit user approval of archive. Follow the archive safety checks in `work-workflow`; never delegate archive.
+- Lifecycle details live in `skills/work-workflow/SKILL.md`.
 
 ## Delegation Contract
 
@@ -122,19 +134,23 @@ Every workflow-relevant delegated prompt must supply these seven fields in order
 Rules:
 
 - Workflow-artifact delegated results must use the compact canonical handoff in `skills/subagent-artifact-contracts/SKILL.md`.
-- Read-only `discovery` returns a direct evidence-backed report, not the compact SDD handoff, unless explicitly delegated as a handoff-only compatibility wrapper.
-- Successful SDD/Mini-SDD handoffs must not repeat artifact content, edited files, scanned files, or validation details; the orchestrator reads the generated `.md`.
-- If discovery evidence materially changes, unlocks, or justifies a Formal SDD decision, persist it through `explore.md` or cite a concrete discovery report/source locator in the downstream artifact.
+- `00-discovery` writes the assigned `discovery.md` and returns the compact canonical handoff. Assign the exact absolute path and governing artifact-contract skill before launch; read the artifact before using its findings. Discovery alone does not authorize implementation or require further phases.
+- Successful Planned Workflow and discovery handoffs must not repeat artifact content, edited files, scanned files, or validation details; the orchestrator reads the generated `.md`.
+- Reuse `discovery.md` evidence IDs in `plan.md`; do not create a separate exploration/synthesis phase. Reuse the existing change directory and never overwrite another investigation's artifact.
 - `READY`, `BLOCKED`, and `FAILED` semantics live in `skills/subagent-artifact-contracts/SKILL.md`.
 - Inter-agent communication is always in English.
-- For SDD delegation, pass compact exact references before launching the subagent: change slug, phase, output artifact path, authority artifact path(s), scope-source artifact, assigned `SKILL.md` path(s), user decision when required, and one expected outcome.
-- Include `skills/subagent-artifact-contracts/SKILL.md` in Assigned skills for any subagent that writes, updates, validates, archives, or returns a workflow artifact.
+- For workflow delegation, pass compact exact references before launching the subagent: change slug, phase, output artifact path, authority artifact path(s), scope-source artifact, assigned `SKILL.md` path(s), user decision when required, and one expected outcome.
+- Include `skills/subagent-artifact-contracts/SKILL.md` in Assigned skills for any subagent that writes, updates, validates, or returns a workflow artifact.
 - Do not copy full OpenSpec contracts, expanded execution-scope path lists, validation matrices, or stable artifact templates into prompts; subagents must read referenced artifacts and the canonical contract skill.
 
 ## Subagent Rules
 
 - Subagents do not automatically inherit `AGENTS.md`, skills, memory, or the full conversation.
-- Prompts to subagents should contain only the seven dynamic fields and exact task context.
+- Prompts to subagents contain the seven dynamic fields, normally one line each. Aim for 150–250 words or fewer; this is a soft budget, never a reason to omit essential authority or constraints.
+- Write each absolute artifact/skill path once, then reference its unambiguous label or filename. Point to scope, acceptance, validation, and evidence in existing artifacts; do not copy their contents or repeat the agent's permanent instructions.
+- Supply only the goal, exact input/output references, and new user decisions/context not recoverable from those files. Do not create extra documents solely to shorten a prompt. Discovery without an upstream contract receives the bounded question, directory roots, and exclusions directly.
+- Assign the narrowest common parent directory covering the approved work instead of enumerating files or child directories. Use multiple roots only for genuinely separate areas; never broaden the approved boundary silently. Separate additional read access from modification permission.
+- The subagent chooses necessary files within the assigned area. Goal, acceptance, exclusions, Configuration Lock, and Git policy still limit its actions. Exact artifact/skill paths and explicit user file restrictions remain valid exceptions.
 - Pass exact `SKILL.md` paths when a subagent must use a skill.
 - Subagents may not broaden scope, invent authority, or perform unrelated discovery.
 

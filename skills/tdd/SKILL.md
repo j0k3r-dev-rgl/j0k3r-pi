@@ -10,7 +10,7 @@ registry:
   domains: "tdd, testing, regression-testing"
   paths: "src/**, lib/**, app/**, packages/*/src/**, tests/**, test/**, spec/**, **/__tests__/**, **/*.test.*, **/*.spec.*"
   keywords: "tdd, red green refactor, regression test, failing test, characterization test, test layer, bug fix test, feature removal test"
-  phases: "task, apply, verify"
+  phases: "apply, verify"
   related: "workflow-triage"
   priority: 90
 ---

@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 export const PROJECT_SKILL_ROOTS = ['.pi/skills', '.agents/skills'] as const;
 export const GLOBAL_SKILL_ROOTS = ['.pi/agent/skills', '.agents/skills'] as const;
 export const KNOWN_SKILL_CATEGORIES = ['base', 'transversal', 'workflow', 'quality', 'security', 'runtime', 'product', 'domain', 'helper'] as const;
@@ -16,7 +16,7 @@ export type RegistryContract = Record<string, unknown> & {
   category?: string;
   domains?: string[];
   triggers?: { paths?: string[]; keywords?: string[]; [key: string]: unknown };
-  sdd_phases?: string[];
+  workflow_phases?: string[];
   related_skills?: string[];
   priority?: number;
 };
@@ -43,7 +43,7 @@ export type SkillRegistryEntry = {
     category: string | null;
     domains: string[];
     triggers: Record<string, unknown>;
-    sdd_phases: string[];
+    workflow_phases: string[];
     related_skills: string[];
     priority: number;
   };
@@ -153,7 +153,7 @@ function extractRegistryContract(data: Record<string, unknown>): RegistryContrac
       ...(paths.length ? { paths } : {}),
       ...(keywords.length ? { keywords } : {}),
     },
-    sdd_phases: parseCommaSeparatedStrings(frontmatter.phases),
+    workflow_phases: parseCommaSeparatedStrings(frontmatter.phases),
     related_skills: parseCommaSeparatedStrings(frontmatter.related),
     ...(Number.isFinite(priority) ? { priority } : {}),
   };
@@ -193,7 +193,7 @@ function collectSkillWarnings(skill: SkillRegistryEntry): string[] {
   const triggerPaths = isStringArray(skill.routing.triggers.paths) ? skill.routing.triggers.paths : [];
   const triggerKeywords = isStringArray(skill.routing.triggers.keywords) ? skill.routing.triggers.keywords : [];
   const hasTriggers = triggerPaths.length > 0 || triggerKeywords.length > 0;
-  const hasPhases = skill.routing.sdd_phases.length > 0;
+  const hasPhases = skill.routing.workflow_phases.length > 0;
 
   if (category && !KNOWN_SKILL_CATEGORIES.includes(category as (typeof KNOWN_SKILL_CATEGORIES)[number])) {
     warnings.push(`${skill.name}: unknown registry category "${skill.routing.category}"`);
@@ -237,7 +237,7 @@ async function parseSkill(filePath: string, input: { cwd: string; homeDir: strin
       category: typeof registryContract.category === 'string' ? registryContract.category : null,
       domains: isStringArray(registryContract.domains) ? registryContract.domains : [],
       triggers,
-      sdd_phases: isStringArray(registryContract.sdd_phases) ? registryContract.sdd_phases : [],
+      workflow_phases: isStringArray(registryContract.workflow_phases) ? registryContract.workflow_phases : [],
       related_skills: isStringArray(registryContract.related_skills) ? registryContract.related_skills : [],
       priority,
     },
@@ -325,7 +325,7 @@ export function renderSkillRegistryMarkdown(registry: SkillRegistry): string {
       `- priority: ${skill.routing.priority}`,
       `- category: ${skill.routing.category ?? 'n/a'}`,
       `- domains: ${skill.routing.domains.length ? skill.routing.domains.join(', ') : 'n/a'}`,
-      `- sdd phases: ${skill.routing.sdd_phases.length ? skill.routing.sdd_phases.join(', ') : 'n/a'}`,
+      `- workflow phases: ${skill.routing.workflow_phases.length ? skill.routing.workflow_phases.join(', ') : 'n/a'}`,
       `- description: ${skill.description || 'n/a'}`,
       `- path triggers: ${paths.length ? paths.map((item) => `\`${item}\``).join(', ') : 'n/a'}`,
       `- keyword triggers: ${keywords.length ? keywords.map((item) => `\`${item}\``).join(', ') : 'n/a'}`,

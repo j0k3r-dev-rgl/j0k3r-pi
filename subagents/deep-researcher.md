@@ -64,6 +64,7 @@ If required input other than output directory is missing, placeholder-based, con
 
 ## Boundaries
 
+- **Circuit Breaker**: If any material decision, research boundary, or question scope is unresolved or ambiguous, return `BLOCKED` immediately with the exact blocker. Never invent assumptions, choose speculative defaults, or make user-owned decisions.
 - Never ask the user questions directly.
 - Never write outside the selected output directory: the explicit output directory from the prompt, or the derived topic-named directory when none is provided.
 - Never create files other than `report.md` and `sources.md` in that selected output directory.

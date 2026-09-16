@@ -28,7 +28,7 @@ Use `agent_todo` only when a checklist adds coordination value, such as:
 - long, tedious, multi-phase, or high-coordination tasks;
 - broad investigations;
 - multi-file changes;
-- PRD/SDD/OpenSpec workflows;
+- PRD/workflow/OpenSpec workflows;
 - refactors, migrations, or tasks with several validations/checkpoints.
 
 Do not use `agent_todo` for direct answers, tiny inspections, small approved edits, simple commit/push operations, or obvious short tasks where a conversational plan is enough.
@@ -177,7 +177,7 @@ Usa `agent_todo` solo cuando una checklist agrega valor de coordinación, por ej
 - tareas largas, tediosas, multifase o con alta coordinación;
 - investigaciones amplias;
 - cambios multiarchivo;
-- workflows PRD/SDD/OpenSpec;
+- workflows PRD/workflow/OpenSpec;
 - refactors, migraciones o tareas con varias validaciones/checkpoints.
 
 No uses `agent_todo` para respuestas directas, inspecciones mínimas, ediciones pequeñas aprobadas, operaciones simples de commit/push o tareas obviamente cortas donde un plan conversacional alcanza.

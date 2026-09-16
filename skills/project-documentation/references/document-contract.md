@@ -215,17 +215,17 @@ Each record contains:
 - Validation or verification evidence must link requirement and acceptance IDs when it claims implementation or conformance validation.
 - Pre-requirement experiments may instead trace to opportunity, assumption, hypothesis, journey, capability, or outcome IDs.
 
-## SDD change-local trace bridge
+## workflow change-local trace bridge
 
-Durable lifecycle IDs under `docs/` and change-local SDD IDs under `openspec/changes/<change-slug>/` are separate namespaces:
+Durable lifecycle IDs under `docs/` and change-local workflow IDs under `openspec/changes/<change-slug>/` are separate namespaces:
 
 - durable IDs use their canonical path and stable ID, for example `docs/02-requirements/01-functional/0001-registration.md#REQ-0001`;
-- SDD IDs such as `DELTA-001`, `REQ-001`, `SCENARIO-001`, `DES-001`, and `TASK-001` are local to one change directory and are invalid outside that change without the change path;
-- every SDD delta or requirement derived from lifecycle documentation records `Canonical sources` using exact `<canonical-path>#<stable-id>` references;
+- plan item IDs such as `MINI-001` are local to one change directory and are invalid outside that change without the change path;
+- every plan item derived from lifecycle documentation records `Canonical sources` using exact `<canonical-path>#<stable-id>` references;
 - when no durable source exists, record `Canonical sources: None — change-local contract`; never invent, copy, or renumber a durable ID;
-- an SDD-local requirement does not supersede or silently rewrite a durable requirement. A material semantic difference follows the canonical change-request lifecycle before the durable owner changes.
+- an workflow-local requirement does not supersede or silently rewrite a durable requirement. A material semantic difference follows the canonical change-request lifecycle before the durable owner changes.
 
-Implementation and verification evidence links both namespaces when applicable: change-local SDD ID for execution continuity and canonical requirement/acceptance ID for durable conformance traceability.
+Implementation and verification evidence links both namespaces when applicable: change-local workflow ID for execution continuity and canonical requirement/acceptance ID for durable conformance traceability.
 
 ## Verification evidence promotion
 
@@ -234,11 +234,11 @@ Implementation and verification evidence links both namespaces when applicable: 
 When promotion applies:
 
 1. reference the exact archived or active `verify.md` location and requirement-evidence row;
-2. retain the canonical requirement and acceptance IDs plus the change-local SDD ID;
+2. retain the canonical requirement and acceptance IDs plus the change-local workflow ID;
 3. store only the decision-relevant summary and provenance, not a copy of the full verification artifact; and
 4. let `product-validation` own the durable validation record and any resulting change request.
 
-Ordinary technical verification with no durable validation decision remains only in the SDD change tree.
+Ordinary technical verification with no durable validation decision remains only in the workflow change tree.
 
 ## Change impact
 

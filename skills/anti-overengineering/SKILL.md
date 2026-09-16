@@ -10,8 +10,8 @@ registry:
   domains: "scope-control, implementation, planning"
   paths: "**/*.c, **/*.cpp, **/*.cs, **/*.go, **/*.java, **/*.js, **/*.jsx, **/*.kt, **/*.php, **/*.py, **/*.rb, **/*.rs, **/*.swift, **/*.ts, **/*.tsx, openspec/changes/**/*.md"
   keywords: "anti-overengineering, avoid overengineering, simplest sufficient solution, KISS, YAGNI, scope creep, unnecessary abstraction, implicit migration"
-  phases: "explore, proposal, spec, design, task, apply, verify"
-  related: "workflow-triage, sdd-workflow, tdd"
+  phases: "apply, verify"
+  related: "workflow-triage, work-workflow, tdd"
   priority: 75
 ---
 
