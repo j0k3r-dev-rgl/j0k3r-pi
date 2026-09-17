@@ -28,7 +28,7 @@ type FallbackOpenAIModel = {
 };
 
 const PROVIDER_ID = "cliproxyapi";
-const DEFAULT_BASE_URL = "http://127.0.0.1:8317/v1";
+const DEFAULT_BASE_URL = "http://127.0.0.1:8317";
 const DEFAULT_MAX_TOKENS = 16_384;
 const MAX_SAFE_OUTPUT_TOKENS = 65_536;
 
@@ -77,7 +77,7 @@ function resolveRecommendedContextWindow(modelId: string, reportedContext?: numb
 }
 
 function resolveBaseUrl(): string {
-    return (process.env.CLIPROXYAPI_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, "");
+    return (process.env.CLIPROXYAPI_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, "").replace(/\/v1$/, "");
 }
 
 function requireApiKey(): string {
@@ -207,7 +207,7 @@ async function fetchCLIProxyModels(signal?: AbortSignal) {
 
     // 1. Consultar endpoint enriquecido de CLIProxyAPI (cpamc) que incluye effort, context_window, tokens y modalidades
     try {
-        const response = await fetch(`${baseUrl}/models?client_version=1`, {
+        const response = await fetch(`${baseUrl}/v1/models?client_version=1`, {
             headers: { Authorization: `Bearer ${apiKey}` },
             signal,
         });
@@ -225,7 +225,7 @@ async function fetchCLIProxyModels(signal?: AbortSignal) {
     }
 
     // 2. Fallback estándar a /v1/models
-    const response = await fetch(`${baseUrl}/models`, {
+    const response = await fetch(`${baseUrl}/v1/models`, {
         headers: { Authorization: `Bearer ${apiKey}` },
         signal,
     });
@@ -245,7 +245,7 @@ async function fetchCLIProxyModels(signal?: AbortSignal) {
 export default function cliproxyapiDynamicProvider(pi: ExtensionAPI) {
     pi.registerProvider(PROVIDER_ID, {
         name: "CLIProxyAPI",
-        baseUrl: resolveBaseUrl(),
+        baseUrl: `${resolveBaseUrl()}/v1`,
         apiKey: "$CLIPROXYAPI_API_KEY",
         api: "openai-completions",
         compat: {
