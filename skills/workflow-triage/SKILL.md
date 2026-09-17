@@ -27,6 +27,7 @@ This skill selects Direct Orchestrator or Planned Workflow, classifies advice ve
 ## Hard Rules
 
 - Apply explicit no-delegation authorization first: use Direct Orchestrator for the approved scope, including investigation, planning, implementation, and validation. Do not delegate or create mandatory Planned Workflow ceremony under this override.
+- **Research-to-Direct Execution Fast Path**: If a prior deep research or investigation (such as from `deep-researcher`) has already identified the exact root cause, files, and proposed solution, do not force Planned Workflow or redundant `00-discovery`. Route directly to Direct Orchestrator to apply the targeted fix, run tests, and report the verified outcome.
 - Without that override, use Direct Orchestrator for answers to direct factual questions, exact known reads, trivial localized edits, and lightweight validation; use Planned Workflow for bounded implementation needing a shared contract.
 - When requested to investigate, research, or inspect a topic, behavior, question, architecture, or codebase outside an implementation change, delegate to `deep-researcher` (which writes `report.md` and `sources.md`).
 - For unknown local code, behavior, tests, or structure before an implementation change in Planned Workflow, delegate `00-discovery` with an exact absolute `openspec/changes/<change-slug>/discovery.md` output path. Project files remain read-only; only that artifact may be written.

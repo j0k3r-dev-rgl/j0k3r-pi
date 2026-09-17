@@ -28,6 +28,7 @@ Own the lightweight lifecycle, phase gates, independent verification, and archiv
 ## Hard Rules
 
 - Keep one coherent contract, not a bundle of proposal/specification/design/task documents.
+- **Bypass Redundant Discovery**: If a completed deep research report (e.g. from `investigaciones/`) already identified the root cause, target files, and concrete solution, do not run `00-discovery`. The orchestrator can proceed directly to implementation under the Direct Orchestrator fast path or plan increments directly if the user requests a formal plan.
 - Use `openspec/changes/<change-slug>/` with optional `discovery.md`, `plan.md`, `apply.md`, and `verify.md`. Resolve material product questions with the user before marking the plan READY; record decisions or blockers in plan.md, without a separate PRD artifact or review phase.
 - Local discovery writes only its assigned `discovery.md`; reuse its evidence IDs directly. Discovery may be the final deliverable of an investigation-only request.
 - Keep one phase active at a time. Delegate contract creation to `01-planning`, implementation to `02-apply`, verification independently to `03-verify`. The orchestrator performs archive directly after user approval; archive is not a delegated phase.

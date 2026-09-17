@@ -51,13 +51,15 @@ If equal-authority sources conflict, stop and surface the exact conflict.
 - When asked to investigate, look into, or research a topic, behavior, codebase, or question outside an implementation change, delegate to `deep-researcher` (writing `report.md` and `sources.md`).
 - For unknown code, behavior, dependencies, tests, or project structure when preparing an implementation change, delegate bounded `00-discovery` in Planned Workflow (project files read-only; assigned `openspec/changes/<change-slug>/discovery.md` writable) unless the user explicitly requests or authorizes direct investigation.
 - Direct orchestrator execution is normally limited to routing, answers to direct factual questions, exact known reads, trivial localized edits, and lightweight validation. Explicit user authorization to work without delegation expands this boundary to the approved task scope.
+- **Research-to-Direct Execution Fast Path**: When a completed deep research or investigation (such as from `deep-researcher` producing `report.md` and `sources.md`) has already identified the exact root cause, files, and proposed solution, the orchestrator MUST NOT force an unnecessary Planned Workflow cycle (e.g. running redundant `00-discovery` or multi-phase ceremony). The orchestrator is fully authorized to apply the targeted fix directly (Direct Orchestrator), validate it through the project's tests (`mvn test`, `bun test`, etc.) following the Pre-Mutation Summary Gate, and present the verified outcome.
 - When direct execution without delegation is explicitly authorized, the orchestrator may inspect, plan, implement, and validate the requested work itself, while preserving all scope, configuration-lock, validation, and Git policies. When modifying code directly, the orchestrator must load and adhere to `skills/anti-overengineering/SKILL.md` and `skills/tdd/SKILL.md` to guarantee the simplest sufficient change without speculative complexity and validate behavior through the required test evidence path.
 - Unexpected scope growth, new repositories, new services, or new product/architecture decisions require renewed approval.
 
 ## Research and Code Inspection
 
 - Unless direct execution is explicitly authorized, delegate standalone investigation, technical research, architecture review, or requests to "look into" a topic or codebase to `deep-researcher`; it conducts the investigation across local code and external sources as needed and writes `report.md` and `sources.md`.
-- Delegate pre-implementation exploration of unknown local project/code/test behavior in Planned Workflow to `00-discovery`; it preserves evidence in the exact assigned `openspec/changes/<change-slug>/discovery.md` and leaves project files unchanged.
+- All deep research artifacts must be organized under `investigaciones/<YYYY-MM-DD>-<HHmm>-<slug>/` (or the project's canonical investigation skill convention) with timestamped traceability.
+- Delegate pre-implementation exploration of unknown local project/code/test behavior in Planned Workflow to `00-discovery` only when no prior deep research or investigation exists; it preserves evidence in the exact assigned `openspec/changes/<change-slug>/discovery.md` and leaves project files unchanged. Never run `00-discovery` to duplicate an already completed investigation.
 - Under explicit no-delegation authorization, perform the narrowest direct inspection needed and do not use subagents.
 - Do not duplicate completed investigation unless freshness or an unresolved gap requires it.
 - For TypeScript/JavaScript, Java, and Go code lookups, call `workspace_graph_status` first and then use `code_find` or `code_call_hierarchy` before any text search.
@@ -160,6 +162,7 @@ Rules:
 ## Git Policy
 
 - Keep changes focused.
+- **Strict Commit vs Push Separation**: `git commit` and `git push` are separate, distinct operations. An authorization to "commit" (e.g. "haz commit", "commit") authorizes ONLY local `git commit`. NEVER execute `git push` unless the user explicitly and unambiguously requests or confirms "push" using that exact term.
 - Never commit or push without explicit user approval.
 
 ## Engram Memory Policy

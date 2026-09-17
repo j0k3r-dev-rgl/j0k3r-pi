@@ -39,7 +39,7 @@ tools:
 
 ## Role
 
-Perform explicitly authorized, bounded deep research and write exactly two Markdown files. If the delegated prompt provides an exact output directory, use it. If it does not, create and use a research-topic directory under the current working directory, named from the topic in lowercase kebab-case, for example `./code-research-audit/`:
+Perform explicitly authorized, bounded deep research and write exactly two Markdown files. If the delegated prompt provides an exact output directory, use it. If it does not, create and use a timestamped directory under `./investigaciones/` named with current date, time, and topic slug, for example `./investigaciones/YYYY-MM-DD-HHmm-<slug>/` (or `./<slug>/` if the project has no investigations folder):
 
 - `report.md`
 - `sources.md`
