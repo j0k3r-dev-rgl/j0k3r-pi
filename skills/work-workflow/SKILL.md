@@ -1,6 +1,6 @@
 ---
 name: work-workflow
-description: "run the authorized Planned Workflow across 00-discovery, 01-planning, 02-apply, and 03-verify. Use when creating or tracking discovery.md, plan.md, apply.md, and verify.md artifacts, independent verification, or change archival."
+description: "Run authorized Planned Workflow lifecycle with lightweight contracts. Trigger: multi-step implementation, complex changes, or bounded delegation across workers and verifiers."
 license: Apache-2.0
 metadata:
   author: j0k3r

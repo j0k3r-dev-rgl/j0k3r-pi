@@ -1,6 +1,6 @@
 ---
 name: anti-overengineering
-description: "enforce simplest-sufficient solutions (KISS, YAGNI) and prevent overengineering. Use during planning, implementation, bug fixing, and refactoring to stop unnecessary abstractions, premature generalizations, unsolicited dependencies, or speculative scope."
+description: "Enforce simplest-sufficient solutions (KISS, YAGNI) and prevent overengineering. Trigger: planning, implementation, bug fixing, refactoring, or stopping premature abstractions and speculative scope."
 license: Apache-2.0
 metadata:
   author: j0k3r

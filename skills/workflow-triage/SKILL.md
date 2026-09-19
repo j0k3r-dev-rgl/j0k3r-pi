@@ -1,6 +1,6 @@
 ---
 name: workflow-triage
-description: "route software requests between Direct Orchestrator and Planned Workflow. Use to classify execution versus advice, honor explicit no-delegation authorization, and select bounded local or external research."
+description: "Route software requests between Direct Orchestrator and Planned Workflow. Trigger: non-trivial software work, workflow selection, choosing between direct execution and planned delegation."
 license: Apache-2.0
 metadata:
   author: j0k3r
