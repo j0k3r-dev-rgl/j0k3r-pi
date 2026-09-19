@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -50,8 +50,19 @@ export async function resolve(specifier, context, nextResolve) {
         export const DEFAULT_MAX_BYTES = 50000;
         export const DEFAULT_MAX_LINES = 2000;
         export function formatSize(bytes) { return bytes + "B"; }
+        export function keyHint(id, description) { return "Alt+X " + description; }
         export function truncateHead(content, opts) {
-          return { content, truncated: false, outputLines: 1, totalLines: 1, outputBytes: 1, totalBytes: 1 };
+          const lines = content.split("\\\\n");
+          const truncated = lines.length > opts.maxLines || Buffer.byteLength(content) > opts.maxBytes;
+          const kept = lines.slice(0, opts.maxLines).join("\\\\n").slice(0, opts.maxBytes);
+          return {
+            content: kept,
+            truncated,
+            outputLines: kept ? kept.split("\\\\n").length : 0,
+            totalLines: lines.length,
+            outputBytes: Buffer.byteLength(kept),
+            totalBytes: Buffer.byteLength(content),
+          };
         }
       \`)
     };
@@ -160,8 +171,9 @@ test("MINI-003: Local theme primitives and ANSI tokens in theme.ts", async () =>
   assert.ok(lines[0].includes("test content line"));
 
   const hint = theme.toolHint("to expand");
-  assert.ok(hint.includes("Ctrl+O"));
+  assert.ok(hint.includes("Alt+X"));
   assert.ok(hint.includes("to expand"));
+  assert.ok(!hint.includes("Ctrl+O"));
 });
 
 test("MINI-004: All tools register renderShell: 'self'", async () => {
@@ -207,7 +219,7 @@ test("MINI-004: Tool call and result rendering with local pink card components",
   );
   const collapsedRender = resultCollapsed.render(60);
   assert.ok(collapsedRender.some((l) => l.includes("✓ CodeGraph exploration complete")));
-  assert.ok(collapsedRender.some((l) => l.includes("Ctrl+O") && l.includes("to expand")));
+  assert.ok(collapsedRender.some((l) => l.includes("Alt+X") && l.includes("to expand")));
   assert.ok(collapsedRender.every((l) => !l.includes(RED)));
 
   // 3. Explore Result (error)
@@ -232,7 +244,7 @@ test("MINI-004: Tool call and result rendering with local pink card components",
   );
   const expRender = resultExpanded.render(60);
   assert.ok(expRender.some((l) => l.includes("Architecture Details")));
-  assert.ok(expRender.some((l) => l.includes("Ctrl+O") && l.includes("to collapse")));
+  assert.ok(expRender.some((l) => l.includes("Alt+X") && l.includes("to collapse")));
 
   // 5. Status Call & Result
   const ctxStatus = { state: {} };
@@ -366,7 +378,7 @@ test("MINI-002: codegraph_sync pink card call and result rendering", async () =>
   );
   const collapsedRender = resSuccess.render(60);
   assert.ok(collapsedRender.some((l) => l.includes("✓ CodeGraph sync complete")));
-  assert.ok(collapsedRender.some((l) => l.includes("Ctrl+O") && l.includes("to expand")));
+  assert.ok(collapsedRender.some((l) => l.includes("Alt+X") && l.includes("to expand")));
   assert.ok(collapsedRender.every((l) => !l.includes(RED)));
 
   // 3. Result rendering - Collapsed cached
@@ -389,7 +401,7 @@ test("MINI-002: codegraph_sync pink card call and result rendering", async () =>
   const expRender = resExpanded.render(60);
   assert.ok(expRender.some((l) => l.includes("Synced 5 files")));
   assert.ok(expRender.some((l) => l.includes("Duration: 42ms")));
-  assert.ok(expRender.some((l) => l.includes("Ctrl+O") && l.includes("to collapse")));
+  assert.ok(expRender.some((l) => l.includes("Alt+X") && l.includes("to collapse")));
 
   // 5. Result rendering - Not indexed
   const resNotIndexed = renderSyncResult(
@@ -422,6 +434,153 @@ test("MINI-002: codegraph_sync pink card call and result rendering", async () =>
   const errRender = resErr.render(60);
   assert.ok(errRender.some((l) => l.includes("Sync failed unexpectedly")));
   assert.ok(errRender[0].includes(RED));
+});
+
+test("codegraph status, explore, and manage execution contracts", async () => {
+  const registered = [];
+  const execCalls = [];
+  const mockPi = {
+    registerTool: (tool) => registered.push(tool),
+    exec: async (command, args, options) => {
+      execCalls.push({ command, args, options });
+      if (args[0] === "status") {
+        return { code: 0, stdout: JSON.stringify({ initialized: true, projectPath: options.cwd, version: "1.6.0" }), stderr: "" };
+      }
+      if (args[0] === "explore") {
+        return { code: 0, stdout: "**Exploration: missingIdentifier**\n\nFound related symbols only.", stderr: "" };
+      }
+      return { code: 0, stdout: "operation complete", stderr: "" };
+    },
+  };
+  const { registerCodeGraphTools } = await import("../src/tools/index.ts");
+  registerCodeGraphTools(mockPi);
+
+  const status = registered.find((tool) => tool.name === "codegraph_status");
+  const statusResult = await status.execute("status", { path: "@relative/project" }, undefined, undefined, { cwd: "/workspace" });
+  assert.equal(statusResult.details.path, "/workspace/relative/project");
+  assert.equal(statusResult.details.status.initialized, true);
+
+  const explore = registered.find((tool) => tool.name === "codegraph_explore");
+  const exploreResult = await explore.execute("explore", { query: "missingIdentifier", maxFiles: 3 }, undefined, undefined, { cwd: "/workspace" });
+  assert.ok(exploreResult.content[0].text.includes("Low-confidence CodeGraph result"));
+  assert.equal(exploreResult.details.lowConfidence, true);
+  const lowConfidenceCard = explore.renderResult(
+    exploreResult,
+    { expanded: false, isPartial: false },
+    {},
+    { state: {}, isError: false },
+  ).render(80);
+  assert.ok(lowConfidenceCard.some((line) => line.includes("Low-confidence CodeGraph exploration")));
+  assert.ok(lowConfidenceCard.every((line) => !line.includes("✓ CodeGraph exploration complete")));
+
+  const manage = registered.find((tool) => tool.name === "codegraph_manage");
+  const blocked = await manage.execute("manage", { action: "reindex", path: "/workspace" }, undefined, undefined, { cwd: "/workspace", mode: "json" });
+  assert.equal(blocked.details.executed, false);
+  assert.ok(blocked.content[0].text.startsWith("BLOCKED:"));
+  assert.equal(execCalls.filter((call) => call.args[0] === "index").length, 0);
+
+  const cancelled = await manage.execute("manage", { action: "unlock", path: "/workspace" }, undefined, undefined, {
+    cwd: "/workspace",
+    mode: "tui",
+    ui: { confirm: async () => false },
+  });
+  assert.equal(cancelled.details.confirmed, false);
+  assert.equal(cancelled.details.executed, false);
+  assert.ok(cancelled.content[0].text.includes("no changes were made"));
+
+  const completed = await manage.execute("manage", { action: "unlock", path: "/workspace" }, undefined, undefined, {
+    cwd: "/workspace",
+    mode: "tui",
+    ui: { confirm: async () => true },
+  });
+  assert.equal(completed.details.confirmed, true);
+  assert.equal(completed.details.executed, true);
+  assert.equal(completed.details.status.initialized, true);
+  assert.equal(execCalls.filter((call) => call.args[0] === "unlock").length, 1);
+  assert.ok(completed.content[0].text.includes("Status after operation"));
+});
+
+test("codegraph status and explore surface malformed or failed CLI responses", async () => {
+  const { registerStatusTool } = await import("../src/tools/status.ts");
+  const { registerExploreTool } = await import("../src/tools/explore.ts");
+  let status;
+  let explore;
+  registerStatusTool({
+    registerTool: (tool) => { status = tool; },
+    exec: async () => ({ code: 0, stdout: "not-json", stderr: "" }),
+  });
+  await assert.rejects(
+    status.execute("status", {}, undefined, undefined, { cwd: "/workspace" }),
+    /invalid status JSON/,
+  );
+
+  registerExploreTool({
+    registerTool: (tool) => { explore = tool; },
+    exec: async () => ({ code: 2, stdout: "", stderr: "unexpected failure" }),
+  });
+  await assert.rejects(
+    explore.execute("explore", { query: "architecture" }, undefined, undefined, { cwd: "/workspace" }),
+    /exit code 2: unexpected failure/,
+  );
+});
+
+test("codegraph explore truncates losslessly and exposes the full output path", async () => {
+  let explore;
+  const longOutput = Array.from({ length: 2105 }, (_, index) => `line ${index}`).join("\n");
+  const mockPi = {
+    registerTool: (tool) => { if (tool.name === "codegraph_explore") explore = tool; },
+    exec: async () => ({ code: 0, stdout: longOutput, stderr: "" }),
+  };
+  const { registerExploreTool } = await import("../src/tools/explore.ts");
+  registerExploreTool(mockPi);
+
+  const result = await explore.execute("explore", { query: "architecture" }, undefined, undefined, { cwd: "/workspace" });
+  assert.equal(result.details.truncated, true);
+  assert.ok(result.details.fullOutputPath);
+  assert.equal(readFileSync(result.details.fullOutputPath, "utf8"), longOutput);
+  assert.ok(result.content[0].text.includes("Full output saved to:"));
+  rmSync(join(result.details.fullOutputPath, ".."), { recursive: true, force: true });
+});
+
+test("codegraph sync recognizes the CLI not-initialized diagnostic", async () => {
+  const { registerSyncTool, _resetSyncState } = await import("../src/tools/sync.ts");
+  let sync;
+  const mockPi = {
+    registerTool: (tool) => { sync = tool; },
+    exec: async () => ({ code: 1, stdout: "", stderr: "✗ CodeGraph not initialized in /tmp" }),
+  };
+  registerSyncTool(mockPi);
+  _resetSyncState();
+  const result = await sync.execute("sync", { path: "/tmp" }, undefined, undefined, { cwd: "/tmp" });
+  assert.equal(result.details.notIndexed, true);
+  assert.equal(result.details.executed, false);
+  assert.ok(result.content[0].text.includes("indexing is the user's decision"));
+});
+
+test("codegraph package and documentation contracts are self-contained", () => {
+  const root = new URL("..", import.meta.url);
+  const packagePath = new URL("package.json", root);
+  const tsconfigPath = new URL("tsconfig.json", root);
+  const readmePath = new URL("README.md", root);
+  assert.equal(existsSync(packagePath), true);
+
+  const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
+  assert.equal(pkg.name, "pi-codegraph-extension");
+  assert.deepEqual(pkg.scripts, { test: "node --test test/codegraph.test.mjs", typecheck: "tsc --noEmit" });
+  assert.equal(pkg.dependencies.typebox, "1.0.58");
+  for (const name of ["@earendil-works/pi-ai", "@earendil-works/pi-coding-agent", "@earendil-works/pi-tui"]) {
+    assert.equal(pkg.peerDependencies[name], "*");
+    assert.ok(pkg.devDependencies[name]);
+  }
+
+  const tsconfig = JSON.parse(readFileSync(tsconfigPath, "utf8"));
+  assert.equal(tsconfig.compilerOptions.strict, true);
+  assert.equal("paths" in tsconfig.compilerOptions, false);
+  assert.equal("typeRoots" in tsconfig.compilerOptions, false);
+
+  const readme = readFileSync(readmePath, "utf8");
+  assert.ok(readme.includes("four model-callable tools"));
+  assert.ok(readme.includes("`codegraph_sync`"));
 });
 
 test("MINI-003: Orchestrator and tool prompt guidelines alignment", async () => {

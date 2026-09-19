@@ -17,6 +17,7 @@ export interface CodeGraphExploreDetails extends CodeGraphBaseDetails {
 	query: string;
 	maxFiles: number;
 	notIndexed?: boolean;
+	lowConfidence?: boolean;
 	truncated?: boolean;
 	fullOutputPath?: string;
 }

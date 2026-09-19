@@ -13,6 +13,22 @@ import { DEFAULT_MAX_FILES, MAX_FILES_LIMIT, NOT_INDEXED_MESSAGE, resolveProject
 import { renderExploreCall, renderExploreResult } from "../render/index.js";
 import type { CodeGraphExploreDetails } from "../types.js";
 
+function isIdentifierLike(query: string): boolean {
+	return /^[A-Za-z_$][A-Za-z0-9_$.-]*$/.test(query);
+}
+
+function exactOccurrenceCount(output: string, query: string): number {
+	const haystack = output.toLocaleLowerCase();
+	const needle = query.toLocaleLowerCase();
+	let count = 0;
+	let offset = 0;
+	while ((offset = haystack.indexOf(needle, offset)) !== -1) {
+		count += 1;
+		offset += needle.length;
+	}
+	return count;
+}
+
 export function registerExploreTool(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "codegraph_explore",
@@ -51,7 +67,12 @@ export function registerExploreTool(pi: ExtensionAPI) {
 
 			const truncation = truncateHead(output, { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES });
 			const details: CodeGraphExploreDetails = { path, query: params.query, maxFiles };
+			const lowConfidence = isIdentifierLike(params.query) && exactOccurrenceCount(output, params.query) <= 1;
 			let text = truncation.content;
+			if (lowConfidence) {
+				details.lowConfidence = true;
+				text = `[Low-confidence CodeGraph result: no exact indexed match was found for identifier-like query "${params.query}". Treat the following as fuzzy related context, not a symbol match.]\n\n${text}`;
+			}
 			if (truncation.truncated) {
 				const directory = await mkdtemp(resolve(tmpdir(), "pi-codegraph-"));
 				const fullOutputPath = resolve(directory, "output.md");

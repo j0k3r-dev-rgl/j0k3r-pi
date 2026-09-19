@@ -1,3 +1,4 @@
+import { keyHint } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
@@ -11,7 +12,7 @@ export function electric(color: string, text: string): string {
 }
 
 export function toolHint(action: string): string {
-	return `${electric(DIM, "Ctrl+O")} ${electric(DIM, action)}`;
+	return electric(DIM, keyHint("app.tools.expand", action));
 }
 
 export function fit(text: string, width: number): string {

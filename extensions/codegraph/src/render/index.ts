@@ -75,7 +75,11 @@ export function renderExploreResult(result: any, options: any, _theme: any, cont
 			if (!options.expanded) {
 				const suffix = details?.truncated ? " (full output saved)" : "";
 				const hint = toolHint("to expand");
-				lines.push(`✓ CodeGraph exploration complete${suffix} · ${hint}`);
+				if (details?.lowConfidence) {
+					lines.push(`⚠ Low-confidence CodeGraph exploration${suffix} · ${hint}`);
+				} else {
+					lines.push(`✓ CodeGraph exploration complete${suffix} · ${hint}`);
+				}
 			} else {
 				if (content) {
 					lines.push(...content.split("\n"));

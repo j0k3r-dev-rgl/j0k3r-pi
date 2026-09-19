@@ -12,6 +12,18 @@ type SyncResultPayload = {
 const inFlight = new Map<string, Promise<SyncResultPayload>>();
 const recentSyncs = new Map<string, { timestamp: number; payload: SyncResultPayload }>();
 const DEBOUNCE_MS = 5000;
+const NOT_INITIALIZED_PATTERN = /not initialized|isn't available here|not indexed/i;
+
+function notIndexedResult(path: string, output: string, durationMs?: number): SyncResultPayload {
+	const diagnostic = output || "CodeGraph index not found. Project is not indexed.";
+	return {
+		content: [{
+			type: "text",
+			text: `${diagnostic}\n\nContinue with the usual tools; indexing is the user's decision. Do not initialize CodeGraph without explicit authorization.`,
+		}],
+		details: { path, executed: false, notIndexed: true, durationMs, output },
+	};
+}
 
 export function _resetSyncState(): void {
 	inFlight.clear();
@@ -76,18 +88,8 @@ export function registerSyncTool(pi: ExtensionAPI) {
 					const combinedOutput = output || "";
 
 					// Detect not indexed condition
-					if (
-						combinedOutput.includes(NOT_INDEXED_MESSAGE) ||
-						combinedOutput.includes("isn't available here") ||
-						combinedOutput.includes("not indexed")
-					) {
-						return {
-							content: [{
-								type: "text",
-								text: combinedOutput || "CodeGraph index not found. Project is not indexed.",
-							}],
-							details: { path, executed: false, notIndexed: true, durationMs, output: combinedOutput },
-						};
+					if (combinedOutput.includes(NOT_INDEXED_MESSAGE) || NOT_INITIALIZED_PATTERN.test(combinedOutput)) {
+						return notIndexedResult(path, combinedOutput, durationMs);
 					}
 
 					// Detect lock contention condition
@@ -132,11 +134,8 @@ export function registerSyncTool(pi: ExtensionAPI) {
 							details: { path, executed: false, lockHeld: true, output: msg },
 						};
 					}
-					if (msg.includes(NOT_INDEXED_MESSAGE) || msg.includes("isn't available here")) {
-						return {
-							content: [{ type: "text", text: msg }],
-							details: { path, executed: false, notIndexed: true, output: msg },
-						};
+					if (msg.includes(NOT_INDEXED_MESSAGE) || NOT_INITIALIZED_PATTERN.test(msg)) {
+						return notIndexedResult(path, msg);
 					}
 					throw error;
 				}
