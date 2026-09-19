@@ -62,9 +62,7 @@ If equal-authority sources conflict, stop and surface the exact conflict.
 - Delegate pre-implementation exploration of unknown local project/code/test behavior in Planned Workflow to `00-discovery` only when no prior deep research or investigation exists; it preserves evidence in the exact assigned `openspec/changes/<change-slug>/discovery.md` and leaves project files unchanged. Never run `00-discovery` to duplicate an already completed investigation.
 - Under explicit no-delegation authorization, perform the narrowest direct inspection needed and do not use subagents.
 - Do not duplicate completed investigation unless freshness or an unresolved gap requires it.
-- For TypeScript/JavaScript, Java, and Go code lookups, call `workspace_graph_status` first and then use `code_find` or `code_call_hierarchy` before any text search.
-- Use `rg`, `grep`, or `find` on supported-language code only after graph-backed lookup is unavailable, unusable, or failed for the exact query.
-- For documentation, config, generated data, and unsupported languages, targeted reads or bounded text search are fine.
+- For code, documentation, config, generated data, and local files, targeted reads or bounded text search (`rg`, `grep`, `find`) are fine.
 
 ## Workflow Model
 

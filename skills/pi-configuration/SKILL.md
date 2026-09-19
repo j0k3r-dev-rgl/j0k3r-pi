@@ -8,8 +8,8 @@ metadata:
 registry:
   category: "runtime"
   domains: "pi-configuration, extension-configuration, local-config, agent-config"
-  paths: ".pi/api.json, .pi/code-research.json, .pi/context7.json, .pi/skill-registry.config.json, .pi/workspace-services.json, websearch.json, ~/.pi/agent/websearch.json"
-  keywords: "configure pi, pi configuration, extension configuration, configure extension, api tools configuration, .pi/api.json, code research configuration, .pi/code-research.json, workspace graph config, context7 configuration, .pi/context7.json, skill registry configuration, .pi/skill-registry.config.json, websearch configuration, websearch.json, workspace services configuration, .pi/workspace-services.json, reload pi, restart pi after config, credentials config, token config, configurar pi, configurar extension, configuracion de pi, configuracion de extension"
+  paths: ".pi/api.json, .pi/context7.json, .pi/skill-registry.config.json, .pi/workspace-services.json, websearch.json, ~/.pi/agent/websearch.json"
+  keywords: "configure pi, pi configuration, extension configuration, configure extension, api tools configuration, .pi/api.json, context7 configuration, .pi/context7.json, skill registry configuration, .pi/skill-registry.config.json, websearch configuration, websearch.json, workspace services configuration, .pi/workspace-services.json, reload pi, restart pi after config, credentials config, token config, configurar pi, configurar extension, configuracion de pi, configuracion de extension"
   related: "anti-overengineering"
   priority: 95
 ---
@@ -56,7 +56,6 @@ It does not own:
 | User intent or path | Internal module to read next |
 |---|---|
 | REST/GraphQL local API tools, `.pi/api.json`, login auth, persisted API token behavior | `references/modules/api-tools-configuration.md` |
-| Workspace graph, Code Research, `.pi/code-research.json`, `.pi/workspace-code-graph` | `references/modules/code-research-configuration.md` |
 | Context7 docs lookup config, cache/defaults, `.pi/context7.json`, `CONTEXT7_API_KEY` readiness | `references/modules/context7-configuration.md` |
 | Skill Registry opt-in, `.pi/skill-registry.config.json`, generated registry cache behavior | `references/modules/skill-registry-configuration.md` |
 | Websearch providers, `websearch.json`, GitHub provider mode, search credentials/env vars | `references/modules/websearch-configuration.md` |
@@ -88,7 +87,6 @@ Return:
 ## References
 
 - `references/modules/api-tools-configuration.md` — API Tools project-local REST/GraphQL config.
-- `references/modules/code-research-configuration.md` — Code Research graph config.
 - `references/modules/context7-configuration.md` — Context7 lookup config.
 - `references/modules/skill-registry-configuration.md` — Skill Registry opt-in config.
 - `references/modules/websearch-configuration.md` — Websearch global provider config.

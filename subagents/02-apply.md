@@ -10,11 +10,10 @@ tools:
   - mem_search
   - mem_get_observation
   - mem_update
-  - workspace_graph_status
-  - code_find
-  - code_call_hierarchy
-  - code_change_surface
   - mem_save
+  - codegraph_status
+  - codegraph_sync
+  - codegraph_explore
 ---
 
 # 02 — Apply Subagent
@@ -55,7 +54,6 @@ The authorization may be supplied in prose, but it must contain all required fac
 - Select the necessary implementation files within the approved directory roots; consolidate sibling areas under their narrowest suitable parent. Stay inside approved behavior and exclusions. Request scope expansion before modifying outside that boundary.
 - Record actual changed files in apply.md for verification; do not require the orchestrator to select them in advance.
 - If a material scope, product, architecture, or authority gap appears, stop as `BLOCKED`.
-- For TS/JS, Java, and Go implementation lookups, call `workspace_graph_status` first, then use `code_find` for declarations, implementations, and references; use `code_call_hierarchy` only for known callable incoming/outgoing call flow.
 - Do not commit or push without explicit user approval.
 
 ## Validation Rules

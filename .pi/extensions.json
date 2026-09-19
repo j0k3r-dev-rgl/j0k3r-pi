@@ -4,9 +4,9 @@
   "api-tools": false,
   "workspace-services": false,
   "utils": false,
-  "code-research": false,
   "context7": true,
   "websearch": true,
   "pdf-review": false,
-  "engram": true
+  "engram": true,
+  "codegraph": true
 }

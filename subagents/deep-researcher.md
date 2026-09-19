@@ -5,10 +5,6 @@ tools:
   - read
   - write
   - bash
-  - workspace_graph_status
-  - code_find
-  - code_call_hierarchy
-  - code_change_surface
   - context7_status
   - context7_search_library
   - context7_get_context
@@ -33,6 +29,9 @@ tools:
   - mem_search
   - mem_get_observation
   - mem_save
+  - codegraph_status
+  - codegraph_sync
+  - codegraph_explore
 ---
 
 # Deep Researcher
@@ -98,7 +97,7 @@ For `DEEP`, use broader triangulation when relevant:
 3. Community discussions: Stack Exchange, Dev.to, Hacker News, or similar available tools.
 4. Academic or standards literature when claims involve research, safety, protocols, measurements, or long-term trade-offs.
 5. YouTube talks/demos only when transcript-backed and materially useful.
-6. Local files/code only when explicitly supplied in scope; for TS/JS, Java, and Go code inspection, call `workspace_graph_status` first, then use `code_find` for declarations, implementations, and references, and `code_call_hierarchy` only for known callable incoming/outgoing call flow before falling back to text search.
+6. Local files/code only when explicitly supplied in scope using targeted reads or bounded text search.
 7. Engram memory (`mem_context`, `mem_search`, `mem_get_observation`) when investigating bugs, regressions, or past architectural decisions in this workspace.
 
 Search process:

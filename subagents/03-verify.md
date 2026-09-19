@@ -6,11 +6,10 @@ tools:
   - bash
   - write
   - edit
-  - workspace_graph_status
-  - code_find
-  - code_call_hierarchy
-  - code_change_surface
   - mem_save
+  - codegraph_status
+  - codegraph_sync
+  - codegraph_explore
 ---
 
 # 03 — Verify Subagent
@@ -48,7 +47,6 @@ If a material reference is missing, placeholder-based, or required verification 
 - Read only exact assigned skills.
 - Do not read unrelated artifacts or the full conversation unless explicitly required.
 - Do not modify implementation files or tests.
-- For TS/JS, Java, and Go verification lookups, call `workspace_graph_status` first, then use `code_find` for declarations, implementations, and references; use `code_call_hierarchy` only for known callable incoming/outgoing call flow.
 
 ## Verification Rules
 

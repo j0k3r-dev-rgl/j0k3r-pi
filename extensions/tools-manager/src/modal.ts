@@ -15,11 +15,11 @@ export const SUPPORTED_EXTENSIONS: ToolExtensionItem[] = [
 	{ id: "api-tools", name: "api-tools", description: "REST, GraphQL & Swagger tools" },
 	{ id: "workspace-services", name: "workspace-services", description: "Service runner & process manager" },
 	{ id: "utils", name: "utils", description: "System screenshot & audio tools" },
-	{ id: "code-research", name: "code-research", description: "Code graph & call hierarchy" },
 	{ id: "context7", name: "context7", description: "Context7 documentation & tools" },
 	{ id: "websearch", name: "websearch", description: "Web search tools" },
 	{ id: "pdf-review", name: "pdf-review", description: "PDF inspection & text review" },
 	{ id: "engram", name: "engram", description: "Persistent memory & protocol (19 tools)" },
+	{ id: "codegraph", name: "codegraph", description: "CodeGraph semantic exploration & index management" },
 ];
 
 export interface ModalResult {
@@ -196,8 +196,8 @@ export class ToolsManagerModal implements Component {
 		const x = event.x;
 
 		// Filas de las extensiones (cada item ocupa 2 líneas: nombre en 5 + 2*i, desc en 6 + 2*i)
-		// Total items: 10 -> líneas 5 a 24 inclusive
-		if (y >= 5 && y <= 24) {
+		const listEnd = 5 + SUPPORTED_EXTENSIONS.length * 2 - 1;
+		if (y >= 5 && y <= listEnd) {
 			const itemIndex = Math.floor((y - 5) / 2);
 			if (itemIndex >= 0 && itemIndex < SUPPORTED_EXTENSIONS.length) {
 				this.selectedIndex = itemIndex;
@@ -212,8 +212,9 @@ export class ToolsManagerModal implements Component {
 			}
 		}
 
-		// Fila de botones (línea 28)
-		if (y === 28) {
+		// Fila de botones
+		const buttonsRow = 5 + SUPPORTED_EXTENSIONS.length * 2 + 3;
+		if (y === buttonsRow) {
 			// El inner padding respecto a x=0 del componente tiene un borde de 1 char:
 			// Botón Guardar: columnas aproximadas 8 a 28
 			// Botón Cancelar: columnas aproximadas 30 a 54

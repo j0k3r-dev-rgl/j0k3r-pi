@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "typeRoots": [
+      "/home/j0k3r/.pi/agent/extensions/api-tools/node_modules/@types"
+    ],
+    "paths": {
+      "@earendil-works/pi-coding-agent": [
+        "/home/j0k3r/.pi/agent/extensions/api-tools/node_modules/@earendil-works/pi-coding-agent"
+      ],
+      "@earendil-works/pi-tui": [
+        "/home/j0k3r/.pi/agent/extensions/api-tools/node_modules/@earendil-works/pi-tui"
+      ],
+      "@earendil-works/pi-ai": [
+        "/home/j0k3r/.pi/agent/extensions/context7/node_modules/@earendil-works/pi-ai"
+      ],
+      "typebox": [
+        "/home/j0k3r/.pi/agent/extensions/context7/node_modules/typebox"
+      ]
+    }
+  },
+  "include": ["index.ts", "src/**/*.ts"]
+}

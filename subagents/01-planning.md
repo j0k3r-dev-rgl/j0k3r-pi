@@ -8,10 +8,6 @@ tools:
   - mem_context
   - mem_search
   - mem_get_observation
-  - workspace_graph_status
-  - code_find
-  - code_call_hierarchy
-  - code_change_surface
   - context7_resolve_and_get_context
   - web_search
   - web_fetch
@@ -19,6 +15,9 @@ tools:
   - github_code_search
   - github_get
   - mem_save
+  - codegraph_status
+  - codegraph_sync
+  - codegraph_explore
 ---
 
 # 01 — Planning Subagent
@@ -52,7 +51,6 @@ If any material reference is missing, placeholder-based, contradictory, or outsi
 - Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `plan.md`.
 - Read supplied artifacts, assigned skills, and explicitly approved files first.
 - Use bounded repository inspection or external research only when needed to remove ambiguity from the Planned Workflow contract.
-- For TypeScript/JavaScript, Java, and Go code inspection, call `workspace_graph_status` first, then use `code_find` for declarations, implementations, and references; use `code_call_hierarchy` only for known callable incoming/outgoing call flow.
 - Do not scan the repository or `skills/` blindly.
 - Do not implement, verify, archive, or invent product, scope, architecture, or acceptance decisions. If a material product decision is missing, record it under Open Decisions and return BLOCKED for the orchestrator to ask the user. Do not create a separate PRD document or review phase.
 - Reuse the existing change directory and reference discovery.md EVID-### items directly when supplied; do not repeat completed investigation or add a separate synthesis phase.

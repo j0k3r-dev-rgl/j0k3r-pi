@@ -9,12 +9,11 @@ tools:
   - mem_get_observation
   - bash
   - skill_registry_resolve
-  - workspace_graph_status
-  - code_find
-  - code_call_hierarchy
-  - code_change_surface
   - pdf_extract
   - mem_save
+  - codegraph_status
+  - codegraph_sync
+  - codegraph_explore
 ---
 
 # 00 — Discovery Subagent
@@ -53,9 +52,7 @@ The prompt must also supply the change slug, exact absolute `openspec/changes/<c
 - Reuse supplied context; do not reread files only to restate it.
 - Receive directory roots consolidated under the narrowest common parent, not an exhaustive file or subdirectory list. Select relevant files and symbols within those roots; respect explicit user restrictions, assigned artifacts, and exclusions. Request additional access before investigating outside the approved boundary.
 - Use the narrowest read, symbol lookup, reference lookup, call tree, or command that answers the question.
-- For TypeScript/JavaScript, Java, and Go code, call `workspace_graph_status` first, then use `code_find` for declarations, implementations, and references; use `code_call_hierarchy` only for known callable incoming/outgoing call flow.
-- Use text search on supported-language code only after `code_find` or `code_call_hierarchy` is unavailable, unusable, or fails for the exact need.
-- For other languages, docs, configs, scripts, generated workflow state, and unsupported local files, use targeted reads or bounded `rg/find` commands.
+- For code, docs, configs, scripts, generated workflow state, and local files, use targeted reads or bounded `rg/find` commands.
 - Do not edit project/configuration files, delete files, create any other artifacts, choose workflows, implement code, run services, install dependencies, commit, push, or broaden scope. Use bash only for read-only inspection; use write for the assigned artifact.
 - Do not use internet, Context7, web, GitHub, discussions, research, or YouTube tools.
 - Do not inspect secrets or sensitive files unless explicitly authorized; never report raw secret values.
@@ -81,7 +78,6 @@ Stop when the missing local fact is answered, the delegated boundary is reached,
 - Distinguish observed facts from inference.
 - If a file/path/symbol is inferred, first confirm it exists before reading it.
 - Treat missing files as `NOT_FOUND`, not as permission failure.
-- Report graph status and fallback reason when graph-backed lookup was required but unavailable or insufficient.
 - Keep evidence compact; do not list every scanned file unless the list itself answers the question.
 
 ## Report Contract
@@ -98,7 +94,6 @@ Include inside discovery.md, when applicable:
 - supplied context reused;
 - exact missing local fact resolved;
 - local sources and tools used;
-- graph status and fallback reason when relevant;
 - direct findings;
 - concrete evidence with paths, line numbers, symbols, local artifact IDs, local PDF locators, command results, or referenced Engram observation IDs;
 - unknowns, limits, or blocker reason;

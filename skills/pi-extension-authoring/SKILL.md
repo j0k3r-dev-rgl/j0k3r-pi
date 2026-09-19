@@ -41,7 +41,7 @@ Do not use it for Pi skills, subagent definitions, themes, or configuration-only
 - Read the installed Pi `docs/extensions.md` completely before implementation. Read `docs/tui.md` completely when rendering or custom UI is in scope, and follow all relevant Markdown cross-references.
 - Inspect the installed Pi examples that match the requested capability. Do not rely on remembered APIs when the local Pi version is available.
 - Confirm whether the extension is global, project-local, or distributable before choosing its location and package contract.
-- Treat `extensions/code-research/` and `extensions/websearch/` as structural references, not as templates to copy blindly. Preserve their thin entrypoint and separated tool/core/render boundaries while correcting version-specific or duplicated implementation details.
+- Treat `extensions/websearch/` as a structural reference, not as a template to copy blindly. Preserve its thin entrypoint and separated tool/core/render boundaries while correcting version-specific or duplicated implementation details.
 
 ### Canonical structure
 
@@ -196,7 +196,6 @@ Return:
 - Installed Pi `docs/themes.md` — theme colors and Markdown themes.
 - Installed Pi `docs/packages.md` — package discovery, extension-owned dependencies, bundled Pi core peer dependencies, isolated module roots, and distribution.
 - Installed Pi `examples/extensions/` — version-matched implementation examples.
-- `extensions/code-research/index.ts`, `extensions/code-research/src/tools/`, and `extensions/code-research/src/render.ts` — thin entrypoint and tool/core/render separation.
 - `extensions/websearch/index.ts`, `extensions/websearch/src/tools/`, `extensions/websearch/src/render/index.ts`, and `extensions/websearch/src/security.ts` — modular tool registry, rendering, provider, and security boundaries.
 - `skills/tdd/SKILL.md` — exclusive testing workflow companion.
 - `skills/workflow-triage/SKILL.md` — route selection and review gate.

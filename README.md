@@ -37,7 +37,7 @@ Personal/global Pi agent configuration used from `~/.pi/agent`. It contains the 
 | [`docs/`](docs/) | Supporting docs for this agent configuration, such as [keyboard shortcuts](docs/keyboard-shortcuts.md). |
 | [`subagents.json`](subagents.json) | Global/user subagent configuration and model profile defaults. |
 | [`trust.json`](trust.json) / [`auth.json`](auth.json) | Local runtime identity/trust files. They should not be committed with secrets. |
-| [`.pi/`](.pi/) | Project-local runtime/config data for this repository, including Code Research and Skill Registry configuration. |
+| [`.pi/`](.pi/) | Project-local runtime/config data for this repository, including Skill Registry configuration. |
 
 ### Installation and Setup
 
@@ -176,7 +176,6 @@ See [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 | Agent Todo | [`extensions/agent-todo/README.md`](extensions/agent-todo/README.md) | Single active task checklist for the current conversation branch, plus widget/provider integration. |
 | API Tools | [`extensions/api-tools/README.md`](extensions/api-tools/README.md) | Project-local REST and GraphQL tools gated by exact `<ctx.cwd>/.pi/api.json`, with login/access-token persistence, per-request token use, bounded output, and secret-safe diagnostics. |
 | Browser Screenshot | [`extensions/browser-screenshot/README.md`](extensions/browser-screenshot/README.md) | Read-only Chrome DevTools Protocol status, tab listing, and screenshots without launching or navigating the browser. |
-| Code Research | [`extensions/code-research/README.md`](extensions/code-research/README.md) | Tree-sitter-backed TypeScript, JavaScript, Java, and Go symbol lookup, references, function call trees, and reverse call trees, plus Python workspace graph indexing. |
 | Context7 | [`extensions/context7/README.md`](extensions/context7/README.md) | Safe, bounded Context7 library documentation tools without MCP. |
 | CLIProxyAPI Usage | [`extensions/cpamc-usage/README.md`](extensions/cpamc-usage/README.md) | CLIProxyAPI quota and subscription usage modal for Pi with provider account breakdown and live quota tracking. |
 | Git Diff Panel | [`extensions/git-diff-panel/README.md`](extensions/git-diff-panel/README.md) | Themed split overlay for reviewing Git changes with full Git Worktrees support (`alt+g`). |
@@ -197,7 +196,6 @@ See [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 | API Tools | Project REST/GraphQL tools | Exposes project-local API calls from `.pi/api.json`, including login/token handling and bounded, secret-safe responses. | [Read more](extensions/api-tools/README.md) |
 | Browser Screenshot | `browser_cdp_status`, `browser_tabs_list`, `browser_page_screenshot` | Inspects existing Chrome CDP tabs and captures screenshots without navigation or focus changes. | [Read more](extensions/browser-screenshot/README.md) |
 | CLIProxyAPI Usage | `/usage` | Interactive modal displaying real-time CLIProxyAPI quota windows and active accounts by provider. | [Read more](extensions/cpamc-usage/README.md) |
-| Code Research | `code_find`, `code_call_hierarchy`, `code_change_surface`, `workspace_graph_status` | Provides code intelligence for TypeScript, JavaScript, Java, and Go, with Python file/symbol indexing in the workspace graph. | [Read more](extensions/code-research/README.md) |
 | Context7 | `context7_search_library`, `context7_get_context`, `context7_resolve_and_get_context` | Fetches focused library documentation through Context7 with bounded output and safe configuration. | [Read more](extensions/context7/README.md) |
 | Git Diff Panel | `/git-diff [worktree]`, `alt+g` | Themed split overlay for inspecting Git changes and multiple worktree diffs. | [Read more](extensions/git-diff-panel/README.md) |
 | Model Picker | `/model-select [ref]`, `/ms` | Collapsible floating model selector organized by provider and account with search and mouse support. | [Read more](extensions/j0k3r-model-picker/README.md) |
@@ -245,7 +243,6 @@ npm run typecheck
 
 Runtime notes:
 
-- Code Research uses Tree-sitter parser dependencies installed with the extension.
 - YouTube Research requires `yt-dlp` on `PATH` at runtime.
 - PDF Review OCR mode requires OCRmyPDF/Tesseract only when OCR is requested.
 - Utils Markdown-to-audio requires a local TTS engine: `piper-tts`/`piper` with at least one Piper `.onnx` voice model, or `espeak-ng` fallback. `ffmpeg` is required only for MP3 output.
@@ -315,7 +312,7 @@ Configuración global/personal de Pi usada desde `~/.pi/agent`. Contiene la guí
 | [`docs/`](docs/) | Documentos de apoyo para esta configuración, como [atajos de teclado](docs/keyboard-shortcuts.md). |
 | [`subagents.json`](subagents.json) | Configuración global/de usuario para subagentes y perfiles de modelo. |
 | [`trust.json`](trust.json) / [`auth.json`](auth.json) | Archivos locales runtime de identidad/confianza. No deben commitearse con secretos. |
-| [`.pi/`](.pi/) | Datos runtime/config locales de este repositorio, incluyendo configuración de Code Research y Skill Registry. |
+| [`.pi/`](.pi/) | Datos runtime/config locales de este repositorio, incluyendo configuración de Skill Registry. |
 
 ### Instalación y configuración
 
@@ -454,7 +451,6 @@ Ver [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 | Agent Todo | [`extensions/agent-todo/README.md`](extensions/agent-todo/README.md) | Checklist de una sola tarea activa para la rama de conversación actual, más integración de widget/provider. |
 | API Tools | [`extensions/api-tools/README.md`](extensions/api-tools/README.md) | Herramientas REST y GraphQL por proyecto, activadas por `<ctx.cwd>/.pi/api.json`, con login/token, uso de token por request, salida acotada y diagnósticos seguros. |
 | Browser Screenshot | [`extensions/browser-screenshot/README.md`](extensions/browser-screenshot/README.md) | Estado, listado de pestañas y capturas de Chrome DevTools Protocol en modo de solo lectura, sin iniciar ni navegar el navegador. |
-| Code Research | [`extensions/code-research/README.md`](extensions/code-research/README.md) | Búsqueda de símbolos, referencias, call trees y reverse call trees para TypeScript, JavaScript, Java y Go usando Tree-sitter, más indexado Python en el workspace graph. |
 | Context7 | [`extensions/context7/README.md`](extensions/context7/README.md) | Herramientas seguras y acotadas para documentación de librerías con Context7, sin MCP. |
 | CLIProxyAPI Usage | [`extensions/cpamc-usage/README.md`](extensions/cpamc-usage/README.md) | Modal de cuotas y uso de suscripciones en CLIProxyAPI para Pi, con detalle por cuenta de proveedor y seguimiento en tiempo real. |
 | Git Diff Panel | [`extensions/git-diff-panel/README.md`](extensions/git-diff-panel/README.md) | Panel dividido con tema visual para revisar cambios en Git con soporte completo de Git Worktrees (`alt+g`). |
@@ -475,7 +471,6 @@ Ver [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 | API Tools | Herramientas REST/GraphQL del proyecto | Expone llamadas API locales definidas en `.pi/api.json`, con login/token, respuestas acotadas y diagnósticos seguros. | [Ver más](extensions/api-tools/README.md) |
 | Browser Screenshot | `browser_cdp_status`, `browser_tabs_list`, `browser_page_screenshot` | Inspecciona pestañas Chrome CDP existentes y obtiene capturas sin navegar ni cambiar el foco. | [Ver más](extensions/browser-screenshot/README.md) |
 | CLIProxyAPI Usage | `/usage` | Modal interactivo que muestra ventanas de cuota en tiempo real y cuentas activas por proveedor en CLIProxyAPI. | [Ver más](extensions/cpamc-usage/README.md) |
-| Code Research | `code_find`, `code_call_hierarchy`, `code_change_surface`, `workspace_graph_status` | Aporta inteligencia de código para TypeScript, JavaScript, Java y Go, con indexado de archivos/símbolos Python en el workspace graph. | [Ver más](extensions/code-research/README.md) |
 | Context7 | `context7_search_library`, `context7_get_context`, `context7_resolve_and_get_context` | Obtiene documentación enfocada de librerías con Context7, salida acotada y configuración segura. | [Ver más](extensions/context7/README.md) |
 | Git Diff Panel | `/git-diff [worktree]`, `alt+g` | Panel dividido temático para inspeccionar cambios de Git y diffs entre múltiples worktrees. | [Ver más](extensions/git-diff-panel/README.md) |
 | Model Picker | `/model-select [ref]`, `/ms` | Selector jerárquico de modelos organizado por proveedor y cuenta, con filtrado y soporte de mouse. | [Ver más](extensions/j0k3r-model-picker/README.md) |
@@ -523,7 +518,6 @@ npm run typecheck
 
 Notas runtime:
 
-- Code Research usa dependencias de parser Tree-sitter instaladas con la extensión.
 - YouTube Research requiere `yt-dlp` en `PATH`.
 - PDF Review en modo OCR requiere OCRmyPDF/Tesseract solo cuando se solicita OCR.
 - Utils Markdown-to-audio requiere un motor TTS local: `piper-tts`/`piper` con al menos una voz Piper `.onnx`, o fallback `espeak-ng`. `ffmpeg` solo es necesario para salida MP3.
