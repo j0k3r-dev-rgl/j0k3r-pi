@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { NOT_INDEXED_MESSAGE, resolveProjectPath } from "../core.js";
+import { isNotIndexedOutput, resolveProjectPath } from "../core.js";
 import { renderSyncCall, renderSyncResult } from "../render/index.js";
 import type { CodeGraphSyncDetails } from "../types.js";
 
@@ -12,7 +12,6 @@ type SyncResultPayload = {
 const inFlight = new Map<string, Promise<SyncResultPayload>>();
 const recentSyncs = new Map<string, { timestamp: number; payload: SyncResultPayload }>();
 const DEBOUNCE_MS = 5000;
-const NOT_INITIALIZED_PATTERN = /not initialized|isn't available here|not indexed/i;
 
 function notIndexedResult(path: string, output: string, durationMs?: number): SyncResultPayload {
 	const diagnostic = output || "CodeGraph index not found. Project is not indexed.";
@@ -88,7 +87,7 @@ export function registerSyncTool(pi: ExtensionAPI) {
 					const combinedOutput = output || "";
 
 					// Detect not indexed condition
-					if (combinedOutput.includes(NOT_INDEXED_MESSAGE) || NOT_INITIALIZED_PATTERN.test(combinedOutput)) {
+					if (isNotIndexedOutput(combinedOutput)) {
 						return notIndexedResult(path, combinedOutput, durationMs);
 					}
 
@@ -134,7 +133,7 @@ export function registerSyncTool(pi: ExtensionAPI) {
 							details: { path, executed: false, lockHeld: true, output: msg },
 						};
 					}
-					if (msg.includes(NOT_INDEXED_MESSAGE) || NOT_INITIALIZED_PATTERN.test(msg)) {
+					if (isNotIndexedOutput(msg)) {
 						return notIndexedResult(path, msg);
 					}
 					throw error;

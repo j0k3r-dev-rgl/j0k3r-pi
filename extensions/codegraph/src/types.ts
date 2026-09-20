@@ -50,11 +50,15 @@ export interface CodeGraphNodeDetails extends CodeGraphBaseDetails {
 	limit?: number;
 	symbolsOnly?: boolean;
 	notIndexed?: boolean;
+	truncated?: boolean;
+	fullOutputPath?: string;
 }
 
 export interface CodeGraphImpactDetails extends CodeGraphBaseDetails {
 	symbol: string;
 	depth?: number;
 	notIndexed?: boolean;
+	truncated?: boolean;
+	fullOutputPath?: string;
 }
 

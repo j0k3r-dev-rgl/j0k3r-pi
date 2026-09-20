@@ -733,15 +733,29 @@ test("TOOLS: codegraph_node and codegraph_impact execution contracts", async () 
   assert.ok(lastImpactCall.args.includes("--depth"));
   assert.ok(lastImpactCall.args.includes("3"));
 
-  // 5. Impact not indexed
-  const impactNotIndexed = await impactTool.execute(
-    "impact2",
+  // 5. Impact not indexed (supports "✗ CodeGraph not initialized" and "isn't available here")
+  const impactNotIndexed1 = await impactTool.execute(
+    "impact2a",
     { symbol: "notIndexedSymbol" },
     undefined,
     undefined,
     { cwd: "/test/project" },
   );
-  assert.equal(impactNotIndexed.details.notIndexed, true);
+  assert.equal(impactNotIndexed1.details.notIndexed, true);
+
+  const mockPiNotInit = {
+    registerTool: (tool) => { if (tool.name === "codegraph_impact") impactTool = tool; },
+    exec: async () => ({ code: 1, stdout: "", stderr: "✗ CodeGraph not initialized in /tmp" }),
+  };
+  registerImpactTool(mockPiNotInit);
+  const impactNotIndexed2 = await impactTool.execute(
+    "impact2b",
+    { symbol: "anySymbol" },
+    undefined,
+    undefined,
+    { cwd: "/tmp" },
+  );
+  assert.equal(impactNotIndexed2.details.notIndexed, true);
 
   // 6. Impact call & result rendering
   const impactCallRender = impactTool.renderCall({ symbol: "myFunc", path: "src", depth: 2 }, {}, { state: {} }).render(60);
@@ -785,6 +799,39 @@ function serviceNotFound() {
   assert.ok(text.includes("- `serviceNotFound` (front/app/server/http/response.server.ts:27)"));
   assert.ok(text.includes("Use `codegraph_node` on any suggested symbol"));
   assert.ok(!text.includes("Massive 50KB code dump"), "Source code must be stripped from response");
+});
+
+test("LIFECYCLE: extension registers before_agent_start and session_shutdown hooks", async () => {
+  const { default: codegraphExtension } = await import("../index.ts");
+  const tmp = mkdtempSync(join(tmpdir(), "codegraph-hooks-test-"));
+  try {
+    const piDir = join(tmp, ".pi");
+    mkdirSync(piDir, { recursive: true });
+    writeFileSync(join(piDir, "extensions.json"), JSON.stringify({ codegraph: true }), "utf8");
+
+    const events = new Map();
+    const mockPi = {
+      registerTool: () => {},
+      on: (event, handler) => { events.set(event, handler); },
+    };
+
+    codegraphExtension(mockPi, { cwd: tmp });
+    assert.ok(events.has("before_agent_start"), "Should register before_agent_start hook");
+    assert.ok(events.has("session_shutdown"), "Should register session_shutdown hook");
+
+    // Test before_agent_start appends CodeGraph policy
+    const beforeStart = events.get("before_agent_start");
+    const result = beforeStart({ systemPrompt: "Base prompt" });
+    assert.ok(result.systemPrompt.includes("Base prompt"));
+    assert.ok(result.systemPrompt.includes("## CodeGraph Intelligence Policy"));
+    assert.ok(result.systemPrompt.includes("codegraph_node"));
+
+    // Test session_shutdown runs without throwing
+    const shutdown = events.get("session_shutdown");
+    await assert.doesNotReject(async () => { await shutdown(); });
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 

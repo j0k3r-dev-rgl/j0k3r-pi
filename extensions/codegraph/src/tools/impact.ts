@@ -9,7 +9,7 @@ import { Type } from "typebox";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { NOT_INDEXED_MESSAGE, resolveProjectPath, trackTempDir } from "../core.js";
+import { isNotIndexedOutput, resolveProjectPath, trackTempDir } from "../core.js";
 import { renderImpactCall, renderImpactResult } from "../render/index.js";
 import type { CodeGraphImpactDetails } from "../types.js";
 
@@ -52,7 +52,7 @@ export function registerImpactTool(pi: ExtensionAPI) {
 			const output = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
 
 			if (result.code !== 0) {
-				if (output.includes(NOT_INDEXED_MESSAGE)) {
+				if (isNotIndexedOutput(output)) {
 					return { content: [{ type: "text", text: output }], details: { ...details, notIndexed: true } };
 				}
 				if (signal?.aborted) {
@@ -68,6 +68,7 @@ export function registerImpactTool(pi: ExtensionAPI) {
 				trackTempDir(directory);
 				const fullOutputPath = resolve(directory, "output.md");
 				await writeFile(fullOutputPath, output, "utf8");
+				Object.assign(details, { truncated: true, fullOutputPath });
 				text += `\n\n[Output truncated: ${truncation.outputLines} of ${truncation.totalLines} lines (${formatSize(truncation.outputBytes)} of ${formatSize(truncation.totalBytes)}). Full output saved to: ${fullOutputPath}]`;
 			}
 

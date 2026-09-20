@@ -4,6 +4,11 @@ import { resolve } from "node:path";
 import type { CodeGraphAction, CodeGraphStatus } from "./types.js";
 
 export const NOT_INDEXED_MESSAGE = "CodeGraph isn't available here";
+export const NOT_INDEXED_PATTERN = /not initialized|isn't available here|not indexed/i;
+
+export function isNotIndexedOutput(output: string): boolean {
+	return output.includes(NOT_INDEXED_MESSAGE) || NOT_INDEXED_PATTERN.test(output);
+}
 export const DEFAULT_MAX_FILES = 12;
 export const MAX_FILES_LIMIT = 50;
 

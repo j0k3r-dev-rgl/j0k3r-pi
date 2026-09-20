@@ -9,7 +9,7 @@ import { Type } from "typebox";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { DEFAULT_MAX_FILES, MAX_FILES_LIMIT, NOT_INDEXED_MESSAGE, resolveProjectPath, trackTempDir } from "../core.js";
+import { DEFAULT_MAX_FILES, MAX_FILES_LIMIT, isNotIndexedOutput, resolveProjectPath, trackTempDir } from "../core.js";
 import { renderExploreCall, renderExploreResult } from "../render/index.js";
 import type { CodeGraphExploreDetails } from "../types.js";
 
@@ -74,7 +74,7 @@ export function registerExploreTool(pi: ExtensionAPI) {
 			const result = await pi.exec("codegraph", ["explore", "--path", path, "--max-files", String(maxFiles), params.query], { cwd: path, signal });
 			const output = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
 			if (result.code !== 0) {
-				if (output.includes(NOT_INDEXED_MESSAGE)) {
+				if (isNotIndexedOutput(output)) {
 					return { content: [{ type: "text", text: output }], details: { path, query: params.query, maxFiles, notIndexed: true } satisfies CodeGraphExploreDetails };
 				}
 				if (signal?.aborted) return { content: [{ type: "text", text: "CodeGraph exploration cancelled." }], details: { path, query: params.query, maxFiles } satisfies CodeGraphExploreDetails };
