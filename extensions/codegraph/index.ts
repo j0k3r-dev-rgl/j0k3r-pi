@@ -21,6 +21,12 @@ export default function codegraphExtension(pi: ExtensionAPI, options: { cwd?: st
 	if (!isExtensionEnabled("codegraph", cwd)) return;
 	registerCodeGraphTools(pi);
 	if (typeof (pi as any).on === "function") {
+		(pi as any).on("before_agent_start", (event: { systemPrompt: string }) => {
+			return {
+				systemPrompt: `${event.systemPrompt}\n\n## CodeGraph Intelligence Policy\n- When inspecting indexed projects, strictly prefer \`codegraph_node\` for symbol definitions, callers/callees, and file structure over the generic \`read\` tool.\n- Before refactoring or changing shared symbols or files, use \`codegraph_impact\` to verify direct and transitive blast radius.\n- Use \`codegraph_explore\` only for wide multi-component architecture queries. Do NOT use \`codegraph_explore\` for single symbols or files.\n- On low-confidence exploration results, follow the suggested symbols using \`codegraph_node\` directly.`,
+			};
+		});
+
 		(pi as any).on("session_shutdown", async () => {
 			await cleanupTrackedTempDirs();
 			_resetSyncState();
