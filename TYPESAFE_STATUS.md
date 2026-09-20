@@ -314,6 +314,60 @@ Antes de permitir que Jev influya consultivamente en el triaje de forma más act
 
 Incluso en esa etapa, `AGENTS.md`, Configuration Lock, autorización humana, Git Policy y circuit breakers seguirán teniendo prioridad absoluta.
 
+## Hallazgos del deep-researcher (sesión 2026-09-20)
+
+Investigación completa: `investigaciones/2026-09-20-1424-typesafe-subagent-integration/report.md`
+
+### Arquitectura de uso por subagente
+
+| Subagente | Herramientas permitidas | Patrón principal | Invocaciones máximas |
+|---|---|---|---|
+| **Orchestrator** | `record_shadow_triage`, `circuit_breaker`, `evaluate` | Macro triaje, ambigüedad de prompt, discrepancia | 1–2 |
+| **00-discovery** | `circuit_breaker` | Claridad de delegación, verificación de límites | 0–1 |
+| **01-planning** | `check_overengineering`, `circuit_breaker` | **Gate de KISS/YAGNI** antes de finalizar plan.md | 1–2 |
+| **02-apply** | `check_overengineering`, `circuit_breaker` | Sensor de drift arquitectónico (excepcional) | 0–1 |
+| **03-verify** | `evaluate`, `check_overengineering` | Verificación cualitativa de contrato, diff audit | 1–2 |
+| **deep-researcher** | `circuit_breaker`, `evaluate` | Ambigüedad de tema, detección de contradicciones | 1–2 |
+
+### Reglas de oro
+
+1. **Regla de Determinismo**: Nunca reemplazar `bash`, `read`, `tsc`, `node --test` con Jev.
+2. **Regla de No-Duplicación**: Si el orchestrator ya validó con `circuit_breaker`, el subagente acepta la tarea como clara.
+3. **Regla de Invocaciones Acotadas**: **Máximo 2 llamadas Jev por subagente**. Una 3ª indica confusión algorítmica → `BLOCKED`.
+4. **Separación de Telemetría**: `typesafe_record_shadow_triage` es **exclusivo del orchestrator**. Los subagentes graban telemetría estándar.
+
+### Bugs encontrados y corregidos
+
+| Bug | Ubicación | Impacto | Estado |
+|---|---|---|---|
+| Token usage registrado como 0/0 | `convenience-factory.ts` leía `response.tokens` en lugar de `response.usage` | Cost tracking incorrecto | ✅ Corregido en `01af57a` |
+| Sin `caller_agent` en telemetría | No se sabía qué subagente hizo la llamada | Dificultaba calibración por agente | ✅ Corregido en `01af57a` |
+
+### Budget de costo/latencia
+
+| Tipo de workflow | Llamadas | Input tokens | Output tokens | Latencia total | Costo diario |
+|---|---|---|---|---|---|
+| Direct Orchestrator | 1 | ~1,160 | ~100 | ~0.9s | ~$0.0013 |
+| Planned Workflow | 3–4 | ~3,500 | ~350 | ~2.7–3.6s | ~$0.0039 |
+| Deep Researcher | 2 | ~2,000 | ~200 | ~1.8s | ~$0.0022 |
+
+**Presupuesto diario (15–20 workflows)**: ~$0.03–$0.09/día, <40s latencia total.
+
+### Anti-patrones identificados
+
+1. **Reemplazo determinista**: Preguntarle a Jev "¿pasó el test?" → usar `bash`/`node --test`
+2. **Tight loops**: Llamar Jev después de cada edición → fase-boundary gate only
+3. **Meta-evaluaciones recursivas**: Preguntarle a Jev si su propio veredicto fue correcto
+4. **Shadow triage en subagentes**: Corrompe la base de datos de triaje
+5. **State dumping**: Volcar 2,000 líneas de código en `state` → diluye atención
+6. **Delegación de autoridad**: Usar score favorable de Jev para saltar Configuration Lock
+
+### Criterios de calibración antes de confiar en subagentes
+
+- **25–50 workflows reales** registrados en `telemetry.sqlite`
+- Durante calibración, subagentes tratan Jev como **warning en notas**, no como aborto duro, salvo score > 0.85
+- Threshold actual: 0.70 (bifurca claramente soluciones limpias de complejidad especulativa)
+
 ## Próxima revisión sugerida
 
 Revisar este documento y la telemetría cuando exista una muestra suficiente de decisiones reales. Como punto inicial, una revisión después de **25–50 decisiones de triaje** ofrecerá más valor que analizar cada registro de forma aislada.
