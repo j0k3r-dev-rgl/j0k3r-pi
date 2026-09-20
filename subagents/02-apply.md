@@ -18,6 +18,7 @@ tools:
   - codegraph_impact
   - typesafe_circuit_breaker
   - typesafe_check_overengineering
+  - typesafe_evaluate
 ---
 
 # 02 — Apply Subagent
