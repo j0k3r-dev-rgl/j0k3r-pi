@@ -24,6 +24,26 @@ export function exactOccurrenceCount(output: string, query: string): number {
 	return matches ? matches.length : 0;
 }
 
+export function extractFuzzySuggestions(output: string): Array<{ symbol: string; location: string }> {
+	const regex = /^-\s+`([^`]+)`\s+\(([^)]+)\)/gm;
+	const suggestions: Array<{ symbol: string; location: string }> = [];
+	let match: RegExpExecArray | null;
+	while ((match = regex.exec(output)) !== null) {
+		suggestions.push({ symbol: match[1], location: match[2] });
+		if (suggestions.length >= 8) break;
+	}
+	return suggestions;
+}
+
+export function stripSourceCode(output: string): string {
+	const match = output.match(/(\r?\n|^)[*#_~]*\s*Source Code\b/im);
+	if (match && match.index !== undefined) {
+		return output.slice(0, match.index).trim();
+	}
+	return output.trim();
+}
+
+
 export function registerExploreTool(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "codegraph_explore",
@@ -60,14 +80,23 @@ export function registerExploreTool(pi: ExtensionAPI) {
 				throw new Error(`CodeGraph failed with exit code ${result.code}: ${output || "no diagnostic output"}`);
 			}
 
-			const truncation = truncateHead(output, { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES });
 			const details: CodeGraphExploreDetails = { path, query: params.query, maxFiles };
 			const lowConfidence = isIdentifierLike(params.query) && exactOccurrenceCount(output, params.query) <= 1;
-			let text = truncation.content;
+			
+			let processedOutput = output;
 			if (lowConfidence) {
 				details.lowConfidence = true;
-				text = `[Low-confidence CodeGraph result: no exact indexed match was found for identifier-like query "${params.query}". Treat the following as fuzzy related context, not a symbol match.]\n\n${text}`;
+				const suggestions = extractFuzzySuggestions(output);
+				const stripped = stripSourceCode(output);
+				let lowConfidenceHeader = `[Low-confidence CodeGraph result: no exact indexed match was found for "${params.query}". Source code blocks stripped to protect context.]\n\n`;
+				if (suggestions.length > 0) {
+					lowConfidenceHeader += `**Suggested related symbols found in index:**\n${suggestions.map((s) => `- \`${s.symbol}\` (${s.location})`).join("\n")}\n\n*Tip: Use \`codegraph_node\` on any suggested symbol above to inspect its definition directly without loading unnecessary files.*\n\n---\n\n`;
+				}
+				processedOutput = lowConfidenceHeader + stripped;
 			}
+
+			const truncation = truncateHead(processedOutput, { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES });
+			let text = truncation.content;
 			if (truncation.truncated) {
 				const directory = await mkdtemp(resolve(tmpdir(), "pi-codegraph-"));
 				trackTempDir(directory);

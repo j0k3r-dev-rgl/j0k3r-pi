@@ -750,3 +750,41 @@ test("TOOLS: codegraph_node and codegraph_impact execution contracts", async () 
   assert.ok(impactResultRender.some((l) => l.includes("✓ CodeGraph impact complete")));
 });
 
+test("BUG-FIX: codegraph_explore strips source code and formats suggestions on low-confidence results", async () => {
+  const { registerExploreTool } = await import("../src/tools/explore.ts");
+  let explore;
+  const mockFuzzyOutput = `**Exploration: NonExistentService**
+
+Found 12 symbols across 2 files.
+
+**Blast radius — what depends on these (update/verify before editing)**
+
+- \`serviceNotFound\` (front/app/server/http/response.server.ts:27) — 33 callers
+- \`someOtherService\` (back/src/service.ts:10) — 2 callers
+
+**Source Code**
+
+\`\`\`typescript
+// Massive 50KB code dump that should never pollute agent context
+function serviceNotFound() {
+  return "404";
+}
+\`\`\``;
+
+  const mockPi = {
+    registerTool: (t) => { if (t.name === "codegraph_explore") explore = t; },
+    exec: async () => ({ code: 0, stdout: mockFuzzyOutput, stderr: "" }),
+  };
+  registerExploreTool(mockPi);
+
+  const res = await explore.execute("exp1", { query: "NonExistentService" }, undefined, undefined, { cwd: "/workspace" });
+  assert.equal(res.details.lowConfidence, true);
+  const text = res.content[0].text;
+  assert.ok(text.includes("Source code blocks stripped to protect context"));
+  assert.ok(text.includes("Suggested related symbols found in index:"));
+  assert.ok(text.includes("- `serviceNotFound` (front/app/server/http/response.server.ts:27)"));
+  assert.ok(text.includes("Use `codegraph_node` on any suggested symbol"));
+  assert.ok(!text.includes("Massive 50KB code dump"), "Source code must be stripped from response");
+});
+
+
