@@ -1,21 +1,9 @@
-import { Type } from 'typebox';
-import crypto from 'node:crypto';
 import type { TelemetryDb } from '../storage/telemetry-db.ts';
 import type { evaluateSystemOne as defaultEvaluateSystemOne } from '../providers/typesafe-client.ts';
-import type { QuestionDefinition, SystemOneRequest } from '../types.ts';
-import { sanitizeState } from '../security.ts';
+import type { QuestionDefinition } from '../types.ts';
+import { createConvenienceTool, TaskSchema } from './convenience-factory.ts';
 
-export const CircuitBreakerToolSchema = Type.Object({
-  task: Type.String({
-    minLength: 1,
-    description: 'The user prompt, subagent task, or proposed action to evaluate for ambiguity or missing decisions.',
-  }),
-  context: Type.Optional(
-    Type.String({
-      description: 'Optional additional context or current progress.',
-    })
-  ),
-});
+export const CircuitBreakerToolSchema = TaskSchema;
 
 export interface CircuitBreakerClientAdapter {
   evaluateSystemOne: typeof defaultEvaluateSystemOne;
@@ -47,7 +35,7 @@ function buildCircuitBreakerQuestions(): Record<string, QuestionDefinition> {
 }
 
 export function createCircuitBreakerTool(client: CircuitBreakerClientAdapter, db?: TelemetryDb) {
-  return {
+  return createConvenienceTool(client, {
     name: 'typesafe_circuit_breaker',
     label: 'TypeSafe Circuit Breaker',
     description:
@@ -58,101 +46,23 @@ export function createCircuitBreakerTool(client: CircuitBreakerClientAdapter, db
       'If tripped (blocked: true), stop execution immediately, formulate one concise question, and ask the user.',
     ],
     parameters: CircuitBreakerToolSchema,
-    execute: async (_toolCallId: string, args: any, context?: any) => {
-      const task = args.task;
-      if (!task || typeof task !== 'string' || !task.trim()) {
-        throw new Error('Missing required parameter: task');
-      }
-
-      const telemetryId = `cb-${crypto.randomUUID()}`;
-      const sessionId = context?.sessionManager?.getSessionId?.() ?? context?.sessionId;
-      const state = args.context ? { task, context: args.context } : { task };
-
-      const questions = buildCircuitBreakerQuestions();
-      const request: SystemOneRequest = {
-        state: sanitizeState(state),
-        questions,
-        model: 'jev-latest',
-      };
-
-      const start = Date.now();
-      try {
-        const response = await client.evaluateSystemOne(request, {
-          signal: context?.signal,
-          timeout: 4000,
-        });
-        const latencyMs = Date.now() - start;
-
-        const answers = response.answers as Record<string, any> | undefined;
-        const cbScore = answers?.circuit_breaker_needed?.noul ?? 0;
-        const decisionType = answers?.decision_type?.choice ?? 'none';
-        const blocked = cbScore >= 0.70 && decisionType !== 'none';
-
-        if (db) {
-          try {
-            db.recordEvaluation({
-              id: telemetryId,
-              source: 'circuit-breaker-tool',
-              session_id: sessionId,
-              created_at: new Date().toISOString(),
-              model: response.model || 'jev-latest',
-              latency_ms: latencyMs,
-              input_tokens: (response as any).tokens?.input_tokens ?? 0,
-              output_tokens: (response as any).tokens?.output_tokens ?? 0,
-              state_json: JSON.stringify(state),
-              questions_json: JSON.stringify(questions),
-              response_json: JSON.stringify(response.answers),
-            });
-          } catch {}
-        }
-
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(
-                {
-                  blocked,
-                  circuit_breaker_score: cbScore,
-                  decision_type: decisionType,
-                  recommendation: blocked
-                    ? `TRIP CIRCUIT BREAKER: Stop execution immediately and ask the user to clarify the ${decisionType.replace(/_/g, ' ')}.`
-                    : 'SAFE: Clear to proceed within authorized scope.',
-                },
-                null,
-                2
-              ),
-            },
-          ],
-          details: {
-            telemetry_id: telemetryId,
-            blocked,
-            score: cbScore,
-            decision_type: decisionType,
-            latency_ms: latencyMs,
-          },
-        };
-      } catch (err: any) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify({
-                blocked: false,
-                error: err?.message || String(err),
-                fallback: 'Safe fallback: review task manually against AGENTS.md rules.',
-              }),
-            },
-          ],
-          details: {
-            telemetry_id: telemetryId,
-            blocked: false,
-            score: 0,
-            decision_type: 'none',
-            latency_ms: Date.now() - start,
-          },
-        };
-      }
+    buildState: (args: any) => (args.context ? { task: args.task, context: args.context } : { task: args.task }),
+    buildQuestions: buildCircuitBreakerQuestions,
+    extractScore: (answers) => {
+      const score = answers?.circuit_breaker_needed?.noul ?? 0;
+      const decision = answers?.decision_type?.choice ?? 'none';
+      return { score, decision, isTriggered: score >= 0.70 && decision !== 'none' };
     },
-  };
+    formatResult: (score, decision, isTriggered) => ({
+      blocked: isTriggered,
+      circuit_breaker_score: score,
+      decision_type: decision,
+      recommendation: isTriggered
+        ? `TRIP CIRCUIT BREAKER: Stop execution immediately and ask the user to clarify the ${decision.replace(/_/g, ' ')}.`
+        : 'SAFE: Clear to proceed within authorized scope.',
+    }),
+    telemetrySource: 'circuit-breaker-tool',
+    telemetryPrefix: 'cb',
+    threshold: 0.70,
+  }, db);
 }

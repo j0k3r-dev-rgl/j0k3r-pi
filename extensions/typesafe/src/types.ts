@@ -117,7 +117,7 @@ export class NetworkError extends TypeSafeError {
 export interface EvaluationRecord {
   id: string;
   session_id?: string;
-  source: 'shadow-triage' | 'evaluate-tool' | 'circuit-breaker-tool' | 'overengineering-tool' | 'benchmark';
+  source: string;
   created_at: string;
   latency_ms: number;
   model: string;
