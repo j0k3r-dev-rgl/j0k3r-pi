@@ -67,6 +67,15 @@ Use the `verify.md`, `Workflow Status`, and `Handoff` contracts from `skills/sub
 
 Only `Verification Result: PASS` may produce artifact and handoff `READY`.
 
+## TypeSafe / Jev Guidelines
+
+After deterministic validation (tests, typecheck, continuity snapshot), use `typesafe_evaluate` for qualitative acceptance criteria that unit tests cannot verify:
+- Human-friendly error messages, idiomatic API naming, documentation quality.
+- Use `Score` or `Choice` primitives with explicit criteria tied to `plan.md` acceptance.
+- Also run `typesafe_check_overengineering` on the cumulative diff to catch accidental dead code or speculative scaffolding.
+- Maximum 2 Jev calls per execution. If a 3rd call is needed, return `BLOCKED`.
+- Do not call Jev for deterministic tasks (test passes, exit codes, file hashes). Use `bash` or `read` instead.
+
 ## Handoff
 
 Return only the compact canonical handoff from `skills/subagent-artifact-contracts/SKILL.md`. For `READY`, put `verify.md` in `Artifact` and do not repeat verification evidence from the artifact.

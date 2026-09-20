@@ -116,11 +116,14 @@ export function createConvenienceTool(
               created_at: new Date().toISOString(),
               model: response.model || 'jev-latest',
               latency_ms: latencyMs,
-              input_tokens: (response as any).tokens?.input_tokens ?? 0,
-              output_tokens: (response as any).tokens?.output_tokens ?? 0,
+              input_tokens: (response as any).usage?.input_tokens ?? 0,
+              output_tokens: (response as any).usage?.output_tokens ?? 0,
               state_json: JSON.stringify(state),
               questions_json: JSON.stringify(questions),
               response_json: JSON.stringify(response.answers),
+              metadata_json: JSON.stringify({
+                caller_agent: context?.caller_agent || context?.agent?.name || 'unknown',
+              }),
             });
           } catch {}
         }

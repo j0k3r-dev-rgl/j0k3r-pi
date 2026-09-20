@@ -81,6 +81,14 @@ Before returning `READY`, audit the contract at scenario level:
 
 If any scenario, required behavior, or validation remains incomplete, return `BLOCKED` and name the exact `MINI-###` and unmet acceptance check. Do not mark partially implemented work as `READY` because the current test suite passes.
 
+## TypeSafe / Jev Guidelines
+
+Jev is **NOT** a per-edit linter. Validate every change deterministically with tests and typecheck (`bash`, `node --test`, `tsc`).
+- Call `typesafe_check_overengineering` ONLY when encountering unexpected obstacles that tempt you to introduce a new library, compatibility shim, or config change — i.e., architectural drift.
+- Call `typesafe_circuit_breaker` ONLY when a material product decision is missing mid-implementation.
+- NEVER call Jev after each file edit or between search queries. Jev is a phase-boundary gate, not an inner-loop tool.
+- Maximum 1 Jev call per execution (exceptional only). If tempted to call twice, return `BLOCKED` instead.
+
 ## Handoff
 
 Return only the compact canonical handoff from `skills/subagent-artifact-contracts/SKILL.md`. For `READY`, put `apply.md` in `Artifact` and do not repeat validation evidence from the artifact.
