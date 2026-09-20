@@ -9,7 +9,7 @@ import { Type } from "typebox";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { DEFAULT_MAX_FILES, MAX_FILES_LIMIT, NOT_INDEXED_MESSAGE, resolveProjectPath } from "../core.js";
+import { DEFAULT_MAX_FILES, MAX_FILES_LIMIT, NOT_INDEXED_MESSAGE, resolveProjectPath, trackTempDir } from "../core.js";
 import { renderExploreCall, renderExploreResult } from "../render/index.js";
 import type { CodeGraphExploreDetails } from "../types.js";
 
@@ -17,16 +17,11 @@ function isIdentifierLike(query: string): boolean {
 	return /^[A-Za-z_$][A-Za-z0-9_$.-]*$/.test(query);
 }
 
-function exactOccurrenceCount(output: string, query: string): number {
-	const haystack = output.toLocaleLowerCase();
-	const needle = query.toLocaleLowerCase();
-	let count = 0;
-	let offset = 0;
-	while ((offset = haystack.indexOf(needle, offset)) !== -1) {
-		count += 1;
-		offset += needle.length;
-	}
-	return count;
+export function exactOccurrenceCount(output: string, query: string): number {
+	const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const regex = new RegExp(`(?:^|[^a-zA-Z0-9_$])${escaped}(?=[^a-zA-Z0-9_$]|$)`, "gi");
+	const matches = output.match(regex);
+	return matches ? matches.length : 0;
 }
 
 export function registerExploreTool(pi: ExtensionAPI) {
@@ -75,6 +70,7 @@ export function registerExploreTool(pi: ExtensionAPI) {
 			}
 			if (truncation.truncated) {
 				const directory = await mkdtemp(resolve(tmpdir(), "pi-codegraph-"));
+				trackTempDir(directory);
 				const fullOutputPath = resolve(directory, "output.md");
 				await writeFile(fullOutputPath, output, "utf8");
 				Object.assign(details, { truncated: true, fullOutputPath });

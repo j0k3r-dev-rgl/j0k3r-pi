@@ -18,6 +18,8 @@ tools:
   - codegraph_status
   - codegraph_sync
   - codegraph_explore
+  - codegraph_node
+  - codegraph_impact
 ---
 
 # 01 — Planning Subagent

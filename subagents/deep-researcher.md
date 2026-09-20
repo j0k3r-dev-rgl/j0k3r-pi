@@ -32,6 +32,8 @@ tools:
   - codegraph_status
   - codegraph_sync
   - codegraph_explore
+  - codegraph_node
+  - codegraph_impact
 ---
 
 # Deep Researcher

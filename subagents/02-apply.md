@@ -14,6 +14,8 @@ tools:
   - codegraph_status
   - codegraph_sync
   - codegraph_explore
+  - codegraph_node
+  - codegraph_impact
 ---
 
 # 02 — Apply Subagent

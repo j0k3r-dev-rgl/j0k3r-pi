@@ -1,10 +1,33 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { CodeGraphAction, CodeGraphStatus } from "./types.js";
 
 export const NOT_INDEXED_MESSAGE = "CodeGraph isn't available here";
 export const DEFAULT_MAX_FILES = 12;
 export const MAX_FILES_LIMIT = 50;
+
+const trackedTempDirs = new Set<string>();
+
+export function trackTempDir(dir: string): void {
+	trackedTempDirs.add(dir);
+}
+
+export function getTrackedTempDirs(): Set<string> {
+	return trackedTempDirs;
+}
+
+export async function cleanupTrackedTempDirs(): Promise<void> {
+	for (const dir of trackedTempDirs) {
+		try {
+			await rm(dir, { recursive: true, force: true });
+		} catch {
+			// Ignore cleanup errors
+		}
+	}
+	trackedTempDirs.clear();
+}
+
 
 export function resolveProjectPath(cwd: string, path?: string): string {
 	const normalized = path?.replace(/^@/, "");

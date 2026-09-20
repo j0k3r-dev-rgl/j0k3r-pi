@@ -1,7 +1,9 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { cleanupTrackedTempDirs } from "./src/core.js";
 import { registerCodeGraphTools } from "./src/tools/index.js";
+import { _resetSyncState } from "./src/tools/sync.js";
 
 export function isExtensionEnabled(name: string, cwd = process.cwd()): boolean {
 	try {
@@ -18,4 +20,11 @@ export default function codegraphExtension(pi: ExtensionAPI, options: { cwd?: st
 	const cwd = options.cwd ?? process.cwd();
 	if (!isExtensionEnabled("codegraph", cwd)) return;
 	registerCodeGraphTools(pi);
+	if (typeof (pi as any).on === "function") {
+		(pi as any).on("session_shutdown", async () => {
+			await cleanupTrackedTempDirs();
+			_resetSyncState();
+		});
+	}
 }
+

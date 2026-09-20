@@ -1,11 +1,13 @@
 # CodeGraph for Pi
 
-Global Pi extension exposing CodeGraph through four model-callable tools.
+Global Pi extension exposing CodeGraph through six model-callable tools.
 
 ## Tools
 
 - `codegraph_status` — read-only `codegraph status --json` for the selected project.
 - `codegraph_explore` — read-only architecture, symbol, dependency, and call-flow exploration against an existing index. Identifier-like queries without an exact indexed match are marked as low-confidence fuzzy context.
+- `codegraph_node` — read-only focused inspection of a single symbol's definition, signature, source code, and caller/callee trail, or file structure with line numbers and dependents.
+- `codegraph_impact` — read-only blast radius and affected code analysis when changing a symbol or file across direct and transitive dependencies.
 - `codegraph_sync` — safe, unattended incremental refresh of an existing index; coalesces concurrent calls and briefly caches successful results.
 - `codegraph_manage` — confirmation-gated lifecycle operations:
   - `init`: create `.codegraph/` and build the initial index;
@@ -26,7 +28,7 @@ Explore output is limited to Pi's standard 50KB/2000-line budget. Oversized full
 
 ## Lifecycle
 
-No daemon, watcher, socket, timer, or persistent child process is started. Each call launches the installed `codegraph` CLI and honors Pi cancellation.
+No daemon, watcher, socket, timer, or persistent child process is started. Each call launches the installed `codegraph` CLI and honors Pi cancellation. Temporary exploration output directories are automatically tracked and removed on `session_shutdown`.
 
 ## Activation
 

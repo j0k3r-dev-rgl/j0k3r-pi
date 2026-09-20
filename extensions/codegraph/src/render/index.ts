@@ -1,6 +1,8 @@
 import type {
 	CodeGraphExploreDetails,
+	CodeGraphImpactDetails,
 	CodeGraphManageDetails,
+	CodeGraphNodeDetails,
 	CodeGraphStatusDetails,
 	CodeGraphSyncDetails,
 } from "../types.js";
@@ -284,3 +286,136 @@ export function renderSyncResult(result: any, options: any, _theme: any, context
 		true,
 	);
 }
+
+export function renderNodeCall(
+	args: { name: string; path?: string; file?: string },
+	_theme: any,
+	context: any,
+) {
+	const state: CodeGraphCardState = (context.state ??= {});
+	const target = `${args.name}${args.file ? ` (${args.file})` : ""}${args.path ? ` in ${args.path}` : ""}`;
+	return new CodeGraphCardCallComponent(
+		"codegraph_node",
+		() => target,
+		() => "● Inspecting CodeGraph node…",
+		getCodeGraphBorderColor,
+		state,
+	);
+}
+
+export function renderNodeResult(result: any, options: any, _theme: any, context: any) {
+	const state: CodeGraphCardState = (context.state ??= {});
+	state.hasResult = true;
+	state.isError = Boolean(context.isError);
+	state.isPartial = Boolean(options.isPartial);
+	state.expanded = Boolean(options.expanded);
+
+	const content = resultText(result);
+	const details = result.details as CodeGraphNodeDetails | undefined;
+
+	return new CodeGraphCardResultComponent(
+		(_width, _innerWidth) => {
+			const lines: string[] = [];
+			if (options.isPartial) {
+				lines.push("● Inspecting CodeGraph node…");
+				return lines;
+			}
+			if (context.isError) {
+				lines.push(content || "CodeGraph node inspection failed.");
+				return lines;
+			}
+			if (details?.notIndexed) {
+				const hint = toolHint("to expand");
+				if (!options.expanded) {
+					lines.push(`⚠ CodeGraph: not indexed · ${hint}`);
+				} else {
+					lines.push(content || "CodeGraph index not found.");
+					lines.push(toolHint("to collapse"));
+				}
+				return lines;
+			}
+			if (!options.expanded) {
+				const hint = toolHint("to expand");
+				lines.push(`✓ CodeGraph node complete · ${hint}`);
+			} else {
+				if (content) {
+					lines.push(...content.split("\n"));
+				} else {
+					lines.push("CodeGraph returned no output.");
+				}
+				lines.push(toolHint("to collapse"));
+			}
+			return lines;
+		},
+		getCodeGraphBorderColor,
+		state,
+		true,
+	);
+}
+
+export function renderImpactCall(
+	args: { symbol: string; path?: string; depth?: number },
+	_theme: any,
+	context: any,
+) {
+	const state: CodeGraphCardState = (context.state ??= {});
+	const target = `${args.symbol}${args.depth ? ` (depth ${args.depth})` : ""}${args.path ? ` in ${args.path}` : ""}`;
+	return new CodeGraphCardCallComponent(
+		"codegraph_impact",
+		() => target,
+		() => "● Analyzing CodeGraph impact…",
+		getCodeGraphBorderColor,
+		state,
+	);
+}
+
+export function renderImpactResult(result: any, options: any, _theme: any, context: any) {
+	const state: CodeGraphCardState = (context.state ??= {});
+	state.hasResult = true;
+	state.isError = Boolean(context.isError);
+	state.isPartial = Boolean(options.isPartial);
+	state.expanded = Boolean(options.expanded);
+
+	const content = resultText(result);
+	const details = result.details as CodeGraphImpactDetails | undefined;
+
+	return new CodeGraphCardResultComponent(
+		(_width, _innerWidth) => {
+			const lines: string[] = [];
+			if (options.isPartial) {
+				lines.push("● Analyzing CodeGraph impact…");
+				return lines;
+			}
+			if (context.isError) {
+				lines.push(content || "CodeGraph impact failed.");
+				return lines;
+			}
+			if (details?.notIndexed) {
+				const hint = toolHint("to expand");
+				if (!options.expanded) {
+					lines.push(`⚠ CodeGraph: not indexed · ${hint}`);
+				} else {
+					lines.push(content || "CodeGraph index not found.");
+					lines.push(toolHint("to collapse"));
+				}
+				return lines;
+			}
+			if (!options.expanded) {
+				const hint = toolHint("to expand");
+				lines.push(`✓ CodeGraph impact complete · ${hint}`);
+			} else {
+				if (content) {
+					lines.push(...content.split("\n"));
+				} else {
+					lines.push("CodeGraph returned no output.");
+				}
+				lines.push(toolHint("to collapse"));
+			}
+			return lines;
+		},
+		getCodeGraphBorderColor,
+		state,
+		true,
+	);
+}
+

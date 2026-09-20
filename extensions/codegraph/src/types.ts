@@ -42,3 +42,19 @@ export interface CodeGraphSyncDetails extends CodeGraphBaseDetails {
 	durationMs?: number;
 	output?: string;
 }
+
+export interface CodeGraphNodeDetails extends CodeGraphBaseDetails {
+	name: string;
+	file?: string;
+	offset?: number;
+	limit?: number;
+	symbolsOnly?: boolean;
+	notIndexed?: boolean;
+}
+
+export interface CodeGraphImpactDetails extends CodeGraphBaseDetails {
+	symbol: string;
+	depth?: number;
+	notIndexed?: boolean;
+}
+

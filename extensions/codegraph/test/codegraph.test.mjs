@@ -84,6 +84,7 @@ export async function resolve(specifier, context, nextResolve) {
           String: (opts) => ({ type: "string", ...opts }),
           Optional: (item) => ({ ...item, optional: true }),
           Integer: (opts) => ({ type: "integer", ...opts }),
+          Boolean: (opts) => ({ type: "boolean", ...opts }),
         };
       \`)
     };
@@ -141,9 +142,9 @@ test("MINI-002: isExtensionEnabled and codegraphExtension opt-in guard", async (
     const registered4 = [];
     const mockPi4 = { registerTool: (tool) => registered4.push(tool) };
     codegraphExtension(mockPi4, { cwd: tmp });
-    assert.equal(registered4.length, 4, "All four tools registered when codegraph: true");
+    assert.equal(registered4.length, 6, "All six tools registered when codegraph: true");
     const names = registered4.map((t) => t.name).sort();
-    assert.deepEqual(names, ["codegraph_explore", "codegraph_manage", "codegraph_status", "codegraph_sync"]);
+    assert.deepEqual(names, ["codegraph_explore", "codegraph_impact", "codegraph_manage", "codegraph_node", "codegraph_status", "codegraph_sync"]);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -182,9 +183,9 @@ test("MINI-004: All tools register renderShell: 'self'", async () => {
   const { registerCodeGraphTools } = await import("../src/tools/index.ts");
   registerCodeGraphTools(mockPi);
 
-  assert.equal(registered.length, 4);
+  assert.equal(registered.length, 6);
   const names = registered.map((t) => t.name).sort();
-  assert.deepEqual(names, ["codegraph_explore", "codegraph_manage", "codegraph_status", "codegraph_sync"]);
+  assert.deepEqual(names, ["codegraph_explore", "codegraph_impact", "codegraph_manage", "codegraph_node", "codegraph_status", "codegraph_sync"]);
   for (const tool of registered) {
     assert.equal(tool.renderShell, "self", `${tool.name} must specify renderShell: "self"`);
   }
@@ -579,7 +580,9 @@ test("codegraph package and documentation contracts are self-contained", () => {
   assert.equal("typeRoots" in tsconfig.compilerOptions, false);
 
   const readme = readFileSync(readmePath, "utf8");
-  assert.ok(readme.includes("four model-callable tools"));
+  assert.ok(readme.includes("six model-callable tools"));
+  assert.ok(readme.includes("`codegraph_node`"));
+  assert.ok(readme.includes("`codegraph_impact`"));
   assert.ok(readme.includes("`codegraph_sync`"));
 });
 
@@ -603,3 +606,147 @@ test("MINI-003: Orchestrator and tool prompt guidelines alignment", async () => 
   assert.ok(manageTool.promptGuidelines.some((g) => g.includes("codegraph_sync")));
   assert.ok(manageTool.promptGuidelines.some((g) => g.includes("Reserve codegraph_manage strictly for administrative lifecycle operations")));
 });
+
+test("BUG-FIX: exactOccurrenceCount respects word/identifier boundaries for short symbols", async () => {
+  const { exactOccurrenceCount } = await import("../src/tools/explore.ts");
+  assert.ok(typeof exactOccurrenceCount === "function");
+
+  // "id" appears only once as a standalone identifier token in the header line,
+  // but "definitions", "widgets", "provided" contain "id" as a substring.
+  const sampleOutput = `**Exploration: id**
+Definitions in widgets:
+function provideWidgets() {
+  return void 0;
+}`;
+
+  // With substring match, it would find 4 matches (id in Exploration: id, Definitions, widgets, provideWidgets)
+  // With identifier boundary match, it must find exactly 1 match (the query header "id").
+  const count = exactOccurrenceCount(sampleOutput, "id");
+  assert.equal(count, 1, `Expected 1 standalone match for 'id', got ${count}`);
+
+  // When actual symbol 'id' is defined or used:
+  const outputWithSymbol = `**Exploration: id**
+const id = 123;
+return id;`;
+  const countWithSymbol = exactOccurrenceCount(outputWithSymbol, "id");
+  assert.equal(countWithSymbol, 3, `Expected 3 standalone matches for 'id', got ${countWithSymbol}`);
+});
+
+test("LIFECYCLE: temp directories are tracked and cleaned up on shutdown", async () => {
+  const { trackTempDir, cleanupTrackedTempDirs, getTrackedTempDirs } = await import("../src/core.ts");
+  assert.ok(typeof trackTempDir === "function");
+  assert.ok(typeof cleanupTrackedTempDirs === "function");
+
+  const dir = mkdtempSync(join(tmpdir(), "pi-codegraph-test-track-"));
+  assert.ok(existsSync(dir));
+  trackTempDir(dir);
+  assert.ok(getTrackedTempDirs().has(dir));
+
+  await cleanupTrackedTempDirs();
+  assert.equal(existsSync(dir), false, "Temp directory should be deleted after cleanup");
+  assert.equal(getTrackedTempDirs().has(dir), false, "Set of tracked dirs should be cleared");
+});
+
+test("TOOLS: codegraph_node and codegraph_impact execution contracts", async () => {
+  const { registerNodeTool } = await import("../src/tools/node.ts");
+  const { registerImpactTool } = await import("../src/tools/impact.ts");
+  assert.ok(typeof registerNodeTool === "function");
+  assert.ok(typeof registerImpactTool === "function");
+
+  const execCalls = [];
+  let nodeTool;
+  let impactTool;
+  const mockPi = {
+    registerTool: (tool) => {
+      if (tool.name === "codegraph_node") nodeTool = tool;
+      if (tool.name === "codegraph_impact") impactTool = tool;
+    },
+    exec: async (cmd, args, opts) => {
+      execCalls.push({ cmd, args, opts });
+      if (args[0] === "node") {
+        if (args.includes("notIndexedNode")) {
+          return { code: 1, stdout: "CodeGraph isn't available here", stderr: "" };
+        }
+        return { code: 0, stdout: `**myFunc** (function)\nLocation: src/app.ts:10\nCalls: otherFunc`, stderr: "" };
+      }
+      if (args[0] === "impact") {
+        if (args.includes("notIndexedSymbol")) {
+          return { code: 1, stdout: "CodeGraph isn't available here", stderr: "" };
+        }
+        return { code: 0, stdout: `Impact of changing "myFunc" — 3 affected symbols`, stderr: "" };
+      }
+      return { code: 0, stdout: "ok", stderr: "" };
+    },
+  };
+
+  registerNodeTool(mockPi);
+  registerImpactTool(mockPi);
+  assert.ok(nodeTool);
+  assert.ok(impactTool);
+
+  // 1. Execute codegraph_node with arguments
+  const nodeRes = await nodeTool.execute(
+    "node1",
+    { name: "myFunc", path: "/test/project", file: "src/app.ts", offset: 1, limit: 50, symbolsOnly: false },
+    undefined,
+    undefined,
+    { cwd: "/test/project" },
+  );
+  assert.equal(nodeRes.details.name, "myFunc");
+  assert.equal(nodeRes.details.file, "src/app.ts");
+  assert.ok(nodeRes.content[0].text.includes("**myFunc**"));
+  const lastNodeCall = execCalls.find((c) => c.args[0] === "node");
+  assert.ok(lastNodeCall.args.includes("--file"));
+  assert.ok(lastNodeCall.args.includes("src/app.ts"));
+  assert.ok(lastNodeCall.args.includes("--offset"));
+  assert.ok(lastNodeCall.args.includes("1"));
+
+  // 2. Node not indexed
+  const nodeNotIndexed = await nodeTool.execute(
+    "node2",
+    { name: "notIndexedNode" },
+    undefined,
+    undefined,
+    { cwd: "/test/project" },
+  );
+  assert.equal(nodeNotIndexed.details.notIndexed, true);
+  assert.ok(nodeNotIndexed.content[0].text.includes("isn't available here"));
+
+  // 3. Node call & result rendering
+  const nodeCallRender = nodeTool.renderCall({ name: "myFunc", path: "src" }, {}, { state: {} }).render(60);
+  assert.ok(nodeCallRender[0].includes("codegraph_node [myFunc in src]"));
+  const nodeResultRender = nodeTool.renderResult(nodeRes, { expanded: false }, {}, { state: {} }).render(60);
+  assert.ok(nodeResultRender.some((l) => l.includes("✓ CodeGraph node complete")));
+
+  // 4. Execute codegraph_impact
+  const impactRes = await impactTool.execute(
+    "impact1",
+    { symbol: "myFunc", path: "/test/project", depth: 3 },
+    undefined,
+    undefined,
+    { cwd: "/test/project" },
+  );
+  assert.equal(impactRes.details.symbol, "myFunc");
+  assert.equal(impactRes.details.depth, 3);
+  assert.ok(impactRes.content[0].text.includes("Impact of changing \"myFunc\""));
+  const lastImpactCall = execCalls.find((c) => c.args[0] === "impact");
+  assert.ok(lastImpactCall.args.includes("--depth"));
+  assert.ok(lastImpactCall.args.includes("3"));
+
+  // 5. Impact not indexed
+  const impactNotIndexed = await impactTool.execute(
+    "impact2",
+    { symbol: "notIndexedSymbol" },
+    undefined,
+    undefined,
+    { cwd: "/test/project" },
+  );
+  assert.equal(impactNotIndexed.details.notIndexed, true);
+
+  // 6. Impact call & result rendering
+  const impactCallRender = impactTool.renderCall({ symbol: "myFunc", path: "src", depth: 2 }, {}, { state: {} }).render(60);
+  assert.ok(impactCallRender[0].includes("codegraph_impact [myFunc (depth 2) in src]"));
+  const impactResultRender = impactTool.renderResult(impactRes, { expanded: false }, {}, { state: {} }).render(60);
+  assert.ok(impactResultRender.some((l) => l.includes("✓ CodeGraph impact complete")));
+});
+
