@@ -34,12 +34,13 @@ This skill selects Direct Orchestrator or Planned Workflow, classifies advice ve
 - Research alone may finish with its artifact; it does not mandate implementation or Planned Workflow continuation.
 - If work is too broad or material decisions are unresolved, trip the circuit breaker and narrow/split it with the user rather than introducing another workflow.
 - A concrete request authorizes work within its scope, subject to the Pre-Mutation Summary Gate before any file modification; advice-only does not authorize inspection or mutation.
+- **Shadow Telemetry Recording (Non-Authoritative)**: When the TypeSafe extension is active, the orchestrator explicitly records shadow triage telemetry after selecting the canonical route by invoking `typesafe_record_shadow_triage` (or `typesafe_shadow_triage`) with the original user request (`original_prompt`) and the selected canonical route enum (`route`: `direct_orchestrator`, `planned_workflow`, or `deep_researcher`). TypeSafe's consultative prediction is persisted in local SQLite telemetry to benchmark question calibration and agreement without altering or delaying the workflow. Shadow recommendations are strictly non-authoritative: LLM triage decisions governed by this skill and `AGENTS.md` remain 100% authoritative with zero override or veto power. Confirmation turns (e.g., "yes", "proceed") are not triage decisions and must never be evaluated.
 
 ## Execution Steps
 
 1. Reuse supplied context and classify request mode.
 2. Check explicit executor decisions before normal routing.
-3. Select the smallest valid route and resolve only material unknowns.
+3. Select the smallest valid route and resolve only material unknowns. When the TypeSafe extension is active, explicitly record shadow telemetry via `typesafe_record_shadow_triage` using the original user request and selected canonical route (`direct_orchestrator`, `planned_workflow`, or `deep_researcher`); do not evaluate confirmation turns.
 4. If local discovery is needed, reuse the active change directory or assign a topic slug; confirm the destination is not owned by another investigation. Pass the exact output path and artifact-contract skill.
 5. Read the resulting artifact before relying on its evidence. Stop on a material blocker.
 6. For Planned Workflow, load `work-workflow`; for direct code changes, apply the relevant validation and scope skills.
