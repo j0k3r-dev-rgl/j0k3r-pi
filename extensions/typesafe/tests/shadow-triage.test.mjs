@@ -154,3 +154,171 @@ test('MINI-004: evaluateShadowTriage handles slow/failed API calls gracefully wi
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test('MINI-004: evaluateShadowTriage enriches state with project_context when calling Jev', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'typesafe-shadow-ctx-'));
+  const dbPath = path.join(tmpDir, 'telemetry.sqlite');
+  const db = new TelemetryDb(dbPath);
+
+  // Create a fake package.json so detectProjectContext finds a stack
+  fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'test' }));
+  // Create a fake src dir with files
+  fs.mkdirSync(path.join(tmpDir, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(tmpDir, 'src', 'a.ts'), 'export const a = 1;');
+  fs.writeFileSync(path.join(tmpDir, 'src', 'b.ts'), 'export const b = 2;');
+
+  const capturedRequests = [];
+  const mockClient = {
+    evaluateSystemOne: async (req, _opt) => {
+      capturedRequests.push(req);
+      return {
+        model: 'jev-1.13.0',
+        answers: {
+          suggested_lane: {
+            type: 'choice',
+            choice: 'planned_workflow',
+            confidence: 0.90,
+            probabilities: { planned_workflow: 0.90, direct_orchestrator: 0.10 }
+          },
+          is_complex_workflow: { type: 'noul', noul: 0.8 },
+          requires_investigation: { type: 'noul', noul: 0.2 }
+        },
+        responses: {},
+        usage: { input_tokens: 240, output_tokens: 32 },
+        latency_ms: 120
+      };
+    }
+  };
+
+  const originalCwd = process.cwd();
+  try {
+    process.chdir(tmpDir);
+    const result = await evaluateShadowTriage(
+      'investigate how to add OAuth2 with PKCE in React Native',
+      'planned_workflow',
+      'session-ctx',
+      { client: mockClient, db }
+    );
+
+    assert.ok(result);
+    assert.equal(capturedRequests.length, 1);
+    const state = capturedRequests[0].state;
+    assert.ok(state.project_context, 'state must include project_context');
+    assert.equal(state.project_context.stack, 'nodejs', 'should detect nodejs stack');
+    assert.ok(typeof state.project_context.file_count_approx === 'number', 'file_count_approx must be a number');
+    assert.ok(state.project_context.file_count_approx >= 2, 'should count at least src files');
+    assert.equal(state.project_context.has_codegraph_index, false, 'no codegraph index in tmp dir');
+  } finally {
+    process.chdir(originalCwd);
+    db.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('MINI-004: buildTriageQuestions instructs Jev to distinguish scoped work from pure investigation', () => {
+  const questions = buildTriageQuestions();
+  const instructions = questions.suggested_lane.instructions;
+  assert.ok(instructions.includes('specific technologies'), 'must mention specific technologies');
+  assert.ok(instructions.includes('pure open-ended exploration'), 'must tell Jev what pure investigation is');
+  assert.ok(questions.requires_investigation.instructions.includes('WITHOUT naming'), 'must qualify investigation by absence of named stack/files');
+});
+
+test('MINI-004: evaluateShadowTriage handles empty prompt gracefully', async () => {
+  const result = await evaluateShadowTriage('', 'direct_orchestrator');
+  assert.equal(result, null);
+});
+
+test('MINI-004: evaluateShadowTriage includes triage_policy in state sent to Jev', async () => {
+  const capturedRequests = [];
+  const mockClient = {
+    evaluateSystemOne: async (req, _opt) => {
+      capturedRequests.push(req);
+      return {
+        model: 'jev-1.13.0',
+        answers: {
+          suggested_lane: { type: 'choice', choice: 'planned_workflow', confidence: 0.90, probabilities: {} },
+          is_complex_workflow: { type: 'noul', noul: 0.8 },
+          requires_investigation: { type: 'noul', noul: 0.2 }
+        },
+        responses: {},
+        usage: { input_tokens: 240, output_tokens: 32 },
+        latency_ms: 120
+      };
+    }
+  };
+
+  const result = await evaluateShadowTriage('test prompt', 'direct_orchestrator', undefined, { client: mockClient });
+  assert.ok(result);
+  assert.equal(capturedRequests.length, 1);
+  assert.ok(capturedRequests[0].state.triage_policy, 'state must include triage_policy');
+  assert.ok(capturedRequests[0].state.triage_policy.includes('direct_orchestrator'), 'policy must mention direct_orchestrator');
+  assert.ok(capturedRequests[0].state.triage_policy.includes('deep_researcher'), 'policy must mention deep_researcher');
+});
+
+test('MINI-004: evaluateShadowTriage flags discrepancy and requires user decision when routes differ', async () => {
+  const mockClient = {
+    evaluateSystemOne: async (_req, _opt) => ({
+      model: 'jev-1.13.0',
+      answers: {
+        suggested_lane: {
+          type: 'choice',
+          choice: 'deep_researcher',
+          confidence: 0.85,
+          probabilities: { deep_researcher: 0.85, planned_workflow: 0.15 }
+        },
+        is_complex_workflow: { type: 'noul', noul: 0.3 },
+        requires_investigation: { type: 'noul', noul: 0.9 }
+      },
+      responses: {},
+      usage: { input_tokens: 230, output_tokens: 30 },
+      latency_ms: 100
+    })
+  };
+
+  const result = await evaluateShadowTriage(
+    'investigate how to implement OAuth2',
+    'planned_workflow',
+    undefined,
+    { client: mockClient }
+  );
+
+  assert.ok(result);
+  assert.equal(result.shadow_agreement, 0, 'agreement must be 0 when routes differ');
+  assert.equal(result.discrepancy_detected, true, 'must flag discrepancy');
+  assert.equal(result.user_decision_required, true, 'must require user decision');
+  assert.ok(result.jev_recommendation?.includes('deep_researcher'), 'must include Jev recommendation');
+  assert.ok(result.orchestrator_recommendation?.includes('planned_workflow'), 'must include orchestrator recommendation');
+});
+
+test('MINI-004: evaluateShadowTriage does NOT flag discrepancy when routes agree', async () => {
+  const mockClient = {
+    evaluateSystemOne: async (_req, _opt) => ({
+      model: 'jev-1.13.0',
+      answers: {
+        suggested_lane: {
+          type: 'choice',
+          choice: 'direct_orchestrator',
+          confidence: 0.95,
+          probabilities: { direct_orchestrator: 0.95, planned_workflow: 0.05 }
+        },
+        is_complex_workflow: { type: 'noul', noul: 0.1 },
+        requires_investigation: { type: 'noul', noul: 0.05 }
+      },
+      responses: {},
+      usage: { input_tokens: 210, output_tokens: 28 },
+      latency_ms: 90
+    })
+  };
+
+  const result = await evaluateShadowTriage(
+    'fix typo in readme',
+    'direct_orchestrator',
+    undefined,
+    { client: mockClient }
+  );
+
+  assert.ok(result);
+  assert.equal(result.shadow_agreement, 1, 'agreement must be 1 when routes match');
+  assert.equal(result.discrepancy_detected, false, 'must NOT flag discrepancy when routes agree');
+  assert.equal(result.user_decision_required, false, 'must NOT require user decision when routes agree');
+});

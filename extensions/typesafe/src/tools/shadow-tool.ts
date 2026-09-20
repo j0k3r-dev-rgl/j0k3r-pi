@@ -41,7 +41,7 @@ export function createShadowTool(client: ShadowClientAdapter, db: TelemetryDb) {
     name: 'typesafe_record_shadow_triage',
     label: 'TypeSafe Record Shadow Triage',
     description:
-      'Explicitly record post-decision shadow triage telemetry comparing an already-selected canonical route against TypeSafe System One prediction. Non-authoritative consultative telemetry only; route selection remains 100% authoritative.',
+      'Explicitly record post-decision shadow triage telemetry comparing an already-selected canonical route against TypeSafe System One prediction. Non-authoritative consultative telemetry only; route selection remains 100% authoritative. If Jev disagrees with the orchestrator, the discrepancy is flagged so the orchestrator can ask the user for the final decision.',
     parameters: ShadowToolSchema,
     execute: async (_toolCallId: string, args: any, context?: any) => {
       const originalPrompt = args.original_prompt || args.prompt;
@@ -64,7 +64,7 @@ export function createShadowTool(client: ShadowClientAdapter, db: TelemetryDb) {
 
       const result = await evaluateShadowTriage(originalPrompt, route, sessionId, options);
 
-      const output = {
+      const output: Record<string, any> = {
         telemetry_id: result?.telemetry_id,
         recorded: true,
         actual_route: route,
@@ -72,6 +72,16 @@ export function createShadowTool(client: ShadowClientAdapter, db: TelemetryDb) {
         shadow_agreement: result?.shadow_agreement,
         non_authoritative: true,
       };
+
+      // Expose discrepancy detection for orchestrator circuit breaker
+      if (result?.discrepancy_detected) {
+        output.discrepancy_detected = true;
+        output.jev_recommendation = result.jev_recommendation;
+        output.orchestrator_recommendation = result.orchestrator_recommendation;
+        output.user_decision_required = true;
+        output.circuit_breaker_note =
+          'DISCREPANCY DETECTED: Jev and orchestrator disagree on routing. STOP and ask the user to choose the final route. The user decides, not the agent.';
+      }
 
       return {
         content: [
@@ -85,6 +95,8 @@ export function createShadowTool(client: ShadowClientAdapter, db: TelemetryDb) {
           actual_route: route,
           predicted_route: result?.shadow_predicted_route,
           shadow_agreement: result?.shadow_agreement,
+          discrepancy_detected: result?.discrepancy_detected,
+          user_decision_required: result?.user_decision_required,
           latency_ms: result?.latency_ms,
           model: 'jev-latest',
         },
