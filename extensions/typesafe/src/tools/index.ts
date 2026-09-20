@@ -19,6 +19,7 @@ export function registerTypesafeTools(pi: ExtensionAPI, db: TelemetryDb): void {
     name: evaluateTool.name,
     label: evaluateTool.label,
     description: evaluateTool.description,
+    promptGuidelines: evaluateTool.promptGuidelines,
     parameters: evaluateTool.parameters,
     execute: evaluateTool.execute,
     renderShell: 'self',

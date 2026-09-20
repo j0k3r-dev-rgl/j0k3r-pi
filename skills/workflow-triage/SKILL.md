@@ -34,19 +34,12 @@ This skill selects Direct Orchestrator or Planned Workflow, classifies advice ve
 - Research alone may finish with its artifact; it does not mandate implementation or Planned Workflow continuation.
 - If work is too broad or material decisions are unresolved, trip the circuit breaker and narrow/split it with the user rather than introducing another workflow.
 - A concrete request authorizes work within its scope, subject to the Pre-Mutation Summary Gate before any file modification; advice-only does not authorize inspection or mutation.
-- **TypeSafe / Jev Consultative Assistance**: When the TypeSafe extension is active in `jev-config`, the orchestrator actively consults Jev (`typesafe_evaluate`) to determine ambiguous strategic paths and validate decisions before execution:
-  1. **Investigation Lane Selection**: Before launching research on ambiguous tasks, consult Jev (`investigation_lane`) to determine whether the task needs `local_code_intelligence` (CodeGraph) or `deep_researcher` (external/web/docs).
-  2. **Strategy Evaluation with Context**: When the user asks to "do something" with existing context, consult Jev (`execution_strategy`) to assess whether to apply direct localized edits (`direct_orchestrator`) or create a formal planned workflow (`planned_workflow`).
-  3. **Output & Result Verification**: When a subagent or major test completes, consult Jev to evaluate whether the result answers the original user goal or has residual gaps.
-  4. **Circuit Breaker Sensor**: Before taking action on complex, risky, or ambiguous requests, consult Jev (`circuit_breaker_needed`, `decision_type`). If Jev scores high probability (>0.70) of missing material decisions, unauthorized configuration mutations, or speculative scope creep, immediately trip the Circuit Breaker, stop execution, and ask the user the exact concise trade-off question.
-  5. **Shadow Telemetry Recording (Non-Authoritative)**: The orchestrator also records shadow triage telemetry after canonical routing via `typesafe_record_shadow_triage`. Shadow recommendations are strictly non-authoritative: LLM triage decisions governed by this skill and `AGENTS.md` remain 100% authoritative. Confirmation turns (e.g., "yes", "proceed") are not triage decisions and must never be evaluated.
-  6. **Discrepancy Circuit Breaker**: After recording shadow triage, inspect the result. If `discrepancy_detected: true` (Jev predicted a different route than the orchestrator), **STOP immediately**. Do not proceed with either route autonomously. Present both options concisely to the user: "Jev suggests [route], I suggest [route]. Which route do you prefer?" The **USER decides the final route**, not the agent. Only proceed after the user explicitly chooses.
 
 ## Execution Steps
 
 1. Reuse supplied context and classify request mode.
 2. Check explicit executor decisions before normal routing.
-3. Select the smallest valid route and resolve only material unknowns. When the TypeSafe extension is active, explicitly record shadow telemetry via `typesafe_record_shadow_triage` using the original user request and selected canonical route (`direct_orchestrator`, `planned_workflow`, or `deep_researcher`); do not evaluate confirmation turns. **If the shadow result shows `discrepancy_detected: true`, STOP and ask the user to choose between Jev's recommendation and the orchestrator's recommendation before proceeding.**
+3. Select the smallest valid route and resolve only material unknowns.
 4. If local discovery is needed, reuse the active change directory or assign a topic slug; confirm the destination is not owned by another investigation. Pass the exact output path and artifact-contract skill.
 5. Read the resulting artifact before relying on its evidence. Stop on a material blocker.
 6. For Planned Workflow, load `work-workflow`; for direct code changes, apply the relevant validation and scope skills.

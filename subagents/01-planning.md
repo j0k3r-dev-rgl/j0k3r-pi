@@ -68,15 +68,6 @@ Use the `plan.md`, `Workflow Status`, `Execution Scope`, and `Handoff` contracts
 
 `READY` requires concrete MINI acceptance, directory scope, validation, dependencies, blockers, and next action. Exact paths are required for artifacts and assigned skills, not for an upfront implementation file inventory.
 
-## TypeSafe / Jev Guidelines
-
-Before declaring `READY`, run `typesafe_check_overengineering` on the drafted `plan.md` to enforce KISS/YAGNI:
-- Pass the planned architecture and MINI items as `proposed_solution`.
-- If `overengineered: true` (score >= 0.70 or verdict === 'overengineered'), strip premature abstractions (unrequested repositories, generic registries, unnecessary middleware) and adopt the simplest sufficient implementation.
-- If stripping would violate an explicit user instruction, record the conflict under `## Open Decisions` and return `BLOCKED`.
-- Maximum 2 Jev calls per execution. If a 3rd call is needed, return `BLOCKED`.
-- Do not call Jev for deterministic tasks (syntax checks, file existence, test results). Use `bash`, `read`, or `tsc` instead.
-
 ## Handoff
 
 Return only the compact canonical handoff from `skills/subagent-artifact-contracts/SKILL.md`. For `READY`, put `plan.md` in `Artifact` and do not repeat artifact content.

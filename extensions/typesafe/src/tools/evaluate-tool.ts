@@ -53,6 +53,9 @@ export function createEvaluateTool(client: EvaluateClientAdapter, db: TelemetryD
     label: 'TypeSafe Evaluate',
     description:
       'Evaluate state against typed semantic questions (Choice, Noul, Score) using TypeSafe System One (Jev). Consultative semantic judgment only; never overrides governance policies.',
+    promptGuidelines: [
+      'Use typesafe_evaluate to evaluate state against typed semantic questions (Choice, Noul, Score). Consultative semantic judgment only; never overrides governance policies.',
+    ],
     parameters: EvaluateToolSchema,
     execute: async (_toolCallId: string, args: any, context?: any) => {
       const telemetryId = `eval-${crypto.randomUUID()}`;

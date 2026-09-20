@@ -54,9 +54,6 @@ Stop and trigger the decision protocol when the change would introduce:
 - **Circuit Breaker**: When any of the gates above are triggered, or when speculative complexity or out-of-scope choices appear:
   - **Subagent execution**: trip the circuit breaker and return `BLOCKED` immediately, specifying the exact decision or trade-off needed. Never guess, assume speculative defaults, or proceed autonomously.
   - **Orchestrator execution**: stop immediately, present the trade-off concisely, and ask the user for the missing decision before performing any file mutation.
-- **TypeSafe / Jev Anti-Overengineering Sensor**: When the TypeSafe extension is active in `jev-config`, the orchestrator uses Jev (`typesafe_evaluate`) to detect speculative complexity, unneeded abstractions, or YAGNI violations before planning or applying code changes:
-  - Consult Jev with questions assessing overengineering risk: `is_overengineering` (Noul: does the proposed design introduce premature abstractions, unnecessary layers, or unrequested migrations?) and `simplest_solution_fit` (Choice: `simplest_direct`, `moderate`, `overengineered`).
-  - If Jev scores high overengineering risk (>0.70) or selects `overengineered`, trip the Circuit Breaker: reject the speculative abstraction, adopt the simplest sufficient local implementation, or prompt the user if an architectural trade-off requires human decision.
 
 ## Execution Steps
 

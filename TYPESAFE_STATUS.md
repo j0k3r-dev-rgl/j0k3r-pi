@@ -63,20 +63,21 @@ oficial   ¿Cuál preferís?"
 | Área | Estado |
 |---|---|
 | Extensión | Activa después de `/reload` |
-| Alcance | Solo orquestador principal |
+| Alcance | Orquestador principal y subagentes (`00-discovery`, `01-planning`, `02-apply`, `03-verify`, `deep-researcher`) |
 | Modelo solicitado | `jev-latest` |
 | Modelo observado | `jev-1.13.0` |
-| Modo de decisión | **Prueba: copiloto consultivo + circuit breaker de discrepancia** |
+| Modo de decisión | **Copiloto consultivo + circuit breaker de discrepancia + inyección dinámica por código** |
+| Inyección de directrices | **Dinámica por código** (`before_agent_start` en orquestador, `promptGuidelines` en subagentes) |
+| Desacoplamiento Markdown | Completo: subagentes y skills 100% limpios de instrucciones hardcodeadas |
 | Persistencia | SQLite local con WAL |
 | Retención | 90 días, sin límite adicional de filas |
 | Seguridad del archivo | Directorio `0700`, base `0600` |
 | Dependencias npm de runtime | Ninguna |
 | Renderer | Tarjeta hueca propia, amarillo eléctrico `#ffe600` |
-| Tests de la extensión | **31/31** |
+| Tests de la extensión | **33/33** pasando |
 | Typecheck | Sin errores |
-| Verificación independiente | PASS |
-| Skills inyectadas a Jev | `TRIAGE_POLICY_SUMMARY` incluido en state |
-| Discrepancy circuit breaker | Activo en shadow-tool + workflow-triage SKILL.md |
+| Verificación independiente | PASS (validado en orquestador y subagentes) |
+| Gestión en UI | Soportado en `tools-manager` (`/tools`) y `.pi/extensions.json` |
 | Factory compartida | `convenience-factory.ts` (circuit-breaker + overengineering) |
 
 ## Métricas de prueba — sesión 2026-09-20 (preliminares)
