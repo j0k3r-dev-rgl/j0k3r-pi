@@ -34,6 +34,7 @@ tools:
   - codegraph_explore
   - codegraph_node
   - codegraph_impact
+  - typesafe_circuit_breaker
 ---
 
 # Deep Researcher

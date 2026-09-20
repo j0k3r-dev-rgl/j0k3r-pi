@@ -461,7 +461,7 @@ test('MINI-004: registerTypesafeTools configures renderShell: self and renderCal
   const mockDb = {};
 
   registerTypesafeTools(mockPi, mockDb);
-  assert.equal(registered.length, 4, 'Must register evaluate, telemetry, shadow, and shadow_triage');
+  assert.equal(registered.length, 6, 'Must register evaluate, telemetry, shadow, shadow_triage, circuit_breaker, and overengineering');
 
   for (const tool of registered) {
     assert.equal(tool.renderShell, 'self', `Tool ${tool.name} must declare renderShell: 'self'`);
