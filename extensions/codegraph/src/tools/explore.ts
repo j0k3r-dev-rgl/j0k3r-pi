@@ -53,7 +53,8 @@ export function registerExploreTool(pi: ExtensionAPI) {
 		promptSnippet: "Explore indexed code architecture, symbols, dependencies, and call paths with CodeGraph",
 		promptGuidelines: [
 			"Use codegraph_status before codegraph_explore when index availability or freshness is unknown.",
-			"Use codegraph_explore for unfamiliar architecture and cross-component flows, then use precise symbol tools for exact declarations and references.",
+			"Do NOT use codegraph_explore for inspecting a single symbol, function, or file; use codegraph_node instead to avoid massive token overhead.",
+			"Use codegraph_explore only for wide, unfamiliar architecture questions across multiple components.",
 			"If no CodeGraph index exists, do not call codegraph_manage unless the user explicitly authorized the exact lifecycle operation and project path.",
 		],
 		parameters: Type.Object({

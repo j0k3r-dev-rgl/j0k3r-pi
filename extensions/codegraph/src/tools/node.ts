@@ -21,8 +21,9 @@ export function registerNodeTool(pi: ExtensionAPI) {
 			"Inspect a single symbol's source code and caller/callee trail, or inspect a file with line numbers and dependents. Read-only.",
 		promptSnippet: "Inspect one symbol's definition, caller/callee trail, or file structure with CodeGraph",
 		promptGuidelines: [
-			"Use codegraph_node for focused symbol or file inspection when you do not need a wide architecture exploration.",
+			"Prefer codegraph_node over the read tool and codegraph_explore when inspecting a specific symbol's definition, callers, callees, or file outline in indexed codebases.",
 			"codegraph_node is much lighter than codegraph_explore and consumes significantly fewer tokens.",
+			"Use symbolsOnly: true for quick API surface inspections without reading line-by-line source code.",
 		],
 		parameters: Type.Object({
 			name: Type.String({ minLength: 1, description: "Symbol name (e.g. 'isExtensionEnabled') or file path to inspect." }),
