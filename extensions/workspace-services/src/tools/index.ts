@@ -61,7 +61,9 @@ function formatStatusText(result: Awaited<ReturnType<typeof getServicesStatus>>)
   ];
   for (const service of result.services) {
     const pid = service.pid ? ` pid=${service.pid}` : '';
-    lines.push(`- ${service.name}: ${service.status}${pid} type=${service.type} path=${service.path} command=${service.command} log=${service.log_path}`);
+    const container = service.container_id ? ` container=${service.container_id.slice(0, 12)}` : '';
+    const health = service.health ? ` health=${service.health}` : '';
+    lines.push(`- ${service.name}: ${service.status}${pid}${container}${health} type=${service.type} path=${service.path} command=${service.command} log=${service.log_path}`);
   }
   return lines.join('\n');
 }

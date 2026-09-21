@@ -151,9 +151,31 @@ describe('workspace service manager', () => {
 
   it('returns a cancelled outcome but reconciles running state when cancellation arrives after spawn', async () => {
     const cwd = await configuredWorkspace();
+    const flagPath = join(cwd, 'svc', 'started.flag');
+    await writeFile(join(cwd, '.pi', 'workspace-services.json'), JSON.stringify({
+      services: {
+        svc: {
+          type: 'node',
+          path: 'svc',
+          command: `node -e "import('node:fs').then(fs => { fs.writeFileSync('${flagPath}', '1'); setInterval(() => {}, 1000); })"`,
+          env_file: false,
+        },
+      },
+    }), 'utf8');
+
     const controller = new AbortController();
     const startPromise = startService(cwd, 'svc', { signal: controller.signal });
-    setTimeout(() => controller.abort(), 20);
+
+    for (let i = 0; i < 200; i++) {
+      try {
+        await readFile(flagPath);
+        break;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
+    controller.abort();
+
     const outcome = await startPromise;
     expect(outcome.status).toBe('cancelled');
     expect(outcome.ok).toBe(false);

@@ -1,4 +1,4 @@
-export type WorkspaceServiceType = 'node' | 'spring';
+export type WorkspaceServiceType = 'node' | 'spring' | 'compose';
 
 export interface WorkspaceServiceDefinition {
   name: string;
@@ -9,6 +9,7 @@ export interface WorkspaceServiceDefinition {
   envFile: boolean;
   envFilePath: string;
   logPath: string;
+  composeFile?: string;
 }
 
 export interface WorkspacePathSecurityContext {
@@ -98,6 +99,10 @@ export interface ServiceStatus {
   env_file: boolean;
   status: 'running' | 'stopped' | 'stale' | 'identity_mismatch' | 'recovery_required';
   pid?: number;
+  container_id?: string;
+  health?: string;
+  exit_code?: number;
+  ports?: string;
   started_at?: string;
   log_path: string;
 }

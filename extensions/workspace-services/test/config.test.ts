@@ -136,4 +136,24 @@ describe('workspace services config', () => {
     const gitignore = await import('node:fs/promises').then((fs) => fs.readFile(join(cwd, '.gitignore'), 'utf8'));
     expect(gitignore.match(/\.pi\/workspace-services\//g)).toHaveLength(1);
   });
+
+  it('accepts type "compose" in workspace-services.json and rejects unknown types', async () => {
+    const cwd = await workspace();
+    await mkdir(join(cwd, '.pi'), { recursive: true });
+    await mkdir(join(cwd, 'comp'), { recursive: true });
+    await writeFile(join(cwd, '.pi', 'workspace-services.json'), JSON.stringify({
+      services: {
+        comp: { type: 'compose', path: 'comp', command: 'docker compose up', env_file: false },
+      },
+    }), 'utf8');
+    const config = await loadWorkspaceServicesConfig(cwd);
+    expect(config.services.comp.type).toBe('compose');
+
+    await writeFile(join(cwd, '.pi', 'workspace-services.json'), JSON.stringify({
+      services: {
+        bad: { type: 'kubernetes', path: 'comp', command: 'kubectl apply', env_file: false },
+      },
+    }), 'utf8');
+    await expect(loadWorkspaceServicesConfig(cwd)).rejects.toThrow(/expected "node", "spring", or "compose"/i);
+  });
 });

@@ -4,6 +4,14 @@ import { appendFile, open, readFile, writeFile } from 'node:fs/promises';
 import type { Writable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import { ensureRuntimeDirs, ensureRuntimeGitignore, loadServiceEnv, loadWorkspaceServicesConfig } from '../config.js';
+import {
+  findComposeFile,
+  getComposeServiceLogs,
+  getComposeServicesStatus,
+  restartComposeService,
+  startComposeService,
+  stopComposeService,
+} from './docker-compose.js';
 import { pathExists, redactText } from '../security.js';
 import type {
   ManagedProcessIdentityV1,
@@ -70,7 +78,7 @@ function clampInteger(value: number | undefined, fallback: number, min: number, 
 }
 
 function requireConfig(config: WorkspaceServicesConfig): void {
-  if (!config.exists) throw new Error(`Workspace services config not found at ${config.configPath}. Create .pi/workspace-services.json with explicit services.`);
+  if (!config.exists) throw new Error(`Workspace services config not found at ${config.configPath}. Create .pi/workspace-services.json or provide a Docker Compose file.`);
 }
 
 function getService(config: WorkspaceServicesConfig, serviceName: string): WorkspaceServiceDefinition {
@@ -286,13 +294,70 @@ export async function listServices(cwd: string): Promise<ListServicesResult> {
 export async function getServicesStatus(cwd: string, signal?: AbortSignal): Promise<ServicesStatusResult> {
   const config = await loadWorkspaceServicesConfig(cwd);
   if (!config.exists) return { configPath: config.configPath, runtimeDir: config.runtimeDir, logsDir: config.logsDir, statePath: config.statePath, exists: false, services: [] };
+
+  const composeServices = Object.values(config.services).filter((s) => s.type === 'compose');
+  const hostServices = Object.values(config.services).filter((s) => s.type !== 'compose');
+
+  const composeStatuses: ServiceStatus[] = [];
+  if (composeServices.length > 0) {
+    const composeFiles = [...new Set(composeServices.map((s) => s.composeFile).filter(Boolean))];
+    if (composeFiles.length === 0) composeFiles.push(undefined as any);
+    for (const compFile of composeFiles) {
+      const containers = await getComposeServicesStatus(config.workspaceRoot, compFile).catch(() => []);
+      const containerMap = new Map<string, typeof containers[0]>();
+      for (const c of containers) {
+        containerMap.set(c.service, c);
+        containerMap.set(c.name, c);
+      }
+      for (const service of composeServices.filter((s) => s.composeFile === compFile || (!s.composeFile && !compFile))) {
+        const matched = containerMap.get(service.name);
+        if (matched) {
+          composeStatuses.push({
+            name: service.name,
+            type: service.type,
+            path: service.relativePath,
+            command: service.command,
+            env_file: service.envFile,
+            status: matched.state === 'running' ? 'running' : 'stopped',
+            container_id: matched.id,
+            health: matched.health,
+            exit_code: matched.exitCode,
+            ports: matched.ports,
+            log_path: service.logPath,
+          });
+        } else {
+          composeStatuses.push({
+            name: service.name,
+            type: service.type,
+            path: service.relativePath,
+            command: service.command,
+            env_file: service.envFile,
+            status: 'stopped',
+            log_path: service.logPath,
+          });
+        }
+      }
+    }
+  }
+
+  if (hostServices.length === 0) {
+    return {
+      configPath: config.configPath,
+      runtimeDir: config.runtimeDir,
+      logsDir: config.logsDir,
+      statePath: config.statePath,
+      exists: true,
+      services: composeStatuses.sort((a, b) => a.name.localeCompare(b.name)),
+    };
+  }
+
   return withLifecycleTransaction(config.statePath, { signal, deadlineMs: DEFAULT_TRANSACTION_DEADLINE_MS, ownerPath: config.ownerPath }, async () => {
     await initializeLastGoodState(config);
     const opened = await openRuntimeState(config);
     const next = { ...opened.state, services: { ...opened.state.services } };
     const statuses: ServiceStatus[] = [];
     let changed = opened.recovered;
-    for (const service of Object.values(config.services).sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const service of hostServices.sort((a, b) => a.name.localeCompare(b.name))) {
       const runtime = next.services[service.name];
       if (!runtime?.identity) {
         statuses.push(toServiceStatus(service, runtime));
@@ -309,13 +374,33 @@ export async function getServicesStatus(cwd: string, signal?: AbortSignal): Prom
       }
     }
     if (changed) await commitRuntimeState(config, opened.state, next);
-    return { configPath: config.configPath, runtimeDir: config.runtimeDir, logsDir: config.logsDir, statePath: config.statePath, exists: true, services: statuses };
+    const allStatuses = [...statuses, ...composeStatuses].sort((a, b) => a.name.localeCompare(b.name));
+    return { configPath: config.configPath, runtimeDir: config.runtimeDir, logsDir: config.logsDir, statePath: config.statePath, exists: true, services: allStatuses };
   });
 }
 
 export async function startService(cwd: string, serviceName: string, options: StartOptions = {}): Promise<WorkspaceServiceOutcome> {
   const config = await loadWorkspaceServicesConfig(cwd);
+
+  if (serviceName === 'all' || serviceName === 'compose') {
+    const composeFile = findComposeFile(config.workspaceRoot);
+    if (!composeFile) throw new Error('No Docker Compose file found in workspace root.');
+    return await startComposeService(config.workspaceRoot, 'all', {
+      composeFile,
+      timeoutMs: options.timeoutMs,
+      signal: options.signal,
+    });
+  }
+
   const service = getService(config, serviceName);
+  if (service.type === 'compose') {
+    return await startComposeService(config.workspaceRoot, service.name, {
+      composeFile: service.composeFile,
+      timeoutMs: options.timeoutMs,
+      signal: options.signal,
+    });
+  }
+
   const timeoutMs = clampInteger(options.timeoutMs, DEFAULT_START_TIMEOUT_MS, 100, 300_000);
   await ensureRuntimeDirs(config);
   await ensureRuntimeGitignore(config.workspaceRoot);
@@ -459,7 +544,26 @@ export async function startService(cwd: string, serviceName: string, options: St
 
 export async function stopService(cwd: string, serviceName: string, options: StopOptions = {}): Promise<WorkspaceServiceOutcome> {
   const config = await loadWorkspaceServicesConfig(cwd);
+
+  if (serviceName === 'all' || serviceName === 'compose') {
+    const composeFile = findComposeFile(config.workspaceRoot);
+    if (!composeFile) throw new Error('No Docker Compose file found in workspace root.');
+    return await stopComposeService(config.workspaceRoot, 'all', {
+      composeFile,
+      timeoutMs: options.timeoutMs,
+      signal: options.signal,
+    });
+  }
+
   const service = getService(config, serviceName);
+  if (service.type === 'compose') {
+    return await stopComposeService(config.workspaceRoot, service.name, {
+      composeFile: service.composeFile,
+      timeoutMs: options.timeoutMs,
+      signal: options.signal,
+    });
+  }
+
   const timeoutMs = clampInteger(options.timeoutMs, DEFAULT_STOP_TIMEOUT_MS, 500, 30000);
 
   return withLifecycleTransaction(config.statePath, { signal: options.signal, deadlineMs: DEFAULT_TRANSACTION_DEADLINE_MS, ownerPath: config.ownerPath }, async () => {
@@ -509,7 +613,26 @@ export async function stopService(cwd: string, serviceName: string, options: Sto
 
 export async function restartService(cwd: string, serviceName: string, options: StopOptions = {}): Promise<WorkspaceServiceOutcome> {
   const config = await loadWorkspaceServicesConfig(cwd);
+
+  if (serviceName === 'all' || serviceName === 'compose') {
+    const composeFile = findComposeFile(config.workspaceRoot);
+    if (!composeFile) throw new Error('No Docker Compose file found in workspace root.');
+    return await restartComposeService(config.workspaceRoot, 'all', {
+      composeFile,
+      timeoutMs: options.timeoutMs,
+      signal: options.signal,
+    });
+  }
+
   const service = getService(config, serviceName);
+  if (service.type === 'compose') {
+    return await restartComposeService(config.workspaceRoot, service.name, {
+      composeFile: service.composeFile,
+      timeoutMs: options.timeoutMs,
+      signal: options.signal,
+    });
+  }
+
   const timeoutMs = clampInteger(options.timeoutMs, DEFAULT_STOP_TIMEOUT_MS, 500, 30000);
 
   try {
@@ -588,6 +711,48 @@ export async function restartService(cwd: string, serviceName: string, options: 
 export async function getServiceLogs(cwd: string, serviceName: string, options: LogsOptions = {}): Promise<WorkspaceServiceOutcome> {
   const config = await loadWorkspaceServicesConfig(cwd);
   const service = getService(config, serviceName);
+
+  if (service.type === 'compose') {
+    await ensureRuntimeDirs(config);
+    const lines = clampInteger(options.lines, DEFAULT_LOG_LINES, 1, MAX_LOG_LINES);
+    try {
+      const text = await getComposeServiceLogs(config.workspaceRoot, service.name, {
+        lines,
+        composeFile: service.composeFile,
+      });
+      await writeFile(service.logPath, text, 'utf8').catch(() => undefined);
+      const splitLines = text.split(/\r?\n/).filter(Boolean);
+      return {
+        ok: true,
+        status: 'running',
+        summary: `Retrieved bounded logs for ${service.name}.`,
+        data: {
+          service: service.name,
+          logPath: service.logPath,
+          text,
+          lines: splitLines.length,
+          offset: 0,
+          until: undefined,
+          bytesRead: Buffer.byteLength(text, 'utf8'),
+          totalBytes: Buffer.byteLength(text, 'utf8'),
+        },
+        truncation: {
+          returned: splitLines.length,
+          total: splitLines.length,
+          hasMore: false,
+        },
+      };
+    } catch (error: any) {
+      return {
+        ok: false,
+        status: 'failed',
+        summary: `Failed to retrieve logs for ${service.name}: ${error.message}`,
+        nextAction: 'Ensure Docker daemon is running and compose service exists.',
+        data: { service: service.name, logPath: service.logPath, text: '' },
+      };
+    }
+  }
+
   const lines = clampInteger(options.lines, DEFAULT_LOG_LINES, 1, MAX_LOG_LINES);
   const maxBytes = clampInteger(options.maxBytes, DEFAULT_LOG_BYTES, 1024, MAX_LOG_BYTES);
   const offset = clampInteger(options.offset, 0, 0, MAX_LOG_LINES);

@@ -1,5 +1,6 @@
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { basename, join, relative, resolve } from 'node:path';
+import { findComposeFile, discoverComposeServices } from './core/docker-compose.js';
 import {
   MAX_ENV_ENTRIES,
   MAX_ENV_FILE_BYTES,
@@ -40,8 +41,8 @@ function assertServiceName(name: string): void {
 }
 
 function assertServiceType(value: unknown, name: string): WorkspaceServiceType {
-  if (value === 'node' || value === 'spring') return value;
-  throw new Error(`Invalid type for service "${name}". Expected "node" or "spring".`);
+  if (value === 'node' || value === 'spring' || value === 'compose') return value;
+  throw new Error(`Invalid type for service "${name}". Expected "node", "spring", or "compose".`);
 }
 
 function assertStringField(value: unknown, field: string, name: string): string {
@@ -76,46 +77,74 @@ function buildEmptyConfig(cwd: string, workspaceRealRoot: string): WorkspaceServ
 export async function loadWorkspaceServicesConfig(cwd: string): Promise<WorkspaceServicesConfig> {
   const securityContext = await createWorkspaceSecurityContext(cwd);
   const base = buildEmptyConfig(cwd, securityContext.workspaceRealRoot);
-  if (!(await pathExists(base.configPath))) return base;
+  const jsonExists = await pathExists(base.configPath);
+  const composeFile = findComposeFile(base.workspaceRoot);
 
-  const configDir = await pinRelativeWorkspaceDirectory(base.workspaceRealRoot, '.pi', 'Workspace Services config directory');
-  let rawText: string;
-  try {
-    rawText = await readPinnedTextFile(configDir, 'workspace-services.json', MAX_ENV_FILE_BYTES, CONFIG_RELATIVE_PATH);
-  } finally {
-    await closePinnedDirectory(configDir);
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rawText);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'unknown parse error';
-    throw new Error(`Invalid JSON in ${CONFIG_RELATIVE_PATH}: ${message}`);
-  }
-
-  if (!isRecord(parsed)) throw new Error(`${CONFIG_RELATIVE_PATH} must contain a JSON object.`);
-  if (!isRecord(parsed.services)) throw new Error(`${CONFIG_RELATIVE_PATH} must contain a "services" object.`);
+  if (!jsonExists && !composeFile) return base;
 
   const services: Record<string, WorkspaceServiceDefinition> = {};
-  for (const [name, serviceRaw] of Object.entries(parsed.services)) {
-    assertServiceName(name);
-    if (!isRecord(serviceRaw)) throw new Error(`Service "${name}" must be an object.`);
-    const type = assertServiceType(serviceRaw.type, name);
-    const relativePath = assertStringField(serviceRaw.path, 'path', name);
-    const command = assertStringField(serviceRaw.command, 'command', name);
-    const envFile = assertBooleanField(serviceRaw.env_file, 'env_file', name);
-    const serviceCwd = resolve(base.workspaceRoot, relativePath);
-    const safeCwd = await assertContainedRealPath(base.workspaceRealRoot, serviceCwd, `Configured path for service "${name}"`);
-    services[name] = {
-      name,
-      type,
-      relativePath,
-      cwd: safeCwd,
-      command,
-      envFile,
-      envFilePath: join(safeCwd, '.env'),
-      logPath: join(base.logsDir, `${name}.log`),
-    };
+
+  if (jsonExists) {
+    const configDir = await pinRelativeWorkspaceDirectory(base.workspaceRealRoot, '.pi', 'Workspace Services config directory');
+    let rawText: string;
+    try {
+      rawText = await readPinnedTextFile(configDir, 'workspace-services.json', MAX_ENV_FILE_BYTES, CONFIG_RELATIVE_PATH);
+    } finally {
+      await closePinnedDirectory(configDir);
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(rawText);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown parse error';
+      throw new Error(`Invalid JSON in ${CONFIG_RELATIVE_PATH}: ${message}`);
+    }
+
+    if (!isRecord(parsed)) throw new Error(`${CONFIG_RELATIVE_PATH} must contain a JSON object.`);
+    if (!isRecord(parsed.services)) throw new Error(`${CONFIG_RELATIVE_PATH} must contain a "services" object.`);
+
+    for (const [name, serviceRaw] of Object.entries(parsed.services)) {
+      assertServiceName(name);
+      if (!isRecord(serviceRaw)) throw new Error(`Service "${name}" must be an object.`);
+      const type = assertServiceType(serviceRaw.type, name);
+      const relativePath = assertStringField(serviceRaw.path, 'path', name);
+      const command = assertStringField(serviceRaw.command, 'command', name);
+      const envFile = assertBooleanField(serviceRaw.env_file, 'env_file', name);
+      const serviceCwd = resolve(base.workspaceRoot, relativePath);
+      const safeCwd = await assertContainedRealPath(base.workspaceRealRoot, serviceCwd, `Configured path for service "${name}"`);
+      services[name] = {
+        name,
+        type,
+        relativePath,
+        cwd: safeCwd,
+        command,
+        envFile,
+        envFilePath: join(safeCwd, '.env'),
+        logPath: join(base.logsDir, `${name}.log`),
+        composeFile: type === 'compose' ? (composeFile ?? undefined) : undefined,
+      };
+    }
+  }
+
+  if (composeFile) {
+    const composeServices = await discoverComposeServices(base.workspaceRoot, composeFile);
+    const relComposePath = relative(base.workspaceRoot, composeFile) || basename(composeFile);
+    for (const name of composeServices) {
+      if (!SERVICE_NAME_PATTERN.test(name)) continue;
+      // If service already configured in workspace-services.json, explicit JSON config takes precedence
+      if (services[name]) continue;
+      services[name] = {
+        name,
+        type: 'compose',
+        relativePath: relComposePath,
+        cwd: base.workspaceRoot,
+        command: `docker compose up -d ${name}`,
+        envFile: false,
+        envFilePath: join(base.workspaceRoot, '.env'),
+        logPath: join(base.logsDir, `${name}.log`),
+        composeFile,
+      };
+    }
   }
 
   return { ...base, exists: true, services };

@@ -3,18 +3,18 @@ import type { WorkspaceServiceOutcome } from '../types.js';
 
 export const EMPTY_PARAMETERS = Type.Object({}, { additionalProperties: false });
 export const SERVICE_PARAMETERS = Type.Object({
-  service: Type.String({ description: 'Configured service name from .pi/workspace-services.json.' }),
+  service: Type.String({ description: 'Configured service name from .pi/workspace-services.json, detected compose service, or "all" / "compose" for full compose stack.' }),
 }, { additionalProperties: false });
 export const START_PARAMETERS = Type.Object({
-  service: Type.String({ description: 'Configured service name from .pi/workspace-services.json.' }),
+  service: Type.String({ description: 'Configured service name from .pi/workspace-services.json, detected compose service, or "all" / "compose" for full compose stack.' }),
   timeout_ms: Type.Optional(Type.Number({ description: 'Milliseconds to wait for service startup. Default 30000.' })),
 }, { additionalProperties: false });
 export const STOP_PARAMETERS = Type.Object({
-  service: Type.String({ description: 'Configured service name from .pi/workspace-services.json.' }),
+  service: Type.String({ description: 'Configured service name from .pi/workspace-services.json, detected compose service, or "all" / "compose" for full compose stack.' }),
   timeout_ms: Type.Optional(Type.Number({ description: 'Milliseconds to wait after SIGTERM before SIGKILL. Default 5000.' })),
 }, { additionalProperties: false });
 export const LOGS_PARAMETERS = Type.Object({
-  service: Type.String({ description: 'Configured service name from .pi/workspace-services.json.' }),
+  service: Type.String({ description: 'Configured service name from .pi/workspace-services.json or detected compose service.' }),
   lines: Type.Optional(Type.Number({ description: 'Maximum log lines to return. Default 100, max 2000.' })),
   offset: Type.Optional(Type.Number({ description: 'Number of newest log lines to skip before returning logs. Default 0; use 100 for the previous page.' })),
   until: Type.Optional(Type.Number({ description: 'Oldest line offset from the newest log line for range reads. Example: offset=100, until=200 returns the previous 100-line window.' })),

@@ -7,7 +7,7 @@ import { registerWorkspaceServicesTools, type RegisterWorkspaceServicesToolsOpti
 export { WORKSPACE_SERVICE_TOOL_NAMES, registerWorkspaceServicesTools, type RegisterWorkspaceServicesToolsOptions };
 export type { WorkspaceServiceOutcome, WorkspaceServicesConfig, RuntimeStateV1, ManagedProcessIdentityV1 } from './src/types.js';
 
-function isExtensionEnabled(name: string, cwd = process.cwd()): boolean {
+export function isExtensionEnabled(name: string, cwd = process.cwd()): boolean {
   try {
     const configPath = join(cwd, '.pi', 'extensions.json');
     if (!existsSync(configPath)) return false;
