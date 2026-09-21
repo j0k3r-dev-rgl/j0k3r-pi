@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -273,7 +273,7 @@ function parseRepoName(remoteUrl: string): string | undefined {
 	return match?.[1] || undefined;
 }
 
-function detectGitInfoSync(cwd: string): { repoName?: string; branch?: string } {
+function detectGitInfoSync(cwd: string): { repoName?: string; branch?: string; gitDir?: string } {
 	try {
 		const root = gitRoot(cwd);
 		if (!root) return {};
@@ -305,7 +305,7 @@ function detectGitInfoSync(cwd: string): { repoName?: string; branch?: string } 
 			else if (/^[0-9a-f]{7,}$/i.test(headContent)) branch = `detached@${headContent.slice(0, 7)}`;
 		}
 
-		return { repoName, branch };
+		return { repoName, branch, gitDir };
 	} catch {
 		return {};
 	}
@@ -357,6 +357,9 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 
 	let activeHeader: J0k3rThemeHeader | undefined;
 	let activeFooter: J0k3rThemeFooter | undefined;
+	let activeGitWatcher: FSWatcher | undefined;
+	let gitDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+	let triggerGitRefresh: ((cwd: string) => void) | undefined;
 	let requestUIRender: (() => void) | undefined;
 	let bannerAnimTimer: ReturnType<typeof setInterval> | undefined;
 	let mustacheAnimTimer: ReturnType<typeof setInterval> | undefined;
@@ -559,28 +562,42 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 			branch: initialGit.branch,
 		};
 
-		void Promise.all([
-			resolveViaPackageManager(ctx.cwd).catch(() => null),
-			pi.exec("git", ["branch", "--show-current"], { cwd: ctx.cwd, timeout: 1000 }).catch(() => null),
-			pi.exec("git", ["remote", "get-url", "origin"], { cwd: ctx.cwd, timeout: 1000 })
-				.then((res) =>
-					res && res.code === 0
-						? res
-						: pi.exec("git", ["remote"], { cwd: ctx.cwd, timeout: 1000 }).then((rList) => {
-								const firstRemote = rList && rList.code === 0 ? rList.stdout.trim().split("\n")[0]?.trim() : "";
-								return firstRemote ? pi.exec("git", ["remote", "get-url", firstRemote], { cwd: ctx.cwd, timeout: 1000 }) : null;
-							}),
-				)
-				.catch(() => null),
-		])
-			.then(([pmRes, branchRes, remoteRes]) => {
-				let changed = false;
+		const refreshGitInfo = async (cwd: string): Promise<boolean> => {
+			const fastGit = detectGitInfoSync(cwd);
+			let changed = false;
 
-				if (pmRes) {
-					headerData.extensionNames = pmRes.extensionNames;
-					headerData.skillNames = pmRes.skillNames;
-					changed = true;
-				}
+			if (fastGit.repoName && fastGit.repoName !== headerData.repoName) {
+				headerData.repoName = fastGit.repoName;
+				footerGitInfo.repoName = fastGit.repoName;
+				changed = true;
+			}
+
+			if (fastGit.branch && fastGit.branch !== headerData.branch) {
+				headerData.branch = fastGit.branch;
+				footerGitInfo.branch = fastGit.branch;
+				changed = true;
+			}
+
+			if (footerGitInfo.dir !== cwd) {
+				footerGitInfo.dir = cwd;
+				headerData.projectName = basename(cwd);
+				changed = true;
+			}
+
+			try {
+				const [branchRes, remoteRes] = await Promise.all([
+					pi.exec("git", ["branch", "--show-current"], { cwd, timeout: 800 }).catch(() => null),
+					pi.exec("git", ["remote", "get-url", "origin"], { cwd, timeout: 800 })
+						.then((res) =>
+							res && res.code === 0
+								? res
+								: pi.exec("git", ["remote"], { cwd, timeout: 800 }).then((rList) => {
+										const firstRemote = rList && rList.code === 0 ? rList.stdout.trim().split("\n")[0]?.trim() : "";
+										return firstRemote ? pi.exec("git", ["remote", "get-url", firstRemote], { cwd, timeout: 800 }) : null;
+									}),
+						)
+						.catch(() => null),
+				]);
 
 				const branch = branchRes && branchRes.code === 0 ? branchRes.stdout.trim() : "";
 				if (branch.length > 0 && branch !== headerData.branch) {
@@ -590,16 +607,78 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 				}
 
 				const remoteUrl = remoteRes && remoteRes.code === 0 ? remoteRes.stdout.trim() : "";
-				const repoName = parseRepoName(remoteUrl) || headerData.repoName;
+				const repoName = parseRepoName(remoteUrl);
 				if (repoName && repoName !== headerData.repoName) {
 					headerData.repoName = repoName;
 					footerGitInfo.repoName = repoName;
 					changed = true;
 				}
+			} catch {
+				// CLI check fallback errors ignored
+			}
 
-				if (changed) {
+			if (changed) {
+				activeHeader?.setData(headerData);
+				activeFooter?.setGitInfo(footerGitInfo);
+				requestUIRender?.();
+			}
+			return changed;
+		};
+
+		const scheduleGitRefresh = (cwd: string, delayMs = 120): void => {
+			if (gitDebounceTimer) clearTimeout(gitDebounceTimer);
+			gitDebounceTimer = setTimeout(() => {
+				gitDebounceTimer = undefined;
+				void refreshGitInfo(cwd);
+			}, delayMs);
+		};
+
+		triggerGitRefresh = (cwd: string) => {
+			void refreshGitInfo(cwd);
+		};
+
+		const setupGitWatcher = (cwd: string): void => {
+			if (activeGitWatcher) {
+				try {
+					activeGitWatcher.close();
+				} catch {
+					// Ignore
+				}
+				activeGitWatcher = undefined;
+			}
+
+			const gitInfo = detectGitInfoSync(cwd);
+			if (!gitInfo.gitDir || !existsSync(gitInfo.gitDir)) return;
+
+			try {
+				activeGitWatcher = watch(gitInfo.gitDir, { recursive: false }, (_eventType, filename) => {
+					if (
+						!filename ||
+						filename === "HEAD" ||
+						filename === "config" ||
+						filename === "FETCH_HEAD" ||
+						filename === "ORIG_HEAD" ||
+						filename.startsWith("refs")
+					) {
+						scheduleGitRefresh(cwd, 80);
+					}
+				});
+			} catch {
+				// Ignore watcher setup errors in restricted directories
+			}
+		};
+
+		setupGitWatcher(ctx.cwd);
+
+		void Promise.all([
+			resolveViaPackageManager(ctx.cwd).catch(() => null),
+			refreshGitInfo(ctx.cwd),
+		])
+			.then(([pmRes]) => {
+				if (pmRes) {
+					headerData.extensionNames = pmRes.extensionNames;
+					headerData.skillNames = pmRes.skillNames;
 					activeHeader?.setData(headerData);
-					activeFooter?.setGitInfo(footerGitInfo);
 					requestUIRender?.();
 				}
 			})
@@ -639,7 +718,29 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 		};
 	});
 
+	pi.on("tool_execution_end", (event, ctx) => {
+		if (event.toolName === "bash" || event.toolName === "user_bash") {
+			triggerGitRefresh?.(ctx.cwd);
+		}
+	});
+
+	pi.on("turn_end", (_event, ctx) => {
+		triggerGitRefresh?.(ctx.cwd);
+	});
+
 	pi.on("session_shutdown", () => {
 		stopBannerAnimation();
+		if (gitDebounceTimer) {
+			clearTimeout(gitDebounceTimer);
+			gitDebounceTimer = undefined;
+		}
+		if (activeGitWatcher) {
+			try {
+				activeGitWatcher.close();
+			} catch {
+				// Ignore
+			}
+			activeGitWatcher = undefined;
+		}
 	});
 }
