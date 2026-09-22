@@ -114,12 +114,12 @@ function detectLocalExtensionsInDir(dir: string): string[] {
 	return names;
 }
 
-function getExtensionDisplayName(resource: { path: string; metadata?: any }): string {
+export function getExtensionDisplayName(resource: { path: string; metadata?: any }): string {
 	if (resource.metadata?.origin === "package") {
 		if (typeof resource.metadata.source === "string") {
 			const src = resource.metadata.source;
 			const clean = src.replace(/^(?:npm|git):/, "").split("@")[0];
-			if (clean) return clean;
+			if (clean) return basename(clean);
 		}
 		if (resource.metadata.baseDir) {
 			const pkg = parseJsonFile(join(resource.metadata.baseDir, "package.json"));
@@ -135,6 +135,67 @@ function getExtensionDisplayName(resource: { path: string; metadata?: any }): st
 	return fileName.replace(/\.(?:ts|js)$/, "");
 }
 
+export function loadExtensionsConfig(cwd: string): Record<string, boolean> | null {
+	const configPath = join(cwd, ".pi", "extensions.json");
+	if (!existsSync(configPath)) return null;
+	try {
+		const parsed = JSON.parse(readFileSync(configPath, "utf8"));
+		return parsed && typeof parsed === "object" ? parsed : null;
+	} catch {
+		return null;
+	}
+}
+
+export const KNOWN_OPT_IN_EXTENSIONS = new Set<string>([
+	"browser-screenshot",
+	"youtube-research",
+	"api-tools",
+	"workspace-services",
+	"utils",
+	"context7",
+	"websearch",
+	"pdf-review",
+	"engram",
+	"gentle-engram",
+	"codegraph",
+	"typesafe",
+]);
+
+export function isOptInExtension(extName: string, extPath?: string): boolean {
+	if (KNOWN_OPT_IN_EXTENSIONS.has(extName)) return true;
+	if (extPath && existsSync(extPath)) {
+		try {
+			const stat = statSync(extPath);
+			const targetFile = stat.isDirectory()
+				? (existsSync(join(extPath, "index.ts")) ? join(extPath, "index.ts") : join(extPath, "index.js"))
+				: extPath;
+			if (existsSync(targetFile)) {
+				const headerChunk = readFileSync(targetFile, "utf8").slice(0, 1500);
+				if (headerChunk.includes("isExtensionEnabled") || headerChunk.includes("extensions.json")) {
+					return true;
+				}
+			}
+		} catch {
+			// ignore
+		}
+	}
+	return false;
+}
+
+export function isExtensionActive(extName: string, config: Record<string, boolean> | null, extPath?: string): boolean {
+	const configKey = (extName === "gentle-engram" || extName === "engram") ? "engram" : extName;
+
+	if (isOptInExtension(extName, extPath) || (config && configKey in config)) {
+		return Boolean(config && config[configKey] === true);
+	}
+
+	if (config && config[configKey] === false) {
+		return false;
+	}
+
+	return true;
+}
+
 function getSkillDisplayName(skillPath: string): string {
 	const fileName = basename(skillPath);
 	if (fileName === "SKILL.md") {
@@ -146,16 +207,23 @@ function getSkillDisplayName(skillPath: string): string {
 	return basename(dirname(skillPath));
 }
 
-function detectResourcesSync(cwd: string): { extensionNames: string[]; skillNames: string[] } {
+export function detectResourcesSync(cwd: string): { extensionNames: string[]; skillNames: string[] } {
 	const extensionNames = new Set<string>();
 	const skillNames = new Set<string>();
+	const extConfig = loadExtensionsConfig(cwd);
 
 	// 1. Local extensions
 	for (const ext of detectLocalExtensionsInDir(join(globalAgentDir, "extensions"))) {
-		extensionNames.add(ext);
+		const extPath = join(globalAgentDir, "extensions", ext);
+		if (isExtensionActive(ext, extConfig, extPath)) {
+			extensionNames.add(ext);
+		}
 	}
 	for (const ext of detectLocalExtensionsInDir(join(cwd, ".pi", "extensions"))) {
-		extensionNames.add(ext);
+		const extPath = join(cwd, ".pi", "extensions", ext);
+		if (isExtensionActive(ext, extConfig, extPath)) {
+			extensionNames.add(ext);
+		}
 	}
 
 	// 2. Local skills
@@ -178,7 +246,10 @@ function detectResourcesSync(cwd: string): { extensionNames: string[]; skillName
 		if (Array.isArray(settings.extensions)) {
 			for (const extPath of settings.extensions) {
 				if (typeof extPath === "string") {
-					extensionNames.add(basename(extPath).replace(/\.(?:ts|js)$/, ""));
+					const displayName = basename(extPath).replace(/\.(?:ts|js)$/, "");
+					if (isExtensionActive(displayName, extConfig, extPath)) {
+						extensionNames.add(displayName);
+					}
 				}
 			}
 		}
@@ -205,7 +276,7 @@ function detectResourcesSync(cwd: string): { extensionNames: string[]; skillName
 
 				if (pkgDir) {
 					const pkgJson = parseJsonFile(join(pkgDir, "package.json"));
-					const displayName = pkgJson?.name || cleanName;
+					const displayName = pkgJson?.name || basename(cleanName);
 
 					const hasExtension =
 						(pkgJson?.pi?.extensions && pkgJson.pi.extensions.length > 0) ||
@@ -213,7 +284,7 @@ function detectResourcesSync(cwd: string): { extensionNames: string[]; skillName
 						existsSync(join(pkgDir, "index.ts")) ||
 						existsSync(join(pkgDir, "index.js"));
 
-					if (hasExtension) {
+					if (hasExtension && isExtensionActive(displayName, extConfig, pkgDir)) {
 						extensionNames.add(displayName);
 					}
 
@@ -236,18 +307,22 @@ function detectResourcesSync(cwd: string): { extensionNames: string[]; skillName
 	};
 }
 
-async function resolveViaPackageManager(cwd: string): Promise<{ extensionNames: string[]; skillNames: string[] } | null> {
+export async function resolveViaPackageManager(cwd: string): Promise<{ extensionNames: string[]; skillNames: string[] } | null> {
 	try {
 		const agentDir = typeof getAgentDir === "function" ? getAgentDir() : globalAgentDir;
 		const settingsManager = SettingsManager.create(cwd, agentDir);
 		const pm = new DefaultPackageManager({ cwd, agentDir, settingsManager });
 		const resolved = await pm.resolve();
 
+		const extConfig = loadExtensionsConfig(cwd);
+
 		const extensionNames = [
 			...new Set(
 				resolved.extensions
 					.filter((ext) => ext.enabled)
-					.map(getExtensionDisplayName),
+					.map((ext) => ({ name: getExtensionDisplayName(ext), path: ext.path }))
+					.filter(({ name, path }) => isExtensionActive(name, extConfig, path))
+					.map(({ name }) => name),
 			),
 		].sort();
 
