@@ -348,3 +348,85 @@ test("MINI-003: Extension Registration and Details Attachment", async () => {
   assert.ok(Array.isArray(renderedOutput));
   assert.ok(renderedOutput.length > 0);
 });
+
+test("MINI-004: Mouse Click handling toggles expansion and requests render", async () => {
+  const { createGitSyncMessageRenderer } = await import("../src/render.ts");
+
+  const diagnostic = {
+    timestamp: Date.now(),
+    fetchSuccess: true,
+    currentBranch: {
+      branch: "main",
+      upstream: "origin/main",
+      syncStatus: "UP-TO-DATE",
+      ahead: 0,
+      behind: 0,
+      incomingCommits: [],
+    },
+    otherLocalBranches: [
+      {
+        branch: "jev-config",
+        syncStatus: "UNTRACKED",
+        ahead: 0,
+        behind: 0,
+        baseBranch: "main",
+        aheadBase: 0,
+        behindBase: 3,
+      },
+    ],
+    remoteBranches: ["origin/main"],
+    remoteOnlyBranches: [],
+    activeCollaboratorBranches: [],
+    workingTree: {
+      isClean: true,
+      modifiedCount: 0,
+      untrackedCount: 0,
+      stagedCount: 0,
+      summaryLines: [],
+    },
+    isBranchPolicyCompliant: true,
+    requiresDecision: false,
+    formattedReport: "All synced",
+  };
+
+  const renderer = createGitSyncMessageRenderer(
+    { customType: "git-sync-awareness", content: diagnostic.formattedReport, details: diagnostic },
+    { expanded: false }
+  );
+
+  // Initial state is collapsed: exactly 1 line
+  const initialLines = renderer.render(80);
+  assert.equal(initialLines.length, 1);
+  assert.match(initialLines[0], /main/);
+
+  // Non-click event (move or drag) should be ignored
+  const moveRes = renderer.handleMouse({ type: "move", button: "none", x: 10, y: 0 });
+  assert.equal(moveRes, undefined);
+  assert.equal(renderer.render(80).length, 1);
+
+  // Right click should be ignored
+  const rightClickRes = renderer.handleMouse({ type: "click", button: "right", x: 10, y: 0 });
+  assert.equal(rightClickRes, undefined);
+  assert.equal(renderer.render(80).length, 1);
+
+  // Valid left click toggles from collapsed to expanded
+  const clickRes1 = renderer.handleMouse({ type: "click", button: "left", x: 10, y: 0 });
+  assert.deepEqual(clickRes1, { handled: true, render: true });
+
+  // Now rendering should produce expanded card
+  const expandedLines = renderer.render(80);
+  assert.ok(expandedLines.length > 5, "Expanded mode must render multi-line card after click");
+  const fullText = expandedLines.join("\n");
+  assert.match(fullText, /Other Local Branches \(1\)/);
+  assert.match(fullText, /jev-config/);
+  assert.match(fullText, /behind 3 vs main/);
+  assert.match(fullText, /Remote Branches \(1\)/);
+  assert.match(fullText, /origin\/main/);
+
+  // Clicking again toggles back to collapsed
+  const clickRes2 = renderer.handleMouse({ type: "click", button: "left", x: 10, y: 0 });
+  assert.deepEqual(clickRes2, { handled: true, render: true });
+
+  const collapsedAgain = renderer.render(80);
+  assert.equal(collapsedAgain.length, 1, "Should collapse back to 1 line after second click");
+});

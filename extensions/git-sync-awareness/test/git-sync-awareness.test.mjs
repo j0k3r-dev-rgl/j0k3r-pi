@@ -648,3 +648,36 @@ test("MINI-003: Report Formatting - multi-worktree tags and cross-worktree colli
   assert.doesNotMatch(report, /`feature\/idle`.*active in worktree/);
 });
 
+test("MINI-004: Git Inspection Engine - Untracked other local branch compared against main", async () => {
+  const { runGitSyncInspection } = await import("../src/inspector.ts");
+
+  const mockExec = async (cmd, args) => {
+    const full = [cmd, ...args].join(" ");
+    if (full.includes("rev-parse --is-inside-work-tree")) return { stdout: "true\n", stderr: "", exitCode: 0 };
+    if (full.includes("rev-parse --git-dir --git-common-dir")) return { stdout: ".git\n.git\n/test\n", stderr: "", exitCode: 0 };
+    if (full.includes("worktree list --porcelain")) return { stdout: "worktree /test\nHEAD abc\nbranch refs/heads/main\n\n", stderr: "", exitCode: 0 };
+    if (full.includes("fetch origin --prune")) return { stdout: "", stderr: "", exitCode: 0 };
+    if (full.includes("branch --show-current")) return { stdout: "main\n", stderr: "", exitCode: 0 };
+    if (full.includes("rev-parse --abbrev-ref @{upstream}")) return { stdout: "origin/main\n", stderr: "", exitCode: 0 };
+    if (full.includes("rev-list --left-right --count HEAD...@{upstream}")) return { stdout: "0\t0\n", stderr: "", exitCode: 0 };
+    if (full.includes("for-each-ref")) return { stdout: "main origin/main\njev-config \n", stderr: "", exitCode: 0 };
+    if (full.includes("rev-list --left-right --count jev-config...main")) return { stdout: "0\t3\n", stderr: "", exitCode: 0 };
+    if (full.includes("branch -r --no-merged origin/main")) return { stdout: "", stderr: "", exitCode: 0 };
+    if (full.includes("branch -r --format=%(refname:short)")) return { stdout: "origin/main\n", stderr: "", exitCode: 0 };
+    if (full.includes("status --short")) return { stdout: "", stderr: "", exitCode: 0 };
+    return { stdout: "", stderr: "", exitCode: 0 };
+  };
+
+  const diag = await runGitSyncInspection({ execFn: mockExec });
+  assert.equal(diag.otherLocalBranches.length, 1);
+  const jev = diag.otherLocalBranches[0];
+  assert.equal(jev.branch, "jev-config");
+  assert.equal(jev.syncStatus, "UNTRACKED");
+  assert.equal(jev.baseBranch, "main");
+  assert.equal(jev.aheadBase, 0);
+  assert.equal(jev.behindBase, 3);
+
+  assert.match(diag.formattedReport, /`jev-config`: `UNTRACKED` \(behind 3 vs main\)/);
+});
+
+

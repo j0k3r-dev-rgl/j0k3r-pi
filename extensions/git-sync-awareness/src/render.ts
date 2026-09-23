@@ -238,6 +238,7 @@ function renderDecisionGateBox(
 
 export interface GitSyncMessageRenderer {
   render(width: number): string[];
+  handleMouse?(event: any): { handled?: boolean; render?: boolean } | undefined;
   invalidate(): void;
 }
 
@@ -248,9 +249,14 @@ export function createGitSyncMessageRenderer(
   message: any,
   options: { expanded?: boolean } = {}
 ): GitSyncMessageRenderer {
-  const isExpanded = options.expanded === true;
+  let isExpanded = options.expanded === true;
 
   return {
+    handleMouse(event: any) {
+      if (event?.button !== 'left' || event?.type !== 'click') return undefined;
+      isExpanded = !isExpanded;
+      return { handled: true, render: true };
+    },
     render(width: number): string[] {
       const targetWidth = width > 0 ? width : 80;
       const diagnostic: GitSyncDiagnostic | undefined = message?.details;
@@ -260,7 +266,7 @@ export function createGitSyncMessageRenderer(
         const rawContent = String(message?.content || 'No git diagnostic report available');
         if (!isExpanded) {
           const firstLine = rawContent.split('\n')[0] || '';
-          return [fit(`${RED}●${RESET} ${firstLine} ${DIM}(ctrl+o expand)${RESET}`, targetWidth)];
+          return [fit(`${RED}●${RESET} ${firstLine} ${DIM}(click or ctrl+o expand)${RESET}`, targetWidth)];
         }
         const innerWidth = Math.max(10, targetWidth - 2);
         const lines: string[] = [];
@@ -269,7 +275,7 @@ export function createGitSyncMessageRenderer(
           lines.push(boxLine(line, innerWidth, AMBER));
         }
         lines.push(cardBottomBorder(innerWidth, AMBER));
-        lines.push(`${DIM}(ctrl+o collapse)${RESET}`);
+        lines.push(`${DIM}(click or ctrl+o collapse)${RESET}`);
         return lines;
       }
 
@@ -291,7 +297,7 @@ export function createGitSyncMessageRenderer(
           diagnostic.currentBranch.behind
         );
         const wtBadge = formatWorkingTreeBadge(diagnostic.workingTree);
-        const hint = `${DIM}(ctrl+o expand)${RESET}`;
+        const hint = `${DIM}(click or ctrl+o expand)${RESET}`;
 
         if (targetWidth < 40) {
           const shortHint = `${DIM}(ctrl+o)${RESET}`;
@@ -419,23 +425,97 @@ export function createGitSyncMessageRenderer(
         }
       }
 
-      // Collaborator / Remote Branches
-      if (
-        (diagnostic.activeCollaboratorBranches &&
-          diagnostic.activeCollaboratorBranches.length > 0) ||
-        (diagnostic.remoteOnlyBranches && diagnostic.remoteOnlyBranches.length > 0)
-      ) {
-        const collabBranches = diagnostic.activeCollaboratorBranches || [];
+      // Other Local Branches
+      if (diagnostic.otherLocalBranches && diagnostic.otherLocalBranches.length > 0) {
         lines.push(boxLine('', innerWidth, cardBorderColor));
         lines.push(
           boxLine(
-            `${CYAN}${BOLD}Collaborator Branches (${collabBranches.length}):${RESET}`,
+            `${CYAN}${BOLD}Other Local Branches (${diagnostic.otherLocalBranches.length}):${RESET}`,
             innerWidth,
             cardBorderColor
           )
         );
-        for (const cBranch of collabBranches.slice(0, 4)) {
+        for (const b of diagnostic.otherLocalBranches) {
+          const badge = formatSyncStatusBadge(b.syncStatus, b.ahead, b.behind);
+          let extra = '';
+          if (b.upstream) {
+            extra = ` -> ${CYAN}${b.upstream}${RESET}`;
+          } else if (b.baseBranch && (b.behindBase !== undefined || b.aheadBase !== undefined)) {
+            let relDesc = '';
+            if ((b.behindBase ?? 0) > 0 && !(b.aheadBase ?? 0)) {
+              relDesc = `behind ${b.behindBase} vs ${b.baseBranch}`;
+            } else if ((b.aheadBase ?? 0) > 0 && !(b.behindBase ?? 0)) {
+              relDesc = `ahead ${b.aheadBase} vs ${b.baseBranch}`;
+            } else if ((b.aheadBase ?? 0) > 0 && (b.behindBase ?? 0) > 0) {
+              relDesc = `ahead ${b.aheadBase}, behind ${b.behindBase} vs ${b.baseBranch}`;
+            } else {
+              relDesc = `synced with ${b.baseBranch}`;
+            }
+            extra = ` ${DIM}(${relDesc})${RESET}`;
+          }
+          lines.push(
+            boxLine(
+              `  • ${BOLD}${b.branch}${RESET}: ${badge}${extra}`,
+              innerWidth,
+              cardBorderColor
+            )
+          );
+        }
+      }
+
+      // Collaborator Branches (unmerged into main)
+      if (
+        diagnostic.activeCollaboratorBranches &&
+        diagnostic.activeCollaboratorBranches.length > 0
+      ) {
+        lines.push(boxLine('', innerWidth, cardBorderColor));
+        lines.push(
+          boxLine(
+            `${CYAN}${BOLD}Collaborator Branches (${diagnostic.activeCollaboratorBranches.length}):${RESET}`,
+            innerWidth,
+            cardBorderColor
+          )
+        );
+        for (const cBranch of diagnostic.activeCollaboratorBranches.slice(0, 4)) {
           lines.push(boxLine(`  • ${cBranch}`, innerWidth, cardBorderColor));
+        }
+      }
+
+      // Remote Branches (origin)
+      if (diagnostic.remoteBranches && diagnostic.remoteBranches.length > 0) {
+        lines.push(boxLine('', innerWidth, cardBorderColor));
+        lines.push(
+          boxLine(
+            `${VIOLET}${BOLD}Remote Branches (${diagnostic.remoteBranches.length}):${RESET}`,
+            innerWidth,
+            cardBorderColor
+          )
+        );
+        for (const remote of diagnostic.remoteBranches.slice(0, 5)) {
+          const local = [diagnostic.currentBranch, ...(diagnostic.otherLocalBranches || [])].find(
+            (b) => b.upstream === remote
+          );
+          const relation = local
+            ? `${LIME}local ${local.branch}${RESET}`
+            : (diagnostic.remoteOnlyBranches || []).includes(remote)
+              ? `${AMBER}remote-only${RESET}`
+              : `${DIM}tracking${RESET}`;
+          lines.push(
+            boxLine(
+              `  • ${remote}: ${relation}`,
+              innerWidth,
+              cardBorderColor
+            )
+          );
+        }
+        if (diagnostic.remoteBranches.length > 5) {
+          lines.push(
+            boxLine(
+              `  ${DIM}... +${diagnostic.remoteBranches.length - 5} more remote branches${RESET}`,
+              innerWidth,
+              cardBorderColor
+            )
+          );
         }
       }
 
@@ -451,7 +531,7 @@ export function createGitSyncMessageRenderer(
       lines.push(cardBottomBorder(innerWidth, cardBorderColor));
 
       // Key hint footer
-      lines.push(`${DIM}(ctrl+o collapse)${RESET}`);
+      lines.push(`${DIM}(click or ctrl+o collapse)${RESET}`);
 
       return lines;
     },

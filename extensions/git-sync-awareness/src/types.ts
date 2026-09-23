@@ -15,6 +15,9 @@ export interface LocalBranchStatus {
   ahead: number;
   behind: number;
   syncStatus: SyncStatus;
+  baseBranch?: string;
+  aheadBase?: number;
+  behindBase?: number;
 }
 
 export interface WorkingTreeStatus {

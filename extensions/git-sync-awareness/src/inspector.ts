@@ -291,6 +291,17 @@ export function formatDiagnosticReport(diag: Omit<GitSyncDiagnostic, 'formattedR
       if (b.syncStatus === 'DIVERGED') bSync = `DIVERGED (ahead ${b.ahead}, behind ${b.behind})`;
 
       let extra = b.upstream ? ` (\`${b.upstream}\`)` : '';
+      if (b.syncStatus === 'UNTRACKED' && b.baseBranch && (b.behindBase !== undefined || b.aheadBase !== undefined)) {
+        if ((b.behindBase ?? 0) > 0 && !(b.aheadBase ?? 0)) {
+          extra += ` (behind ${b.behindBase} vs ${b.baseBranch})`;
+        } else if ((b.aheadBase ?? 0) > 0 && !(b.behindBase ?? 0)) {
+          extra += ` (ahead ${b.aheadBase} vs ${b.baseBranch})`;
+        } else if ((b.aheadBase ?? 0) > 0 && (b.behindBase ?? 0) > 0) {
+          extra += ` (ahead ${b.aheadBase}, behind ${b.behindBase} vs ${b.baseBranch})`;
+        } else if (b.aheadBase === 0 && b.behindBase === 0) {
+          extra += ` (synced with ${b.baseBranch})`;
+        }
+      }
       if (diag.worktree) {
         const wtCheckout = diag.worktree.worktrees.find(
           (wt) => !wt.isCurrent && wt.branch === b.branch
@@ -524,12 +535,37 @@ export async function runGitSyncInspection(options?: {
             // fallback to untracked
           }
         }
+        // Compare against trunk / base branch (e.g. main or master) if no upstream
+        let aheadBase: number | undefined;
+        let behindBase: number | undefined;
+        const candidateBase = allLocalBranchNames.includes('main')
+          ? 'main'
+          : allLocalBranchNames.includes('master')
+            ? 'master'
+            : undefined;
+
+        if (candidateBase && candidateBase !== bName) {
+          try {
+            const baseCountRes = await exec('git', ['rev-list', '--left-right', '--count', `${bName}...${candidateBase}`], { cwd });
+            if (baseCountRes.exitCode === 0) {
+              const parsedBase = parseAheadBehind(baseCountRes.stdout);
+              aheadBase = parsedBase.ahead;
+              behindBase = parsedBase.behind;
+            }
+          } catch {
+            // ignore
+          }
+        }
+
         otherLocalBranches.push({
           branch: bName,
           upstream: bUpstream || undefined,
           ahead: 0,
           behind: 0,
           syncStatus: 'UNTRACKED',
+          baseBranch: candidateBase,
+          aheadBase,
+          behindBase,
         });
       }
     }
