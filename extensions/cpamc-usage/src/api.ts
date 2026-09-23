@@ -31,6 +31,7 @@ export type UsagePool = {
 
 export type AccountUsage = {
     id: string;
+    authFileName?: string;
     provider: string;
     account: string;
     authType: string | null;
@@ -154,14 +155,13 @@ async function executeApiCall(
 }
 
 function getOpenCodeGoApiKey(): string | null {
-    if (process.env.OPENCODE_API_KEY?.trim()) return process.env.OPENCODE_API_KEY.trim();
     if (process.env.OPENCODE_GO_API_KEY?.trim()) return process.env.OPENCODE_GO_API_KEY.trim();
 
     try {
         const authPath = join(homedir(), ".pi", "agent", "auth.json");
         const raw = readFileSync(authPath, "utf8");
         const parsed = JSON.parse(raw);
-        const cred = parsed?.["opencode-go"] || parsed?.["opencode"];
+        const cred = parsed?.["opencode-go"];
         if (cred?.key && typeof cred.key === "string") {
             return cred.key.trim();
         }
@@ -490,6 +490,7 @@ export async function fetchUsage(signal?: AbortSignal): Promise<ProviderGroup[]>
 
             return {
                 id: f.id || f.name || account,
+                authFileName: f.name,
                 provider,
                 account,
                 authType: f.account_type || null,
