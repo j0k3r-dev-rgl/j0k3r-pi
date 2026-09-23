@@ -10,6 +10,7 @@ import {
 import { ARCH_WORKING_INDICATOR, J0k3rThemeEditor } from "./src/J0k3rThemeEditor.js";
 import { J0k3rThemeFooter, type RepoGitInfo } from "./src/J0k3rThemeFooter.js";
 import { J0k3rThemeHeader, type J0k3rThemeHeaderData, type WelcomeBannerStyle } from "./src/J0k3rThemeHeader.js";
+import { fetchModelQuota, QUOTA_REFRESH_MS } from "./src/quota.js";
 import { registerNativeToolOverrides } from "./src/tools/index.js";
 
 const extensionDir = dirname(fileURLToPath(import.meta.url));
@@ -441,6 +442,40 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 	let catAnimTimer: ReturnType<typeof setInterval> | undefined;
 	let oniAnimTimer: ReturnType<typeof setInterval> | undefined;
 	let currentBannerStyle: WelcomeBannerStyle = "default";
+	let quota: string | undefined;
+	let quotaModelKey = "";
+	let quotaRequest = 0;
+	let quotaUpdatedAt = 0;
+	let quotaTimer: ReturnType<typeof setInterval> | undefined;
+	let quotaLoading = false;
+
+	const refreshQuota = (provider: string, modelId: string, force = false): void => {
+		const key = `${provider}/${modelId}`;
+		const modelChanged = key !== quotaModelKey;
+		if (!force && !modelChanged && (quotaLoading || Date.now() - quotaUpdatedAt < QUOTA_REFRESH_MS)) return;
+		const request = ++quotaRequest;
+		quotaModelKey = key;
+		if (modelChanged) {
+			quota = undefined;
+			activeFooter?.setQuota();
+		}
+		if (provider !== "opencode-go" && provider !== "cliproxyapi") return;
+		quotaLoading = true;
+		void fetchModelQuota(provider, modelId)
+			.then((value) => {
+				if (request !== quotaRequest) return;
+				quota = value;
+				quotaUpdatedAt = Date.now();
+				activeFooter?.setQuota(value);
+			})
+			.catch(() => {
+				if (request !== quotaRequest) return;
+				quotaUpdatedAt = Date.now();
+			})
+			.finally(() => {
+				if (request === quotaRequest) quotaLoading = false;
+			});
+	};
 
 	const stopBannerAnimation = () => {
 		if (bannerAnimTimer) {
@@ -614,6 +649,11 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_start", (_event, ctx) => {
+		++quotaRequest;
+		quota = undefined;
+		quotaModelKey = "";
+		quotaUpdatedAt = 0;
+		quotaLoading = false;
 		registerNativeToolOverrides(pi, ctx.cwd);
 		if (ctx.mode !== "tui") return;
 
@@ -781,9 +821,17 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 		ctx.ui.setEditorComponent((tui, theme, keybindings) => new J0k3rThemeEditor(tui, theme, keybindings));
 		ctx.ui.setFooter((tui, theme, footerData) => {
 			activeFooter = new J0k3rThemeFooter(tui, theme, footerData, ctx, () => pi.getThinkingLevel(), footerGitInfo);
+			activeFooter.setQuota(quota);
 			requestUIRender = () => tui.requestRender();
 			return activeFooter;
 		});
+		refreshQuota(ctx.model?.provider ?? "", ctx.model?.id ?? "", true);
+		if (quotaTimer) clearInterval(quotaTimer);
+		quotaTimer = setInterval(() => refreshQuota(ctx.model?.provider ?? "", ctx.model?.id ?? ""), QUOTA_REFRESH_MS);
+	});
+
+	pi.on("model_select", (event) => {
+		refreshQuota(event.model?.provider ?? "", event.model?.id ?? "", true);
 	});
 
 	pi.on("before_agent_start", (event) => {
@@ -804,6 +852,9 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_shutdown", () => {
+		++quotaRequest;
+		if (quotaTimer) clearInterval(quotaTimer);
+		quotaTimer = undefined;
 		stopBannerAnimation();
 		if (gitDebounceTimer) {
 			clearTimeout(gitDebounceTimer);

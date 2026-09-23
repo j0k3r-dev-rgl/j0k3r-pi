@@ -17,6 +17,7 @@ export async function resolve(specifier, context, nextResolve) {
         export function matchesKey(data, key) { return data === key; }
         export function visibleWidth(str) { return str.replace(/\\\\x1b\\\\[[0-9;]*m/g, "").length; }
         export function truncateToWidth(str) { return str; }
+        export function wrapTextWithAnsi(str) { return [str]; }
       \`)
     };
   }
@@ -26,6 +27,16 @@ export async function resolve(specifier, context, nextResolve) {
       url: "data:text/javascript," + encodeURIComponent(\`
         export function keyHint(k, d) { return d; }
         export function getAgentDir() { return "/home/j0k3r/.pi/agent"; }
+        export class CustomEditor { constructor() {} }
+        export function createBashToolDefinition() { return { execute() {} }; }
+        export function createEditToolDefinition() { return { execute() {} }; }
+        export function createReadToolDefinition() { return { execute() {} }; }
+        export function createWriteToolDefinition() { return { execute() {} }; }
+        export function truncateToVisualLines() { return { lines: [], truncated: false }; }
+        export function formatSize(value) { return String(value); }
+        export function getLanguageFromPath() { return "text"; }
+        export function highlightCode(value) { return value; }
+        export function renderDiff(value) { return value; }
         export const SettingsManager = { create: () => ({ isProjectTrusted: () => true }) };
         export class DefaultPackageManager {
           constructor(opts) { this.cwd = opts.cwd; }
@@ -72,6 +83,90 @@ const {
   detectResourcesSync,
   resolveViaPackageManager,
 } = await import("../index.ts");
+
+const { selectQuotaAccount, fetchModelQuota, formatQuota, QUOTA_REFRESH_MS } = await import("../src/quota.ts");
+const { J0k3rThemeFooter } = await import("../src/J0k3rThemeFooter.ts");
+
+test("quota account is chosen only for an exact unique prefixed model", () => {
+  const accounts = [
+    { id: "one", provider: "antigravity", pools: [{ label: "5h", availablePercentage: 72 }] },
+    { id: "two", provider: "codex", pools: [{ label: "weekly", availablePercentage: 40 }] },
+  ];
+  const models = new Map([["one", ["main/gemini-3"]], ["two", ["second/gpt-5"]]]);
+  assert.equal(selectQuotaAccount("cliproxyapi", "main/gemini-3", accounts, models)?.id, "one");
+  assert.equal(selectQuotaAccount("cliproxyapi", "main/gpt-5", accounts, models), undefined);
+  models.set("two", ["main/gemini-3"]);
+  assert.equal(selectQuotaAccount("cliproxyapi", "main/gemini-3", accounts, models), undefined);
+  assert.equal(selectQuotaAccount("opencode-go", "glm-5", [{ id: "opencode-go", pools: [] }], models)?.id, "opencode-go");
+});
+
+test("fetchModelQuota follows the active CPA model to its unique auth quota", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env.CLIPROXYAPI_MANAGEMENT_KEY;
+  process.env.CLIPROXYAPI_MANAGEMENT_KEY = "test-key";
+  const calls = [];
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.endsWith("/auth-files")) return Response.json({ files: [
+      { id: "auth-a", name: "a", auth_index: "index-a", provider: "antigravity", email: "a@example.org" },
+      { id: "b", name: "b", auth_index: "index-b", provider: "antigravity", email: "b@example.org" },
+    ] });
+    if (url.includes("/auth-files/models")) return Response.json({ models: [
+      { id: url.includes("name=a") ? "main/gemini-3" : "other/gemini-3" },
+    ] });
+    return Response.json({ status_code: 200, body: JSON.stringify({ groups: [
+      { displayName: "Gemini", buckets: [{ remainingFraction: 0.72, window: "5h" }] },
+    ] }) });
+  };
+  try {
+    assert.equal(await fetchModelQuota("cliproxyapi", "main/gemini-3"), "quota 5 hs ━━━━━━── 72%");
+    assert.equal(await fetchModelQuota("cliproxyapi", "missing/gemini-3"), undefined);
+    assert.equal(await fetchModelQuota("opencode-zen", "model"), undefined);
+    assert.ok(calls.some((url) => url.includes("/auth-files/models?name=a")));
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.CLIPROXYAPI_MANAGEMENT_KEY;
+    else process.env.CLIPROXYAPI_MANAGEMENT_KEY = originalKey;
+  }
+});
+
+test("quota refresh interval is 30 seconds and pools include thin eight-cell availability bars", () => {
+  assert.equal(QUOTA_REFRESH_MS, 30_000);
+  assert.equal(formatQuota([
+    { windowLabel: "5h", label: "rolling", availablePercentage: 72 },
+    { windowLabel: "7d", label: "weekly", availablePercentage: 25 },
+  ]), "quota 5h ━━━━━━── 72% · 7d ━━────── 25%");
+  assert.equal(formatQuota([{ windowLabel: "5h", label: "rolling", availablePercentage: 0 }]), "quota 5h ──────── 0%");
+});
+
+test("quota shows a compact countdown for each valid future reset", () => {
+  const now = Date.parse("2026-09-23T12:00:00Z");
+  const pool = (resetAt) => ({ windowLabel: "5h", label: "rolling", availablePercentage: 72, resetAt });
+  assert.equal(formatQuota([pool("2026-09-23T14:15:00Z")], now), "quota 5h ━━━━━━── 72% ↻ 2h 15m");
+  assert.equal(formatQuota([pool("2026-09-25T15:00:00Z")], now), "quota 5h ━━━━━━── 72% ↻ 2d 3h");
+  assert.equal(formatQuota([pool("2026-09-23T12:01:00Z")], now), "quota 5h ━━━━━━── 72% ↻ 1m");
+  assert.equal(formatQuota([pool(null), pool("invalid"), pool("2026-09-23T11:00:00Z")], now),
+    "quota 5h ━━━━━━── 72% · 5h ━━━━━━── 72% · 5h ━━━━━━── 72%");
+});
+
+test("quota appears above Engram only when it fits without displacing the top line", () => {
+  const theme = { bold: (s) => s, fg: (_color, s) => s };
+  const ctx = {
+    cwd: "/tmp/example", model: { provider: "cliproxyapi", id: "main/gpt-5", contextWindow: 100000 },
+    sessionManager: { getLeafId: () => null, getBranch: () => [] },
+    getContextUsage: () => null,
+  };
+  const footer = new J0k3rThemeFooter({ requestRender() {} }, theme,
+    { getExtensionStatuses: () => new Map([["engram", "engram"]]) }, ctx, () => "off",
+    { dir: "/tmp/example", repoName: "example", branch: "main" });
+  footer.setQuota("quota 5h ━━━━━━── 72% · 7d ━━━───── 40%");
+  const wide = footer.render(120);
+  assert.match(wide[0], /quota 5h ━━━━━━── 72% · 7d ━━━───── 40%/);
+  assert.match(wide[1], /engram/);
+  const narrow = footer.render(48);
+  assert.doesNotMatch(narrow.join("\n"), /quota/);
+});
 
 test("MINI-001: isExtensionActive correctly filters opt-in extensions according to .pi/extensions.json", () => {
   const config = {

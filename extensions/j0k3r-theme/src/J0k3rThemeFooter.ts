@@ -160,6 +160,7 @@ export class J0k3rThemeFooter implements Component {
 		key: string;
 		output: string;
 	};
+	private quota?: string;
 
 	constructor(
 		private readonly tui: TUI,
@@ -173,6 +174,11 @@ export class J0k3rThemeFooter implements Component {
 	setGitInfo(gitInfo: RepoGitInfo): void {
 		this.gitInfo = gitInfo;
 		this.cachedTopLine = undefined;
+	}
+
+	setQuota(quota?: string): void {
+		this.quota = quota;
+		this.tui.requestRender();
 	}
 
 	private getTokenTotals(): { input: number; output: number } {
@@ -429,7 +435,11 @@ export class J0k3rThemeFooter implements Component {
 
 	render(width: number): string[] {
 		if (width <= 0) return [];
-		return [this.renderTopLine(width), this.renderBottomLine(width)];
+		const top = this.renderTopLine(width);
+		const quota = this.quota ? electric(VIOLET, this.quota) : "";
+		const gap = width - visibleWidth(top) - visibleWidth(quota);
+		const topWithQuota = quota && gap >= 2 ? `${top}${" ".repeat(gap)}${quota}` : top;
+		return [topWithQuota, this.renderBottomLine(width)];
 	}
 
 	invalidate(): void {
