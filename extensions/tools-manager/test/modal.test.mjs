@@ -35,14 +35,22 @@ const mockTheme = {
   bold: (text) => text,
 };
 
-test("MINI-001: SUPPORTED_EXTENSIONS contains 10 items including codegraph", () => {
-  assert.equal(SUPPORTED_EXTENSIONS.length, 10);
+test("MINI-001: SUPPORTED_EXTENSIONS contains 11 items including codegraph and typesafe", () => {
+  assert.equal(SUPPORTED_EXTENSIONS.length, 11);
   const codegraph = SUPPORTED_EXTENSIONS.find((e) => e.id === "codegraph");
   assert.ok(codegraph, "codegraph must exist in SUPPORTED_EXTENSIONS");
   assert.deepEqual(codegraph, {
     id: "codegraph",
     name: "codegraph",
     description: "CodeGraph semantic exploration & index management",
+  });
+
+  const typesafe = SUPPORTED_EXTENSIONS.find((e) => e.id === "typesafe");
+  assert.ok(typesafe, "typesafe must exist in SUPPORTED_EXTENSIONS");
+  assert.deepEqual(typesafe, {
+    id: "typesafe",
+    name: "typesafe",
+    description: "TypeSafe System One (Jev) semantic AI evaluation",
   });
 });
 
@@ -84,19 +92,20 @@ test("MINI-001: clicking on any extension item row (0 to 9) accurately toggles t
   }
 });
 
-test("MINI-001: clicking on action buttons row (y = 28 for 10 items) invokes saveConfig or dismisses", () => {
+test("MINI-001: clicking on action buttons row (y = 30 for 11 items) invokes saveConfig or dismisses", () => {
   const tmp = mkdtempSync(join(tmpdir(), "tools-manager-test-"));
   try {
     let doneResult;
     const modal = new ToolsManagerModal(tmp, mockTheme, (res) => { doneResult = res; });
 
-    // Click cancel button at y = 28, x = 35
-    modal.handleMouse({ button: "left", type: "click", x: 35, y: 28 });
+    // Buttons row for 11 items is 5 + 11*2 + 3 = 30
+    // Click cancel button at y = 30, x = 35
+    modal.handleMouse({ button: "left", type: "click", x: 35, y: 30 });
     assert.deepEqual(doneResult, { action: "cancel" });
 
-    // Reset doneResult and click save button at y = 28, x = 15
+    // Reset doneResult and click save button at y = 30, x = 15
     doneResult = undefined;
-    modal.handleMouse({ button: "left", type: "click", x: 15, y: 28 });
+    modal.handleMouse({ button: "left", type: "click", x: 15, y: 30 });
     assert.ok(doneResult);
     assert.equal(doneResult.action, "save");
   } finally {

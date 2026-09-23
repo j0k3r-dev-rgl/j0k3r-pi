@@ -8,5 +8,6 @@
   "websearch": true,
   "pdf-review": false,
   "engram": true,
-  "codegraph": true
+  "codegraph": true,
+  "typesafe": true
 }
