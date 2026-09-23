@@ -25,6 +25,24 @@ export interface WorkingTreeStatus {
   summaryLines: string[];
 }
 
+export interface WorktreeEntry {
+  path: string;
+  head: string;
+  branch?: string;
+  isCurrent: boolean;
+  isMain: boolean;
+  detached?: boolean;
+  locked?: boolean | string;
+  prunable?: boolean | string;
+}
+
+export interface WorktreeDiagnostic {
+  isMainWorktree: boolean;
+  currentWorktreePath: string;
+  mainWorktreePath: string;
+  worktrees: WorktreeEntry[];
+}
+
 export interface GitSyncDiagnostic {
   timestamp: number;
   fetchSuccess: boolean;
@@ -35,6 +53,7 @@ export interface GitSyncDiagnostic {
   remoteOnlyBranches: string[];
   activeCollaboratorBranches: string[];
   workingTree: WorkingTreeStatus;
+  worktree?: WorktreeDiagnostic;
   isBranchPolicyCompliant: boolean;
   branchPolicyWarning?: string;
   requiresDecision: boolean;

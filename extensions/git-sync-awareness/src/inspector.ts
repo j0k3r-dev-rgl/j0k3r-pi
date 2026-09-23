@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import type {
   CurrentBranchStatus,
@@ -7,6 +8,8 @@ import type {
   LocalBranchStatus,
   SyncStatus,
   WorkingTreeStatus,
+  WorktreeDiagnostic,
+  WorktreeEntry,
 } from './types.js';
 
 const execFileAsync = promisify(execFile);
@@ -117,6 +120,91 @@ export function parseWorkingTree(shortStatus: string): WorkingTreeStatus {
   };
 }
 
+export function parseWorktreeListPorcelain(
+  stdout: string,
+  currentWorktreePath: string,
+  mainWorktreePath: string
+): WorktreeEntry[] {
+  const normCurrent = path.resolve(currentWorktreePath);
+  const normMain = path.resolve(mainWorktreePath);
+
+  const rawBlocks = stdout
+    .split(/\n\s*\n/)
+    .map((b) => b.trim())
+    .filter((b) => b.length > 0);
+
+  const entries: WorktreeEntry[] = [];
+
+  for (let i = 0; i < rawBlocks.length; i++) {
+    const lines = rawBlocks[i]
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+
+    let entryPath = '';
+    let head = '';
+    let branch: string | undefined;
+    let detached: boolean | undefined;
+    let locked: boolean | string | undefined;
+    let prunable: boolean | string | undefined;
+
+    for (const line of lines) {
+      if (line.startsWith('worktree ')) {
+        entryPath = line.slice('worktree '.length).trim();
+      } else if (line.startsWith('HEAD ')) {
+        head = line.slice('HEAD '.length).trim();
+      } else if (line.startsWith('branch ')) {
+        let b = line.slice('branch '.length).trim();
+        if (b.startsWith('refs/heads/')) {
+          b = b.slice('refs/heads/'.length);
+        }
+        branch = b;
+      } else if (line === 'detached') {
+        detached = true;
+      } else if (line === 'locked') {
+        locked = true;
+      } else if (line.startsWith('locked ')) {
+        const reason = line.slice('locked '.length).trim();
+        locked = reason.length > 0 ? reason : true;
+      } else if (line === 'prunable') {
+        prunable = true;
+      } else if (line.startsWith('prunable ')) {
+        const reason = line.slice('prunable '.length).trim();
+        prunable = reason.length > 0 ? reason : true;
+      }
+    }
+
+    if (!entryPath) continue;
+
+    const normPath = path.resolve(entryPath);
+    const isMain = i === 0 || normPath === normMain;
+    const isCurrent = normPath === normCurrent;
+
+    const entry: WorktreeEntry = {
+      path: normPath,
+      head,
+      isCurrent,
+      isMain,
+    };
+    if (branch !== undefined) {
+      entry.branch = branch;
+    }
+    if (detached) {
+      entry.detached = true;
+    }
+    if (locked !== undefined) {
+      entry.locked = locked;
+    }
+    if (prunable !== undefined) {
+      entry.prunable = prunable;
+    }
+
+    entries.push(entry);
+  }
+
+  return entries;
+}
+
 export function formatDiagnosticReport(diag: Omit<GitSyncDiagnostic, 'formattedReport'>): string {
   const parts: string[] = [];
 
@@ -153,6 +241,14 @@ export function formatDiagnosticReport(diag: Omit<GitSyncDiagnostic, 'formattedR
     parts.push(`- **Working Tree**: \`dirty [${dirtyDesc}]\``);
   }
 
+  if (diag.worktree) {
+    if (diag.worktree.isMainWorktree) {
+      parts.push('- **Worktree**: `main` (base repository)');
+    } else {
+      parts.push(`- **Worktree**: \`linked\` (base: \`${diag.worktree.mainWorktreePath}\`)`);
+    }
+  }
+
   if (diag.branchPolicyWarning) {
     parts.push(`- **Branch Policy**: ⚠️ ${diag.branchPolicyWarning}`);
   } else {
@@ -166,6 +262,26 @@ export function formatDiagnosticReport(diag: Omit<GitSyncDiagnostic, 'formattedR
     }
   }
 
+  if (diag.worktree && diag.worktree.worktrees.length > 1) {
+    parts.push('\n#### Active Worktrees');
+    for (const wt of diag.worktree.worktrees) {
+      const branchDisplay = wt.branch ? `\`${wt.branch}\`` : '`detached`';
+      const shortHead = wt.head ? ` [HEAD ${wt.head.slice(0, 7)}]` : '';
+      const tags: string[] = [];
+      if (wt.isCurrent) tags.push('(current)');
+      if (wt.isMain) tags.push('(base)');
+      if (wt.locked) {
+        tags.push(typeof wt.locked === 'string' ? `[locked: ${wt.locked}]` : '[locked]');
+      }
+      if (wt.prunable) {
+        tags.push(typeof wt.prunable === 'string' ? `[prunable: ${wt.prunable}]` : '[prunable]');
+      }
+      const tagStr = tags.length > 0 ? ` ${tags.join(' ')}` : '';
+      parts.push(`- \`${wt.path}\`: branch ${branchDisplay}${shortHead}${tagStr}`);
+    }
+    parts.push('\n> **Note**: Git prevents checking out branches that are already active in another worktree.');
+  }
+
   if (diag.otherLocalBranches.length > 0) {
     parts.push('\n#### Other Local Branches');
     for (const b of diag.otherLocalBranches) {
@@ -173,7 +289,17 @@ export function formatDiagnosticReport(diag: Omit<GitSyncDiagnostic, 'formattedR
       if (b.syncStatus === 'BEHIND') bSync = `BEHIND [${b.behind}]`;
       if (b.syncStatus === 'AHEAD') bSync = `AHEAD [${b.ahead}]`;
       if (b.syncStatus === 'DIVERGED') bSync = `DIVERGED (ahead ${b.ahead}, behind ${b.behind})`;
-      parts.push(`- \`${b.branch}\`: \`${bSync}\`${b.upstream ? ` (\`${b.upstream}\`)` : ''}`);
+
+      let extra = b.upstream ? ` (\`${b.upstream}\`)` : '';
+      if (diag.worktree) {
+        const wtCheckout = diag.worktree.worktrees.find(
+          (wt) => !wt.isCurrent && wt.branch === b.branch
+        );
+        if (wtCheckout) {
+          extra += ` [active in worktree: \`${wtCheckout.path}\`]`;
+        }
+      }
+      parts.push(`- \`${b.branch}\`: \`${bSync}\`${extra}`);
     }
   }
 
@@ -234,6 +360,68 @@ export async function runGitSyncInspection(options?: {
     if (probe.exitCode !== 0 || probe.stdout.trim() !== 'true') return null;
   } catch {
     return null;
+  }
+
+  // Worktree awareness detection
+  let worktree: WorktreeDiagnostic | undefined;
+  try {
+    const revRes = await exec('git', ['rev-parse', '--git-dir', '--git-common-dir', '--show-toplevel'], { cwd });
+    if (revRes.exitCode === 0 && revRes.stdout.trim()) {
+      const lines = revRes.stdout.trim().split('\n').map((l) => l.trim()).filter(Boolean);
+      if (lines.length >= 2) {
+        const gitDir = lines[0];
+        const commonDir = lines[1];
+        const baseCwd = cwd || process.cwd();
+        const topLevel = lines[2] || (path.isAbsolute(gitDir) ? path.dirname(gitDir) : baseCwd);
+        const resolvedGitDir = path.resolve(baseCwd, gitDir);
+        const resolvedCommonDir = path.resolve(baseCwd, commonDir);
+        const currentWorktreePath = path.resolve(baseCwd, topLevel);
+        const isMainWorktree = resolvedGitDir === resolvedCommonDir;
+        let mainWorktreePath = isMainWorktree
+          ? currentWorktreePath
+          : (path.basename(resolvedCommonDir) === '.git' ? path.dirname(resolvedCommonDir) : resolvedCommonDir);
+
+        let worktrees: WorktreeEntry[] = [];
+        try {
+          const wtRes = await exec('git', ['worktree', 'list', '--porcelain'], { cwd });
+          if (wtRes.exitCode === 0 && wtRes.stdout.trim()) {
+            worktrees = parseWorktreeListPorcelain(wtRes.stdout, currentWorktreePath, mainWorktreePath);
+            if (worktrees.length > 0 && worktrees[0].isMain) {
+              mainWorktreePath = worktrees[0].path;
+            }
+          } else {
+            // Graceful fallback single-entry
+            worktrees = [
+              {
+                path: currentWorktreePath,
+                head: '',
+                isCurrent: true,
+                isMain: isMainWorktree,
+              },
+            ];
+          }
+        } catch {
+          // Graceful fallback single-entry
+          worktrees = [
+            {
+              path: currentWorktreePath,
+              head: '',
+              isCurrent: true,
+              isMain: isMainWorktree,
+            },
+          ];
+        }
+
+        worktree = {
+          isMainWorktree,
+          currentWorktreePath,
+          mainWorktreePath,
+          worktrees,
+        };
+      }
+    }
+  } catch {
+    // Non-blocking degradation
   }
 
   // 1. Non-destructive fetch origin --prune
@@ -412,6 +600,14 @@ export async function runGitSyncInspection(options?: {
   const requiresDecision =
     currentSyncStatus === 'BEHIND' || currentSyncStatus === 'DIVERGED' || !workingTree.isClean;
 
+  if (worktree && worktree.worktrees.length === 1 && !worktree.worktrees[0].head) {
+    if (currentBranchName && currentBranchName !== 'HEAD') {
+      worktree.worktrees[0].branch = currentBranchName;
+    } else if (currentBranchName === 'HEAD') {
+      worktree.worktrees[0].detached = true;
+    }
+  }
+
   const currentBranch: CurrentBranchStatus = {
     branch: currentBranchName,
     upstream,
@@ -431,6 +627,7 @@ export async function runGitSyncInspection(options?: {
     remoteOnlyBranches,
     activeCollaboratorBranches,
     workingTree,
+    worktree,
     isBranchPolicyCompliant: policy.isCompliant,
     branchPolicyWarning: policy.warning,
     requiresDecision,

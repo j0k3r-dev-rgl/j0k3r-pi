@@ -1,9 +1,11 @@
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { runGitSyncInspection } from './src/inspector.js';
+import { createGitSyncMessageRenderer } from './src/render.js';
 import type { GitSyncDiagnostic } from './src/types.js';
 
 export * from './src/types.js';
 export * from './src/inspector.js';
+export * from './src/render.js';
 
 export interface BeforeAgentStartEventCustom {
   inspectorOverride?: () => Promise<GitSyncDiagnostic | null>;
@@ -14,6 +16,10 @@ export default function gitSyncAwarenessExtension(
   context?: ExtensionContext
 ) {
   let hasReported = false;
+
+  pi.registerMessageRenderer?.('git-sync-awareness', (message: any, options: { expanded?: boolean } = {}) => {
+    return createGitSyncMessageRenderer(message, options);
+  });
 
   pi.on('session_start', async () => {
     hasReported = false;
@@ -40,6 +46,7 @@ export default function gitSyncAwarenessExtension(
           customType: 'git-sync-awareness',
           content: diagnostic.formattedReport,
           display: true,
+          details: diagnostic,
         },
       };
     } catch (err: any) {

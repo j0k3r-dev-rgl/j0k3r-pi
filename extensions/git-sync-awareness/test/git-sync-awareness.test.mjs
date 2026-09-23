@@ -386,3 +386,265 @@ test("MINI-002: Pi Extension Lifecycle and First-Turn Gating", async () => {
   const postResetTurn2 = await listeners["before_agent_start"]({}, { inspectorOverride: mockInspection });
   assert.equal(postResetTurn2, undefined, "second turn after reset is gated");
 });
+
+test("MINI-001: Exports Worktree types and parser from index.ts", async () => {
+  const index = await import("../index.ts");
+  assert.equal(typeof index.parseWorktreeListPorcelain, "function");
+  assert.equal(typeof index.runGitSyncInspection, "function");
+  assert.equal(typeof index.formatDiagnosticReport, "function");
+});
+
+test("MINI-002: Worktree Porcelain Parser - parses single main worktree", async () => {
+  const { parseWorktreeListPorcelain } = await import("../src/inspector.ts");
+  assert.equal(typeof parseWorktreeListPorcelain, "function");
+
+  const porcelain = [
+    "worktree /home/user/repo",
+    "HEAD 1111111111111111111111111111111111111111",
+    "branch refs/heads/main",
+    "",
+  ].join("\n");
+
+  const entries = parseWorktreeListPorcelain(porcelain, "/home/user/repo", "/home/user/repo");
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].path, "/home/user/repo");
+  assert.equal(entries[0].head, "1111111111111111111111111111111111111111");
+  assert.equal(entries[0].branch, "main");
+  assert.equal(entries[0].isMain, true);
+  assert.equal(entries[0].isCurrent, true);
+  assert.equal(entries[0].detached, undefined);
+  assert.equal(entries[0].locked, undefined);
+  assert.equal(entries[0].prunable, undefined);
+});
+
+test("MINI-002: Worktree Porcelain Parser - multi-worktree with detached, locked, and prunable checkouts", async () => {
+  const { parseWorktreeListPorcelain } = await import("../src/inspector.ts");
+
+  const porcelain = [
+    "worktree /home/user/repo",
+    "HEAD 1111111111111111111111111111111111111111",
+    "branch refs/heads/main",
+    "",
+    "worktree /home/user/repo-linked",
+    "HEAD 2222222222222222222222222222222222222222",
+    "branch refs/heads/feature/worktree-sync",
+    "",
+    "worktree /home/user/repo-locked",
+    "HEAD 3333333333333333333333333333333333333333",
+    "branch refs/heads/fix/locked-issue",
+    "locked maintenance in progress",
+    "",
+    "worktree /home/user/repo-detached",
+    "HEAD 4444444444444444444444444444444444444444",
+    "detached",
+    "prunable gitdir file missing",
+    "",
+  ].join("\n");
+
+  const entries = parseWorktreeListPorcelain(porcelain, "/home/user/repo-linked", "/home/user/repo");
+  assert.equal(entries.length, 4);
+
+  // Entry 0: main repository
+  assert.equal(entries[0].path, "/home/user/repo");
+  assert.equal(entries[0].branch, "main");
+  assert.equal(entries[0].isMain, true);
+  assert.equal(entries[0].isCurrent, false);
+
+  // Entry 1: current linked worktree
+  assert.equal(entries[1].path, "/home/user/repo-linked");
+  assert.equal(entries[1].branch, "feature/worktree-sync");
+  assert.equal(entries[1].isMain, false);
+  assert.equal(entries[1].isCurrent, true);
+
+  // Entry 2: locked worktree
+  assert.equal(entries[2].path, "/home/user/repo-locked");
+  assert.equal(entries[2].branch, "fix/locked-issue");
+  assert.equal(entries[2].locked, "maintenance in progress");
+
+  // Entry 3: detached and prunable worktree
+  assert.equal(entries[3].path, "/home/user/repo-detached");
+  assert.equal(entries[3].branch, undefined);
+  assert.equal(entries[3].detached, true);
+  assert.equal(entries[3].prunable, "gitdir file missing");
+});
+
+test("MINI-002: Worktree Porcelain Parser - empty and malformed input handling", async () => {
+  const { parseWorktreeListPorcelain } = await import("../src/inspector.ts");
+
+  assert.deepEqual(parseWorktreeListPorcelain("", "/repo", "/repo"), []);
+  assert.deepEqual(parseWorktreeListPorcelain("   \n\n  ", "/repo", "/repo"), []);
+  assert.deepEqual(parseWorktreeListPorcelain("invalid lines without worktree marker", "/repo", "/repo"), []);
+});
+
+test("MINI-002: Git Inspection Engine - main worktree detection (git-dir === git-common-dir)", async () => {
+  const { runGitSyncInspection } = await import("../src/inspector.ts");
+
+  const mockExec = async (cmd, args) => {
+    const full = [cmd, ...args].join(" ");
+    if (full.includes("rev-parse --is-inside-work-tree")) return { stdout: "true\n", stderr: "", exitCode: 0 };
+    if (full.includes("rev-parse --git-dir --git-common-dir --show-toplevel")) {
+      return { stdout: ".git\n.git\n/home/user/repo\n", stderr: "", exitCode: 0 };
+    }
+    if (full.includes("worktree list --porcelain")) {
+      return {
+        stdout: "worktree /home/user/repo\nHEAD abcdef0123456789abcdef0123456789abcdef01\nbranch refs/heads/main\n\n",
+        stderr: "",
+        exitCode: 0,
+      };
+    }
+    if (full.includes("fetch origin --prune")) return { stdout: "", stderr: "", exitCode: 0 };
+    if (full.includes("branch --show-current")) return { stdout: "main\n", stderr: "", exitCode: 0 };
+    if (full.includes("rev-parse --abbrev-ref @{upstream}")) return { stdout: "origin/main\n", stderr: "", exitCode: 0 };
+    if (full.includes("rev-list --left-right --count HEAD...@{upstream}")) return { stdout: "0\t0\n", stderr: "", exitCode: 0 };
+    if (full.includes("for-each-ref")) return { stdout: "main origin/main\n", stderr: "", exitCode: 0 };
+    if (full.includes("branch -r --no-merged origin/main")) return { stdout: "", stderr: "", exitCode: 0 };
+    if (full.includes("branch -r --format=%(refname:short)")) return { stdout: "origin/main\n", stderr: "", exitCode: 0 };
+    if (full.includes("status --short")) return { stdout: "", stderr: "", exitCode: 0 };
+    return { stdout: "", stderr: "", exitCode: 0 };
+  };
+
+  const diag = await runGitSyncInspection({ cwd: "/home/user/repo", execFn: mockExec });
+  assert.ok(diag.worktree);
+  assert.equal(diag.worktree.isMainWorktree, true);
+  assert.equal(diag.worktree.currentWorktreePath, "/home/user/repo");
+  assert.equal(diag.worktree.mainWorktreePath, "/home/user/repo");
+  assert.equal(diag.worktree.worktrees.length, 1);
+  assert.equal(diag.worktree.worktrees[0].isMain, true);
+  assert.equal(diag.worktree.worktrees[0].isCurrent, true);
+  assert.match(diag.formattedReport, /- \*\*Worktree\*\*: `main` \(base repository\)/);
+  assert.doesNotMatch(diag.formattedReport, /#### Active Worktrees/);
+});
+
+test("MINI-002: Git Inspection Engine - linked worktree detection (git-dir !== git-common-dir)", async () => {
+  const { runGitSyncInspection } = await import("../src/inspector.ts");
+
+  const mockExec = async (cmd, args) => {
+    const full = [cmd, ...args].join(" ");
+    if (full.includes("rev-parse --is-inside-work-tree")) return { stdout: "true\n", stderr: "", exitCode: 0 };
+    if (full.includes("rev-parse --git-dir --git-common-dir --show-toplevel")) {
+      return {
+        stdout: "/home/user/repo/.git/worktrees/feature-wt\n/home/user/repo/.git\n/home/user/repo-wt\n",
+        stderr: "",
+        exitCode: 0,
+      };
+    }
+    if (full.includes("worktree list --porcelain")) {
+      const wtPorcelain = [
+        "worktree /home/user/repo",
+        "HEAD 1111111111111111111111111111111111111111",
+        "branch refs/heads/main",
+        "",
+        "worktree /home/user/repo-wt",
+        "HEAD 2222222222222222222222222222222222222222",
+        "branch refs/heads/feature/task-wt",
+        "",
+      ].join("\n");
+      return { stdout: wtPorcelain, stderr: "", exitCode: 0 };
+    }
+    if (full.includes("fetch origin --prune")) return { stdout: "", stderr: "", exitCode: 0 };
+    if (full.includes("branch --show-current")) return { stdout: "feature/task-wt\n", stderr: "", exitCode: 0 };
+    if (full.includes("rev-parse --abbrev-ref @{upstream}")) return { stdout: "origin/feature/task-wt\n", stderr: "", exitCode: 0 };
+    if (full.includes("rev-list --left-right --count HEAD...@{upstream}")) return { stdout: "0\t0\n", stderr: "", exitCode: 0 };
+    if (full.includes("for-each-ref")) return { stdout: "main origin/main\nfeature/task-wt origin/feature/task-wt\n", stderr: "", exitCode: 0 };
+    if (full.includes("branch -r --no-merged origin/main")) return { stdout: "", stderr: "", exitCode: 0 };
+    if (full.includes("branch -r --format=%(refname:short)")) return { stdout: "origin/main\norigin/feature/task-wt\n", stderr: "", exitCode: 0 };
+    if (full.includes("status --short")) return { stdout: "", stderr: "", exitCode: 0 };
+    return { stdout: "", stderr: "", exitCode: 0 };
+  };
+
+  const diag = await runGitSyncInspection({ cwd: "/home/user/repo-wt", execFn: mockExec });
+  assert.ok(diag.worktree);
+  assert.equal(diag.worktree.isMainWorktree, false);
+  assert.equal(diag.worktree.currentWorktreePath, "/home/user/repo-wt");
+  assert.equal(diag.worktree.mainWorktreePath, "/home/user/repo");
+  assert.equal(diag.worktree.worktrees.length, 2);
+  assert.equal(diag.worktree.worktrees[0].isMain, true);
+  assert.equal(diag.worktree.worktrees[0].isCurrent, false);
+  assert.equal(diag.worktree.worktrees[1].isMain, false);
+  assert.equal(diag.worktree.worktrees[1].isCurrent, true);
+  assert.match(diag.formattedReport, /- \*\*Worktree\*\*: `linked` \(base: `\/home\/user\/repo`\)/);
+  assert.match(diag.formattedReport, /#### Active Worktrees/);
+  assert.match(diag.formattedReport, /`\/home\/user\/repo`: branch `main` \[HEAD 1111111\] \(base\)/);
+  assert.match(diag.formattedReport, /`\/home\/user\/repo-wt`: branch `feature\/task-wt` \[HEAD 2222222\] \(current\)/);
+});
+
+test("MINI-002: Git Inspection Engine - fallback when worktree list fails", async () => {
+  const { runGitSyncInspection } = await import("../src/inspector.ts");
+
+  const mockExec = async (cmd, args) => {
+    const full = [cmd, ...args].join(" ");
+    if (full.includes("rev-parse --is-inside-work-tree")) return { stdout: "true\n", stderr: "", exitCode: 0 };
+    if (full.includes("rev-parse --git-dir --git-common-dir --show-toplevel")) {
+      return { stdout: ".git\n.git\n/home/user/repo\n", stderr: "", exitCode: 0 };
+    }
+    if (full.includes("worktree list --porcelain")) {
+      throw new Error("git worktree list: command not supported (Git 2.5)");
+    }
+    if (full.includes("fetch origin --prune")) return { stdout: "", stderr: "", exitCode: 0 };
+    if (full.includes("branch --show-current")) return { stdout: "main\n", stderr: "", exitCode: 0 };
+    if (full.includes("rev-parse --abbrev-ref @{upstream}")) return { stdout: "origin/main\n", stderr: "", exitCode: 0 };
+    if (full.includes("rev-list --left-right --count HEAD...@{upstream}")) return { stdout: "0\t0\n", stderr: "", exitCode: 0 };
+    if (full.includes("for-each-ref")) return { stdout: "main origin/main\n", stderr: "", exitCode: 0 };
+    if (full.includes("branch -r --no-merged origin/main")) return { stdout: "", stderr: "", exitCode: 0 };
+    if (full.includes("branch -r --format=%(refname:short)")) return { stdout: "origin/main\n", stderr: "", exitCode: 0 };
+    if (full.includes("status --short")) return { stdout: "", stderr: "", exitCode: 0 };
+    return { stdout: "", stderr: "", exitCode: 0 };
+  };
+
+  const diag = await runGitSyncInspection({ cwd: "/home/user/repo", execFn: mockExec });
+  assert.ok(diag.worktree);
+  assert.equal(diag.worktree.isMainWorktree, true);
+  assert.equal(diag.worktree.currentWorktreePath, "/home/user/repo");
+  assert.equal(diag.worktree.worktrees.length, 1);
+  assert.equal(diag.worktree.worktrees[0].path, "/home/user/repo");
+  assert.match(diag.formattedReport, /- \*\*Worktree\*\*: `main` \(base repository\)/);
+});
+
+test("MINI-003: Report Formatting - multi-worktree tags and cross-worktree collision warning", async () => {
+  const { formatDiagnosticReport } = await import("../src/inspector.ts");
+
+  const diag = {
+    timestamp: Date.now(),
+    fetchSuccess: true,
+    currentBranch: { branch: "feature/wt-a", syncStatus: "UP-TO-DATE", ahead: 0, behind: 0, incomingCommits: [] },
+    otherLocalBranches: [
+      { branch: "feature/wt-b", upstream: "origin/feature/wt-b", ahead: 0, behind: 0, syncStatus: "UP-TO-DATE" },
+      { branch: "feature/idle", ahead: 0, behind: 0, syncStatus: "UNTRACKED" },
+    ],
+    remoteBranches: ["origin/main", "origin/feature/wt-a", "origin/feature/wt-b"],
+    remoteOnlyBranches: [],
+    activeCollaboratorBranches: [],
+    workingTree: { isClean: true, modifiedCount: 0, untrackedCount: 0, stagedCount: 0, summaryLines: [] },
+    isBranchPolicyCompliant: true,
+    requiresDecision: false,
+    worktree: {
+      isMainWorktree: false,
+      currentWorktreePath: "/repo-wt-a",
+      mainWorktreePath: "/repo",
+      worktrees: [
+        { path: "/repo", head: "aaaaaaa111111111111111111111111111111111", branch: "main", isMain: true, isCurrent: false },
+        { path: "/repo-wt-a", head: "bbbbbbb222222222222222222222222222222222", branch: "feature/wt-a", isMain: false, isCurrent: true },
+        { path: "/repo-wt-b", head: "ccccccc333333333333333333333333333333333", branch: "feature/wt-b", isMain: false, isCurrent: false, locked: "locked for review" },
+        { path: "/repo-wt-c", head: "ddddddd444444444444444444444444444444444", isMain: false, isCurrent: false, detached: true, prunable: true },
+      ],
+    },
+  };
+
+  const report = formatDiagnosticReport(diag);
+
+  // Header check
+  assert.match(report, /- \*\*Worktree\*\*: `linked` \(base: `\/repo`\)/);
+
+  // Active worktrees check
+  assert.match(report, /#### Active Worktrees/);
+  assert.match(report, /`\/repo`: branch `main` \[HEAD aaaaaaa\] \(base\)/);
+  assert.match(report, /`\/repo-wt-a`: branch `feature\/wt-a` \[HEAD bbbbbbb\] \(current\)/);
+  assert.match(report, /`\/repo-wt-b`: branch `feature\/wt-b` \[HEAD ccccccc\] \[locked: locked for review\]/);
+  assert.match(report, /`\/repo-wt-c`: branch `detached` \[HEAD ddddddd\] \[prunable\]/);
+
+  // Mutual checkout collision notice
+  assert.match(report, /Git prevents checking out branches that are already active in another worktree/);
+  assert.match(report, /`feature\/wt-b`: `UP-TO-DATE` \(`origin\/feature\/wt-b`\) \[active in worktree: `\/repo-wt-b`\]/);
+  assert.doesNotMatch(report, /`feature\/idle`.*active in worktree/);
+});
+
