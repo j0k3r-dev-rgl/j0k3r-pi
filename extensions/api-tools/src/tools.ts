@@ -11,7 +11,9 @@ import { getAuthMetadataStatus, redactDeep } from './security.js';
 import { executeSwaggerAction } from './swagger.js';
 import { DISCOVERY_PAGE_SIZE as SWAGGER_DISCOVERY_PAGE_SIZE } from './swagger/discovery.js';
 import { renderApiToolCall, renderApiToolResult } from './render.js';
-import type { ApiActionDocument, ApiClient, ApiToolResult, ApiToolsConfig, ApiWarning } from './types.js';
+import { resolveLocalAccount } from './accounts.js';
+import type { GitFileInspector } from './git.js';
+import type { ApiActionDocument, ApiClient, ApiToolResult, ApiToolsConfig, ApiWarning, DynamicCredentials } from './types.js';
 
 export const API_TOOL_NAMES = [
   'api_status',
@@ -29,9 +31,21 @@ export interface RegisterApiToolsOptions {
   createClient?: (options: { config: ApiToolsConfig; fetch?: FetchLike }) => ApiClient;
   fetch?: FetchLike;
   now?: () => Date;
+  gitFileInspector?: GitFileInspector;
 }
 
 const EMPTY_PARAMETERS = { type: 'object', additionalProperties: false, properties: {} } as const;
+
+const LOGIN_PARAMETERS = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    alias: {
+      type: 'string',
+      description: 'Account alias (role, username, or email) to resolve from local accounts file',
+    },
+  },
+} as const;
 
 const SWAGGER_PARAMETERS = {
   type: 'object',
@@ -220,17 +234,86 @@ async function persistAccessToken(config: ApiToolsConfig, accessToken: string): 
   if (!config.secretValues.includes(accessToken)) config.secretValues.push(accessToken);
 }
 
-async function executeLoginTool(signal: AbortSignal | undefined, config: ApiToolsConfig, client: ApiClient): Promise<ApiActionDocument> {
-  if (config.auth.type !== 'login') return failureDocument({ tool: 'api_rest_request', action: 'login', failure: classifyError('api_rest_request', 'login', new ApiClientError('configuration', 'Login auth is not configured.')) });
+async function executeLoginTool(
+  params: Record<string, unknown>,
+  signal: AbortSignal | undefined,
+  config: ApiToolsConfig,
+  client: ApiClient,
+  cwd: string,
+  gitInspector?: GitFileInspector,
+): Promise<ApiActionDocument> {
+  if (config.auth.type !== 'login') {
+    return failureDocument({
+      tool: 'api_rest_request',
+      action: 'login',
+      failure: classifyError('api_rest_request', 'login', new ApiClientError('configuration', 'Login auth is not configured.')),
+    });
+  }
+
+  if (params && typeof params === 'object') {
+    const extraKeys = Object.keys(params).filter((key) => key !== 'alias');
+    if (extraKeys.length > 0) {
+      return failureDocument({
+        tool: 'api_rest_request',
+        action: 'login',
+        failure: {
+          category: 'validation_error',
+          code: 'api_tools.validation.invalid_parameters',
+          message: `Unexpected parameter(s): ${extraKeys.join(', ')}. api_login accepts only optional alias.`,
+          retryable: false,
+          next_step: 'Call api_login with optional alias only.',
+        },
+      });
+    }
+  }
+
+  const requestedAlias = typeof params?.alias === 'string' && params.alias.trim()
+    ? params.alias.trim()
+    : (config.auth.account_alias ? config.auth.account_alias.trim() : undefined);
+
+  let credentials: DynamicCredentials | undefined;
+  let identity = 'api_login';
+
   try {
-    const response = await client.login(signal);
+    if (requestedAlias || config.auth.accounts_file) {
+      if (!config.auth.accounts_file) {
+        throw new ApiClientError('configuration', 'accounts_file is not configured in auth config.');
+      }
+      if (!requestedAlias) {
+        throw new ApiClientError('configuration', 'No account alias provided and no default account_alias configured.');
+      }
+      const resolved = await resolveLocalAccount({
+        cwd,
+        accountsFile: config.auth.accounts_file,
+        alias: requestedAlias,
+        secretValues: config.secretValues,
+        gitInspector,
+      });
+      credentials = { identifier: resolved.identifier, password: resolved.password };
+      identity = `api_login [${requestedAlias}]`;
+    } else {
+      if (!config.auth.username || !config.auth.password) {
+        throw new ApiClientError('configuration', 'Login auth credentials (username/password or accounts_file) are not configured.');
+      }
+      credentials = { identifier: config.auth.username, password: config.auth.password };
+    }
+
+    const response = await (credentials ? client.login(credentials, signal) : client.login(signal));
     const accessToken = extractAccessToken(response.bodyText);
-    if (!accessToken) return failureDocument({ tool: 'api_rest_request', action: 'login', failure: classifyError('api_rest_request', 'login', new ApiClientError('provider', 'Login response did not include access_token.')) });
+    if (!accessToken) {
+      return failureDocument({
+        tool: 'api_rest_request',
+        action: 'login',
+        identity,
+        failure: classifyError('api_rest_request', 'login', new ApiClientError('provider', 'Login response did not include access_token.')),
+      });
+    }
+
     await persistAccessToken(config, accessToken);
     return successDocument({
       tool: 'api_rest_request',
       action: 'login',
-      identity: 'api_login',
+      identity,
       records: [
         record('login-1', 'login', 'api_login: access_token persisted.'),
         record('login-2', 'response', `status: ${response.status} ${response.statusText}`),
@@ -238,7 +321,12 @@ async function executeLoginTool(signal: AbortSignal | undefined, config: ApiTool
       total: 2,
     });
   } catch (error) {
-    return failureDocument({ tool: 'api_rest_request', action: 'login', failure: classifyError('api_rest_request', 'login', error) });
+    return failureDocument({
+      tool: 'api_rest_request',
+      action: 'login',
+      identity,
+      failure: classifyError('api_rest_request', 'login', error),
+    });
   }
 }
 
@@ -322,7 +410,8 @@ function rejectCursorExecutionInputs(params: Record<string, unknown>): ApiToolRe
 export async function registerApiTools(pi: any, options: RegisterApiToolsOptions = {}): Promise<void> {
   if (!pi || typeof pi.registerTool !== 'function') return;
 
-  const config = await (options.loadConfig ?? loadApiConfig)({ cwd: options.cwd ?? process.cwd() });
+  const cwd = options.cwd ?? process.cwd();
+  const config = await (options.loadConfig ?? loadApiConfig)({ cwd });
   if (!config.exists || !config.enabled) return;
 
   const client = options.client ?? options.createClient?.({ config, fetch: options.fetch }) ?? createApiClient({ config, fetch: options.fetch });
@@ -369,8 +458,8 @@ export async function registerApiTools(pi: any, options: RegisterApiToolsOptions
     promptGuidelines: [
       'Use api_login only when the user asks to authenticate or api_auth_status shows a configured login flow is needed for the project API.',
     ],
-    parameters: EMPTY_PARAMETERS,
-    execute: async (_id: string, _params: Record<string, unknown>, signal?: AbortSignal) => continuation.finalize({ tool: 'api_rest_request', action: 'login', document: await executeLoginTool(signal, config, client), secretValues: config.secretValues, limits: { ...config.limits, maxRecordsPerPage: continuationPageLimit('api_rest_request', 'login') } }),
+    parameters: LOGIN_PARAMETERS,
+    execute: async (_id: string, params: Record<string, unknown>, signal?: AbortSignal) => continuation.finalize({ tool: 'api_rest_request', action: 'login', document: await executeLoginTool(params, signal, config, client, cwd, options.gitFileInspector), secretValues: config.secretValues, limits: { ...config.limits, maxRecordsPerPage: continuationPageLimit('api_rest_request', 'login') } }),
     ...buildRenderers('api_login'),
   });
 

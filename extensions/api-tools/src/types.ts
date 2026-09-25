@@ -31,7 +31,17 @@ export type ApiAuthConfig =
   | { type: 'basic'; username: string; password: string }
   | { type: 'api_key'; header: string; value: string }
   | { type: 'headers'; headers: Record<string, string> }
-  | { type: 'login'; login_path: string; username: string; password: string; access_token?: string };
+  | {
+      type: 'login';
+      login_path: string;
+      username?: string;
+      password?: string;
+      access_token?: string;
+      identifier_field?: string;
+      password_field?: string;
+      accounts_file?: string;
+      account_alias?: string;
+    };
 
 export interface ApiIntegrationState {
   configured: boolean;
@@ -94,8 +104,15 @@ export interface ApiHttpResponse {
   url?: string;
 }
 
+export interface DynamicCredentials {
+  identifier: string;
+  password: string;
+}
+
 export interface ApiClient {
   login(signal?: AbortSignal): Promise<ApiHttpResponse>;
+  login(credentials: DynamicCredentials, signal?: AbortSignal): Promise<ApiHttpResponse>;
+  login(credentialsOrSignal?: DynamicCredentials | AbortSignal, signal?: AbortSignal): Promise<ApiHttpResponse>;
   rest(request: ApiRestRequest, signal?: AbortSignal): Promise<ApiHttpResponse>;
   graphql(request: ApiGraphqlRequest, signal?: AbortSignal): Promise<ApiHttpResponse>;
   fetchSwaggerDocument(signal?: AbortSignal): Promise<SwaggerDocumentResponse>;

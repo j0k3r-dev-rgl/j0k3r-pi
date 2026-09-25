@@ -92,4 +92,69 @@ describe('loadApiConfig', () => {
     expect(config.limits.cursorTtlSeconds).toBe(86400);
     expect(config.warnings.map((warning) => warning.code)).toContain('limit_fallback_applied');
   });
+
+  it('parses legacy login auth with default identifier_field and password_field', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'api-tools-config-login-legacy-'));
+    await writeApiJson(cwd, JSON.stringify({
+      enabled: true,
+      url: 'https://api.example.test',
+      auth: {
+        type: 'login',
+        login_path: '/api/v1/auth/login',
+        username: 'legacy-user',
+        password: 'legacy-password',
+      },
+    }));
+    const config = await loadApiConfig({ cwd, gitInspector: gitInspector('ignored') });
+    expect(config.auth).toEqual({
+      type: 'login',
+      login_path: '/api/v1/auth/login',
+      username: 'legacy-user',
+      password: 'legacy-password',
+      identifier_field: 'username',
+      password_field: 'password',
+    });
+    expect(config.secretValues).toContain('legacy-password');
+    expect(config.warnings.filter((w) => w.code === 'unsupported_auth_metadata')).toHaveLength(0);
+  });
+
+  it('parses alias-enabled login auth without fixed credentials', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'api-tools-config-login-alias-'));
+    await writeApiJson(cwd, JSON.stringify({
+      enabled: true,
+      url: 'https://api.example.test',
+      auth: {
+        type: 'login',
+        login_path: '/api/v1/auth/login',
+        identifier_field: 'identifier',
+        password_field: 'password',
+        accounts_file: 'core-api/dev/.seed-credentials.json',
+        account_alias: 'PLATFORM_ADMIN',
+      },
+    }));
+    const config = await loadApiConfig({ cwd, gitInspector: gitInspector('ignored') });
+    expect(config.auth).toEqual({
+      type: 'login',
+      login_path: '/api/v1/auth/login',
+      identifier_field: 'identifier',
+      password_field: 'password',
+      accounts_file: 'core-api/dev/.seed-credentials.json',
+      account_alias: 'PLATFORM_ADMIN',
+    });
+    expect(config.warnings.filter((w) => w.code === 'unsupported_auth_metadata')).toHaveLength(0);
+  });
+
+  it('loads real project config from disa-rgl when executed against its directory', async () => {
+    const config = await loadApiConfig({ cwd: '/home/j0k3r/projects/disa-rgl' });
+    expect(config.exists).toBe(true);
+    expect(config.enabled).toBe(true);
+    expect(config.auth.type).toBe('login');
+    if (config.auth.type === 'login') {
+      expect(config.auth.login_path).toBe('/api/v1/auth/login');
+      expect(config.auth.identifier_field).toBe('identifier');
+      expect(config.auth.accounts_file).toBe('core-api/dev/.seed-credentials.json');
+      expect(config.auth.account_alias).toBe('PLATFORM_ADMIN');
+    }
+    expect(config.git.state).toBe('ignored');
+  });
 });

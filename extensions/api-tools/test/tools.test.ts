@@ -259,4 +259,147 @@ describe('api-tools registration and v2 contracts', () => {
     expect(persisted.auth.access_token).toBe('fresh-token');
     expect(JSON.stringify(result)).not.toContain('fresh-token');
   });
+
+  it('exposes alias parameter on api_login and rejects direct password or unknown parameters', async () => {
+    const pi = createMockPi();
+    await registerApiTools(pi, optionsFor(createConfig({
+      auth: { type: 'login', login_path: '/login', username: 'test', password: 'test' },
+    }), createMockClient()));
+    const loginTool = pi.tools.find((tool) => tool.name === 'api_login');
+    expect(loginTool.parameters).toEqual({
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        alias: {
+          type: 'string',
+          description: expect.any(String),
+        },
+      },
+    });
+
+    const result = await execute(loginTool, { password: 'secret-password' } as any);
+    expect(result.details.status).toBe('failure');
+    expect(result.details.failure.category).toBe('validation_error');
+    expect(JSON.stringify(result)).not.toContain('secret-password');
+  });
+
+  it('executes alias-based login from accounts_file, persists token, and redacts resolved secrets', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'api-tools-alias-login-'));
+    await mkdir(join(cwd, '.pi'), { recursive: true });
+    await mkdir(join(cwd, 'dev'), { recursive: true });
+
+    const accounts = [
+      { role: 'PLATFORM_ADMIN', username: 'admin_user', email: 'admin@test.local', password: 'secret-admin-pass-xyz' },
+    ];
+    await writeFile(join(cwd, 'dev', '.accounts.json'), JSON.stringify(accounts), 'utf8');
+
+    const apiJson = {
+      enabled: true,
+      url: 'https://api.example.test/base/',
+      auth: {
+        type: 'login',
+        login_path: '/auth/login',
+        identifier_field: 'identifier',
+        accounts_file: 'dev/.accounts.json',
+      },
+    };
+    await writeFile(join(cwd, '.pi', 'api.json'), JSON.stringify(apiJson, null, 2), 'utf8');
+
+    const client = createMockClient();
+    const pi = createMockPi();
+    const config = createConfig({
+      configPath: join(cwd, '.pi', 'api.json'),
+      auth: {
+        type: 'login',
+        login_path: '/auth/login',
+        identifier_field: 'identifier',
+        password_field: 'password',
+        accounts_file: 'dev/.accounts.json',
+      },
+      secretValues: [],
+    });
+
+    // Provide gitInspector that marks accounts file as ignored
+    const gitInspector = {
+      inspectFile: vi.fn(async () => 'ignored' as const),
+    };
+
+    await registerApiTools(pi, optionsFor(config, client, {
+      cwd,
+      gitFileInspector: gitInspector as any,
+    }));
+
+    const loginTool = pi.tools.find((tool) => tool.name === 'api_login');
+    const result = await execute(loginTool, { alias: 'PLATFORM_ADMIN' });
+
+    expect(result.details.status).toBe('success');
+    expect(result.details.identity).toBe('api_login [PLATFORM_ADMIN]');
+    expect(client.login).toHaveBeenCalledWith(
+      { identifier: 'admin_user', password: 'secret-admin-pass-xyz' },
+      undefined,
+    );
+
+    const persisted = JSON.parse(await readFile(join(cwd, '.pi', 'api.json'), 'utf8'));
+    expect(persisted.auth.access_token).toBe('fresh-token');
+
+    // Password must be redacted and never leaked
+    expect(JSON.stringify(result)).not.toContain('secret-admin-pass-xyz');
+  });
+
+  it('falls back to config.auth.account_alias when alias is omitted from api_login params', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'api-tools-alias-fallback-'));
+    await mkdir(join(cwd, '.pi'), { recursive: true });
+    await mkdir(join(cwd, 'dev'), { recursive: true });
+
+    const accounts = [
+      { role: 'DEFAULT_ROLE', username: 'default_user', email: 'default@test.local', password: 'secret-default-pass' },
+    ];
+    await writeFile(join(cwd, 'dev', '.accounts.json'), JSON.stringify(accounts), 'utf8');
+
+    const apiJson = {
+      enabled: true,
+      url: 'https://api.example.test/base/',
+      auth: {
+        type: 'login',
+        login_path: '/auth/login',
+        accounts_file: 'dev/.accounts.json',
+        account_alias: 'DEFAULT_ROLE',
+      },
+    };
+    await writeFile(join(cwd, '.pi', 'api.json'), JSON.stringify(apiJson, null, 2), 'utf8');
+
+    const client = createMockClient();
+    const pi = createMockPi();
+    const config = createConfig({
+      configPath: join(cwd, '.pi', 'api.json'),
+      auth: {
+        type: 'login',
+        login_path: '/auth/login',
+        identifier_field: 'username',
+        password_field: 'password',
+        accounts_file: 'dev/.accounts.json',
+        account_alias: 'DEFAULT_ROLE',
+      },
+      secretValues: [],
+    });
+
+    const gitInspector = {
+      inspectFile: vi.fn(async () => 'ignored' as const),
+    };
+
+    await registerApiTools(pi, optionsFor(config, client, {
+      cwd,
+      gitFileInspector: gitInspector as any,
+    }));
+
+    const loginTool = pi.tools.find((tool) => tool.name === 'api_login');
+    const result = await execute(loginTool, {});
+
+    expect(result.details.status).toBe('success');
+    expect(result.details.identity).toBe('api_login [DEFAULT_ROLE]');
+    expect(client.login).toHaveBeenCalledWith(
+      { identifier: 'default_user', password: 'secret-default-pass' },
+      undefined,
+    );
+  });
 });

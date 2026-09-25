@@ -204,8 +204,12 @@ export function extractApiToolAction(toolName: string, args: any): string | unde
     case 'api_status':
       return undefined;
     case 'api_auth_status':
-    case 'api_login':
       return typeof args.provider === 'string' && args.provider.trim() ? args.provider.trim() : undefined;
+    case 'api_login': {
+      if (typeof args.alias === 'string' && args.alias.trim()) return args.alias.trim();
+      if (typeof args.provider === 'string' && args.provider.trim()) return args.provider.trim();
+      return undefined;
+    }
     case 'api_rest_request': {
       const method = typeof args.method === 'string' ? args.method.trim() : '';
       const path = typeof args.path === 'string' ? args.path.trim() : '';

@@ -91,16 +91,34 @@ function parseAuth(value: unknown, warnings: ApiWarning[]): ApiAuthConfig {
         : { type: 'none' };
     case 'headers':
       return { type: 'headers', headers: parseHeaders(record.headers, warnings) };
-    case 'login':
-      return typeof record.login_path === 'string' && typeof record.username === 'string' && typeof record.password === 'string'
-        ? {
-          type: 'login',
-          login_path: record.login_path,
-          username: record.username,
-          password: record.password,
-          ...(typeof record.access_token === 'string' ? { access_token: record.access_token } : {}),
-        }
-        : { type: 'none' };
+    case 'login': {
+      if (typeof record.login_path !== 'string') return { type: 'none' };
+      const hasFixedCredentials = typeof record.username === 'string' && typeof record.password === 'string';
+      const accountsFile = typeof record.accounts_file === 'string' && record.accounts_file.trim() ? record.accounts_file.trim() : undefined;
+      if (!hasFixedCredentials && !accountsFile) return { type: 'none' };
+
+      const identifierField = typeof record.identifier_field === 'string' && record.identifier_field.trim()
+        ? record.identifier_field.trim()
+        : 'username';
+      const passwordField = typeof record.password_field === 'string' && record.password_field.trim()
+        ? record.password_field.trim()
+        : 'password';
+      const accountAlias = typeof record.account_alias === 'string' && record.account_alias.trim()
+        ? record.account_alias.trim()
+        : undefined;
+
+      return {
+        type: 'login',
+        login_path: record.login_path,
+        identifier_field: identifierField,
+        password_field: passwordField,
+        ...(accountsFile ? { accounts_file: accountsFile } : {}),
+        ...(accountAlias ? { account_alias: accountAlias } : {}),
+        ...(typeof record.username === 'string' ? { username: record.username } : {}),
+        ...(typeof record.password === 'string' ? { password: record.password } : {}),
+        ...(typeof record.access_token === 'string' ? { access_token: record.access_token } : {}),
+      };
+    }
     case undefined:
       return { type: 'none' };
     default:

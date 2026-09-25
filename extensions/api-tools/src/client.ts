@@ -6,6 +6,7 @@ import type {
   ApiHttpResponse,
   ApiRestRequest,
   ApiToolsConfig,
+  DynamicCredentials,
   SwaggerDocumentResponse,
 } from './types.js';
 
@@ -256,8 +257,23 @@ export function createApiClient(options: CreateApiClientOptions): ApiClient {
   if (!fetchImpl) throw err('configuration', 'API client requires an injected fetch implementation.');
 
   return {
-    async login(signal?: AbortSignal): Promise<ApiHttpResponse> {
+    async login(credentialsOrSignal?: DynamicCredentials | AbortSignal, maybeSignal?: AbortSignal): Promise<ApiHttpResponse> {
       if (options.config.auth.type !== 'login') throw err('configuration', 'Login auth is not configured.');
+      const auth = options.config.auth;
+      const isSignal = credentialsOrSignal instanceof AbortSignal || (credentialsOrSignal && typeof (credentialsOrSignal as any).addEventListener === 'function');
+      const credentials = isSignal ? undefined : (credentialsOrSignal as DynamicCredentials | undefined);
+      const signal = isSignal ? (credentialsOrSignal as AbortSignal) : maybeSignal;
+
+      const identifierField = auth.identifier_field || 'username';
+      const passwordField = auth.password_field || 'password';
+
+      const identifier = credentials ? credentials.identifier : auth.username;
+      const password = credentials ? credentials.password : auth.password;
+
+      if (!identifier || !password) {
+        throw err('configuration', 'Login credentials are required.');
+      }
+
       const url = buildLoginUrl(options.config);
       return executeRequest(fetchImpl, url, {
         method: 'POST',
@@ -265,7 +281,7 @@ export function createApiClient(options: CreateApiClientOptions): ApiClient {
           accept: 'application/json',
           'content-type': 'application/json',
         }, false),
-        body: JSON.stringify({ username: options.config.auth.username, password: options.config.auth.password }),
+        body: JSON.stringify({ [identifierField]: identifier, [passwordField]: password }),
       }, {
         timeoutMs: options.config.timeoutMs,
         externalSignal: signal,
