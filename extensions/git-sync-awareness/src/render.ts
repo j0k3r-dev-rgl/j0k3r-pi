@@ -198,44 +198,6 @@ export function formatNetworkStatusBadge(
   return `${AMBER}offline${fetchError ? ` (${fetchError})` : ''}${RESET}`;
 }
 
-/**
- * Format the Decision Gate inner mini-box.
- */
-function renderDecisionGateBox(
-  diagnostic: GitSyncDiagnostic,
-  boxWidth: number
-): string[] {
-  const inner = Math.max(10, boxWidth - 2);
-  const isSafe = !diagnostic.requiresDecision;
-  const borderColor = isSafe ? LIME : RED;
-
-  let reason = 'Action required before proceeding: pull remote or resolve working tree';
-  if (diagnostic.currentBranch.syncStatus === 'BEHIND') {
-    reason = `Branch is ${diagnostic.currentBranch.behind} commits behind remote upstream.`;
-  } else if (diagnostic.currentBranch.syncStatus === 'DIVERGED') {
-    reason = `Branch diverged (ahead ${diagnostic.currentBranch.ahead}, behind ${diagnostic.currentBranch.behind}).`;
-  } else if (!diagnostic.workingTree.isClean) {
-    reason = 'Working tree has uncommitted local changes.';
-  }
-
-  const lines: string[] = [];
-
-  if (isSafe) {
-    const top = `${borderColor}╭─ ${LIME}✔ Safe to proceed${RESET} ${borderColor}${'─'.repeat(Math.max(1, inner - 19))}╮${RESET}`;
-    const mid = `${borderColor}│${RESET} ${pad('Working tree clean and synchronized with upstream.', inner - 2)} ${borderColor}│${RESET}`;
-    const bot = `${borderColor}╰${'─'.repeat(inner)}╯${RESET}`;
-    lines.push(top, mid, bot);
-  } else {
-    const top = `${borderColor}╭─ ${RED}⚠ MANDATORY DECISION GATE${RESET} ${borderColor}${'─'.repeat(Math.max(1, inner - 27))}╮${RESET}`;
-    const mid1 = `${borderColor}│${RESET} ${pad(`${RED}${BOLD}Review or synchronize before continuing:${RESET}`, inner - 2)} ${borderColor}│${RESET}`;
-    const mid2 = `${borderColor}│${RESET} ${pad(reason, inner - 2)} ${borderColor}│${RESET}`;
-    const bot = `${borderColor}╰${'─'.repeat(inner)}╯${RESET}`;
-    lines.push(top, mid1, mid2, bot);
-  }
-
-  return lines;
-}
-
 export interface GitSyncMessageRenderer {
   render(width: number): string[];
   handleMouse?(event: any): { handled?: boolean; render?: boolean } | undefined;
@@ -333,17 +295,6 @@ export function createGitSyncMessageRenderer(
           cardBorderColor
         )
       );
-
-      // Branch Policy Warning
-      if (!diagnostic.isBranchPolicyCompliant && diagnostic.branchPolicyWarning) {
-        lines.push(
-          boxLine(
-            `${AMBER}⚠ Policy: ${diagnostic.branchPolicyWarning}${RESET}`,
-            innerWidth,
-            cardBorderColor
-          )
-        );
-      }
 
       // Incoming Remote Commits
       if (
@@ -517,14 +468,6 @@ export function createGitSyncMessageRenderer(
             )
           );
         }
-      }
-
-      // Decision Gate Box
-      lines.push(boxLine('', innerWidth, cardBorderColor));
-      const contentInner = Math.max(10, innerWidth - 2);
-      const gateLines = renderDecisionGateBox(diagnostic, contentInner);
-      for (const gLine of gateLines) {
-        lines.push(boxLine(gLine, innerWidth, cardBorderColor));
       }
 
       // Bottom Border

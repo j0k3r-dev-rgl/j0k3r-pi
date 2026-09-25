@@ -249,12 +249,6 @@ export function formatDiagnosticReport(diag: Omit<GitSyncDiagnostic, 'formattedR
     }
   }
 
-  if (diag.branchPolicyWarning) {
-    parts.push(`- **Branch Policy**: ⚠️ ${diag.branchPolicyWarning}`);
-  } else {
-    parts.push('- **Branch Policy**: `Compliant`');
-  }
-
   if (diag.currentBranch.incomingCommits.length > 0) {
     parts.push('\n#### Incoming Remote Commits');
     for (const commit of diag.currentBranch.incomingCommits) {
@@ -279,7 +273,6 @@ export function formatDiagnosticReport(diag: Omit<GitSyncDiagnostic, 'formattedR
       const tagStr = tags.length > 0 ? ` ${tags.join(' ')}` : '';
       parts.push(`- \`${wt.path}\`: branch ${branchDisplay}${shortHead}${tagStr}`);
     }
-    parts.push('\n> **Note**: Git prevents checking out branches that are already active in another worktree.');
   }
 
   if (diag.otherLocalBranches.length > 0) {
@@ -329,28 +322,6 @@ export function formatDiagnosticReport(diag: Omit<GitSyncDiagnostic, 'formattedR
       : diag.remoteOnlyBranches.includes(remote) ? 'remote-only' : 'no tracking local branch';
     const unmerged = diag.activeCollaboratorBranches.includes(remote) ? ' *(unmerged into main)*' : '';
     parts.push(`- \`${remote}\`: ${relation}${unmerged}`);
-  }
-
-  parts.push('\n#### Recommended Action / Decision Gate');
-  if (diag.currentBranch.syncStatus === 'BEHIND') {
-    parts.push(
-      `> **MANDATORY DECISION GATE**: Current branch is BEHIND remote by ${diag.currentBranch.behind} commit(s).\n` +
-      '> Automatic pull or merge is strictly prohibited.\n' +
-      '> Prompt user before proceeding: fast-forward (`git pull --ff-only`), rebase (`git pull --rebase`), or continue as is.'
-    );
-  } else if (diag.currentBranch.syncStatus === 'DIVERGED') {
-    parts.push(
-      `> **MANDATORY DECISION GATE**: Current branch has DIVERGED from remote (ahead ${diag.currentBranch.ahead}, behind ${diag.currentBranch.behind}).\n` +
-      '> Automatic merge or rebase is strictly prohibited.\n' +
-      '> Prompt user for resolution strategy before making file modifications.'
-    );
-  } else if (!diag.workingTree.isClean) {
-    parts.push(
-      '> **NOTICE**: Working tree has uncommitted or untracked changes.\n' +
-      '> Verify or stash working changes before synchronizing or creating new branches.'
-    );
-  } else {
-    parts.push('> **Status**: Safe to proceed with development.');
   }
 
   return parts.join('\n');

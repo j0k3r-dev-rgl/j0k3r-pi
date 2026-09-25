@@ -56,7 +56,7 @@ test("MINI-001: Git Inspection Engine - UP-TO-DATE and clean state", async () =>
   assert.equal(diag.workingTree.isClean, true);
   assert.equal(diag.requiresDecision, false);
   assert.match(diag.formattedReport, /UP-TO-DATE/);
-  assert.match(diag.formattedReport, /Safe to proceed/);
+  assert.doesNotMatch(diag.formattedReport, /Branch Policy|Recommended Action|Decision Gate|Safe to proceed/i);
 });
 
 test("MINI-001: Git Inspection Engine - BEHIND state with preview commits triggers decision gate", async () => {
@@ -88,7 +88,7 @@ test("MINI-001: Git Inspection Engine - BEHIND state with preview commits trigge
   assert.equal(diag.currentBranch.incomingCommits.length, 2);
   assert.equal(diag.requiresDecision, true);
   assert.match(diag.formattedReport, /BEHIND \[2\]/);
-  assert.match(diag.formattedReport, /MANDATORY DECISION GATE/);
+  assert.doesNotMatch(diag.formattedReport, /MANDATORY DECISION GATE|Prompt user|Automatic pull/i);
   assert.match(diag.formattedReport, /Fix race condition/);
 });
 
@@ -257,7 +257,7 @@ test("MINI-001: Git Inspection Engine - DIVERGED state with incoming commits and
   assert.equal(diag.currentBranch.behind, 3);
   assert.equal(diag.requiresDecision, true);
   assert.match(diag.formattedReport, /DIVERGED \(ahead 2, behind 3\)/);
-  assert.match(diag.formattedReport, /MANDATORY DECISION GATE/);
+  assert.doesNotMatch(diag.formattedReport, /MANDATORY DECISION GATE|Prompt user|Automatic merge/i);
 });
 
 test("MINI-001: Git Inspection Engine - Non-compliant branch naming policy warning", async () => {
@@ -643,7 +643,7 @@ test("MINI-003: Report Formatting - multi-worktree tags and cross-worktree colli
   assert.match(report, /`\/repo-wt-c`: branch `detached` \[HEAD ddddddd\] \[prunable\]/);
 
   // Mutual checkout collision notice
-  assert.match(report, /Git prevents checking out branches that are already active in another worktree/);
+  assert.doesNotMatch(report, /Git prevents checking out branches that are already active in another worktree/);
   assert.match(report, /`feature\/wt-b`: `UP-TO-DATE` \(`origin\/feature\/wt-b`\) \[active in worktree: `\/repo-wt-b`\]/);
   assert.doesNotMatch(report, /`feature\/idle`.*active in worktree/);
 });
