@@ -87,7 +87,7 @@ export function collectConfiguredSecrets(input: {
       secrets.push(...Object.values(input.auth.headers));
       break;
     case 'login':
-      secrets.push(input.auth.password);
+      if (input.auth.password) secrets.push(input.auth.password);
       if (input.auth.access_token) secrets.push(input.auth.access_token);
       break;
     case 'none':

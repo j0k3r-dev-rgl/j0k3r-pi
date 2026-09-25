@@ -38,6 +38,13 @@ The extension reads exactly `<ctx.cwd>/.pi/api.json`.
     "max_response_lines": 2000,
     "cursor_ttl_seconds": 3600
   },
+  "auth": {
+    "type": "login",
+    "login_path": "/api/v1/auth/login",
+    "identifier_field": "identifier",
+    "accounts_file": "core-api/dev/.seed-credentials.json",
+    "account_alias": "PLATFORM_ADMIN"
+  },
   "swagger": {
     "enabled": true,
     "framework": "spring"
@@ -49,6 +56,26 @@ The extension reads exactly `<ctx.cwd>/.pi/api.json`.
   "graphql_url": "https://api.example.com/base/graphql"
 }
 ```
+
+### Authentication configuration
+
+`auth` supports `none`, `bearer`, `basic`, `api_key`, `headers`, and `login`.
+
+For `type: "login"`:
+- `login_path`: relative login path (required)
+- `identifier_field`: JSON property name for the identifier in the login body (optional, defaults to `"username"`)
+- `password_field`: JSON property name for the password in the login body (optional, defaults to `"password"`)
+- `accounts_file`: project-relative path to a git-ignored accounts JSON file (optional)
+- `account_alias`: default alias to authenticate with if no alias argument is supplied (optional)
+- `username` / `password`: fixed static credentials for legacy backward compatibility (optional)
+
+### Local accounts and alias resolution
+
+When `accounts_file` is configured:
+- Path security: strictly project-relative; path traversal (`..`, `%2e`), backslashes, control characters, and symlinks escaping project root are rejected.
+- Git safety: the file must not be tracked by git and must be explicitly git-ignored.
+- Alias matching: case-insensitive against `role`, `username`, or `email`.
+- Secret protection: all passwords parsed from the file are dynamically registered in the redaction list; raw passwords never appear in tool parameters, results, or logs.
 
 ## Contract version 2
 
@@ -89,6 +116,15 @@ Primary categories:
 - `unknown_error`
 
 ## Tool contracts
+
+### `api_login`
+
+Authenticates against the configured login endpoint and persists `access_token` into `.pi/api.json`.
+
+Parameters:
+- `alias` (optional string): account alias (role, username, or email) to resolve from `accounts_file`.
+
+Direct passwords or tokens are disallowed in tool inputs. If `alias` is omitted, the configured `account_alias` default or legacy fixed credentials are used.
 
 ### `api_swagger`
 

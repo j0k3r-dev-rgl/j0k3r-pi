@@ -153,6 +153,7 @@ describe('renderApiToolResult', () => {
   it('extracts API action badge correctly for all tool types', () => {
     expect(extractApiToolAction('api_status', {})).toBeUndefined();
     expect(extractApiToolAction('api_auth_status', { provider: 'github' })).toBe('github');
+    expect(extractApiToolAction('api_login', { alias: 'PLATFORM_ADMIN' })).toBe('PLATFORM_ADMIN');
     expect(extractApiToolAction('api_login', { provider: 'okta' })).toBe('okta');
     expect(extractApiToolAction('api_rest_request', { method: 'GET', path: '/users' })).toBe('GET /users');
     expect(extractApiToolAction('api_swagger', { action: 'detail', operation: 'getUser' })).toBe('detail getUser');

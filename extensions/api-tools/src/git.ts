@@ -13,6 +13,10 @@ export interface GitCommandResult {
 
 export type GitCommandRunner = (command: string[], options: { cwd: string }) => Promise<GitCommandResult>;
 
+export interface GitFileInspector {
+  inspectFile(input: { cwd: string; relativePath: string }): Promise<'ignored' | 'unignored_untracked' | 'tracked' | 'unknown'>;
+}
+
 async function defaultRunCommand(command: string[], options: { cwd: string }): Promise<GitCommandResult> {
   try {
     const { stdout, stderr } = await execFileAsync(command[0]!, command.slice(1), { cwd: options.cwd, encoding: 'utf8' });
@@ -26,22 +30,33 @@ async function defaultRunCommand(command: string[], options: { cwd: string }): P
   }
 }
 
-export function createApiJsonGitInspector(options: { runCommand?: GitCommandRunner } = {}): ApiJsonGitInspector {
+export function createGitFileInspector(options: { runCommand?: GitCommandRunner } = {}): GitFileInspector {
   const runCommand = options.runCommand ?? defaultRunCommand;
 
   return {
-    async inspectApiJson({ cwd }) {
+    async inspectFile({ cwd, relativePath }: { cwd: string; relativePath: string }) {
       try {
-        const tracked = await runCommand(['git', 'ls-files', '--error-unmatch', API_JSON_RELATIVE_PATH], { cwd });
-        if (tracked.exitCode === 0) return { state: 'tracked' };
+        const tracked = await runCommand(['git', 'ls-files', '--error-unmatch', relativePath], { cwd });
+        if (tracked.exitCode === 0) return 'tracked';
 
-        const ignored = await runCommand(['git', 'check-ignore', API_JSON_RELATIVE_PATH], { cwd });
-        if (ignored.exitCode === 0) return { state: 'ignored' };
-        if (ignored.exitCode === 1) return { state: 'unignored_untracked' };
-        return { state: 'unknown' };
+        const ignored = await runCommand(['git', 'check-ignore', relativePath], { cwd });
+        if (ignored.exitCode === 0) return 'ignored';
+        if (ignored.exitCode === 1) return 'unignored_untracked';
+        return 'unknown';
       } catch {
-        return { state: 'unknown' };
+        return 'unknown';
       }
+    },
+  };
+}
+
+export function createApiJsonGitInspector(options: { runCommand?: GitCommandRunner } = {}): ApiJsonGitInspector {
+  const fileInspector = createGitFileInspector(options);
+
+  return {
+    async inspectApiJson({ cwd }) {
+      const state = await fileInspector.inspectFile({ cwd, relativePath: API_JSON_RELATIVE_PATH });
+      return { state };
     },
   };
 }

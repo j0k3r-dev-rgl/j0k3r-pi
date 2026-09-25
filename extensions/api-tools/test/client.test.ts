@@ -115,4 +115,67 @@ describe('api-tools client runtime', () => {
     await expect(client.graphql({ query: '{ viewer { id } }' }, externalController.signal)).rejects.toMatchObject({ kind: 'cancellation' satisfies ApiClientError['kind'] });
     await expect(client.rest({ method: 'GET', path: 'slow' })).rejects.toMatchObject({ kind: 'timeout' satisfies ApiClientError['kind'] });
   });
+
+  describe('login payload configuration and dynamic credentials', () => {
+    it('uses username by default or when identifier_field is username', async () => {
+      const fetch = createFetchMock();
+      const client = createApiClient({
+        config: createConfig({
+          auth: {
+            type: 'login',
+            login_path: 'auth/login',
+            username: 'fixed-user',
+            password: 'fixed-password',
+          },
+        }),
+        fetch,
+      });
+
+      await client.login();
+      const call = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(call[0]).toBe('https://api.example.test/base/auth/login');
+      expect(JSON.parse(call[1].body)).toEqual({ username: 'fixed-user', password: 'fixed-password' });
+    });
+
+    it('uses custom identifier_field and password_field when configured', async () => {
+      const fetch = createFetchMock();
+      const client = createApiClient({
+        config: createConfig({
+          auth: {
+            type: 'login',
+            login_path: 'auth/login',
+            username: 'fixed-user',
+            password: 'fixed-password',
+            identifier_field: 'identifier',
+            password_field: 'pass',
+          },
+        }),
+        fetch,
+      });
+
+      await client.login();
+      const call = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(JSON.parse(call[1].body)).toEqual({ identifier: 'fixed-user', pass: 'fixed-password' });
+    });
+
+    it('overrides config credentials with explicit dynamic credentials', async () => {
+      const fetch = createFetchMock();
+      const client = createApiClient({
+        config: createConfig({
+          auth: {
+            type: 'login',
+            login_path: 'auth/login',
+            username: 'fixed-user',
+            password: 'fixed-password',
+            identifier_field: 'identifier',
+          },
+        }),
+        fetch,
+      });
+
+      await client.login({ identifier: 'dynamic-admin', password: 'dynamic-secret' });
+      const call = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(JSON.parse(call[1].body)).toEqual({ identifier: 'dynamic-admin', password: 'dynamic-secret' });
+    });
+  });
 });
