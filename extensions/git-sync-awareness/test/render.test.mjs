@@ -184,7 +184,7 @@ test("MINI-002: Message Renderer - Expanded Mode (Up-to-Date / Clean)", async ()
   assert.match(fullText, /git-sync/);
   assert.match(fullText, /main/);
   assert.match(fullText, /UP-TO-DATE/);
-  assert.match(fullText, /Safe to proceed/);
+  assert.doesNotMatch(fullText, /Safe to proceed|MANDATORY DECISION GATE|Policy:/);
   assert.match(fullText, /ctrl\+o collapse/);
 });
 
@@ -250,7 +250,7 @@ test("MINI-002: Message Renderer - Expanded Mode (Behind, Dirty, Worktrees, Comm
   assert.match(fullText, /\(current\)/);
   assert.match(fullText, /\(base\)/);
   assert.match(fullText, /collab\/alice-widget/);
-  assert.match(fullText, /MANDATORY DECISION GATE/);
+  assert.doesNotMatch(fullText, /MANDATORY DECISION GATE|Review or synchronize|Policy:/);
 });
 
 test("MINI-002: Message Renderer - Fallback Mode without structured details", async () => {
