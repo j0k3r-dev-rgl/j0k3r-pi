@@ -2,7 +2,7 @@ import { fetchUsage, type AccountUsage } from "../../cpamc-usage/src/api.js";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:8317";
 const TIMEOUT_MS = 8000;
-export const QUOTA_REFRESH_MS = 30_000;
+export const QUOTA_REFRESH_MS = 60_000;
 
 type ModelAccount = Pick<AccountUsage, "id" | "pools">;
 
@@ -14,8 +14,23 @@ export function selectQuotaAccount<T extends ModelAccount>(
 ): T | undefined {
 	if (provider === "opencode-go") return accounts.find((account) => account.id === "opencode-go");
 	if (provider !== "cliproxyapi") return undefined;
-	const matches = accounts.filter((account) => modelsByAccount.get(account.id)?.includes(modelId));
-	return matches.length === 1 ? matches[0] : undefined;
+
+	// 1. Support explicit prefix routing (e.g. "prefix/model-name" or "cliproxyapi/prefix/model-name")
+	const prefixMatch = modelId.match(/^(?:cliproxyapi\/)?([a-z0-9_-]+)\//i)?.[1]?.toLowerCase();
+	if (prefixMatch) {
+		const byPrefix = accounts.find((acc) => acc.id.toLowerCase().includes(prefixMatch));
+		if (byPrefix) return byPrefix;
+	}
+
+	// 2. Filter accounts that serve this model ID (or model name without prefix)
+	const rawModelId = modelId.includes("/") ? modelId.split("/").pop()! : modelId;
+	const matches = accounts.filter((account) => {
+		const list = modelsByAccount.get(account.id) ?? [];
+		return list.includes(modelId) || list.includes(rawModelId);
+	});
+
+	// 3. Fallback: prioritize accounts with available quota instead of returning undefined on multi-account
+	return matches.find((m) => m.pools?.some((p) => (p.availablePercentage ?? 0) > 0)) ?? matches[0];
 }
 
 export function formatQuota(
@@ -53,17 +68,21 @@ export async function fetchModelQuota(provider: string, modelId: string, signal?
 		const base = (process.env.CLIPROXYAPI_BASE_URL || DEFAULT_BASE_URL).trim().replace(/\/+$/, "");
 		const key = (process.env.CLIPROXYAPI_MANAGEMENT_KEY || "").trim();
 		const modelsByAccount = new Map<string, string[]>();
-		await Promise.all(accounts.filter((entry) => entry.id !== "opencode-go" && entry.authFileName).map(async (entry) => {
-			const url = new URL(`${base}/v0/management/auth-files/models`);
-			url.searchParams.set("name", entry.authFileName!);
-			const response = await fetch(url, {
-				headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
-				signal: combinedSignal,
-			});
-			if (!response.ok) throw new Error(`auth-files/models HTTP ${response.status}`);
-			const data = await response.json() as { models?: Array<{ id?: string }> };
-			modelsByAccount.set(entry.id, (data.models ?? []).map((model) => model.id).filter((id): id is string => typeof id === "string"));
-		}));
+		await Promise.allSettled(
+			accounts.filter((entry) => entry.id !== "opencode-go" && entry.authFileName).map(async (entry) => {
+				try {
+					const url = new URL(`${base}/v0/management/auth-files/models`);
+					url.searchParams.set("name", entry.authFileName!);
+					const response = await fetch(url, {
+						headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
+						signal: combinedSignal,
+					});
+					if (!response.ok) return;
+					const data = (await response.json()) as { models?: Array<{ id?: string }> };
+					modelsByAccount.set(entry.id, (data.models ?? []).map((model) => model.id).filter((id): id is string => typeof id === "string"));
+				} catch {}
+			}),
+		);
 		account = selectQuotaAccount(provider, modelId, accounts, modelsByAccount);
 	}
 
