@@ -1,4 +1,6 @@
 # dependencies
+extensions/herdr-agent-state.ts
+pi-pretty/
 node_modules/
 .pi/extensions/*/node_modules/
 npm
