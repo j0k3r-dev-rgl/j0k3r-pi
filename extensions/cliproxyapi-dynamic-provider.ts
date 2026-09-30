@@ -67,7 +67,7 @@ function resolveRecommendedContextWindow(modelId: string, reportedContext?: numb
     } else if (id.includes("claude")) {
         recommendedCap = 200_000;
     } else if (id.includes("gemini")) {
-        recommendedCap = 370_000;
+        recommendedCap = 1_048_576;
     }
 
     if (typeof reportedContext === "number" && Number.isFinite(reportedContext) && reportedContext > 0) {
