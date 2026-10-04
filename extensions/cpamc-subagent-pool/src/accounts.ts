@@ -1,6 +1,6 @@
 import path from 'node:path';
 import os from 'node:os';
-import { requestJson } from './http.js';
+import { requestJson } from './http.ts';
 
 export function resolveBaseUrl() {
   const raw = process.env.CLIPROXYAPI_BASE_URL || 'http://127.0.0.1:8317';
@@ -24,7 +24,7 @@ export function resolveAuthDir() {
  * @param {string} [options.managementKey]
  * @param {typeof fetch} [options.fetchFn]
  * @param {AbortSignal} [options.signal]
- * @returns {Promise<import('./types.js').PoolAccount[]>}
+ * @returns {Promise<import('./types.ts').PoolAccount[]>}
  */
 export async function discoverAccounts(options = {}) {
   const baseUrl = options.baseUrl ?? resolveBaseUrl();

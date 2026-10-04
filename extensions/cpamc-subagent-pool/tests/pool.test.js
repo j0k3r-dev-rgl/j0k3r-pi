@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { selectAccountCandidate } from '../src/pool.js';
+import { selectAccountCandidate } from '../src/pool.ts';
 
 describe('Pool candidate selection algorithm', () => {
   const accounts = [

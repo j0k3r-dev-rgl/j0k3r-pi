@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { PoolStateStore, buildLeaseId } from '../src/store.js';
-import { registerPoolLifecycle } from '../src/lifecycle.js';
+import { PoolStateStore, buildLeaseId } from '../src/store.ts';
+import { registerPoolLifecycle } from '../src/lifecycle.ts';
 
 class MockPiEventBus {
   constructor() {
@@ -37,6 +37,7 @@ describe('Pool extension lifecycle wiring and Pi events', () => {
       const bus = new MockPiEventBus();
       const handlers = new Map();
       let discoveries = 0;
+      const quotaRequests = [];
       registerPoolLifecycle({ events: bus, on: (name, fn) => { handlers.set(name, fn); } }, {
         store,
         discoverAccountsFn: async ({ signal }) => {
@@ -44,11 +45,15 @@ describe('Pool extension lifecycle wiring and Pi events', () => {
           discoveries++;
           return [{ prefix: 'existing', authIndex: 'old-index', status: 'unknown' }, { prefix: 'new-gemini', authIndex: 'new-index', status: 'unknown' }];
         },
-        fetchQuotaFn: async () => { throw new Error('Startup must not request quotas'); },
+        fetchQuotaFn: (authIndex, options) => new Promise((resolve) => {
+          quotaRequests.push({ authIndex, options, resolve });
+        }),
       });
       await handlers.get('session_start')({});
       const state = store.readState();
       assert.equal(discoveries, 1);
+      assert.deepEqual(quotaRequests.map((r) => r.authIndex), ['old-index', 'new-index']);
+      assert.ok(quotaRequests.every((r) => r.options.forceFresh && !r.options.signal.aborted));
       assert.deepEqual(state.accounts.map((a) => a.prefix), ['existing', 'new-gemini']);
       assert.deepEqual(state.accounts[0].quota, quota);
       assert.equal(state.accounts[0].lastRequestStartedAt, 123);
@@ -60,6 +65,117 @@ describe('Pool extension lifecycle wiring and Pi events', () => {
       bus.emit('subagents:task:allocate', { taskId: 'warm', claimModel: (fn) => { allocator = fn; } });
       assert.ok(await allocator());
       assert.equal(discoveries, 1);
+      assert.equal(quotaRequests.length, 2, 'Warm launch must not query additional quotas');
+      const commits = [];
+      const update = store.updateAccountQuota.bind(store);
+      store.updateAccountQuota = (...args) => {
+        const pending = update(...args);
+        commits.push(pending);
+        return pending;
+      };
+      for (const request of quotaRequests) request.resolve({ remainingFraction: 0.8, status: 'known', window: '5 hs' });
+      await Promise.resolve();
+      await Promise.all(commits);
+      assert.ok(store.readState().accounts.every((a) => a.quota.status === 'known' && a.quota.remainingFraction === 0.8));
+      await handlers.get('session_shutdown')({ reason: 'quit' });
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('refreshes only the used prefix at terminal and rejects older startup quota responses', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpamc-startup-terminal-'));
+    try {
+      const store = new PoolStateStore({ stateFile: path.join(dir, 'state.json') });
+      const accounts = [{ prefix: 'a', authIndex: 'a' }, { prefix: 'b', authIndex: 'b' }];
+      const bus = new MockPiEventBus();
+      const handlers = new Map();
+      const requests = [];
+      const updates = [];
+      const update = store.updateAccountQuota.bind(store);
+      store.updateAccountQuota = (...args) => {
+        const pending = update(...args);
+        updates.push(pending);
+        return pending;
+      };
+      registerPoolLifecycle({ events: bus, on: (name, fn) => { handlers.set(name, fn); } }, {
+        store, discoverAccountsFn: async () => accounts,
+        fetchQuotaFn: (authIndex, options) => new Promise((resolve) => { requests.push({ authIndex, options, resolve }); }),
+      });
+      await handlers.get('session_start')({});
+      assert.equal(requests.length, 2);
+      let allocator;
+      bus.emit('subagents:task:allocate', { taskId: 'used', parentSessionId: 'owner', claimModel: (fn) => { allocator = fn; } });
+      const claimed = await allocator();
+      assert.equal(claimed.model.id, 'a/gemini-3.8-flash-high');
+      let cleanup;
+      bus.emit('subagents:task:terminal', { taskId: 'used', parentSessionId: 'owner', registerCleanup: (fn) => { cleanup = fn; } });
+      await cleanup();
+      assert.equal(Object.keys(store.readState().leases).length, 0);
+      assert.deepEqual(requests.map((r) => r.authIndex), ['a', 'b', 'a']);
+      assert.ok(requests[2].options.requestStartedAt > requests[0].options.requestStartedAt);
+      requests[2].resolve({ remainingFraction: 0.4, status: 'known', window: '5 hs' });
+      await Promise.resolve();
+      await Promise.all(updates);
+      for (const request of requests.slice(0, 2)) request.resolve({ remainingFraction: 0.9, status: 'known', window: '5 hs' });
+      await Promise.resolve();
+      await Promise.all(updates);
+      const state = store.readState();
+      assert.equal(state.accounts.find((a) => a.prefix === 'a').quota.remainingFraction, 0.4);
+      assert.equal(state.accounts.find((a) => a.prefix === 'b').quota.remainingFraction, 0.9);
+      await handlers.get('session_shutdown')({ reason: 'quit' });
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('cancels startup quota requests on shutdown without late state writes', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpamc-startup-quota-abort-'));
+    try {
+      const store = new PoolStateStore({ stateFile: path.join(dir, 'state.json') });
+      const handlers = new Map();
+      const signals = [];
+      registerPoolLifecycle({ events: new MockPiEventBus(), on: (name, fn) => { handlers.set(name, fn); } }, {
+        store, discoverAccountsFn: async () => [{ prefix: 'a', authIndex: 'a' }, { prefix: 'b', authIndex: 'b' }],
+        fetchQuotaFn: (_authIndex, { signal }) => new Promise((resolve) => {
+          signals.push(signal);
+          signal.addEventListener('abort', () => resolve({ remainingFraction: 1, status: 'known' }), { once: true });
+        }),
+      });
+      await handlers.get('session_start')({});
+      assert.equal(signals.length, 2);
+      const before = fs.readFileSync(store.stateFile, 'utf8');
+      await handlers.get('session_shutdown')({ reason: 'reload' });
+      assert.ok(signals.every((signal) => signal.aborted));
+      assert.equal(fs.readFileSync(store.stateFile, 'utf8'), before);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('retains verified quota on startup refresh failure while refreshing other accounts', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpamc-startup-quota-failure-'));
+    try {
+      const store = new PoolStateStore({ stateFile: path.join(dir, 'state.json') });
+      const quota = { remainingFraction: 0.7, status: 'known', window: '5 hs', lastCheckedAt: '2026-01-01T00:00:00Z' };
+      const accounts = [{ prefix: 'a', authIndex: 'a' }, { prefix: 'b', authIndex: 'b' }];
+      await store.initAccounts(accounts.map((a) => ({ ...a, quota })));
+      const handlers = new Map();
+      const warnings = [];
+      const updates = [];
+      const update = store.updateAccountQuota.bind(store);
+      store.updateAccountQuota = (...args) => { const pending = update(...args); updates.push(pending); return pending; };
+      registerPoolLifecycle({ events: new MockPiEventBus(), on: (name, fn) => { handlers.set(name, fn); } }, {
+        store, discoverAccountsFn: async () => accounts, warnFn: (msg) => warnings.push(msg),
+        fetchQuotaFn: async (authIndex) => {
+          if (authIndex === 'a') throw new Error('Bearer fixture-secret');
+          return { remainingFraction: 0.8, status: 'known', window: '5 hs' };
+        },
+      });
+      await handlers.get('session_start')({});
+      await Promise.all(updates);
+      const state = store.readState();
+      assert.equal(state.accounts[0].quota.remainingFraction, 0.7);
+      assert.equal(state.accounts[0].quota.status, 'stale');
+      assert.equal(state.accounts[0].quota.lastCheckedAt, quota.lastCheckedAt);
+      assert.equal(state.accounts[1].quota.remainingFraction, 0.8);
+      assert.equal(warnings.length, 1);
+      assert.doesNotMatch(warnings[0], /fixture-secret/);
+      await handlers.get('session_shutdown')({ reason: 'quit' });
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 

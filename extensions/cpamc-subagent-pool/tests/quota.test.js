@@ -1,6 +1,6 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchAccountQuota, clearQuotaCache } from '../src/quota.js';
+import { fetchAccountQuota, clearQuotaCache } from '../src/quota.ts';
 
 describe('Quota client and Gemini 5-hour consumption calculator', () => {
   beforeEach(() => {

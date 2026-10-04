@@ -1,5 +1,5 @@
-import { resolveBaseUrl, resolveManagementKey } from './accounts.js';
-import { requestJson } from './http.js';
+import { resolveBaseUrl, resolveManagementKey } from './accounts.ts';
+import { requestJson } from './http.ts';
 
 const CACHE_TTL_MS = 30_000;
 const quotaCache = new Map();

@@ -20,7 +20,7 @@ The extension connects to CLIProxyAPI Management API independently without hardc
 
 On `session_start`, account prefixes are discovered automatically from Management API `auth-files` and each account's `/v0/management/auth-files/models?name=…` response. Only IDs matching `<prefix>/gemini-*` enter the pool; Codex/GPT-only, Claude-only, disabled, unprefixed, and ambiguous shared-prefix accounts are excluded. No manual account list or local credential files are required.
 
-Startup refreshes nonempty inventories too, preserving saved quotas and request-order tokens only for unchanged `(prefix, authIndex)` identities, plus live leases. New accounts begin with unknown quota; discovery never queries quotas or claims provider health. Empty, incomplete, or failed discovery retains saved inventory; shutdown cancels discovery and prevents late commits.
+Startup refreshes nonempty inventories too, preserving saved quotas and request-order tokens only for unchanged `(prefix, authIndex)` identities, plus live leases. After successful inventory discovery, it starts fresh Gemini 5h quota queries for every discovered account in parallel, in the background. Session startup does not wait for these quota responses. New accounts begin with unknown quota until their refresh succeeds; discovery alone does not claim provider health. Empty, incomplete, or failed discovery retains saved inventory and skips startup quota queries; shutdown cancels discovery and quota refreshes and prevents late commits.
 
 ## State Management
 
@@ -34,6 +34,11 @@ Pool state and active leases are stored in `~/.pi/agent/cpamc-subagent-pool-stat
 ## Cached Launch & Asynchronous Quota Lifecycle
 
 Coordinates with `pi-subagents-j0k3r` via Pi's public EventBus (`pi.events`) and extension lifecycle hooks (`pi.on`):
+
+0. **Startup Quota Refresh (`session_start`)**:
+   - After discovering and saving Gemini account prefixes, queries each discovered account's quota with `forceFresh: true` in the background.
+   - Uses the same account-only persistence, request-start ordering, failure retention, and shutdown cancellation as post-run refreshes.
+   - Does not block session startup on quota responses. Cached launches can proceed with saved quotas while startup refreshes are pending.
 
 1. **Cached Launch Allocation (`subagents:task:allocate`)**:
    - Reads inventory and persisted quotas directly from `cpamc-subagent-pool-state.json`.
@@ -58,7 +63,7 @@ Coordinates with `pi-subagents-j0k3r` via Pi's public EventBus (`pi.events`) and
    - On instance shutdown (`reason === 'quit' || reason === 'reload'`):
      1. **Stops admission first** (`isOpen = false` / `isShuttingDown = true`). Terminal callbacks fired after pool shutdown release leases cleanly but cannot admit new quota requests or file writes.
      2. Aborts in-flight background requests via `lifecycleAbortController.abort()`.
-     3. Awaits settlement of all active refreshes (`Promise.allSettled(Array.from(activeRefreshes))`).
+     3. Awaits settlement of all active discovery and quota refreshes (`Promise.allSettled(Array.from(activeRefreshes))`).
    - Supports both extension handler execution orders (pool-first and manager-first) without leaks or late writes.
    - Ordinary session replacement (`reason === 'new' | 'resume' | 'fork'`) leaves in-flight quota refreshes intact regardless of owner so they settle naturally without controller reset, while Pi instance quit/reload stops admission first, aborts, and awaits all owned refreshes.
    - Zero background timers (`setInterval`), polling loops, or file system watchers.
@@ -71,6 +76,10 @@ Verified quota is cached for 30 seconds for non-forced requests; post-execution 
 
 ## Reloading & Activation
 
-When Pi is reloaded (`/reload` or restart session), Pi automatically discovers this extension from `~/.pi/agent/extensions/cpamc-subagent-pool/index.js`. Installed Pi 0.99.2 tracks `pi.events.on` and `pi.on` subscriptions by runtime and removes them on invalidation after awaited shutdown. No independent pool shutdown handler deletes leases before owner-drain.
+Pi automatically discovers `~/.pi/agent/extensions/cpamc-subagent-pool/index.ts`. All runtime modules use `.ts` imports so the installed Pi loader re-evaluates edited modules on `/reload`, avoiding Node's native ESM `.js` cache. Renaming only the entrypoint would leave nested JavaScript modules cached. The factory remains registration-only.
 
-Startup discovery has been tested against the local Management API using an isolated temporary state file, without model inference or quota consumption. Live provider inference is separate and has not been tested for this change. A valid Management API key must be present in the environment of the reloaded session; public inventory/auth indexes can drift and are refreshed at session start. This extension registers no tools or UI and borrows no dependencies/compiler/types from other extensions.
+Opening Pi, `/reload`, and `/new` run `session_start`: account discovery then background quota refresh. Pi tracks `pi.events.on` and `pi.on` subscriptions by runtime and removes them on invalidation after awaited shutdown. No independent pool shutdown handler deletes leases before owner-drain.
+
+Run `npm test` from this extension directory. The JavaScript tests import the TypeScript runtime using Node's native type stripping (tested on Node 24); no compiler or third-party test dependencies are needed. The reload integration test requires the installed Pi CLI on `PATH`, loads a temporary copy through Pi's actual loader, edits nested runtime modules, and verifies that reloading picks up the changes. It never changes Pi's installation or the live pool state.
+
+Startup discovery, all-account quota refresh, and post-task used-account quota refresh have been tested against the local Management API using an isolated temporary state file and a simulated terminal event, without model inference. The real subagent runner and live inference are separate and have not been exercised for this change. A valid Management API key must be present in the environment of the reloaded session; public inventory/auth indexes can drift and are refreshed at session start. This extension registers no tools or UI and borrows no dependencies/compiler/types from other extensions.

@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { PoolStateStore, buildLeaseId } from '../src/store.js';
-import { registerPoolLifecycle } from '../src/lifecycle.js';
+import { PoolStateStore, buildLeaseId } from '../src/store.ts';
+import { registerPoolLifecycle } from '../src/lifecycle.ts';
 
 class MockPiEventBus {
   constructor() {

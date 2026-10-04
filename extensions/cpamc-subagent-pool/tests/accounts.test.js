@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { discoverAccounts } from '../src/accounts.js';
+import { discoverAccounts } from '../src/accounts.ts';
 
 describe('Account discovery and correlation', () => {
   it('discovers only Gemini prefixes from per-account models without local credentials', async () => {

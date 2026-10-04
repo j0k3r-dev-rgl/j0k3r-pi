@@ -1,6 +1,6 @@
-import { PoolStateStore } from './store.js';
-import { discoverAccounts } from './accounts.js';
-import { fetchAccountQuota } from './quota.js';
+import { PoolStateStore } from './store.ts';
+import { discoverAccounts } from './accounts.ts';
+import { fetchAccountQuota } from './quota.ts';
 
 const DEFAULT_TARGET_MODEL = 'gemini-3.8-flash-high';
 const DEFAULT_TARGET_EFFORT = 'high';
@@ -66,6 +66,44 @@ export function registerPoolLifecycle(pi, options = {}) {
     await Promise.allSettled(Array.from(activeRefreshes));
   };
 
+  const refreshAccountQuota = (account, authIndex) => {
+    if (!authIndex || !isOpen || isShuttingDown || lifecycleSignal.aborted) return;
+    const requestStartedAt = nextRequestStartToken();
+    const refreshPromise = (async () => {
+      try {
+        const freshQuota = await fetchQuotaFn(authIndex, {
+          forceFresh: true,
+          signal: lifecycleSignal,
+          requestStartedAt,
+        });
+        if (!isOpen || isShuttingDown || lifecycleSignal.aborted) return;
+        if (!freshQuota || freshQuota.status === 'unknown') {
+          warn(`[cpamc-subagent-pool] Background quota refresh failed for account ${account}: Quota fetch returned status unknown`);
+        }
+        await store.updateAccountQuota(account, freshQuota, {
+          signal: lifecycleSignal,
+          requestStartedAt,
+        });
+      } catch (err) {
+        if (lifecycleSignal.aborted || err?.name === 'AbortError') return;
+        const msg = err instanceof Error ? err.message : String(err ?? '');
+        warn(`[cpamc-subagent-pool] Background quota refresh failed for account ${account}: ${sanitizeWarning(msg)}`);
+        try {
+          if (!lifecycleSignal.aborted) {
+            await store.updateAccountQuota(account, { status: 'stale' }, {
+              signal: lifecycleSignal,
+              requestStartedAt,
+            });
+          }
+        } catch {}
+      }
+    })();
+    activeRefreshes.add(refreshPromise);
+    refreshPromise.finally(() => {
+      activeRefreshes.delete(refreshPromise);
+    }).catch(() => {});
+  };
+
   const handleSessionStart = async () => {
     if (isShuttingDown) return;
     isOpen = true;
@@ -74,6 +112,7 @@ export function registerPoolLifecycle(pi, options = {}) {
         const accounts = await discoverFn({ signal: lifecycleSignal });
         if (isShuttingDown || lifecycleSignal.aborted || !accounts?.length) return;
         await store.initAccounts(accounts, { signal: lifecycleSignal });
+        for (const account of accounts) refreshAccountQuota(account.prefix, account.authIndex);
       } catch (err) {
         if (lifecycleSignal.aborted || err?.name === 'AbortError') return;
         warn('[cpamc-subagent-pool] Startup account discovery failed; saved inventory retained');
@@ -189,46 +228,8 @@ export function registerPoolLifecycle(pi, options = {}) {
         return;
       }
 
-      const { account, authIndex } = released;
-      if (!authIndex) return;
-
-      // Off the critical path: asynchronous single-account fresh refresh
-      const requestStartedAt = nextRequestStartToken();
-      const refreshPromise = (async () => {
-        try {
-          if (!isOpen || isShuttingDown || lifecycleSignal.aborted) return;
-          const freshQuota = await fetchQuotaFn(authIndex, {
-            forceFresh: true,
-            signal: lifecycleSignal,
-            requestStartedAt,
-          });
-          if (!isOpen || isShuttingDown || lifecycleSignal.aborted) return;
-          if (!freshQuota || freshQuota.status === 'unknown') {
-            warn(`[cpamc-subagent-pool] Background quota refresh failed for account ${account}: Quota fetch returned status unknown`);
-          }
-          await store.updateAccountQuota(account, freshQuota, {
-            signal: lifecycleSignal,
-            requestStartedAt,
-          });
-        } catch (err) {
-          if (lifecycleSignal.aborted || err?.name === 'AbortError') return;
-          const msg = err instanceof Error ? err.message : String(err ?? '');
-          warn(`[cpamc-subagent-pool] Background quota refresh failed for account ${account}: ${sanitizeWarning(msg)}`);
-          try {
-            if (!lifecycleSignal.aborted) {
-              await store.updateAccountQuota(account, { status: 'stale' }, {
-                signal: lifecycleSignal,
-                requestStartedAt,
-              });
-            }
-          } catch {}
-        }
-      })();
-
-      activeRefreshes.add(refreshPromise);
-      refreshPromise.finally(() => {
-        activeRefreshes.delete(refreshPromise);
-      }).catch(() => {});
+      // Off the critical path: refresh only the account actually released for this task.
+      refreshAccountQuota(released.account, released.authIndex);
     });
   });
 

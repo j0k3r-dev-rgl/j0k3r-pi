@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { selectAccountCandidate } from './pool.js';
-import { abortable } from './http.js';
+import { selectAccountCandidate } from './pool.ts';
+import { abortable } from './http.ts';
 
 const DEFAULT_STATE_FILE = path.join(os.homedir(), '.pi', 'agent', 'cpamc-subagent-pool-state.json');
 const LOCK_TIMEOUT_MS = 5000;
@@ -127,7 +127,7 @@ export class PoolStateStore {
   /**
    * Load state from disk or return default template.
    *
-   * @returns {import('./types.js').PoolState}
+   * @returns {import('./types.ts').PoolState}
    */
   readState() {
     try {
@@ -157,7 +157,7 @@ export class PoolStateStore {
    * Write state to disk atomically using temporary file and rename.
    * Strictly avoids persisting sensitive credentials.
    *
-   * @param {import('./types.js').PoolState} state
+   * @param {import('./types.ts').PoolState} state
    */
   writeState(state) {
     const parentDir = path.dirname(this.stateFile);
@@ -196,7 +196,7 @@ export class PoolStateStore {
   /**
    * Reclaim leases from processes that are no longer alive.
    *
-   * @param {import('./types.js').PoolState} state
+   * @param {import('./types.ts').PoolState} state
    * @returns {boolean} True if any lease was reclaimed
    */
   cleanDeadProcessLeases(state) {
@@ -229,7 +229,7 @@ export class PoolStateStore {
    * Initialize or update available accounts in pool.
    *
    * Preserve saved quotas and ordering tokens only for unchanged account identities.
-   * @param {import('./types.js').PoolAccount[]} accounts
+   * @param {import('./types.ts').PoolAccount[]} accounts
    * @param {{ signal?: AbortSignal }} [options]
    */
   async initAccounts(accounts, { signal } = {}) {
@@ -255,7 +255,7 @@ export class PoolStateStore {
   /**
    * Return current snapshot of pool state.
    *
-   * @returns {Promise<import('./types.js').PoolState>}
+   * @returns {Promise<import('./types.ts').PoolState>}
    */
   async getState() {
     return this.withLock(async () => {
@@ -272,9 +272,9 @@ export class PoolStateStore {
    * Atomic Choose + Acquire transaction:
    * Selects an optimal candidate account and commits a new lease record under file lock.
    *
-   * @param {Map<string, import('./types.js').QuotaBucket>} [quotaMap]
-   * @param {import('./types.js').AllocateOptions} options
-   * @param {import('./types.js').PoolAccount[]} [accountsOverride]
+   * @param {Map<string, import('./types.ts').QuotaBucket>} [quotaMap]
+   * @param {import('./types.ts').AllocateOptions} options
+   * @param {import('./types.ts').PoolAccount[]} [accountsOverride]
    * @returns {Promise<string>} Account prefix
    */
   async allocateAccount(quotaMap = new Map(), options, accountsOverride) {
@@ -356,7 +356,7 @@ export class PoolStateStore {
    * Also safely looks up owner-matching pre-existing legacy taskId:attempt records.
    * Returns released account and authIndex snapshot, or null on mismatch.
    *
-   * @param {import('./types.js').ReleaseOptions} options
+   * @param {import('./types.ts').ReleaseOptions} options
    * @returns {Promise<{ account: string, authIndex: string | undefined } | null>}
    */
   async removeLease(options) {
@@ -419,7 +419,7 @@ export class PoolStateStore {
    * Signal propagation aborts lock waits and final commit.
    *
    * @param {string} prefix
-   * @param {import('./types.js').QuotaBucket | { status: string, remainingFraction?: number, usedPercentage?: number, window?: string, lastCheckedAt?: string }} quotaResult
+   * @param {import('./types.ts').QuotaBucket | { status: string, remainingFraction?: number, usedPercentage?: number, window?: string, lastCheckedAt?: string }} quotaResult
    * @param {Object} [options]
    * @param {AbortSignal} [options.signal]
    * @param {number} [options.requestStartedAt]

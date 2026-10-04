@@ -1,8 +1,8 @@
-import { registerPoolLifecycle } from './src/lifecycle.js';
+import { registerPoolLifecycle } from './src/lifecycle.ts';
 
 /**
  * Pi Extension entrypoint for CPAMC Subagent Account Allocation Pool.
- * Automatically discovered by Pi under ~/.pi/agent/extensions/cpamc-subagent-pool/index.js.
+ * Automatically discovered by Pi under ~/.pi/agent/extensions/cpamc-subagent-pool/index.ts.
  *
  * @param {any} pi ExtensionAPI
  */

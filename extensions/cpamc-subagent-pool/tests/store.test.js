@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { PoolStateStore, buildLeaseId } from '../src/store.js';
+import { PoolStateStore, buildLeaseId } from '../src/store.ts';
 import { fork } from 'node:child_process';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
@@ -74,7 +74,7 @@ describe('PoolStateStore atomic transactions, multi-owner leases, and orphan rec
       fs.writeFileSync(store.lockFile, JSON.stringify({ pid: process.pid }));
       const old = new Date(Date.now() - 60_000);
       fs.utimesSync(store.lockFile, old, old);
-      const modulePath = fileURLToPath(new URL('../src/store.js', import.meta.url));
+      const modulePath = fileURLToPath(new URL('../src/store.ts', import.meta.url));
       for (let i = 0; i < 2; i++) {
         const child = fork(fileURLToPath(new URL('./store-worker.js', import.meta.url)), [modulePath, stateFile, `child-${i}`], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
         children.push(child);

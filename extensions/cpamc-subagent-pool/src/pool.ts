@@ -2,10 +2,10 @@
  * Pure selection function that determines the best account candidate based on
  * idle status, 5-hour quota consumption threshold (95%), and active lease counts.
  *
- * @param {import('./types.js').PoolAccount[]} accounts
- * @param {import('./types.js').SubagentLease[]} activeLeases
- * @param {Map<string, import('./types.js').QuotaBucket>} [quotaMap]
- * @returns {import('./types.js').PoolAccount | null}
+ * @param {import('./types.ts').PoolAccount[]} accounts
+ * @param {import('./types.ts').SubagentLease[]} activeLeases
+ * @param {Map<string, import('./types.ts').QuotaBucket>} [quotaMap]
+ * @returns {import('./types.ts').PoolAccount | null}
  */
 export function selectAccountCandidate(accounts, activeLeases = [], quotaMap = new Map()) {
   if (!Array.isArray(accounts) || accounts.length === 0) {
@@ -22,7 +22,7 @@ export function selectAccountCandidate(accounts, activeLeases = [], quotaMap = n
 
   /**
    * Helper to get remaining quota fraction for an account
-   * @param {import('./types.js').PoolAccount} acc
+   * @param {import('./types.ts').PoolAccount} acc
    * @returns {number}
    */
   const getRemainingFraction = (acc) => {
