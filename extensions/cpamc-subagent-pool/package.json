@@ -1,0 +1,10 @@
+{
+  "name": "cpamc-subagent-pool",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Dynamic CPAMC account allocation pool for Pi subagents",
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  }
+}
