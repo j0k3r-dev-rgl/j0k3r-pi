@@ -56,5 +56,7 @@ bin
 .pi/subagents-debug.log
 models-store.json
 # Local Pi runtime state
+/subagents.json
+/cpamc-subagent-pool-state.json
 .atl/
 .codegraph/
