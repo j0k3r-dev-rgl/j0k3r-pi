@@ -7,27 +7,33 @@ import { withDatabase } from './storage/db.ts';
 import { initSchema } from './storage/schema.ts';
 import { activateSession, cleanupTerminalChildSession } from './storage/session-store.ts';
 import { resolveScope, encodeScope } from './identity.ts';
+import { ActivationDiagnostics } from './diagnostics/activation.ts';
+import type { E5Client } from './client/e5-client.ts';
 
 export class InvocationLease implements InvocationLeaseV1 {
   readonly version = 1 as const;
   readonly identity: Readonly<InvocationIdentityV1>;
   readonly dbPath: string;
   readonly childContext: any;
+  readonly client?: E5Client;
 
   private state: 'bound' | 'activating' | 'active' | 'closing' | 'closed' | 'failed' = 'bound';
   private abortController = new AbortController();
   private inFlight = new Set<Promise<any>>();
   private activationPromise?: Promise<void>;
   private terminationPromise?: Promise<void>;
+  private activeDiagnostics: ActivationDiagnostics | null = null;
 
   constructor(
     identity: InvocationIdentityV1,
     dbPath: string,
     childContext: any,
+    options?: { client?: E5Client },
   ) {
     this.identity = Object.freeze({ ...identity });
     this.dbPath = dbPath;
     this.childContext = childContext;
+    this.client = options?.client;
   }
 
   async activate(): Promise<void> {
@@ -63,6 +69,10 @@ export class InvocationLease implements InvocationLeaseV1 {
         });
 
         this.state = 'active';
+
+        // Detached nonblocking activation diagnostics
+        this.activeDiagnostics = new ActivationDiagnostics(this.dbPath, this.client);
+        this.activeDiagnostics.start(scopeKey, this.identity.childSessionId, this.childContext);
       } catch (error) {
         this.state = 'failed';
         throw error;
@@ -76,6 +86,9 @@ export class InvocationLease implements InvocationLeaseV1 {
     if (this.terminationPromise) {
       return this.terminationPromise;
     }
+
+    this.activeDiagnostics?.cancel();
+    this.activeDiagnostics = null;
 
     this.state = 'closing';
     this.abortController.abort(new Error(`invocation_terminated: outcome ${outcome}`));

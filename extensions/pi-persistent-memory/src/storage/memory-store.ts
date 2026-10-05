@@ -7,8 +7,12 @@ import type {
   Entity,
   Memory,
   MemoryEntityLink,
+  PublishChunkInput,
+  PublishMetadata,
   Relation,
   ReplaceMemoryInput,
+  SaveMemoryContext,
+  SaveMemoryInput,
   SyntheticChunkInput,
 } from '../types.ts';
 
@@ -108,6 +112,155 @@ export function replaceMemory(db: DatabaseSync, id: number, input: ReplaceMemory
   }
 }
 
+export function saveMemoryAtomic(
+  db: DatabaseSync,
+  scopeKey: string,
+  input: SaveMemoryInput,
+  context: SaveMemoryContext,
+): Memory {
+  db.exec('BEGIN IMMEDIATE;');
+  try {
+    let targetId: number | undefined;
+
+    if (input.id !== undefined) {
+      const existing = db.prepare('SELECT id, scope_key, topic_key, deleted_at FROM memories WHERE id = ?;').get(input.id) as {
+        id: number;
+        scope_key: string;
+        topic_key: string | null;
+        deleted_at: string | null;
+      } | undefined;
+
+      if (!existing || existing.scope_key !== scopeKey) {
+        throw new Error(`target_not_found: Memory ${input.id} not found in scope ${scopeKey}`);
+      }
+      if (existing.deleted_at !== null) {
+        throw new Error(`target_deleted: Memory ${input.id} is deleted and requires restore`);
+      }
+      if (input.topicKey) {
+        const conflict = db.prepare('SELECT id FROM memories WHERE scope_key = ? AND topic_key = ? AND id != ?;').get(
+          scopeKey,
+          input.topicKey,
+          input.id,
+        ) as { id: number } | undefined;
+        if (conflict) {
+          throw new Error(`target_conflict: Topic key '${input.topicKey}' is already used by memory ${conflict.id}`);
+        }
+      }
+      targetId = input.id;
+    } else if (input.topicKey) {
+      const existing = db.prepare('SELECT id, deleted_at FROM memories WHERE scope_key = ? AND topic_key = ?;').get(
+        scopeKey,
+        input.topicKey,
+      ) as { id: number; deleted_at: string | null } | undefined;
+
+      if (existing) {
+        if (existing.deleted_at !== null) {
+          throw new Error(`target_deleted: Memory with topic_key '${input.topicKey}' is deleted and requires restore`);
+        }
+        targetId = existing.id;
+      }
+    }
+
+    let resultMemory: Memory;
+
+    if (targetId !== undefined) {
+      const existing = db.prepare('SELECT id, title, content, deleted_at FROM memories WHERE id = ? AND scope_key = ?;').get(targetId, scopeKey) as {
+        id: number;
+        title: string;
+        content: string;
+        deleted_at: string | null;
+      } | undefined;
+
+      if (!existing || existing.deleted_at !== null) {
+        throw new Error(`target_deleted: Memory ${targetId} is deleted and requires restore`);
+      }
+
+      // Remove from FTS if was active
+      db.prepare(`
+        INSERT INTO memory_fts (memory_fts, rowid, title, content)
+        VALUES ('delete', ?, ?, ?);
+      `).run(existing.id, existing.title, existing.content);
+
+      // Clear old chunks and vectors
+      const oldChunks = db.prepare('SELECT id FROM chunks WHERE memory_id = ?;').all(targetId) as Array<{ id: number }>;
+      for (const c of oldChunks) {
+        db.prepare('DELETE FROM memory_vectors WHERE rowid = ?;').run(BigInt(c.id));
+      }
+      db.prepare('DELETE FROM chunks WHERE memory_id = ?;').run(targetId);
+
+      const updated = db.prepare(`
+        UPDATE memories
+        SET title = ?,
+            content = ?,
+            type = ?,
+            topic_key = ?,
+            content_version = content_version + 1,
+            deleted_at = NULL,
+            indexing_status = 'pending',
+            pending_reason = NULL,
+            session_id = ?,
+            invoking_parent_session_id = ?,
+            invocation_id = ?,
+            updated_at = datetime('now')
+        WHERE id = ? AND scope_key = ? AND deleted_at IS NULL
+        RETURNING *;
+      `).get(
+        input.title,
+        input.content,
+        input.type,
+        input.topicKey ?? null,
+        context.sessionId,
+        context.invokingParentSessionId ?? null,
+        context.invocationId ?? null,
+        targetId,
+        scopeKey,
+      ) as unknown as Memory | undefined;
+
+      if (!updated) {
+        throw new Error(`target_deleted: Memory ${targetId} is deleted and requires restore`);
+      }
+
+      db.prepare(`
+        INSERT INTO memory_fts (rowid, title, content)
+        VALUES (?, ?, ?);
+      `).run(updated.id, updated.title, updated.content);
+
+      resultMemory = updated;
+    } else {
+      const created = db.prepare(`
+        INSERT INTO memories (
+          scope_key, title, content, type, topic_key, content_version,
+          deleted_at, indexing_status, pending_reason, session_id, invoking_parent_session_id, invocation_id,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 1, NULL, 'pending', NULL, ?, ?, ?, datetime('now'), datetime('now'))
+        RETURNING *;
+      `).get(
+        scopeKey,
+        input.title,
+        input.content,
+        input.type,
+        input.topicKey ?? null,
+        context.sessionId,
+        context.invokingParentSessionId ?? null,
+        context.invocationId ?? null,
+      ) as unknown as Memory;
+
+      db.prepare(`
+        INSERT INTO memory_fts (rowid, title, content)
+        VALUES (?, ?, ?);
+      `).run(created.id, created.title, created.content);
+
+      resultMemory = created;
+    }
+
+    db.exec('COMMIT;');
+    return resultMemory;
+  } catch (error) {
+    db.exec('ROLLBACK;');
+    throw error;
+  }
+}
+
 export function softDeleteMemory(db: DatabaseSync, id: number, scopeKey: string): void {
   db.exec('BEGIN IMMEDIATE;');
   try {
@@ -181,11 +334,12 @@ export function restoreMemory(db: DatabaseSync, id: number, scopeKey: string): M
   }
 }
 
-export function publishSyntheticVectors(
+export function publishValidatedChunks(
   db: DatabaseSync,
   memoryId: number,
   expectedVersion: number,
-  chunks: SyntheticChunkInput[],
+  metadata: PublishMetadata,
+  chunks: PublishChunkInput[],
 ): void {
   db.exec('BEGIN IMMEDIATE;');
   try {
@@ -215,16 +369,20 @@ export function publishSyntheticVectors(
           memory_id, chunk_index, chunk_text, start_char, end_char,
           token_count, content_version, model_id, model_revision,
           dimensions, normalized, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'intfloat/e5-small-v2', 'v2', 384, 1, datetime('now'))
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         RETURNING id;
       `).get(
         memoryId,
-        i,
+        ch.chunk_index ?? i,
         ch.chunk_text,
         ch.start_char,
         ch.end_char,
         ch.token_count,
         expectedVersion,
+        metadata.model_id,
+        metadata.model_revision,
+        metadata.dimensions,
+        metadata.normalized,
       ) as { id: number };
 
       const floatArray = new Float32Array(ch.vector);
@@ -249,6 +407,61 @@ export function publishSyntheticVectors(
     db.exec('ROLLBACK;');
     throw error;
   }
+}
+
+export function markPendingReason(
+  db: DatabaseSync,
+  memoryId: number,
+  expectedVersion: number,
+  reason: string,
+): boolean {
+  db.exec('BEGIN IMMEDIATE;');
+  try {
+    const memory = db.prepare('SELECT id, content_version, deleted_at FROM memories WHERE id = ?;').get(memoryId) as { id: number; content_version: number; deleted_at: string | null } | undefined;
+    if (!memory || memory.deleted_at !== null || memory.content_version !== expectedVersion) {
+      db.exec('COMMIT;');
+      return false;
+    }
+    db.prepare(`
+      UPDATE memories
+      SET indexing_status = 'pending',
+          pending_reason = ?,
+          updated_at = datetime('now')
+      WHERE id = ? AND content_version = ?;
+    `).run(reason, memoryId, expectedVersion);
+    db.exec('COMMIT;');
+    return true;
+  } catch (error) {
+    db.exec('ROLLBACK;');
+    throw error;
+  }
+}
+
+export function publishSyntheticVectors(
+  db: DatabaseSync,
+  memoryId: number,
+  expectedVersion: number,
+  chunks: SyntheticChunkInput[],
+): void {
+  publishValidatedChunks(
+    db,
+    memoryId,
+    expectedVersion,
+    {
+      model_id: 'intfloat/e5-small-v2',
+      model_revision: 'v2',
+      dimensions: 384,
+      normalized: 1,
+    },
+    chunks.map((ch, i) => ({
+      chunk_index: i,
+      chunk_text: ch.chunk_text,
+      start_char: ch.start_char,
+      end_char: ch.end_char,
+      token_count: ch.token_count,
+      vector: ch.vector,
+    })),
+  );
 }
 
 export function createEntity(db: DatabaseSync, input: CreateEntityInput): Entity {

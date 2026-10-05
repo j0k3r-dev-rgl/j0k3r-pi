@@ -2,7 +2,7 @@
 
 Independent TypeScript extension work area for Pi persistent memory.
 
-Status: **MINI-001 completed** (storage foundation, schema v1, project identity, session lifecycle, and runtime-local subagents lease protocol). Public tools and root extension discovery (`index.ts`) remain deferred to subsequent increments; this package is currently non-discovered.
+Status: **MINI-002 completed** (E5 contract client, validated index publication, pending-text preservation, bounded sequential recovery, and post-message diagnostics). Public tools and root extension discovery (`index.ts`) remain deferred to subsequent increments; this package is currently non-discovered.
 
 ## Architecture and Scope (MINI-001)
 
@@ -11,6 +11,15 @@ Status: **MINI-001 completed** (storage foundation, schema v1, project identity,
 - **Project Identity**: Exact home directory resolves to global scope (`["global"]`); descendant directories resolve via trusted `.pi/memory.json` (actionable error if invalid or empty), name-ordered normalized git remote (standard SSH/HTTPS only, unsupported remotes reject explicitly), or folder name fallback.
 - **Session Lifecycle**: Normal sessions activate only on first user message (`message_start` where role is user), never on load/start/selection. Normal shutdown (`new`, `quit`, `resume`, `fork`) closes activated sessions. Reload preserves parent session state.
 - **Subagent Invocation Lease Protocol**: Optional runtime-local lease rendezvous (`memory:invocation:bind:v1`) over child EventBus. Immutable per-attempt identity, activation on first user message, in-flight operation fencing, terminal child session cleanup (empty sessions deleted; sessions with retained active or soft-deleted knowledge preserved closed). Reload coordinates clean runner drain and lease termination without timeouts or deadlocks.
+
+## Architecture and Scope (MINI-002)
+
+- **E5 HTTP Contract Client**: Package-local `E5Client` consuming the local English E5 service at `http://127.0.0.1:8000` via Node built-in `fetch`. Enforces single total 120s embedding deadline and 3s health deadline across headers and body read, zero retries, and caller/lease cancellation precedence. Validates canonical metadata (`intfloat/e5-small-v2`, revision `ffb93f3bd4047442299a41ebb6fa998a38507c52`, 384 dimensions, L2 normalization within 1e-4, 512 max input tokens). Enforces Unicode code point spans (`Array.from(source)`), contiguous coverage, ordered chunk indices, token count <= 512, query exactly 1 chunk, bounded response body ceiling (4 MiB), and client-side preflight body byte check (<= 1 MiB). Errors classified into `unavailable`, `input_error`, `integration_error`, and `cancelled`.
+- **Passage Input Mapping**: Composed source for passage embeddings is strictly `title + '\n' + content`. Original title and content are stored separately in `memories`, while chunk text and spans refer to this composed text.
+- **Save & Publication Pipeline**: Internal `saveAndIndexMemory` prevalidates targets (`target_not_found`, `target_deleted` requiring explicit restore, `target_conflict`) and commits text and FTS5 in a single atomic `BEGIN IMMEDIATE` transaction; POSTs to E5 outside any database connection; publishes validated chunks and vec0 rows in a fresh short transaction conditional on unchanged `content_version`, owner, and active state. In-flight generation failures leave text and FTS intact with status `pending` (not `failed`) and conditional sanitized `pending_reason` so diagnostics and recovery find them.
+- **Sequential Recovery & Continuation**: Internal `reindexMemories` supports explicit ID targeting, current scope pending, or all-project pending with explicit `explicitAllProjects: true`. Processes at most 5 memories strictly sequentially per invocation, committing each before proceeding. Unavailability stops batch immediately. Output envelopes <= 6 KiB UTF-8, counts include earlier failed records, and continuation cursor binds scope, operation, high-water ID, last ID, and a SHA-256 dataset fingerprint that invalidates if records are modified externally. No automatic traversal.
+- **Post-Message Diagnostics**: Detached nonblocking activation diagnostics trigger only on first user message in normal or child runtime, never on load/startup/reload. Checks active pending count (exact-home reports total database pending; project reports scope count and elsewhere boolean notice) and performs one GET `/health` with a 3s deadline. Emits a concise notice via `ctx.ui.notify` when available, or a bounded noninteractive `stderr` notice in headless/noninteractive mode. Canceled immediately on reload, session change, or child lease termination, suppressing late notifications.
+
 
 ## Package Dependencies
 
@@ -22,9 +31,10 @@ Status: **MINI-001 completed** (storage foundation, schema v1, project identity,
 
 ```bash
 cd ~/.pi/agent/extensions/pi-persistent-memory
-npm test           # Runs unit/integration tests and benchmark regression tests
+npm test           # Runs 100% offline unit/integration and benchmark regression tests
 npm run typecheck  # Typecheck via package-local TypeScript 5.9.3 (erasable types)
 npm run test:benchmark # Runs established benchmark tests
+LIVE_SMOKE=1 node --test test/integration/e5-live.test.ts # Dedicated 1-query/1-passage live smoke test (opt-in)
 npm run benchmark -- --command import
 npm run benchmark -- --command index
 npm run benchmark -- --command status

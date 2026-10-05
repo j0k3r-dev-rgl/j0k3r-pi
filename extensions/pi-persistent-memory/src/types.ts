@@ -108,6 +108,23 @@ export interface SyntheticChunkInput {
   vector: number[];
 }
 
+export interface PublishChunkInput {
+  chunk_index: number;
+  chunk_text: string;
+  start_char: number;
+  end_char: number;
+  token_count: number;
+  vector: number[];
+}
+
+export interface PublishMetadata {
+  model_id: string;
+  model_revision: string;
+  dimensions: number;
+  normalized: number;
+}
+
+
 export interface CreateEntityInput {
   id: string;
   type: string;
@@ -135,3 +152,18 @@ export interface CreateMemoryEntityLinkInput {
   scopeKey: string;
   sessionId: string;
 }
+
+export interface SaveMemoryInput {
+  id?: number;
+  topicKey?: string | null;
+  title: string;
+  content: string;
+  type: string;
+}
+
+export interface SaveMemoryContext {
+  sessionId: string;
+  invokingParentSessionId?: string | null;
+  invocationId?: string | null;
+}
+

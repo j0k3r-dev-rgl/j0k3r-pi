@@ -4,15 +4,24 @@ import { initSchema } from './storage/schema.ts';
 import { activateSession, closeSession } from './storage/session-store.ts';
 import { resolveScope, encodeScope } from './identity.ts';
 import { InvocationLease } from './lease.ts';
+import { ActivationDiagnostics } from './diagnostics/activation.ts';
+import { E5Client } from './client/e5-client.ts';
 import type { InvocationBindRequestV1, InvocationLeaseV1 } from './protocol.ts';
+
+export interface MemoryLifecycleOptions {
+  client?: E5Client;
+}
 
 export class MemoryLifecycle {
   readonly dbPath: string;
+  readonly client?: E5Client;
   private activeNormalSessionId: string | null = null;
   private boundLease: InvocationLeaseV1 | null = null;
+  private activeDiagnostics: ActivationDiagnostics | null = null;
 
-  constructor(dbPath: string = DEFAULT_DB_PATH) {
+  constructor(dbPath: string = DEFAULT_DB_PATH, options?: MemoryLifecycleOptions) {
     this.dbPath = dbPath;
+    this.client = options?.client;
   }
 
   async handleMessageStart(event: any, ctx: any): Promise<void> {
@@ -40,9 +49,18 @@ export class MemoryLifecycle {
     });
 
     this.activeNormalSessionId = sessionId;
+
+    // Detached nonblocking activation diagnostics
+    this.activeDiagnostics?.cancel();
+    const diag = new ActivationDiagnostics(this.dbPath, this.client);
+    this.activeDiagnostics = diag;
+    diag.start(scopeKey, sessionId, ctx);
   }
 
   async handleSessionShutdown(reason: string, sessionId?: string): Promise<void> {
+    this.activeDiagnostics?.cancel();
+    this.activeDiagnostics = null;
+
     if (reason === 'reload') {
       // Reload does not close parent session or touch DB
       return;
@@ -70,7 +88,7 @@ export class MemoryLifecycle {
       throw new Error('Memory runtime already bound to an invocation');
     }
 
-    const lease = new InvocationLease(request.identity, this.dbPath, request.childContext);
+    const lease = new InvocationLease(request.identity, this.dbPath, request.childContext, { client: this.client });
     this.boundLease = lease;
     request.accept(lease);
     return lease;
