@@ -39,6 +39,7 @@ function activeToolNames(ctx: any): string[] | undefined {
 }
 
 const SUBAGENT_ALLOWED_EXTENSION_EVENTS = new Set(['tool_call', 'tool_result', 'user_bash']);
+const INLINE_MEMORY_ADAPTER_PATH = '<inline:memory-invocation-adapter-v1>';
 
 class NonRetryableSubagentError extends Error {
   readonly nonRetryable = true;
@@ -54,11 +55,132 @@ function isolateSubagentExtensions(base: any): any {
     extensions: (base?.extensions ?? []).map((extension: any) => ({
       ...extension,
       handlers: new Map([...((extension.handlers as Map<string, unknown[]>) ?? new Map())]
-        .filter(([event]) => SUBAGENT_ALLOWED_EXTENSION_EVENTS.has(event))),
+        .filter(([event]) => {
+          if (extension?.path === INLINE_MEMORY_ADAPTER_PATH && event === 'message_start') {
+            return true;
+          }
+          return SUBAGENT_ALLOWED_EXTENSION_EVENTS.has(event);
+        })),
       commands: new Map(),
       flags: new Map(),
       shortcuts: new Map(),
     })),
+  };
+}
+
+function safeSdkProperty<T = any>(piSdk: any, prop: string): T | undefined {
+  try {
+    return piSdk?.[prop];
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveChildSettingsManager(piSdk: any, childCwd: string, ctx: any, agentDir?: string): any {
+  const SettingsManager = safeSdkProperty(piSdk, 'SettingsManager');
+  const ProjectTrustStore = safeSdkProperty(piSdk, 'ProjectTrustStore');
+  if (!SettingsManager) return ctx?.settingsManager;
+
+  const parentCwd = ctx?.cwd ?? process.cwd();
+  const isSameCwd = path.resolve(childCwd) === path.resolve(parentCwd);
+
+  let projectTrusted = false;
+  if (isSameCwd) {
+    projectTrusted = typeof ctx?.isProjectTrusted === 'function' ? ctx.isProjectTrusted() : false;
+  } else {
+    try {
+      if (typeof ProjectTrustStore === 'function' && agentDir) {
+        const store = new ProjectTrustStore(agentDir);
+        const decision = store.get(childCwd);
+        if (typeof decision === 'boolean') {
+          projectTrusted = decision;
+        } else {
+          const defaultTrust = ctx?.settingsManager?.getSettings?.()?.defaultProjectTrust ?? 'ask';
+          projectTrusted = defaultTrust === 'always';
+        }
+      }
+    } catch {
+      projectTrusted = false;
+    }
+  }
+
+  try {
+    if (typeof SettingsManager.create === 'function' && agentDir) {
+      return SettingsManager.create(childCwd, agentDir, { projectTrusted });
+    }
+    if (typeof SettingsManager.inMemory === 'function') {
+      return SettingsManager.inMemory({}, { projectTrusted });
+    }
+  } catch {}
+
+  return ctx?.settingsManager;
+}
+
+function createMemoryRunnerIntegration(identity: {
+  version: 1;
+  invocationId: string;
+  childSessionId: string;
+  invokingParentSessionId: string;
+  taskId?: string;
+  attempt?: number;
+}) {
+  let capturedLease: any = undefined;
+  let activationPromise: Promise<void> | undefined = undefined;
+  let bindCallback: ((childContext: any) => void) | undefined = undefined;
+
+  const memoryInvocationAdapter = {
+    name: 'memory-invocation-adapter-v1',
+    factory: (pi: any) => {
+      bindCallback = (childContext: any) => {
+        if (pi?.events?.emit) {
+          pi.events.emit('memory:invocation:bind:v1', {
+            version: 1,
+            identity,
+            childContext,
+            accept(lease: any) {
+              capturedLease = lease;
+            },
+          });
+        }
+      };
+
+      if (typeof pi?.on === 'function') {
+        pi.on('message_start', async (event: any) => {
+          if (event?.message?.role === 'user') {
+            if (!activationPromise && capturedLease) {
+              activationPromise = capturedLease.activate();
+            }
+            if (activationPromise) {
+              await activationPromise;
+            }
+          }
+        });
+      }
+    },
+  };
+
+  return {
+    memoryInvocationAdapter,
+    bindChildContext(childContext: any) {
+      if (bindCallback) {
+        bindCallback(childContext);
+      }
+    },
+    async waitForActivation(): Promise<void> {
+      if (activationPromise) {
+        try {
+          await activationPromise;
+        } catch {}
+      }
+    },
+    async terminateLease(outcome: 'completed' | 'cancelled' | 'failed'): Promise<void> {
+      if (capturedLease) {
+        await capturedLease.terminate(outcome);
+      }
+    },
+    hasLease(): boolean {
+      return Boolean(capturedLease);
+    },
   };
 }
 
@@ -136,6 +258,12 @@ async function createSession(
   ctx: any,
   systemPrompt: string,
   nestedSessionPath?: string,
+  identityOptions?: {
+    invocationId: string;
+    parentSessionId: string;
+    taskId?: string;
+    attempt?: number;
+  },
 ) {
   const piSdk = await loadPiSdkModule();
   const { createAgentSession, SessionManager } = piSdk;
@@ -147,6 +275,26 @@ async function createSession(
       : SessionManager.inMemory(cwd);
   const resolvedSessionPath = sessionPathFromManager(sessionManager, nestedSessionPath);
   await secureSessionPathWhenReady(resolvedSessionPath);
+
+  const childSessionId = typeof sessionManager?.getSessionId === 'function'
+    ? sessionManager.getSessionId()
+    : 'unknown-child';
+
+  const memoryIntegration = identityOptions
+    ? createMemoryRunnerIntegration({
+        version: 1,
+        invocationId: identityOptions.invocationId,
+        childSessionId,
+        invokingParentSessionId: identityOptions.parentSessionId,
+        taskId: identityOptions.taskId,
+        attempt: identityOptions.attempt,
+      })
+    : undefined;
+
+  const getAgentDir = safeSdkProperty(piSdk, 'getAgentDir');
+  const agentDir = typeof getAgentDir === 'function' ? getAgentDir() : undefined;
+  const childSettingsManager = resolveChildSettingsManager(piSdk, cwd, ctx, agentDir);
+
   const options: Record<string, unknown> = {
     cwd,
     model,
@@ -155,28 +303,61 @@ async function createSession(
     sessionManager,
   };
   if (ctx?.modelRuntime) options.modelRuntime = ctx.modelRuntime;
-  if (ctx?.settingsManager) options.settingsManager = ctx.settingsManager;
+  if (childSettingsManager) options.settingsManager = childSettingsManager;
+  else if (ctx?.settingsManager) options.settingsManager = ctx.settingsManager;
+
+  const DefaultResourceLoader = safeSdkProperty(piSdk, 'DefaultResourceLoader');
+  const createEventBus = safeSdkProperty(piSdk, 'createEventBus');
+  const childEventBus = typeof createEventBus === 'function' ? createEventBus() : undefined;
+  const extensionFactories = memoryIntegration ? [memoryIntegration.memoryInvocationAdapter] : [];
+
   if (config.session_resources === 'lean') {
-    const DefaultResourceLoader = piSdk.DefaultResourceLoader;
-    const agentDir = typeof piSdk.getAgentDir === 'function' ? piSdk.getAgentDir() : undefined;
     if (typeof DefaultResourceLoader !== 'function') throw new Error('Subagent lean session resources require DefaultResourceLoader from Pi SDK.');
-    const resourceLoader = new DefaultResourceLoader({
+    const loaderOptions: Record<string, unknown> = {
       cwd,
       agentDir,
-      settingsManager: ctx?.settingsManager,
+      settingsManager: options.settingsManager,
       noSkills: true,
       noPromptTemplates: true,
       noThemes: true,
       noContextFiles: true,
       systemPromptOverride: () => systemPrompt,
       extensionsOverride: isolateSubagentExtensions,
+    };
+    if (childEventBus) loaderOptions.eventBus = childEventBus;
+    if (extensionFactories.length > 0) loaderOptions.extensionFactories = extensionFactories;
+
+    const resourceLoader = new DefaultResourceLoader(loaderOptions);
+    await resourceLoader.reload();
+    options.agentDir = agentDir;
+    options.resourceLoader = resourceLoader;
+  } else if (typeof DefaultResourceLoader === 'function' && memoryIntegration && childEventBus) {
+    const resourceLoader = new DefaultResourceLoader({
+      cwd,
+      agentDir,
+      settingsManager: options.settingsManager,
+      eventBus: childEventBus,
+      extensionFactories,
     });
     await resourceLoader.reload();
     options.agentDir = agentDir;
     options.resourceLoader = resourceLoader;
   }
+
   const created = await createAgentSession(options);
-  return { ...created, nested_session_path: resolvedSessionPath, pi_version: versionFromPiSdk(piSdk) };
+  if (memoryIntegration && created?.extensionsResult?.runtime?.createContext) {
+    try {
+      const childContext = created.extensionsResult.runtime.createContext();
+      memoryIntegration.bindChildContext(childContext);
+    } catch {}
+  }
+
+  return {
+    ...created,
+    nested_session_path: resolvedSessionPath,
+    pi_version: versionFromPiSdk(piSdk),
+    memoryIntegration,
+  };
 }
 
 function createSessionAbortBridge(session: any, signal: AbortSignal) {
@@ -243,13 +424,41 @@ export const sdkSubagentRunner: SubagentRunner = async ({ definition, task, task
 
   async function attempt(model: any) {
     onActivity?.({ message: `starting ${definition.name} with model ${modelLabel(model) ?? 'unknown'}${effort ? ` effort ${effort}` : ''}`, prompt, system_prompt: systemPrompt, effort });
-    const { session, nested_session_path: resolvedNestedSessionPath, pi_version: piVersion } = await createSession(model, cwd, tools, effort, config, ctx, systemPrompt, nested_session_path);
+
+    const invocationId = crypto.randomUUID();
+    const parentSessionId = parentPiSessionId ?? ctx?.sessionManager?.getSessionId?.() ?? 'standalone';
+    const taskIdForMemory = taskId ?? (continuation ? 'continuation' : undefined);
+    const attemptNumber = continuation?.attempt ?? 1;
+
+    const {
+      session,
+      nested_session_path: resolvedNestedSessionPath,
+      pi_version: piVersion,
+      memoryIntegration,
+    } = await createSession(
+      model,
+      cwd,
+      tools,
+      effort,
+      config,
+      ctx,
+      systemPrompt,
+      nested_session_path,
+      {
+        invocationId,
+        parentSessionId,
+        taskId: taskIdForMemory,
+        attempt: attemptNumber,
+      },
+    );
     registerLiveBridge?.(createLiveSteeringBridge(session, piVersion));
     onActivity?.({ message: 'nested session ready', nested_session_path: resolvedNestedSessionPath });
-    const unregisterInteractionSession = registerInteractionSubagentSession(session, definition, taskId, parentPiSessionId ?? ctx?.sessionManager?.getSessionId?.());
+    const unregisterInteractionSession = registerInteractionSubagentSession(session, definition, taskId, parentSessionId);
     const abortBridge = createSessionAbortBridge(session, signal);
+    let outcome: 'completed' | 'cancelled' | 'failed' = 'completed';
     try {
       if (signal.aborted) {
+        outcome = 'cancelled';
         await abortBridge.abortSession();
         throw new Error('Subagent was aborted');
       }
@@ -271,12 +480,14 @@ export const sdkSubagentRunner: SubagentRunner = async ({ definition, task, task
         continuation?.previous_snapshot,
       );
       if (signal.aborted) {
+        outcome = 'cancelled';
         await abortBridge.abortSession();
         throw new Error('Subagent was aborted');
       }
       await secureSessionPathWhenReady(resolvedNestedSessionPath);
       return { result, usage, thread_snapshot, interaction_request, system_prompt: effectiveSystemPrompt, nested_session_path: resolvedNestedSessionPath };
     } catch (error) {
+      outcome = signal.aborted ? 'cancelled' : 'failed';
       if (signal.aborted) await abortBridge.abortSession();
       await secureSessionPathWhenReady(resolvedNestedSessionPath);
       throw error instanceof SubagentStructuredError
@@ -291,6 +502,22 @@ export const sdkSubagentRunner: SubagentRunner = async ({ definition, task, task
       clearLiveBridge?.();
       abortBridge.dispose();
       unregisterInteractionSession();
+
+      if (memoryIntegration) {
+        await memoryIntegration.waitForActivation();
+        try {
+          await memoryIntegration.terminateLease(outcome);
+        } catch (cleanupError) {
+          throw cleanupError instanceof SubagentStructuredError
+            ? cleanupError
+            : new SubagentStructuredError(structuredMetadataFromError(cleanupError, {
+                phase: 'runner_invoke',
+                provider: providerFromModel(model),
+                model: modelLabel(model),
+                operation: 'memory.lease.terminate',
+              }));
+        }
+      }
     }
   }
 

@@ -1,0 +1,27 @@
+{
+  "name": "pi-persistent-memory",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Benchmark-only preparation for independent Pi memory; not an active extension",
+  "type": "module",
+  "engines": {
+    "node": ">=24.19.0"
+  },
+  "scripts": {
+    "test": "node --test test/**/*.test.ts benchmark/*.test.ts",
+    "test:benchmark": "node --test benchmark/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "benchmark": "node benchmark/cli.ts"
+  },
+  "dependencies": {
+    "sqlite-vec": "0.1.9"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "1.0.2",
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3"
+  }
+}
