@@ -85,6 +85,12 @@ function readJsonl(file: string): any[] {
 }
 
 describe('config and workflow loading', () => {
+  it('defaults to supported read-only memory tools when a definition omits tools', () => {
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents', 'reader.md'), '---\nname: reader\n---\n# Reader');
+    const expected = ['read', 'memory_context', 'memory_search', 'memory_get'];
+    expect(readSubagentsConfig(tmp).default_tools).toEqual(expected);
+    expect(loadSubagents(tmp).find((agent) => agent.name === 'reader')?.tools).toEqual(expected);
+  });
   it('parses markdown agents with multiline or comma-separated inline tools', () => {
     const multiline = parseFrontmatter('---\nname: analyst\ntools:\n  - read\n  - write\n---\n# Body');
     expect(multiline.data.name).toBe('analyst');

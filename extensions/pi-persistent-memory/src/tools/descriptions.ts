@@ -41,5 +41,5 @@ export const ENTITY_TOOL_DESCRIPTION =
   'Entity types and scopes are immutable once created.';
 
 export const RELATION_TOOL_DESCRIPTION =
-  'Manage directed graph relations between entities (depends_on, implements, references, configured_by, owned_by, related_to). ' +
+  'Manage directed graph relations between entities (uses, about, references, depends_on, related_to, contradicts). ' +
   'Supports action "save" (create relation between existing entities) or "delete" (remove relation).';

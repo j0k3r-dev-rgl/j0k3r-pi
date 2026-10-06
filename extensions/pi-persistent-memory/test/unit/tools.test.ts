@@ -82,9 +82,11 @@ test('M6-A01 & M6-A05: public relation schema accepts exactly the approved graph
   assert.deepEqual([...declared].sort(), [...RELATION_TYPES].sort());
   for (const relationType of RELATION_TYPES) {
     assert.equal(validator.Check({ action: 'save', source: 'source', target: 'target', relation_type: relationType }), true, relationType);
+    assert.ok(tool.description.includes(relationType), `Description must document supported relation ${relationType}`);
   }
   for (const relationType of ['implements', 'configured_by', 'owned_by', 'unknown']) {
     assert.equal(validator.Check({ action: 'save', source: 'source', target: 'target', relation_type: relationType }), false, relationType);
+    assert.ok(!tool.description.includes(relationType), `Description must not advertise unsupported relation ${relationType}`);
   }
 });
 

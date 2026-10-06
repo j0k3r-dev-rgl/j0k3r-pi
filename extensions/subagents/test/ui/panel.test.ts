@@ -105,13 +105,13 @@ describe('subagents panel and extension ui', () => {
       const pi: any = { registerTool: (_tool: any) => undefined, registerMessageRenderer: () => undefined, on: () => undefined, registerShortcut: () => undefined, registerCommand: () => undefined };
       extension(pi);
       pi.registerTool({
-        name: 'mem_save',
-        label: 'Engram: Save',
+        name: 'memory_save',
+        label: 'Memory: Save',
         description: 'memory save',
         parameters: {},
         renderShell: 'self',
-        renderCall: (args: any) => ({ render: () => [`engram-call:${args.title}`], invalidate: () => undefined }),
-        renderResult: (result: any) => ({ render: () => [`engram-result:${result.details?.status}`], invalidate: () => undefined }),
+        renderCall: (args: any) => ({ render: () => [`memory-call:${args.title}`], invalidate: () => undefined }),
+        renderResult: (result: any) => ({ render: () => [`memory-result:${result.details?.status}`], invalidate: () => undefined }),
       });
       const task: SubagentTask = {
         id: 'subtask_captured_external_renderer',
@@ -120,12 +120,12 @@ describe('subagents panel and extension ui', () => {
         status: 'completed',
         task: 'render captured external renderer',
         created_at: new Date().toISOString(),
-        thread_snapshot: { version: 1, source: 'events', items: [{ type: 'tool', name: 'mem_save', status: 'completed', arguments: { title: 'Fix render' }, result: { content: [{ type: 'text', text: 'Saved' }], details: { status: 'saved' }, isError: false } }] },
+        thread_snapshot: { version: 1, source: 'events', items: [{ type: 'tool', name: 'memory_save', status: 'completed', arguments: { title: 'Fix render' }, result: { content: [{ type: 'text', text: 'Saved' }], details: { status: 'saved' }, isError: false } }] },
       } as any;
       const panel = new SubagentsHistoryPanel([task], { fg: (_name: string, text: string) => text }, () => undefined, () => false, (text) => text.length, (text, width) => text.length > width ? text.slice(0, width) : text, { cwd: tmp, tui: { requestRender() {} } });
       const rendered = panel.render(160).join('\n');
-      expect(rendered).toContain('captured:engram-call:Fix render:engram-result:saved');
-      expect(rendered).not.toContain('mem_save completed');
+      expect(rendered).toContain('captured:memory-call:Fix render:memory-result:saved');
+      expect(rendered).not.toContain('memory_save completed');
     } finally {
       resetPiComponentCacheForTests();
     }

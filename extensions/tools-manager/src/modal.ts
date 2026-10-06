@@ -18,7 +18,6 @@ export const SUPPORTED_EXTENSIONS: ToolExtensionItem[] = [
 	{ id: "context7", name: "context7", description: "Context7 documentation & tools" },
 	{ id: "websearch", name: "websearch", description: "Web search tools" },
 	{ id: "pdf-review", name: "pdf-review", description: "PDF inspection & text review" },
-	{ id: "engram", name: "engram", description: "Persistent memory & protocol (19 tools)" },
 	{ id: "codegraph", name: "codegraph", description: "CodeGraph semantic exploration & index management" },
 	{ id: "typesafe", name: "typesafe", description: "TypeSafe System One (Jev) semantic AI evaluation" },
 ];

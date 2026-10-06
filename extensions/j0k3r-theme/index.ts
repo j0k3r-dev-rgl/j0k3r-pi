@@ -156,8 +156,6 @@ export const KNOWN_OPT_IN_EXTENSIONS = new Set<string>([
 	"context7",
 	"websearch",
 	"pdf-review",
-	"engram",
-	"gentle-engram",
 	"codegraph",
 	"typesafe",
 ]);
@@ -184,7 +182,7 @@ export function isOptInExtension(extName: string, extPath?: string): boolean {
 }
 
 export function isExtensionActive(extName: string, config: Record<string, boolean> | null, extPath?: string): boolean {
-	const configKey = (extName === "gentle-engram" || extName === "engram") ? "engram" : extName;
+	const configKey = extName;
 
 	if (isOptInExtension(extName, extPath) || (config && configKey in config)) {
 		return Boolean(config && config[configKey] === true);

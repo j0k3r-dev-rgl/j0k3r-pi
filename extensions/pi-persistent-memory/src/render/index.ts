@@ -1,162 +1,112 @@
-import { Text } from '@earendil-works/pi-tui';
+import { Container, Text, TruncatedText } from '@earendil-works/pi-tui';
 import { keyHint } from '@earendil-works/pi-coding-agent';
 
-function formatCallSummary(toolName: string, args: any, theme: any): string {
+const MEMORY_CYAN = '\x1b[38;2;135;206;250m';
+const RESET = '\x1b[39m';
+const cyan = (text: string) => `${MEMORY_CYAN}${text}${RESET}`;
+const inline = (text: string) => text.replace(/\s+/g, ' ').trim();
+
+type RenderState = { header?: Container; call?: string };
+
+function callArguments(toolName: string, args: any): string {
   switch (toolName) {
-    case 'memory_save': {
+    case 'memory_save':
       if (args?.action === 'reindex') {
-        const target = args?.id ? `id #${args.id}` : args?.global ? 'all projects' : 'pending in scope';
-        return theme.fg('toolOutput', `reindex memory (${target})`);
+        return `reindex ${args.id ? `#${args.id}` : args.global ? 'all projects' : 'pending in scope'}`;
       }
-      const title = args?.title ? `"${args.title}"` : args?.topic_key ? `key:${args.topic_key}` : '';
-      const typeStr = args?.type ? ` [${args.type}]` : '';
-      return theme.fg('toolOutput', `save memory ${title}${typeStr}`);
-    }
-    case 'memory_search': {
-      if (args?.mode === 'graph') {
-        return theme.fg('toolOutput', `graph search entity: ${args?.entity_id ?? ''}`);
-      }
-      const q = args?.query ? `"${args.query}"` : '';
-      const modeStr = args?.mode ? ` [${args.mode}]` : '';
-      return theme.fg('toolOutput', `search memory ${q}${modeStr}`);
-    }
+      return [args?.title ? `"${args.title}"` : args?.topic_key ? `key:${args.topic_key}` : '',
+        args?.type ? `[${args.type}]` : ''].filter(Boolean).join(' ');
+    case 'memory_search':
+      return args?.mode === 'graph' ? `graph ${args?.entity_id ?? ''}`
+        : [args?.query ? `"${args.query}"` : '', args?.mode ? `[${args.mode}]` : ''].filter(Boolean).join(' ');
     case 'memory_get':
-      return theme.fg('toolOutput', `get memory #${args?.id ?? ''}`);
-    case 'memory_context': {
-      const scopeLabel = args?.global ? 'all projects' : 'current project';
-      return theme.fg('toolOutput', `memory context (${scopeLabel})`);
-    }
     case 'memory_delete':
-      return theme.fg('toolOutput', `delete memory #${args?.id ?? ''}`);
     case 'memory_restore':
-      return theme.fg('toolOutput', `restore memory #${args?.id ?? ''}`);
-    case 'memory_deleted_list': {
-      const scopeLabel = args?.global ? 'all projects' : 'current project';
-      return theme.fg('toolOutput', `list deleted memories (${scopeLabel})`);
-    }
-    case 'memory_entity': {
-      const act = args?.action ?? 'list';
-      const name = args?.name ? ` "${args.name}"` : args?.id ? ` id:${args.id}` : '';
-      return theme.fg('toolOutput', `entity ${act}${name}`);
-    }
-    case 'memory_relation': {
-      const act = args?.action ?? 'save';
-      const rel = args?.source && args?.target ? ` ${args.source} -> ${args.target}` : args?.id ? ` id:${args.id}` : '';
-      return theme.fg('toolOutput', `relation ${act}${rel}`);
-    }
+      return `#${args?.id ?? ''}`;
+    case 'memory_context':
+    case 'memory_deleted_list':
+      return args?.global ? 'all projects' : 'current project';
+    case 'memory_entity':
+      return [args?.action ?? 'list', args?.name ? `"${args.name}"` : args?.id ?? ''].filter(Boolean).join(' ');
+    case 'memory_relation':
+      return [args?.action ?? 'save', args?.source && args?.target ? `${args.source} → ${args.target}` : args?.id ?? ''].filter(Boolean).join(' ');
     default:
-      return theme.fg('toolOutput', `${toolName}`);
+      return '';
   }
 }
 
-function formatCollapsedResult(toolName: string, result: any, theme: any): string {
-  const expandHint = keyHint('app.tools.expand', 'to expand');
-  const details = result?.details ?? {};
-
+function resultSummary(toolName: string, details: any): string {
+  const id = details.id ? ` #${details.id}` : '';
   switch (toolName) {
-    case 'memory_save': {
-      if (details?.action === 'reindex') {
-        const proc = details?.processed ?? 0;
-        const succ = details?.succeeded ?? 0;
-        const fail = details?.failed ?? 0;
-        return `${theme.fg('success', '✓')} Reindexed ${proc} memories (${succ} ok, ${fail} failed) ${theme.fg('muted', `(${expandHint})`)}`;
-      }
-      const idStr = details?.id ? ` #${details.id}` : '';
-      const statusStr = details?.indexing_status === 'indexed' ? 'indexed' : 'pending indexing';
-      return `${theme.fg('success', '✓')} Saved memory${idStr} (${statusStr}) ${theme.fg('muted', `(${expandHint})`)}`;
-    }
-    case 'memory_search': {
-      const count = details?.count ?? (details?.node_count !== undefined ? details.node_count : 0);
-      const moreStr = details?.has_more ? ' (more available)' : '';
-      return `${theme.fg('success', '✓')} Found ${count} result(s)${moreStr} ${theme.fg('muted', `(${expandHint})`)}`;
-    }
-    case 'memory_get': {
-      const idStr = details?.id ? ` #${details.id}` : '';
-      const moreStr = details?.has_more ? ' [page continuation available]' : '';
-      return `${theme.fg('success', '✓')} Retrieved memory${idStr}${moreStr} ${theme.fg('muted', `(${expandHint})`)}`;
-    }
-    case 'memory_context': {
-      const count = details?.count ?? 0;
-      return `${theme.fg('success', '✓')} Context loaded (${count} items) ${theme.fg('muted', `(${expandHint})`)}`;
-    }
-    case 'memory_delete': {
-      const idStr = details?.id ? ` #${details.id}` : '';
-      return `${theme.fg('success', '✓')} Deleted memory${idStr} ${theme.fg('muted', `(${expandHint})`)}`;
-    }
-    case 'memory_restore': {
-      const idStr = details?.id ? ` #${details.id}` : '';
-      return `${theme.fg('success', '✓')} Restored memory${idStr} (reindex pending) ${theme.fg('muted', `(${expandHint})`)}`;
-    }
-    case 'memory_deleted_list': {
-      const count = details?.count ?? 0;
-      return `${theme.fg('success', '✓')} Found ${count} deleted record(s) ${theme.fg('muted', `(${expandHint})`)}`;
-    }
-    case 'memory_entity': {
-      const idStr = details?.id ? ` id:${details.id}` : '';
-      return `${theme.fg('success', '✓')} Entity operation completed${idStr} ${theme.fg('muted', `(${expandHint})`)}`;
-    }
-    case 'memory_relation': {
-      const idStr = details?.id ? ` id:${details.id}` : '';
-      return `${theme.fg('success', '✓')} Relation operation completed${idStr} ${theme.fg('muted', `(${expandHint})`)}`;
-    }
+    case 'memory_save':
+      return details.action === 'reindex'
+        ? `Reindexed ${details.processed ?? 0} (${details.succeeded ?? 0} ok, ${details.failed ?? 0} failed)`
+        : `Saved${id} (${details.indexing_status === 'indexed' ? 'indexed' : 'pending indexing'})`;
+    case 'memory_search':
+      return `Found ${details.count ?? details.node_count ?? 0} result(s)`;
+    case 'memory_get':
+      return `Retrieved${id}`;
+    case 'memory_context':
+      return `Context loaded (${details.count ?? 0} items)`;
+    case 'memory_delete':
+      return `Deleted${id}`;
+    case 'memory_restore':
+      return `Restored${id} (reindex pending)`;
+    case 'memory_deleted_list':
+      return `Found ${details.count ?? 0} deleted record(s)`;
+    case 'memory_entity':
+      return `Entity completed${id}`;
+    case 'memory_relation':
+      return `Relation completed${id}`;
     default:
-      return `${theme.fg('success', '✓')} Completed ${theme.fg('muted', `(${expandHint})`)}`;
+      return 'Completed';
   }
 }
 
 export function createToolRenderers(toolName: string) {
   return {
-    renderShell: 'default' as const,
+    // Own only the unframed presentation; Pi still owns expansion and mouse handling.
+    renderShell: 'self' as const,
 
-    renderCall(args: any, theme: any, _context?: any) {
-      const text = formatCallSummary(toolName, args, theme);
-      return new Text(text, 0, 0);
+    renderCall(args: any, _theme: any, context?: any) {
+      const header = new Container();
+      if (context?.expanded) return header;
+      const call = inline(`🧠 ${toolName} ${callArguments(toolName, args)}`);
+      header.addChild(new TruncatedText(cyan(call), 0, 0));
+      if (context?.state) {
+        const state: RenderState = context.state;
+        state.header = header;
+        state.call = call;
+      }
+      return header;
     },
 
     renderResult(
       result: { content: Array<{ type: string; text?: string }>; details?: any },
       { expanded, isPartial }: { expanded: boolean; isPartial: boolean },
-      theme: any,
+      _theme: any,
       context?: any,
     ) {
-      if (isPartial) {
-        return new Text(theme.fg('muted', 'Executing memory operation...'), 0, 0);
+      const text = result?.content?.filter((block) => block.type === 'text')
+        .map((block) => block.text ?? '').join('\n') ?? '';
+      if (expanded) {
+        // Content already includes continuation information; never add metadata or panels.
+        return text ? new Text(cyan(text), 0, 0) : new Container();
       }
 
-      if (context?.isError) {
-        const errorMsg = result?.details?.error ?? result?.content?.[0]?.text ?? 'Operation failed';
-        if (!expanded) {
-          const expandHint = keyHint('app.tools.expand', 'to expand');
-          return new Text(
-            `${theme.fg('error', '✗')} ${theme.fg('error', errorMsg)} ${theme.fg('muted', `(${expandHint})`)}`,
-            0,
-            0,
-          );
-        }
-        return new Text(theme.fg('error', `Error details:\n${errorMsg}`), 0, 0);
+      const details = result?.details ?? {};
+      const status = isPartial ? 'Executing…'
+        : context?.isError ? `✗ ${details.error || text || 'Operation failed'}`
+        : `✓ ${resultSummary(toolName, details)}${details.has_more ? ' · more available' : ''}`;
+      const hint = keyHint('app.tools.expand', 'to expand');
+      const state: RenderState | undefined = context?.state;
+      const headerText = cyan(inline(`${state?.call ?? `🧠 ${toolName}`} · ${status} (${hint})`));
+      if (state?.header) {
+        state.header.clear();
+        state.header.addChild(new TruncatedText(headerText, 0, 0));
+        return new Container();
       }
-
-      if (!expanded) {
-        const collapsedLine = formatCollapsedResult(toolName, result, theme);
-        return new Text(collapsedLine, 0, 0);
-      }
-
-      // Expanded: display all content returned in current page plus metadata
-      const textOutput = result?.content
-        ?.filter((c) => c.type === 'text' && c.text)
-        ?.map((c) => c.text!)
-        ?.join('\n') ?? '';
-
-      if (!textOutput || textOutput.trim().length === 0) {
-        return new Text(theme.fg('muted', '(No content)'), 0, 0);
-      }
-
-      let expandedText = textOutput;
-      if (result?.details?.has_more) {
-        expandedText += `\n\n${theme.fg('muted', `... (More data available. Use cursor: "${result.details.next_cursor}")`)}`;
-      }
-
-      return new Text(expandedText, 0, 0);
+      return new TruncatedText(headerText, 0, 0);
     },
   };
 }

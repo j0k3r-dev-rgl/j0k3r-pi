@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, symlinkSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -15,6 +15,7 @@ import { withDatabase } from '../../src/storage/db.ts';
 import { MemoryLifecycle } from '../../src/lifecycle.ts';
 import { createMemoryTools } from '../../src/tools/index.ts';
 import { createMemoryExtension } from '../../src/extension.ts';
+import { DEFAULT_DB_PATH } from '../../src/config.ts';
 import type { InvocationLeaseV1, InvocationIdentityV1 } from '../../src/protocol.ts';
 import { createServer } from 'node:http';
 import { mkdirSync } from 'node:fs';
@@ -37,6 +38,72 @@ function createTempFixture(name: string): { dir: string; dbPath: string; cleanup
     },
   };
 }
+
+test('Activation: Pi autodiscovers the root entrypoint and registers nine tools without storage or network activity', async () => {
+  const { dir, dbPath, cleanup } = createTempFixture('discovery');
+  const originalFetch = globalThis.fetch;
+  const storageState = () => existsSync(DEFAULT_DB_PATH)
+    ? { size: statSync(DEFAULT_DB_PATH).size, modified: statSync(DEFAULT_DB_PATH).mtimeMs }
+    : null;
+  const beforeLoading = storageState();
+  let networkCalls = 0;
+  globalThis.fetch = async () => {
+    networkCalls++;
+    throw new Error('Extension loading must not access the network');
+  };
+  try {
+    const entrypoint = new URL('../../index.ts', import.meta.url);
+    assert.ok(existsSync(entrypoint), 'Pi requires a root index.ts entrypoint');
+    mkdirSync(join(dir, 'extensions'));
+    symlinkSync(new URL('../../', import.meta.url), join(dir, 'extensions', 'pi-persistent-memory'), 'dir');
+    const loader = new DefaultResourceLoader({
+      cwd: dir, agentDir: dir,
+      settingsManager: SettingsManager.inMemory({}, { projectTrusted: true }),
+      noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
+    });
+    await loader.reload();
+    const loaded = loader.getExtensions();
+    assert.deepEqual(loaded.errors, []);
+    assert.equal(loaded.extensions.length, 1);
+    assert.deepEqual([...loaded.extensions[0].tools.keys()].sort(), [
+      'memory_context', 'memory_delete', 'memory_deleted_list', 'memory_entity',
+      'memory_get', 'memory_relation', 'memory_restore', 'memory_save', 'memory_search',
+    ]);
+    assert.equal(existsSync(dbPath), false);
+    assert.deepEqual(storageState(), beforeLoading, 'Autodiscovery must not touch the real memory database');
+    assert.equal(networkCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    cleanup();
+  }
+});
+
+test('Activation: session startup reports registered memory tools without creating a database', async () => {
+  const { dbPath, cleanup } = createTempFixture('startup-status');
+  const handlers = new Map<string, Function[]>();
+  const statuses = new Map<string, string | undefined>();
+  const pi: any = {
+    on: (name: string, handler: Function) => {
+      handlers.set(name, [...(handlers.get(name) ?? []), handler]);
+      return () => {};
+    },
+    events: { on: () => () => {} },
+    registerTool: () => {},
+  };
+  const ctx = { ui: { setStatus: (key: string, value: string | undefined) => statuses.set(key, value) } };
+  try {
+    createMemoryExtension(dbPath, { client: new OfflineE5Client() })(pi);
+    assert.ok(handlers.has('session_start'), 'Registered tools should publish their own status');
+    for (const handler of handlers.get('session_start')!) await handler({}, ctx);
+    assert.equal(statuses.get('pi-persistent-memory'), 'memory · 9 tools');
+    assert.equal(existsSync(dbPath), false);
+    for (const handler of handlers.get('session_shutdown')!) await handler({ reason: 'quit' }, ctx);
+    assert.equal(statuses.get('pi-persistent-memory'), undefined);
+    assert.equal(existsSync(dbPath), false);
+  } finally {
+    cleanup();
+  }
+});
 
 test('M5-A02: Tool execution before first user message fails with session_not_active without opening DB', async () => {
   const { dbPath, cleanup } = createTempFixture('gate-before');

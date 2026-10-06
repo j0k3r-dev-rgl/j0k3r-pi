@@ -7,7 +7,6 @@
   "context7": true,
   "websearch": true,
   "pdf-review": false,
-  "engram": true,
   "codegraph": true,
   "typesafe": true
 }

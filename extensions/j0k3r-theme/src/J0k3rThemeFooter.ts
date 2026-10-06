@@ -33,24 +33,24 @@ function formatContextTokens(value: number | null | undefined): string {
 
 function getExtensionStatus(footerData: ReadonlyFooterDataProvider): string {
 	const entries = Array.from(footerData.getExtensionStatuses().entries());
-	if (entries.length === 0) return "engram";
+	if (entries.length === 0) return "";
 
-	const engramCandidates: string[] = [];
+	const memoryCandidates: string[] = [];
 	for (const [key, value] of entries) {
 		const haystack = `${key} ${value}`.toLowerCase();
-		if (haystack.includes("engram") || haystack.includes("memory") || haystack.includes("loaded")) {
-			engramCandidates.push(value);
+		if (haystack.includes("memory")) {
+			memoryCandidates.push(value);
 		}
 	}
 
-	if (engramCandidates.length > 0) {
-		return engramCandidates.join(" · ");
+	if (memoryCandidates.length > 0) {
+		return memoryCandidates.join(" · ");
 	}
 
 	return entries.map(([, v]) => v).join(" · ");
 }
 
-function compactEngramStatus(status: string, maxLength: number): string {
+function compactExtensionStatus(status: string, maxLength: number): string {
 	if (visibleWidth(status) <= maxLength) return status;
 
 	const match = status.match(/(\d+)\s*(?:memories|memory|mem)/i);
@@ -59,8 +59,8 @@ function compactEngramStatus(status: string, maxLength: number): string {
 		if (visibleWidth(candidate) <= maxLength) return candidate;
 	}
 
-	if (status.toLowerCase().includes("engram") && maxLength >= 6) {
-		return "engram";
+	if (status.toLowerCase().includes("memory") && maxLength >= 6) {
+		return "memory";
 	}
 
 	return truncateToWidth(status, maxLength, "…");
@@ -340,12 +340,12 @@ export class J0k3rThemeFooter implements Component {
 		const context = this.ctx.getContextUsage();
 		const rawModel = this.ctx.model ? `${this.ctx.model.provider}/${this.ctx.model.id}` : "no-model";
 		const effort = this.getThinkingLevel();
-		const engramStatus = getExtensionStatus(this.footerData);
+		const extensionStatus = getExtensionStatus(this.footerData);
 
 		const usedTokens = context?.tokens ?? 0;
 		const winTokens = context?.contextWindow ?? this.ctx.model?.contextWindow ?? 0;
 		const percentVal = context?.percent ?? null;
-		const cacheKey = `${width}:${rawModel}:${effort}:${input}:${output}:${usedTokens}:${winTokens}:${percentVal}:${engramStatus}`;
+		const cacheKey = `${width}:${rawModel}:${effort}:${input}:${output}:${usedTokens}:${winTokens}:${percentVal}:${extensionStatus}`;
 
 		if (this.cachedBottomLine && this.cachedBottomLine.key === cacheKey) {
 			return this.cachedBottomLine.output;
@@ -379,9 +379,9 @@ export class J0k3rThemeFooter implements Component {
 		const cCompact = `${electric(percentColor, percentStr)} ${this.theme.fg("muted", usedContextStr)}`;
 		const cSlim = electric(percentColor, percentStr);
 
-		const sFull = electric(CYAN, engramStatus);
-		const sCompact = electric(CYAN, compactEngramStatus(engramStatus, 14));
-		const sSlim = electric(CYAN, "engram");
+		const sFull = extensionStatus ? electric(CYAN, extensionStatus) : "";
+		const sCompact = extensionStatus ? electric(CYAN, compactExtensionStatus(extensionStatus, 14)) : "";
+		const sSlim = extensionStatus ? electric(CYAN, compactExtensionStatus(extensionStatus, 6)) : "";
 
 		// Priority 1: Split layout (Left + Right gap >= 2)
 		const splitProfiles = [

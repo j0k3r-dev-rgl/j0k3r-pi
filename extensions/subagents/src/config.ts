@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ModelRef, SubagentDefinition, SubagentDefinitionScope, SubagentMode, SubagentModelProfile, SubagentModelProfiles, SubagentSessionResources, SubagentsConfig, ThinkingEffort } from './types.js';
 
-const DEFAULT_TOOLS = ['read', 'memory_context', 'memory_search', 'memory_recall', 'memory_get'];
+const DEFAULT_TOOLS = ['read', 'memory_context', 'memory_search', 'memory_get'];
 const DEFAULT_MAX_CONCURRENCY = 5;
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
 const DEFAULT_STALL_TIMEOUT_MS = 4 * 60 * 1000;

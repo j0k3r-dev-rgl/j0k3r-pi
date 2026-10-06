@@ -150,7 +150,7 @@ test("quota shows a compact countdown for each valid future reset", () => {
     "quota 5h ━━━━━━── 72% · 5h ━━━━━━── 72% · 5h ━━━━━━── 72%");
 });
 
-test("quota appears above Engram only when it fits without displacing the top line", () => {
+test("quota appears above memory status only when it fits without displacing the top line", () => {
   const theme = { bold: (s) => s, fg: (_color, s) => s };
   const ctx = {
     cwd: "/tmp/example", model: { provider: "cliproxyapi", id: "main/gpt-5", contextWindow: 100000 },
@@ -158,26 +158,40 @@ test("quota appears above Engram only when it fits without displacing the top li
     getContextUsage: () => null,
   };
   const footer = new J0k3rThemeFooter({ requestRender() {} }, theme,
-    { getExtensionStatuses: () => new Map([["engram", "engram"]]) }, ctx, () => "off",
+    { getExtensionStatuses: () => new Map([["pi-persistent-memory", "memory · 9 tools"]]) }, ctx, () => "off",
     { dir: "/tmp/example", repoName: "example", branch: "main" });
   footer.setQuota("quota 5h ━━━━━━── 72% · 7d ━━━───── 40%");
   const wide = footer.render(120);
   assert.match(wide[0], /quota 5h ━━━━━━── 72% · 7d ━━━───── 40%/);
-  assert.match(wide[1], /engram/);
+  assert.match(wide[1], /memory · 9 tools/);
   const narrow = footer.render(48);
   assert.doesNotMatch(narrow.join("\n"), /quota/);
+});
+
+test("footer does not invent a memory status when no extension publishes one", () => {
+  const theme = { bold: (s) => s, fg: (_color, s) => s };
+  const ctx = {
+    cwd: "/tmp/example", model: { provider: "mock", id: "model", contextWindow: 100000 },
+    sessionManager: { getLeafId: () => null, getBranch: () => [] },
+    getContextUsage: () => null,
+  };
+  const footer = new J0k3rThemeFooter({ requestRender() {} }, theme,
+    { getExtensionStatuses: () => new Map() }, ctx, () => "off",
+    { dir: "/tmp/example", repoName: "example", branch: "main" });
+  for (const width of [120, 80, 48]) assert.doesNotMatch(footer.render(width).join("\n"), /memory/);
+  assert.doesNotMatch(footer.render(120).join("\n"), /engram/i);
 });
 
 test("MINI-001: isExtensionActive correctly filters opt-in extensions according to .pi/extensions.json", () => {
   const config = {
     "api-tools": false,
     "codegraph": true,
-    "engram": true,
+    "pi-persistent-memory": false,
   };
 
   assert.equal(isExtensionActive("api-tools", config), false, "api-tools must be inactive when set to false");
   assert.equal(isExtensionActive("codegraph", config), true, "codegraph must be active when set to true");
-  assert.equal(isExtensionActive("gentle-engram", config), true, "gentle-engram must map to engram key");
+  assert.equal(isExtensionActive("pi-persistent-memory", config), false, "explicit native Pi resource exclusions must be reflected");
   assert.equal(isExtensionActive("browser-screenshot", config), false, "unspecified opt-in extension must be inactive");
   assert.equal(isExtensionActive("tools-manager", config), true, "core extension must be active by default");
 });
@@ -187,6 +201,7 @@ test("MINI-002: isExtensionActive treats all opt-in extensions as inactive when 
   assert.equal(isExtensionActive("codegraph", null), false);
   assert.equal(isExtensionActive("tools-manager", null), true);
   assert.equal(isExtensionActive("j0k3r-theme", null), true);
+  assert.equal(isExtensionActive("pi-persistent-memory", null), true, "memory is globally autodiscovered, not an opt-in toggle");
 });
 
 test("MINI-003: getExtensionDisplayName cleans local package paths like pi-subagents-j0k3r", () => {

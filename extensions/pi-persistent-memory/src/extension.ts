@@ -15,6 +15,14 @@ export function createMemoryExtension(
     for (const tool of tools) {
       pi.registerTool(tool);
     }
+
+    // Report registration only; loading never opens storage or checks the E5 service.
+    pi.on('session_start', (_event, ctx) => {
+      ctx.ui?.setStatus?.('pi-persistent-memory', `memory · ${tools.length} tools`);
+    });
+    pi.on('session_shutdown', (_event, ctx) => {
+      ctx.ui?.setStatus?.('pi-persistent-memory', undefined);
+    });
   };
 }
 
