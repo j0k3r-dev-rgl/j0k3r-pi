@@ -1,4 +1,5 @@
 import { Type } from 'typebox';
+import { RELATION_TYPES } from '../graph/types.ts';
 
 export const SaveSchema = Type.Object(
   {
@@ -90,7 +91,7 @@ export const RelationSchema = Type.Object(
     id: Type.Optional(Type.String({ description: 'Relation ID (for delete or update)' })),
     source: Type.Optional(Type.String({ description: 'Source entity ID' })),
     target: Type.Optional(Type.String({ description: 'Target entity ID' })),
-    relation_type: Type.Optional(Type.String({ enum: ['depends_on', 'implements', 'references', 'configured_by', 'owned_by', 'related_to'], description: 'Relation type' })),
+    relation_type: Type.Optional(Type.String({ enum: [...RELATION_TYPES], description: 'Relation type' })),
     scope: Type.Optional(Type.String({ enum: ['project', 'global'], description: 'Target scope' })),
   },
   { additionalProperties: false },

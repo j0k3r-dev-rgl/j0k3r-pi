@@ -148,6 +148,21 @@ export async function executeSaveTool(
       },
     );
 
+    if (res.error && ['cancelled', 'integration_error', 'input_error'].includes(res.error.category)) {
+      const reason = res.error.category === 'cancelled'
+        ? 'Embedding generation was cancelled'
+        : res.error.category === 'input_error'
+          ? 'Embedding input requires correction'
+          : 'Embedding response failed integration validation';
+      return formatErrorResult(`${res.error.category}: ${reason}; committed memory text remains pending.`, {
+        id: res.memory.id,
+        category: res.error.category,
+        committed: res.committed,
+        indexed: res.indexed,
+        indexing_status: 'pending',
+      });
+    }
+
     const summaryContent: Record<string, any> = {
       action: 'save',
       id: res.memory.id,

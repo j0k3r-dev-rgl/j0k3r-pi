@@ -10,6 +10,7 @@ import { createMemory } from '../../src/storage/memory-store.ts';
 import { InvocationLease } from '../../src/lease.ts';
 import { MemoryLifecycle } from '../../src/lifecycle.ts';
 import type { InvocationIdentityV1 } from '../../src/protocol.ts';
+import { OfflineE5Client } from '../fixtures/offline-e5.ts';
 
 function createTempDb(): { dir: string; dbPath: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), 'pi-memory-mini-001-lifecycle-'));
@@ -26,7 +27,7 @@ function createTempDb(): { dir: string; dbPath: string; cleanup: () => void } {
 test('M1-A03: First-message activation — no DB on load/start/selection, creates/reopens on first user message, closes on shutdown', async () => {
   const { dbPath, cleanup } = createTempDb();
   try {
-    const lifecycle = new MemoryLifecycle(dbPath);
+    const lifecycle = new MemoryLifecycle(dbPath, { client: new OfflineE5Client() });
 
     // 1. Initial state: DB file must NOT even be created yet
     assert.equal(existsSync(dbPath), false);
@@ -77,7 +78,7 @@ test('M1-A03: First-message activation — no DB on load/start/selection, create
 test('M1-A03: Normal session without user messages leaves zero DB records on shutdown', async () => {
   const { dbPath, cleanup } = createTempDb();
   try {
-    const lifecycle = new MemoryLifecycle(dbPath);
+    const lifecycle = new MemoryLifecycle(dbPath, { client: new OfflineE5Client() });
     await lifecycle.handleSessionShutdown('quit', 'session-untouched');
     // DB was never created or touched
     assert.equal(existsSync(dbPath), false);
@@ -101,7 +102,7 @@ test('M1-A04 & M1-A05: Child lease isolation, terminal closure, and empty-record
     const leaseA = new InvocationLease(identityA, dbPath, {
       cwd: '/tmp',
       isProjectTrusted: () => true,
-    });
+    }, { client: new OfflineE5Client() });
 
     // Before activation: no DB work
     assert.equal(existsSync(dbPath), false);
@@ -129,7 +130,7 @@ test('M1-A04 & M1-A05: Child lease isolation, terminal closure, and empty-record
     const leaseB = new InvocationLease(identityB, dbPath, {
       cwd: '/tmp',
       isProjectTrusted: () => true,
-    });
+    }, { client: new OfflineE5Client() });
     await leaseB.activate();
 
     // Terminate lease A with outcome completed: child A has no memories, so it must be deleted!
@@ -179,7 +180,7 @@ test('M1-A06: In-flight operations cancelled and awaited on terminal, late callb
     const lease = new InvocationLease(identity, dbPath, {
       cwd: '/tmp',
       isProjectTrusted: () => true,
-    });
+    }, { client: new OfflineE5Client() });
     await lease.activate();
 
     let opStarted = false;
@@ -221,7 +222,7 @@ test('M1-A07: Reload handler ordering resilience — both orders complete child 
   {
     const { dbPath, cleanup } = createTempDb();
     try {
-      const lifecycle = new MemoryLifecycle(dbPath);
+      const lifecycle = new MemoryLifecycle(dbPath, { client: new OfflineE5Client() });
       const identity: InvocationIdentityV1 = {
         version: 1,
         invocationId: 'inv-order1',
@@ -231,7 +232,7 @@ test('M1-A07: Reload handler ordering resilience — both orders complete child 
       const lease = new InvocationLease(identity, dbPath, {
         cwd: '/tmp',
         isProjectTrusted: () => true,
-      });
+      }, { client: new OfflineE5Client() });
       await lease.activate();
 
       // Runner terminates child lease
@@ -253,7 +254,7 @@ test('M1-A07: Reload handler ordering resilience — both orders complete child 
   {
     const { dbPath, cleanup } = createTempDb();
     try {
-      const lifecycle = new MemoryLifecycle(dbPath);
+      const lifecycle = new MemoryLifecycle(dbPath, { client: new OfflineE5Client() });
       const identity: InvocationIdentityV1 = {
         version: 1,
         invocationId: 'inv-order2',
@@ -263,7 +264,7 @@ test('M1-A07: Reload handler ordering resilience — both orders complete child 
       const lease = new InvocationLease(identity, dbPath, {
         cwd: '/tmp',
         isProjectTrusted: () => true,
-      });
+      }, { client: new OfflineE5Client() });
       await lease.activate();
 
       // Memory extension shuts down first
@@ -334,7 +335,7 @@ test('M1-A04: Continuation from another parent preserves child ID and attributes
     const lease1 = new InvocationLease(identity1, dbPath, {
       cwd: '/tmp',
       isProjectTrusted: () => true,
-    });
+    }, { client: new OfflineE5Client() });
     await lease1.activate();
 
     withDatabase(dbPath, (db) => {
@@ -362,7 +363,7 @@ test('M1-A04: Continuation from another parent preserves child ID and attributes
     const lease2 = new InvocationLease(identity2, dbPath, {
       cwd: '/tmp',
       isProjectTrusted: () => true,
-    });
+    }, { client: new OfflineE5Client() });
     await lease2.activate();
 
     withDatabase(dbPath, (db) => {

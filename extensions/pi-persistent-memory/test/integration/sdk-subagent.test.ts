@@ -16,6 +16,7 @@ import { getSession } from '../../src/storage/session-store.ts';
 import { createMemory } from '../../src/storage/memory-store.ts';
 import { MemoryLifecycle } from '../../src/lifecycle.ts';
 import type { InvocationLeaseV1, InvocationIdentityV1 } from '../../src/protocol.ts';
+import { OfflineE5Client } from '../fixtures/offline-e5.ts';
 
 function createTempFixture(name: string): { dir: string; dbPath: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), `pi-memory-mini-001-${name}-`));
@@ -36,7 +37,7 @@ function createTempFixture(name: string): { dir: string; dbPath: string; cleanup
 test('M1-A09: Isolated SDK session with DefaultResourceLoader, inline adapter, and real EventBus', async () => {
   const { dir, dbPath, cleanup } = createTempFixture('sdk-subagent');
   try {
-    const lifecycle = new MemoryLifecycle(dbPath);
+    const lifecycle = new MemoryLifecycle(dbPath, { client: new OfflineE5Client() });
     const childEventBus = createEventBus();
 
     let capturedLease: InvocationLeaseV1 | undefined;

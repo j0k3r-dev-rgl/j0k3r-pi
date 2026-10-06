@@ -2,7 +2,7 @@
 
 Independent TypeScript extension work area for Pi persistent memory.
 
-Status: **MINI-005 completed** (nine agent-facing memory tools, progressive get/deleted/context readers, runtime scope and lease operation ownership, native collapsed/expanded TUI rendering with native Pi mouse and keyboard interaction). Public root extension discovery (`index.ts`) and production activation remain deferred to MINI-006; this package is currently non-discovered.
+Status: **MINI-001–MINI-006 completed and validated**. The nine tools, progressive readers, scoped search/graph, session provenance and native collapsed/mouse rendering are implemented. The package is still **non-discovered and not activated**: creating the root entrypoint, enabling subagent allowlists and starting the real `~/.memory/memories.db` runtime require separate explicit approval.
 
 ## Architecture and Scope (MINI-001)
 
@@ -88,6 +88,16 @@ Status: **MINI-005 completed** (nine agent-facing memory tools, progressive get/
   - Pure visual toggle: expansion never triggers database queries, model calls, or network requests.
 - **Output Budget Ceiling**: Complete serialized `AgentToolResult` (`content` + `details` + `isError`) strictly bounded <= 6144 bytes UTF-8 across all tools.
 
+## Final Integrated Validation (MINI-006)
+
+- Real isolated Pi SDK calls exercise all nine public tools together: save/index/detail/context/search/graph/delete/deleted-list/restore/reindex/update, every approved relation type, foreign-scope denials, explicit global reads, and data-preserving graph links.
+- Actual child EventBus binding and lean-filtered tools preserve the native child ID and parent attribution across continuation, close retained child records and remove empty ones. Simultaneous project saves and registered shutdown handlers cover scope isolation and no extra reload requests. These SDK handler tests complement prior runner/manager regression; they do not modify a user's session or settings.
+- Public `memory_relation` schemas derive their enum from the graph vocabulary. Cancelled, invalid-input and integration-failed embeddings return an error with committed text/pending state explicitly retained. Availability failures still preserve a successful text save with indexing pending.
+- Normal test fixtures inject a deterministic `OfflineE5Client`; loopback HTTP fixtures test transport behavior. An optional test preload rejects real E5 and external fetch calls during offline regression:
+  `NODE_OPTIONS='--import=./test/fixtures/offline-network-guard.mjs' npm test`.
+- The existing opt-in live smoke is run separately and uses exactly one query and one passage. It proves the live API contract, not model precision/recall, universal prompt-policy compliance or a throughput SLA.
+- Final validation was performed directly by the orchestrator under the user's no-subagent request, reusing the five earlier independently verified increments. No new independent-agent review is claimed.
+
 ## Package Dependencies
 
 - Pinned runtime dependency: `sqlite-vec: 0.1.9`
@@ -151,4 +161,4 @@ The second round reviewed 166 task-memory pairs before selection. Unjudged resul
 
 An additional **exploratory** reformulation (`tasks-v2-refinements.json`) recovered useful CodeGraph memories missed by a broad task query without lowering thresholds; another skills query retained unrelated lexical additions. Its report is separate and must not be described as fresh holdout validation. Inspect both noise and missing memories before changing production policies. No production parameters were changed.
 
-No TypeScript typecheck environment, real Pi lifecycle integration, general semantic-quality guarantee, or final implementation readiness is claimed. Stop at benchmark evidence; extension implementation needs separate approved scope.
+The preceding benchmark sections describe historical evaluation assets and incomplete semantic-quality labels, not a production migration or runtime Engram dependency. They must not be used to claim calibrated model precision/recall. Package-owned typecheck and isolated SDK/lifecycle integration are now validated through MINI-006; production activation and migration/removal of any other memory system remain separately authorized operations.

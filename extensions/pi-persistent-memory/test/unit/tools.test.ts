@@ -11,6 +11,9 @@ import { encodeScope } from '../../src/identity.ts';
 import type { Scope } from '../../src/types.ts';
 import { createMemoryTools, TOOL_NAMES } from '../../src/tools/index.ts';
 import type { OperationContext } from '../../src/tools/types.ts';
+import { Compile } from 'typebox/compile';
+import { RELATION_TYPES } from '../../src/graph/types.ts';
+import { OfflineE5Client } from '../fixtures/offline-e5.ts';
 
 function createTempDb(): { dbPath: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), 'pi-memory-mini-005-tools-'));
@@ -41,6 +44,7 @@ function createMockOpContext(dbPath: string, scope: Scope, sessionId = 'test-ses
     signal: new AbortController().signal,
     assertActive: () => {},
     dbPath,
+    client: new OfflineE5Client(),
   };
 }
 
@@ -68,6 +72,19 @@ test('M5-A01: Exactly nine tools register with valid provider-compatible flat sc
     assert.equal(schema.type, 'object', `Tool ${tool.name} must have root Type.Object`);
     assert.equal(schema.additionalProperties, false, `Tool ${tool.name} must have additionalProperties: false`);
     assert.ok(tool.description && tool.description.length > 20, `Tool ${tool.name} must have meaningful English description`);
+  }
+});
+
+test('M6-A01 & M6-A05: public relation schema accepts exactly the approved graph vocabulary', () => {
+  const tool = createMemoryTools().find((entry) => entry.name === 'memory_relation')!;
+  const validator = Compile(tool.parameters);
+  const declared = (tool.parameters as any).properties.relation_type.enum;
+  assert.deepEqual([...declared].sort(), [...RELATION_TYPES].sort());
+  for (const relationType of RELATION_TYPES) {
+    assert.equal(validator.Check({ action: 'save', source: 'source', target: 'target', relation_type: relationType }), true, relationType);
+  }
+  for (const relationType of ['implements', 'configured_by', 'owned_by', 'unknown']) {
+    assert.equal(validator.Check({ action: 'save', source: 'source', target: 'target', relation_type: relationType }), false, relationType);
   }
 });
 
