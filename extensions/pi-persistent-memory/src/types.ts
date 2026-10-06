@@ -167,3 +167,46 @@ export interface SaveMemoryContext {
   invocationId?: string | null;
 }
 
+export type SearchMode = 'hybrid' | 'semantic' | 'fts5';
+
+export interface SearchMemoryResult {
+  id: number;
+  title: string;
+  scope: Scope;
+  type: string;
+  updated_at: string;
+  score: number;
+  excerpt: string;
+  excerpt_meta?: {
+    field: 'title' | 'content';
+    start: number;
+    end: number;
+  };
+  abbreviated?: boolean;
+  guidance?: string;
+}
+
+export interface SearchResultEnvelope {
+  status: 'ok';
+  requested_mode: SearchMode;
+  actual_mode: SearchMode;
+  scope: {
+    kind: 'global' | 'project';
+    project?: string;
+    explicit_global: boolean;
+  };
+  results: SearchMemoryResult[];
+  has_more: boolean;
+  next_cursor: string | null;
+  warnings: string[];
+}
+
+export interface SearchOptions {
+  query: string;
+  mode?: SearchMode;
+  scope: Scope;
+  explicitGlobal?: boolean;
+  cursor?: string;
+  signal?: AbortSignal;
+}
+
