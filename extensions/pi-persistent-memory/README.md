@@ -2,7 +2,7 @@
 
 Independent TypeScript extension work area for Pi persistent memory.
 
-Status: **MINI-003 completed** (internal scoped semantic, literal lexical and hybrid retrieval; Option B code literal identifiers; relevance admission floors; stateless dataset-fingerprinted cursors; bounded consistent pages <= 6KiB; and visible availability fallback). Public tools and root extension discovery (`index.ts`) remain deferred to subsequent increments; this package is currently non-discovered.
+Status: **MINI-004 completed** (internal scoped entity/relation/association graph services; Option B bidirectional BFS incoming/outgoing navigation with preserved stored direction; strict 5 entity / 6 relation vocabulary; conservative canonicalization and explicit aliases; serialized natural-key deduplication; starvation-free scoped queries; soft-delete visibility filtering; and bounded <= 6KiB envelopes). Public tools and root extension discovery (`index.ts`) remain deferred to subsequent increments (MINI-005/006); this package is currently non-discovered.
 
 ## Architecture and Scope (MINI-001)
 
@@ -29,6 +29,36 @@ Status: **MINI-003 completed** (internal scoped semantic, literal lexical and hy
 - **Visible Availability Fallback**: Pure FTS5 mode makes zero calls to E5 client. For semantic and hybrid modes, only E5 client error category `unavailable` (500, 503, network offline) triggers fallback to `actual_mode: 'fts5'` with warning `'semantic_unavailable'`. Input errors (such as 422 `query_too_long`), integration errors, and caller cancellations propagate distinctly without fallback. HTTP requests occur outside database transactions.
 - **Stateless Fingerprinted Cursors & Read Snapshots**: Pagination cursors are base64url encoded payloads binding `op: 'search'`, `query_hash`, requested and actual modes, scope identity, profile version (1), offset, and a SHA-256 dataset fingerprint computed from memories and vector blobs in scope during a single consistent SQLite read snapshot (`BEGIN DEFERRED`). Changes to memory content, deletions, or vector updates in same-content reindex invalidate the cursor (`cursor_dataset_modified`). Edits to unrelated projects do not invalidate project-local cursors. Tampered, corrupted, or mismatched cursors are rejected.
 - **Bounded Result Envelopes**: Complete JSON serialized response envelope strictly bounded <= 6144 bytes UTF-8 and at most 5 memories per page. Relevant excerpts centered around best matching chunk (semantic/hybrid) or matched literal terms (lexical) using code-point safe slicing (never splitting multibyte characters). Display fields abbreviated when oversized with guidance notice. Empty result set is valid; if metadata leaves no room for any record, an explicit limit error is thrown rather than an empty progress loop.
+
+## Architecture and Scope (MINI-004)
+
+- **Internal Scoped Graph Engine (`src/graph/`)**: Implements memory-owned entity, relation, and explicit association operations with zero public tool registrations. Strictly enforces the 5-entity (`project`, `technology`, `concept`, `file`, `memory`) and 6-relation (`uses`, `about`, `references`, `depends_on`, `related_to`, `contradicts`) vocabulary. Graph signals never participate in semantic/FTS5/hybrid search ranking.
+- **Conservative Identity, Aliases, and Immutability**:
+  - `project`: exact resolved project name, case preserved, whitespace collapsed. Project-scoped.
+  - `technology` & `concept`: deterministic lowercase canonical key, punctuation preserved (`C++`, `C#`, `Node.js` distinct), whitespace collapsed. May be project-owned or shared global nodes.
+  - `file`: normalized project-relative lexical path (rejects absolute, UNC, drive letter, NUL bytes, and `..` escaping root). Project-scoped.
+  - `memory`: canonical key is stringified memory ID (`String(memoryId)`). Positive integer `memoryId` required for `memory`, forbidden for other types.
+  - Explicit aliases: checked atomically against canonical names and aliases in the same namespace; collisions throw actionable `alias_conflict` or `identity_conflict`.
+  - Immutability on update: entity ID, `session_id`, and `created_at` are preserved; `type`, `scope_key`, and `memory_id` cannot be moved. No entity delete/purge primitive.
+- **Serialized BEGIN IMMEDIATE Transactional Invariants**:
+  - Business uniqueness for relations `(source_entity_id, relation_type, target_entity_id, scope_key)` is enforced in serialized write transactions without DDL changes; concurrent identical saves return the stable relation ID.
+  - Endpoint existence, active memory state, and scope compatibility (project edges allow same project or shared global technology/concept; global edges allow global endpoints only) are verified before mutation.
+  - Creator-session attribution is preserved on upsert/update, ensuring `countAssociatedKnowledge` accurately protects child sessions with knowledge upon terminal cleanup.
+- **Option B Bidirectional BFS Traversal**:
+  - Explores both incoming (`direction: 'incoming'`) and outgoing (`direction: 'outgoing'`) edges from an authorized root entity while strictly preserving original stored `source` and `target` direction.
+  - Traversal bounded to max 2 hops and max 20 unique explored entities INCLUDING root.
+  - Scoped SQL predicates query only edges matching the authorized scope before entity admission, preventing foreign-neighbor starvation (e.g., a shared node like React with >20 foreign edges does not starve current project edges).
+  - Keyset bounded neighbor reads with explicit SQL LIMIT dynamically sized to remaining capacity terminate as budgets are reached, preventing unbounded queries on high-degree nodes.
+  - Frontier edges connecting to unadmitted entities are strictly excluded: only edges with both endpoints admitted into nodes are emitted.
+  - Cumulative serialized budget accounting during admission: edges between admitted nodes (including high-degree parallel relations, legacy duplicates, and self-cycles) are budgeted against the 6KiB ceiling during admission, immediately terminating keyset paged reads and BFS exploration when serialized capacity is reached. This bounds total SQL queries and fetched rows, prevents table-exhaustion loops, and preserves admitted connected nodes and directed edges without dropping them in post-traversal trimming cascades.
+  - Cycle and self-link protection: visited nodes are never duplicated in budgets or returned arrays. Deterministic ordering: nodes sorted by depth then ID, edges by ID.
+  - Explicit limits metadata: reports `depth_limit`, `entity_limit`, `byte_limit`, `has_more`, and guidance notice (`Recommend a new focused root query`). `byte_limit` accurately reflects real payload omission rather than frontier cleanup. No graph cursor or auto-exhaustion.
+- **Ordinary Graph Visibility & Soft-Deletion**:
+  - Memory entities referencing soft-deleted memories, as well as incident edges and associations to them, are hidden across `getEntity`, `listEntities`, and `traverseGraph`.
+  - Recoverable state is retained in SQLite; `restoreMemory` immediately re-enables visibility without data duplication or repair. Active memories pending embeddings remain graph-visible without requiring E5.
+- **Bounded Envelopes & List Cursor**:
+  - All graph traversal, list, get, and write confirmations strictly bounded <= 6144 bytes UTF-8. Giant names and aliases are safely abbreviated in envelopes with explicit `truncated` / `aliases_truncated` notices.
+  - `listEntities` supports deterministic pagination with stateless cursors binding scope, type, and SHA-256 dataset fingerprint; modifications in scope invalidate cursors with `cursor_expired`.
 
 
 ## Package Dependencies
