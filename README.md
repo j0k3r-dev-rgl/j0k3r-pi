@@ -52,13 +52,13 @@ for extension_dir in extensions/*; do
   (cd "$extension_dir" && npm install)
 done
 pi install npm:pi-subagents-j0k3r
-pi install npm:gentle-engram
 ```
+
+Persistent memory is provided by the local [`pi-persistent-memory`](extensions/pi-persistent-memory/) extension, autodiscovered through its root `index.ts`. No external memory package is required. After `/reload`, send a user message to activate storage; the nine `memory_*` tools use `~/.memory/memories.db`. Semantic indexing/search uses the local E5 service at `http://127.0.0.1:8000`; lexical search remains available when that service is unavailable. Existing memories are not migrated automatically.
 
 | Pi package | Purpose |
 |---|---|
 | [`npm:pi-subagents-j0k3r`](https://www.npmjs.com/package/pi-subagents-j0k3r) | Runtime support for the Markdown-defined subagents in this configuration. |
-| [`npm:gentle-engram`](https://www.npmjs.com/package/gentle-engram) | Pi-native persistent memory backed by Engram. |
 
 After installation or update, restart Pi or run `/reload` in an active session.
 
@@ -327,13 +327,13 @@ for extension_dir in extensions/*; do
   (cd "$extension_dir" && npm install)
 done
 pi install npm:pi-subagents-j0k3r
-pi install npm:gentle-engram
 ```
+
+La memoria persistente la proporciona la extensión local [`pi-persistent-memory`](extensions/pi-persistent-memory/), que Pi descubre mediante su `index.ts` raíz. No requiere un paquete externo de memoria. Después de `/reload`, envía un mensaje para activar el almacenamiento; las nueve tools `memory_*` usan `~/.memory/memories.db`. La indexación y búsqueda semántica usan E5 local en `http://127.0.0.1:8000`; la búsqueda léxica sigue disponible si ese servicio falla. No se migran recuerdos existentes automáticamente.
 
 | Paquete Pi | Propósito |
 |---|---|
 | [`npm:pi-subagents-j0k3r`](https://www.npmjs.com/package/pi-subagents-j0k3r) | Soporte runtime para los subagentes definidos en Markdown de esta configuración. |
-| [`npm:gentle-engram`](https://www.npmjs.com/package/gentle-engram) | Memoria persistente nativa de Pi respaldada por Engram. |
 
 Después de instalar o actualizar, reinicia Pi o ejecuta `/reload` en una sesión activa.
 

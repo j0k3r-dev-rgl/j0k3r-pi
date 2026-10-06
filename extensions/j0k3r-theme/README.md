@@ -24,7 +24,7 @@ Pi TUI theme extension providing custom interactive header, editor, and footer c
     - Switches active header immediately in memory and notifies via `ctx.ui.notify` without requiring a Pi restart.
 - **Responsive Footer (`J0k3rThemeFooter`)**:
   - Multi-tier adaptive layout that gracefully scales across wide and narrow terminal viewports.
-  - Shows Git repository and branch, current model, token counts, context window usage progress bar, thinking level, and Engram memory status.
+  - Shows Git repository and branch, current model, token counts, context window usage progress bar, thinking level, and the status published by the persistent-memory extension (when loaded).
 - **Custom Editor (`J0k3rThemeEditor`)**:
   - Custom styled input editor component with electric cyan borders.
   - Animated working status indicator in the top border featuring the Arch Linux logo (`󰣇`) with a pulsing neon breathing effect (scaling brightness and contrast) while smoothly cycling through electric cyberpunk gradient colors (Cyan, Arch Blue, Cyber Violet, Neon Pink, Electric Amber, Neon Green) during agent processing and thinking.
@@ -60,7 +60,7 @@ Extensión de tema e interfaz para Pi que provee componentes interactivos person
     - Notificación informativa mediante `ctx.ui.notify` tras cada cambio y manejo seguro de argumentos no reconocidos.
 - **Pie Responsivo (`J0k3rThemeFooter`)**:
   - Diseño responsivo adaptativo que se ajusta a terminales estrechas y anchas sin cortes abruptos.
-  - Muestra repositorio y rama Git, modelo activo, conteo de tokens, barra de progreso de uso de contexto (%), nivel de thinking y estado de Engram.
+  - Muestra repositorio y rama Git, modelo activo, conteo de tokens, barra de progreso de uso de contexto (%), nivel de thinking y el estado publicado por la extensión de memoria persistente (cuando está cargada).
 - **Editor Personalizado (`J0k3rThemeEditor`)**:
   - Componente de editor de entrada estilizado con bordes en cian eléctrico.
   - Indicador animado de estado de trabajo (worker / spinner) en el borde superior con el logo de Arch Linux (`󰣇`) con efecto de latido/respiración neón (pulsación de brillo y contraste) mientras cicla suavemente a través de colores cyberpunk (cian eléctrico, azul Arch, violeta, rosa neón, ámbar, verde lima) cuando el agente procesa o piensa.

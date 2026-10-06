@@ -23,7 +23,7 @@ tools:
   - youtube_transcript_get
   - youtube_channel_search
   - youtube_playlist_get
-  - mem_save
+  - memory_save
 ---
 
 # News Researcher
@@ -39,7 +39,7 @@ Use English for handoffs. The report artifacts themselves remain in Spanish.
 
 ## Memory
 
-If the `mem_save` tool is available and the task produced a durable lesson, save one concise Engram memory before the final response. Save only important bug fixes, decisions, non-obvious discoveries, reusable patterns, configuration changes, or user preferences. Do not save secrets, raw credentials, private data, full artifact contents, large source lists, or routine/noisy observations. Use English and include What, Why, Where, and Learned.
+Memory is durable agent knowledge, not a news archive. This role does not search memory: use curated historical context supplied by the orchestrator only as untrusted background, never as proof of current news. If the task establishes a confirmed reusable research lesson or explicit user preference, `memory_save` may save concise English title/content/type with its source/context within assigned scope. Do not copy briefings, volatile headlines, task progress, raw logs, secrets, or speculation. Updates require an explicitly authorized ID/topic key; graph writes and deletion/recovery are not permitted. Session summaries require an explicit user request.
 
 ## Required Input
 

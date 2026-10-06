@@ -1,8 +1,18 @@
 # Pi Persistent Memory
 
-Independent TypeScript extension work area for Pi persistent memory.
+Independent TypeScript extension providing nine persistent-memory tools for Pi.
 
-Status: **MINI-001–MINI-006 completed and validated**. The nine tools, progressive readers, scoped search/graph, session provenance and native collapsed/mouse rendering are implemented. The package is still **non-discovered and not activated**: creating the root entrypoint, enabling subagent allowlists and starting the real `~/.memory/memories.db` runtime require separate explicit approval.
+Status: **MINI-001–MINI-006 completed and validated; Pi loading enabled**. The root `index.ts` exposes the existing implementation for automatic discovery in `~/.pi/agent/extensions/pi-persistent-memory/`. Subagent definitions use the supported `memory_*` tools.
+
+## Activation
+
+1. Run `/reload` or restart Pi after updating this checkout. No external memory package or extra entry in `settings.json` is required.
+2. Verify the nine `memory_*` tools are present. In the TUI, `memory · 9 tools` reports registration, not database readiness or E5 health.
+3. Send a user message to activate the session and initialize `~/.memory/memories.db` on demand. Loading, session selection and reload alone never open storage or call E5.
+
+The extension is global to this agent directory and uses Pi's native resource controls (`pi config`), not `.pi/extensions.json` opt-in flags. Project identity configuration is read only from trusted `.pi/memory.json`; otherwise the existing remote/folder fallback applies. No prior database is imported or deleted automatically.
+
+Semantic indexing/search uses E5 at `http://127.0.0.1:8000`. If unavailable, saved text remains pending and hybrid/semantic search falls back visibly to FTS5; `memory_search` with `mode: fts5` avoids E5 entirely. Use `memory_save` for both new records and authorized updates by ID/topic key. Session summaries remain explicit-user-request only.
 
 ## Architecture and Scope (MINI-001)
 
@@ -80,11 +90,11 @@ Status: **MINI-001–MINI-006 completed and validated**. The nine tools, progres
   - Child subagent invocations execute through exact captured `InvocationLease.perform(signal, op)` with immutable identity provenance.
   - Normal sessions require first user message activation; calls before first message fail with `session_not_active` without touching SQLite.
   - Shutdown or reload aborts active operation signals and marks generation unusable.
-- **Native Pi Collapsed, Mouse, and Keyboard Rendering (`src/render/`)**:
-  - Default shell (`renderShell: 'default'`); rows start collapsed.
+- **Inline Memory Rendering (`src/render/`)**:
+  - Transparent self shell (`renderShell: 'self'`) with no background, card, or border; rows start collapsed.
   - Native `ToolExecutionComponent` and `MouseRegion` handle primary click expand/collapse in fullscreen TUI mode; terminal scrollback preserved in regular mode.
-  - Collapsed view displays concise one-line summary and native `app.tools.expand` key hint.
-  - Expanded view renders complete current page content within ANSI-safe width bounds.
+  - Collapsed view is one light-blue/cyan line (`#87cefa`): 🧠, actual tool name, concise arguments, status/counts, continuation notice when needed, and native `app.tools.expand` key hint. Long call previews are visually truncated to terminal width without changing tool output.
+  - Expanded view shows only the complete returned text blocks in cyan, wrapped to terminal width, without a repeated header or appended details. Pagination information remains in the returned text.
   - Pure visual toggle: expansion never triggers database queries, model calls, or network requests.
 - **Output Budget Ceiling**: Complete serialized `AgentToolResult` (`content` + `details` + `isError`) strictly bounded <= 6144 bytes UTF-8 across all tools.
 
@@ -161,4 +171,4 @@ The second round reviewed 166 task-memory pairs before selection. Unjudged resul
 
 An additional **exploratory** reformulation (`tasks-v2-refinements.json`) recovered useful CodeGraph memories missed by a broad task query without lowering thresholds; another skills query retained unrelated lexical additions. Its report is separate and must not be described as fresh holdout validation. Inspect both noise and missing memories before changing production policies. No production parameters were changed.
 
-The preceding benchmark sections describe historical evaluation assets and incomplete semantic-quality labels, not a production migration or runtime Engram dependency. They must not be used to claim calibrated model precision/recall. Package-owned typecheck and isolated SDK/lifecycle integration are now validated through MINI-006; production activation and migration/removal of any other memory system remain separately authorized operations.
+The preceding benchmark sections describe historical evaluation assets and incomplete semantic-quality labels, not a production migration or runtime Engram dependency. They must not be used to claim calibrated model precision/recall. Package-owned typecheck and isolated SDK/lifecycle integration are now validated through MINI-006; Pi loading is now enabled as described above; migration or deletion of any prior memory database remains a separately authorized operation.
