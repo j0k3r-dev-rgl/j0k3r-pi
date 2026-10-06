@@ -2,7 +2,7 @@
 
 Independent TypeScript extension work area for Pi persistent memory.
 
-Status: **MINI-004 completed** (internal scoped entity/relation/association graph services; Option B bidirectional BFS incoming/outgoing navigation with preserved stored direction; strict 5 entity / 6 relation vocabulary; conservative canonicalization and explicit aliases; serialized natural-key deduplication; starvation-free scoped queries; soft-delete visibility filtering; and bounded <= 6KiB envelopes). Public tools and root extension discovery (`index.ts`) remain deferred to subsequent increments (MINI-005/006); this package is currently non-discovered.
+Status: **MINI-005 completed** (nine agent-facing memory tools, progressive get/deleted/context readers, runtime scope and lease operation ownership, native collapsed/expanded TUI rendering with native Pi mouse and keyboard interaction). Public root extension discovery (`index.ts`) and production activation remain deferred to MINI-006; this package is currently non-discovered.
 
 ## Architecture and Scope (MINI-001)
 
@@ -61,11 +61,38 @@ Status: **MINI-004 completed** (internal scoped entity/relation/association grap
   - `listEntities` supports deterministic pagination with stateless cursors binding scope, type, and SHA-256 dataset fingerprint; modifications in scope invalidate cursors with `cursor_expired`.
 
 
+## Architecture and Scope (MINI-005)
+
+- **Nine Agent-Facing Tools (`src/tools/`)**:
+  - `memory_save`: Saves durable English memory or executes reindex. Save requires `title`, `content`, `type`; returns compact confirmation without echoing submitted text. Reindex rejects textual fields and supports specific ID or sequential bulk (<= 5 memories). Explicit user request required for `session_summary` saving with reserved key `session/<session-id>/summary`.
+  - `memory_search`: Multi-modal search (`hybrid` default, `semantic`, `fts5`, `graph`). Enforces query for non-graph and `entity_id` for graph. Contradictory arguments rejected. Excerpts bounded <= 5 memories per page.
+  - `memory_get`: Retrieves full active memory title and content progressively. Bounded pages sliced on Unicode code-point boundaries with opaque stateless cursors. Soft-deleted memories hidden.
+  - `memory_context`: Retrieves prioritized context: active `session_summary` first, project summary second, recent authorized memories third. Deduplicated by memory ID and topic key. Missing summaries normal (no automatic generation).
+  - `memory_delete` & `memory_restore`: Recoverable soft-deletion and restoration. Requires `owner_scope` assertion ('project' or 'global') verified against target record before mutation.
+  - `memory_deleted_list`: Recovery audit page returning recovery metadata only (`id`, `title`, `owner`, `type`, `deleted_at`); deleted text remains hidden.
+  - `memory_entity`: Canonical graph entity operations (`save`, `get`, `list`). Strict type vocabulary and immutable entity properties.
+  - `memory_relation`: Directed graph relation operations (`save`, `delete`). Validates endpoints and enforces business uniqueness.
+- **Progressive Unicode Readers (`src/reading/`)**:
+  - Stateless cursors encoding operation, ID, version, offsets, and SHA-256 dataset fingerprints.
+  - Slices text on Unicode code-point boundaries, preventing surrogate pair splits.
+  - Concurrent mutations or deletions invalidate cursors with `cursor_expired`.
+- **Runtime Lifecycle & Operation Gateway (`src/lifecycle.ts`)**:
+  - Child subagent invocations execute through exact captured `InvocationLease.perform(signal, op)` with immutable identity provenance.
+  - Normal sessions require first user message activation; calls before first message fail with `session_not_active` without touching SQLite.
+  - Shutdown or reload aborts active operation signals and marks generation unusable.
+- **Native Pi Collapsed, Mouse, and Keyboard Rendering (`src/render/`)**:
+  - Default shell (`renderShell: 'default'`); rows start collapsed.
+  - Native `ToolExecutionComponent` and `MouseRegion` handle primary click expand/collapse in fullscreen TUI mode; terminal scrollback preserved in regular mode.
+  - Collapsed view displays concise one-line summary and native `app.tools.expand` key hint.
+  - Expanded view renders complete current page content within ANSI-safe width bounds.
+  - Pure visual toggle: expansion never triggers database queries, model calls, or network requests.
+- **Output Budget Ceiling**: Complete serialized `AgentToolResult` (`content` + `details` + `isError`) strictly bounded <= 6144 bytes UTF-8 across all tools.
+
 ## Package Dependencies
 
 - Pinned runtime dependency: `sqlite-vec: 0.1.9`
-- Peer dependency: `@earendil-works/pi-coding-agent: *`
-- Exact local devDependencies: `typescript: 5.9.3`, `@types/node: 24.10.1`, `@earendil-works/pi-coding-agent: 1.0.2`
+- Peer dependencies: `@earendil-works/pi-coding-agent: *`, `@earendil-works/pi-tui: *`, `typebox: *`
+- Exact local devDependencies: `typescript: 5.9.3`, `@types/node: 24.10.1`, `@earendil-works/pi-coding-agent: 1.0.2`, `@earendil-works/pi-tui: 1.0.3`, `typebox: 1.3.27`
 
 ## Commands
 

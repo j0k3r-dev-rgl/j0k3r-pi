@@ -165,6 +165,8 @@ export interface ListEntitiesOptions {
   cursor?: string;
   signal?: AbortSignal;
   assertActive?: () => void;
+  maxEnvelopeBytes?: number;
+  isWithinBudget?: (envelope: ListEntitiesResult) => boolean;
 }
 
 export interface ListEntitiesResult {
@@ -187,6 +189,8 @@ export interface TraverseGraphOptions {
   maxEntities?: number;
   signal?: AbortSignal;
   assertActive?: () => void;
+  maxEnvelopeBytes?: number;
+  isWithinBudget?: (envelope: GraphTraverseEnvelope) => boolean;
 }
 
 export interface GraphNode {

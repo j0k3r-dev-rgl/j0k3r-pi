@@ -208,5 +208,7 @@ export interface SearchOptions {
   explicitGlobal?: boolean;
   cursor?: string;
   signal?: AbortSignal;
+  maxEnvelopeBytes?: number;
+  isWithinBudget?: (envelope: SearchResultEnvelope) => boolean;
 }
 

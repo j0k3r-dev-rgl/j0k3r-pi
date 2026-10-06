@@ -163,6 +163,8 @@ export async function searchMemories(
         queryHash,
         datasetFingerprint: currentFingerprint,
         meaningfulTerms,
+        maxEnvelopeBytes: options.maxEnvelopeBytes,
+        isWithinBudget: options.isWithinBudget,
       });
 
       db.exec('COMMIT;');

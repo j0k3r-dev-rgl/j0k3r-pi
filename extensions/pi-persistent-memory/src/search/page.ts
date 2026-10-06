@@ -18,6 +18,8 @@ export interface PageFormatOptions {
   queryHash: string;
   datasetFingerprint: string;
   meaningfulTerms?: string[];
+  maxEnvelopeBytes?: number;
+  isWithinBudget?: (envelope: SearchResultEnvelope) => boolean;
 }
 
 /**
@@ -86,6 +88,7 @@ export function formatSearchPage(options: PageFormatOptions): SearchResultEnvelo
     meaningfulTerms = [],
   } = options;
 
+  const envelopeByteLimit = options.maxEnvelopeBytes ?? MAX_ENVELOPE_BYTES;
   const totalAdmitted = admittedMemories.length;
   const candidateSlice = admittedMemories.slice(offset, offset + MAX_MEMORIES_PER_PAGE);
 
@@ -180,12 +183,15 @@ export function formatSearchPage(options: PageFormatOptions): SearchResultEnvelo
       warnings,
     };
 
-    const trialBytes = Buffer.byteLength(JSON.stringify(trialEnvelope), 'utf8');
+    const isBudgetOk = (env: SearchResultEnvelope) => {
+      if (options.isWithinBudget) return options.isWithinBudget(env);
+      return Buffer.byteLength(JSON.stringify(env), 'utf8') <= envelopeByteLimit;
+    };
 
-    if (trialBytes <= MAX_ENVELOPE_BYTES) {
+    if (isBudgetOk(trialEnvelope)) {
       results.push(resultItem);
     } else {
-      // If trialBytes > MAX_ENVELOPE_BYTES, attempt further truncation of current item
+      // If trialBytes > envelopeByteLimit, attempt further truncation of current item
       const { text: miniTitle } = truncateCodePoints(mem.title, 30);
       const { text: miniExcerpt } = truncateCodePoints(safeExcerpt, 40);
       const miniItem: SearchMemoryResult = {
@@ -201,8 +207,7 @@ export function formatSearchPage(options: PageFormatOptions): SearchResultEnvelo
         results: [...results, miniItem],
       };
 
-      const miniTrialBytes = Buffer.byteLength(JSON.stringify(miniTrialEnvelope), 'utf8');
-      if (miniTrialBytes <= MAX_ENVELOPE_BYTES) {
+      if (isBudgetOk(miniTrialEnvelope)) {
         results.push(miniItem);
       } else {
         // Cannot fit even abbreviated; stop adding items to this page

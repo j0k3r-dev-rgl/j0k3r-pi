@@ -70,7 +70,12 @@ function enforceEnvelopeBudget<T extends { scope: Scope }>(result: T): T {
   if (Buffer.byteLength(JSON.stringify(result), 'utf8') <= MAX_ENVELOPE_BYTES) {
     return result;
   }
-  throw new Error('byte_limit_exceeded: Operation confirmation exceeds 6144 bytes budget');
+  for (const [k, v] of Object.entries(result as Record<string, any>)) {
+    if (typeof v === 'string' && v.length > 80) {
+      (result as any)[k] = truncateCodePoints(v, 80).text;
+    }
+  }
+  return result;
 }
 
 function checkCancellation(options?: { signal?: AbortSignal; assertActive?: () => void }): void {
@@ -745,8 +750,13 @@ export function listEntities(
       next_cursor: prospectiveCursor,
     };
 
-    const trialBytes = Buffer.byteLength(JSON.stringify(trialEnvelope), 'utf8');
-    if (trialBytes <= MAX_ENVELOPE_BYTES) {
+    const envelopeByteLimit = options.maxEnvelopeBytes ?? MAX_ENVELOPE_BYTES;
+    const isBudgetOk = (env: ListEntitiesResult) => {
+      if (options.isWithinBudget) return options.isWithinBudget(env);
+      return Buffer.byteLength(JSON.stringify(env), 'utf8') <= envelopeByteLimit;
+    };
+
+    if (isBudgetOk(trialEnvelope)) {
       entities.push(record);
     } else {
       // Try further abbreviation
@@ -759,7 +769,7 @@ export function listEntities(
         ...trialEnvelope,
         entities: [...entities, miniRecord],
       };
-      if (Buffer.byteLength(JSON.stringify(miniEnvelope), 'utf8') <= MAX_ENVELOPE_BYTES) {
+      if (isBudgetOk(miniEnvelope)) {
         entities.push(miniRecord);
       } else {
         break;
@@ -1297,6 +1307,14 @@ export function traverseGraph(
   `);
 
   const associations: GraphAssociation[] = [];
+  const envelopeByteLimit = options.maxEnvelopeBytes ?? MAX_ENVELOPE_BYTES;
+
+  function isEnvelopeBudgetOk(trial: GraphTraverseEnvelope): boolean {
+    if (options.isWithinBudget) {
+      return options.isWithinBudget(trial);
+    }
+    return Buffer.byteLength(JSON.stringify(trial), 'utf8') <= envelopeByteLimit;
+  }
 
   function computeEnvelopeBytes(
     root: GraphNode,
@@ -1344,7 +1362,15 @@ export function traverseGraph(
       };
       const trialNodes = Array.from(visitedEntities.values());
       const trialEdges = Array.from(visitedEdges.values());
-      if (computeEnvelopeBytes(rootNode, trialNodes, trialEdges, trialAssocs, trialLimits) <= MAX_ENVELOPE_BYTES) {
+      const trialEnvelope: GraphTraverseEnvelope = {
+        status: 'ok',
+        root: rootNode,
+        nodes: trialNodes,
+        edges: trialEdges,
+        associations: trialAssocs,
+        limits: trialLimits,
+      };
+      if (isEnvelopeBudgetOk(trialEnvelope)) {
         associations.push(candAssoc);
       } else {
         byteLimitReached = true;
@@ -1448,8 +1474,16 @@ export function traverseGraph(
           };
           const trialNodes = Array.from(visitedEntities.values());
           const trialEdges = [...visitedEdges.values(), candEdge];
+          const trialEnvelope: GraphTraverseEnvelope = {
+            status: 'ok',
+            root: rootNode,
+            nodes: trialNodes,
+            edges: trialEdges,
+            associations,
+            limits: trialLimits,
+          };
 
-          if (computeEnvelopeBytes(rootNode, trialNodes, trialEdges, associations, trialLimits) <= MAX_ENVELOPE_BYTES) {
+          if (isEnvelopeBudgetOk(trialEnvelope)) {
             visitedEdges.set(candEdge.id, candEdge);
           } else {
             byteLimitReached = true;
@@ -1506,6 +1540,34 @@ export function traverseGraph(
           direction: isOutgoing ? 'outgoing' : 'incoming',
         };
 
+        if (options.isWithinBudget) {
+          const trialNodes = [...visitedEntities.values(), candNeighborNode];
+          const trialEdges = [...visitedEdges.values(), candEdge];
+          const trialLimits: GraphLimits = {
+            depth_limit: depthLimitReached,
+            entity_limit: entityLimitReached,
+            byte_limit: true,
+            max_hops: limitHops,
+            max_entities: limitEntities,
+            has_more: true,
+            guidance: 'Recommend a new focused root query',
+          };
+          const trialEnvelope: GraphTraverseEnvelope = {
+            status: 'ok',
+            root: rootNode,
+            nodes: trialNodes,
+            edges: trialEdges,
+            associations,
+            limits: trialLimits,
+          };
+
+          if (!options.isWithinBudget(trialEnvelope)) {
+            byteLimitReached = true;
+            exhaustedRelationsForNode = true;
+            break;
+          }
+        }
+
         visitedEntities.set(candNeighborNode.id, candNeighborNode);
         visitedEdges.set(candEdge.id, candEdge);
         fetchAndAdmitAssociations(candNeighborNode.id);
@@ -1555,12 +1617,11 @@ export function traverseGraph(
     limits,
   };
 
-  const bytes = Buffer.byteLength(JSON.stringify(envelope), 'utf8');
-  if (bytes <= MAX_ENVELOPE_BYTES) {
+  if (isEnvelopeBudgetOk(envelope)) {
     return envelope;
   }
 
-  // Envelope exceeds 6KiB: trim/abbreviate safely
+  // Envelope exceeds budget: trim/abbreviate safely
   byteLimitReached = true;
   limits.byte_limit = true;
   limits.has_more = true;
@@ -1584,7 +1645,7 @@ export function traverseGraph(
     associations: sortedAssocs,
     limits,
   };
-  if (Buffer.byteLength(JSON.stringify(abbreviatedTrial), 'utf8') <= MAX_ENVELOPE_BYTES) {
+  if (isEnvelopeBudgetOk(abbreviatedTrial)) {
     return abbreviatedTrial;
   }
 
@@ -1598,7 +1659,7 @@ export function traverseGraph(
       associations: sortedAssocs.filter(a => trimmedNodes.some(n => n.id === a.entity_id)),
       limits,
     };
-    if (Buffer.byteLength(JSON.stringify(trial), 'utf8') <= MAX_ENVELOPE_BYTES) {
+    if (isEnvelopeBudgetOk(trial)) {
       return trial;
     }
     // Remove deepest node from the end
@@ -1625,7 +1686,7 @@ export function traverseGraph(
     limits,
   };
 
-  if (Buffer.byteLength(JSON.stringify(minimalTrial), 'utf8') <= MAX_ENVELOPE_BYTES) {
+  if (isEnvelopeBudgetOk(minimalTrial)) {
     return minimalTrial;
   }
 

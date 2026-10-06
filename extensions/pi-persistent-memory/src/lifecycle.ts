@@ -7,9 +7,19 @@ import { InvocationLease } from './lease.ts';
 import { ActivationDiagnostics } from './diagnostics/activation.ts';
 import { E5Client } from './client/e5-client.ts';
 import type { InvocationBindRequestV1, InvocationLeaseV1 } from './protocol.ts';
+import type { Scope } from './types.ts';
+import type { OperationContext } from './tools/types.ts';
 
 export interface MemoryLifecycleOptions {
   client?: E5Client;
+}
+
+interface NormalGeneration {
+  generationId: number;
+  sessionId: string;
+  scope: Scope;
+  scopeKey: string;
+  abortController: AbortController;
 }
 
 export class MemoryLifecycle {
@@ -18,6 +28,8 @@ export class MemoryLifecycle {
   private activeNormalSessionId: string | null = null;
   private boundLease: InvocationLeaseV1 | null = null;
   private activeDiagnostics: ActivationDiagnostics | null = null;
+  private normalGeneration: NormalGeneration | null = null;
+  private generationCounter = 0;
 
   constructor(dbPath: string = DEFAULT_DB_PATH, options?: MemoryLifecycleOptions) {
     this.dbPath = dbPath;
@@ -34,7 +46,7 @@ export class MemoryLifecycle {
       return;
     }
 
-    if (this.activeNormalSessionId === sessionId) {
+    if (this.activeNormalSessionId === sessionId && this.normalGeneration) {
       return;
     }
 
@@ -50,6 +62,22 @@ export class MemoryLifecycle {
 
     this.activeNormalSessionId = sessionId;
 
+    // Abort prior normal generation if any
+    if (this.normalGeneration) {
+      try {
+        this.normalGeneration.abortController.abort(new Error('session_replaced'));
+      } catch {}
+    }
+
+    this.generationCounter++;
+    this.normalGeneration = {
+      generationId: this.generationCounter,
+      sessionId,
+      scope,
+      scopeKey,
+      abortController: new AbortController(),
+    };
+
     // Detached nonblocking activation diagnostics
     this.activeDiagnostics?.cancel();
     const diag = new ActivationDiagnostics(this.dbPath, this.client);
@@ -60,6 +88,13 @@ export class MemoryLifecycle {
   async handleSessionShutdown(reason: string, sessionId?: string): Promise<void> {
     this.activeDiagnostics?.cancel();
     this.activeDiagnostics = null;
+
+    if (this.normalGeneration) {
+      try {
+        this.normalGeneration.abortController.abort(new Error(`session_shutdown: ${reason}`));
+      } catch {}
+      this.normalGeneration = null;
+    }
 
     if (reason === 'reload') {
       // Reload does not close parent session or touch DB
@@ -92,6 +127,74 @@ export class MemoryLifecycle {
     this.boundLease = lease;
     request.accept(lease);
     return lease;
+  }
+
+  async performOperation<T>(
+    signal: AbortSignal | undefined,
+    ctx: any,
+    operation: (opCtx: OperationContext) => Promise<T>,
+  ): Promise<T> {
+    // 1. If bound to child invocation, tools execute via captured lease
+    if (this.boundLease) {
+      const lease = this.boundLease as InvocationLease;
+      return lease.perform(signal, async (capability) => {
+        const trusted = lease.childContext?.isProjectTrusted
+          ? lease.childContext.isProjectTrusted()
+          : true;
+        const cwd = lease.childContext?.cwd ?? process.cwd();
+        const scope = resolveScope(cwd, { isProjectTrusted: () => trusted });
+        const scopeKey = encodeScope(scope);
+
+        const opCtx: OperationContext = {
+          sessionId: capability.identity.childSessionId,
+          scope,
+          scopeKey,
+          isChild: true,
+          invokingParentSessionId: capability.identity.invokingParentSessionId,
+          invocationId: capability.identity.invocationId,
+          signal: capability.signal,
+          assertActive: capability.assertActive,
+          dbPath: this.dbPath,
+          client: this.client,
+        };
+        return operation(opCtx);
+      });
+    }
+
+    // 2. Normal runtime tools require successful first-message activation
+    if (!this.normalGeneration) {
+      throw new Error('session_not_active: Memory session is not active (waiting for first user message)');
+    }
+
+    const gen = this.normalGeneration;
+    const combinedSignal = signal
+      ? AbortSignal.any([signal, gen.abortController.signal])
+      : gen.abortController.signal;
+
+    if (combinedSignal.aborted) {
+      throw new Error('operation_aborted');
+    }
+
+    const assertActive = () => {
+      if (this.normalGeneration !== gen || combinedSignal.aborted) {
+        throw new Error('operation_terminated: Normal session generation is no longer active');
+      }
+    };
+
+    assertActive();
+
+    const opCtx: OperationContext = {
+      sessionId: gen.sessionId,
+      scope: gen.scope,
+      scopeKey: gen.scopeKey,
+      isChild: false,
+      signal: combinedSignal,
+      assertActive,
+      dbPath: this.dbPath,
+      client: this.client,
+    };
+
+    return operation(opCtx);
   }
 
   registerPublicEvents(pi: any): () => void {
