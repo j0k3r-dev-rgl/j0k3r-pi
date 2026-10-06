@@ -63,6 +63,7 @@ models-store.json
 
 # local investigations and generated memory benchmark results
 /investigaciones/
+/extensions/pi-persistent-memory/benchmark/tasks*.json
 /extensions/pi-persistent-memory/benchmark/results/
 /extensions/pi-persistent-memory/benchmark/reports/
 /extensions/pi-persistent-memory/benchmark/report*.json
