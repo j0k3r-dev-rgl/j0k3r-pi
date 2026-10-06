@@ -60,3 +60,12 @@ models-store.json
 /cpamc-subagent-pool-state.json
 .atl/
 .codegraph/
+
+# local investigations and generated memory benchmark results
+/investigaciones/
+/extensions/pi-persistent-memory/benchmark/results/
+/extensions/pi-persistent-memory/benchmark/reports/
+/extensions/pi-persistent-memory/benchmark/report*.json
+/extensions/pi-persistent-memory/benchmark/pool*.json
+/extensions/pi-persistent-memory/benchmark/judged*.json
+/extensions/pi-persistent-memory/benchmark/assessment*.json
