@@ -129,7 +129,8 @@ describe('youtube-research yt-dlp command and parse contract', () => {
       'yt-dlp',
       '--dump-json',
       '--no-playlist',
-      '--write-info-json',
+      '--skip-download',
+      '--ignore-no-formats-error',
       'https://www.youtube.com/watch?v=abc123',
     ]);
 
@@ -137,7 +138,8 @@ describe('youtube-research yt-dlp command and parse contract', () => {
       'yt-dlp',
       '--dump-json',
       '--no-playlist',
-      '--write-info-json',
+      '--skip-download',
+      '--ignore-no-formats-error',
       '--write-comments',
       '--extractor-args',
       'youtube:max_comments=5',
@@ -198,6 +200,7 @@ describe('youtube-research yt-dlp command and parse contract', () => {
     expect(buildTranscriptSourcesCommand({ video_id: 'abc123' })).toEqual([
       'yt-dlp',
       '--list-subs',
+      '--ignore-no-formats-error',
       'https://www.youtube.com/watch?v=abc123',
     ]);
 
@@ -211,6 +214,7 @@ describe('youtube-research yt-dlp command and parse contract', () => {
       'yt-dlp',
       '--write-subs',
       '--skip-download',
+      '--ignore-no-formats-error',
       '--sub-langs',
       'en',
       '--sub-format',
@@ -230,6 +234,7 @@ describe('youtube-research yt-dlp command and parse contract', () => {
       'yt-dlp',
       '--write-auto-subs',
       '--skip-download',
+      '--ignore-no-formats-error',
       '--sub-langs',
       'en',
       '--sub-format',
@@ -250,6 +255,7 @@ describe('youtube-research yt-dlp command and parse contract', () => {
       '--write-auto-subs',
       '--write-subs',
       '--skip-download',
+      '--ignore-no-formats-error',
       '--sub-langs',
       'es',
       '--sub-format',
@@ -297,6 +303,60 @@ describe('youtube-research yt-dlp command and parse contract', () => {
     expect(run).toHaveBeenCalledOnce();
   });
 
+  it('preserves extraction errors instead of reporting no subtitles', async () => {
+    const run = vi.fn().mockResolvedValue({ stdout: '', stderr: 'The page needs to be reloaded.', exitCode: 1 });
+    const client = new YoutubeResearchClient({ run });
+    await expect(client.listTranscriptSources({ video_id: 'abc123' })).rejects.toThrow('The page needs to be reloaded.');
+    run.mockRejectedValueOnce(new Error('network failed'));
+    await expect(client.listTranscriptSources({ video_id: 'abc123' })).rejects.toThrow('network failed');
+  });
+
+  it('passes cancellation through every client operation', async () => {
+    const signal = new AbortController().signal;
+    const run = vi.fn().mockResolvedValue({ stdout: '{"id":"abc123"}', stderr: '', exitCode: 0 });
+    const client = new YoutubeResearchClient({ run });
+    await client.search({ query: 'sqlite', limit: 1, type: 'video' }, signal);
+    await client.getVideo({ video_id: 'abc123' }, signal);
+    await client.getPlaylist({ playlist_id: 'PL123', entriesOffset: 0, entriesLimit: 1, enrichEntries: false, descriptionPreviewChars: 500 }, signal);
+    await client.searchChannels({ query: 'sqlite' }, signal);
+    await client.getChannelAbout({ handle: '@sqlite' }, signal);
+    await client.getChannelVideos({ handle: '@sqlite' }, signal);
+    await client.getChannelPlaylists({ handle: '@sqlite' }, signal);
+    await client.listTranscriptSources({ video_id: 'abc123' }, signal);
+    expect(run.mock.calls.every((call) => (call as unknown[])[1] && ((call as unknown[])[1] as { signal: AbortSignal }).signal === signal)).toBe(true);
+  });
+
+  it('returns an empty inventory only when subtitle discovery succeeds', async () => {
+    const run = vi.fn().mockResolvedValue({ stdout: '[info] abc123 has no subtitles', stderr: '', exitCode: 0 });
+    const client = new YoutubeResearchClient({ run });
+    await expect(client.listTranscriptSources({ video_id: 'abc123' })).resolves.toEqual({ manual: [], automatic: [], translated: [] });
+  });
+
+  it('rejects cancelled subtitle operations before running the extractor', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const run = vi.fn();
+    const client = new YoutubeResearchClient({ run });
+    await expect(client.listTranscriptSources({ video_id: 'abc123' }, controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(run).not.toHaveBeenCalled();
+    await expect(client.fetchTranscript({ video_id: 'abc123', source: 'manual_subtitle', language: 'en', sourceLanguage: 'en', generated: false }, controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('returns extraction warnings alongside recovered video metadata', async () => {
+    const run = vi.fn().mockResolvedValue({ stdout: '{"id":"abc123","title":"SQLite"}', stderr: 'WARNING: Requested format is not available', exitCode: 0 });
+    const client = new YoutubeResearchClient({ run });
+    await expect(client.getVideo({ video_id: 'abc123' })).resolves.toMatchObject({
+      id: 'abc123', extraction_warnings: ['WARNING: Requested format is not available'],
+    });
+  });
+
+  it('does not mistake yt-dlp progress output for a transcript', async () => {
+    const run = vi.fn().mockResolvedValue({ stdout: '[youtube] Downloading webpage\n', stderr: '', exitCode: 0 });
+    const client = new YoutubeResearchClient({ run });
+    await expect(client.fetchTranscript({ source: 'manual_subtitle', language: 'en', sourceLanguage: 'en', generated: false, video_id: 'abc123' })).rejects.toThrow('did not produce subtitle output');
+  });
+
   it('supports legacy --list-subs language map lines', async () => {
     const run = vi.fn().mockResolvedValue({
       stdout: 'Manual: en, fr\nAuto: es\n',
@@ -317,7 +377,8 @@ describe('youtube-research yt-dlp command and parse contract', () => {
 
   it('fetchTranscript uses a temporary working directory and deterministic subtitle filename', async () => {
     let capturedCwd = '';
-    const run = vi.fn(async (_args: string[], options?: { cwd?: string }) => {
+    const signal = new AbortController().signal;
+    const run = vi.fn(async (_args: string[], options?: { cwd?: string; signal?: AbortSignal }) => {
       capturedCwd = options?.cwd ?? '';
       mkdirSync(capturedCwd, { recursive: true });
       writeFileSync(join(capturedCwd, 'abc123.en.vtt'), 'WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nHello world\n');
@@ -339,13 +400,14 @@ describe('youtube-research yt-dlp command and parse contract', () => {
       sourceLanguage: 'en',
       generated: false,
       video_id: 'abc123',
-    });
+    }, signal);
 
     expect(text).toContain('Hello world');
     expect(capturedCwd).toContain(tmpdir());
     expect(run.mock.calls[0][0]).toContain('-o');
     expect(run.mock.calls[0][0]).toContain('%(id)s.%(ext)s');
     expect(run.mock.calls[0][1]?.cwd).toBe(capturedCwd);
+    expect(run.mock.calls[0][1]?.signal).toBe(signal);
   });
 
   it('fetchTranscript discovers generated subtitle files when yt-dlp output path parsing is absent', async () => {

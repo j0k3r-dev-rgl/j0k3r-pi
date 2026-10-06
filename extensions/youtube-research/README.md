@@ -9,6 +9,11 @@ A standalone Pi extension that adds five focused YouTube research tools.
 ### Required runtime dependency
 - `yt-dlp` must be installed and available on `PATH` before using any tool.
 - If missing, tools return a `yt_dlp_missing` error with installation guidance.
+- The extension uses the binary on `PATH`; it does not install or update `yt-dlp`. Passing the version probe does not guarantee compatibility with YouTube.
+- Metadata and caption requests tolerate unavailable video formats without downloading the video. Video details expose extraction warnings when metadata may be incomplete.
+- Extraction errors during subtitle discovery are reported as errors, never as proof that a video has no captions. Caption availability signals indicate a catalog entry, not a successful transcript download.
+- YouTube can block subtitle downloads (for example, HTTP 429). A subtitle rate limit stops further candidates and returns a recoverable error; retry later rather than issuing more requests. No authenticated cookies, PO tokens, or alternate provider are configured automatically.
+- Tool cancellation is forwarded to subprocesses. Each extraction process has a 120-second timeout; multi-step calls can take longer.
 
 ### Public tools (exactly five)
 1. `youtube_search`
@@ -26,6 +31,8 @@ A standalone Pi extension that adds five focused YouTube research tools.
    - Fetch transcript text for a video by URL or video ID.
    - `source_mode`: `manual | automatic | translated | any-caption | auto | best-effort`.
    - `best-effort` follows a fidelity-first fallback chain and reports whether fallback was used.
+   - `auto` (the default) aliases `best-effort`. Description, chapters, and metadata fallbacks are explicitly labeled context only, **not a spoken transcript**. Use `any-caption` or a specific caption mode when actual spoken-content evidence is required.
+   - Only downloaded subtitle files are accepted as transcript content; extractor progress output is not a transcript.
    - Transcript downloads use a temporary directory and deterministic subtitle filenames to avoid title/unicode path issues.
    - `cleanTranscript` defaults to `true` and returns text-only transcript; set `cleanTranscript: false` to preserve raw subtitle timing/metadata when timestamps are needed.
 4. `youtube_channel_search`
@@ -64,6 +71,11 @@ Extensión standalone de Pi que agrega cinco herramientas enfocadas para investi
 
 - `yt-dlp` debe estar instalado y disponible en `PATH` antes de usar cualquier herramienta.
 - Si falta, las herramientas devuelven un error `yt_dlp_missing` con guía de instalación.
+- La extensión usa el ejecutable del `PATH`; no instala ni actualiza `yt-dlp`. La comprobación de versión no garantiza compatibilidad con YouTube.
+- Las consultas de metadata y captions toleran formatos de video no disponibles sin descargar el video. Los detalles muestran advertencias de extracción cuando la metadata puede estar incompleta.
+- Los errores al consultar subtítulos se comunican como errores, no como ausencia de captions. El catálogo de captions no garantiza una descarga exitosa.
+- YouTube puede bloquear la descarga de subtítulos (por ejemplo, HTTP 429). Ese bloqueo detiene los candidatos y devuelve un error recuperable; se debe reintentar más tarde, no multiplicar las peticiones. No se configuran cookies, PO tokens ni proveedores alternativos automáticamente.
+- La cancelación se propaga a los subprocesos. Cada proceso tiene un timeout de 120 segundos; una llamada con varios pasos puede durar más.
 
 ### Herramientas públicas (exactamente cinco)
 
@@ -82,6 +94,8 @@ Extensión standalone de Pi que agrega cinco herramientas enfocadas para investi
    - Obtiene texto de transcripción para un video por URL o ID.
    - `source_mode`: `manual | automatic | translated | any-caption | auto | best-effort`.
    - `best-effort` sigue una cadena de fallback priorizando fidelidad e informa si se usó fallback.
+   - `auto` (predeterminado) equivale a `best-effort`. Los fallbacks de descripción, capítulos y metadata se rotulan como contexto, **no como transcripción hablada**. Usa `any-caption` o un modo específico de captions para exigir evidencia del contenido hablado.
+   - Solo se acepta el contenido de archivos de subtítulos descargados; los mensajes de progreso del extractor no son una transcripción.
    - Las descargas de transcripción usan un directorio temporal y nombres determinísticos para subtítulos, evitando problemas con títulos o rutas unicode.
    - `cleanTranscript` es `true` por defecto y devuelve transcripción solo-texto; usa `cleanTranscript: false` para preservar timing/metadata crudos cuando se necesitan timestamps.
 4. `youtube_channel_search`

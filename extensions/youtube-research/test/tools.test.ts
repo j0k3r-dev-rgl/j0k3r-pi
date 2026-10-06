@@ -329,7 +329,7 @@ describe('youtube-research tool registration', () => {
       details: { status: string; data: { query: string } };
     };
 
-    expect(client.search).toHaveBeenCalledWith(expect.objectContaining({ query: 'rust ownership borrow checker' }));
+    expect(client.search).toHaveBeenCalledWith(expect.objectContaining({ query: 'rust ownership borrow checker' }), undefined);
     expect(result.details.data.query).toBe('rust ownership borrow checker');
     expect(result.content[0].text).toContain('rust ownership borrow checker');
   });
@@ -756,7 +756,7 @@ describe('youtube-research tool registration', () => {
       isError?: boolean;
     };
     expect(byId.details.status).toBe('success');
-    expect(client.getPlaylist).toHaveBeenCalledWith(expect.objectContaining({ playlist_id: 'PL123', entriesOffset: 10, entriesLimit: 2, enrichEntries: true }));
+    expect(client.getPlaylist).toHaveBeenCalledWith(expect.objectContaining({ playlist_id: 'PL123', entriesOffset: 10, entriesLimit: 2, enrichEntries: true }), undefined);
     expect(client.getVideo).toHaveBeenCalledTimes(2);
     expect(byId.details.data.playlist_id).toBe('PL123');
     expect(byId.details.data.video_count).toBe(12);
@@ -868,6 +868,98 @@ describe('youtube-research tool registration', () => {
 
     const idResult = (await execute(videoTool!, { video_id: 'abc123' })) as { details: { status: 'success'; data: { video_id: string } } };
     expect(idResult.details.data.video_id).toBe('abc123');
+  });
+
+  it('propagates tool cancellation to the client and never converts it to a provider failure', async () => {
+    const pi = createMockPi();
+    const { client } = createMockClient();
+    registerYoutubeResearchTools(pi, {
+      checkRuntime: vi.fn().mockResolvedValue({ runtime: { binary: 'yt-dlp' } }),
+      createClient: () => client,
+    });
+    const tool = pi.tools.find((entry) => entry.name === 'youtube_search')!;
+    const controller = new AbortController();
+    await tool.execute('id', { query: 'sqlite' }, controller.signal);
+    expect(client.search).toHaveBeenCalledWith(expect.anything(), controller.signal);
+    controller.abort();
+    await expect(tool.execute('id', { query: 'sqlite' }, controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('shows warnings when metadata is recovered despite unavailable formats', async () => {
+    const pi = createMockPi();
+    const { client } = createMockClient();
+    (client.getVideo as any).mockResolvedValue({ id: 'abc123', title: 'SQLite', extraction_warnings: ['WARNING: Requested format is not available'] });
+    registerYoutubeResearchTools(pi, {
+      checkRuntime: vi.fn().mockResolvedValue({ runtime: { binary: 'yt-dlp' } }),
+      createClient: () => client,
+    });
+    const result = await execute(pi.tools.find((entry) => entry.name === 'youtube_video_get')!, { video_id: 'abc123' }) as { content: Array<{ text: string }> };
+    expect(result.content[0].text).toContain('metadata may be incomplete');
+    expect(result.content[0].text).toContain('Requested format is not available');
+  });
+
+  it('does not swallow cancellation during optional enrichment', async () => {
+    const pi = createMockPi();
+    const { client } = createMockClient();
+    const controller = new AbortController();
+    (client.search as any).mockResolvedValue([{ id: 'abc123', title: 'SQLite', _type: 'video' }]);
+    (client.getVideo as any).mockImplementation(async () => {
+      controller.abort();
+      controller.signal.throwIfAborted();
+    });
+    registerYoutubeResearchTools(pi, {
+      checkRuntime: vi.fn().mockResolvedValue({ runtime: { binary: 'yt-dlp' } }),
+      createClient: () => client,
+    });
+    const tool = pi.tools.find((entry) => entry.name === 'youtube_search')!;
+    await expect(tool.execute('id', { query: 'sqlite', enrich: true }, controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('labels metadata fallbacks as context, not spoken transcripts', async () => {
+    const pi = createMockPi();
+    const { client } = createMockClient();
+    (client.getVideo as any).mockResolvedValue({ id: 'abc123', title: 'SQLite', description: 'Video description' });
+    registerYoutubeResearchTools(pi, {
+      checkRuntime: vi.fn().mockResolvedValue({ runtime: { binary: 'yt-dlp' } }),
+      createClient: () => client,
+    });
+    const tool = pi.tools.find((entry) => entry.name === 'youtube_transcript_get')!;
+    const result = await execute(tool, { video_id: 'abc123' }) as { content: Array<{ text: string }> };
+    expect(result.content[0].text).toContain('not a spoken transcript');
+    expect(result.content[0].text).not.toContain('\ntranscript:\n');
+  });
+
+  it('stops on subtitle rate limits rather than retrying every language or claiming context is a transcript', async () => {
+    const pi = createMockPi();
+    const { client } = createMockClient();
+    (client.listTranscriptSources as any).mockResolvedValue({ manual: [], translated: [], automatic: [
+      { source: 'automatic_subtitle', language: 'en', generated: true },
+      { source: 'automatic_subtitle', language: 'es', generated: true },
+    ] });
+    (client.fetchTranscript as any).mockRejectedValue(new Error('HTTP Error 429: Too Many Requests'));
+    registerYoutubeResearchTools(pi, {
+      checkRuntime: vi.fn().mockResolvedValue({ runtime: { binary: 'yt-dlp' } }),
+      createClient: () => client,
+    });
+    const result = await execute(pi.tools.find((entry) => entry.name === 'youtube_transcript_get')!, { video_id: 'abc123' }) as { details: { error: { code: string; message: string; recoverable: boolean } } };
+    expect(result.details.error).toMatchObject({ code: 'yt_dlp_failed', recoverable: true });
+    expect(result.details.error.message).toContain('429');
+    expect(client.fetchTranscript).toHaveBeenCalledTimes(1);
+    expect(client.getVideo).not.toHaveBeenCalled();
+  });
+
+  it('reports list-subs failures as extraction errors, not absent captions', async () => {
+    const pi = createMockPi();
+    const { client } = createMockClient();
+    (client.listTranscriptSources as any).mockRejectedValue(new Error('The page needs to be reloaded.'));
+    registerYoutubeResearchTools(pi, {
+      checkRuntime: vi.fn().mockResolvedValue({ runtime: { binary: 'yt-dlp' } }),
+      createClient: () => client,
+    });
+    const tool = pi.tools.find((entry) => entry.name === 'youtube_transcript_get')!;
+    const result = await execute(tool, { video_id: 'abc123', source_mode: 'any-caption' }) as { details: { error: { code: string; message: string } } };
+    expect(result.details.error).toMatchObject({ code: 'yt_dlp_failed', message: 'The page needs to be reloaded.' });
+    expect(client.getVideo).not.toHaveBeenCalled();
   });
 
   it('maps unavailable youtube videos to not_found instead of a generic yt-dlp failure', async () => {

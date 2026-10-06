@@ -214,6 +214,7 @@ function summarizeVideo(details: YoutubeVideoDetails): string {
     metadata || undefined,
     details.description_preview ? `description: ${details.description_preview}` : undefined,
     captionSignals ? `captions: ${captionSignals}` : undefined,
+    details.extraction_warnings?.length ? `extraction warnings (metadata may be incomplete):\n${details.extraction_warnings.join('\n')}` : undefined,
     summarizeVideoComments(details),
   ].filter(Boolean);
 
@@ -225,7 +226,7 @@ function summarizeTranscript(result: YoutubeTranscriptResult): string {
     `youtube_transcript_get: ${result.content_source} [language=${result.language}]`,
     `video: ${result.video_ref}`,
     `fallback: ${result.used_fallback ? 'yes' : 'no'}`,
-    'transcript:',
+    /_fallback$/.test(result.content_source) ? 'context only — not a spoken transcript:' : 'transcript:',
     result.text,
   ].filter(Boolean);
 
@@ -368,6 +369,7 @@ function createDefaultExecutor(runtime: YtDlpRuntime): YtDlpExecutor {
         encoding: 'utf8',
         windowsHide: true,
         maxBuffer: 64 * 1024 * 1024,
+        timeout: 120_000,
       });
       return {
         stdout: String(stdout ?? ''),
@@ -375,6 +377,7 @@ function createDefaultExecutor(runtime: YtDlpRuntime): YtDlpExecutor {
         exitCode: 0,
       };
     } catch (error) {
+      options?.signal?.throwIfAborted();
       const typed = error as { code?: number | string; stderr?: string | Buffer; stdout?: string | Buffer };
       const exitCode = Number.parseInt(String(typed.code ?? ''), 10);
       return {
@@ -658,7 +661,7 @@ function applySearchFilters(results: YoutubeSearchResult[], input: SearchFilters
   return filtered.slice(0, input.limit);
 }
 
-async function enrichSearchResults(results: YoutubeSearchResult[], input: SearchFilters, client: YtDlpClient): Promise<YoutubeSearchResult[]> {
+async function enrichSearchResults(results: YoutubeSearchResult[], input: SearchFilters, client: YtDlpClient, signal?: AbortSignal): Promise<YoutubeSearchResult[]> {
   if (!input.enrich) {
     return results;
   }
@@ -676,7 +679,7 @@ async function enrichSearchResults(results: YoutubeSearchResult[], input: Search
         video_id: entry.video_id,
         videoUrl: entry.url,
         descriptionPreviewChars: input.descriptionPreviewChars,
-      }, undefined);
+      }, signal);
       if (!raw) {
         continue;
       }
@@ -700,13 +703,14 @@ async function enrichSearchResults(results: YoutubeSearchResult[], input: Search
         tags: details.tags?.slice(0, 8),
       };
     } catch {
+      signal?.throwIfAborted();
       // Best-effort enrichment: keep the base search result when full metadata fails.
     }
   }
   return enriched;
 }
 
-async function enrichPlaylistEntries(playlist: YoutubePlaylistDetails, reference: NormalizedPlaylistRef, client: YtDlpClient): Promise<YoutubePlaylistDetails> {
+async function enrichPlaylistEntries(playlist: YoutubePlaylistDetails, reference: NormalizedPlaylistRef, client: YtDlpClient, signal?: AbortSignal): Promise<YoutubePlaylistDetails> {
   if (!reference.enrichEntries || !playlist.entries?.length) {
     return playlist;
   }
@@ -722,7 +726,7 @@ async function enrichPlaylistEntries(playlist: YoutubePlaylistDetails, reference
         video_id: entry.video_id ?? undefined,
         videoUrl: entry.url ?? undefined,
         descriptionPreviewChars: reference.descriptionPreviewChars,
-      }, undefined);
+      }, signal);
       if (!raw) {
         entries.push(entry);
         continue;
@@ -746,6 +750,7 @@ async function enrichPlaylistEntries(playlist: YoutubePlaylistDetails, reference
         tags: details.tags?.slice(0, 8),
       });
     } catch {
+      signal?.throwIfAborted();
       // Best-effort enrichment: keep the compact playlist entry when full metadata fails.
       entries.push(entry);
     }
@@ -877,6 +882,7 @@ async function runSearch(
   params: YoutubeSearchInput,
   checkRuntime: RegisterYoutubeResearchToolsDeps['checkRuntime'],
   createClient: (runtime: YtDlpRuntime) => YtDlpClient,
+  signal?: AbortSignal,
 ): Promise<PiToolResult<{ results: YoutubeSearchResult[]; query: string; effective_type: NormalizedSearchInput['type']; total: number }>> {
   let normalized: SearchFilters;
   try {
@@ -895,11 +901,11 @@ async function runSearch(
   }
 
   const client = createClient(dependency.runtime);
-  const rawResults = await client.search(normalized);
+  const rawResults = await client.search(normalized, signal);
 
   const normalizedResults = normalizeSearchResults(rawResults as RawYtDlpItem[]);
   const filtered = applySearchFilters(normalizedResults, normalized);
-  const results = await enrichSearchResults(filtered, normalized, client);
+  const results = await enrichSearchResults(filtered, normalized, client, signal);
 
   return buildSuccess(summarizeSearchResults(normalized.query, normalized.type, results), {
     results,
@@ -913,6 +919,7 @@ async function runVideoGet(
   params: VideoRefInput,
   checkRuntime: RegisterYoutubeResearchToolsDeps['checkRuntime'],
   createClient: (runtime: YtDlpRuntime) => YtDlpClient,
+  signal?: AbortSignal,
 ): Promise<PiToolResult<YoutubeVideoDetails>> {
   let reference: NormalizedVideoRef;
   try {
@@ -936,7 +943,7 @@ async function runVideoGet(
   let totalCommentCount: number | null | undefined;
   try {
     if (reference.includeComments) {
-      const metadataRaw = await client.getVideo({ ...reference, includeComments: false, commentsLimit: 0 }, undefined);
+      const metadataRaw = await client.getVideo({ ...reference, includeComments: false, commentsLimit: 0 }, signal);
       if (!metadataRaw) {
         return buildFailure('not_found', `No video metadata found for ${reference.video_id}`, false);
       }
@@ -944,9 +951,9 @@ async function runVideoGet(
       raw = await client.getVideo({
         ...reference,
         commentsLimit: (reference.commentsOffset ?? 0) + (reference.commentsLimit ?? VIDEO_COMMENTS_DEFAULT_LIMIT),
-      }, undefined);
+      }, signal);
     } else {
-      raw = await client.getVideo(reference, undefined);
+      raw = await client.getVideo(reference, signal);
     }
   } catch (error) {
     if (error instanceof Error && isYtDlpVideoUnavailable(error.message)) {
@@ -979,6 +986,7 @@ async function runTranscriptGet(
   params: YoutubeTranscriptInput,
   checkRuntime: RegisterYoutubeResearchToolsDeps['checkRuntime'],
   createClient: (runtime: YtDlpRuntime) => YtDlpClient,
+  signal?: AbortSignal,
 ): Promise<PiToolResult<YoutubeTranscriptResult>> {
   let reference: NormalizedVideoRef;
   try {
@@ -1001,7 +1009,7 @@ async function runTranscriptGet(
   }
 
   const client = createClient(dependency.runtime);
-  const transcriptInventory = await client.listTranscriptSources(reference);
+  const transcriptInventory = await client.listTranscriptSources(reference, signal);
   const plan = buildTranscriptPlan(transcriptInventory, { sourceMode: params.source_mode ?? 'auto', language });
 
   pickTranscriptCandidate(plan, params.source_mode ?? 'best-effort');
@@ -1024,7 +1032,7 @@ async function runTranscriptGet(
     try {
       if (usedFallback && /_fallback$/.test(usedActualSource)) {
         if (!fallbackVideo) {
-          const rawVideo = await client.getVideo(reference);
+          const rawVideo = await client.getVideo(reference, signal);
           if (!rawVideo) {
             failures.push(`${usedActualSource}:${candidate.language}: no video metadata`);
             continue;
@@ -1040,13 +1048,18 @@ async function runTranscriptGet(
           generated: candidate.generated,
           video_id: reference.video_id,
           url: reference.videoUrl,
-        });
+        }, signal);
         if (reference.cleanTranscript !== false) {
           text = cleanTranscriptText(text);
         }
       }
     } catch (error) {
-      failures.push(`${usedActualSource}:${candidate.language}: ${error instanceof Error ? error.message : 'failed'}`);
+      signal?.throwIfAborted();
+      const message = error instanceof Error ? error.message : 'failed';
+      if (/\b429\b|too many requests/i.test(message)) {
+        return buildFailure('yt_dlp_failed', `YouTube rate-limited subtitle retrieval. Retry later; no spoken transcript was retrieved. ${message}`, true);
+      }
+      failures.push(`${usedActualSource}:${candidate.language}: ${message}`);
       continue;
     }
 
@@ -1082,6 +1095,7 @@ async function runChannelSearch(
   params: YoutubeChannelSearchInput,
   checkRuntime: RegisterYoutubeResearchToolsDeps['checkRuntime'],
   createClient: (runtime: YtDlpRuntime) => YtDlpClient,
+  signal?: AbortSignal,
 ): Promise<PiToolResult<{ results: ReturnType<typeof normalizeChannelResult>[] }>> {
   try {
     validateChannelInput(params);
@@ -1104,13 +1118,13 @@ async function runChannelSearch(
   let results: ReturnType<typeof normalizeChannelResult>[] = [];
 
   if (directLookup) {
-    const about = await client.getChannelAbout(params);
+    const about = await client.getChannelAbout(params, signal);
     if (!about) {
       return buildFailure('not_found', `No channel metadata found for ${params.channel_id ?? params.handle ?? params.url}`, false);
     }
     results = [normalizeChannelResult(about as RawYtDlpItem, descriptionPreviewChars)];
   } else {
-    const raw = await client.searchChannels(params);
+    const raw = await client.searchChannels(params, signal);
     const limit = params.limit ?? 5;
     results = raw
       .filter((entry) => normalizeSearchResult(entry as RawYtDlpItem).result_type === 'channel')
@@ -1132,23 +1146,25 @@ async function runChannelSearch(
     };
     if (params.includeVideos) {
       try {
-        const rawVideos = await client.getChannelVideos(lookupInput);
+        const rawVideos = await client.getChannelVideos(lookupInput, signal);
         const entries = Array.isArray((rawVideos as { entries?: unknown[] } | null)?.entries)
           ? ((rawVideos as { entries?: unknown[] }).entries ?? [])
           : [];
         first.recent_videos = entries.map((entry) => normalizeChannelVideoEntry(entry as RawYtDlpItem, descriptionPreviewChars));
       } catch {
+        signal?.throwIfAborted();
         first.recent_videos = [];
       }
     }
     if (params.includePlaylists) {
       try {
-        const rawPlaylists = await client.getChannelPlaylists(lookupInput);
+        const rawPlaylists = await client.getChannelPlaylists(lookupInput, signal);
         const entries = Array.isArray((rawPlaylists as { entries?: unknown[] } | null)?.entries)
           ? ((rawPlaylists as { entries?: unknown[] }).entries ?? [])
           : [];
         first.playlists = entries.map((entry) => normalizeChannelPlaylistEntry(entry as RawYtDlpItem, descriptionPreviewChars));
       } catch {
+        signal?.throwIfAborted();
         first.playlists = [];
       }
     }
@@ -1163,6 +1179,7 @@ async function runPlaylistGet(
   params: PlaylistRefInput,
   checkRuntime: RegisterYoutubeResearchToolsDeps['checkRuntime'],
   createClient: (runtime: YtDlpRuntime) => YtDlpClient,
+  signal?: AbortSignal,
 ): Promise<PiToolResult<any>> {
   let reference: NormalizedPlaylistRef;
   try {
@@ -1182,7 +1199,7 @@ async function runPlaylistGet(
   }
 
   const client = createClient(dependency.runtime);
-  const raw = await client.getPlaylist(reference);
+  const raw = await client.getPlaylist(reference, signal);
   if (!raw) {
     return buildFailure('not_found', `No playlist found for ${reference.playlist_id ?? reference.url}`, false);
   }
@@ -1192,7 +1209,7 @@ async function runPlaylistGet(
     entriesLimit: reference.entriesLimit,
     descriptionPreviewChars: reference.descriptionPreviewChars,
   });
-  const playlist = await enrichPlaylistEntries(compactPlaylist, reference, client);
+  const playlist = await enrichPlaylistEntries(compactPlaylist, reference, client, signal);
   return buildSuccess(summarizePlaylist(playlist), playlist);
 }
 
@@ -1213,10 +1230,12 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
     renderShell: 'self' as const,
     renderCall: (args: any, theme: any, context?: any) => renderYoutubeToolCall('youtube_search', args, theme, context),
     renderResult: (result: any, options: any, theme: any, context?: any) => renderYoutubeToolResult('youtube_search', result, options, theme, context),
-    async execute(_id: string, params: YoutubeSearchInput) {
+    async execute(_id: string, params: YoutubeSearchInput, signal?: AbortSignal) {
+      signal?.throwIfAborted();
       try {
-        return await runSearch(params, checkRuntime, createClient);
+        return await runSearch(params, checkRuntime, createClient, signal);
       } catch (error) {
+        signal?.throwIfAborted();
         return toToolError(error);
       }
     },
@@ -1235,10 +1254,12 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
     renderShell: 'self' as const,
     renderCall: (args: any, theme: any, context?: any) => renderYoutubeToolCall('youtube_video_get', args, theme, context),
     renderResult: (result: any, options: any, theme: any, context?: any) => renderYoutubeToolResult('youtube_video_get', result, options, theme, context),
-    async execute(_id: string, params: VideoRefInput) {
+    async execute(_id: string, params: VideoRefInput, signal?: AbortSignal) {
+      signal?.throwIfAborted();
       try {
-        return await runVideoGet(params, checkRuntime, createClient);
+        return await runVideoGet(params, checkRuntime, createClient, signal);
       } catch (error) {
+        signal?.throwIfAborted();
         return toToolError(error);
       }
     },
@@ -1257,10 +1278,12 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
     renderShell: 'self' as const,
     renderCall: (args: any, theme: any, context?: any) => renderYoutubeToolCall('youtube_transcript_get', args, theme, context),
     renderResult: (result: any, options: any, theme: any, context?: any) => renderYoutubeToolResult('youtube_transcript_get', result, options, theme, context),
-    async execute(_id: string, params: YoutubeTranscriptInput) {
+    async execute(_id: string, params: YoutubeTranscriptInput, signal?: AbortSignal) {
+      signal?.throwIfAborted();
       try {
-        return await runTranscriptGet(params, checkRuntime, createClient);
+        return await runTranscriptGet(params, checkRuntime, createClient, signal);
       } catch (error) {
+        signal?.throwIfAborted();
         return toToolError(error);
       }
     },
@@ -1278,10 +1301,12 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
     renderShell: 'self' as const,
     renderCall: (args: any, theme: any, context?: any) => renderYoutubeToolCall('youtube_channel_search', args, theme, context),
     renderResult: (result: any, options: any, theme: any, context?: any) => renderYoutubeToolResult('youtube_channel_search', result, options, theme, context),
-    async execute(_id: string, params: YoutubeChannelSearchInput) {
+    async execute(_id: string, params: YoutubeChannelSearchInput, signal?: AbortSignal) {
+      signal?.throwIfAborted();
       try {
-        return await runChannelSearch(params, checkRuntime, createClient);
+        return await runChannelSearch(params, checkRuntime, createClient, signal);
       } catch (error) {
+        signal?.throwIfAborted();
         return toToolError(error);
       }
     },
@@ -1299,10 +1324,12 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
     renderShell: 'self' as const,
     renderCall: (args: any, theme: any, context?: any) => renderYoutubeToolCall('youtube_playlist_get', args, theme, context),
     renderResult: (result: any, options: any, theme: any, context?: any) => renderYoutubeToolResult('youtube_playlist_get', result, options, theme, context),
-    async execute(_id: string, params: PlaylistRefInput) {
+    async execute(_id: string, params: PlaylistRefInput, signal?: AbortSignal) {
+      signal?.throwIfAborted();
       try {
-        return await runPlaylistGet(params, checkRuntime, createClient);
+        return await runPlaylistGet(params, checkRuntime, createClient, signal);
       } catch (error) {
+        signal?.throwIfAborted();
         return toToolError(error);
       }
     },

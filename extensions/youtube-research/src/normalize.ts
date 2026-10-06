@@ -189,6 +189,9 @@ export function normalizeVideoDetails(raw: RawYtDlpItem): YoutubeVideoDetails {
     caption_available: subtitleLanguages.length > 0 || autoLanguages.length > 0 || toBoolean(raw.always_rewrite) === true,
     caption_languages: subtitleLanguages,
     automatic_caption_languages: autoLanguages,
+    extraction_warnings: Array.isArray(raw.extraction_warnings)
+      ? raw.extraction_warnings.filter((warning): warning is string => typeof warning === 'string')
+      : undefined,
     comments: normalizeVideoComments(raw.comments),
   };
 }

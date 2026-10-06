@@ -106,7 +106,8 @@ export function buildVideoCommand(input: NormalizedVideoRef, binary?: string): s
     commandBinary(binary),
     '--dump-json',
     '--no-playlist',
-    '--write-info-json',
+    '--skip-download',
+    '--ignore-no-formats-error',
   ];
 
   if (input.includeComments) {
@@ -184,7 +185,7 @@ export function buildChannelPlaylistsCommand(input: YoutubeChannelSearchInput, b
 }
 
 export function buildTranscriptSourcesCommand(input: NormalizedVideoRef, binary?: string): string[] {
-  return [commandBinary(binary), '--list-subs', youtubeVideoUrl(input)];
+  return [commandBinary(binary), '--list-subs', '--ignore-no-formats-error', youtubeVideoUrl(input)];
 }
 
 export function buildTranscriptFetchCommand(selection: TranscriptFetchCommandOptions, binary?: string): string[] {
@@ -192,6 +193,7 @@ export function buildTranscriptFetchCommand(selection: TranscriptFetchCommandOpt
     commandBinary(binary),
     '--write-subs',
     '--skip-download',
+    '--ignore-no-formats-error',
     '--sub-langs',
     selection.language,
     '--sub-format',
@@ -388,68 +390,76 @@ async function readTranscriptFile(pathname: string): Promise<string> {
   return fs.readFile(pathname, 'utf8');
 }
 
-async function runAndParseJson(run: YtDlpExecutor, args: string[]): Promise<unknown[]> {
-  const result = await run(args);
+async function runAndParseJson(run: YtDlpExecutor, args: string[], signal?: AbortSignal): Promise<unknown[]> {
+  signal?.throwIfAborted();
+  const result = await run(args, { signal });
   if (result.exitCode !== 0) {
     throw new Error(result.stderr || 'yt-dlp execution failed');
   }
-  return parseYtDlpJsonPayload(result.stdout).payloads;
+  const payloads = parseYtDlpJsonPayload(result.stdout).payloads;
+  const warnings = result.stderr.split('\n').map((line) => line.trim()).filter(Boolean);
+  if (warnings.length) {
+    for (const payload of payloads) {
+      if (payload && typeof payload === 'object') {
+        (payload as Record<string, unknown>).extraction_warnings = warnings;
+      }
+    }
+  }
+  return payloads;
 }
 
 export class YoutubeResearchClient implements YtDlpClient {
   constructor(private options: YoutubeClientOptions) {}
 
-  async search(input: NormalizedSearchInput, _signal?: AbortSignal): Promise<unknown[]> {
-    return runAndParseJson(this.options.run, buildSearchCommand(input, this.options.binary));
+  async search(input: NormalizedSearchInput, signal?: AbortSignal): Promise<unknown[]> {
+    return runAndParseJson(this.options.run, buildSearchCommand(input, this.options.binary), signal);
   }
 
-  async getVideo(input: NormalizedVideoRef, _signal?: AbortSignal): Promise<unknown> {
-    const payloads = await runAndParseJson(this.options.run, buildVideoCommand(input, this.options.binary));
+  async getVideo(input: NormalizedVideoRef, signal?: AbortSignal): Promise<unknown> {
+    const payloads = await runAndParseJson(this.options.run, buildVideoCommand(input, this.options.binary), signal);
     return payloads[0] ?? null;
   }
 
-  async getPlaylist(input: NormalizedPlaylistRef, _signal?: AbortSignal): Promise<unknown> {
-    const payloads = await runAndParseJson(this.options.run, buildPlaylistCommand(input, this.options.binary));
+  async getPlaylist(input: NormalizedPlaylistRef, signal?: AbortSignal): Promise<unknown> {
+    const payloads = await runAndParseJson(this.options.run, buildPlaylistCommand(input, this.options.binary), signal);
     return payloads[0] ?? null;
   }
 
-  async searchChannels(input: YoutubeChannelSearchInput, _signal?: AbortSignal): Promise<unknown[]> {
-    const payloads = await runAndParseJson(this.options.run, buildChannelSearchCommand(input, this.options.binary));
+  async searchChannels(input: YoutubeChannelSearchInput, signal?: AbortSignal): Promise<unknown[]> {
+    const payloads = await runAndParseJson(this.options.run, buildChannelSearchCommand(input, this.options.binary), signal);
     const first = payloads[0] as { entries?: unknown[] } | undefined;
     return Array.isArray(first?.entries) ? first.entries : payloads;
   }
 
-  async getChannelAbout(input: YoutubeChannelSearchInput, _signal?: AbortSignal): Promise<unknown> {
-    const payloads = await runAndParseJson(this.options.run, buildChannelAboutCommand(input, this.options.binary));
+  async getChannelAbout(input: YoutubeChannelSearchInput, signal?: AbortSignal): Promise<unknown> {
+    const payloads = await runAndParseJson(this.options.run, buildChannelAboutCommand(input, this.options.binary), signal);
     return payloads[0] ?? null;
   }
 
-  async getChannelVideos(input: YoutubeChannelSearchInput, _signal?: AbortSignal): Promise<unknown> {
-    const payloads = await runAndParseJson(this.options.run, buildChannelVideosCommand(input, this.options.binary));
+  async getChannelVideos(input: YoutubeChannelSearchInput, signal?: AbortSignal): Promise<unknown> {
+    const payloads = await runAndParseJson(this.options.run, buildChannelVideosCommand(input, this.options.binary), signal);
     return payloads[0] ?? null;
   }
 
-  async getChannelPlaylists(input: YoutubeChannelSearchInput, _signal?: AbortSignal): Promise<unknown> {
-    const payloads = await runAndParseJson(this.options.run, buildChannelPlaylistsCommand(input, this.options.binary));
+  async getChannelPlaylists(input: YoutubeChannelSearchInput, signal?: AbortSignal): Promise<unknown> {
+    const payloads = await runAndParseJson(this.options.run, buildChannelPlaylistsCommand(input, this.options.binary), signal);
     return payloads[0] ?? null;
   }
 
-  async listTranscriptSources(input: NormalizedVideoRef, _signal?: AbortSignal): Promise<TranscriptSourceInventory> {
-    try {
-      const result = await this.options.run(buildTranscriptSourcesCommand(input, this.options.binary));
-      if (result.exitCode !== 0) {
-        return { manual: [], automatic: [], translated: [] };
-      }
-      return parseListSubsOutput(result.stdout);
-    } catch {
-      return { manual: [], automatic: [], translated: [] };
+  async listTranscriptSources(input: NormalizedVideoRef, signal?: AbortSignal): Promise<TranscriptSourceInventory> {
+    signal?.throwIfAborted();
+    const result = await this.options.run(buildTranscriptSourcesCommand(input, this.options.binary), { signal });
+    if (result.exitCode !== 0) {
+      throw new Error(result.stderr || 'yt-dlp subtitle discovery failed');
     }
+    return parseListSubsOutput(result.stdout);
   }
 
-  async fetchTranscript(input: TranscriptFetchCommandOptions, _signal?: AbortSignal): Promise<string> {
+  async fetchTranscript(input: TranscriptFetchCommandOptions, signal?: AbortSignal): Promise<string> {
+    signal?.throwIfAborted();
     const workdir = await fs.mkdtemp(join(tmpdir(), 'pi-youtube-transcript-'));
     try {
-      const result = await this.options.run(buildTranscriptFetchCommand(input, this.options.binary), { cwd: workdir });
+      const result = await this.options.run(buildTranscriptFetchCommand(input, this.options.binary), { cwd: workdir, signal });
       if (result.exitCode !== 0) {
         throw new Error(result.stderr || 'yt-dlp transcript fetch failed');
       }
@@ -457,11 +467,6 @@ export class YoutubeResearchClient implements YtDlpClient {
       const subtitlePath = await findSubtitleFile(workdir, parseSubtitlePath(result));
       if (subtitlePath) {
         return await readTranscriptFile(subtitlePath);
-      }
-
-      const trimmed = `${result.stdout}`.trim();
-      if (trimmed.length > 0) {
-        return trimmed;
       }
 
       throw new Error('yt-dlp did not produce subtitle output for transcript fetch');

@@ -140,6 +140,7 @@ export interface YoutubeVideoDetails {
   caption_available?: boolean;
   caption_languages?: string[];
   automatic_caption_languages?: string[];
+  extraction_warnings?: string[];
   comments_offset?: number;
   comments_limit?: number;
   comments_returned?: number;
