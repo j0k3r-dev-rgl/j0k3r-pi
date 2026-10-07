@@ -75,6 +75,42 @@ test('M5-A01: Exactly nine tools register with valid provider-compatible flat sc
   }
 });
 
+test('Memory guidance: all nine registered tools expose actionable prompt guidelines and parameter help', () => {
+  for (const tool of createMemoryTools()) {
+    assert.ok(tool.promptGuidelines?.length, `${tool.name} must provide guidelines to Pi and lean subagents`);
+    for (const guideline of tool.promptGuidelines!) {
+      assert.ok(guideline.trim().length > 0);
+      assert.ok(guideline.includes(tool.name), `${tool.name} guideline must identify its operation`);
+    }
+    for (const [name, property] of Object.entries((tool.parameters as any).properties)) {
+      assert.ok((property as any).description?.length > 15, `${tool.name}.${name} needs actionable help`);
+    }
+  }
+});
+
+test('Memory guidance: save documents replacement, deduplication, confirmation and safety boundaries', () => {
+  const save = createMemoryTools().find((tool) => tool.name === 'memory_save')!;
+  const guidance = [save.description, ...(save.promptGuidelines ?? [])].join(' ');
+  for (const concept of [/confirmed/i, /topic_key/, /replace/i, /memory_get/, /source/i, /committed/, /indexing_status/, /secret/i, /session_summary/, /explicit.*user request/i]) {
+    assert.match(guidance, concept);
+  }
+  assert.match((save.parameters as any).properties.content.description, /replace/i);
+  assert.match((save.parameters as any).properties.scope.description, /global/);
+});
+
+test('Memory guidance: search and recovery document real continuation and scope contracts', () => {
+  const tools = createMemoryTools();
+  const search = tools.find((tool) => tool.name === 'memory_search')!;
+  for (const concept of [/hybrid/, /fts5/, /semantic/, /graph/, /entity_id/, /memory_get/, /query/, /next_cursor/, /warnings/]) {
+    assert.match(search.description, concept);
+  }
+  assert.match((search.parameters as any).properties.cursor.description, /same query.*mode.*global/i);
+  const restore = tools.find((tool) => tool.name === 'memory_restore')!;
+  for (const concept of [/memory_deleted_list/, /owner_scope/, /scope.*global/, /pending/, /reindex/]) {
+    assert.match(restore.description, concept);
+  }
+});
+
 test('M6-A01 & M6-A05: public relation schema accepts exactly the approved graph vocabulary', () => {
   const tool = createMemoryTools().find((entry) => entry.name === 'memory_relation')!;
   const validator = Compile(tool.parameters);

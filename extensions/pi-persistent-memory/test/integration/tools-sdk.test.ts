@@ -282,6 +282,7 @@ test('M5-A08: Real isolated SDK session executes memory tools deterministically'
     modelRuntime.checkAuth = async () => ({ type: 'api_key', apiKey: 'mock' });
 
     let turn = 0;
+    let receivedSystemPrompt = '';
     const mockModel: any = {
       id: 'mock-model',
       provider: 'mock-provider',
@@ -290,6 +291,15 @@ test('M5-A08: Real isolated SDK session executes memory tools deterministically'
     };
 
     modelRuntime.streamSimple = (model: any, context: any, options: any) => {
+      receivedSystemPrompt = (context.messages ?? [])
+        .filter((message: any) => message.role === 'system')
+        .map((message: any) => [
+          ...Object.values(message.sections ?? {}),
+          typeof message.content === 'string'
+            ? message.content
+            : (message.content ?? []).filter((block: any) => block.type === 'text').map((block: any) => block.text).join('\n'),
+        ].join('\n'))
+        .join('\n');
       turn++;
       if (turn === 1) {
         const msg: any = {
@@ -416,6 +426,11 @@ test('M5-A08: Real isolated SDK session executes memory tools deterministically'
 
     // Send user message
     await session.prompt('Save memory note and check context');
+
+    // Real Pi prompt construction must include the registered tool guidelines.
+    const saveGuidelines = createMemoryTools().find((tool) => tool.name === 'memory_save')!.promptGuidelines;
+    assert.ok(saveGuidelines?.length, 'Memory capture guidelines must be registered');
+    for (const guideline of saveGuidelines!) assert.ok(receivedSystemPrompt.includes(guideline), guideline);
 
     // Verify turn occurred and memory was saved in DB
     assert.ok(turn >= 2, `Expected at least 2 turns, got ${turn}`);
