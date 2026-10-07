@@ -4,12 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import extension, { ClaudeBackgroundWidget, ClaudeBackgroundWidgetState, completionMessage, createSubagentsPanelKeyMatcher, moveClaudeBackgroundWidgetSelection, renderClaudeBackgroundWidgetLines, resolveRegisteredToolDefinition, sendSubagentCompletionMessage } from '../index.js';
-import { loadSubagents, parseFrontmatter, readSubagentsConfig, resetGlobalSubagentModelProfileField, saveGlobalSubagentModelProfile, subagentSourceWarnings } from '../src/config.js';
+import { loadSubagents, parseFrontmatter, readSubagentsConfig, subagentSourceWarnings } from '../src/config.js';
 import { expandToolPatterns, matchesToolPattern } from '../src/tool-patterns.js';
 import { resolveEffectiveSubagentProfile } from '../src/profile-resolver.js';
 import { buildPrompt, ThreadSnapshotBuilder } from '../src/runner.js';
 import { SubagentStructuredError, deriveErrorString, normalizeErrorMetadata, parseErrorMetadata, safeErrorMetadataDetails, serializeErrorMetadata } from '../src/error-metadata.js';
-import { applyDirtyProfileEdit, buildModelProfileRows, buildNoChangesModelProfilesMessage, buildNonTuiModelProfilesMessage, commitStagedModelProfiles, createSubagentModelProfilesModal, globalSubagentsConfigPath, groupAvailableModelsByProvider, runSubagentModelsCommand, stageModelProfileEdit } from '../src/model-profiles-ui.js';
 import { resolveSubagentHistoryDbPath, resolveSubagentsHistoryHome, SubagentHistoryStore } from '../src/history.js';
 import { isSubagentsDebugEnabled, writeSubagentsDebugLog } from '../src/debug.js';
 import { createSubagentsRenderLogger, DEFAULT_RENDER_DEBUG_LOG_PATH } from '../src/render-debug.js';
@@ -496,6 +495,56 @@ describe('config and workflow loading', () => {
       }
       expect(agent.tools.some((tool) => tool.startsWith('subagent_'))).toBe(false);
     }
+  });
+
+  it('treats legacy keys as inert at runtime and never rewrites config files on disk (MINI-004)', () => {
+    const configPath = path.join(tmp, '.pi', 'subagents.json');
+    const legacyConfig = {
+      default_model: 'anthropic/claude-3-opus',
+      default_effort: 'high',
+      model_profiles: {
+        analyst: {
+          model: 'anthropic/claude-3-sonnet',
+          effort: 'low',
+        },
+      },
+      timeout_ms: 60000,
+    };
+    const originalJson = `${JSON.stringify(legacyConfig, null, 2)}\n`;
+    fs.writeFileSync(configPath, originalJson, 'utf8');
+
+    // Read config at runtime
+    const parsed = readSubagentsConfig(tmp);
+    expect(parsed.timeout_ms).toBe(60000);
+
+    // Verify file on disk was not modified or rewritten
+    const diskContent = fs.readFileSync(configPath, 'utf8');
+    expect(diskContent).toBe(originalJson);
+
+    // Now test with resolveEffectiveSubagentProfile: legacy model_profiles/default_model are inert
+    const agentDef = {
+      name: 'analyst',
+      description: 'Analyst agent',
+      filePath: path.join(tmp, '.pi', 'subagents', 'analyst.md'),
+      instructions: 'Do analysis',
+      tools: ['read'],
+    };
+    const ctx = {
+      model: { provider: 'orchestrator-provider', id: 'orchestrator-model' },
+      thinkingLevel: 'medium',
+    };
+    const profile = resolveEffectiveSubagentProfile({
+      agentName: 'analyst',
+      definition: agentDef,
+      config: parsed,
+      ctx,
+    });
+
+    // Profile resolves orchestrator model and effort, NOT the inert legacy keys from config
+    expect(profile.model.value).toEqual({ provider: 'orchestrator-provider', id: 'orchestrator-model' });
+    expect(profile.model.source).toBe('orchestrator');
+    expect(profile.effort.value).toBe('medium');
+    expect(profile.effort.source).toBe('orchestrator');
   });
 
 });

@@ -4,11 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import extension, { ClaudeBackgroundWidget, ClaudeBackgroundWidgetState, completionMessage, createSubagentsPanelKeyMatcher, moveClaudeBackgroundWidgetSelection, renderClaudeBackgroundWidgetLines, resolveRegisteredToolDefinition, sendSubagentCompletionMessage } from '../../index.js';
-import { loadSubagents, parseFrontmatter, readSubagentsConfig, resetGlobalSubagentModelProfileField, saveGlobalSubagentModelProfile, subagentSourceWarnings } from '../../src/config.js';
+import { loadSubagents, parseFrontmatter, readSubagentsConfig, subagentSourceWarnings } from '../../src/config.js';
 import { resolveEffectiveSubagentProfile } from '../../src/profile-resolver.js';
 import { buildPrompt, ThreadSnapshotBuilder } from '../../src/runner.js';
 import { SubagentStructuredError, deriveErrorString, normalizeErrorMetadata, parseErrorMetadata, safeErrorMetadataDetails, serializeErrorMetadata } from '../../src/error-metadata.js';
-import { applyDirtyProfileEdit, buildModelProfileRows, buildNoChangesModelProfilesMessage, buildNonTuiModelProfilesMessage, commitStagedModelProfiles, createSubagentModelProfilesModal, globalSubagentsConfigPath, groupAvailableModelsByProvider, runSubagentModelsCommand, stageModelProfileEdit } from '../../src/model-profiles-ui.js';
 import { resolveSubagentHistoryDbPath, resolveSubagentsHistoryHome, SubagentHistoryStore } from '../../src/history.js';
 import { isSubagentsDebugEnabled, writeSubagentsDebugLog } from '../../src/debug.js';
 import { createSubagentsRenderLogger, DEFAULT_RENDER_DEBUG_LOG_PATH } from '../../src/render-debug.js';
@@ -226,7 +225,7 @@ describe('background widget', () => {
     expect(bold).toHaveBeenCalledWith('● tool-smoke Running sleep 15.');
   });
 
-  it('renders one wrapped current background activity and never a trail', () => {
+  it('renders one clipped current background activity and never a trail', () => {
     const now = new Date().toISOString();
     const state = new ClaudeBackgroundWidgetState(
       () => [{
@@ -249,13 +248,16 @@ describe('background widget', () => {
     const widget = new ClaudeBackgroundWidget(state, { fg: (_name: string, text: string) => `\u001b[33m${text}\u001b[39m`, bold: (text: string) => `\u001b[1m${text}\u001b[22m` });
 
     const rendered = widget.render(24).map((line) => line.replace(/\u001b\[[0-9;]*m/g, ''));
-    const normalized = rendered.join(' ').replace(/\s+/g, ' ');
-    const condensed = normalized.replace(/\s+/g, '');
-
-    expect(condensed).toContain('runningtool:workspace_graph_status_with_a_very_long_public_name');
-    expect(normalized).not.toContain('thinking');
-    expect(normalized).not.toContain('streaming response');
+    expect(rendered.length).toBe(2);
+    expect(rendered[1]).toContain('running to…');
     expect(rendered.every((line) => line.length <= 24)).toBe(true);
+
+    const wide = widget.render(120).map((line) => line.replace(/\u001b\[[0-9;]*m/g, ''));
+    expect(wide.length).toBe(2);
+    const normalizedWide = wide.join(' ').replace(/\s+/g, ' ');
+    expect(normalizedWide).toContain('running tool: workspace_graph_status_with_a_very_long_public_name');
+    expect(normalizedWide).not.toContain('thinking');
+    expect(normalizedWide).not.toContain('streaming response');
   });
 
   it('returns to input on main enter and opens the selected subagent on enter', () => {
@@ -272,6 +274,70 @@ describe('background widget', () => {
     expect(state.handleTerminalInput('\u001b[B')).toEqual({ consume: true });
     expect(state.handleTerminalInput('\u001b[A')).toEqual({ consume: true });
     expect(state.handleTerminalInput('\r')).toEqual({ consume: true, action: { type: 'focus-editor' } });
+  });
+
+  describe('responsive single-line clipping and 1:1 hit testing (MINI-001)', () => {
+    it('returns empty array when width <= 0', () => {
+      const now = new Date().toISOString();
+      const state = new ClaudeBackgroundWidgetState(
+        () => [
+          { id: 'task-1', agent: 'tool-smoke', mode: 'background', status: 'running', task: 'sleep 15', created_at: now },
+        ] as any,
+      );
+      const widget = new ClaudeBackgroundWidget(state, {});
+      expect(widget.render(0)).toEqual([]);
+      expect(widget.render(-10)).toEqual([]);
+    });
+
+    it('returns exactly one line per active entry across all positive widths including tiny widths', () => {
+      const now = new Date().toISOString();
+      const state = new ClaudeBackgroundWidgetState(
+        () => [
+          { id: 'task-1', agent: 'tool-smoke', mode: 'background', status: 'running', task: 'long running task description that wraps across multiple lines if wrapped', created_at: now },
+          { id: 'task-2', agent: 'worker-2', mode: 'background', status: 'queued', task: 'another task', created_at: now },
+        ] as any,
+      );
+      const widget = new ClaudeBackgroundWidget(state, {});
+      // Active entries = main (1) + task-1 (1) + task-2 (1) = 3 total lines
+      const testWidths = [1, 20, 30, 50, 100];
+      for (const w of testWidths) {
+        const lines = widget.render(w);
+        expect(lines.length).toBe(3);
+        for (const line of lines) {
+          expect(stripAnsi(line).length).toBeLessThanOrEqual(w);
+        }
+      }
+    });
+
+    it('maps handleMouseClick on row k 1:1 to entry k reliably without wrapping displacement', () => {
+      const now = new Date().toISOString();
+      let lastAction: any;
+      const state = new ClaudeBackgroundWidgetState(
+        () => [
+          { id: 'task-1', agent: 'tool-smoke', mode: 'background', status: 'running', task: 'very long description line 1 that could wrap and displace row clicks', created_at: now },
+          { id: 'task-2', agent: 'worker-2', mode: 'background', status: 'running', task: 'very long description line 2 that could wrap and displace row clicks', created_at: now },
+        ] as any,
+      );
+      const widget = new ClaudeBackgroundWidget(state, {}, {}, (action) => {
+        lastAction = action;
+      });
+
+      // Render at narrow width (e.g. 20)
+      const lines = widget.render(20);
+      expect(lines.length).toBe(3); // row 0: main, row 1: task-1, row 2: task-2
+
+      // Click row 0 -> focus editor
+      widget.handleMouse({ type: 'click', row: 0 });
+      expect(lastAction).toEqual({ type: 'focus-editor' });
+
+      // Click row 1 -> open task-1
+      widget.handleMouse({ type: 'click', row: 1 });
+      expect(lastAction).toEqual({ type: 'open-task', taskId: 'task-1' });
+
+      // Click row 2 -> open task-2
+      widget.handleMouse({ type: 'click', row: 2 });
+      expect(lastAction).toEqual({ type: 'open-task', taskId: 'task-2' });
+    });
   });
 
 });

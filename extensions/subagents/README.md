@@ -1,12 +1,12 @@
 # Pi Subagents Extension
 
-Pi extension for delegating work to markdown-defined subagents. Continuation is unavailable by default: `subagent_continue` is exposed only when effective `enable_continue` is explicitly `true`. The extension registers tools for the orchestrator, runs subagents in isolated in-memory Pi sessions, tracks task history, provides a TUI history panel, and supports per-subagent model/thinking-effort profiles.
+Pi extension for delegating work to markdown-defined subagents. Continuation is unavailable by default: `subagent_continue` is exposed only when effective `enable_continue` is explicitly `true`. The extension registers tools for the orchestrator, runs subagents in isolated in-memory Pi sessions, tracks task history, provides a TUI history panel, and uses automatic CPAMC model allocation with orchestrator fallback.
 
 ## What it provides
 
 - Markdown-defined subagents loaded from global and project directories.
 - `subagent_run` for task-mode or background delegation to one agent per call.
-- Optional `subagent_continue` for resuming the exact persisted nested session with optional mode/model/effort overrides when `enable_continue: true`.
+- Optional `subagent_continue` for resuming the exact persisted nested session with an optional continuation-mode override when `enable_continue: true`.
 - `subagent_send_message` for live same-parent steering of owned background tasks on supported Pi runtimes.
 - Status/result/list/cancel tools for delegated tasks.
 - Isolated in-memory agent sessions for each subagent run.
@@ -16,8 +16,7 @@ Pi extension for delegating work to markdown-defined subagents. Continuation is 
 - Task-to-background handoff via `ctrl+h` by default, configurable in `subagents.json`.
 - Automatic background completion/failure notifications that start or queue a parent-orchestrator response; no polling is needed just to wait.
 - TUI execution rendering can expand/collapse tool and rendered component output with `ctrl+o`, show/hide assistant thinking blocks with `ctrl+t`, and display queued/consumed steering messages in the owning task detail timeline.
-- Model profile UI via `/subagent-models`.
-- Per-agent/default model and thinking-effort configuration.
+- Automatic model and effort allocation via CPAMC with orchestrator model/effort fallback.
 - Tool allowlist filtering that prevents subagents from delegating to other subagents.
 - Generic subagent-to-parent interaction handoff so human decisions happen on the main thread.
 
@@ -106,8 +105,6 @@ tools:
   - bash
   - context7_status
   - context7_search_library
-model: anthropic/claude-sonnet-4-5
-effort: low
 ---
 
 # Discovery Subagent
@@ -122,8 +119,6 @@ Supported frontmatter:
 | `name` | Subagent name. Defaults to filename stem. Normalized to lowercase. |
 | `description` | Short description shown by `subagent_list_agents`. |
 | `tools` | Tool allowlist for the subagent. Accepts either a comma-separated inline list or a multiline YAML list, but never both in one definition. Entries may include `*` wildcards such as `tool_*`. Wildcards expand only against tools that are active in the current parent session; inactive or blocked tools are ignored. When omitted, the definition gets the built-in default tool list. Configured `default_tools` is used by the runner when a definition has an empty tool list. |
-| `model` | Optional model as `provider/model-id`. |
-| `effort`, `thinking_level`, `thinkingLevel` | Optional thinking effort: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`. |
 | `subagent_mode` | Optional default execution mode for this definition: `task` or `background`. |
 
 ### Tool allowlist formats
@@ -168,8 +163,8 @@ Choose the narrowest scope that matches the intended behavior:
 | Scope | Path | Use it when |
 |---|---|---|
 | Global defaults | `$PI_CODING_AGENT_DIR/subagents.json`, or `~/.pi/agent/subagents.json` when the environment variable is unset | The setting should apply across projects unless locally overridden. |
-| Project-local overrides | `.pi/subagents.json` | This workspace needs different defaults, shortcuts, tools, or profiles. |
-| One definition | Frontmatter in the selected global/project Markdown definition | Only that subagent needs `subagent_mode`, or an explicit per-file model/effort override. |
+| Project-local overrides | `.pi/subagents.json` | This workspace needs different execution defaults, shortcuts, or tools. |
+| One definition | Frontmatter in the selected global/project Markdown definition | Only that subagent needs a different tool allowlist, instructions, or `subagent_mode`. |
 
 Config resolves as a field-by-field cascade:
 
@@ -182,11 +177,11 @@ Config resolves as a field-by-field cascade:
 
 Avoid copying every global value into project config: add only intentional local overrides unless you specifically want to pin inherited values. Changing where the package is installed does not change this cascade.
 
-`model_profiles` follow the selected definition source rather than being merged freely across scopes: project-local definitions use project-local profiles, while global definitions use global profiles. If a project definition overrides a global definition with the same normalized name, the project definition and its project-local profile win.
+Model and thinking effort are allocated by CPAMC, with the current orchestrator as fallback; they are not selected through this configuration cascade or definition frontmatter. See [Model allocation and CPAMC integration](#model-allocation-and-cpamc-integration).
 
 ### Asking an agent to configure Subagents
 
-You can ask the bundled `subagents-configuration` skill for setup or explanation. If your request does not already name a scope, the agent should explain the cascade and ask whether you want:
+In this agent workspace, `pi-configuration` routes Subagents questions to its internal Subagents configuration module; there is no separate global Subagents skill. Independent package installations still include the bundled `subagents-configuration` skill. If your request does not already name a scope, the agent should explain the cascade and ask whether you want:
 
 1. a global default for every project;
 2. a project-local override for the current workspace; or
@@ -199,7 +194,7 @@ Example requests:
 ```txt
 Explain whether default_mode belongs in global or project config. Do not edit anything.
 Set default_mode to background only for this project.
-Configure the global reviewer profile, but leave project overrides unchanged.
+Explain CPAMC automatic model allocation and the orchestrator fallback. Do not edit configuration.
 Give the project-local discovery definition background mode without changing other agents.
 ```
 
@@ -209,8 +204,6 @@ The same JSON shape is valid globally or project-locally; place it only in the s
 
 ```json
 {
-  "default_model": "anthropic/claude-sonnet-4-5",
-  "default_effort": "medium",
   "default_mode": "task",
   "enable_continue": false,
   "timeout_ms": 1200000,
@@ -226,17 +219,7 @@ The same JSON shape is valid globally or project-locally; place it only in the s
     "memory_context",
     "memory_search",
     "memory_get"
-  ],
-  "model_profiles": {
-    "discovery": {
-      "model": "anthropic/claude-haiku-4-5",
-      "effort": "low"
-    },
-    "sdd-apply": {
-      "model": "anthropic/claude-sonnet-4-5",
-      "effort": "medium"
-    }
-  }
+  ]
 }
 ```
 
@@ -244,11 +227,8 @@ The same JSON shape is valid globally or project-locally; place it only in the s
 
 | Field | Default | Description |
 |---|---:|---|
-| `default_model` | current orchestrator model | Fallback model for all subagents. Format: `provider/model-id`. |
-| `default_effort` | current orchestrator effort | Fallback thinking effort. Also accepts `default_thinking_level` or `thinkingLevel`. |
 | `default_mode` | `task` | Fallback execution mode when neither the invocation nor the selected definition sets one. Accepts `task` or `background`. |
 | `enable_continue` | `false` | Opt-in gate for new continuations and `subagent_continue` tool exposure. Project values override global values; changing it requires `/reload` or restart before tool availability changes. |
-| `model_profiles` | `{}` | Per-agent model/effort overrides scoped to matching definitions. Project-local profiles apply to project-local definitions; global profiles apply to global definitions. |
 | `timeout_ms` | `1200000` | Total timeout per subagent task (20 minutes). |
 | `stall_timeout_ms` | `240000` | Inactivity timeout for a subagent session (4 minutes). |
 | `max_concurrency` | `5` | Max concurrent subagent tasks per cwd/config pair. |
@@ -279,25 +259,16 @@ subagent_cancel
 any tool starting with subagent_
 ```
 
-## Model profile resolution
+## Model allocation and CPAMC integration
 
-Effective model resolution order:
+Model allocation is owned automatically by the CPAMC subagent pool (`extensions/cpamc-subagent-pool`) via Pi EventBus hooks:
 
-1. `model_profiles[agent].model` from the config matching the selected definition scope: project-local for project definitions, global for global definitions
-2. subagent frontmatter `model`
-3. `default_model`
-4. current orchestrator model
-5. unresolved
-
-Effective effort resolution order:
-
-1. `model_profiles[agent].effort` from the config matching the selected definition scope: project-local for project definitions, global for global definitions
-2. subagent frontmatter `effort` / `thinking_level` / `thinkingLevel`
-3. `default_effort`
-4. current orchestrator thinking level
-5. unresolved
-
-If a configured model cannot be resolved, the runner reports an error. If a selected model fails or stalls and the current orchestrator model is different, the runner falls back to the current model.
+1. **Allocation Hook**: On task launch (or continuation attempt), `SubagentManager` emits `subagents:task:allocate` with `{ taskId, attempt, parentSessionId, agent, cwd, signal, claimModel }`.
+2. **CPAMC Claim**: When CPAMC is present, it claims the allocation and assigns an optimal model (e.g. Gemini 3.8 Flash) and thinking effort (`high`), setting `model_source: 'allocated'` and `effort_source: 'allocated'`.
+3. **Orchestrator Fallback**: If CPAMC is not present, unclaimed, or encounters an allocator error, the subagent launch automatically falls back to the current orchestrator model and thinking effort from context (`ctx.model` and `ctx.thinkingLevel`), setting `model_source: 'orchestrator'` and `effort_source: 'orchestrator'`.
+4. **Strict Cancellation Isolation**: Cancellation (`signal.aborted`) is never converted into a fallback; aborted tasks halt immediately and release leases.
+5. **Continuation Isolation**: Continuations allocate attempt-specific leases (`buildLeaseId({ taskId, attempt })`), isolating continuation attempts from previous attempt cleanups.
+6. **Inert Legacy Keys**: Legacy model profiles and default model/effort keys in `subagents.json`, plus model/effort fields in definition frontmatter, no longer select the runtime model. Existing configuration files are not rewritten or deleted. `/subagent-models` and continuation model/effort overrides have been removed; configure execution modes, not model profiles.
 
 ## Debug and interaction bridge logs
 
@@ -385,8 +356,6 @@ Parameters:
   task_id: string;
   prompt: string;
   mode?: "task" | "background";
-  model?: string;
-  effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 }
 ```
 
@@ -398,7 +367,6 @@ Behavior:
 - `mode: "task"` waits, renders `(task)`, and remains eligible for manual `ctrl+h` handoff.
 - `mode: "background"` returns immediately, renders `(background)`, and relies on the automatic completion notification.
 - When `mode` is omitted, the continuation preserves the previous task attempt's effective mode. Legacy records without a valid saved mode fall back through `default_mode` and then `task`.
-- Model and effort overrides still require an explicit user decision before use.
 
 ### `subagent_send_message`
 
@@ -455,16 +423,11 @@ Live-message requirements, visibility, and lifecycle:
 | Entry point | Description |
 |---|---|
 | `/subagents` | Open the session-focused TUI subagent history panel. |
-| `/subagent-models` | Configure subagent model profiles in the matching local or global config. |
 | `ctrl+,` | Open the TUI subagent history panel by default. Configurable via `history_panel_shortcut` in `subagents.json`. |
 | `x` | Cancel the currently selected queued/running subagent from the open history/detail panel by default. Configurable via `detail_cancel_shortcut` in `subagents.json`. |
 | `ctrl+h` | Send the running task-mode subagent task to the background by default. Configurable via `background_handoff_shortcut` in `subagents.json`. |
 | `ctrl+o` | Expand or collapse rendered tool output and subagent responses in the active execution/detail view. |
 | `ctrl+t` | Show or hide assistant thinking blocks in the open subagent execution panel, using Pi's `app.thinking.toggle` keybinding. |
-
-`/subagent-models` writes profile changes to the config that matches each selected definition: project-local subagents write to `.pi/subagents.json`, while global subagents write to `~/.pi/agent/subagents.json` or `$PI_CODING_AGENT_DIR/subagents.json` when `PI_CODING_AGENT_DIR` is set.
-
-In non-TUI environments, edit `model_profiles` manually in the matching local or global JSON file.
 
 ## Task history
 

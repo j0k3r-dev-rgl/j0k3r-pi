@@ -435,7 +435,7 @@ export class SubagentHistoryStore {
   listTasks(cwd: string, limit = 100, options: HistoryReadOptions = {}): SubagentTask[] {
     return this.db(cwd).prepare(`
       SELECT * FROM subagent_tasks WHERE cwd = ?
-      ORDER BY COALESCE(last_activity_at, started_at, created_at) DESC, created_at DESC, id DESC
+      ORDER BY created_at DESC, id DESC
       LIMIT ?
     `).all(cwd, limit).map((row) => rowToTask(row, options));
   }
@@ -443,7 +443,7 @@ export class SubagentHistoryStore {
   listSessionTasks(cwd: string, sessionId: string, limit = 100, options: HistoryReadOptions = {}): SubagentTask[] {
     return this.db(cwd).prepare(`
       SELECT * FROM subagent_tasks WHERE cwd = ? AND session_id = ?
-      ORDER BY COALESCE(last_activity_at, started_at, created_at) DESC, created_at DESC, id DESC
+      ORDER BY created_at DESC, id DESC
       LIMIT ?
     `).all(cwd, sessionId, limit).map((row) => rowToTask(row, options));
   }
@@ -452,7 +452,7 @@ export class SubagentHistoryStore {
     return this.db(cwd).prepare(`
       SELECT ${SESSION_TASK_METADATA_COLUMNS}
       FROM subagent_tasks WHERE cwd = ? AND session_id = ?
-      ORDER BY COALESCE(last_activity_at, started_at, created_at) DESC, created_at DESC, id DESC
+      ORDER BY created_at DESC, id DESC
       LIMIT ?
     `).all(cwd, sessionId, limit).map((row) => rowToTask(row, { includeSnapshots: false }));
   }
@@ -462,7 +462,7 @@ export class SubagentHistoryStore {
     const placeholders = statuses.map(() => '?').join(', ');
     return this.db(cwd).prepare(`
       SELECT * FROM subagent_tasks WHERE cwd = ? AND status IN (${placeholders})
-      ORDER BY COALESCE(last_activity_at, started_at, created_at) DESC, created_at DESC, id DESC
+      ORDER BY created_at DESC, id DESC
     `).all(cwd, ...statuses).map((row) => rowToTask(row, options));
   }
 
@@ -520,6 +520,7 @@ export class SubagentHistoryStore {
 function rowToTask(row: any, options: HistoryReadOptions = {}): SubagentTask {
   return {
     id: row.id,
+    cwd: row.cwd ?? undefined,
     display_name: row.display_name ?? undefined,
     agent: row.agent,
     mode: row.mode,

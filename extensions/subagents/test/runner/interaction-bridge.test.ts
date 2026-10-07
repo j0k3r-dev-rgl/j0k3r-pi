@@ -101,6 +101,11 @@ describe('subagent runner interaction-required bridge', () => {
       cwd: '/workspace',
       ctx: { modelRuntime, modelRegistry },
       config: { timeout_ms: 10_000, stall_timeout_ms: 10_000, max_concurrency: 1, default_tools: ['read'], model_profiles: {} },
+      effectiveProfile: {
+        agent: 'analyst',
+        model: { value: { provider: 'openai', id: 'gpt-5.5' }, source: 'allocated', label: 'allocated: openai/gpt-5.5' },
+        effort: { source: 'unresolved', label: 'unresolved' },
+      },
       signal: new AbortController().signal,
     } as any);
 
@@ -527,6 +532,11 @@ describe('subagent runner interaction-required bridge', () => {
         pi: { getThinkingLevel: () => 'low' },
       },
       config,
+      effectiveProfile: {
+        agent: 'sdd-apply',
+        model: { value: { provider: 'profile', id: 'model' }, source: 'allocated', label: 'allocated: profile/model' },
+        effort: { value: 'xhigh', source: 'allocated', label: 'allocated: xhigh' },
+      },
       signal: new AbortController().signal,
     });
 
@@ -571,12 +581,12 @@ describe('subagent runner interaction-required bridge', () => {
       definition,
       task: 'design work',
       cwd: '/workspace',
-      ctx: { modelRegistry: { find: vi.fn(() => frontmatterModel) }, model: { provider: 'orchestrator', id: 'model' }, thinkingLevel: 'low' },
+      ctx: { modelRegistry: { find: vi.fn(() => frontmatterModel) }, model: { provider: 'orchestrator', id: 'model' }, thinkingLevel: 'high' },
       config,
       signal: new AbortController().signal,
     });
 
-    expect(createAgentSession).toHaveBeenCalledWith(expect.objectContaining({ model: frontmatterModel, thinkingLevel: 'high' }));
+    expect(createAgentSession).toHaveBeenCalledWith(expect.objectContaining({ model: { provider: 'orchestrator', id: 'model' }, thinkingLevel: 'high' }));
   });
 
   it('keeps no-profile default-config and orchestrator-inherited behavior unchanged', async () => {
@@ -617,12 +627,12 @@ describe('subagent runner interaction-required bridge', () => {
       definition,
       task: 'review work',
       cwd: '/workspace',
-      ctx: { modelRegistry: { find: vi.fn(() => defaultModel) }, model: { provider: 'orchestrator', id: 'model' }, thinkingLevel: 'low' },
+      ctx: { modelRegistry: { find: vi.fn(() => defaultModel) }, model: { provider: 'orchestrator', id: 'model' }, thinkingLevel: 'medium' },
       config,
       signal: new AbortController().signal,
     });
 
-    expect(createAgentSession).toHaveBeenLastCalledWith(expect.objectContaining({ model: defaultModel, thinkingLevel: 'medium' }));
+    expect(createAgentSession).toHaveBeenLastCalledWith(expect.objectContaining({ model: { provider: 'orchestrator', id: 'model' }, thinkingLevel: 'medium' }));
 
     createAgentSession.mockClear();
     await sdkSubagentRunner({
@@ -682,9 +692,14 @@ describe('subagent runner interaction-required bridge', () => {
       task: 'apply work',
       cwd: '/workspace',
       ctx: { modelRegistry: { find: vi.fn(() => undefined) }, model: { provider: 'orchestrator', id: 'model' } },
-      config: { timeout_ms: 10_000, stall_timeout_ms: 10_000, max_concurrency: 1, default_tools: ['read'], model_profiles: { 'sdd-apply': { model: { provider: 'missing', id: 'model' } } } },
+      config: { timeout_ms: 10_000, stall_timeout_ms: 10_000, max_concurrency: 1, default_tools: ['read'], model_profiles: {} },
+      effectiveProfile: {
+        agent: 'sdd-apply',
+        model: { value: { provider: 'missing', id: 'model' }, source: 'allocated', label: 'allocated: missing/model' },
+        effort: { source: 'unresolved', label: 'unresolved' },
+      },
       signal: new AbortController().signal,
-    })).rejects.toThrow('Subagent sdd-apply could not resolve selected model missing/model');
+    })).rejects.toThrow('Subagent sdd-apply could not resolve selected model missing/model (allocated)');
   });
 
   it('passes the resolved thinking effort to nested SDK sessions and reports it', async () => {
@@ -723,7 +738,7 @@ describe('subagent runner interaction-required bridge', () => {
       definition,
       task: 'design work',
       cwd: '/workspace',
-      ctx: { model: { provider: 'test', id: 'model' }, pi: { getThinkingLevel: () => 'low' } },
+      ctx: { model: { provider: 'test', id: 'model' }, pi: { getThinkingLevel: () => 'high' } },
       config,
       signal: new AbortController().signal,
     });

@@ -75,8 +75,9 @@ describe('subagent_continue tool', () => {
     ).render(160).join('\n');
     const result = await continueTool.execute('1', { task_id: taskId, prompt: 'Continue with the approved fix.' }, undefined, undefined, { cwd: env.tmp });
 
-    expect(continueTool.description).toContain('explicit user decision');
-    expect(continueTool.description).toContain('Never auto-switch models');
+    expect(continueTool.description).toContain('Continue a completed, failed, or cancelled subagent task');
+    expect(continueTool.parameters.properties.model).toBeUndefined();
+    expect(continueTool.parameters.properties.effort).toBeUndefined();
     expect(continueTool.renderShell).toBe('self');
     expect(continueTool.parameters.properties.mode.anyOf.map((entry: any) => entry.const)).toEqual(['task', 'background']);
     expect(renderedCall).toBe('');

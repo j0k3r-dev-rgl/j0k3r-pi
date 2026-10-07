@@ -27,8 +27,13 @@ export function renderSubagentRunCall(_args: any, _theme: any) {
   return emptyComponent();
 }
 
-export function renderSubagentRunResult(result: any, { expanded, isPartial }: any, theme: any, context?: any) {
-  const task = taskFromDetails(result);
+function formatRenderedModel(task?: SubagentTask): string {
+  if (task?.model) return task.model;
+  if (task?.status === 'queued' || task?.model_source === 'unresolved' || !task?.model) return 'pending';
+  return 'default/current';
+}
+
+function createSubagentRunBoxedComponent(result: any, { expanded, isPartial }: any, theme: any, context?: any, task?: SubagentTask) {
   const archPrefix = themeAccent(theme, ARCH_ICON);
   const isBg = task?.mode === 'background' || task?.effective_mode === 'background' || result?.details?.mode === 'background';
   const bgSuffix = isBg ? ' (background)' : '';
@@ -76,12 +81,13 @@ export function renderSubagentRunResult(result: any, { expanded, isPartial }: an
   const historyShortcut = readSubagentsConfig(process.cwd()).history_panel_shortcut ?? 'ctrl+,';
   const detailsHint = `(click to view execution) · (${historyShortcut} or /subagents for details)`;
   const usage = task ? formatUsage(task as SubagentTask) : '';
+  const renderedModel = formatRenderedModel(task);
 
   if (expanded === false) {
     const expandHint = resolveExpandHint('to expand', context);
     const metaLines = task
       ? [
-        `subagent: ${themeAccent(theme, task.agent)} · model: ${task.model ?? 'default/current'} · effort: ${themeAccent(theme, task.effort ?? 'default/current')} · status: ${status}`,
+        `subagent: ${themeAccent(theme, task.agent)} · model: ${renderedModel} · effort: ${themeAccent(theme, task.effort ?? 'default/current')} · status: ${status}`,
         usage ? themeDim(theme, `usage: ${usage}`) : undefined,
         themeDim(theme, `${detailsHint} · ${expandHint}`),
       ].filter(Boolean) as string[]
@@ -97,7 +103,7 @@ export function renderSubagentRunResult(result: any, { expanded, isPartial }: an
   const metaLines = task
     ? [
       `subagent: ${themeAccent(theme, task.agent)} · status: ${status} · attempt: ${themeAccent(theme, String(task.attempt ?? 1))} · effort: ${themeAccent(theme, task.effort ?? 'default/current')}`,
-      themeDim(theme, `model: ${task.model ?? 'default/current'}`),
+      themeDim(theme, `model: ${renderedModel}`),
       usage ? themeDim(theme, `usage: ${usage}`) : undefined,
       themeDim(theme, detailsHint),
     ].filter(Boolean) as string[]
@@ -114,4 +120,143 @@ export function renderSubagentRunResult(result: any, { expanded, isPartial }: an
     wrapped: true,
     onClick: task?.id ? () => openSubagentsPanel(task.id) : undefined,
   });
+}
+
+export function renderSubagentRunResult(
+  result: any,
+  options: any,
+  theme: any,
+  context?: any,
+  taskLookup?: (id: string, cwd?: string) => SubagentTask | undefined,
+  managerOrEmitter?: { onTaskUpdate?: (listener: () => void) => () => void },
+  pi?: any,
+) {
+  let cachedInnerComp: any = undefined;
+  let cachedTaskSignature = '';
+
+  const rawTask = taskFromDetails(result);
+  const taskWorkspace = rawTask?.cwd ?? result?.details?.cwd ?? context?.cwd;
+
+  const isTerminalStatus = (status?: string): boolean =>
+    status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'interrupted';
+
+  const getResolvedTask = (): SubagentTask | undefined => {
+    if (!rawTask?.id || !taskLookup) return rawTask;
+    const liveTask = taskLookup(rawTask.id, taskWorkspace);
+    if (!liveTask) return rawTask;
+    if (options?.isPartial) {
+      return {
+        ...rawTask,
+        model: liveTask.model ?? rawTask.model,
+        effort: liveTask.effort ?? rawTask.effort,
+      };
+    }
+    return liveTask;
+  };
+
+  const buildComponent = () => {
+    const task = getResolvedTask();
+    const sig = `${task?.id}|${task?.status}|${task?.model}|${task?.effort}|${task?.attempt}|${Boolean(options?.expanded)}|${Boolean(options?.isPartial)}|${result?.details?.frame ?? 0}`;
+    if (cachedInnerComp && cachedTaskSignature === sig) {
+      return cachedInnerComp;
+    }
+    cachedTaskSignature = sig;
+    cachedInnerComp = createSubagentRunBoxedComponent(result, options, theme, context, task);
+    return cachedInnerComp;
+  };
+
+  const comp = {
+    invalidate() {
+      cachedInnerComp = undefined;
+      cachedTaskSignature = '';
+    },
+    handleMouse(event: any) {
+      return buildComponent().handleMouse(event);
+    },
+    render(width: number): string[] {
+      return buildComponent().render(width);
+    },
+    dispose() {
+      cleanup?.();
+    },
+  };
+
+  let cleanup: (() => void) | undefined = undefined;
+
+  const initialTask = rawTask?.id && taskLookup ? taskLookup(rawTask.id, taskWorkspace) : undefined;
+  const shouldSubscribe = Boolean(
+    managerOrEmitter
+    && typeof managerOrEmitter.onTaskUpdate === 'function'
+    && initialTask
+    && !isTerminalStatus(initialTask.status),
+  );
+
+  if (shouldSubscribe) {
+    if (context?.state && typeof context.state.cleanup === 'function') {
+      try { context.state.cleanup(); } catch {}
+      context.state.cleanup = undefined;
+    }
+    if (context?.lastComponent && typeof context.lastComponent.dispose === 'function') {
+      try { context.lastComponent.dispose(); } catch {}
+    }
+
+    let cleanedUp = false;
+    let unsubscribeListener: (() => void) | undefined;
+    let unregisterShutdown: (() => void) | undefined;
+    let abortListener: (() => void) | undefined;
+
+    cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      if (context?.state?.cleanup === cleanup) {
+        context.state.cleanup = undefined;
+      }
+      if (abortListener && context?.signal) {
+        try { context.signal.removeEventListener('abort', abortListener); } catch {}
+        abortListener = undefined;
+      }
+      if (typeof unregisterShutdown === 'function') {
+        try { unregisterShutdown(); } catch {}
+        unregisterShutdown = undefined;
+      }
+      if (typeof unsubscribeListener === 'function') {
+        try { unsubscribeListener(); } catch {}
+        unsubscribeListener = undefined;
+      }
+    };
+
+    if (context?.state) {
+      context.state.cleanup = cleanup;
+    }
+
+    if (context?.signal) {
+      if (context.signal.aborted) {
+        cleanup();
+        return comp;
+      }
+      abortListener = () => { cleanup?.(); };
+      try { context.signal.addEventListener('abort', abortListener, { once: true }); } catch {}
+    }
+
+    if (pi && typeof pi.on === 'function') {
+      try {
+        unregisterShutdown = pi.on('session_shutdown', () => {
+          cleanup?.();
+        });
+      } catch {}
+    }
+
+    unsubscribeListener = managerOrEmitter!.onTaskUpdate!(() => {
+      comp.invalidate();
+      context?.requestRender?.();
+      context?.ui?.requestRender?.();
+      pi?.ui?.requestRender?.();
+      const current = taskLookup ? taskLookup(rawTask!.id, taskWorkspace) : undefined;
+      if (!current || isTerminalStatus(current.status)) {
+        cleanup?.();
+      }
+    });
+  }
+
+  return comp;
 }

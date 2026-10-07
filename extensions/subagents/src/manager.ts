@@ -8,9 +8,9 @@ import { sdkSubagentRunner } from './runner.js';
 import { SubagentHistoryStore } from './history.js';
 import { publishInteractionResponse, sanitizeInteractionTransportText } from './interaction-channel.js';
 import { classifyThrownError, deriveErrorString, enrichErrorMetadata, normalizeErrorMetadata, SubagentStructuredError } from './error-metadata.js';
-import { profileSourceLabel, resolveEffectiveSubagentProfile } from './profile-resolver.js';
+import { effortFromCtx, modelFromCtx, profileSourceLabel, resolveEffectiveSubagentProfile } from './profile-resolver.js';
 import type { SubagentInteractionRequest, SubagentInteractionResponse } from './interaction-channel.js';
-import type { EffectiveSubagentProfile, LiveSteeringBridge, ModelRef, SendMessageResult, SubagentContinueInput, SubagentDefinition, SubagentErrorMetadata, SubagentRunInput, SubagentRunResult, SubagentsConfig, SubagentRunner, SubagentTask, SubagentTaskAllocationClaim, SubagentTaskAllocationEvent, SubagentTaskTerminalEvent } from './types.js';
+import type { EffectiveSubagentProfile, LiveSteeringBridge, ModelRef, SendMessageResult, SubagentContinueInput, SubagentDefinition, SubagentErrorMetadata, SubagentRunInput, SubagentRunResult, SubagentsConfig, SubagentRunner, SubagentTask, SubagentTaskAllocationClaim, SubagentTaskAllocationEvent, SubagentTaskTerminalEvent, ThinkingEffort } from './types.js';
 
 type StopDisposition = {
   status: Extract<SubagentTask['status'], 'failed' | 'cancelled' | 'interrupted'>;
@@ -22,9 +22,8 @@ function nowIso(): string { return new Date().toISOString(); }
 function taskId(agent: string): string { return `subtask_${agent}_${Date.now()}_${randomUUID().replace(/-/g, '').slice(0, 8)}`; }
 function taskActivityTime(task: SubagentTask): string { return task.last_activity_at ?? task.started_at ?? task.created_at; }
 function compareBinaryTextDesc(a: string, b: string): number { return Buffer.compare(Buffer.from(b, 'utf8'), Buffer.from(a, 'utf8')); }
-function compareTasksByRecentActivity(a: SubagentTask, b: SubagentTask): number {
-  return compareBinaryTextDesc(taskActivityTime(a), taskActivityTime(b))
-    || compareBinaryTextDesc(a.created_at, b.created_at)
+function compareTasksByCreationDesc(a: SubagentTask, b: SubagentTask): number {
+  return compareBinaryTextDesc(a.created_at, b.created_at)
     || compareBinaryTextDesc(a.id, b.id);
 }
 function subagentAuditLog(cwd: string | undefined, event: string, data: Record<string, unknown>): void {
@@ -139,23 +138,8 @@ function stopDispositionFromReason(reason: string): StopDisposition {
   };
 }
 
-function resolveContinuationProfile(definition: SubagentDefinition, config: SubagentsConfig, ctx: any, input: SubagentContinueInput): EffectiveSubagentProfile {
-  const resolved = resolveEffectiveSubagentProfile({ agentName: definition.name, definition, config, ctx });
-  const model = input.model === undefined
-    ? resolved.model
-    : (() => {
-        const parsed = parseModel(input.model);
-        if (!parsed) throw new Error(`Invalid model override for continuation: ${input.model}`);
-        return { value: parsed, source: 'orchestrator' as const, label: profileSourceLabel('orchestrator', parsed, (value) => `${value.provider}/${value.id}`) };
-      })();
-  const effort = input.effort === undefined
-    ? resolved.effort
-    : (() => {
-        const parsed = parseEffort(input.effort);
-        if (!parsed) throw new Error(`Invalid effort override for continuation: ${input.effort}`);
-        return { value: parsed, source: 'orchestrator' as const, label: profileSourceLabel('orchestrator', parsed, String) };
-      })();
-  return { ...resolved, model, effort };
+function resolveContinuationProfile(definition: SubagentDefinition, config: SubagentsConfig, ctx: any, _input: SubagentContinueInput): EffectiveSubagentProfile {
+  return resolveEffectiveSubagentProfile({ agentName: definition.name, definition, config, ctx });
 }
 
 function interactionPromptMessage(request: SubagentInteractionRequest): string {
@@ -451,17 +435,17 @@ export class SubagentManager {
   }
 
   listTasks(cwd?: string) {
-    const active = [...this.tasks.values()].sort(compareTasksByRecentActivity);
+    const active = [...this.tasks.values()].sort(compareTasksByCreationDesc);
     if (!cwd) return active;
     const activeIds = new Set(active.map((task) => task.id));
     const persisted = this.history.listTasks(cwd).filter((task) => !activeIds.has(task.id));
-    return [...active, ...persisted].sort(compareTasksByRecentActivity);
+    return [...active, ...persisted].sort(compareTasksByCreationDesc);
   }
 
   listActiveSessionTasks(cwd?: string, sessionId?: string) {
     return [...this.tasks.values()]
       .filter((task) => (!cwd || this.taskCwds.get(task.id) === cwd) && (!sessionId || task.session_id === sessionId))
-      .sort(compareTasksByRecentActivity);
+      .sort(compareTasksByCreationDesc);
   }
 
   listSessionTasks(cwd?: string, sessionId?: string) {
@@ -469,7 +453,7 @@ export class SubagentManager {
     if (!cwd || !sessionId) return active;
     const activeIds = new Set(active.map((task) => task.id));
     const persisted = this.cachedPersistedSessionTasks(cwd, sessionId).filter((task) => !activeIds.has(task.id));
-    return [...active, ...persisted].sort(compareTasksByRecentActivity);
+    return [...active, ...persisted].sort(compareTasksByCreationDesc);
   }
 
   onTaskUpdate(listener: () => void): () => void {
@@ -754,6 +738,7 @@ export class SubagentManager {
       ...latest,
       mode: effectiveMode,
       effective_mode: effectiveMode,
+      cwd: taskCwd,
       status: 'queued',
       attempt: (latest.attempt ?? 1) + 1,
       session_id: continuationSessionId,
@@ -765,9 +750,9 @@ export class SubagentManager {
       continuation_prompt: continuationPrompt,
       transcript: undefined,
       usage: undefined,
-      model: modelRefLabel(effectiveProfile.model.value),
+      model: undefined,
       effort: effectiveProfile.effort.value,
-      model_source: effectiveProfile.model.source,
+      model_source: 'unresolved',
       effort_source: effectiveProfile.effort.source,
       fallback_used: undefined,
       error: undefined,
@@ -878,8 +863,10 @@ export class SubagentManager {
     const session_id = sessionIdFromContext(ctx);
     const effectiveProfile = resolveEffectiveSubagentProfile({ agentName: definition.name, definition, config, ctx });
     const effectiveMode = resolveEffectiveSubagentMode({ invocationMode: mode, definition, config });
+    const cwd = ctx?.cwd ?? process.cwd();
     const task: SubagentTask = {
       id: taskId(definition.name),
+      cwd,
       display_name: displayName,
       agent: definition.name,
       mode: effectiveMode,
@@ -887,9 +874,9 @@ export class SubagentManager {
       status: 'queued',
       task: taskText,
       context,
-      model: modelRefLabel(effectiveProfile.model.value),
+      model: undefined,
       effort: effectiveProfile.effort.value,
-      model_source: effectiveProfile.model.source,
+      model_source: 'unresolved',
       effort_source: effectiveProfile.effort.source,
       pending_message_count: 0,
       created_at: nowIso(),
@@ -950,44 +937,66 @@ export class SubagentManager {
         };
         this.emitEvent('subagents:task:allocate', allocateEvent, ctx);
 
+        let claimed: { model?: ModelRef; effort?: ThinkingEffort } | undefined;
         if (claimModelAllocator) {
           if (controller.signal.aborted) {
             await this.runTerminalCleanups(task, parentSessionId, ctx);
             return;
           }
           try {
-            const claimed = await claimModelAllocator(controller.signal);
-            if (controller.signal.aborted) {
-              await this.runTerminalCleanups(task, parentSessionId, ctx);
-              return;
-            }
-            if (claimed?.model) {
-              effectiveProfile = {
-                ...effectiveProfile,
-                model: {
-                  value: claimed.model,
-                  source: 'allocated',
-                  label: profileSourceLabel('allocated', claimed.model, (v) => `${v.provider}/${v.id}`),
-                },
-                effort: claimed.effort ? {
-                  value: claimed.effort,
-                  source: 'allocated',
-                  label: profileSourceLabel('allocated', claimed.effort, String),
-                } : effectiveProfile.effort,
-              };
-              task.model = modelRefLabel(effectiveProfile.model.value);
-              task.model_source = effectiveProfile.model.source;
-              if (claimed.effort) {
-                task.effort = claimed.effort;
-                task.effort_source = effectiveProfile.effort.source;
-              }
-            }
+            claimed = await claimModelAllocator(controller.signal);
           } catch {
             if (controller.signal.aborted) {
               await this.runTerminalCleanups(task, parentSessionId, ctx);
               return;
             }
           }
+          if (controller.signal.aborted) {
+            await this.runTerminalCleanups(task, parentSessionId, ctx);
+            return;
+          }
+        }
+
+        if (claimed?.model) {
+          effectiveProfile = {
+            ...effectiveProfile,
+            model: {
+              value: claimed.model,
+              source: 'allocated',
+              label: profileSourceLabel('allocated', claimed.model, (v) => `${v.provider}/${v.id}`),
+            },
+            effort: claimed.effort ? {
+              value: claimed.effort,
+              source: 'allocated',
+              label: profileSourceLabel('allocated', claimed.effort, String),
+            } : effectiveProfile.effort,
+          };
+          task.model = modelRefLabel(effectiveProfile.model.value);
+          task.model_source = 'allocated';
+          if (claimed.effort) {
+            task.effort = claimed.effort;
+            task.effort_source = 'allocated';
+          }
+        } else {
+          const orchModel = modelFromCtx(ctx);
+          const orchEffort = effortFromCtx(ctx);
+          effectiveProfile = {
+            ...effectiveProfile,
+            model: {
+              value: orchModel,
+              source: 'orchestrator',
+              label: profileSourceLabel('orchestrator', orchModel, (v) => `${v.provider}/${v.id}`),
+            },
+            effort: {
+              value: orchEffort,
+              source: 'orchestrator',
+              label: profileSourceLabel('orchestrator', orchEffort, String),
+            },
+          };
+          task.model = modelRefLabel(orchModel);
+          task.model_source = 'orchestrator';
+          task.effort = orchEffort;
+          task.effort_source = 'orchestrator';
         }
 
         task.status = 'running';
@@ -1101,7 +1110,7 @@ export class SubagentManager {
           task.last_activity_at = nowIso();
           task.usage = result.usage ?? task.usage;
           if (result.system_prompt ?? task.system_prompt) task.system_prompt = sanitizeInteractionTransportText(result.system_prompt ?? task.system_prompt!);
-          task.model = result.model;
+          task.model = result.model ?? task.model;
           task.effort = result.effort ?? task.effort;
           task.fallback_used = result.fallback_used;
           if (result.thread_snapshot) task.thread_snapshot = sanitizeUnknown(result.thread_snapshot);
@@ -1143,7 +1152,7 @@ export class SubagentManager {
         task.last_activity_at = nowIso();
         task.usage = result.usage ?? task.usage;
         if (result.system_prompt ?? task.system_prompt) task.system_prompt = sanitizeInteractionTransportText(result.system_prompt ?? task.system_prompt!);
-        task.model = result.model;
+        task.model = result.model ?? task.model;
         task.effort = result.effort ?? task.effort;
         task.fallback_used = result.fallback_used;
         if (result.thread_snapshot) task.thread_snapshot = sanitizeUnknown(result.thread_snapshot);
