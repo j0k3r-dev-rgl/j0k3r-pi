@@ -70,3 +70,4 @@ models-store.json
 /extensions/pi-persistent-memory/benchmark/pool*.json
 /extensions/pi-persistent-memory/benchmark/judged*.json
 /extensions/pi-persistent-memory/benchmark/assessment*.json
+/crashes.json
