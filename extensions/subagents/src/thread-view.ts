@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { writeSubagentsDebugLog } from './debug.js';
-import { visibleWidth as terminalVisibleWidth } from './render/text-width.js';
+import { visibleWidth as terminalVisibleWidth, wrapLineToWidth } from './render/text-width.js';
 
 import type {
   SubagentAssistantItem,
@@ -430,11 +430,24 @@ function truncateLines(context: SubagentThreadRenderContext, lines: string[], wi
   return out;
 }
 
-function assistantText(item: SubagentAssistantItem): string[] {
+function assistantText(item: SubagentAssistantItem, width?: number): string[] {
   const lines: string[] = [];
   for (const part of item.message.content) {
-    if (part.type === 'text' && part.text.trim()) lines.push(part.text);
-    else if (part.type === 'thinking' && (part.thinking ?? part.text)?.trim()) lines.push(`thinking: ${part.thinking ?? part.text}`);
+    if (part.type === 'text' && part.text.trim()) {
+      if (width && width > 0) {
+        lines.push(...wrapLineToWidth(part.text, width));
+      } else {
+        lines.push(part.text);
+      }
+    } else if (part.type === 'thinking' && (part.thinking ?? part.text)?.trim()) {
+      const thinkingRaw = (part.thinking ?? part.text)!.trim();
+      const prefix = 'thinking: ';
+      if (width && width > 0) {
+        lines.push(...wrapLineToWidth(`${prefix}${thinkingRaw}`, width));
+      } else {
+        lines.push(`${prefix}${thinkingRaw}`);
+      }
+    }
     // Tool calls are rendered as separate tool rows, matching Pi's main thread composition.
   }
   if (item.message.errorMessage) lines.push(`error: ${item.message.errorMessage}`);
@@ -455,7 +468,7 @@ function renderAssistantItem(item: SubagentAssistantItem, context: SubagentThrea
       if (rendered?.some((line) => line.trim())) return rendered;
     } catch (error) { debugLog(context, 'assistant_component_error', { error }); }
   }
-  return assistantText(displayItem);
+  return assistantText(displayItem, width);
 }
 
 function userItemTitle(item: SubagentUserItem): string | undefined {

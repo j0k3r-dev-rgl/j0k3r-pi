@@ -16,7 +16,6 @@ const requiredFiles = [
   'src/history.ts',
   'src/interaction-channel.ts',
   'src/manager.ts',
-  'src/model-profiles-ui.ts',
   'src/profile-resolver.ts',
   'src/runner.ts',
   'src/thread-view.ts',

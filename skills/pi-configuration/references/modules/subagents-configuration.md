@@ -1,25 +1,25 @@
 ---
 name: subagents-configuration
-description: "configure Pi Subagents with explicit global/project scope, markdown definitions, cascaded subagents.json defaults, opt-in continuation, model profiles, execution modes, tool allowlists, shortcuts, history, and live background steering guidance."
+description: "configure Pi Subagents with explicit global/project scope, markdown definitions, cascaded subagents.json defaults, opt-in continuation, automatic CPAMC model allocation with orchestrator fallback, execution modes, tool allowlists, shortcuts, history, and live background steering guidance."
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.4"
-registry:
-  category: "workflow"
-  domains: "subagents-configuration, subagent-config, model-profile-config, execution-mode-config, tool-allowlist-config, subagent-history-config, subagent-shortcut-config, live-steering-config"
-  paths: ".pi/agents/**/*.md, .pi/subagents/**/*.md, .pi/subagents.json, agents/**/*.md, subagents/**/*.md, subagents.json, ~/.pi/agent/agents/**/*.md, ~/.pi/agent/subagents/**/*.md, ~/.pi/agent/subagents.json"
-  keywords: "subagents configuration, configure subagents, configurar subagents, configuro subagents, como configurar subagents, cómo configurar subagents, como configuro subagents, cómo configuro subagents, como se configura subagents, cómo se configura subagents, configurar subagentes, configuro subagentes, como configurar subagentes, cómo configurar subagentes, como configuro subagentes, cómo configuro subagentes, como se configura subagentes, cómo se configura subagentes, configuracion subagents, configuración subagents, configuracion subagentes, configuración subagentes, subagent config, subagents.json, model profiles configuration, tool allowlist configuration, subagent history configuration, background handoff shortcut, background_handoff_shortcut, default_mode, enable_continue, subagent_mode, subagent_continue mode, continuation enablement, subagent_send_message, live background steering, global subagents config, project subagents config, local or global subagents, configuracion global o local, configuración global o local, interaction handoff configuration"
-  priority: 88
+  version: "1.5"
 ---
 
 # Subagents Configuration
 
 ## Activation Contract
 
-Use this skill only when the user asks how to configure Pi Subagents or when editing/reviewing subagent configuration files: package installation/update settings, markdown subagent definitions, project/global `subagents.json`, model profiles, allowed tools, history settings, execution defaults, opt-in continuation, continuation modes, background handoff shortcuts, lean resources, live background steering requirements, runtime task/background behavior, and generic interaction handoff as configuration topics only.
+Internal reference module selected by `pi-configuration`, not a standalone skill or a Skill Registry entry.
 
-Do not load this skill for ordinary subagent delegation/use (`subagent_run`, task status/result polling), extension implementation work, task history browsing, or editing this skill file; those are not configuration questions.
+Use this module only when the user asks how to configure Pi Subagents or when editing/reviewing subagent configuration files: package installation/update settings, markdown subagent definitions, project/global `subagents.json`, model allocation and fallback behavior, allowed tools, history settings, execution defaults, opt-in continuation, continuation modes, background handoff shortcuts, lean resources, live background steering requirements, runtime task/background behavior, and generic interaction handoff as configuration topics only.
+
+Do not load this module for ordinary subagent delegation/use (`subagent_run`, task status/result polling), extension implementation work, or task history browsing; those are not configuration questions.
+
+## Canonical Scope
+
+Own Subagents configuration guidance: global/project cascade, definition tool allowlists, execution modes, continuation, history, shortcuts, and CPAMC allocation with orchestrator fallback. `pi-configuration` owns routing; software workflows own implementation. Do not configure providers, credentials, or CPAMC quota policy through Subagents settings.
 
 ## Hard Rules
 
@@ -41,8 +41,8 @@ Do not load this skill for ordinary subagent delegation/use (`subagent_run`, tas
 - Subagents config resolves as a cascade: project `.pi/subagents.json` overrides global `$PI_CODING_AGENT_DIR/subagents.json` or `~/.pi/agent/subagents.json`; missing project fields fall back to global config; fields missing from both fall back to built-in defaults. Communicate this precedence to users when explaining config behavior.
 - `enable_continue` is built-in default `false` and follows that same cascade. Project `enable_continue` overrides global only when present; omitting it locally inherits the global value. Continuation guidance and new continuation execution are available only when the effective value is `true`.
 - When effective `enable_continue` is `false`, `subagent_continue` is not registered, direct or stale continuation attempts must be described as generic unavailable behavior, historical task and continuation records remain visible, and failed/cancelled/interrupted/stopping terminal results plus terminal background notifications must not recommend continuation or mention `subagent_continue`.
-- `model_profiles` are scoped to the matching subagent definition source: project-local profile entries in `.pi/subagents.json` apply to project-local definitions, while global profile entries apply to global definitions. If a project definition overrides a global definition with the same normalized name, the project definition and its project-local profile win.
-- Prefer configuring subagent `model` and `effort` under `model_profiles` in the config matching the definition scope: project-local definitions use `.pi/subagents.json`; global definitions use `$PI_CODING_AGENT_DIR/subagents.json` or `~/.pi/agent/subagents.json`. Markdown definitions should usually contain identity, description, tool allowlist, and behavioral instructions only.
+- Model and thinking effort are managed automatically by the CPAMC subagent pool via the `subagents:task:allocate` event hook. When CPAMC is unavailable, allocation fails, or returns no model, subagents automatically fall back to the parent orchestrator model and thinking effort from context. Manual model selection, `/subagent-models`, `default_model`, `default_effort`, and `model_profiles` keys are obsolete; legacy `model_profiles` keys in `subagents.json` are inert at runtime and are never rewritten on disk.
+- Markdown definitions should usually contain identity, description, tool allowlist, and behavioral instructions only.
 - Nested subagent sessions should use `session_resources: "lean"` by default so the subagent markdown body becomes the nested session system prompt, the delegated user prompt contains only orchestrator context/task, and workflow skills, prompt templates, themes, context files, and startup context injections are not auto-loaded.
 - In lean mode, extensions are loaded for allowlisted tools and tool-safety hooks only; prompt/context lifecycle hooks such as `before_agent_start` and `context` must not inject hidden messages into subagent turns.
 - Subagent task history is stored globally under data storage, but rows remain project-scoped by `cwd`; history stores delegated prompt and subagent system prompt separately.
@@ -82,8 +82,7 @@ Recommended `subagents.json` starter:
     "memory_context",
     "memory_search",
     "memory_get"
-  ],
-  "model_profiles": {}
+  ]
 }
 ```
 
@@ -105,25 +104,9 @@ Instructions...
 
 Tool entries can include `*` wildcards such as `tool_*`. Wildcards expand at subagent runtime only against tools that are active in the current parent session. If a pattern matches nothing active, it expands to nothing. Blocked `subagent_*` tools remain unavailable even if a pattern would match them. The same wildcard behavior is supported by `default_tools` in `subagents.json`.
 
-Configure model/effort routing separately in the matching local or global `subagents.json` when needed. If no matching profile/default is configured, the subagent inherits the current orchestrator model and thinking effort.
+Model and effort allocation:
 
-```json
-{
-  "model_profiles": {
-    "discovery": {
-      "model": "anthropic/claude-sonnet-4-5",
-      "effort": "low"
-    }
-  }
-}
-```
-
-Model/effort resolution order:
-
-1. `model_profiles[agentName]` from the config matching the selected definition scope: `.pi/subagents.json` for project-local definitions, or `$PI_CODING_AGENT_DIR/subagents.json` / `~/.pi/agent/subagents.json` for global definitions.
-2. Markdown frontmatter `model` / `effort` only for explicit per-file overrides.
-3. `default_model` / `default_effort` from effective `subagents.json` config.
-4. Current orchestrator model / effort.
+Model and thinking effort are allocated automatically by the CPAMC subagent pool (e.g. Gemini 3.8 Flash with high effort) through the `subagents:task:allocate` event hook. When CPAMC is unavailable, allocation is unclaimed, or an allocator error occurs, the runner falls back to the current orchestrator model and thinking effort from the parent session context. Manual model configuration, `/subagent-models`, and legacy `model_profiles` entries are obsolete and inert.
 
 Execution-mode resolution order:
 
@@ -145,7 +128,7 @@ Continuation-mode resolution order (when `enable_continue` is enabled):
 - If the user has not chosen configuration scope, ask: **global for every project, project-local for this workspace, or one subagent definition only?** Do not edit until they choose.
 - If the requested local value differs from an existing global value, explain that local wins and ask whether the user wants an override or wants to change the global default instead.
 - If the user asks for a default execution mode without naming one, ask whether omitted runs should wait in `task` or free the chat in `background`; explain automatic notification behavior before they choose.
-- If the user asks for model profiles, ask which subagent definitions are global versus project-local, then write profiles to the matching config scope.
+- If the user asks how to configure models for subagents, explain that CPAMC handles automatic model allocation and quota balancing, falling back to the current orchestrator model/effort when CPAMC is unavailable; manual model profiles are obsolete.
 - If the user requests a new definition but does not specify `agents` versus `subagents`, recommend `subagents` and ask only when compatibility with another harness may require `agents`.
 - If the subagent will modify files, run bash, or write memory, ask whether the planned workflow or stricter review is required.
 - If the subagent needs human input, require a structured `interaction_required` request with enough prompt, payload, and expected-response data for the parent to answer.
@@ -153,14 +136,14 @@ Continuation-mode resolution order (when `enable_continue` is enabled):
 
 ## Execution Steps
 
-1. Classify the request as package setup, definition creation, config defaults, per-agent profiles, shortcuts/UI, history/debug, or runtime explanation.
+1. Classify the request as package setup, definition creation, config defaults, model allocation explanation, shortcuts/UI, history/debug, or runtime explanation.
 2. If scope is not explicit, present the three choices and wait: global (`$PI_CODING_AGENT_DIR` or `~/.pi/agent`), project-local (`.pi`), or one definition's frontmatter. Explain the cascade before asking the user to choose.
 3. For package setup, inspect settings before editing; use `pi install npm:pi-subagents-j0k3r` when possible, or edit `~/.pi/agent/settings.json` only when the CLI is unavailable/broken. Prefer unpinned `npm:pi-subagents-j0k3r` unless the user asks for a fixed version.
 4. After scope is approved, read the matching existing config/definition plus the fallback config needed to explain effective values. Check optional `agents` and `subagents` directories for existence before listing them.
 5. Summarize existing effective values, what will be inherited, and exactly which file would change; ask for any missing product choice such as `task` versus `background` before editing.
 6. For new subagents, choose lowercase kebab-case names and clear trigger-focused descriptions. Write definitions in English by default; use another language only when explicitly requested. Prefer `subagents` unless compatibility requires `agents`.
 7. Set minimal tool allowlists; remove any `subagent_*` entries.
-8. Configure `model_profiles` in the config matching definition scope. Configure `default_model`, `default_effort`, `default_mode`, and `enable_continue` only in the user-approved scope. Explain model/effort inheritance, execution-mode precedence, and that `enable_continue` needs `/reload` or restart before tool exposure changes.
+8. Do not configure `model_profiles`, `default_model`, or `default_effort` (legacy keys are inert). Configure `default_mode` and `enable_continue` only in the user-approved scope. Explain CPAMC automatic allocation and orchestrator model/effort fallback, execution-mode precedence, and that `enable_continue` needs `/reload` or restart before tool exposure changes.
 9. Never add the removed UI key `mode: "opencode" | "claude"`. Configure history and handoff independently with `history_panel_shortcut`, `detail_cancel_shortcut`, and `background_handoff_shortcut`.
 10. Configure `debug: true` only for temporary diagnostics; keep it false by default and explain that logs are written under the executing project's `.pi` directory.
 11. Validate JSON syntax and Markdown frontmatter/body structure. Preserve unrelated existing keys and definitions.
@@ -172,12 +155,12 @@ Continuation-mode resolution order (when `enable_continue` is enabled):
 
 Return:
 
-- Skill applied: `subagents-configuration`.
+- Configuration module applied: `subagents-configuration` through `pi-configuration`.
 - Scope/path configured or reviewed, including whether definitions came from `agents` or `subagents`.
 - Package settings and subagents/config fields added, changed, or preserved.
 - Scope decision: global, project-local, or definition-specific; include the effective cascade and why that scope was selected.
 - User choices requested before editing, including default execution mode or override intent when relevant.
-- Tool allowlist, system-prompt isolation, Context7 scope, memory-tool scope, debug logging, model/effort decisions, and inheritance behavior.
+- Tool allowlist, system-prompt isolation, Context7 scope, memory-tool scope, debug logging, CPAMC model allocation and orchestrator fallback behavior.
 - Runtime behavior explained when relevant: task vs background, automatic notifications, enabled-only continuation mode preservation/override, same-parent `subagent_send_message`, `/subagents`, `ctrl+o`, and `subagent_result`.
 - Related configuration skills considered or loaded.
 - Validation executed, or the concrete reason it was not run.
@@ -185,8 +168,8 @@ Return:
 
 ## References
 
-- `../../extensions/subagents/README.md` — package installation, definitions, global/project config cascade, execution modes, tools, shortcuts, history, and runtime behavior.
-- `../../extensions/subagents/src/config.ts` — config loading, parsing, definition precedence, and project/global cascade.
-- `../../extensions/subagents/src/continuation-mode.ts` — effective continuation-mode precedence.
-- `../../extensions/subagents/src/manager.ts` — task lifecycle, live steering ownership/queues, continuation attempts, and history-facing task state.
-- `../../extensions/subagents/src/history.ts` — global history storage with project-scoped rows.
+- `../../../../extensions/subagents/README.md` — package installation, definitions, global/project config cascade, execution modes, tools, shortcuts, history, and runtime behavior.
+- `../../../../extensions/subagents/src/config.ts` — config loading, parsing, definition precedence, and project/global cascade.
+- `../../../../extensions/subagents/src/continuation-mode.ts` — effective continuation-mode precedence.
+- `../../../../extensions/subagents/src/manager.ts` — task lifecycle, live steering ownership/queues, continuation attempts, and history-facing task state.
+- `../../../../extensions/subagents/src/history.ts` — global history storage with project-scoped rows.

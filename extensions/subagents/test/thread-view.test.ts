@@ -4,11 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import extension, { ClaudeBackgroundWidget, ClaudeBackgroundWidgetState, completionMessage, createSubagentsPanelKeyMatcher, moveClaudeBackgroundWidgetSelection, renderClaudeBackgroundWidgetLines, resolveRegisteredToolDefinition, sendSubagentCompletionMessage } from '../index.js';
-import { loadSubagents, parseFrontmatter, readSubagentsConfig, resetGlobalSubagentModelProfileField, saveGlobalSubagentModelProfile, subagentSourceWarnings } from '../src/config.js';
+import { loadSubagents, parseFrontmatter, readSubagentsConfig, subagentSourceWarnings } from '../src/config.js';
 import { resolveEffectiveSubagentProfile } from '../src/profile-resolver.js';
 import { buildPrompt, ThreadSnapshotBuilder } from '../src/runner.js';
 import { SubagentStructuredError, deriveErrorString, normalizeErrorMetadata, parseErrorMetadata, safeErrorMetadataDetails, serializeErrorMetadata } from '../src/error-metadata.js';
-import { applyDirtyProfileEdit, buildModelProfileRows, buildNoChangesModelProfilesMessage, buildNonTuiModelProfilesMessage, commitStagedModelProfiles, createSubagentModelProfilesModal, globalSubagentsConfigPath, groupAvailableModelsByProvider, runSubagentModelsCommand, stageModelProfileEdit } from '../src/model-profiles-ui.js';
 import { resolveSubagentHistoryDbPath, resolveSubagentsHistoryHome, SubagentHistoryStore } from '../src/history.js';
 import { isSubagentsDebugEnabled, writeSubagentsDebugLog } from '../src/debug.js';
 import { createSubagentsRenderLogger, DEFAULT_RENDER_DEBUG_LOG_PATH } from '../src/render-debug.js';
@@ -624,4 +623,56 @@ describe('thread view and render', () => {
     expect(text).toContain('…');
   });
 
+  it('wraps long thinking narrative across multiple lines without ellipsis truncation while preserving framed tool rows (MINI-003)', () => {
+    const thinkingText = 'Analysis reveals a significant shift in review activity. Today backup contains extensive records. Determining the format for the sources file is crucial. Examining the documentation confirms the contract requires exact preservation of all fields.';
+    const snapshot = {
+      version: 1,
+      source: 'events',
+      items: [
+        {
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'thinking', thinking: thinkingText },
+              { type: 'text', text: 'Assistant conclusion statement.' },
+            ],
+          },
+        },
+        {
+          type: 'tool',
+          name: 'read',
+          status: 'completed',
+          arguments: { path: 'README.md' },
+          result: { content: [{ type: 'text', text: 'README contents' }], isError: false },
+        },
+      ],
+    };
+
+    const width = 60;
+    const context = {
+      cwd: tmp,
+      renderWidth: width,
+      visibleWidth: (text: string) => stripAnsi(text).length,
+      truncateToWidth: (text: string, w: number) => text.length > w ? `${text.slice(0, Math.max(0, w - 1))}…` : text,
+    };
+
+    const lines = renderThreadBody(snapshot, context);
+    const assistantIndex = lines.findIndex((l) => l.includes('Assistant conclusion statement'));
+    const thinkingLines = lines.slice(0, assistantIndex > 0 ? assistantIndex : lines.length).filter((l) => l.trim().length > 0);
+
+    // 1. Thinking block must render across multiple lines
+    expect(thinkingLines.length).toBeGreaterThan(1);
+
+    // 2. No thinking line should exceed width or end in truncation ellipsis
+    for (const line of thinkingLines) {
+      expect(stripAnsi(line).length).toBeLessThanOrEqual(width);
+      expect(line.trim().endsWith('…')).toBe(false);
+    }
+
+    // 3. Full original thinking text must be reconstructible from lines
+    const reconstructed = thinkingLines.join(' ').replace(/^thinking:\s*/, '');
+    expect(reconstructed).toContain('Analysis reveals a significant shift in review activity.');
+    expect(reconstructed).toContain('Examining the documentation confirms the contract requires exact preservation');
+  });
 });

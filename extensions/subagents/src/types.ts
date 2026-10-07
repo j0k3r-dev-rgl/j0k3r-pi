@@ -106,8 +106,6 @@ export type SubagentContinueInput = {
   task_id: string;
   prompt: string;
   mode?: SubagentMode;
-  model?: string;
-  effort?: ThinkingEffort;
 };
 
 export type UsageStats = {
@@ -361,6 +359,7 @@ export type SendMessageResult =
 
 export type SubagentTask = {
   id: string;
+  cwd?: string;
   display_name?: string;
   agent: string;
   mode: SubagentMode;

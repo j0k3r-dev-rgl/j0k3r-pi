@@ -143,7 +143,7 @@ export async function showSubagentsPanel(input: {
             showImages: ctx?.showImages,
             imageWidthCells: ctx?.imageWidthCells,
           },
-          () => Math.max(12, tui?.terminal?.rows ?? process.stdout.rows ?? 42),
+          () => Math.floor(tui?.terminal?.rows ?? process.stdout.rows ?? 42),
           (id: string) => manager.getTask(id, cwd),
           selectedTaskId,
           (id: string) => manager.cancel(id, 'cancelled from subagents detail view'),

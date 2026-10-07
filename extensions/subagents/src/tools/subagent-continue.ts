@@ -15,21 +15,12 @@ export function createSubagentContinueTool(manager: SubagentManager, pi: any) {
   return {
     name: 'subagent_continue',
     label: 'Subagent Continue',
-    description: 'Continue a completed, failed, or cancelled subagent task in its exact persisted nested Pi session. Overrides require an explicit user decision before you supply model or effort. Never auto-switch models.',
-    promptSnippet: 'Continue an existing terminal subagent task under the same task_id. Use model/effort overrides only after the user explicitly chooses them.',
+    description: 'Continue a completed, failed, or cancelled subagent task in its exact persisted nested Pi session.',
+    promptSnippet: 'Continue an existing terminal subagent task under the same task_id.',
     parameters: Type.Object({
       task_id: Type.String(),
       prompt: Type.String(),
       mode: Type.Optional(Type.Union([Type.Literal('task'), Type.Literal('background')])),
-      model: Type.Optional(Type.String()),
-      effort: Type.Optional(Type.Union([
-        Type.Literal('off'),
-        Type.Literal('minimal'),
-        Type.Literal('low'),
-        Type.Literal('medium'),
-        Type.Literal('high'),
-        Type.Literal('xhigh'),
-      ])),
     }),
     renderShell: 'self',
     async execute(_id: string, params: any, _signal: any, onUpdate: any, ctx: any) {
@@ -72,12 +63,12 @@ export function createSubagentContinueTool(manager: SubagentManager, pi: any) {
         const result = backgroundPromise ? await Promise.race([continuePromise, backgroundPromise]) : await continuePromise;
         if (cancelledByDoubleEscape) throw new Error('Subagent continuation cancelled by double escape');
         if (!('results' in result)) {
-          const response = ok(backgroundLaunchContent(result.task_ids, 'Continued'), compactResultDetails(result as any));
+          const response = ok(backgroundLaunchContent(result.task_ids, 'Continued'), compactResultDetails({ ...result, cwd } as any));
           return isBackground ? response : { ...response, terminate: true };
         }
         const tasks = result.results ?? [];
         const text = formatTaskModeContent(tasks, ctx?.cwd ?? process.cwd());
-        const details = compactResultDetails({ task: tasks[0], ...result });
+        const details = compactResultDetails({ task: tasks[0], ...result, cwd });
         return tasks.some((task) => task.status === 'failed' || task.status === 'cancelled')
           ? { ...fail(text), details }
           : ok(text, details);
@@ -92,6 +83,7 @@ export function createSubagentContinueTool(manager: SubagentManager, pi: any) {
       }
     },
     renderCall: (args: any, theme: any) => renderSubagentContinueCall(args, theme, args?.task_id ? manager.getTask(args.task_id, process.cwd()) : undefined, process.cwd()),
-    renderResult: renderSubagentContinueResult,
+    renderResult: (result: any, options: any, theme: any, context?: any) =>
+      renderSubagentContinueResult(result, options, theme, context, (id: string, cwd?: string) => manager.getTask(id, cwd), manager, pi),
   };
 }

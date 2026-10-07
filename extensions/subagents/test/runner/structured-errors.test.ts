@@ -225,6 +225,11 @@ describe('subagent runner structured errors', () => {
       cwd: '/workspace',
       ctx,
       config: sliceConfig,
+      effectiveProfile: {
+        agent: 'sdd-apply',
+        model: { value: { provider: 'preferred', id: 'primary-model' }, source: 'allocated', label: 'allocated: preferred/primary-model' },
+        effort: { value: undefined, source: 'unresolved', label: 'unresolved' },
+      },
       signal: new AbortController().signal,
     });
     await expect(failedPromise).rejects.toMatchObject({

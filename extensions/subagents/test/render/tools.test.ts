@@ -5,6 +5,8 @@ import { SubagentManager } from '../../src/manager.js';
 import { registerSubagentTools } from '../../src/tools.js';
 import { resetExpandKeybindingProviderForTests, setExpandKeybindingProviderForTests } from '../../src/render/tools/expansion-hint.js';
 import { boxedComponent } from '../../src/render/tools/components.js';
+import { taskFromDetails } from '../../src/tools/result-details.js';
+import type { SubagentTask } from '../../src/types.js';
 import { installSubagentTestEnv } from '../helpers/subagent-test-helpers.js';
 
 const env = installSubagentTestEnv();
@@ -785,5 +787,194 @@ describe('tool render helpers', () => {
     } finally {
       registerSubagentsPanelOpener(undefined);
     }
+  });
+
+  it('reconciles run card against instance manager: displays pending pre-allocation, CPAMC model upon allocation, and repaints live background cards without mutating tool content (MINI-001)', async () => {
+    env.writeAgent('analyst');
+    let releaseAllocation: (() => void) | undefined;
+    class SimpleEventBus {
+      private handlers = new Map<string, Array<(data: any) => void>>();
+      on(channel: string, handler: (data: any) => void) {
+        const list = this.handlers.get(channel) ?? [];
+        list.push(handler);
+        this.handlers.set(channel, list);
+        return () => {
+          const idx = list.indexOf(handler);
+          if (idx >= 0) list.splice(idx, 1);
+        };
+      }
+      emit(channel: string, data: any) {
+        for (const h of this.handlers.get(channel) ?? []) h(data);
+      }
+    }
+    const bus = new SimpleEventBus();
+    bus.on('subagents:task:allocate', (event: any) => {
+      event.claimModel(async () => {
+        await new Promise<void>((resolve) => { releaseAllocation = resolve; });
+        return {
+          model: { provider: 'cliproxyapi', id: 'pdas/gemini-3.8-flash-high' },
+          effort: 'high',
+        };
+      });
+    });
+
+    const runner = async () => ({ result: 'done', model: 'cliproxyapi/pdas/gemini-3.8-flash-high', fallback_used: false });
+    const manager = new SubagentManager(runner, undefined, undefined, undefined, bus);
+    let runTool: any;
+    registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
+
+    const ctx = {
+      cwd: env.tmp,
+      model: { provider: 'anthropic', id: 'parent-claude' },
+      thinkingLevel: 'low',
+    };
+
+    // Launch background task
+    const executeResult = await runTool.execute('run-1', { agent: 'analyst', task: 'background task', mode: 'background' }, undefined, undefined, ctx);
+    const initialContent = JSON.stringify(executeResult.content);
+
+    // 1. Pre-allocation: collapsed & expanded cards must show 'pending', never the parent model
+    const preAllocCollapsed = runTool.renderResult(executeResult, { expanded: false, isPartial: false }, { fg: (_n: string, t: string) => t });
+    const preAllocCollapsedText = preAllocCollapsed.render(120).join('\n');
+    expect(preAllocCollapsedText).toContain('model: pending');
+    expect(preAllocCollapsedText).not.toContain('parent-claude');
+
+    const preAllocExpanded = runTool.renderResult(executeResult, { expanded: true, isPartial: false }, { fg: (_n: string, t: string) => t });
+    const preAllocExpandedText = preAllocExpanded.render(120).join('\n');
+    expect(preAllocExpandedText).toContain('model: pending');
+    expect(preAllocExpandedText).not.toContain('parent-claude');
+
+    // 2. Now trigger CPAMC allocation
+    releaseAllocation?.();
+    const taskId = executeResult.details.tasks[0].id;
+    await vi.waitFor(() => expect(manager.getTask(taskId)?.model).toBe('cliproxyapi/pdas/gemini-3.8-flash-high'));
+
+    // 3. Reconciled run card shows CPAMC model, and cached preAllocCollapsed repaints upon invalidation/render
+    preAllocCollapsed.invalidate();
+    const postAllocCollapsedText = preAllocCollapsed.render(120).join('\n');
+    expect(postAllocCollapsedText).toContain('model: cliproxyapi/pdas/gemini-3.8-flash-high');
+    expect(postAllocCollapsedText).not.toContain('parent-claude');
+
+    // 4. Model-facing tool content is strictly immutable
+    expect(JSON.stringify(executeResult.content)).toBe(initialContent);
+
+    // 5. Persisted SQLite replay: when manager.tasks is cleared (fresh session / memory eviction),
+    // run card resolves CPAMC model from SQLite history using derived workspace metadata (MINI-001)
+    (manager as any).tasks.clear();
+    expect((manager as any).tasks.size).toBe(0);
+
+    const replayedCollapsed = runTool.renderResult(executeResult, { expanded: false, isPartial: false }, { fg: (_n: string, t: string) => t }, { cwd: env.tmp });
+    const replayedCollapsedText = replayedCollapsed.render(120).join('\n');
+    expect(replayedCollapsedText).toContain('model: cliproxyapi/pdas/gemini-3.8-flash-high');
+    expect(replayedCollapsedText).not.toContain('model: pending');
+
+    const replayedExpanded = runTool.renderResult(executeResult, { expanded: true, isPartial: false }, { fg: (_n: string, t: string) => t }, { cwd: env.tmp });
+    const replayedExpandedText = replayedExpanded.render(120).join('\n');
+    expect(replayedExpandedText).toContain('model: cliproxyapi/pdas/gemini-3.8-flash-high');
+    expect(replayedExpandedText).not.toContain('model: pending');
+
+    // 6. Cross-workspace replay isolation: looking up task from an unrelated workspace returns undefined and does not expose task
+    const isolatedResult = {
+      ...executeResult,
+      details: {
+        ...executeResult.details,
+        cwd: '/unrelated/isolated/workspace',
+        tasks: executeResult.details.tasks.map((t: any) => ({ ...t, cwd: '/unrelated/isolated/workspace' })),
+      },
+    };
+    const isolatedCollapsed = runTool.renderResult(isolatedResult, { expanded: false, isPartial: false }, { fg: (_n: string, t: string) => t }, { cwd: '/unrelated/isolated/workspace' });
+    const isolatedCollapsedText = isolatedCollapsed.render(120).join('\n');
+    expect(isolatedCollapsedText).toContain('model: pending');
+    expect(isolatedCollapsedText).not.toContain('cliproxyapi/pdas/gemini-3.8-flash-high');
+  });
+
+  it('does not subscribe to task updates for terminal or replayed tasks, and cleans up active subscriptions upon completion or abort (MINI-001)', async () => {
+    env.writeAgent('analyst');
+    const runner = async () => ({ result: 'done', model: 'cliproxyapi/analyst-model', fallback_used: false });
+    const manager = new SubagentManager(runner);
+    let runTool: any;
+    registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
+
+    const ctx = { cwd: env.tmp };
+    // 1. Launch a task in task mode and wait for completion
+    const executeResult = await runTool.execute('run-1', { agent: 'analyst', task: 'finished task', mode: 'task' }, undefined, undefined, ctx);
+    const completedTaskId = taskFromDetails(executeResult)!.id;
+    expect(manager.getTask(completedTaskId, env.tmp)?.status).toBe('completed');
+
+    // Terminal task must NOT register a listener when rendered
+    const initialListeners = (manager as any).taskUpdateListeners.size;
+    const termComp = runTool.renderResult(executeResult, { expanded: false }, { fg: (_n: string, t: string) => t }, { cwd: env.tmp });
+    expect((manager as any).taskUpdateListeners.size).toBe(initialListeners);
+
+    // Replayed task from SQLite with cleared manager.tasks must NOT register a listener
+    (manager as any).tasks.clear();
+    const replayComp = runTool.renderResult(executeResult, { expanded: false }, { fg: (_n: string, t: string) => t }, { cwd: env.tmp });
+    expect((manager as any).taskUpdateListeners.size).toBe(initialListeners);
+
+    // Non-existent / unknown task must NOT retain queued subscriptions
+    const unknownResult = { details: { tasks: [{ id: 'unknown-id', status: 'queued', agent: 'analyst' }] } };
+    runTool.renderResult(unknownResult, { expanded: false }, { fg: (_n: string, t: string) => t }, { cwd: env.tmp });
+    expect((manager as any).taskUpdateListeners.size).toBe(initialListeners);
+
+    // 2. Active queued task registers a listener and unsubscribes upon reaching terminal status
+    const activeTask: SubagentTask = {
+      id: 'active-1',
+      cwd: env.tmp,
+      agent: 'analyst',
+      mode: 'background',
+      status: 'queued',
+      task: 'running background',
+      created_at: new Date().toISOString(),
+    };
+    (manager as any).tasks.set(activeTask.id, activeTask);
+    const activeResult = { details: { tasks: [activeTask], cwd: env.tmp } };
+
+    const activeComp = runTool.renderResult(activeResult, { expanded: false }, { fg: (_n: string, t: string) => t }, { cwd: env.tmp });
+    expect((manager as any).taskUpdateListeners.size).toBe(initialListeners + 1);
+
+    // Transitioning active task to terminal causes onTaskUpdate to automatically unsubscribe
+    activeTask.status = 'completed';
+    (manager as any).notifyTaskUpdate(activeTask.id, undefined, true);
+    expect((manager as any).taskUpdateListeners.size).toBe(initialListeners);
+
+    // 3. Abort signal on render context cleans up active listener
+    activeTask.status = 'queued';
+    const abortController = new AbortController();
+    runTool.renderResult(activeResult, { expanded: false }, { fg: (_n: string, t: string) => t }, { cwd: env.tmp, signal: abortController.signal });
+    expect((manager as any).taskUpdateListeners.size).toBe(initialListeners + 1);
+
+    abortController.abort();
+    expect((manager as any).taskUpdateListeners.size).toBe(initialListeners);
+
+    // 4. Repeated render of the same tool call with context.state cleans up previous listener
+    const callState: any = {};
+    const contextWithState = { cwd: env.tmp, state: callState };
+    runTool.renderResult(activeResult, { expanded: false }, { fg: (_n: string, t: string) => t }, contextWithState);
+    expect((manager as any).taskUpdateListeners.size).toBe(initialListeners + 1);
+
+    // Re-rendering with expanded: true cleans up the abandoned listener
+    runTool.renderResult(activeResult, { expanded: true }, { fg: (_n: string, t: string) => t }, contextWithState);
+    expect((manager as any).taskUpdateListeners.size).toBe(initialListeners + 1);
+
+    // Disposing via comp.dispose() or state cleanup clears it
+    if (callState.cleanup) callState.cleanup();
+    expect((manager as any).taskUpdateListeners.size).toBe(initialListeners);
+
+    // 5. Session shutdown / reload lifecycle event cleans up active listener
+    let shutdownHandler: any;
+    const mockPi = {
+      on: (event: string, handler: any) => {
+        if (event === 'session_shutdown') shutdownHandler = handler;
+      },
+      registerTool: (tool: any) => { if (tool.name === 'subagent_run') runToolWithPi = tool; },
+    };
+    let runToolWithPi: any;
+    registerSubagentTools(mockPi, manager);
+    runToolWithPi.renderResult(activeResult, { expanded: false }, { fg: (_n: string, t: string) => t }, { cwd: env.tmp });
+    expect((manager as any).taskUpdateListeners.size).toBe(initialListeners + 1);
+
+    // Trigger session shutdown
+    if (shutdownHandler) shutdownHandler();
+    expect((manager as any).taskUpdateListeners.size).toBe(initialListeners);
   });
 });

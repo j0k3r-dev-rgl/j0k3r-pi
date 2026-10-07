@@ -1,4 +1,4 @@
-import { wrapLineToWidth } from '../render/text-width.js';
+import { truncateToWidth } from '../render/text-width.js';
 import type { SubagentTask } from '../types.js';
 import { ARCH_ICON, getArchNeonWorkingIcon, themeBold, themeWarning } from './theme.js';
 
@@ -244,6 +244,8 @@ export class ClaudeBackgroundWidget {
   invalidate(): void {}
 
   render(width: number): string[] {
+    if (width <= 0) return [];
+
     const isNeon = Boolean(
       this.options.archIndicator ||
       this.options.neonRunning ||
@@ -258,7 +260,8 @@ export class ClaudeBackgroundWidget {
       ? this.state.renderLines(renderOptions)
       : this.state.renderLines();
 
-    return lines.flatMap((line) => wrapLineToWidth(this.decorate(line), width));
+    if (!lines) return [];
+    return lines.map((line) => truncateToWidth(this.decorate(line), width));
   }
 
   handleInput(data: string): void {

@@ -238,17 +238,6 @@ function parseModelProfiles(value: unknown): SubagentModelProfiles {
   return profiles;
 }
 
-function serializeModelRef(model: ModelRef): string {
-  return `${model.provider}/${model.id}`;
-}
-
-function cleanProfile(profile: SubagentModelProfile): Record<string, string> | undefined {
-  const cleaned: Record<string, string> = {};
-  if (profile.model) cleaned.model = serializeModelRef(profile.model);
-  if (profile.effort) cleaned.effort = profile.effort;
-  return Object.keys(cleaned).length ? cleaned : undefined;
-}
-
 export function readSubagentsConfig(cwd: string): SubagentsConfig {
   const globalRaw = readJson(subagentsConfigPath());
   const projectRaw = readJson(path.join(cwd, '.pi', 'subagents.json'));
@@ -282,52 +271,6 @@ export function resolveEffectiveSubagentMode(input: {
   config?: Pick<SubagentsConfig, 'default_mode'>;
 }): SubagentMode {
   return input.invocationMode ?? input.definition?.subagent_mode ?? input.config?.default_mode ?? 'task';
-}
-
-function projectSubagentsConfigPath(cwd: string): string {
-  return path.join(cwd, '.pi', 'subagents.json');
-}
-
-function subagentsConfigPathForScope(input: { scope?: SubagentDefinitionScope; cwd?: string; agentDir?: string }): string {
-  return input.scope === 'project' && input.cwd ? projectSubagentsConfigPath(input.cwd) : subagentsConfigPath(input.agentDir);
-}
-
-export function saveSubagentModelProfile(input: { agentName: string; profile: SubagentModelProfile; scope?: SubagentDefinitionScope; cwd?: string; agentDir?: string }): void {
-  const file = subagentsConfigPathForScope(input);
-  const root = readJson(file);
-  const writableRoot: Record<string, unknown> = isPlainObject(root) ? { ...root } : {};
-  const modelProfiles = isPlainObject(writableRoot.model_profiles) ? { ...writableRoot.model_profiles } : {};
-  const agentName = input.agentName.trim().toLowerCase();
-  const cleaned = cleanProfile(input.profile);
-  if (agentName && cleaned) modelProfiles[agentName] = cleaned;
-  if (Object.keys(modelProfiles).length) writableRoot.model_profiles = modelProfiles;
-  else delete writableRoot.model_profiles;
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify(writableRoot, null, 2)}\n`, 'utf8');
-}
-
-export function saveGlobalSubagentModelProfile(input: { agentName: string; profile: SubagentModelProfile; agentDir?: string }): void {
-  saveSubagentModelProfile({ ...input, scope: 'global' });
-}
-
-export function resetSubagentModelProfileField(input: { agentName: string; field: 'model' | 'effort'; scope?: SubagentDefinitionScope; cwd?: string; agentDir?: string }): void {
-  const file = subagentsConfigPathForScope(input);
-  const root = readJson(file);
-  const writableRoot: Record<string, unknown> = isPlainObject(root) ? { ...root } : {};
-  const modelProfiles = isPlainObject(writableRoot.model_profiles) ? { ...writableRoot.model_profiles } : {};
-  const agentName = input.agentName.trim().toLowerCase();
-  const existing = isPlainObject(modelProfiles[agentName]) ? { ...modelProfiles[agentName] } : {};
-  delete existing[input.field];
-  if (Object.keys(existing).length) modelProfiles[agentName] = existing;
-  else delete modelProfiles[agentName];
-  if (Object.keys(modelProfiles).length) writableRoot.model_profiles = modelProfiles;
-  else delete writableRoot.model_profiles;
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify(writableRoot, null, 2)}\n`, 'utf8');
-}
-
-export function resetGlobalSubagentModelProfileField(input: { agentName: string; field: 'model' | 'effort'; agentDir?: string }): void {
-  resetSubagentModelProfileField({ ...input, scope: 'global' });
 }
 
 interface BlockedSubagentDefinition {

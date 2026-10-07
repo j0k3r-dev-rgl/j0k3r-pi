@@ -34,12 +34,12 @@ describe('subagent_list_agents tool', () => {
     const agentDir = process.env.PI_CODING_AGENT_DIR!;
     fs.mkdirSync(path.join(agentDir, 'subagents'), { recursive: true });
     fs.writeFileSync(path.join(agentDir, 'subagents', 'analyst.md'), `---\nname: analyst\ndescription: analyst agent\ntools: [read]\n---\n# Analyst\n`);
-    fs.writeFileSync(path.join(agentDir, 'subagents.json'), JSON.stringify({
-      model_profiles: { analyst: { model: 'openai/gpt-5.4', effort: 'high' } },
-    }));
     const manager = new SubagentManager(env.mockRunner() as any);
 
-    expect(manager.listAgents(env.tmp, {})).toContainEqual(expect.objectContaining({
+    expect(manager.listAgents(env.tmp, {
+      model: { provider: 'openai', id: 'gpt-5.4' },
+      thinkingLevel: 'high',
+    })).toContainEqual(expect.objectContaining({
       name: 'analyst',
       model: { provider: 'openai', id: 'gpt-5.4' },
       effort: 'high',

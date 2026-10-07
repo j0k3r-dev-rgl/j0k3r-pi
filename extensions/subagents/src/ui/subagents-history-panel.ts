@@ -156,6 +156,7 @@ function snapshotHasActiveTools(snapshot: SubagentThreadSnapshot | undefined): b
 
 export class SubagentsHistoryPanel {
   private selected = 0;
+  private selectedTaskId?: string;
   private scroll = 0;
   private sidebarScroll = 0;
   private followTail = true;
@@ -197,7 +198,9 @@ export class SubagentsHistoryPanel {
     private cancelSelectedTask?: (id: string) => void,
     private detailCancelShortcut = 'x',
     private displayOptions: SubagentsHistoryPanelDisplayOptions = {},
-  ) {}
+  ) {
+    this.selectedTaskId = this.initialSelectedTaskId;
+  }
 
   invalidate(): void {
     this.bodyCache.clear();
@@ -283,6 +286,7 @@ export class SubagentsHistoryPanel {
       if (targetIndex >= 0) {
         const changed = this.selected !== targetIndex;
         this.selected = targetIndex;
+        this.selectedTaskId = tasks[targetIndex]?.id;
         this.scroll = 0;
         this.followTail = true;
         return { handled: true, focus: true, render: changed };
@@ -326,11 +330,13 @@ export class SubagentsHistoryPanel {
     }
     if (this.matchesKey(data, 'right')) {
       this.selected = Math.min(tasks.length - 1, this.selected + 1);
+      this.selectedTaskId = tasks[this.selected]?.id;
       this.scroll = 0;
       this.followTail = true;
     }
     if (this.matchesKey(data, 'left')) {
       this.selected = Math.max(0, this.selected - 1);
+      this.selectedTaskId = tasks[this.selected]?.id;
       this.scroll = 0;
       this.followTail = true;
     }
@@ -413,10 +419,13 @@ export class SubagentsHistoryPanel {
   }
 
   render(width: number): string[] {
-    const w = Math.max(40, width);
+    if (width <= 0) return [];
+    const w = width;
     this.lastRenderWidth = w;
     const configuredMaxLines = typeof this.maxLinesProvider === 'function' ? this.maxLinesProvider() : this.maxLinesProvider;
-    const maxLines = Math.max(12, Math.floor(Number.isFinite(configuredMaxLines) ? configuredMaxLines : 42));
+    const maxLines = Math.floor(Number.isFinite(configuredMaxLines) ? configuredMaxLines : 42);
+    if (maxLines <= 0) return [];
+
     const th = this.theme;
     const accent = (s: string) => themeAccent(th, s);
     const dim = (s: string) => themeDim(th, s);
@@ -428,35 +437,86 @@ export class SubagentsHistoryPanel {
     this.lastIsSplit = isSplit;
     const sidebarWidth = isSplit ? Math.max(18, Math.min(30, Math.floor(w * 0.25))) : 0;
     this.lastSidebarWidth = sidebarWidth;
-    const rightWidth = isSplit ? Math.max(16, w - sidebarWidth - 7) : Math.max(16, w - 4);
+    const rightWidth = isSplit ? Math.max(16, w - sidebarWidth - 7) : Math.max(4, w - 4);
 
     const tasks = this.tasks();
-    if (this.initialSelectedTaskId) {
-      const initialIndex = tasks.findIndex((entry) => entry.id === this.initialSelectedTaskId);
-      if (initialIndex >= 0) this.selected = initialIndex;
-      this.initialSelectedTaskId = undefined;
+    if (this.selectedTaskId) {
+      const initialIndex = tasks.findIndex((entry) => entry.id === this.selectedTaskId);
+      if (initialIndex >= 0) {
+        this.selected = initialIndex;
+      } else {
+        this.selected = Math.min(this.selected, Math.max(0, tasks.length - 1));
+        this.selectedTaskId = tasks[this.selected]?.id;
+      }
+    } else {
+      this.selected = Math.min(this.selected, Math.max(0, tasks.length - 1));
+      this.selectedTaskId = tasks[this.selected]?.id;
     }
-    if (this.selected >= tasks.length) this.selected = Math.max(0, tasks.length - 1);
 
-    const rawLines: string[] = [];
     const archPrefix = themeFg(th, 'accent', ARCH_ICON, CYAN);
-    const closeBtnText = '[✕ Cerrar]';
+    const closeBtnText = w < 50 ? '[✕]' : '[✕ Cerrar]';
     const closeBtn = themeFg(th, 'error', closeBtnText, RED);
     const closeVis = this.visibleWidth(closeBtn);
 
+    // Tiny viewports: minimal representation
+    if (w < 30 || maxLines < 6) {
+      this.rowTaskMap.clear();
+      this.sidebarRowTaskMap.clear();
+      this.detailRowTaskMap.clear();
+      const rawLines: string[] = [];
+      const headerLine = this.truncateToWidth(`${title('subagents')} ${closeBtn}`, w);
+      rawLines.push(headerLine);
+
+      if (!tasks.length) {
+        if (maxLines > 1) {
+          rawLines.push(this.truncateToWidth(dim('No tasks recorded.'), w));
+        }
+      } else {
+        const currentTask = this.resolveTaskForBody(tasks[this.selected]!);
+        if (maxLines > 1) {
+          const taskLine = this.truncateToWidth(`${accent(currentTask.agent)} · ${status(currentTask)}`, w);
+          this.rowTaskMap.set(rawLines.length, currentTask.id);
+          rawLines.push(taskLine);
+        }
+        if (maxLines > 2) {
+          const taskDesc = (currentTask.display_name?.trim() || currentTask.task || '').trim().replace(/\s+/g, ' ');
+          if (taskDesc) {
+            this.rowTaskMap.set(rawLines.length, currentTask.id);
+            rawLines.push(this.truncateToWidth(taskDesc, w));
+          }
+        }
+        while (rawLines.length < maxLines && rawLines.length - 3 < tasks.length - 1) {
+          const otherIdx = rawLines.length - 3;
+          const other = tasks[otherIdx];
+          if (!other) break;
+          const rowIdx = rawLines.length;
+          this.rowTaskMap.set(rowIdx, other.id);
+          const isSel = other.id === currentTask.id;
+          const label = `${isSel ? '●' : '○'} ${other.agent}:${other.status}`;
+          rawLines.push(this.truncateToWidth(isSel ? themeFg(th, 'warning', label, AMBER) : dim(label), w));
+        }
+      }
+      const lines = rawLines.slice(0, maxLines).map((l) => this.truncateToWidth(l, w));
+      this.updateDebugState(maxLines, w, lines, Math.max(0, lines.length - 1));
+      return lines;
+    }
+
     if (!tasks.length) {
       // Empty state
+      const rawLines: string[] = [];
       const topTitle = `${archPrefix} ${title('subagents')}`;
       const topTitleVis = this.visibleWidth(topTitle);
       const topFill = Math.max(0, w - topTitleVis - closeVis - 8);
       const top = `${border(ROUNDED_BOX_CHARS.topLeft + ROUNDED_BOX_CHARS.horizontal)} ${topTitle} ${border(ROUNDED_BOX_CHARS.horizontal.repeat(topFill))} ${closeBtn} ${border(ROUNDED_BOX_CHARS.horizontal + ROUNDED_BOX_CHARS.topRight)}`;
       rawLines.push(top);
-      rawLines.push(`${border(ROUNDED_BOX_CHARS.vertical)} ${this.padToWidth(dim('No subagent tasks recorded in this session yet.'), w - 4)} ${border(ROUNDED_BOX_CHARS.vertical)}`);
-      while (rawLines.length < maxLines - 1) rawLines.push(`${border(ROUNDED_BOX_CHARS.vertical)}${' '.repeat(w - 2)}${border(ROUNDED_BOX_CHARS.vertical)}`);
-      const bottomFill = Math.max(0, w - closeVis - 5);
-      const bottom = `${border(ROUNDED_BOX_CHARS.bottomLeft + ROUNDED_BOX_CHARS.horizontal.repeat(bottomFill))} ${closeBtn} ${border(ROUNDED_BOX_CHARS.horizontal + ROUNDED_BOX_CHARS.bottomRight)}`;
-      rawLines.push(bottom);
-      const lines = rawLines.map((l) => fitsWidth(l, w, this.visibleWidth) ? l : this.truncateToWidth(l, w));
+      rawLines.push(`${border(ROUNDED_BOX_CHARS.vertical)} ${this.padToWidth(dim('No subagent tasks recorded in this session yet.'), Math.max(0, w - 4))} ${border(ROUNDED_BOX_CHARS.vertical)}`);
+      while (rawLines.length < maxLines - 1) rawLines.push(`${border(ROUNDED_BOX_CHARS.vertical)}${' '.repeat(Math.max(0, w - 2))}${border(ROUNDED_BOX_CHARS.vertical)}`);
+      if (rawLines.length < maxLines) {
+        const bottomFill = Math.max(0, w - closeVis - 5);
+        const bottom = `${border(ROUNDED_BOX_CHARS.bottomLeft + ROUNDED_BOX_CHARS.horizontal.repeat(bottomFill))} ${closeBtn} ${border(ROUNDED_BOX_CHARS.horizontal + ROUNDED_BOX_CHARS.bottomRight)}`;
+        rawLines.push(bottom);
+      }
+      const lines = rawLines.slice(0, maxLines).map((l) => this.truncateToWidth(l, w));
       this.updateDebugState(maxLines, w, lines, Math.max(0, maxLines - 2));
       return lines;
     }
@@ -482,6 +542,7 @@ export class SubagentsHistoryPanel {
     const leftTitle = `${archPrefix} ${title('subagents')}`;
     const leftTitleVis = this.visibleWidth(leftTitle);
 
+    const rawLines: string[] = [];
     if (isSplit) {
       // Left Top Segment: ╭─ leftTitle ─...─┬
       const fillLeft = Math.max(0, sidebarWidth + 2 - leftTitleVis - 3);
@@ -519,42 +580,53 @@ export class SubagentsHistoryPanel {
     }
 
     if (isSplit) {
-      // Row 1: Subheader Row 1 (Agent, Status, Effort, Model, Duration)
+      const displayName = currentTask.display_name?.trim();
       const leftSubHeader1 = `${accent(`executions 1-${tasks.length}/${tasks.length}`)} `;
-      const rightSubHeader1 = [
+      const primaryFields = [
         `agent: ${accent(currentTask.agent)}`,
         `status: ${status(currentTask)}`,
         currentTask.effort ? `effort: ${accent(currentTask.effort)}${cancelDetailHint ? ` ${dim(cancelDetailHint)}` : ''}` : undefined,
-        currentTask.model ? `model: ${currentTask.model}` : undefined,
+        currentTask.model ? `model: ${currentTask.model}` : `model: ${dim('pending')}`,
         duration ? `duration: ${duration}${timeoutHint}` : undefined,
-        usage ? `usage: ${usage}` : undefined,
-      ].filter(Boolean).join(` ${themeFg(th, 'accent', CYBER_SEPARATOR, VIOLET)} `);
+      ].filter(Boolean) as string[];
 
-      const subheaderLine1 = `${border(ROUNDED_BOX_CHARS.vertical)} ${this.padToWidth(leftSubHeader1, sidebarWidth)} ${border(ROUNDED_BOX_CHARS.vertical)} ${this.padToWidth(rightSubHeader1, rightWidth)} ${border(ROUNDED_BOX_CHARS.vertical)}`;
-      rawLines.push(subheaderLine1);
-
-      // Row 2: Subheader Row 2 (Usage, Last activity, Display Name, Task)
-      const displayName = currentTask.display_name?.trim();
-      const leftSubHeader2 = '';
-      const rightSubHeader2 = [
+      const secondaryFields = [
         usage ? `usage: ${usage}` : undefined,
         lastActivity ? `last: ${lastActivity}` : undefined,
         displayName ? `name: ${accent(displayName)}` : undefined,
-        currentTask.task ? `task: ${clip(currentTask.task, Math.max(20, rightWidth - 30))}` : undefined,
-      ].filter(Boolean).join(` ${themeFg(th, 'accent', CYBER_SEPARATOR, VIOLET)} `);
+      ].filter(Boolean) as string[];
 
-      const subheaderLine2 = `${border(ROUNDED_BOX_CHARS.vertical)} ${this.padToWidth(leftSubHeader2, sidebarWidth)} ${border(ROUNDED_BOX_CHARS.vertical)} ${this.padToWidth(rightSubHeader2, rightWidth)} ${border(ROUNDED_BOX_CHARS.vertical)}`;
-      rawLines.push(subheaderLine2);
+      const rightSep = ` ${themeFg(th, 'accent', CYBER_SEPARATOR, VIOLET)} `;
+      const pLines = this.packMetadataFields(primaryFields, rightWidth, rightSep);
+      const sLines = secondaryFields.length > 0 ? this.packMetadataFields(secondaryFields, rightWidth, rightSep) : [''];
+      const packedRightLines = [...pLines, ...sLines];
+      const minBodyRows = 1;
+      const framingRows = 3; // top, divider, bottom
+      const maxSplitHeaderRows = Math.max(1, maxLines - framingRows - minBodyRows);
 
-      // Row 3: Header Divider Row
+      let headerLinesToRender = packedRightLines;
+      let splitOverflowLines: string[] = [];
+      if (packedRightLines.length > maxSplitHeaderRows) {
+        headerLinesToRender = packedRightLines.slice(0, maxSplitHeaderRows);
+        splitOverflowLines = packedRightLines.slice(maxSplitHeaderRows);
+      }
+
+      for (let i = 0; i < headerLinesToRender.length; i++) {
+        const leftCol = i === 0 ? leftSubHeader1 : '';
+        const rightCol = headerLinesToRender[i]!;
+        const subheaderLine = `${border(ROUNDED_BOX_CHARS.vertical)} ${this.padToWidth(leftCol, sidebarWidth)} ${border(ROUNDED_BOX_CHARS.vertical)} ${this.padToWidth(rightCol, rightWidth)} ${border(ROUNDED_BOX_CHARS.vertical)}`;
+        rawLines.push(subheaderLine);
+      }
+
+      // Header Divider Row
       const headerDivider = `${border(ROUNDED_BOX_CHARS.tRight + ROUNDED_BOX_CHARS.horizontal.repeat(sidebarWidth + 2) + ROUNDED_BOX_CHARS.cross + ROUNDED_BOX_CHARS.horizontal.repeat(rightWidth + 2) + ROUNDED_BOX_CHARS.tLeft)}`;
       rawLines.push(headerDivider);
 
       // Body Setup
       this.lastListStartRow = -1;
       this.lastListEndRow = -1;
-      const headerCount = rawLines.length; // 4 rows
-      const bodyHeight = Math.max(5, maxLines - headerCount - 1);
+      const headerCount = rawLines.length;
+      const bodyHeight = Math.max(1, maxLines - headerCount - 1);
 
       // Keep sidebar scroll focused on selected task
       if (this.selected !== this.lastSelectedTaskIdx) {
@@ -567,7 +639,10 @@ export class SubagentsHistoryPanel {
       // Prepare main view content
       const structuredBody = isValidThreadSnapshot(currentTask.thread_snapshot);
       const bodyEntries = this.bodyEntriesFor(currentTask, rightWidth);
-      const wrappedEntries = structuredBody ? bodyEntries : this.wrapWithTaskIds(bodyEntries, rightWidth);
+      let wrappedEntries = this.wrapWithTaskIds(bodyEntries, rightWidth);
+      if (splitOverflowLines.length) {
+        wrappedEntries = [...splitOverflowLines.map((text) => ({ text, taskId: currentTask.id })), ...wrappedEntries];
+      }
       const maxScroll = Math.max(0, wrappedEntries.length - bodyHeight);
       if (this.followTail) this.scroll = maxScroll;
       if (this.scroll > maxScroll) this.scroll = maxScroll;
@@ -635,51 +710,50 @@ export class SubagentsHistoryPanel {
       const bottomLine = `${border(ROUNDED_BOX_CHARS.bottomLeft + ROUNDED_BOX_CHARS.horizontal.repeat(sidebarWidth + 2) + ROUNDED_BOX_CHARS.tUp)}${rightBottomSegment}`;
       rawLines.push(bottomLine);
 
-      const lines = rawLines.map((l) => fitsWidth(l, w, this.visibleWidth) ? l : this.truncateToWidth(l, w));
+      const lines = rawLines.slice(0, maxLines).map((l) => fitsWidth(l, w, this.visibleWidth) ? l : this.truncateToWidth(l, w));
       this.updateDebugState(maxLines, w, lines, bodyHeight);
       return lines;
     } else {
       // Narrow Mode (Stacked View)
-      // Row 1: Selected task summary
-      const subItems = [
+      const displayName = currentTask.display_name?.trim();
+      const metadataFields = [
         `${accent(`${this.selected + 1}/${tasks.length}`)}`,
         `agent: ${accent(currentTask.agent)}`,
         `status: ${status(currentTask)}`,
-        duration ? `duration: ${duration}` : undefined,
         currentTask.effort ? `effort: ${accent(currentTask.effort)}` : undefined,
-      ].filter(Boolean).join(` ${themeFg(th, 'accent', CYBER_SEPARATOR, VIOLET)} `);
-      const clippedSub1 = this.truncateToWidth(subItems, rightWidth);
-      rawLines.push(`${border(ROUNDED_BOX_CHARS.vertical)} ${this.padToWidth(clippedSub1, rightWidth)} ${border(ROUNDED_BOX_CHARS.vertical)}`);
+        currentTask.model ? `model: ${currentTask.model}` : `model: ${dim('pending')}`,
+        duration ? `duration: ${duration}` : undefined,
+        usage ? `usage: ${usage}` : undefined,
+        lastActivity ? `last: ${lastActivity}` : undefined,
+        displayName ? `name: ${accent(displayName)}` : undefined,
+      ].filter(Boolean) as string[];
 
-      // Row 2: Task or details
-      const displayName = currentTask.display_name?.trim();
-      let taskText = (currentTask.task || '').trim().replace(/\s+/g, ' ');
-      if (displayName && taskText.toLowerCase().startsWith(displayName.toLowerCase())) {
-        taskText = taskText.slice(displayName.length).replace(/^[:\s\-–—]+/, '').trim();
+      const stackedSep = ` ${themeFg(th, 'accent', CYBER_SEPARATOR, VIOLET)} `;
+      const packedStackedLines = this.packMetadataFields(metadataFields, rightWidth, stackedSep);
+      const minPanesSpace = 2; // at least 1 details + 1 list
+      const stackedFraming = 4; // top (1) + divider (1) + listDivider (1) + bottom (1)
+      const maxStackedHeaderRows = Math.max(1, maxLines - stackedFraming - minPanesSpace);
+
+      let headerLinesToRender = packedStackedLines;
+      let stackedOverflowLines: string[] = [];
+      if (packedStackedLines.length > maxStackedHeaderRows) {
+        headerLinesToRender = packedStackedLines.slice(0, maxStackedHeaderRows);
+        stackedOverflowLines = packedStackedLines.slice(maxStackedHeaderRows);
       }
 
-      const titlePart = displayName
-        ? `task: ${accent(displayName)}${taskText ? ` · ${dim(taskText)}` : ''}`
-        : (taskText ? `task: ${accent(taskText)}` : undefined);
-
-      const sub2Parts = [
-        titlePart,
-        currentTask.model ? `model: ${dim(currentTask.model)}` : undefined,
-      ].filter(Boolean).join(` ${themeFg(th, 'accent', CYBER_SEPARATOR, VIOLET)} `);
-      if (sub2Parts) {
-        const clippedSub2 = this.truncateToWidth(sub2Parts, rightWidth);
-        rawLines.push(`${border(ROUNDED_BOX_CHARS.vertical)} ${this.padToWidth(clippedSub2, rightWidth)} ${border(ROUNDED_BOX_CHARS.vertical)}`);
+      for (const hLine of headerLinesToRender) {
+        rawLines.push(`${border(ROUNDED_BOX_CHARS.vertical)} ${this.padToWidth(hLine, rightWidth)} ${border(ROUNDED_BOX_CHARS.vertical)}`);
       }
 
-      // Row 3: Header Divider
+      // Header Divider
       const headerDivider = `${border(ROUNDED_BOX_CHARS.tRight + ROUNDED_BOX_CHARS.horizontal.repeat(rightWidth + 2) + ROUNDED_BOX_CHARS.tLeft)}`;
       rawLines.push(headerDivider);
 
       const headerCount = rawLines.length;
       const nonBodyRows = headerCount + 1 + 1; // headerCount + listDivider (1) + bottomFrame (1)
-      const availableSpace = Math.max(4, maxLines - nonBodyRows);
-      const listHeight = Math.min(tasks.length, Math.max(1, Math.min(4, Math.floor(availableSpace * 0.35))));
-      const detailsHeight = Math.max(2, availableSpace - listHeight);
+      const availableSpace = Math.max(2, maxLines - nonBodyRows);
+      const listHeight = Math.min(tasks.length, Math.max(1, Math.min(maxLines < 14 ? 2 : 4, Math.floor(availableSpace * 0.35))));
+      const detailsHeight = Math.max(1, availableSpace - listHeight);
 
       // Keep sidebar scroll focused on selected task within listHeight
       if (this.selected !== this.lastSelectedTaskIdx) {
@@ -692,7 +766,10 @@ export class SubagentsHistoryPanel {
       // Prepare main view content
       const structuredBody = isValidThreadSnapshot(currentTask.thread_snapshot);
       const bodyEntries = this.bodyEntriesFor(currentTask, rightWidth);
-      const wrappedEntries = structuredBody ? bodyEntries : this.wrapWithTaskIds(bodyEntries, rightWidth);
+      let wrappedEntries = this.wrapWithTaskIds(bodyEntries, rightWidth);
+      if (stackedOverflowLines.length) {
+        wrappedEntries = [...stackedOverflowLines.map((text) => ({ text, taskId: currentTask.id })), ...wrappedEntries];
+      }
       const maxScroll = Math.max(0, wrappedEntries.length - detailsHeight);
       if (this.followTail) this.scroll = maxScroll;
       if (this.scroll > maxScroll) this.scroll = maxScroll;
@@ -768,7 +845,7 @@ export class SubagentsHistoryPanel {
       const bottomLine = `${border(ROUNDED_BOX_CHARS.bottomLeft + ROUNDED_BOX_CHARS.horizontal)} ${dim(shortcuts)} ${border(ROUNDED_BOX_CHARS.horizontal.repeat(bottomFill))} ${closeBtn} ${border(ROUNDED_BOX_CHARS.horizontal + ROUNDED_BOX_CHARS.bottomRight)}`;
       rawLines.push(bottomLine);
 
-      const lines = rawLines.map((l) => fitsWidth(l, w, this.visibleWidth) ? l : this.truncateToWidth(l, w));
+      const lines = rawLines.slice(0, maxLines).map((l) => fitsWidth(l, w, this.visibleWidth) ? l : this.truncateToWidth(l, w));
       this.updateDebugState(maxLines, w, lines, detailsHeight);
       return lines;
     }
@@ -974,7 +1051,13 @@ export class SubagentsHistoryPanel {
     width: number,
   ): Array<{ text: string; taskId?: string }> {
     const out: Array<{ text: string; taskId?: string }> = [];
+    const isFramedBoxLine = (line: string): boolean => /[┌┐└┘│├┤┬┴┼─╭╰╮╯═║╔╗╚╝╠╣╦╩╬]/.test(line);
+
     for (const entry of entries) {
+      if (isFramedBoxLine(entry.text) || this.visibleWidth(entry.text) <= width) {
+        out.push({ text: entry.text, taskId: entry.taskId });
+        continue;
+      }
       const wrappedTexts = this.wrap(entry.text, width);
       for (const text of wrappedTexts) {
         out.push({ text, taskId: entry.taskId });
@@ -1112,13 +1195,14 @@ export class SubagentsHistoryPanel {
   }
 
   private padToWidth(text: string, width: number): string {
+    const targetWidth = Math.max(0, width);
     const vis = this.visibleWidth(text);
-    if (vis <= width) {
-      return `${text}${' '.repeat(width - vis)}`;
+    if (vis <= targetWidth) {
+      return `${text}${' '.repeat(targetWidth - vis)}`;
     }
-    const clipped = this.truncateToWidth(text, width);
+    const clipped = this.truncateToWidth(text, targetWidth);
     const clippedVis = this.visibleWidth(clipped);
-    return `${clipped}${' '.repeat(Math.max(0, width - clippedVis))}`;
+    return `${clipped}${' '.repeat(Math.max(0, targetWidth - clippedVis))}`;
   }
 
   private extractPromptTail(prompt: string): string {
@@ -1161,5 +1245,42 @@ export class SubagentsHistoryPanel {
       if (line) out.push(line);
     }
     return out;
+  }
+
+  private packMetadataFields(fields: string[], width: number, separator = ' ┃ '): string[] {
+    const lines: string[] = [];
+    let currentLine = '';
+
+    for (const field of fields) {
+      if (!field) continue;
+      const fieldVis = this.visibleWidth(field);
+      if (fieldVis > width) {
+        if (currentLine) {
+          lines.push(currentLine);
+          currentLine = '';
+        }
+        const wrapped = this.wrap(field, width);
+        lines.push(...wrapped);
+        continue;
+      }
+
+      if (!currentLine) {
+        currentLine = field;
+      } else {
+        const candidate = `${currentLine}${separator}${field}`;
+        if (this.visibleWidth(candidate) <= width) {
+          currentLine = candidate;
+        } else {
+          lines.push(currentLine);
+          currentLine = field;
+        }
+      }
+    }
+
+    if (currentLine) {
+      lines.push(currentLine);
+    }
+
+    return lines;
   }
 }

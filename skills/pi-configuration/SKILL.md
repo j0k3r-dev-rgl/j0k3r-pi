@@ -1,15 +1,15 @@
 ---
 name: pi-configuration
-description: "Use when the user asks to configure, enable, review, or troubleshoot Pi or extension configuration: API Tools, Code Research, Context7, Skill Registry, Websearch, Workspace Services, reload/restart behavior, credentials, tokens, or local .pi config files. Routes to one internal module only; configuration topics are not separate skills."
+description: "Use when the user asks to configure, enable, review, or troubleshoot Pi or extension configuration: API Tools, Code Research, Context7, Skill Registry, Websearch, Workspace Services, Subagents global/project settings, CPAMC model allocation and orchestrator fallback, reload/restart behavior, credentials, tokens, or local .pi config files. Routes to one internal module only; configuration topics are not separate skills."
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.1"
+  version: "1.2"
 registry:
   category: "runtime"
-  domains: "pi-configuration, extension-configuration, local-config, agent-config"
-  paths: ".pi/api.json, .pi/context7.json, .pi/skill-registry.config.json, .pi/workspace-services.json, websearch.json, ~/.pi/agent/websearch.json"
-  keywords: "configure pi, pi configuration, extension configuration, configure extension, api tools configuration, .pi/api.json, context7 configuration, .pi/context7.json, skill registry configuration, .pi/skill-registry.config.json, websearch configuration, websearch.json, workspace services configuration, .pi/workspace-services.json, reload pi, restart pi after config, credentials config, token config, configurar pi, configurar extension, configuracion de pi, configuracion de extension"
+  domains: "pi-configuration, extension-configuration, local-config, agent-config, subagents-configuration"
+  paths: ".pi/api.json, .pi/context7.json, .pi/skill-registry.config.json, .pi/workspace-services.json, websearch.json, ~/.pi/agent/websearch.json, .pi/subagents.json, subagents.json, ~/.pi/agent/subagents.json, .pi/agents/**/*.md, .pi/subagents/**/*.md, agents/**/*.md, subagents/**/*.md, ~/.pi/agent/agents/**/*.md, ~/.pi/agent/subagents/**/*.md"
+  keywords: "configure pi, pi configuration, extension configuration, configure extension, api tools configuration, .pi/api.json, context7 configuration, .pi/context7.json, skill registry configuration, .pi/skill-registry.config.json, websearch configuration, websearch.json, workspace services configuration, .pi/workspace-services.json, reload pi, restart pi after config, credentials config, token config, subagents configuration, configure subagents, subagent config, subagents.json, CPAMC allocation, orchestrator model fallback, global subagents config, project subagents config, tool allowlist configuration, continuation enablement, configurar subagents, configurar subagentes, configuracion subagents, configuración subagents, configuracion subagentes, configuración subagentes, configurar pi, configurar extension, configuracion de pi, configuracion de extension"
   related: "anti-overengineering"
   priority: 95
 ---
@@ -60,7 +60,7 @@ It does not own:
 | Skill Registry opt-in, `.pi/skill-registry.config.json`, generated registry cache behavior | `references/modules/skill-registry-configuration.md` |
 | Websearch providers, `websearch.json`, GitHub provider mode, search credentials/env vars | `references/modules/websearch-configuration.md` |
 | Workspace Services, `.pi/workspace-services.json`, service commands, `env_file`, local service logs/state | `references/modules/workspace-services-configuration.md` |
-| Subagents extension configuration from the external package | Use the installed `subagents-configuration` skill if available; otherwise ask to inspect that package docs. |
+| Subagents global/project configuration, `subagents.json`, definition allowlists, execution/continuation settings, CPAMC allocation and orchestrator fallback | `references/modules/subagents-configuration.md` |
 
 ## Execution Steps
 
@@ -91,5 +91,6 @@ Return:
 - `references/modules/skill-registry-configuration.md` — Skill Registry opt-in config.
 - `references/modules/websearch-configuration.md` — Websearch global provider config.
 - `references/modules/workspace-services-configuration.md` — Workspace Services project config.
+- `references/modules/subagents-configuration.md` — Subagents global/project cascade, definitions, CPAMC allocation, execution modes, and continuation.
 - `~/.pi/agent/skills/anti-overengineering/SKILL.md` — mandatory scope control.
 - `~/.pi/agent/AGENTS.md` — Pi workflow boundaries and skill loading policy.

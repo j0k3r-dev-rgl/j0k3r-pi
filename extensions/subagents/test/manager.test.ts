@@ -4,11 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import extension, { ClaudeBackgroundWidget, ClaudeBackgroundWidgetState, completionMessage, createSubagentsPanelKeyMatcher, moveClaudeBackgroundWidgetSelection, renderClaudeBackgroundWidgetLines, resolveRegisteredToolDefinition, sendSubagentCompletionMessage } from '../index.js';
-import { loadSubagents, parseFrontmatter, readSubagentsConfig, resetGlobalSubagentModelProfileField, saveGlobalSubagentModelProfile, subagentSourceWarnings } from '../src/config.js';
+import { loadSubagents, parseFrontmatter, readSubagentsConfig, subagentSourceWarnings } from '../src/config.js';
 import { resolveEffectiveSubagentProfile } from '../src/profile-resolver.js';
 import { buildPrompt, ThreadSnapshotBuilder } from '../src/runner.js';
 import { SubagentStructuredError, deriveErrorString, normalizeErrorMetadata, parseErrorMetadata, safeErrorMetadataDetails, serializeErrorMetadata } from '../src/error-metadata.js';
-import { applyDirtyProfileEdit, buildModelProfileRows, buildNoChangesModelProfilesMessage, buildNonTuiModelProfilesMessage, commitStagedModelProfiles, createSubagentModelProfilesModal, globalSubagentsConfigPath, groupAvailableModelsByProvider, runSubagentModelsCommand, stageModelProfileEdit } from '../src/model-profiles-ui.js';
 import { resolveSubagentHistoryDbPath, resolveSubagentsHistoryHome, SubagentHistoryStore } from '../src/history.js';
 import { isSubagentsDebugEnabled, writeSubagentsDebugLog } from '../src/debug.js';
 import { createSubagentsRenderLogger, DEFAULT_RENDER_DEBUG_LOG_PATH } from '../src/render-debug.js';
@@ -16,7 +15,7 @@ import { SubagentManager } from '../src/manager.js';
 import { registerSubagentTools } from '../src/tools.js';
 import { SubagentsHistoryPanel } from '../src/ui.js';
 import { boundThreadSnapshot, isValidThreadSnapshot, registerSubagentRuntimeToolDefinition, renderThreadBody, resetPiComponentCacheForTests } from '../src/thread-view.js';
-import type { EffectiveSubagentProfile, SubagentErrorMetadata, SubagentModelProfiles, SubagentRunner, SubagentTask } from '../src/types.js';
+import type { EffectiveSubagentProfile, SubagentErrorMetadata, SubagentModelProfiles, SubagentRunner, SubagentTask, SubagentTaskAllocationEvent } from '../src/types.js';
 
 const require = createRequire(import.meta.url);
 
@@ -104,7 +103,7 @@ describe('manager and history integration', () => {
     let runnerProfile: EffectiveSubagentProfile | undefined;
     const runner: SubagentRunner = async ({ effectiveProfile }) => {
       runnerProfile = effectiveProfile;
-      return { result: 'profiled result', model: effectiveProfile?.model.label.replace(/^profile: /, ''), effort: effectiveProfile?.effort.value, fallback_used: false };
+      return { result: 'profiled result', model: effectiveProfile?.model.label.replace(/^(?:profile|orchestrator): /, ''), effort: effectiveProfile?.effort.value, fallback_used: false };
     };
     const manager = new SubagentManager(runner);
 
@@ -123,13 +122,13 @@ describe('manager and history integration', () => {
     }
 
     const queued = seenUpdates.flat().find((task) => task.status === 'queued');
-    expect(queued).toMatchObject({ model: 'profile/model', effort: 'xhigh', model_source: 'profile', effort_source: 'profile' });
+    expect(queued).toMatchObject({ model: undefined, effort: 'low', model_source: 'unresolved', effort_source: 'orchestrator' });
     expect(runnerProfile).toMatchObject({
       agent: 'analyst',
-      model: { value: { provider: 'profile', id: 'model' }, source: 'profile', label: 'profile: profile/model' },
-      effort: { value: 'xhigh', source: 'profile', label: 'profile: xhigh' },
+      model: { value: { provider: 'orchestrator', id: 'model' }, source: 'orchestrator', label: 'orchestrator: orchestrator/model' },
+      effort: { value: 'low', source: 'orchestrator', label: 'orchestrator: low' },
     });
-    expect(result.results?.[0]).toMatchObject({ model: 'profile/model', effort: 'xhigh', model_source: 'profile', effort_source: 'profile' });
+    expect(result.results?.[0]).toMatchObject({ model: 'orchestrator/model', effort: 'low', model_source: 'orchestrator', effort_source: 'orchestrator' });
   });
 
   it('runs multiple subagents in one task call', async () => {
@@ -1352,7 +1351,7 @@ describe('manager and history integration', () => {
     expect(store.getTask(tmp, task.id)?.result).toBe('stored globally');
   });
 
-  it('moves a continued stable task to the front of activity-ordered listings, including after history reload', async () => {
+  it('retains immutable creation-time order when a stable task is continued, including after history reload', async () => {
     writeAgent('analyst');
     fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ enable_continue: true }));
     const runner: SubagentRunner = async ({ taskId, task, continuation, nested_session_path, onActivity }) => {
@@ -1369,16 +1368,18 @@ describe('manager and history integration', () => {
       taskIds.push(result.task_ids[0]!);
     }
 
-    expect(manager.listSessionTasks(tmp, session.sessionId).map((task) => task.id)).toEqual([...taskIds].reverse());
+    const expectedOrder = [...taskIds].reverse();
+    expect(manager.listSessionTasks(tmp, session.sessionId).map((task) => task.id)).toEqual(expectedOrder);
 
     await manager.continueTask({ task_id: taskIds[0]!, prompt: 'Resume the first apply.' }, session);
 
-    expect(manager.listSessionTasks(tmp, session.sessionId).map((task) => task.id)).toEqual([taskIds[0], taskIds[3], taskIds[2], taskIds[1]]);
-    expect(manager.listTasks(tmp).map((task) => task.id)).toEqual([taskIds[0], taskIds[3], taskIds[2], taskIds[1]]);
+    // List order remains immutable creation-time order (newest first: taskIds[3], [2], [1], [0])
+    expect(manager.listSessionTasks(tmp, session.sessionId).map((task) => task.id)).toEqual(expectedOrder);
+    expect(manager.listTasks(tmp).map((task) => task.id)).toEqual(expectedOrder);
 
     const freshManager = new SubagentManager(runner);
-    expect(freshManager.listSessionTasks(tmp, session.sessionId).map((task) => task.id)).toEqual([taskIds[0], taskIds[3], taskIds[2], taskIds[1]]);
-    expect(freshManager.listTasks(tmp).map((task) => task.id)).toEqual([taskIds[0], taskIds[3], taskIds[2], taskIds[1]]);
+    expect(freshManager.listSessionTasks(tmp, session.sessionId).map((task) => task.id)).toEqual(expectedOrder);
+    expect(freshManager.listTasks(tmp).map((task) => task.id)).toEqual(expectedOrder);
   });
 
   it('uses the same binary id tie-break order in memory and after sqlite reload', () => {
@@ -1555,13 +1556,13 @@ describe('manager and history integration', () => {
     process.env.PI_CODING_AGENT_DIR = agentDir;
     let result!: Awaited<ReturnType<SubagentManager['run']>>;
     try {
-      result = await manager.run({ agent: 'analyst', task: 'source metadata', mode: 'task' }, { cwd: tmp, model: { provider: 'mock', id: 'model' } });
+      result = await manager.run({ agent: 'analyst', task: 'source metadata', mode: 'task' }, { cwd: tmp, model: { provider: 'mock', id: 'model' }, thinkingLevel: 'high' });
     } finally {
       if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
     }
     const freshManager = new SubagentManager(mockRunner());
     const persisted = freshManager.getTask(result.task_ids[0], tmp);
-    expect(persisted).toMatchObject({ model: 'mock/model', effort: 'high', model_source: 'orchestrator', effort_source: 'profile' });
+    expect(persisted).toMatchObject({ model: 'mock/model', effort: 'high', model_source: 'orchestrator', effort_source: 'orchestrator' });
   });
 
   it('continues a completed task under the same task id, reuses the nested session, and persists attempts across reloads', async () => {
@@ -1587,9 +1588,9 @@ describe('manager and history integration', () => {
     });
     const manager = new SubagentManager(runner);
 
-    const initial = await manager.run({ agent: 'analyst', task: 'initial delegated work', mode: 'task' }, { cwd: tmp });
+    const initial = await manager.run({ agent: 'analyst', task: 'initial delegated work', mode: 'task' }, { cwd: tmp, model: { provider: 'orchestrator', id: 'default' }, thinkingLevel: 'medium' });
     const taskId = initial.task_ids[0]!;
-    const continued = await manager.continueTask({ task_id: taskId, prompt: 'Please continue with the fix.' }, { cwd: tmp });
+    const continued = await manager.continueTask({ task_id: taskId, prompt: 'Please continue with the fix.' }, { cwd: tmp, model: { provider: 'orchestrator', id: 'default' }, thinkingLevel: 'medium' });
 
     expect(continued.task_ids).toEqual([taskId]);
     expect(continued.results?.[0]).toMatchObject({
@@ -1599,7 +1600,7 @@ describe('manager and history integration', () => {
       nested_session_path: nestedSessionPath,
       continuation_prompt: 'Please continue with the fix.',
       result: 'continued with Please continue with the fix.',
-      model: 'profile/default',
+      model: 'orchestrator/default',
       effort: 'medium',
     });
     expect(runner).toHaveBeenNthCalledWith(1, expect.objectContaining({ nested_session_path: undefined, continuation: undefined }));
@@ -1660,7 +1661,7 @@ describe('manager and history integration', () => {
     await vi.waitFor(() => expect(manager.getTask(taskId)?.status).toBe('completed'));
   });
 
-  it('re-resolves configured profiles for continuation overrides without mutating project config and rejects non-terminal continuations', async () => {
+  it('continues without mutating project config and rejects non-terminal continuations', async () => {
     writeAgent('analyst');
     fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ enable_continue: true }));
     const nestedSessionPath = path.join(tmp, 'resume-session.jsonl');
@@ -1686,12 +1687,12 @@ describe('manager and history integration', () => {
     fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ enable_continue: true, model_profiles: { analyst: { model: 'profile/after', effort: 'high' } } }));
     const manager = new SubagentManager(runner);
 
-    const initial = await manager.run({ agent: 'analyst', task: 'first pass', mode: 'task' }, { cwd: tmp });
+    const initial = await manager.run({ agent: 'analyst', task: 'first pass', mode: 'task' }, { cwd: tmp, model: { provider: 'mock', id: 'model' }, thinkingLevel: 'low' });
     const taskId = initial.task_ids[0]!;
     const configBefore = fs.readFileSync(path.join(tmp, '.pi', 'subagents.json'), 'utf8');
-    const continued = await manager.continueTask({ task_id: taskId, prompt: 'Continue with a different effort.', model: 'override/custom', effort: 'xhigh' }, { cwd: tmp });
+    const continued = await manager.continueTask({ task_id: taskId, prompt: 'Continue with next turn.' }, { cwd: tmp, model: { provider: 'mock', id: 'model' }, thinkingLevel: 'low' });
 
-    expect(continued.results?.[0]).toMatchObject({ model: 'override/custom', effort: 'xhigh', model_source: 'orchestrator', effort_source: 'orchestrator', attempt: 2 });
+    expect(continued.results?.[0]).toMatchObject({ model: 'mock/model', effort: 'low', model_source: 'orchestrator', effort_source: 'orchestrator', attempt: 2 });
     expect(fs.readFileSync(path.join(tmp, '.pi', 'subagents.json'), 'utf8')).toBe(configBefore);
 
     const runningManager = new SubagentManager(runner);
@@ -1779,6 +1780,164 @@ describe('manager and history integration', () => {
     }, { cwd: tmp });
     expect(continued.results?.[0].display_name).toBe('Security Scan');
     expect(continued.results?.[0].attempt).toBe(2);
+  });
+
+  it('preserves immutable creation-time task ordering regardless of background activity updates (MINI-002)', async () => {
+    writeAgent('worker');
+    let triggerTask1Activity: ((msg: string) => void) | undefined;
+    const runner: SubagentRunner = async ({ taskId, onActivity }) => {
+      if (taskId?.includes('first')) {
+        triggerTask1Activity = (msg: string) => {
+          onActivity?.({ message: msg });
+        };
+      }
+      return { result: 'done' };
+    };
+
+    const manager = new SubagentManager(runner);
+
+    // Manually insert two tasks with distinct created_at timestamps into manager
+    const olderTime = '2026-10-07T10:00:00.000Z';
+    const newerTime = '2026-10-07T11:00:00.000Z';
+
+    const task1: SubagentTask = {
+      id: 'subtask_first',
+      agent: 'worker',
+      mode: 'background',
+      status: 'running',
+      task: 'first task (older)',
+      created_at: olderTime,
+      last_activity_at: olderTime,
+      session_id: 'sess-1',
+    };
+    const task2: SubagentTask = {
+      id: 'subtask_second',
+      agent: 'worker',
+      mode: 'background',
+      status: 'running',
+      task: 'second task (newer)',
+      created_at: newerTime,
+      last_activity_at: newerTime,
+      session_id: 'sess-1',
+    };
+
+    (manager as any).tasks.set(task1.id, task1);
+    (manager as any).tasks.set(task2.id, task2);
+    (manager as any).taskCwds.set(task1.id, tmp);
+    (manager as any).taskCwds.set(task2.id, tmp);
+
+    // Initial list: newest-first creation order -> task2 (11:00), then task1 (10:00)
+    let list = manager.listSessionTasks(tmp, 'sess-1');
+    expect(list.map((t) => t.id)).toEqual(['subtask_second', 'subtask_first']);
+
+    // Now update task1 with very recent activity (12:00:00)
+    task1.last_activity_at = '2026-10-07T12:00:00.000Z';
+
+    // List order MUST remain immutable creation-time order: task2 then task1!
+    list = manager.listSessionTasks(tmp, 'sess-1');
+    expect(list.map((t) => t.id)).toEqual(['subtask_second', 'subtask_first']);
+  });
+
+  it('instantiates tasks with model undefined and model_source unresolved while queued, then updates upon CPAMC claim or fallback (MINI-001)', async () => {
+    writeAgent('planner');
+    class TestBus {
+      private handlers = new Map<string, Array<(data: any) => void>>();
+      on(channel: string, handler: (data: any) => void) {
+        const list = this.handlers.get(channel) ?? [];
+        list.push(handler);
+        this.handlers.set(channel, list);
+        return () => {
+          const idx = list.indexOf(handler);
+          if (idx >= 0) list.splice(idx, 1);
+        };
+      }
+      emit(channel: string, data: any) {
+        for (const h of this.handlers.get(channel) ?? []) h(data);
+      }
+    }
+    const bus = new TestBus();
+    let releaseAllocation: (() => void) | undefined;
+    bus.on('subagents:task:allocate', (event: SubagentTaskAllocationEvent) => {
+      event.claimModel(async (_signal) => {
+        await new Promise<void>((resolve) => { releaseAllocation = resolve; });
+        return {
+          model: { provider: 'cliproxyapi', id: 'claimed-gemini' },
+          effort: 'high',
+        };
+      });
+    });
+
+    const runner: SubagentRunner = async () => ({ result: 'done' });
+    const manager = new SubagentManager(runner, undefined, undefined, undefined, bus);
+    const ctx = {
+      cwd: tmp,
+      model: { provider: 'anthropic', id: 'parent-claude' },
+      thinkingLevel: 'low',
+    };
+
+    const runResult = await manager.run({ agent: 'planner', task: 'plan', mode: 'background' }, ctx);
+    const taskId = runResult.task_ids[0]!;
+    const queuedTask = manager.getTask(taskId)!;
+
+    // While queued and waiting for allocation claim:
+    expect(queuedTask.status).toBe('queued');
+    expect(queuedTask.model).toBeUndefined();
+    expect(queuedTask.model_source).toBe('unresolved');
+
+    // Now release allocation claim:
+    releaseAllocation?.();
+    await vi.waitFor(() => expect(manager.getTask(taskId)?.status).toBe('completed'));
+
+    const completedTask = manager.getTask(taskId)!;
+    expect(completedTask.model).toBe('cliproxyapi/claimed-gemini');
+    expect(completedTask.model_source).toBe('allocated');
+    expect(completedTask.effort).toBe('high');
+    expect(completedTask.effort_source).toBe('allocated');
+  });
+
+  it('preserves task.model as undefined when queued task is cancelled before allocation claim (MINI-001)', async () => {
+    writeAgent('planner');
+    class TestBus {
+      private handlers = new Map<string, Array<(data: any) => void>>();
+      on(channel: string, handler: (data: any) => void) {
+        const list = this.handlers.get(channel) ?? [];
+        list.push(handler);
+        this.handlers.set(channel, list);
+        return () => {
+          const idx = list.indexOf(handler);
+          if (idx >= 0) list.splice(idx, 1);
+        };
+      }
+      emit(channel: string, data: any) {
+        for (const h of this.handlers.get(channel) ?? []) h(data);
+      }
+    }
+    const bus = new TestBus();
+    bus.on('subagents:task:allocate', (event: SubagentTaskAllocationEvent) => {
+      event.claimModel(async (_signal) => {
+        // Never resolves immediately; task will be cancelled while pending
+        await new Promise<void>(() => {});
+        return { model: { provider: 'cliproxyapi', id: 'claimed-gemini' } };
+      });
+    });
+
+    const runner: SubagentRunner = async () => ({ result: 'done' });
+    const manager = new SubagentManager(runner, undefined, undefined, undefined, bus);
+    const ctx = {
+      cwd: tmp,
+      model: { provider: 'anthropic', id: 'parent-claude' },
+      thinkingLevel: 'low',
+    };
+
+    const runResult = await manager.run({ agent: 'planner', task: 'plan', mode: 'background' }, ctx);
+    const taskId = runResult.task_ids[0]!;
+
+    manager.cancel(taskId, 'user abort');
+    await vi.waitFor(() => expect(manager.getTask(taskId)?.status).toBe('cancelled'));
+
+    const cancelledTask = manager.getTask(taskId)!;
+    expect(cancelledTask.model).toBeUndefined();
+    expect(cancelledTask.model_source).toBe('unresolved');
   });
 
 });

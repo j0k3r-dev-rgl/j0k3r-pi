@@ -12,7 +12,6 @@ import extension, {
 } from '../index.js';
 import * as configModule from '../src/config.js';
 import * as errorMetadataModule from '../src/error-metadata.js';
-import * as modelProfilesUiModule from '../src/model-profiles-ui.js';
 import * as runnerModule from '../src/runner.js';
 import * as threadViewModule from '../src/thread-view.js';
 import * as toolsModule from '../src/tools.js';
@@ -100,7 +99,7 @@ describe('compatibility smoke', () => {
       ]);
       expect(events).toEqual(['session_start', 'session_shutdown']);
       expect(shortcuts).toEqual(expect.arrayContaining(['ctrl+,', 'ctrl+h']));
-      expect(commands).toEqual(['subagents', 'subagent-models']);
+      expect(commands).toEqual(['subagents']);
     });
   });
 

@@ -91,7 +91,7 @@ describe('SubagentManager lifecycle events and cleanups', () => {
     expect(runnerCalledWithProfile?.effort?.value).toBe('high');
   });
 
-  it('falls back cleanly to standard profile resolution when allocation is unclaimed', async () => {
+  it('falls back cleanly to orchestrator model and effort when allocation is unclaimed', async () => {
     writeAgent('researcher');
     const bus = new SimpleEventBus();
     let runnerCalledWithProfile: any;
@@ -102,10 +102,121 @@ describe('SubagentManager lifecycle events and cleanups', () => {
     };
 
     const manager = new SubagentManager(runner, undefined, undefined, undefined, bus);
-    const result = await manager.run({ agent: 'researcher', task: 'research topic' }, { cwd: tmp });
+    const ctx = {
+      cwd: tmp,
+      model: { provider: 'anthropic', id: 'claude-sonnet-4-5' },
+      thinkingLevel: 'medium',
+    };
+    const result = await manager.run({ agent: 'researcher', task: 'research topic' }, ctx);
 
     expect(result.results?.[0].status).toBe('completed');
-    expect(runnerCalledWithProfile).toBeDefined();
+    expect(result.results?.[0].model).toBe('anthropic/claude-sonnet-4-5');
+    expect(result.results?.[0].effort).toBe('medium');
+    expect(result.results?.[0].model_source).toBe('orchestrator');
+    expect(result.results?.[0].effort_source).toBe('orchestrator');
+    expect(runnerCalledWithProfile?.model?.source).toBe('orchestrator');
+    expect(runnerCalledWithProfile?.effort?.source).toBe('orchestrator');
+  });
+
+  it('falls back cleanly to orchestrator model and effort when allocator throws error', async () => {
+    writeAgent('error-fallback-agent');
+    const bus = new SimpleEventBus();
+    let runnerCalledWithProfile: any;
+
+    bus.on('subagents:task:allocate', (event: SubagentTaskAllocationEvent) => {
+      event.claimModel(async (_signal) => {
+        throw new Error('CPAMC allocation failed: quota exceeded');
+      });
+    });
+
+    const runner: SubagentRunner = async ({ effectiveProfile }) => {
+      runnerCalledWithProfile = effectiveProfile;
+      return { result: 'handled after allocator error' };
+    };
+
+    const manager = new SubagentManager(runner, undefined, undefined, undefined, bus);
+    const ctx = {
+      cwd: tmp,
+      model: { provider: 'openai', id: 'gpt-4o' },
+      thinkingLevel: 'low',
+    };
+    const result = await manager.run({ agent: 'error-fallback-agent', task: 'robust task' }, ctx);
+
+    expect(result.results?.[0].status).toBe('completed');
+    expect(result.results?.[0].model).toBe('openai/gpt-4o');
+    expect(result.results?.[0].effort).toBe('low');
+    expect(result.results?.[0].model_source).toBe('orchestrator');
+    expect(result.results?.[0].effort_source).toBe('orchestrator');
+    expect(runnerCalledWithProfile?.model?.value).toEqual({ provider: 'openai', id: 'gpt-4o' });
+  });
+
+  it('halts immediately on abort during allocation and never converts to fallback turn', async () => {
+    writeAgent('cancel-agent');
+    const bus = new SimpleEventBus();
+    let runnerCalled = false;
+    let terminalEventReceived: SubagentTaskTerminalEvent | undefined;
+
+    bus.on('subagents:task:terminal', (event: SubagentTaskTerminalEvent) => {
+      terminalEventReceived = event;
+    });
+
+    const parentController = new AbortController();
+
+    bus.on('subagents:task:allocate', (event: SubagentTaskAllocationEvent) => {
+      event.claimModel(async (_signal) => {
+        // Abort while allocator is running
+        parentController.abort();
+        throw new Error('aborted');
+      });
+    });
+
+    const runner: SubagentRunner = async () => {
+      runnerCalled = true;
+      return { result: 'should not run' };
+    };
+
+    const manager = new SubagentManager(runner, undefined, undefined, undefined, bus);
+    const ctx = {
+      cwd: tmp,
+      model: { provider: 'anthropic', id: 'claude-sonnet-4-5' },
+    };
+
+    const runPromise = manager.run({ agent: 'cancel-agent', task: 'aborted task' }, ctx, parentController.signal);
+    await expect(runPromise).rejects.toThrow();
+
+    expect(runnerCalled).toBe(false);
+    expect(terminalEventReceived).toBeDefined();
+    expect(terminalEventReceived?.status).toBe('cancelled');
+  });
+
+  it('increments attempt and emits attempt in subagents:task:allocate on continuation', async () => {
+    writeAgent('continue-agent');
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ enable_continue: true }));
+    const nestedPath = path.join(tmp, 'continue-test-session.jsonl');
+    fs.writeFileSync(nestedPath, '{"type":"session"}\n');
+
+    const bus = new SimpleEventBus();
+    const allocatedAttempts: number[] = [];
+
+    bus.on('subagents:task:allocate', (event: SubagentTaskAllocationEvent) => {
+      allocatedAttempts.push(event.attempt ?? 1);
+      event.claimModel(async () => ({
+        model: { provider: 'cliproxyapi', id: 'pdas/gemini-3.8-flash-high' },
+        effort: 'high',
+      }));
+    });
+
+    const runner: SubagentRunner = async ({ continuation, onActivity }) => {
+      onActivity?.({ message: 'session ready', nested_session_path: nestedPath } as any);
+      return { result: continuation ? 'continued' : 'first run', model: 'cliproxyapi/pdas/gemini-3.8-flash-high', effort: 'high', fallback_used: false, nested_session_path: nestedPath } as any;
+    };
+
+    const manager = new SubagentManager(runner, undefined, undefined, undefined, bus);
+    const first = await manager.run({ agent: 'continue-agent', task: 'initial run' }, { cwd: tmp });
+    expect(allocatedAttempts).toEqual([1]);
+
+    await manager.continueTask({ task_id: first.task_ids[0]!, prompt: 'second attempt' }, { cwd: tmp });
+    expect(allocatedAttempts).toEqual([1, 2]);
   });
 
   it('emits subagents:task:terminal and awaits registered cleanups before runner settlement completes', async () => {

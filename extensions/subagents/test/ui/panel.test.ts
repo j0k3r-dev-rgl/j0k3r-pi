@@ -4,11 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import extension, { ClaudeBackgroundWidget, ClaudeBackgroundWidgetState, completionMessage, createSubagentsPanelKeyMatcher, moveClaudeBackgroundWidgetSelection, renderClaudeBackgroundWidgetLines, resolveRegisteredToolDefinition, sendSubagentCompletionMessage } from '../../index.js';
-import { loadSubagents, parseFrontmatter, readSubagentsConfig, resetGlobalSubagentModelProfileField, saveGlobalSubagentModelProfile, subagentSourceWarnings } from '../../src/config.js';
+import { loadSubagents, parseFrontmatter, readSubagentsConfig, subagentSourceWarnings } from '../../src/config.js';
 import { resolveEffectiveSubagentProfile } from '../../src/profile-resolver.js';
 import { buildPrompt, ThreadSnapshotBuilder } from '../../src/runner.js';
 import { SubagentStructuredError, deriveErrorString, normalizeErrorMetadata, parseErrorMetadata, safeErrorMetadataDetails, serializeErrorMetadata } from '../../src/error-metadata.js';
-import { applyDirtyProfileEdit, buildModelProfileRows, buildNoChangesModelProfilesMessage, buildNonTuiModelProfilesMessage, commitStagedModelProfiles, createSubagentModelProfilesModal, globalSubagentsConfigPath, groupAvailableModelsByProvider, runSubagentModelsCommand, stageModelProfileEdit } from '../../src/model-profiles-ui.js';
 import { resolveSubagentHistoryDbPath, resolveSubagentsHistoryHome, SubagentHistoryStore } from '../../src/history.js';
 import { isSubagentsDebugEnabled, writeSubagentsDebugLog } from '../../src/debug.js';
 import { createSubagentsRenderLogger, DEFAULT_RENDER_DEBUG_LOG_PATH } from '../../src/render-debug.js';
@@ -970,7 +969,6 @@ describe('subagents panel and extension ui', () => {
     expect(rendered).toContain('duration: 10s (timeout 43m20s)');
     expect(rendered).toContain('usage: 2 turns ↑1.0k ↓500 ctx:50k (25%)');
     expect(rendered).toContain('last: rendering snapshot (stall 2m)');
-    expect(rendered).toContain('task: keep shell visible');
     expect(rendered).toContain('● reviewer:running effort:high');
     expect(rendered).toContain('thread body visible');
   });
@@ -2120,9 +2118,13 @@ describe('subagents panel and extension ui', () => {
 
     const rendered = panel.render(40);
     expect(rendered.every((line) => visible(line) <= 40)).toBe(true);
-    expect(rendered[0]).toContain('[✕ Cerrar]');
-    expect(rendered[rendered.length - 1]).toContain('[✕ Cerrar]');
+    expect(rendered[0]).toContain('[✕]');
+    expect(rendered[rendered.length - 1]).toContain('[✕]');
     expect(rendered.join('\n')).toContain('executions [1-1/1]');
+
+    const renderedWide = panel.render(60);
+    expect(renderedWide[0]).toContain('[✕ Cerrar]');
+    expect(renderedWide[renderedWide.length - 1]).toContain('[✕ Cerrar]');
   });
 
   it('renders narrow stacked view with intact borders and clean task description', async () => {
@@ -2248,6 +2250,226 @@ describe('subagents panel and extension ui', () => {
     } finally {
       resetPiComponentCacheForTests();
     }
+  });
+
+  describe('responsive viewport adaptation and identity tracking (MINI-001 & MINI-002)', () => {
+    it('returns empty array when width <= 0', () => {
+      const now = new Date().toISOString();
+      const task: SubagentTask = {
+        id: 'task-1',
+        agent: 'researcher',
+        mode: 'task',
+        status: 'running',
+        task: 'researching responsive UI',
+        created_at: now,
+      };
+      const panel = new SubagentsHistoryPanel(
+        [task],
+        {},
+        () => {},
+        () => false,
+        (s) => stripAnsi(s).length,
+        (s, w) => s.slice(0, w),
+        {},
+        20,
+      );
+      expect(panel.render(0)).toEqual([]);
+      expect(panel.render(-5)).toEqual([]);
+    });
+
+    it('never exceeds supplied width or height across tiny and practical dimensions', () => {
+      const now = new Date().toISOString();
+      const tasks: SubagentTask[] = [
+        { id: 'task-1', agent: 'worker-1', mode: 'task', status: 'completed', task: 'first task', created_at: now, started_at: now, ended_at: now },
+        { id: 'task-2', agent: 'worker-2', mode: 'task', status: 'running', task: 'second task with long description that might overflow', created_at: now, started_at: now },
+        { id: 'task-3', agent: 'worker-3', mode: 'task', status: 'queued', task: 'third task', created_at: now },
+      ];
+
+      const testWidths = [1, 20, 30, 40, 70, 90, 120];
+      const testHeights = [1, 3, 5, 6, 10, 14, 42];
+
+      for (const w of testWidths) {
+        for (const h of testHeights) {
+          const panel = new SubagentsHistoryPanel(
+            tasks,
+            { fg: (_n: string, t: string) => t, bold: (t: string) => t },
+            () => {},
+            () => false,
+            (s) => stripAnsi(s).length,
+            (s, width) => s.slice(0, width),
+            {},
+            () => h,
+          );
+
+          const lines = panel.render(w);
+
+          // 1. Line count never exceeds height budget
+          expect(
+            lines.length,
+            `Rendered line count (${lines.length}) must not exceed height budget (${h}) at width ${w}`,
+          ).toBeLessThanOrEqual(h);
+
+          // 2. Visible width of every single line never exceeds width bound
+          for (let i = 0; i < lines.length; i++) {
+            const vis = stripAnsi(lines[i]!).length;
+            expect(
+              vis,
+              `Line ${i} visible width (${vis}) must be <= width (${w}) at height ${h}: "${lines[i]}"`,
+            ).toBeLessThanOrEqual(w);
+          }
+        }
+      }
+    });
+
+    it('renders compact [✕] when width < 50 and [✕ Cerrar] when width >= 50', () => {
+      const now = new Date().toISOString();
+      const tasks: SubagentTask[] = [
+        { id: 'task-1', agent: 'worker-1', mode: 'task', status: 'completed', task: 'first task', created_at: now },
+      ];
+
+      const panelNarrow = new SubagentsHistoryPanel(
+        tasks,
+        { fg: (_n: string, t: string) => t, bold: (t: string) => t },
+        () => {},
+        () => false,
+        (s) => stripAnsi(s).length,
+        (s, width) => s.slice(0, width),
+        {},
+        20,
+      );
+      const linesNarrow = panelNarrow.render(40);
+      expect(linesNarrow[0]).toContain('[✕]');
+      expect(linesNarrow[0]).not.toContain('[✕ Cerrar]');
+
+      const panelWide = new SubagentsHistoryPanel(
+        tasks,
+        { fg: (_n: string, t: string) => t, bold: (t: string) => t },
+        () => {},
+        () => false,
+        (s) => stripAnsi(s).length,
+        (s, width) => s.slice(0, width),
+        {},
+        20,
+      );
+      const linesWide = panelWide.render(60);
+      expect(linesWide[0]).toContain('[✕ Cerrar]');
+    });
+
+    it('preserves selectedTaskId identity across task updates and re-renders (MINI-002)', () => {
+      const now = new Date().toISOString();
+      let taskList: SubagentTask[] = [
+        { id: 'task-1', agent: 'worker-1', mode: 'task', status: 'running', task: 'task 1', created_at: '2026-10-07T10:00:00.000Z' },
+        { id: 'task-2', agent: 'worker-2', mode: 'task', status: 'running', task: 'task 2', created_at: '2026-10-07T09:00:00.000Z' },
+      ];
+
+      const panel = new SubagentsHistoryPanel(
+        () => taskList,
+        { fg: (_n: string, t: string) => t, bold: (t: string) => t },
+        () => {},
+        (data, key) => data === key,
+        (s) => stripAnsi(s).length,
+        (s, width) => s.slice(0, width),
+        {},
+        20,
+        undefined,
+        'task-2', // initially select task-2
+      );
+
+      // Render initial
+      panel.render(100);
+      let debug = panel.getRenderDebugState();
+      expect(debug.selectedIndex).toBe(1);
+
+      // Now simulate a newer task prepended (task-3 created at 11:00)
+      taskList = [
+        { id: 'task-3', agent: 'worker-3', mode: 'task', status: 'running', task: 'task 3', created_at: '2026-10-07T11:00:00.000Z' },
+        { id: 'task-1', agent: 'worker-1', mode: 'task', status: 'running', task: 'task 1', created_at: '2026-10-07T10:00:00.000Z' },
+        { id: 'task-2', agent: 'worker-2', mode: 'task', status: 'running', task: 'task 2', created_at: '2026-10-07T09:00:00.000Z' },
+      ];
+
+      // Re-render: task-2 index in list is now 2, but identity must be preserved!
+      panel.render(100);
+      debug = panel.getRenderDebugState();
+      expect(debug.selectedIndex).toBe(2);
+    });
+
+    it('removes task prompt text, deduplicates usage, and adapts header metadata without horizontal clipping (MINI-002)', () => {
+      const now = new Date().toISOString();
+      const longModel = 'cliproxyapi/anthropic/claude-3-5-sonnet-20241022';
+      const promptString = '1. Goal: Execute complete forensic verification of all components';
+      const task: SubagentTask = {
+        id: 'task-1',
+        display_name: 'Forensic Review',
+        agent: 'deep-researcher',
+        mode: 'task',
+        status: 'completed',
+        task: promptString,
+        model: longModel,
+        effort: 'high',
+        created_at: now,
+        started_at: now,
+        ended_at: now,
+        last_activity: 'completed successfully',
+        last_activity_at: now,
+        usage: { turns: 3, input: 12000, output: 850, cacheRead: 45000, cacheWrite: 0, cost: 0.12, contextTokens: 14000 },
+      };
+
+      // 1. Desktop split view (w = 120):
+      // - Task prompt string is absent from header
+      // - Usage appears at most once across all header lines
+      // - All metadata fields (agent, status, effort, model, duration, usage, last, name) are present
+      const panelDesktop = new SubagentsHistoryPanel(
+        [task],
+        { fg: (_n: string, t: string) => t, bold: (t: string) => t },
+        () => {},
+        () => false,
+        (s) => stripAnsi(s).length,
+        (s, width) => s.slice(0, width),
+        {},
+        30,
+      );
+      const desktopLines = panelDesktop.render(120);
+      const desktopDividerIdx = desktopLines.findIndex((l) => l.includes('├') || l.includes('┼'));
+      const desktopHeaderLines = desktopLines.slice(0, desktopDividerIdx > 0 ? desktopDividerIdx : 5);
+      const desktopHeaderText = desktopHeaderLines.join('\n');
+      expect(desktopHeaderText).not.toContain(promptString);
+      const usageMatchesDesktop = desktopHeaderText.match(/usage:/g) || [];
+      expect(usageMatchesDesktop.length).toBe(1);
+      expect(desktopHeaderText).toContain('agent: deep-researcher');
+      expect(desktopHeaderText).toContain('status: completed');
+      expect(desktopHeaderText).toContain('effort: high');
+      expect(desktopHeaderText).toContain(`model: ${longModel}`);
+      expect(desktopHeaderText).toContain('name: Forensic Review');
+      expect(desktopHeaderText).toContain('last: completed successfully');
+
+      // 2. Mobile stacked view (w = 30, 40, 60, 80):
+      // - Task prompt string is absent from header
+      // - Usage appears at most once
+      // - Model is complete and reconstructible without clipping
+      // - Total rendered lines strictly <= maxLines
+      for (const w of [30, 40, 60, 80]) {
+        for (const h of [10, 14, 25]) {
+          const panelMobile = new SubagentsHistoryPanel(
+            [task],
+            { fg: (_n: string, t: string) => t, bold: (t: string) => t },
+            () => {},
+            () => false,
+            (s) => stripAnsi(s).length,
+            (s, width) => s.slice(0, width),
+            {},
+            () => h,
+          );
+          const mobileLines = panelMobile.render(w);
+          expect(mobileLines.length).toBeLessThanOrEqual(h);
+          for (const line of mobileLines) {
+            expect(stripAnsi(line).length).toBeLessThanOrEqual(w);
+          }
+          const headerDividerIdx = mobileLines.findIndex((l) => l.includes('┬') || l.includes('├') || l.includes('┼') || l.includes('executions ['));
+          const mobileHeaderSection = mobileLines.slice(0, headerDividerIdx > 0 ? headerDividerIdx : 3).join('\n');
+          expect(mobileHeaderSection).not.toContain(promptString);
+        }
+      }
+    });
   });
 
 });

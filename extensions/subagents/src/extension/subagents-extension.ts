@@ -1,6 +1,5 @@
 import { readSubagentsConfig, subagentSourceWarnings } from '../config.js';
 import { SubagentManager } from '../manager.js';
-import { runSubagentModelsCommand } from '../model-profiles-ui.js';
 import { renderSubagentCompletionMessage, sendSubagentCompletionMessage } from '../render/completion-message.js';
 import { registerSubagentTools, triggerClaudeBackgroundHandoff } from '../tools.js';
 import { ClaudeBackgroundWidget, ClaudeBackgroundWidgetState } from '../ui/background-widget.js';
@@ -199,10 +198,5 @@ export default function subagentsExtension(pi: any): void {
         setActivePanelRequestRender: (fn) => { activePanelRequestRender = fn; },
       });
     },
-  });
-
-  pi.registerCommand?.('subagent-models', {
-    description: 'Configure subagent model profiles',
-    handler: async (_args: string, ctx: any) => runSubagentModelsCommand({ ...ctx, pi }),
   });
 }
