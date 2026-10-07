@@ -20,6 +20,7 @@ export interface WorkspacePathSecurityContext {
 export interface WorkspaceServicesConfig extends WorkspacePathSecurityContext {
   exists: boolean;
   configPath: string;
+  composeFile?: string;
   runtimeDir: string;
   logsDir: string;
   statePath: string;

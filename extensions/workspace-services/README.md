@@ -1,6 +1,6 @@
 # Workspace Services Extension
 
-Pi extension for Linux-only management of manually configured workspace services.
+Pi extension for Linux-only management of configured local services and Docker Compose services.
 
 ## Configuration
 
@@ -19,9 +19,31 @@ Create a project-local config file at `.pi/workspace-services.json`:
 }
 ```
 
+### Docker Compose file path
+
+Set the optional top-level `compose_file` to a file path relative to the workspace root (not relative to `.pi`):
+
+```json
+{
+  "compose_file": "infra/docker-compose.yml",
+  "services": {}
+}
+```
+
+Keep your existing entries under `services` when combining Compose with local Node or Spring services. An empty `services` object is valid for a Compose-only project.
+
+- The configured file takes precedence over standard Compose filenames in the root.
+- The path must point to an existing regular file inside the project. Absolute paths, paths escaping the project, and symlinks pointing outside it are rejected; an invalid configured path never silently falls back to another file.
+- If `compose_file` is omitted, the extension searches the workspace root in order: `compose.yaml`, `compose.yml`, `docker-compose.yaml`, `docker-compose.yml`.
+- Compose services are discovered with `docker compose config --services`; explicit JSON service entries win on name collisions.
+- The selected file is used for discovery, status, logs, start, stop, and restart. Targets `all` and `compose` manage the selected Compose stack, not local Node/Spring services.
+- If no file is available, Compose lifecycle tools report the reason and point to `compose_file`; the TUI displays a warning instead of crashing.
+
+Run `/reload` or restart Pi after updating the extension or its configuration.
+
 Rules:
-- No service auto-discovery is performed.
-- Only configured service keys can be managed.
+- Node and Spring services must be explicitly configured; they are not auto-discovered.
+- Only configured or Compose-discovered service keys can be managed, besides the Compose stack targets `all` and `compose`.
 - Service keys are also log file names, so they may only contain letters, numbers, dots, underscores, and dashes.
 - `env_file: true` loads `<service path>/.env` for the managed process.
 - Project trust is required before the extension reads config, state, or logs, or starts/stops processes.

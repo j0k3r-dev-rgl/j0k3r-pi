@@ -1,5 +1,5 @@
 import { mkdtempSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -133,6 +133,126 @@ describe('Docker Compose autodetection & discovery (MINI-002)', () => {
     const config = await loadWorkspaceServicesConfig(cwd);
     expect(config.exists).toBe(true);
     expect(config.services).toEqual({});
+  });
+});
+
+describe('Project-relative Compose configuration', () => {
+  async function configuredComposeWorkspace(): Promise<string> {
+    const cwd = await createTempDir();
+    await mkdir(join(cwd, '.pi'));
+    await mkdir(join(cwd, 'infra'));
+    await writeFile(join(cwd, 'infra', 'development.yml'), 'services:\n  web:\n    image: nginx\n');
+    await writeFile(join(cwd, '.pi', 'workspace-services.json'), JSON.stringify({
+      compose_file: 'infra/development.yml',
+      services: {},
+    }));
+    return cwd;
+  }
+
+  it('uses the configured relative file instead of a standard file in the root', async () => {
+    const cwd = await configuredComposeWorkspace();
+    const composeFile = join(cwd, 'infra', 'development.yml');
+    await writeFile(join(cwd, 'compose.yaml'), 'services: {}\n');
+    const runSpy = vi.spyOn(composeExecutor, 'run').mockResolvedValue({ stdout: 'web\n', stderr: '', exitCode: 0 });
+    try {
+      const config = await loadWorkspaceServicesConfig(cwd);
+      expect(config).toMatchObject({ exists: true, composeFile });
+      expect(config.services.web).toMatchObject({
+        type: 'compose', relativePath: 'infra/development.yml', cwd, composeFile,
+      });
+      expect(runSpy).toHaveBeenCalledWith(cwd, ['config', '--services'], expect.objectContaining({ composeFile }));
+    } finally {
+      runSpy.mockRestore();
+    }
+  });
+
+  it('passes the configured file to explicitly declared Compose services', async () => {
+    const cwd = await configuredComposeWorkspace();
+    await writeFile(join(cwd, '.pi', 'workspace-services.json'), JSON.stringify({
+      compose_file: 'infra/development.yml',
+      services: { web: { type: 'compose', path: '.', command: 'docker compose up -d web', env_file: false } },
+    }));
+    const runSpy = vi.spyOn(composeExecutor, 'run').mockResolvedValue({ stdout: 'web\n', stderr: '', exitCode: 0 });
+    try {
+      const config = await loadWorkspaceServicesConfig(cwd);
+      expect(config.services.web).toMatchObject({ relativePath: '.', composeFile: join(cwd, 'infra', 'development.yml') });
+    } finally {
+      runSpy.mockRestore();
+    }
+  });
+
+  it.each([
+    ['start', 'all', ['up', '-d']],
+    ['start', 'compose', ['up', '-d']],
+    ['stop', 'all', ['stop']],
+    ['stop', 'compose', ['stop']],
+    ['restart', 'all', ['restart']],
+    ['restart', 'compose', ['restart']],
+    ['start', 'web', ['up', '-d', 'web']],
+    ['stop', 'web', ['stop', 'web']],
+    ['restart', 'web', ['restart', 'web']],
+  ] as const)('uses the configured file for %s target %s', async (action, target, args) => {
+    const cwd = await configuredComposeWorkspace();
+    const runSpy = vi.spyOn(composeExecutor, 'run').mockImplementation(async (_cwd, command) => ({
+      stdout: command[0] === 'config' ? 'web\n' : '', stderr: '', exitCode: 0,
+    }));
+    try {
+      const operations = { start: startService, stop: stopService, restart: restartService };
+      const outcome = await operations[action](cwd, target);
+      expect(outcome.ok).toBe(true);
+      expect(runSpy).toHaveBeenCalledWith(cwd, args, expect.objectContaining({ composeFile: join(cwd, 'infra', 'development.yml') }));
+    } finally {
+      runSpy.mockRestore();
+    }
+  });
+
+  it('uses the configured file for status and logs', async () => {
+    const cwd = await configuredComposeWorkspace();
+    const composeFile = join(cwd, 'infra', 'development.yml');
+    const runSpy = vi.spyOn(composeExecutor, 'run').mockImplementation(async (_cwd, args) => ({
+      stdout: args[0] === 'config' ? 'web\n' : args[0] === 'ps'
+        ? JSON.stringify([{ ID: 'web1', Name: 'web', Service: 'web', State: 'running' }]) : 'ready\n',
+      stderr: '', exitCode: 0,
+    }));
+    try {
+      const status = await getServicesStatus(cwd);
+      expect(status.services[0]).toMatchObject({ name: 'web', status: 'running' });
+      expect(runSpy).toHaveBeenCalledWith(cwd, ['ps', '--all', '--format', 'json'], expect.objectContaining({ composeFile }));
+      const logs = await getServiceLogs(cwd, 'web', { lines: 5 });
+      expect(logs.ok).toBe(true);
+      expect(runSpy).toHaveBeenCalledWith(cwd, ['logs', '--no-color', '--tail', '5', 'web'], expect.objectContaining({ composeFile }));
+    } finally {
+      runSpy.mockRestore();
+    }
+  });
+
+  it.each([null, '', '   ', false, 42, '/tmp/compose.yaml', '../compose.yaml', 'infra/missing.yml', 'infra'])
+    ('rejects invalid compose_file %j before running Docker', async (compose_file) => {
+      const cwd = await configuredComposeWorkspace();
+      await writeFile(join(cwd, 'compose.yaml'), 'services: {}\n');
+      await writeFile(join(cwd, '.pi', 'workspace-services.json'), JSON.stringify({ compose_file, services: {} }));
+      const runSpy = vi.spyOn(composeExecutor, 'run').mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+      try {
+        await expect(loadWorkspaceServicesConfig(cwd)).rejects.toThrow(/compose_file/i);
+        expect(runSpy).not.toHaveBeenCalled();
+      } finally {
+        runSpy.mockRestore();
+      }
+    });
+
+  it('rejects a configured file symlink escaping the project', async () => {
+    const cwd = await configuredComposeWorkspace();
+    const outside = await createTempDir();
+    await writeFile(join(outside, 'compose.yml'), 'services: {}\n');
+    await symlink(join(outside, 'compose.yml'), join(cwd, 'infra', 'linked.yml'));
+    await writeFile(join(cwd, '.pi', 'workspace-services.json'), JSON.stringify({ compose_file: 'infra/linked.yml', services: {} }));
+    const runSpy = vi.spyOn(composeExecutor, 'run').mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+    try {
+      await expect(loadWorkspaceServicesConfig(cwd)).rejects.toThrow(/compose_file.*workspace boundary/i);
+      expect(runSpy).not.toHaveBeenCalled();
+    } finally {
+      runSpy.mockRestore();
+    }
   });
 });
 

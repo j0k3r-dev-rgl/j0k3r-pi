@@ -55,6 +55,7 @@ export function registerExploreTool(pi: ExtensionAPI) {
 			"Use codegraph_status before codegraph_explore when index availability or freshness is unknown.",
 			"Do NOT use codegraph_explore for inspecting a single symbol, function, or file; use codegraph_node instead to avoid massive token overhead.",
 			"Use codegraph_explore only for wide, unfamiliar architecture questions across multiple components.",
+			"On low-confidence exploration results, follow the suggested symbols using codegraph_node directly.",
 			"If no CodeGraph index exists, do not call codegraph_manage unless the user explicitly authorized the exact lifecycle operation and project path.",
 		],
 		parameters: Type.Object({

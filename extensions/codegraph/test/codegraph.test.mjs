@@ -592,6 +592,13 @@ test("MINI-003: Orchestrator and tool prompt guidelines alignment", async () => 
   const { registerCodeGraphTools } = await import("../src/tools/index.ts");
   registerCodeGraphTools(mockPi);
 
+  const nodeTool = registered.find((t) => t.name === "codegraph_node");
+  assert.ok(nodeTool.promptGuidelines.some((g) => g.includes("strictly prefer codegraph_node") && g.includes("indexed codebases")));
+  const exploreTool = registered.find((t) => t.name === "codegraph_explore");
+  assert.ok(exploreTool.promptGuidelines.some((g) => g.includes("low-confidence") && g.includes("codegraph_node directly")));
+  const impactTool = registered.find((t) => t.name === "codegraph_impact");
+  assert.ok(impactTool.promptGuidelines.some((g) => g.includes("shared symbols or files")));
+
   const syncTool = registered.find((t) => t.name === "codegraph_sync");
   assert.ok(syncTool);
   assert.ok(Array.isArray(syncTool.promptGuidelines));
@@ -801,7 +808,28 @@ function serviceNotFound() {
   assert.ok(!text.includes("Massive 50KB code dump"), "Source code must be stripped from response");
 });
 
-test("LIFECYCLE: extension registers before_agent_start and session_shutdown hooks", async () => {
+test("codegraph_node structural advice prioritizes member inspection without altering source", async () => {
+  const { registerNodeTool } = await import("../src/tools/node.ts");
+  let tool;
+  let output = '**Service** (class)\n\n```typescript\nconst example = "Structural outline only. Read a file";\n```\n\n> Structural outline only. Read `src/service.ts` or call codegraph_node on a specific member for its body.\n**Trail**';
+  registerNodeTool({
+    registerTool: (registered) => { tool = registered; },
+    exec: async () => ({ code: 0, stdout: output, stderr: "" }),
+  });
+  const result = await tool.execute("outline", { name: "Service" }, undefined, undefined, { cwd: "/project" });
+  const text = result.content[0].text;
+  assert.ok(text.includes('Call codegraph_node with { name: "<member>", file: "src/service.ts" }'));
+  assert.ok(text.includes("Use read only for unindexed raw segments."));
+  assert.ok(!text.includes('> Structural outline only. Read'));
+  assert.ok(text.includes('const example = "Structural outline only. Read a file";'));
+  assert.ok(text.endsWith("**Trail**"));
+
+  output = '**method** (function)\n```typescript\nfunction method() {}\n```';
+  const unchanged = await tool.execute("source", { name: "method" }, undefined, undefined, { cwd: "/project" });
+  assert.equal(unchanged.content[0].text, output);
+});
+
+test("LIFECYCLE: policy stays in tool metadata and only shutdown is registered", async () => {
   const { default: codegraphExtension } = await import("../index.ts");
   const tmp = mkdtempSync(join(tmpdir(), "codegraph-hooks-test-"));
   try {
@@ -816,19 +844,21 @@ test("LIFECYCLE: extension registers before_agent_start and session_shutdown hoo
     };
 
     codegraphExtension(mockPi, { cwd: tmp });
-    assert.ok(events.has("before_agent_start"), "Should register before_agent_start hook");
-    assert.ok(events.has("session_shutdown"), "Should register session_shutdown hook");
-
-    // Test before_agent_start appends CodeGraph policy
-    const beforeStart = events.get("before_agent_start");
-    const result = beforeStart({ systemPrompt: "Base prompt" });
-    assert.ok(result.systemPrompt.includes("Base prompt"));
-    assert.ok(result.systemPrompt.includes("## CodeGraph Intelligence Policy"));
-    assert.ok(result.systemPrompt.includes("codegraph_node"));
+    assert.deepEqual([...events.keys()], ["session_shutdown"], "Prompt policy must not be injected through a lifecycle hook");
 
     // Test session_shutdown runs without throwing
     const shutdown = events.get("session_shutdown");
     await assert.doesNotReject(async () => { await shutdown(); });
+
+    writeFileSync(join(piDir, "extensions.json"), JSON.stringify({ codegraph: false }), "utf8");
+    const disabledTools = [];
+    const disabledEvents = [];
+    codegraphExtension({
+      registerTool: (tool) => disabledTools.push(tool),
+      on: (event) => disabledEvents.push(event),
+    }, { cwd: tmp });
+    assert.deepEqual(disabledTools, [], "Disabled extension must not register tools or their guidelines");
+    assert.deepEqual(disabledEvents, [], "Disabled extension must not register lifecycle hooks");
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

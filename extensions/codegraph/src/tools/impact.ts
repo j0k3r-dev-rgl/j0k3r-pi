@@ -21,7 +21,7 @@ export function registerImpactTool(pi: ExtensionAPI) {
 			"Analyze the blast radius and affected code when changing a symbol or file. Read-only.",
 		promptSnippet: "Analyze code impact and affected symbols for a change with CodeGraph",
 		promptGuidelines: [
-			"Use codegraph_impact before refactoring or modifying a shared symbol to understand its full blast radius.",
+			"Before refactoring or changing shared symbols or files, use codegraph_impact to verify the direct and transitive blast radius.",
 			"codegraph_impact traces direct and transitive dependencies across the entire codebase.",
 		],
 		parameters: Type.Object({

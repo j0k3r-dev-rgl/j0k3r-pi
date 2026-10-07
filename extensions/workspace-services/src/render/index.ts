@@ -278,15 +278,28 @@ export function renderWorkspaceServiceCall(
   };
 }
 
+type WorkspaceServiceRenderResult = {
+  content?: Array<{ type: string; text?: string }>;
+  details?: WorkspaceServiceOutcome | any;
+  isError?: boolean;
+};
+
+function resultText(result: WorkspaceServiceRenderResult): string {
+  return (Array.isArray(result.content) ? result.content : [])
+    .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+    .map((part) => part.text)
+    .join('\n');
+}
+
 export function renderWorkspaceServiceResult(
-  first: string | { details?: WorkspaceServiceOutcome | any; isError?: boolean },
+  first: string | WorkspaceServiceRenderResult,
   second?: any,
   third?: any,
   fourth?: any,
   fifth?: any,
 ): RenderComponent {
   let toolName: string;
-  let result: { details?: WorkspaceServiceOutcome | any; isError?: boolean };
+  let result: WorkspaceServiceRenderResult;
   let options: WorkspaceServiceRenderOptions;
   let theme: any;
   let context: any;
@@ -334,22 +347,26 @@ export function renderWorkspaceServiceResult(
 
       if (options?.isPartial) {
         bodyLines.push(`${toolName} · running…`);
-      } else if (!outcome) {
-        bodyLines.push(`${RED}Error: workspace service · missing details${RESET}`);
+      } else if (!outcome || typeof outcome.summary !== 'string') {
+        const message = resultText(result) || 'workspace service result is missing details.';
+        bodyLines.push(`${toolName} · warning`);
+        bodyLines.push(`${RED}Warning: ${stripAnsi(message)}${RESET}`);
         bodyLines.push(keyHintStr);
       } else {
         const service = String((outcome.data as any)?.service ?? toolName);
-        const header = `${service} · ${outcome.status}`;
+        const nativeError = Boolean(context?.isError || result?.isError);
+        const header = `${service} · ${nativeError ? 'warning' : outcome.status}`;
+        const summary = nativeError ? `Warning: ${resultText(result) || outcome.summary}` : outcome.summary;
         if (!isExpanded) {
           const detail = outcome.truncation?.hasMore ? ' · more available' : '';
           bodyLines.push(header);
-          bodyLines.push(`${outcome.summary}${detail}`);
+          bodyLines.push(`${summary}${detail}`);
           bodyLines.push(keyHintStr);
         } else {
           bodyLines.push(header);
           bodyLines.push(keyHintStr);
           bodyLines.push('');
-          bodyLines.push(outcome.summary);
+          bodyLines.push(summary);
           const text = typeof (outcome.data as any)?.text === 'string' ? (outcome.data as any).text : undefined;
           if (text) bodyLines.push(...text.split('\n'));
           if (outcome.nextAction) bodyLines.push(`next: ${outcome.nextAction}`);

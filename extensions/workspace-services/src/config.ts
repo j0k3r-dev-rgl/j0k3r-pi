@@ -1,5 +1,5 @@
-import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { basename, join, relative, resolve } from 'node:path';
+import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { findComposeFile, discoverComposeServices } from './core/docker-compose.js';
 import {
   MAX_ENV_ENTRIES,
@@ -55,6 +55,25 @@ function assertBooleanField(value: unknown, field: string, name: string): boolea
   throw new Error(`Invalid ${field} for service "${name}". Expected a boolean.`);
 }
 
+async function resolveConfiguredComposeFile(config: WorkspaceServicesConfig, value: unknown): Promise<string> {
+  if (typeof value !== 'string' || !value.trim() || isAbsolute(value.trim())) {
+    throw new Error('Invalid compose_file. Expected a non-empty path relative to the workspace root.');
+  }
+  const candidate = resolve(config.workspaceRoot, value.trim());
+  const relativePath = relative(config.workspaceRoot, candidate);
+  if (relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) {
+    throw new Error('Invalid compose_file. Path must stay inside the workspace boundary.');
+  }
+  try {
+    const safePath = await assertContainedRealPath(config.workspaceRealRoot, candidate, 'compose_file');
+    if (!(await stat(safePath)).isFile()) throw new Error('Expected a regular file.');
+    return safePath;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid compose_file "${value.trim()}": ${message}`);
+  }
+}
+
 function buildEmptyConfig(cwd: string, workspaceRealRoot: string): WorkspaceServicesConfig {
   const workspaceRoot = resolve(cwd);
   const runtimeDir = join(workspaceRoot, RUNTIME_RELATIVE_DIR);
@@ -78,7 +97,7 @@ export async function loadWorkspaceServicesConfig(cwd: string): Promise<Workspac
   const securityContext = await createWorkspaceSecurityContext(cwd);
   const base = buildEmptyConfig(cwd, securityContext.workspaceRealRoot);
   const jsonExists = await pathExists(base.configPath);
-  const composeFile = findComposeFile(base.workspaceRoot);
+  let composeFile = findComposeFile(base.workspaceRoot);
 
   if (!jsonExists && !composeFile) return base;
 
@@ -102,6 +121,7 @@ export async function loadWorkspaceServicesConfig(cwd: string): Promise<Workspac
 
     if (!isRecord(parsed)) throw new Error(`${CONFIG_RELATIVE_PATH} must contain a JSON object.`);
     if (!isRecord(parsed.services)) throw new Error(`${CONFIG_RELATIVE_PATH} must contain a "services" object.`);
+    if ('compose_file' in parsed) composeFile = await resolveConfiguredComposeFile(base, parsed.compose_file);
 
     for (const [name, serviceRaw] of Object.entries(parsed.services)) {
       assertServiceName(name);
@@ -147,7 +167,7 @@ export async function loadWorkspaceServicesConfig(cwd: string): Promise<Workspac
     }
   }
 
-  return { ...base, exists: true, services };
+  return { ...base, exists: true, composeFile: composeFile ?? undefined, services };
 }
 
 export async function ensureRuntimeDirs(config: WorkspaceServicesConfig): Promise<void> {

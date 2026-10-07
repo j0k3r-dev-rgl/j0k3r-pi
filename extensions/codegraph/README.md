@@ -26,6 +26,12 @@ The extension never uses a shell: arguments are passed directly through `pi.exec
 
 Explore output is limited to Pi's standard 50KB/2000-line budget. Oversized full output is saved under a temporary `pi-codegraph-*` directory and the retrieval path is returned. Status, sync, and management results include structured `details`; successful management operations always finish by reading and returning status. Collapsed tool cards use Pi's configured `app.tools.expand` keybinding hint.
 
+## Agent instructions
+
+CodeGraph usage policy belongs to each tool's `promptGuidelines`, not to agent definitions or a `before_agent_start` hook. Pi includes guidelines for active tools in its normal prompt; lean subagents receive them through `Active Tool Guidelines`, filtered by their effective tool allowlist. A disabled extension registers no tools or guidelines, and excluded tools contribute no instructions.
+
+For indexed code, the guidelines prioritize `codegraph_node` for focused inspection, reserve `codegraph_explore` for multi-component questions, require `codegraph_impact` before shared-symbol/file changes, and direct low-confidence exploration follow-up to suggested symbols with `codegraph_node`. Structural-outline advice also prioritizes focused member inspection.
+
 ## Lifecycle
 
 No daemon, watcher, socket, timer, or persistent child process is started. Each call launches the installed `codegraph` CLI and honors Pi cancellation. Temporary exploration output directories are automatically tracked and removed on `session_shutdown`.

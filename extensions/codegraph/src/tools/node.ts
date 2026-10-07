@@ -21,7 +21,7 @@ export function registerNodeTool(pi: ExtensionAPI) {
 			"Inspect a single symbol's source code and caller/callee trail, or inspect a file with line numbers and dependents. Read-only.",
 		promptSnippet: "Inspect one symbol's definition, caller/callee trail, or file structure with CodeGraph",
 		promptGuidelines: [
-			"Prefer codegraph_node over the read tool and codegraph_explore when inspecting a specific symbol's definition, callers, callees, or file outline in indexed codebases.",
+			"When inspecting indexed codebases, strictly prefer codegraph_node over the read tool and codegraph_explore for symbol definitions, callers/callees, and file structure.",
 			"codegraph_node is much lighter than codegraph_explore and consumes significantly fewer tokens.",
 			"Use symbolsOnly: true for quick API surface inspections without reading line-by-line source code.",
 		],
@@ -61,7 +61,10 @@ export function registerNodeTool(pi: ExtensionAPI) {
 			args.push(params.name);
 
 			const result = await pi.exec("codegraph", args, { cwd: path, signal });
-			const output = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
+			const output = [result.stdout, result.stderr].filter(Boolean).join("\n").trim().replace(
+				/^> Structural outline only\. Read `([^`\r\n]+)` or call codegraph_node on a specific member for its body\.$/gm,
+				(_match, file: string) => `> Structural outline only. Call codegraph_node with { name: "<member>", file: ${JSON.stringify(file)} } for its body. Use read only for unindexed raw segments.`,
+			);
 
 			if (result.code !== 0) {
 				if (isNotIndexedOutput(output)) {

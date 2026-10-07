@@ -5,7 +5,6 @@ import type { Writable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import { ensureRuntimeDirs, ensureRuntimeGitignore, loadServiceEnv, loadWorkspaceServicesConfig } from '../config.js';
 import {
-  findComposeFile,
   getComposeServiceLogs,
   getComposeServicesStatus,
   restartComposeService,
@@ -383,8 +382,8 @@ export async function startService(cwd: string, serviceName: string, options: St
   const config = await loadWorkspaceServicesConfig(cwd);
 
   if (serviceName === 'all' || serviceName === 'compose') {
-    const composeFile = findComposeFile(config.workspaceRoot);
-    if (!composeFile) throw new Error('No Docker Compose file found in workspace root.');
+    const composeFile = config.composeFile;
+    if (!composeFile) throw new Error('No Docker Compose file found. Set compose_file in .pi/workspace-services.json to a project-relative file path, or place a standard Compose file in the workspace root.');
     return await startComposeService(config.workspaceRoot, 'all', {
       composeFile,
       timeoutMs: options.timeoutMs,
@@ -546,8 +545,8 @@ export async function stopService(cwd: string, serviceName: string, options: Sto
   const config = await loadWorkspaceServicesConfig(cwd);
 
   if (serviceName === 'all' || serviceName === 'compose') {
-    const composeFile = findComposeFile(config.workspaceRoot);
-    if (!composeFile) throw new Error('No Docker Compose file found in workspace root.');
+    const composeFile = config.composeFile;
+    if (!composeFile) throw new Error('No Docker Compose file found. Set compose_file in .pi/workspace-services.json to a project-relative file path, or place a standard Compose file in the workspace root.');
     return await stopComposeService(config.workspaceRoot, 'all', {
       composeFile,
       timeoutMs: options.timeoutMs,
@@ -615,8 +614,8 @@ export async function restartService(cwd: string, serviceName: string, options: 
   const config = await loadWorkspaceServicesConfig(cwd);
 
   if (serviceName === 'all' || serviceName === 'compose') {
-    const composeFile = findComposeFile(config.workspaceRoot);
-    if (!composeFile) throw new Error('No Docker Compose file found in workspace root.');
+    const composeFile = config.composeFile;
+    if (!composeFile) throw new Error('No Docker Compose file found. Set compose_file in .pi/workspace-services.json to a project-relative file path, or place a standard Compose file in the workspace root.');
     return await restartComposeService(config.workspaceRoot, 'all', {
       composeFile,
       timeoutMs: options.timeoutMs,

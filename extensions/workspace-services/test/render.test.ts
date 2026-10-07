@@ -119,6 +119,52 @@ describe('workspace service rendering', () => {
     expect(visibleTestWidth(lines[0])).toBeLessThanOrEqual(20);
   });
 
+  it.each([false, true])('renders native errors as warnings with expanded=%s', (expanded) => {
+    const message = 'No Docker Compose file found in workspace root.';
+    for (const details of [{}, undefined]) {
+      const result = {
+        content: [{ type: 'text', text: message }],
+        details,
+        isError: true,
+      };
+      const component = renderWorkspaceServiceResult('workspace_service_start', result, { expanded }, theme);
+      const text = component.render(80).map(stripAnsi).join('\n');
+      expect(text).toContain('warning');
+      expect(text).toContain(`Warning: ${message}`);
+      expect(text).not.toContain('undefined');
+      for (const width of [20, 24, 40, 80]) {
+        for (const line of component.render(width)) expect(visibleTestWidth(line)).toBeLessThanOrEqual(width);
+      }
+      component.invalidate();
+      expect(component.render(80).map(stripAnsi).join('\n')).toBe(text);
+    }
+  });
+
+  it.each([false, true])('handles errors flagged by Pi render context with expanded=%s', (expanded) => {
+    const result = { content: [{ type: 'text', text: 'Service start was cancelled.' }], details: {} };
+    const context = { isError: true, state: {} };
+    const text = renderWorkspaceServiceResult('workspace_service_start', result, { expanded }, theme, context)
+      .render(80).map(stripAnsi).join('\n');
+    expect(text).toContain('Warning: Service start was cancelled.');
+    expect(text).not.toContain('undefined');
+  });
+
+  it.each([false, true])('warns about incomplete outcomes with expanded=%s', (expanded) => {
+    for (const details of [{}, { ok: false }, { ok: true, summary: 42 }, undefined]) {
+      const text = renderWorkspaceServiceResult({ details }, { expanded }, theme)
+        .render(80).map(stripAnsi).join('\n');
+      expect(text).toContain('Warning: workspace service result is missing details.');
+      expect(text).not.toContain('undefined');
+    }
+  });
+
+  it.each([false, true])('uses an error summary when no text content is available with expanded=%s', (expanded) => {
+    const result = { details: { ok: false, status: 'error', summary: 'Process failed to launch.' }, isError: true };
+    const text = renderWorkspaceServiceResult('workspace_service_start', result, { expanded }, theme)
+      .render(80).map(stripAnsi).join('\n');
+    expect(text).toContain('Warning: Process failed to launch.');
+  });
+
   it('extracts workspace service action properly', () => {
     expect(extractWorkspaceServiceAction('workspace_services_list', {})).toBeUndefined();
     expect(extractWorkspaceServiceAction('workspace_service_start', { service: 'frontend' })).toBe('frontend');
