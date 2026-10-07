@@ -110,6 +110,23 @@ describe('MINI-004: Tool-Guideline Composition for Lean Subagents', () => {
     expect(composed).not.toContain('Inspect the code graph first');
   });
 
+  it('propagates memory capture and recall guidelines for a lean worker without recovery permissions', () => {
+    const capture = 'Use memory_save to persist confirmed reusable lessons within assigned scope.';
+    const recall = 'Use memory_context for relevant project orientation, then memory_get for full content.';
+    const ctx = {
+      getAllTools: () => [
+        { name: 'memory_save', promptGuidelines: [capture] },
+        { name: 'memory_context', promptGuidelines: [recall] },
+        { name: 'memory_delete', promptGuidelines: ['Use memory_delete only for explicitly authorized deletion.'] },
+      ],
+    };
+    const composed = composeLeanSystemPrompt('# Apply worker', ['read', 'memory_save', 'memory_context'], ctx);
+    expect(composed).toContain(`- ${capture}`);
+    expect(composed).toContain(`- ${recall}`);
+    expect(composed).not.toContain('memory_delete');
+    expect(extractActiveToolGuidelines(['read'], ctx)).toEqual([]);
+  });
+
   it('is completely generic with zero references to specific extensions', () => {
     const ctx = {
       getAllTools: () => [
