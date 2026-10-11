@@ -2,13 +2,13 @@
 import { type Static, Type } from "typebox";
 
 /** Maximum number of questions accepted by one questionnaire. */
-export const MAX_QUESTIONS = 4;
+export const MAX_QUESTIONS = 6;
 
 /** Minimum number of authored options per question. */
 export const MIN_OPTIONS = 2;
 
 /** Maximum number of authored options per question. */
-export const MAX_OPTIONS = 4;
+export const MAX_OPTIONS = 5;
 
 /** Maximum length of an authored option label. */
 export const MAX_LABEL_LENGTH = 60;
@@ -26,7 +26,7 @@ const OptionSchema = Type.Object(
 			description: "Short user-facing option label",
 		}),
 		description: Type.String({
-			description: "One-line explanation shown under the label",
+			description: "Explanation of this option, its trade-offs, and practical implications shown under the label",
 		}),
 		preview: Type.Optional(Type.String({
 			description: "Optional markdown-flavored preview shown beside the focused option",
@@ -37,14 +37,14 @@ const OptionSchema = Type.Object(
 
 const QuestionSchema = Type.Object(
 	{
-		question: Type.String({ description: "The full question text" }),
+		question: Type.String({ description: "The full question text including necessary background and context for the decision" }),
 		header: Type.String({
 			description: "Progress header; keep it concise for readability",
 		}),
 		options: Type.Array(OptionSchema, {
 			minItems: MIN_OPTIONS,
 			maxItems: MAX_OPTIONS,
-			description: "Two to four ordered options",
+			description: "Two to five ordered options",
 		}),
 		multiSelect: Type.Optional(Type.Boolean({
 			default: false,
@@ -55,7 +55,7 @@ const QuestionSchema = Type.Object(
 );
 
 /**
- * Typebox parameters for the native `ask_user_question` tool: one to four
+ * Typebox parameters for the native `ask_user_question` tool: one to six
  * questions rendered together as a single questionnaire.
  */
 export const QuestionParamsSchema = Type.Object(
@@ -63,7 +63,7 @@ export const QuestionParamsSchema = Type.Object(
 		questions: Type.Array(QuestionSchema, {
 			minItems: 1,
 			maxItems: MAX_QUESTIONS,
-			description: "One to four questions rendered as a single questionnaire",
+			description: "One to six questions rendered as a single questionnaire",
 		}),
 	},
 	{ additionalProperties: false },

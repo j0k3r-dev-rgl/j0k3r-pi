@@ -12,13 +12,15 @@ export function registerQuestionTool(pi: ExtensionAPI): void {
   const tool: ToolDefinition<typeof QuestionParamsSchema, QuestionnaireDetails> = {
     name: "ask_user_question",
     label: "Ask User Question",
-    description: "Ask one to four structured questions, each with two to four ordered options, optional previews, multiple selection and an always-available free-text response. Requires the interactive Pi TUI.",
+    description: "Ask one to six structured questions, each with two to five ordered options, optional previews, multiple selection and an always-available free-text response. Requires the interactive Pi TUI.",
     promptSnippet: "Ask the user for necessary decisions through a native interactive questionnaire.",
     promptGuidelines: [
       "When a material product or design decision is open, use ask_user_question for one focused question, then wait. Do not turn clear tasks into unnecessary interviews.",
       "Find environment and code facts yourself within authorized scope; ask only for user-owned decisions.",
-      "Batch up to four questions only when they are independent and the governing workflow permits it; defer questions that depend on unanswered choices.",
-      "Keep headers concise for readability and option labels at most 60 characters; give two to four honest options with descriptions and optional previews. Use multiSelect only for non-exclusive choices.",
+      "Batch up to six questions only when they are independent and the governing workflow permits it; defer questions that depend on unanswered choices.",
+      "Keep headers concise for readability and option labels at most 60 characters; give two to five honest options with descriptions and optional previews. Use multiSelect only for non-exclusive choices.",
+      "Provide clear context in each question: explain why the decision is needed, relevant background, and the trade-off at hand. Avoid terse or context-free questions that leave the user guessing; be concise without omitting what is needed to understand the choice.",
+      "Provide meaningful explanations in option descriptions: clearly state consequences, trade-offs, and practical differences between options so the user can make an informed choice. Use plain language and explain necessary technical terms.",
       "Write questions and authored options in the user's conversation language. Indicate a recommendation in the description when helpful, without preselecting or deciding for the user.",
       "The Type something. row is always available. Treat free text as the user's actual response, not as an opaque choice token or implicit approval.",
       "Cancellation means no decision or authorization was accepted: stop dependent work and wait, never guess, retry automatically, or treat cancellation as approval.",

@@ -460,15 +460,71 @@ test("native container mouse dispatch accounts for its top border", () => {
 	assert.equal(view.getResult().answers[0]?.answer, "Beta");
 });
 
-test("every rendered line fits the width across 1-4 questions", () => {
-	const questions = [
-		question("One?", [option("A"), option("B", "B description", "preview ".repeat(20))], { header: "One" }),
-		question("Two?", [option("C"), option("D")], { header: "Two", multiSelect: true }),
-		question("Three?", [option("E"), option("F")], { header: "Three" }),
-		question("Four?", [option("G"), option("H")], { header: "Four" }),
-	];
-	const { view } = viewWithResult(questions);
-	for (const width of [40, 60, 80, 100, 140]) {
-		assertFits(view, width);
+test("six tabs preserve navigation, fifth-option toggles and custom drafts", () => {
+	const questions = Array.from({ length: 6 }, (_, index) => question(
+		`Decision ${index + 1}?`,
+		[option("A"), option("B"), option("C"), option("D"), option("E")],
+		{ header: `Q${index + 1}`, multiSelect: index === 0 },
+	));
+	const { view, completed } = viewWithResult(questions);
+	const initial = render(view, 160);
+	for (let index = 0; index < 6; index++) assert.match(initial, new RegExp(`Q${index + 1}`));
+	assert.ok(initial.indexOf(CUSTOM_ROW_LABEL) > initial.indexOf("E description"));
+
+	for (let move = 0; move < 4; move++) view.handleInput(KEY.down[0]);
+	assert.match(render(view), /❯ \[ \] E/);
+	view.handleInput(KEY.space);
+	assert.match(render(view), /❯ \[x\] E/);
+	view.handleInput(KEY.down[0]);
+	assert.match(render(view), /❯ Type something\./);
+	view.handleInput(KEY.enter);
+	view.handleInput("saved draft");
+
+	for (let index = 1; index <= 6; index++) {
+		view.handleInput(KEY.tab);
+		assert.equal(view.activeQuestion, index % 6);
+		assert.match(render(view), new RegExp(`\\[${index % 6 + 1}/6\\]`));
+	}
+	view.handleInput(KEY.enter); // Reopen the custom editor with its saved draft.
+	assert.match(plain(render(view)), /saved draft/);
+	view.handleInput(KEY.shiftTab);
+	assert.equal(view.activeQuestion, 5);
+	view.handleInput(KEY.tab);
+	assert.equal(view.activeQuestion, 0);
+	view.handleInput(KEY.up[0]);
+	assert.match(render(view), /❯ \[x\] E/);
+	view.handleInput(KEY.down[0]);
+	view.handleInput(KEY.enter);
+	view.handleInput(KEY.enter); // Submit preserved draft with the fifth option toggled.
+	assert.deepEqual(view.getResult().answers[0], {
+		questionIndex: 0, question: "Decision 1?", kind: "custom", answer: "saved draft", selected: ["E"],
+	});
+	assert.match(render(view, 160), /✓ Q1/);
+	for (let index = 1; index < 6; index++) {
+		for (let move = 0; move < 4; move++) view.handleInput(KEY.down[0]);
+		assert.match(render(view), /❯ E/);
+		view.handleInput(KEY.enter);
+	}
+	assert.equal(completed.length, 1);
+	assert.equal(view.getResult().answers.length, 6);
+	for (const answer of view.getResult().answers.slice(1)) assert.equal(answer.answer, "E");
+});
+
+test("every rendered line fits the width across 1-6 questions with five options and context", () => {
+	const questions = Array.from({ length: 6 }, (_, index) => question(
+		`Decision ${index + 1}: 中文 🚀 rollout safety affects our customers. Which trade-off should we choose?`,
+		Array.from({ length: 5 }, (_, optionIndex) => option(
+			`Choice ${optionIndex + 1}`,
+			"Balance rollout speed against safety and explain the practical impact. ".repeat(3),
+			"中文 🚀 preview ".repeat(20),
+		)),
+		{ header: `Q${index + 1}`, multiSelect: index === 0 },
+	));
+	for (let count = 1; count <= 6; count++) {
+		const { view } = viewWithResult(questions.slice(0, count));
+		for (let index = 0; index < count; index++) {
+			for (const width of [1, 8, 24, 40, 80, 100, 120]) assertFits(view, width);
+			view.handleInput(KEY.tab);
+		}
 	}
 });
