@@ -70,6 +70,7 @@ export function registerQuestionTool(pi: ExtensionAPI): void {
       }
       return { content: [{ type: "text", text: answersText(selection.answers) }], details: { answers: selection.answers } };
     },
+    renderShell: "self",
     renderCall: renderQuestionCall,
     renderResult: renderQuestionResult,
   };

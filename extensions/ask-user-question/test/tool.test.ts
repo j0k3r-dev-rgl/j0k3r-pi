@@ -143,16 +143,93 @@ describe("standalone question tool", () => {
 });
 
 describe("native tool result rendering", () => {
-  it("keeps the collapsed summary short, exposes expansion, and expands all returned text", async () => {
+  it("declares renderShell as 'self'", () => {
+    expect(tool().renderShell).toBe("self");
+  });
+
+  it("assembles the card in two phases across call and result using context.state", async () => {
     const definition = tool();
     const { ctx } = context();
     const result = await execute(definition, ctx);
-    const collapsed = definition.renderResult!(result, { expanded: false, isPartial: false }, theme, {} as any).render(100).join("\n");
-    const expanded = definition.renderResult!(result, { expanded: true, isPartial: false }, theme, {} as any).render(100).join("\n");
+    const sharedContext = { state: {} as Record<string, any> };
+
+    const callComponent = definition.renderCall!(params, theme, sharedContext as any);
+    const callPendingLines = callComponent.render(80);
+    expect(callPendingLines).toHaveLength(3);
+    expect(callPendingLines[0]).toMatch(/╭/);
+    expect(callPendingLines[1]).toMatch(/│/);
+    expect(callPendingLines[2]).toMatch(/╰/);
+
+    const resultComponent = definition.renderResult!(result, { expanded: false, isPartial: false }, theme, sharedContext as any);
+    const resultLines = resultComponent.render(80);
+    expect(sharedContext.state.hasResult).toBe(true);
+    expect(resultLines.some((l) => l.includes("│"))).toBe(true);
+    expect(resultLines[resultLines.length - 1]).toMatch(/╰/);
+
+    const callCompletedLines = callComponent.render(80);
+    expect(callCompletedLines).toHaveLength(1);
+    expect(callCompletedLines[0]).toMatch(/╭/);
+    expect(callCompletedLines[0]).not.toMatch(/╰/);
+  });
+
+  it("falls back to question prompt when header is omitted in renderCall", () => {
+    const definition = tool();
+    const noHeaderArgs = { questions: [{ question: "Select an architectural option" }] };
+    const lines = definition.renderCall!(noHeaderArgs, theme, {} as any).render(80);
+    expect(lines.join("\n")).toContain("Select an architectural option");
+    expect(lines.join("\n")).not.toMatch(/1\.\s+·/);
+  });
+
+  it("keeps collapsed summary short, exposes expansion, shows borders and answers without preview", async () => {
+    const definition = tool();
+    const { ctx } = context();
+    const result = await execute(definition, ctx);
+    const sharedContext = { state: {} as Record<string, any> };
+    definition.renderCall!(params, theme, sharedContext as any);
+    const collapsed = definition.renderResult!(result, { expanded: false, isPartial: false }, theme, sharedContext as any).render(100).join("\n");
+    const expanded = definition.renderResult!(result, { expanded: true, isPartial: false }, theme, sharedContext as any).render(100).join("\n");
+    expect(collapsed).toMatch(/│/);
+    expect(collapsed).toMatch(/╰/);
     expect(collapsed).toMatch(/1 answer/);
+    expect(collapsed).toContain("Scope");
+    expect(collapsed).toContain("Minimal");
     expect(collapsed).toMatch(/expand/i);
     expect(collapsed).not.toContain("Keep all selected detail.");
     expect(expanded).toContain("Keep all selected detail.");
+    expect(expanded).toMatch(/collapse/i);
+  });
+
+  it("preserves multi-select and custom answers in collapsed and expanded views with collapse hint", () => {
+    const definition = tool();
+    const multiCustomResult = {
+      content: [
+        { type: "text" as const, text: "1. Scope — (custom) Bespoke — selected: Minimal\n   selected preview: Keep detail." },
+      ],
+      details: {
+        answers: [
+          {
+            questionIndex: 0,
+            question: "Scope",
+            header: "Scope",
+            kind: "custom" as const,
+            custom: "Bespoke",
+            selected: ["Minimal"],
+            answer: "Bespoke",
+            preview: "Keep detail.",
+          },
+        ],
+      },
+    };
+    const collapsed = definition.renderResult!(multiCustomResult, { expanded: false, isPartial: false }, theme, {} as any).render(100).join("\n");
+    expect(collapsed).toContain("(custom) Bespoke");
+    expect(collapsed).toContain("selected: Minimal");
+    expect(collapsed).not.toContain("selected preview:");
+
+    const expanded = definition.renderResult!(multiCustomResult, { expanded: true, isPartial: false }, theme, {} as any).render(100).join("\n");
+    expect(expanded).toContain("(custom) Bespoke");
+    expect(expanded).toContain("selected: Minimal");
+    expect(expanded).toContain("selected preview: Keep detail.");
+    expect(expanded).toMatch(/collapse/i);
   });
 
   it("renders streaming, cancellation, failures and empty results deliberately", () => {
