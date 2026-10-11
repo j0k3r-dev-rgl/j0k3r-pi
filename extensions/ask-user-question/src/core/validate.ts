@@ -1,7 +1,6 @@
 // Adapted from gentle-shell (MIT); see LICENSE and README.md.
 import {
 	CUSTOM_ROW_LABEL,
-	MAX_HEADER_LENGTH,
 	MAX_LABEL_LENGTH,
 	MAX_OPTIONS,
 	MAX_QUESTIONS,
@@ -21,7 +20,6 @@ export type QuestionnaireError =
 	| { code: "duplicate_question"; message: string; questionIndex: number }
 	| { code: "duplicate_option_label"; message: string; questionIndex: number; optionIndex: number; label: string }
 	| { code: "label_too_long"; message: string; questionIndex: number; optionIndex: number; length: number }
-	| { code: "header_too_long"; message: string; questionIndex: number; length: number }
 	| { code: "reserved_label"; message: string; questionIndex: number; optionIndex: number; label: string };
 
 /**
@@ -29,8 +27,8 @@ export type QuestionnaireError =
  * precedence order, or `undefined` when the parameters are valid.
  *
  * Precedence: no questions, empty options, option count, question count,
- * duplicate question text, duplicate option label, label length, header
- * length, then reserved custom-row labels.
+ * duplicate question text, duplicate option label, label length, then reserved
+ * custom-row labels.
  */
 export function validateQuestionnaire(params: QuestionParams): QuestionnaireError | undefined {
 	const questions = Array.isArray(params?.questions) ? params.questions : [];
@@ -110,17 +108,6 @@ export function validateQuestionnaire(params: QuestionParams): QuestionnaireErro
 					length: option.label.length,
 				};
 			}
-		}
-	}
-
-	for (const [questionIndex, question] of questions.entries()) {
-		if (question.header.length > MAX_HEADER_LENGTH) {
-			return {
-				code: "header_too_long",
-				message: `Question ${questionIndex + 1} header exceeds ${MAX_HEADER_LENGTH} characters.`,
-				questionIndex,
-				length: question.header.length,
-			};
 		}
 	}
 

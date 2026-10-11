@@ -4,7 +4,6 @@ import { test } from "vitest";
 import { Value } from "typebox/value";
 import {
 	CUSTOM_ROW_LABEL,
-	MAX_HEADER_LENGTH,
 	MAX_LABEL_LENGTH,
 	MAX_OPTIONS,
 	MAX_QUESTIONS,
@@ -58,8 +57,8 @@ function makeCases(): Case[] {
 			expected: undefined,
 		},
 		{
-			name: "accepts a header at the 16 character limit",
-			input: params([question("Long header?", [option("A"), option("B")], { header: "x".repeat(MAX_HEADER_LENGTH) })]),
+			name: "accepts a header without a character limit",
+			input: params([question("Long header?", [option("A"), option("B")], { header: "Configuración autorizada 中文 🚀 ".repeat(100) })]),
 			expected: undefined,
 		},
 		{
@@ -151,16 +150,6 @@ function makeCases(): Case[] {
 			},
 		},
 		{
-			name: "rejects a header over the 16 character limit",
-			input: params([question("Header too long?", [option("A"), option("B")], { header: "x".repeat(MAX_HEADER_LENGTH + 1) })]),
-			expected: {
-				code: "header_too_long",
-				message: "Question 1 header exceeds 16 characters.",
-				questionIndex: 0,
-				length: MAX_HEADER_LENGTH + 1,
-			},
-		},
-		{
 			name: "rejects the reserved Other label",
 			input: params([question("Reserved?", [option("Other"), option("B")])]),
 			expected: {
@@ -213,7 +202,6 @@ test("schema constants expose the documented limits", () => {
 	assert.equal(MAX_QUESTIONS, 4);
 	assert.equal(MIN_OPTIONS, 2);
 	assert.equal(MAX_OPTIONS, 4);
-	assert.equal(MAX_HEADER_LENGTH, 16);
 	assert.equal(MAX_LABEL_LENGTH, 60);
 	assert.equal(CUSTOM_ROW_LABEL, "Type something.");
 });
@@ -261,12 +249,19 @@ test("schema rejects malformed questionnaire parameters", () => {
 		])],
 		["one option", params([question("One?", [option("Only")])])],
 		["label over the limit", params([question("Long?", [option("z".repeat(MAX_LABEL_LENGTH + 1)), option("B")])])],
-		["header over the limit", params([question("Long?", [option("A"), option("B")], { header: "x".repeat(MAX_HEADER_LENGTH + 1) })])],
 		["unknown root property", { questions: valid(), extra: true }],
 	];
 	for (const [name, subject] of invalidCases) {
 		assert.equal(Value.Check(QuestionParamsSchema, subject), false, name);
 	}
+});
+
+test("schema accepts long headers and retains the string type requirement", () => {
+	for (const header of ["Config autorizada", "Fallos de escaneo", "Configuración autorizada", "x".repeat(1000)]) {
+		const input = params([question("Long header?", [option("A"), option("B")], { header })]);
+		assert.equal(Value.Check(QuestionParamsSchema, input), true, header);
+	}
+	assert.equal(Value.Check(QuestionParamsSchema, { questions: [{ ...valid()[0], header: 123 }] }), false);
 });
 
 test("schema accepts multiSelect and preview as optional fields", () => {

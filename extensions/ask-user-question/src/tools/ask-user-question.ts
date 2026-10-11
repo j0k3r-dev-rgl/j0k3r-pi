@@ -18,7 +18,7 @@ export function registerQuestionTool(pi: ExtensionAPI): void {
       "When a material product or design decision is open, use ask_user_question for one focused question, then wait. Do not turn clear tasks into unnecessary interviews.",
       "Find environment and code facts yourself within authorized scope; ask only for user-owned decisions.",
       "Batch up to four questions only when they are independent and the governing workflow permits it; defer questions that depend on unanswered choices.",
-      "Keep headers at most 16 characters and option labels at most 60 characters; give two to four honest options with descriptions and optional previews. Use multiSelect only for non-exclusive choices.",
+      "Keep headers concise for readability and option labels at most 60 characters; give two to four honest options with descriptions and optional previews. Use multiSelect only for non-exclusive choices.",
       "Write questions and authored options in the user's conversation language. Indicate a recommendation in the description when helpful, without preselecting or deciding for the user.",
       "The Type something. row is always available. Treat free text as the user's actual response, not as an opaque choice token or implicit approval.",
       "Cancellation means no decision or authorization was accepted: stop dependent work and wait, never guess, retry automatically, or treat cancellation as approval.",
