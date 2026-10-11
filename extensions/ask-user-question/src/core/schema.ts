@@ -10,9 +10,6 @@ export const MIN_OPTIONS = 2;
 /** Maximum number of authored options per question. */
 export const MAX_OPTIONS = 4;
 
-/** Maximum length of a question header chip. */
-export const MAX_HEADER_LENGTH = 16;
-
 /** Maximum length of an authored option label. */
 export const MAX_LABEL_LENGTH = 60;
 
@@ -42,8 +39,7 @@ const QuestionSchema = Type.Object(
 	{
 		question: Type.String({ description: "The full question text" }),
 		header: Type.String({
-			maxLength: MAX_HEADER_LENGTH,
-			description: "Short progress header, at most 16 characters",
+			description: "Progress header; keep it concise for readability",
 		}),
 		options: Type.Array(OptionSchema, {
 			minItems: MIN_OPTIONS,

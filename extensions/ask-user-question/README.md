@@ -34,7 +34,7 @@ For an isolated trial, run `pi --no-extensions -e ./index.ts` from this director
 |---|---|
 | `questions` | 1–4 questions; duplicate question text is rejected |
 | `question` | Full question text |
-| `header` | Short tab label, at most 16 characters |
+| `header` | Tab label with no character limit; concise text is recommended for readability |
 | `options` | 2–4 ordered choices |
 | `label` | At most 60 characters; labels must be unique within a question |
 | `description` | Explanation shown below the choice |
@@ -61,7 +61,7 @@ Selection and input actions honor injected Pi keybindings; Space and Shift+Tab f
 
 Only the active question body is displayed, avoiding stacked question bodies. Long descriptions/previews still increase its height; this does not promise a height limit for arbitrary text. Every rendered line is width-safe, including extremely narrow Unicode viewports. A grapheme wider than the viewport can be visually clipped without changing result data.
 
-Tool rows use Pi's standard shell and expansion state. The collapsed result shows answer count and the configured `app.tools.expand` hint; expanding shows **all returned model-facing text**, including previews. Partial, cancellation, error, and empty states are explicit. Rendering never changes the result or silently truncates answer data; no persistence/pagination layer is needed for this bounded, user-authored interaction.
+Tool rows use Pi's standard shell and expansion state. The collapsed result shows answer count and the configured `app.tools.expand` hint; expanding shows **all returned model-facing text**, including previews. Partial, cancellation, error, and empty states are explicit. Collapsed errors show only their first non-empty line, clipped to the available width; expanding reveals the complete diagnostic, including received arguments. Rendering never changes the result or silently truncates answer data; no persistence/pagination layer is needed for this bounded, user-authored interaction.
 
 ## Independence, lifecycle and privacy
 

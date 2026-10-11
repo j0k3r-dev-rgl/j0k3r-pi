@@ -175,14 +175,13 @@ export function renderQuestionResult(
         }
       } else if (isError) {
         const errorMsg = body || "Error: tool execution failed";
-        bodyLines.push(theme.fg("error", errorMsg));
         if (!isExpanded) {
+          const summary = errorMsg.split(/\r?\n/).find((line) => line.trim())?.trim() || "Error: tool execution failed";
+          const summaryWidth = width < 24 ? width : width - 4;
+          bodyLines.push(truncateToWidth(theme.fg("error", summary), summaryWidth));
           bodyLines.push(formatKeyHint(theme, "expand"));
         } else {
-          if (body && body !== errorMsg) {
-            bodyLines.push("");
-            bodyLines.push(...body.split("\n"));
-          }
+          bodyLines.push(theme.fg("error", errorMsg));
           bodyLines.push(formatKeyHint(theme, "collapse"));
         }
       } else if (isEmpty) {

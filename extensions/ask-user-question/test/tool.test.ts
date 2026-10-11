@@ -53,6 +53,22 @@ describe("standalone question tool", () => {
     expect(result.content[0]).toMatchObject({ text: expect.stringContaining("Keep all selected detail.") });
   });
 
+  it("opens the questionnaire with long headers without truncating its input", async () => {
+    const header = "Configuración autorizada 中文 🚀 ".repeat(30);
+    const input = { questions: [{ ...params.questions[0], header }] };
+    const { ctx, custom, component } = context();
+    const definition = tool();
+    expect(definition.parameters.properties.questions.items.properties.header).not.toHaveProperty("maxLength");
+    expect(definition.promptGuidelines?.join(" ")).not.toMatch(/headers at most 16/);
+    const result = await execute(definition, ctx, undefined, input);
+    expect(custom).toHaveBeenCalledOnce();
+    expect(result.details.answers[0].answer).toBe("Minimal");
+    expect(input.questions[0].header).toBe(header);
+    for (const width of [1, 8, 24, 40, 80]) {
+      for (const line of component().render(width)) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+    }
+  });
+
   it("cancels the whole questionnaire without exposing committed partial answers", async () => {
     const input = { questions: [...params.questions, { ...params.questions[0], question: "Next decision?", header: "Next" }] };
     const { ctx } = context((view) => { view.handleInput("\r"); view.handleInput("\x1b"); });
@@ -239,6 +255,47 @@ describe("native tool result rendering", () => {
     expect(render({ content: [{ type: "text", text: "Cancelled" }], details: { cancelled: true } })).toMatch(/Cancelled/);
     expect(render({ content: [{ type: "text", text: "Error: TUI unavailable" }], details: {} })).toContain("TUI unavailable");
     expect(render({ content: [], details: {} })).toMatch(/No answers/);
+  });
+
+  it("compacts native validation errors but preserves every line on expansion", () => {
+    const definition = tool();
+    const body = 'Validation failed for tool "ask_user_question":\n  - questions.1.header: invalid input\n\nReceived arguments:\n{\n  "questions": ["full diagnostic payload"]\n}';
+    // Pi schema failures have no questionnaire details and signal errors via context.
+    const result = { content: [{ type: "text" as const, text: body }], details: undefined };
+    const original = JSON.stringify(result);
+    const sharedContext = { state: {} as Record<string, any>, isError: true };
+    const call = definition.renderCall!(params, theme, sharedContext as any);
+    const collapsed = definition.renderResult!(result, { expanded: false, isPartial: false }, theme, sharedContext as any);
+    for (const width of [1, 2, 8, 24, 40, 80, 120]) {
+      const lines = collapsed.render(width);
+      expect(lines.length).toBeLessThanOrEqual(3);
+      for (const line of [...call.render(width), ...lines]) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      expect(lines.join("\n")).not.toContain("Received arguments");
+      expect(lines.join("\n")).not.toContain("full diagnostic payload");
+    }
+    expect(collapsed.render(120).join("\n")).toContain('Validation failed for tool "ask_user_question"');
+    expect(collapsed.render(120).join("\n")).toMatch(/expand/);
+    expect(call.render(80)).toHaveLength(1);
+    const expanded = definition.renderResult!(result, { expanded: true, isPartial: false }, theme, sharedContext as any).render(120).join("\n");
+    for (const line of body.split("\n").filter(Boolean)) expect(expanded).toContain(line);
+    expect(expanded).toMatch(/collapse/);
+    expect(JSON.stringify(result)).toBe(original);
+  });
+
+  it("keeps long single-line execution errors compact and handles empty error bodies", () => {
+    const definition = tool();
+    for (const body of ["Error: 中文 🚀 é ".repeat(100), ""]) {
+      const result = { content: [{ type: "text" as const, text: body }], details: undefined, isError: true };
+      for (const width of [1, 8, 24, 40, 80]) {
+        const lines = definition.renderResult!(result, { expanded: false, isPartial: false }, theme, {} as any).render(width);
+        expect(lines.length).toBeLessThanOrEqual(3);
+        for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      }
+      if (!body) {
+        const expanded = definition.renderResult!(result, { expanded: true, isPartial: false }, theme, {} as any).render(80).join("\n");
+        expect(expanded).toContain("Error: tool execution failed");
+      }
+    }
   });
 
   it("keeps call and result lines width-safe with long Unicode content", () => {
