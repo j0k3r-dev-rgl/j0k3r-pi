@@ -47,13 +47,10 @@ function makeCases(): Case[] {
 			expected: undefined,
 		},
 		{
-			name: "accepts exactly four questions and four options",
-			input: params([
-				question("Q1", [option("A1"), option("B1"), option("C1"), option("D1")]),
-				question("Q2", [option("A2"), option("B2")]),
-				question("Q3", [option("A3"), option("B3")]),
-				question("Q4", [option("A4"), option("B4")]),
-			]),
+			name: "accepts exactly six questions and five options",
+			input: params(Array.from({ length: 6 }, (_, index) =>
+				question(`Q${index + 1}`, [option("A"), option("B"), option("C"), option("D"), option("E")]),
+			)),
 			expected: undefined,
 		},
 		{
@@ -85,34 +82,30 @@ function makeCases(): Case[] {
 			input: params([question("One?", [option("Only")])]),
 			expected: {
 				code: "option_count",
-				message: "Question 1 must have between 2 and 4 options, received 1.",
+				message: "Question 1 must have between 2 and 5 options, received 1.",
 				questionIndex: 0,
 				count: 1,
 			},
 		},
 		{
-			name: "rejects five options above the maximum",
-			input: params([question("Five?", [option("A"), option("B"), option("C"), option("D"), option("E")])]),
+			name: "rejects six options above the maximum",
+			input: params([question("Six?", [option("A"), option("B"), option("C"), option("D"), option("E"), option("F")])]),
 			expected: {
 				code: "option_count",
-				message: "Question 1 must have between 2 and 4 options, received 5.",
+				message: "Question 1 must have between 2 and 5 options, received 6.",
 				questionIndex: 0,
-				count: 5,
+				count: 6,
 			},
 		},
 		{
-			name: "rejects more than four questions",
-			input: params([
-				question("Q1", [option("A1"), option("B1")]),
-				question("Q2", [option("A2"), option("B2")]),
-				question("Q3", [option("A3"), option("B3")]),
-				question("Q4", [option("A4"), option("B4")]),
-				question("Q5", [option("A5"), option("B5")]),
-			]),
+			name: "rejects more than six questions",
+			input: params(Array.from({ length: 7 }, (_, index) =>
+				question(`Q${index + 1}`, [option("A"), option("B")]),
+			)),
 			expected: {
 				code: "too_many_questions",
-				message: "A questionnaire accepts at most 4 questions, received 5.",
-				count: 5,
+				message: "A questionnaire accepts at most 6 questions, received 7.",
+				count: 7,
 			},
 		},
 		{
@@ -199,9 +192,9 @@ test("validateQuestionnaire reports the first violation for each guard", () => {
 });
 
 test("schema constants expose the documented limits", () => {
-	assert.equal(MAX_QUESTIONS, 4);
+	assert.equal(MAX_QUESTIONS, 6);
 	assert.equal(MIN_OPTIONS, 2);
-	assert.equal(MAX_OPTIONS, 4);
+	assert.equal(MAX_OPTIONS, 5);
 	assert.equal(MAX_LABEL_LENGTH, 60);
 	assert.equal(CUSTOM_ROW_LABEL, "Type something.");
 });
@@ -240,19 +233,39 @@ test("schema rejects malformed questionnaire parameters", () => {
 	const invalidCases: Array<[string, unknown]> = [
 		["missing questions", {}],
 		["empty questions", { questions: [] }],
-		["five questions", params([
-			question("Q1", [option("A1"), option("B1")]),
-			question("Q2", [option("A2"), option("B2")]),
-			question("Q3", [option("A3"), option("B3")]),
-			question("Q4", [option("A4"), option("B4")]),
-			question("Q5", [option("A5"), option("B5")]),
-		])],
+		["seven questions", params(Array.from({ length: 7 }, (_, index) =>
+			question(`Q${index + 1}`, [option("A"), option("B")]),
+		))],
+		["six options", params([question("Six?", [option("A"), option("B"), option("C"), option("D"), option("E"), option("F")])])],
 		["one option", params([question("One?", [option("Only")])])],
 		["label over the limit", params([question("Long?", [option("z".repeat(MAX_LABEL_LENGTH + 1)), option("B")])])],
 		["unknown root property", { questions: valid(), extra: true }],
 	];
 	for (const [name, subject] of invalidCases) {
 		assert.equal(Value.Check(QuestionParamsSchema, subject), false, name);
+	}
+});
+
+test("schema and validator accept every supported question and option count", () => {
+	for (let count = 1; count <= 6; count++) {
+		for (let optionsCount = 2; optionsCount <= 5; optionsCount++) {
+			const input = params(Array.from({ length: count }, (_, index) => question(
+				`Decision ${index + 1}?`,
+				Array.from({ length: optionsCount }, (_, index) => option(`Option ${index + 1}`)),
+			)));
+			assert.equal(Value.Check(QuestionParamsSchema, input), true, `${count} questions, ${optionsCount} options`);
+			assert.equal(validateQuestionnaire(input), undefined);
+		}
+	}
+});
+
+test("schema descriptions request decision context and option implications without text length rules", () => {
+	const questionSchema = QuestionParamsSchema.properties.questions.items;
+	assert.match((questionSchema.properties.question as { description?: string }).description ?? "", /background.*context/i);
+	assert.match((questionSchema.properties.options.items.properties.description as { description?: string }).description ?? "", /trade-offs.*implications/i);
+	for (const field of [questionSchema.properties.question, questionSchema.properties.options.items.properties.description]) {
+		assert.equal("minLength" in field, false);
+		assert.equal("maxLength" in field, false);
 	}
 });
 

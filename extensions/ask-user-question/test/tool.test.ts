@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CURSOR_MARKER, KeybindingsManager, TUI_KEYBINDINGS, visibleWidth } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionToolContext, Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import register from "../index.ts";
+import { QuestionParamsSchema } from "../src/core/schema.ts";
 
 const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text } as Theme;
 const keybindings = new KeybindingsManager(TUI_KEYBINDINGS);
@@ -43,6 +44,14 @@ describe("standalone question tool", () => {
     expect(definition.promptSnippet).toBeTruthy();
     expect(definition.promptGuidelines?.join(" ")).toMatch(/decision/);
     expect(definition.promptGuidelines?.join(" ")).toMatch(/cancel/i);
+    expect(definition.description).toMatch(/one to six.*two to five/);
+    expect(definition.parameters).toBe(QuestionParamsSchema);
+    const guidance = definition.promptGuidelines?.join(" ") ?? "";
+    expect(guidance).toMatch(/Batch up to six questions/);
+    expect(guidance).toMatch(/two to five honest options/);
+    expect(guidance).toMatch(/why the decision is needed/i);
+    expect(guidance).toMatch(/relevant background/i);
+    expect(guidance).toMatch(/consequences, trade-offs, and practical differences/i);
   });
 
   it("returns the actual answer and preview without writing configuration", async () => {
@@ -66,6 +75,49 @@ describe("standalone question tool", () => {
     expect(input.questions[0].header).toBe(header);
     for (const width of [1, 8, 24, 40, 80]) {
       for (const line of component().render(width)) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+    }
+  });
+
+  it("completes six questions with five options and preserves context in expanded output", async () => {
+    const input = { questions: Array.from({ length: 6 }, (_, index) => ({
+      question: `Decision ${index + 1}: we need a rollout strategy because downtime affects customers. Which approach should we use?`,
+      header: `Q${index + 1}`,
+      options: Array.from({ length: 5 }, (_, optionIndex) => ({
+        label: `Option ${optionIndex + 1}`,
+        description: `Approach ${optionIndex + 1} trades rollout speed for rollback safety; compare its impact before choosing.`,
+        preview: `Preview ${index + 1}/${optionIndex + 1}`,
+      })),
+    })) };
+    const { ctx, custom } = context((component) => {
+      for (let index = 0; index < 6; index++) {
+        const rendered = component.render(200).join("\n");
+        expect(rendered).toContain(`[${index + 1}/6]`);
+        expect(rendered).toContain("downtime affects customers");
+        expect(rendered).toContain("rollback safety");
+        for (let move = 0; move < 4; move++) component.handleInput("\x1b[B");
+        component.handleInput("\r");
+      }
+    });
+    const definition = tool();
+    const result = await execute(definition, ctx, undefined, input);
+    expect(custom).toHaveBeenCalledOnce();
+    expect(result.details.answers).toHaveLength(6);
+    const sharedContext = { state: {} as Record<string, any> };
+    const call = definition.renderCall!(input, theme, sharedContext as any);
+    const collapsed = definition.renderResult!(result, { expanded: false, isPartial: false }, theme, sharedContext as any);
+    const expanded = definition.renderResult!(result, { expanded: true, isPartial: false }, theme, sharedContext as any);
+    expect(call.render(200).join("\n")).toContain("6. Q6");
+    expect(collapsed.render(200).join("\n")).toContain("6 answers");
+    const expandedText = expanded.render(200).join("\n");
+    for (let index = 0; index < 6; index++) {
+      expect(result.details.answers[index]).toMatchObject({ questionIndex: index, answer: "Option 5", preview: `Preview ${index + 1}/5` });
+      expect(expandedText).toContain(`Decision ${index + 1}:`);
+      expect(expandedText).toContain(`Preview ${index + 1}/5`);
+    }
+    for (const width of [1, 8, 24, 40, 80, 100, 120]) {
+      for (const component of [call, collapsed, expanded]) {
+        for (const line of component.render(width)) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      }
     }
   });
 

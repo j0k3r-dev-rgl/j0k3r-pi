@@ -8,7 +8,7 @@ An independent global Pi extension adapting gentle-shell's `ask_user_question` e
 2. Run `/reload` or restart Pi.
 3. Ask Pi to clarify a necessary decision using `ask_user_question`. The questionnaire replaces the input dock temporarily while leaving the transcript visible.
 
-The tool contributes prompt guidelines for **one focused question when a material decision is open**, then waiting for the answer. Independent questions can be grouped only when the governing workflow permits it. Facts the agent can inspect are not user decisions. These are model instructions, not a deterministic guarantee of when the model will call the tool; existing authorization and circuit-breaker rules remain authoritative.
+The tool contributes prompt guidelines for **one focused question when a material decision is open**, then waiting for the answer. Up to six independent questions can be grouped only when the governing workflow permits it. Each question should explain the relevant background, why the decision is needed, and the trade-off at hand. Option descriptions should explain the consequences and practical differences in plain language, rather than repeating a short label. Facts the agent can inspect are not user decisions. These are model instructions, not a deterministic guarantee of when the model will call the tool; existing authorization and circuit-breaker rules remain authoritative.
 
 For an isolated trial, run `pi --no-extensions -e ./index.ts` from this directory. Do not load a second provider of `ask_user_question`, including gentle-shell or `@juicesharp/rpiv-ask-user-question`, in the same session: Pi rejects duplicate tool names.
 
@@ -19,11 +19,11 @@ For an isolated trial, run `pi --no-extensions -e ./index.ts` from this director
 ```json
 {
   "questions": [{
-    "question": "Which scope should we implement?",
+    "question": "We need to choose the scope for the first release before implementation. A minimal release is faster to deliver; a broader release includes more capabilities but needs more work and validation. Which scope should we implement?",
     "header": "Scope",
     "options": [
-      { "label": "Minimal", "description": "Recommended: the smallest useful change", "preview": "Keep the current workflow and implement only the requested behavior." },
-      { "label": "Broader", "description": "Discuss additional requirements first" }
+      { "label": "Minimal", "description": "Recommended: deliver only the required behavior first, reducing implementation and validation effort; extra capabilities remain out of scope.", "preview": "Keep the current workflow and implement only the requested behavior." },
+      { "label": "Broader", "description": "Include additional capabilities after agreeing their requirements; this increases implementation effort and delays the first release." }
     ],
     "multiSelect": false
   }]
@@ -32,16 +32,16 @@ For an isolated trial, run `pi --no-extensions -e ./index.ts` from this director
 
 | Field | Contract |
 |---|---|
-| `questions` | 1–4 questions; duplicate question text is rejected |
-| `question` | Full question text |
+| `questions` | 1–6 questions; duplicate question text is rejected |
+| `question` | Full question text with the background and context needed to understand the decision |
 | `header` | Tab label with no character limit; concise text is recommended for readability |
-| `options` | 2–4 ordered choices |
+| `options` | 2–5 ordered choices, plus the automatically appended free-text row |
 | `label` | At most 60 characters; labels must be unique within a question |
-| `description` | Explanation shown below the choice |
+| `description` | Explanation of the choice's consequences, trade-offs, and practical differences |
 | `preview` | Optional text preview: side-by-side at ≥80 columns, inline below that width |
 | `multiSelect` | Optional boolean; defaults to single selection |
 
-The view appends **Type something.** itself; do not author an option named `Other` or `Type something.`. Input schemas reject unknown properties. Questions and authored options can be localized by the model; fixed interaction labels remain upstream English. Previews are wrapped text, not a full Markdown renderer.
+The view appends **Type something.** itself; do not author an option named `Other` or `Type something.`. Input schemas reject unknown properties. Questions and authored options can be localized by the model; fixed interaction labels remain upstream English. Previews are wrapped text, not a full Markdown renderer. Context quality is model guidance, not a deterministic guarantee: question text and option descriptions have no artificial minimum length.
 
 Success returns the complete answer transcript in `content` and typed answer rows in `details.answers`, including custom text, multi-select choices, and selected single-option previews. Cancellation returns `details.cancelled: true`, discards partial answers, and explicitly tells the model to stop dependent work. It does **not** authorize an operation.
 
@@ -87,7 +87,8 @@ Tests cover upstream schema/validation and view behavior, tabs/drafts, single/mu
 Manual checks after `/reload`:
 
 - [ ] Single question; complete it and expand the returned answer.
-- [ ] Multiple questions; switch tabs and return to a saved custom draft.
+- [ ] Six questions with five options each; select the fifth option, switch through all tabs, and return to a saved custom draft.
+- [ ] Questions explain the decision's context; option descriptions make consequences and practical differences understandable.
 - [ ] Multi-select with Space and a custom response.
 - [ ] Preview above and below 80 columns; resize during interaction.
 - [ ] Escape from editor versus Escape from choices; confirm cancellation does not continue blocked work.
