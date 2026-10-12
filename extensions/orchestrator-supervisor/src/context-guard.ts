@@ -185,6 +185,12 @@ export class ContextGuard {
         : typeof toolCall?.name === 'string'
           ? toolCall.name
           : 'unknown';
+
+    // Memory tools and supervisor_rotate are essential lifecycle tools and must NEVER be blocked
+    if (toolName.startsWith('memory_') || toolName === 'supervisor_rotate') {
+      return null;
+    }
+
     const estimatedOutputBudget = this.estimateToolOutputBudgetTokens(toolName);
     const candidateBatchBudget = this.pendingBatchToolOutputBudget + estimatedOutputBudget;
     const projectedTokens = currentEstimatedTokens + candidateBatchBudget;
@@ -194,7 +200,7 @@ export class ContextGuard {
       return {
         block: true,
         terminate: true,
-        reason: `Context reserve ceiling (90%) reached; blocking remaining tool calls to allow clean settlement and session rotation. Por favor, guarda un resumen del estado actual y lo pendiente usando memory_save (type: 'session_summary', title: 'Resumen de continuación'), y a continuación invoca supervisor_rotate({ memory_id: <id_guardado>, next_step: '<siguiente_paso>' }) para rotar inmediatamente a una sesión limpia y continuar la tarea automáticamente. (projected ${projectedTokens} >= ceiling ${ceilingTokens})`,
+        reason: `Límite de seguridad de contexto alcanzado (90%). No ejecutes más herramientas pesadas en esta sesión. Guarda un resumen de lo realizado y lo pendiente usando la herramienta memory_save (type: 'session_summary', title: 'Resumen de continuación'), y a continuación ejecuta supervisor_rotate({ memory_id: <id_guardado>, next_step: '<siguiente_paso>' }) para iniciar una nueva sesión limpia y continuar automáticamente. (projected ${projectedTokens} >= ceiling ${ceilingTokens})`,
       };
     }
 

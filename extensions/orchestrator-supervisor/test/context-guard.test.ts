@@ -58,7 +58,22 @@ test('MINI-004: Reaching 90% context reserve flags reserve exceeded and blocks s
   assert.ok(interception);
   assert.equal(interception.block, true);
   assert.equal(interception.terminate, true);
-  assert.match(interception.reason ?? '', /Context reserve ceiling \(90%\) reached/);
+  assert.match(interception.reason ?? '', /Límite de seguridad de contexto alcanzado \(90%\)|Context reserve ceiling \(90%\) reached/);
+
+  // Essential lifecycle tools memory_save, memory_get, and supervisor_rotate are NEVER blocked even at >= 90%!
+  const memSaveIntercept = guard.interceptToolCall(
+    { toolName: 'memory_save', input: { action: 'save', type: 'session_summary' } },
+    metrics.tokens,
+    metrics.contextWindow,
+  );
+  assert.equal(memSaveIntercept, null, 'memory_save must NEVER be blocked by context ceiling');
+
+  const rotateIntercept = guard.interceptToolCall(
+    { toolName: 'supervisor_rotate', input: { memory_id: 88 } },
+    metrics.tokens,
+    metrics.contextWindow,
+  );
+  assert.equal(rotateIntercept, null, 'supervisor_rotate must NEVER be blocked by context ceiling');
 });
 
 test('MINI-004: Unknown tool output budget fails closed at reserve boundary', () => {

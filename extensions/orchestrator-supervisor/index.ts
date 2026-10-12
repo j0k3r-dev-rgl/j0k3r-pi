@@ -245,12 +245,10 @@ export default function orchestratorSupervisorExtension(pi: ExtensionAPI, explic
         fallbackDetails,
       );
       if (evaluated.isReserveExceeded) {
-        runtime.setAuthorizedContinuation({
-          action: 'continue_interrupted_turn',
-          reason: 'context_reserve_90_reached',
-          timestamp: Date.now(),
-        });
-        runtime.requestRotation('context_reserve_90_reached');
+        ctx.ui?.setStatus?.(
+          SUPERVISOR_EXTENSION_NAME,
+          `supervisor · ${runtime.getState().activeModel.split('/')[1] || 'main'} · contexto ≥ 90%`,
+        );
       }
     }
   });
@@ -345,12 +343,6 @@ export default function orchestratorSupervisorExtension(pi: ExtensionAPI, explic
       try {
         runtime.recordToolCallResult(toolCallId, true, { blockedBySupervisor: true });
       } catch {}
-      runtime.setAuthorizedContinuation({
-        action: 'continue_interrupted_turn',
-        reason: 'context_reserve_90_reached',
-        timestamp: Date.now(),
-      });
-      runtime.requestRotation('context_reserve_90_reached');
       return {
         block: true,
         reason: intercept.reason,
@@ -424,7 +416,7 @@ export default function orchestratorSupervisorExtension(pi: ExtensionAPI, explic
       );
 
       if (action.type === 'immediate_failover' || action.type === 'cooldown_failover') {
-        runtime.requestRotation(action.reason || 'provider_failover');
+        runtime.requestFailover(action.reason || 'provider_failover', { autoContinue: true });
         if (action.shouldAbortRetry && typeof (ctx as any).abort === 'function') {
           runtime.markInternalAbort(action.reason || 'provider_failover');
           (ctx as any).abort();
@@ -446,12 +438,10 @@ export default function orchestratorSupervisorExtension(pi: ExtensionAPI, explic
         fallbackDetails,
       );
       if (evaluated.isReserveExceeded) {
-        runtime.setAuthorizedContinuation({
-          action: 'continue_interrupted_turn',
-          reason: 'context_reserve_90_reached',
-          timestamp: Date.now(),
-        });
-        runtime.requestRotation('context_reserve_90_reached');
+        ctx.ui?.setStatus?.(
+          SUPERVISOR_EXTENSION_NAME,
+          `supervisor · ${runtime.getState().activeModel.split('/')[1] || 'main'} · contexto ≥ 90%`,
+        );
       }
     }
   });
