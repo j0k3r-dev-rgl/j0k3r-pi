@@ -768,6 +768,7 @@ test('MINI-002 / MINI-003 / MINI-004: Turn-end >= 90% context triggers rotation 
 
   try {
     const hooks = new Map<string, Function>();
+    const registeredTools = new Map<string, any>();
     const sentUserMessages: string[] = [];
     const mockPi = {
       on: (event: string, handler: Function) => {
@@ -775,6 +776,9 @@ test('MINI-002 / MINI-003 / MINI-004: Turn-end >= 90% context triggers rotation 
         return () => {};
       },
       registerCommand: () => {},
+      registerTool: (tool: any) => {
+        registeredTools.set(tool.name, tool);
+      },
       sendUserMessage: (msg: string) => {
         sentUserMessages.push(msg);
       },
@@ -824,7 +828,7 @@ test('MINI-002 / MINI-003 / MINI-004: Turn-end >= 90% context triggers rotation 
       ctx,
     );
 
-    // 2. Context reaches >= 90% at turn_end (250,000 / 272,000 = 91.9%) with no tool calls in that turn
+    // 2. Context reaches >= 90% (250,000 / 272,000 = 91.9%)
     currentTokens = 250000;
     await hooks.get('turn_end')!(
       {
@@ -834,11 +838,135 @@ test('MINI-002 / MINI-003 / MINI-004: Turn-end >= 90% context triggers rotation 
       },
       ctx,
     );
+    // At turn end, status shows context >= 90% without blind rotation
+    await hooks.get('agent_settled')!({ type: 'agent_settled', aborted: false }, ctx);
+    assert.equal(sentUserMessages.length, 0, 'Must NOT rotate blindly before agent saves memory');
+
+    // 3. Heavy tool call (bash) is blocked and instructed to save memory and call supervisor_rotate
+    const toolCallRes = await hooks.get('tool_call')!(
+      { type: 'tool_call', toolCallId: 'call_heavy_1', toolName: 'bash', input: { command: 'git status' } },
+      ctx,
+    );
+    assert.equal(toolCallRes?.block, true);
+    assert.match(toolCallRes?.reason ?? '', /memory_save/i);
+    assert.match(toolCallRes?.reason ?? '', /supervisor_rotate/i);
+
+    // 4. Model calls supervisor_rotate tool after saving memory
+    const supervisorRotateTool = registeredTools.get('supervisor_rotate');
+    assert.ok(supervisorRotateTool, 'supervisor_rotate tool must be registered');
+    await supervisorRotateTool.execute('call_rot_2', { memory_id: 88, next_step: 'Continuar con RM-008' });
+
+    // Now on agent settlement, rotation executes cleanly!
     await hooks.get('agent_settled')!({ type: 'agent_settled', aborted: false }, ctx);
     await new Promise((r) => setImmediate(r));
 
     assert.equal(sentUserMessages.length, 1);
     assert.equal(sentUserMessages[0], '/supervisor-rotate');
+
+    await hooks.get('session_shutdown')!({ reason: 'quit' }, ctx);
+  } finally {
+    await cpamcServer.stop();
+    if (oldCpamcUrl === undefined) delete process.env.CLIPROXYAPI_BASE_URL;
+    else process.env.CLIPROXYAPI_BASE_URL = oldCpamcUrl;
+    if (oldRuntimeDir === undefined) delete process.env.PI_SUPERVISOR_RUNTIME_DIR;
+    else process.env.PI_SUPERVISOR_RUNTIME_DIR = oldRuntimeDir;
+    rmSync(tmpProject, { recursive: true, force: true });
+  }
+});
+
+test('MINI-002 / MINI-003: Provider failure with context < 90% switches model in-session and dispatches continua without opening new session', async () => {
+  const tmpProject = mkdtempSync(join(tmpdir(), 'sup-provider-failover-'));
+  const oldCpamcUrl = process.env.CLIPROXYAPI_BASE_URL;
+  const oldRuntimeDir = process.env.PI_SUPERVISOR_RUNTIME_DIR;
+
+  const cpamcServer = new MockCpamcServer({
+    mainWhamUsedPercentPrimary: 10.0,
+    mainWhamUsedPercentSecondary: 10.0,
+    secondWhamUsedPercentPrimary: 20.0,
+    secondWhamUsedPercentSecondary: 20.0,
+  });
+  const cpamcUrl = await cpamcServer.start();
+  process.env.CLIPROXYAPI_BASE_URL = cpamcUrl;
+  const runtimeDir = join(tmpProject, 'supervisor-runtime');
+  process.env.PI_SUPERVISOR_RUNTIME_DIR = runtimeDir;
+
+  try {
+    mkdirSync(join(tmpProject, '.pi'), { recursive: true });
+    writeFileSync(
+      join(tmpProject, '.pi', 'extensions.json'),
+      JSON.stringify({ 'orchestrator-supervisor': true }),
+    );
+
+    const hooks = new Map<string, Function>();
+    const sentUserMessages: string[] = [];
+    let switchedModel: any = null;
+    let switchedThinking: string | null = null;
+
+    const mockPi = {
+      on: (event: string, handler: Function) => {
+        hooks.set(event, handler);
+        return () => {};
+      },
+      registerCommand: () => {},
+      registerTool: () => {},
+      sendUserMessage: (msg: string) => {
+        sentUserMessages.push(msg);
+      },
+      setModel: async (m: any) => {
+        switchedModel = m;
+        return true;
+      },
+      setThinkingLevel: (lvl: string) => {
+        switchedThinking = lvl;
+      },
+      events: { on: () => () => {}, emit: () => {} },
+    };
+
+    orchestratorSupervisorExtension(mockPi as any, tmpProject);
+
+    let abortCalled = false;
+    const ctx: any = {
+      cwd: tmpProject,
+      mode: 'tui',
+      isProjectTrusted: () => true,
+      sessionManager: { getSessionId: () => 'sess-in-session-1', getBranch: () => [] },
+      getSystemPrompt: () => 'sys',
+      getContextUsage: () => ({ tokens: 44000, contextWindow: 272000, percent: 16.1 }), // 44k tokens, way below 90%!
+      abort: () => { abortCalled = true; },
+      ui: { setStatus: () => {}, notify: () => {} },
+    };
+
+    await hooks.get('session_start')!({ reason: 'startup' }, ctx);
+
+    // Provider error occurs: hard quota exhaustion on main
+    await hooks.get('turn_end')!(
+      {
+        type: 'turn_end',
+        outcome: 'error',
+        message: {
+          role: 'assistant',
+          stopReason: 'error',
+          errorMessage: 'Rate limit exceeded: insufficient_quota',
+        },
+      },
+      ctx,
+    );
+    assert.equal(abortCalled, true, 'Hard quota should abort retry sleep');
+
+    // Settle agent
+    await hooks.get('agent_settled')!({ type: 'agent_settled', aborted: true }, ctx);
+    await new Promise((r) => setImmediate(r));
+
+    // MUST NOT rotate session (/supervisor-rotate must NOT be sent)
+    assert.equal(sentUserMessages.includes('/supervisor-rotate'), false, 'Must NOT rotate session on provider failover with normal context');
+
+    // MUST switch model to second in-session
+    assert.ok(switchedModel, 'Model must have been switched in-session');
+    assert.equal(switchedModel.id, 'second/gpt-6.1-sol');
+    assert.equal(switchedThinking, 'high');
+
+    // MUST dispatch 'continua' to resume turn in the current session
+    assert.ok(sentUserMessages.includes('continua'), 'Must automatically dispatch continua in current session');
 
     await hooks.get('session_shutdown')!({ reason: 'quit' }, ctx);
   } finally {

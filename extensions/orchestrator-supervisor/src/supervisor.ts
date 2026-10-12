@@ -54,6 +54,9 @@ export class SupervisorRuntime {
   private quotaTimer?: NodeJS.Timeout;
   private rotationPending = false;
   private rotationReason = '';
+  private failoverPending = false;
+  private failoverReason = '';
+  private failoverAutoContinue = false;
   private isDisposed = false;
   private isSupervisorRotating = false;
   private lastRotatedGeneration = -1;
@@ -230,7 +233,7 @@ export class SupervisorRuntime {
       } else {
         this.staleQuotaStopNewWork = false;
         if (!activeStatus.isEligible) {
-          this.requestRotation(activeStatus.reason || 'active_quota_ineligible');
+          this.requestFailover(activeStatus.reason || 'active_quota_ineligible', { autoContinue: false });
         }
       }
 
@@ -241,8 +244,7 @@ export class SupervisorRuntime {
         this.errorClassifier.getExcludedCandidates(),
       );
       if (returnCheck.shouldReturn && returnCheck.targetCandidate) {
-        this.rotationPending = true;
-        this.rotationReason = returnCheck.reason || 'quota_reset_return';
+        this.requestFailover(returnCheck.reason || 'quota_reset_return', { autoContinue: false });
       }
       if (onStatusUpdate) {
         onStatusUpdate(`supervisor · ${this.state.activeModel.split('/')[1]} · normal`);
@@ -435,6 +437,14 @@ export class SupervisorRuntime {
     this.rotationReason = reason;
   }
 
+  requestFailover(reason: string, options?: { autoContinue?: boolean }): void {
+    if (this.state.userCancelled || this.state.userPaused) return;
+    if (!isExtensionEnabled(SUPERVISOR_EXTENSION_NAME, this.cwd)) return;
+    this.failoverPending = true;
+    this.failoverReason = reason;
+    this.failoverAutoContinue = options?.autoContinue ?? true;
+  }
+
   requestRotationFromTool(memoryId: number, nextStep?: string): void {
     if (this.state.userCancelled) return;
     this.rotationPending = true;
@@ -507,11 +517,12 @@ export class SupervisorRuntime {
     // User pause/cancel dominates automatic operations, except when context reserve is physically exceeded (>90%)
     if (this.state.userCancelled || (this.state.userPaused && this.rotationReason !== 'context_reserve_90_reached')) {
       this.rotationPending = false;
+      this.failoverPending = false;
       this.pendingStandaloneRetry = undefined;
       return;
     }
 
-    // Check context usage at settlement if rotation is not yet pending
+    // Check context usage at settlement
     if (!this.rotationPending && typeof ctx?.getContextUsage === 'function') {
       const usage = ctx.getContextUsage();
       if (usage) {
@@ -522,13 +533,16 @@ export class SupervisorRuntime {
           fallbackDetails,
         );
         if (evaluated.isReserveExceeded) {
-          this.requestRotation('context_reserve_90_reached');
+          ctx?.ui?.setStatus?.(
+            SUPERVISOR_EXTENSION_NAME,
+            `supervisor · ${this.state.activeModel.split('/')[1] || 'main'} · contexto ≥ 90%`,
+          );
         }
       }
     }
 
     // Handle standalone retry progression when native retry is disabled
-    if (!this.rotationPending && this.pendingStandaloneRetry) {
+    if (!this.rotationPending && !this.failoverPending && this.pendingStandaloneRetry) {
       const retryInfo = this.pendingStandaloneRetry;
       this.pendingStandaloneRetry = undefined;
       await new Promise((r) => setTimeout(r, Math.min(retryInfo.delayMs, 30000)));
@@ -538,6 +552,102 @@ export class SupervisorRuntime {
         this.canAutoContinue()
       ) {
         pi?.sendUserMessage?.('Continue interrupted step.');
+      }
+      return;
+    }
+
+    // In-session model failover (provider failure or quota return with context < 90%)
+    // Switch model directly in current session and automatically dispatch "continua" WITHOUT opening a new session!
+    if (this.failoverPending && !this.rotationPending) {
+      this.failoverPending = false;
+      const autoContinue = this.failoverAutoContinue;
+      this.failoverAutoContinue = false;
+
+      const selection = await this.quotaManager.selectBestCandidate(
+        this.errorClassifier.getCooldowns(),
+        {
+          forceFresh: true,
+          excluded: this.errorClassifier.getExcludedCandidates(),
+        },
+      );
+
+      if (selection.allUnavailable || !selection.candidate) {
+        this.unavailablePollCount++;
+        this.currentBackoffMs = Math.min(
+          ALL_UNAVAILABLE_BACKOFF_MIN_MS * Math.pow(2, Math.max(0, this.unavailablePollCount - 1)),
+          ALL_UNAVAILABLE_BACKOFF_MAX_MS,
+        );
+        this.state.status = 'idle';
+        this.state.updatedAt = Date.now();
+        this.journal.saveState(this.state);
+        ctx?.ui?.setStatus?.(
+          SUPERVISOR_EXTENSION_NAME,
+          `supervisor · idle (all candidates unavailable, backoff ${Math.round(this.currentBackoffMs / 1000)}s)`,
+        );
+        if (this.quotaTimer) {
+          this.startPeriodicPolling((text) => {
+            ctx?.ui?.setStatus?.(SUPERVISOR_EXTENSION_NAME, text);
+          }, this.currentBackoffMs);
+        }
+        return;
+      }
+
+      this.unavailablePollCount = 0;
+      this.currentBackoffMs = QUOTA_POLL_INTERVAL_MS;
+      const targetModelId = selection.candidate.id;
+      const previousModel = this.state.activeModel;
+
+      if (targetModelId !== previousModel) {
+        const providerModelId = targetModelId.startsWith('cliproxyapi/')
+          ? targetModelId.slice('cliproxyapi/'.length)
+          : targetModelId;
+        const resolvedModel =
+          ctx?.modelRegistry?.getModel?.('cliproxyapi', providerModelId) ??
+          ctx?.modelRegistry?.getModel?.('cliproxyapi', targetModelId) ??
+          ctx?.modelRegistry?.find?.('cliproxyapi', providerModelId) ??
+          ctx?.modelRegistry?.find?.('cliproxyapi', targetModelId) ?? {
+            id: providerModelId,
+            provider: 'cliproxyapi',
+            name: providerModelId,
+            api: 'openai-completions',
+            baseUrl: process.env.CLIPROXYAPI_BASE_URL || 'http://127.0.0.1:8317/v1',
+            reasoning: true,
+            input: ['text', 'image'],
+            thinkingLevelMap: {
+              off: null,
+              minimal: null,
+              low: 'low',
+              medium: 'medium',
+              high: 'high',
+              xhigh: 'high',
+              max: 'high',
+            },
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: this.contextGuard.getProviderContextWindowCap(targetModelId),
+            maxTokens: 16384,
+          };
+
+        await pi.setModel?.(resolvedModel);
+        pi.setThinkingLevel?.('high');
+        this.state.activeModel = targetModelId;
+        this.state.status = 'active';
+        this.state.updatedAt = Date.now();
+        this.journal.saveState(this.state);
+
+        ctx?.ui?.setStatus?.(
+          SUPERVISOR_EXTENSION_NAME,
+          `supervisor · ${targetModelId.split('/')[1] || 'main'} · normal`,
+        );
+        ctx?.ui?.notify?.(
+          `Fallo de proveedor en ${previousModel}. Cambiado a ${targetModelId} (effort: high) en la sesión actual.`,
+          'info',
+        );
+      }
+
+      if (autoContinue && !this.state.userPaused && !this.state.userCancelled) {
+        setImmediate(() => {
+          pi.sendUserMessage?.('continua');
+        });
       }
       return;
     }
