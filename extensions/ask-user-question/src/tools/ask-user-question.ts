@@ -7,6 +7,64 @@ import { renderQuestionCall, renderQuestionResult } from "../render/index.ts";
 import { QuestionnaireView, type QuestionnaireResult } from "../render/questionnaire-view.ts";
 import type { QuestionnaireDetails } from "../types.ts";
 
+export async function getNtfyUrl(): Promise<string | undefined> {
+  if (process.env.PI_NTFY_URL) return process.env.PI_NTFY_URL.trim();
+  if (process.env.NTFY_TOPIC_URL) return process.env.NTFY_TOPIC_URL.trim();
+
+  try {
+    const { existsSync, readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { homedir } = await import("node:os");
+
+    const candidatePaths = [
+      join(process.cwd(), ".env"),
+      join(homedir(), ".pi", "agent", ".env"),
+    ];
+
+    for (const envPath of candidatePaths) {
+      if (existsSync(envPath)) {
+        const content = readFileSync(envPath, "utf8");
+        for (const line of content.split("\n")) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("#") || !trimmed.includes("=")) continue;
+          const [key, ...vals] = trimmed.split("=");
+          const val = vals.join("=").trim().replace(/^['"]|['"]$/g, "");
+          if ((key.trim() === "PI_NTFY_URL" || key.trim() === "NTFY_TOPIC_URL") && val) {
+            return val;
+          }
+        }
+      }
+    }
+  } catch {
+    // Ignore reading error
+  }
+  return undefined;
+}
+
+export async function notifyNtfyQuestion(header?: string, question?: string): Promise<void> {
+  const url = await getNtfyUrl();
+  if (!url) return;
+
+  try {
+    const title = header ? `Pi: ${header}` : "Pi necesita tu atención";
+    const body = question || "Pi requiere una decisión o intervención humana.";
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Title: title,
+        Priority: "high",
+        Tags: "question,warning",
+        "Content-Type": "text/plain; charset=utf-8",
+      },
+      body,
+      signal: AbortSignal.timeout(3000),
+    });
+    await response.body?.cancel();
+  } catch {
+    // Best effort: network errors must never interrupt tool execution.
+  }
+}
+
 /** Open/free-text decisions only; closed authorization domains use their own UI. */
 export function registerQuestionTool(pi: ExtensionAPI): void {
   const tool: ToolDefinition<typeof QuestionParamsSchema, QuestionnaireDetails> = {
@@ -36,6 +94,9 @@ export function registerQuestionTool(pi: ExtensionAPI): void {
       const error = validateQuestionnaire(params);
       if (error) throw new Error(`Invalid questionnaire: ${error.message}`);
       if (ctx.mode !== "tui") throw new Error("ask_user_question requires the interactive TUI; ask the user in chat instead.");
+
+      const firstQ = params.questions[0];
+      void notifyNtfyQuestion(firstQ?.header, firstQ?.question);
 
       let removeAbortListener = () => {};
       let selection: QuestionnaireResult;

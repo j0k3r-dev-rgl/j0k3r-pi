@@ -3,6 +3,7 @@ import { CURSOR_MARKER, KeybindingsManager, TUI_KEYBINDINGS, visibleWidth } from
 import type { ExtensionAPI, ExtensionToolContext, Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import register from "../index.ts";
 import { QuestionParamsSchema } from "../src/core/schema.ts";
+import { getNtfyUrl, notifyNtfyQuestion } from "../src/tools/ask-user-question.ts";
 
 const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text } as Theme;
 const keybindings = new KeybindingsManager(TUI_KEYBINDINGS);
@@ -359,5 +360,104 @@ describe("native tool result rendering", () => {
         definition.renderResult!(result, { expanded: true, isPartial: false }, theme, {} as any),
       ]) for (const line of component.render(width)) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
     }
+  });
+
+  describe("ntfy notification integration", () => {
+    it("resolves ntfy URL from process.env without exposing secrets in code", async () => {
+      const originalEnv = process.env.PI_NTFY_URL;
+      try {
+        process.env.PI_NTFY_URL = "https://ntfy.sh/test-topic-123";
+        expect(await getNtfyUrl()).toBe("https://ntfy.sh/test-topic-123");
+      } finally {
+        if (originalEnv !== undefined) {
+          process.env.PI_NTFY_URL = originalEnv;
+        } else {
+          delete process.env.PI_NTFY_URL;
+        }
+      }
+    });
+
+    it("sends notification with header as title and question as body", async () => {
+      const originalEnv = process.env.PI_NTFY_URL;
+      const originalFetch = globalThis.fetch;
+      const mockFetch = vi.fn().mockResolvedValue({ body: { cancel: vi.fn() } });
+      globalThis.fetch = mockFetch;
+
+      try {
+        process.env.PI_NTFY_URL = "https://ntfy.sh/test-topic-abc";
+        await notifyNtfyQuestion("Decisión clave", "¿Proceder con la refactorización?");
+
+        expect(mockFetch).toHaveBeenCalledWith(
+          "https://ntfy.sh/test-topic-abc",
+          expect.objectContaining({
+            method: "POST",
+            headers: expect.objectContaining({
+              Title: "Pi: Decisión clave",
+              Priority: "high",
+              Tags: "question,warning",
+            }),
+            body: "¿Proceder con la refactorización?",
+          }),
+        );
+      } finally {
+        globalThis.fetch = originalFetch;
+        if (originalEnv !== undefined) {
+          process.env.PI_NTFY_URL = originalEnv;
+        } else {
+          delete process.env.PI_NTFY_URL;
+        }
+      }
+    });
+
+    it("swallows fetch network errors safely without breaking tool execution", async () => {
+      const originalEnv = process.env.PI_NTFY_URL;
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network timeout"));
+
+      try {
+        process.env.PI_NTFY_URL = "https://ntfy.sh/test-topic-abc";
+        await expect(notifyNtfyQuestion("Header", "Question")).resolves.toBeUndefined();
+      } finally {
+        globalThis.fetch = originalFetch;
+        if (originalEnv !== undefined) {
+          process.env.PI_NTFY_URL = originalEnv;
+        } else {
+          delete process.env.PI_NTFY_URL;
+        }
+      }
+    });
+
+    it("triggers ntfy notification when execute is called", async () => {
+      const originalEnv = process.env.PI_NTFY_URL;
+      const originalFetch = globalThis.fetch;
+      const mockFetch = vi.fn().mockResolvedValue({ body: { cancel: vi.fn() } });
+      globalThis.fetch = mockFetch;
+
+      try {
+        process.env.PI_NTFY_URL = "https://ntfy.sh/test-topic-exec";
+        const definition = tool();
+        const { ctx } = context();
+        await execute(definition, ctx);
+
+        expect(mockFetch).toHaveBeenCalledWith(
+          "https://ntfy.sh/test-topic-exec",
+          expect.objectContaining({
+            method: "POST",
+            headers: expect.objectContaining({
+              Title: "Pi: Scope",
+              Priority: "high",
+            }),
+            body: "What should we build?",
+          }),
+        );
+      } finally {
+        globalThis.fetch = originalFetch;
+        if (originalEnv !== undefined) {
+          process.env.PI_NTFY_URL = originalEnv;
+        } else {
+          delete process.env.PI_NTFY_URL;
+        }
+      }
+    });
   });
 });
