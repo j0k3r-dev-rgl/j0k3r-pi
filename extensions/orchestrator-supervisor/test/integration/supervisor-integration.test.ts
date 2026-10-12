@@ -839,25 +839,7 @@ test('MINI-002 / MINI-003 / MINI-004: Turn-end >= 90% context triggers rotation 
       },
       ctx,
     );
-    // At turn end, status shows context >= 90% without blind rotation
-    await hooks.get('agent_settled')!({ type: 'agent_settled', aborted: false }, ctx);
-    assert.equal(sentUserMessages.length, 0, 'Must NOT rotate blindly before agent saves memory');
-
-    // 3. Heavy tool call (bash) is blocked and instructed to save memory and call supervisor_rotate
-    const toolCallRes = await hooks.get('tool_call')!(
-      { type: 'tool_call', toolCallId: 'call_heavy_1', toolName: 'bash', input: { command: 'git status' } },
-      ctx,
-    );
-    assert.equal(toolCallRes?.block, true);
-    assert.match(toolCallRes?.reason ?? '', /memory_save/i);
-    assert.match(toolCallRes?.reason ?? '', /supervisor_rotate/i);
-
-    // 4. Model calls supervisor_rotate tool after saving memory
-    const supervisorRotateTool = registeredTools.get('supervisor_rotate');
-    assert.ok(supervisorRotateTool, 'supervisor_rotate tool must be registered');
-    await supervisorRotateTool.execute('call_rot_2', { memory_id: 88, next_step: 'Continuar con RM-008' });
-
-    // Now on agent settlement, rotation executes cleanly!
+    // At turn end, context >= 90% automatically requests clean rotation without asking the user
     await hooks.get('agent_settled')!({ type: 'agent_settled', aborted: false }, ctx);
     await new Promise((r) => setImmediate(r));
 

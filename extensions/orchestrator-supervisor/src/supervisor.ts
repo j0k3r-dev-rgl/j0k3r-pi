@@ -535,6 +535,7 @@ export class SupervisorRuntime {
             SUPERVISOR_EXTENSION_NAME,
             `supervisor · ${this.state.activeModel.split('/')[1] || 'main'} · contexto ≥ 90%`,
           );
+          this.requestRotation('context_reserve_90_reached');
         }
       }
     }
@@ -677,6 +678,10 @@ export class SupervisorRuntime {
       ctx?.ui?.setStatus?.(
         SUPERVISOR_EXTENSION_NAME,
         `supervisor · waiting for subagents (${fence.activeCount} active)`,
+      );
+      ctx?.ui?.notify?.(
+        `Contexto ≥ 90% alcanzado. Esperando que finalice la ejecución del subagente (${fence.activeCount} activo/s) para rotar automáticamente...`,
+        'info',
       );
       return; // will recheck on next settlement
     }

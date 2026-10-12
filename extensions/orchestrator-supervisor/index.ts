@@ -444,6 +444,7 @@ export default function orchestratorSupervisorExtension(pi: ExtensionAPI, explic
           SUPERVISOR_EXTENSION_NAME,
           `supervisor · ${runtime.getState().activeModel.split('/')[1] || 'main'} · contexto ≥ 90%`,
         );
+        runtime.requestRotation('context_reserve_90_reached');
       }
     }
   });

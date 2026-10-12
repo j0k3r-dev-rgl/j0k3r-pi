@@ -76,51 +76,43 @@ test('MINI-004: Reaching 90% context reserve flags reserve exceeded and blocks s
   assert.equal(rotateIntercept, null, 'supervisor_rotate must NEVER be blocked by context ceiling');
 });
 
-test('MINI-004: Unknown tool output budget fails closed at reserve boundary', () => {
+test('MINI-004: Strict 90% boundary: tools are allowed below 90% and blocked only when actual tokens reach ceiling', () => {
   const guard = new ContextGuard();
 
-  // Tokens at 240,000 (88.2%): an unknown tool with potential 12,800 tokens output crosses 90%
-  const interception = guard.interceptToolCall(
-    { name: 'unknown_custom_heavy_tool', arguments: {} },
+  // Tokens at 222,000 (81.6%) and 240,000 (88.2%) on 272,000 cap (ceiling = 244,800):
+  // Tools must NOT be blocked by speculative preventive budgeting!
+  const callBelow1 = guard.interceptToolCall(
+    { toolName: 'bash', input: { command: 'git status' } },
+    222000,
+    272000,
+  );
+  assert.equal(callBelow1, null, 'Must allow bash below 90%');
+
+  const callBelow2 = guard.interceptToolCall(
+    { toolName: 'read', input: { path: 'plan.md' } },
     240000,
     272000,
   );
+  assert.equal(callBelow2, null, 'Must allow read below 90%');
 
-  assert.ok(interception);
-  assert.equal(interception.block, true);
-  assert.equal(interception.terminate, true);
-});
-
-test('MINI-004: Cumulative batch tool output budgeting and ToolCallEvent.toolName extraction', () => {
-  const guard = new ContextGuard();
-
-  // At 225,000 tokens on 272,000 cap (90% ceiling = 244,800):
-  // Tool 1 (bash = 12,800 tokens): 225,000 + 12,800 = 237,800 < 244,800 -> allowed
-  const call1 = guard.interceptToolCall(
+  // Actual tokens at or above 244,800 (>= 90%): tools are blocked with clean reason
+  const callAtCeiling = guard.interceptToolCall(
     { toolName: 'bash', input: { command: 'ls' } },
-    225000,
+    245000,
     272000,
   );
-  assert.equal(call1, null);
+  assert.ok(callAtCeiling);
+  assert.equal(callAtCeiling.block, true);
+  assert.equal(callAtCeiling.terminate, true);
+  assert.match(callAtCeiling.reason, /Límite de seguridad de contexto alcanzado \(90%\)/);
 
-  // Tool 2 in same batch (read = 12,800 tokens): cumulative 225,000 + 25,600 = 250,600 >= 244,800 -> blocked!
-  const call2 = guard.interceptToolCall(
-    { toolName: 'read', input: { path: 'a.txt' } },
-    225000,
+  // Memory tools are never blocked even at >= 90%
+  const memCall = guard.interceptToolCall(
+    { toolName: 'memory_save', input: { action: 'save' } },
+    250000,
     272000,
   );
-  assert.ok(call2);
-  assert.equal(call2.block, true);
-  assert.equal(call2.terminate, true);
-
-  // Resetting batch budget at turn boundary allows next turn's first call
-  (guard as any).resetBatchBudget();
-  const callAfterReset = guard.interceptToolCall(
-    { toolName: 'memory_get', input: { id: 1 } },
-    225000,
-    272000,
-  );
-  assert.equal(callAfterReset, null);
+  assert.equal(memCall, null, 'memory_save must never be blocked');
 });
 
 test('MINI-004: extractFallbackDetails computes systemPrompt, compaction summary, kept branch entries, and image blocks', () => {
