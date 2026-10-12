@@ -6,6 +6,7 @@ import {
   SUPERVISOR_EXTENSION_NAME,
   MEMORY_CHECKPOINT_CHANNEL,
   MODEL_CANDIDATES,
+  MAX_TRANSIENT_FAILURES,
   QUOTA_POLL_INTERVAL_MS,
   ALL_UNAVAILABLE_BACKOFF_MIN_MS,
   ALL_UNAVAILABLE_BACKOFF_MAX_MS,
@@ -19,6 +20,7 @@ import { SubagentMonitor } from './subagent-monitor.ts';
 import { QuotaManager } from './quota-manager.ts';
 import { ErrorClassifier, type ClassificationAction } from './error-classifier.ts';
 import { ContextGuard } from './context-guard.ts';
+import { sendSupervisorNotification } from './notify.ts';
 import type {
   ModelCandidateId,
   SupervisorState,
@@ -490,16 +492,12 @@ export class SupervisorRuntime {
       freshQuotaStatus,
     });
 
-    if (action.type === 'transient_retry' && action.retryDelayMs) {
-      const settings = pi?.getSettings?.();
-      const nativeRetryEnabled = settings?.retry?.enabled !== false;
-      if (!nativeRetryEnabled) {
-        this.pendingStandaloneRetry = {
-          delayMs: action.retryDelayMs,
-          attempt: action.consecutiveErrors ?? 1,
-          candidateId: activeModel,
-        };
-      }
+    if (action.type === 'transient_retry') {
+      this.pendingStandaloneRetry = {
+        delayMs: action.retryDelayMs ?? 1000,
+        attempt: action.consecutiveErrors ?? 1,
+        candidateId: activeModel,
+      };
     } else if (action.type === 'success' || action.type === 'immediate_failover' || action.type === 'cooldown_failover') {
       this.pendingStandaloneRetry = undefined;
     }
@@ -541,7 +539,7 @@ export class SupervisorRuntime {
       }
     }
 
-    // Handle standalone retry progression when native retry is disabled
+    // Handle standalone retry progression for transient stream/provider errors
     if (!this.rotationPending && !this.failoverPending && this.pendingStandaloneRetry) {
       const retryInfo = this.pendingStandaloneRetry;
       this.pendingStandaloneRetry = undefined;
@@ -551,7 +549,15 @@ export class SupervisorRuntime {
         isExtensionEnabled(SUPERVISOR_EXTENSION_NAME, this.cwd) &&
         this.canAutoContinue()
       ) {
-        pi?.sendUserMessage?.('Continue interrupted step.');
+        ctx?.ui?.setStatus?.(
+          SUPERVISOR_EXTENSION_NAME,
+          `supervisor · reintento transitorio (${retryInfo.attempt}/${MAX_TRANSIENT_FAILURES})`,
+        );
+        ctx?.ui?.notify?.(
+          `Corte transitorio de stream o red (${retryInfo.attempt}/${MAX_TRANSIENT_FAILURES}). Reanudando automáticamente...`,
+          'warning',
+        );
+        pi?.sendUserMessage?.('continua');
       }
       return;
     }
@@ -642,6 +648,12 @@ export class SupervisorRuntime {
           `Fallo de proveedor en ${previousModel}. Cambiado a ${targetModelId} (effort: high) en la sesión actual.`,
           'info',
         );
+        void sendSupervisorNotification({
+          title: 'Pi: Cambio de modelo',
+          body: `Modelo cambiado de ${previousModel} a ${targetModelId} (motivo: ${this.failoverReason || 'cuota / error de proveedor'}).`,
+          priority: 'high',
+          tags: 'shuffle,arrows_counterclockwise',
+        });
       }
 
       if (autoContinue && !this.state.userPaused && !this.state.userCancelled) {
@@ -725,19 +737,26 @@ export class SupervisorRuntime {
     if (this.rotationReason === 'tool_requested_rotate' && this.state.lastCheckpointMemoryId) {
       checkpointId = this.state.lastCheckpointMemoryId;
     } else if (pi?.events?.emit) {
-      const gitState = this.getGitState();
-      const artifactHashes = this.getArtifactHashes();
-      const checkpointContent = JSON.stringify({
-        flowIdentity: this.flowIdentity,
-        sessionId: this.sessionId,
-        previousModel: this.state.activeModel,
-        targetModel: targetModelId,
-        rotationReason: this.rotationReason,
-        gitState,
-        artifactHashes,
-        authorizedContinuation: this.state.authorizedContinuation ?? null,
-        timestamp: Date.now(),
-      });
+      let checkpointContent: string;
+      if (this.state.referencedArtifacts && this.state.referencedArtifacts.length > 0) {
+        const gitState = this.getGitState();
+        const artifactHashes = this.getArtifactHashes();
+        checkpointContent = JSON.stringify({
+          flowIdentity: this.flowIdentity,
+          sessionId: this.sessionId,
+          previousModel: this.state.activeModel,
+          targetModel: targetModelId,
+          rotationReason: this.rotationReason,
+          gitState,
+          artifactHashes,
+          authorizedContinuation: this.state.authorizedContinuation ?? null,
+          timestamp: Date.now(),
+        });
+      } else {
+        checkpointContent = this.lastAssistantSummary
+          ? `Rotación de sesión por supervisor (${this.rotationReason}).\nÚltimo estado de la tarea:\n${this.lastAssistantSummary}`
+          : `Rotación de sesión por supervisor (${this.rotationReason}). Continuar la tarea en curso.`;
+      }
 
       const saveRes: any = await new Promise((resolve) => {
         const timer = setTimeout(() => resolve({ ok: false, error: 'save_timeout' }), 10000);
@@ -761,6 +780,12 @@ export class SupervisorRuntime {
           'Error al guardar checkpoint de memoria verificado; rotación abortada para proteger el estado.',
           'error',
         );
+        void sendSupervisorNotification({
+          title: 'Pi: Error en rotación de sesión',
+          body: `Error al guardar checkpoint de memoria verificado (${saveRes?.error || 'fallo de lectura'}). Rotación abortada.`,
+          priority: 'urgent',
+          tags: 'warning,skull',
+        });
         this.rotationPending = false;
         return;
       }
@@ -895,24 +920,38 @@ export class SupervisorRuntime {
       if (!getOk) {
         preflightVerified = false;
       } else if (fullContent.trim().length > 0) {
-        try {
-          const parsedCheckpoint = JSON.parse(fullContent);
-          const verification = this.verifyCheckpointPreflight(parsedCheckpoint);
-          if (!verification.verified) {
+        const trimmed = fullContent.trim();
+        // If content starts with JSON object notation, parse and verify its structured git/hash fields.
+        // If content is Markdown/natural text (saved by LLM via memory_save), accept it as a valid session summary.
+        if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+          try {
+            const parsedCheckpoint = JSON.parse(trimmed);
+            const verification = this.verifyCheckpointPreflight(parsedCheckpoint);
+            if (!verification.verified) {
+              preflightVerified = false;
+              this.setUserPaused(true);
+              ctx?.ui?.notify?.(
+                `Checkpoint preflight verification failed (${verification.reason}); halting automatic continuation.`,
+                'error',
+              );
+              void sendSupervisorNotification({
+                title: 'Pi: Error en verificación de sesión',
+                body: `Fallo en verificación de preflight (${verification.reason}). Reanudación automática pausada.`,
+                priority: 'urgent',
+                tags: 'warning,skull',
+              });
+            }
+          } catch {
             preflightVerified = false;
             this.setUserPaused(true);
             ctx?.ui?.notify?.(
-              `Checkpoint preflight verification failed (${verification.reason}); halting automatic continuation.`,
+              'Checkpoint preflight JSON parse failed; halting automatic continuation.',
               'error',
             );
           }
-        } catch {
-          preflightVerified = false;
-          this.setUserPaused(true);
-          ctx?.ui?.notify?.(
-            'Checkpoint preflight JSON parse failed; halting automatic continuation.',
-            'error',
-          );
+        } else {
+          // Markdown / natural language session summary from memory_save is valid
+          preflightVerified = true;
         }
       }
 
@@ -922,9 +961,9 @@ export class SupervisorRuntime {
           Boolean(this.state.authorizedContinuation) &&
           preflightVerified;
 
-        const summaryText = this.lastAssistantSummary
-          ? `\nÚltimo estado reportado:\n"""\n${this.lastAssistantSummary.slice(0, 800)}\n"""\n`
-          : '';
+        const summaryText = fullContent.trim().length > 0 && !fullContent.trim().startsWith('{')
+          ? `\nGuía de continuación de la sesión anterior (Memoria #${checkpointId}):\n"""\n${fullContent.trim()}\n"""\n`
+          : (this.lastAssistantSummary ? `\nÚltimo estado reportado:\n"""\n${this.lastAssistantSummary.slice(0, 800)}\n"""\n` : '');
         const instruction = `[supervisor-continuity] Rotated to fresh session on ${targetModelId} (effort: high). Read verified checkpoint memory ID ${checkpointId} via memory_get and paginate completely before continuing.${summaryText}`;
 
         if (shouldTrigger) {
@@ -933,6 +972,12 @@ export class SupervisorRuntime {
             `Nueva sesión iniciada automáticamente con modelo ${targetModelId}. Reanudando tarea desde memoria ID ${checkpointId}...`,
             'info',
           );
+          void sendSupervisorNotification({
+            title: 'Pi: Nueva sesión iniciada',
+            body: `Rotación limpia a ${targetModelId} completada exitosamente. Reanudando tarea desde memoria #${checkpointId}.`,
+            priority: 'default',
+            tags: 'recycle,robot',
+          });
           setImmediate(() => {
             if (this.pendingContinuationInstruction) {
               const instr = this.pendingContinuationInstruction;

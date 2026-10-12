@@ -200,7 +200,7 @@ export class ContextGuard {
       return {
         block: true,
         terminate: true,
-        reason: `Límite de seguridad de contexto alcanzado (90%). No ejecutes más herramientas pesadas en esta sesión. Guarda un resumen de lo realizado y lo pendiente usando la herramienta memory_save (type: 'session_summary', title: 'Resumen de continuación'), y a continuación ejecuta supervisor_rotate({ memory_id: <id_guardado>, next_step: '<siguiente_paso>' }) para iniciar una nueva sesión limpia y continuar automáticamente. (projected ${projectedTokens} >= ceiling ${ceilingTokens})`,
+        reason: `Límite de seguridad de contexto alcanzado (90%). No ejecutes más herramientas pesadas en esta sesión. Guarda un resumen ESTRUCTURADO Y CONCISO de 150-250 palabras en memory_save (type: 'session_summary', title: 'Resumen de continuación') con: 1) Objetivo activo y límites del usuario (dónde parar), 2) Dónde se quedó exactamente, 3) Punteros a los archivos para leer con read (ej. plan.md, apply.md; NUNCA vuelques su contenido), 4) Estado de servicios/puertos si aplica, 5) Siguiente paso inmediato. Tras guardar, ejecuta supervisor_rotate({ memory_id: <id_guardado>, next_step: '<siguiente_paso>' }) para rotar limpiamente. (projected ${projectedTokens} >= ceiling ${ceilingTokens})`,
       };
     }
 

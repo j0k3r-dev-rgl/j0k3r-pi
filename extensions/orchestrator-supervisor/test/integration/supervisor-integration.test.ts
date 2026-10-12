@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { register } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { execSync } from 'node:child_process';
@@ -973,6 +974,169 @@ test('MINI-002 / MINI-003: Provider failure with context < 90% switches model in
     await cpamcServer.stop();
     if (oldCpamcUrl === undefined) delete process.env.CLIPROXYAPI_BASE_URL;
     else process.env.CLIPROXYAPI_BASE_URL = oldCpamcUrl;
+    if (oldRuntimeDir === undefined) delete process.env.PI_SUPERVISOR_RUNTIME_DIR;
+    else process.env.PI_SUPERVISOR_RUNTIME_DIR = oldRuntimeDir;
+    rmSync(tmpProject, { recursive: true, force: true });
+  }
+});
+
+test('MINI-001 / MINI-007: Markdown session summary saved via memory_save passes preflight without JSON parse failure and auto-continues', async () => {
+  const tmpProject = mkdtempSync(join(tmpdir(), 'supervisor-markdown-summary-'));
+  const oldRuntimeDir = process.env.PI_SUPERVISOR_RUNTIME_DIR;
+  process.env.PI_SUPERVISOR_RUNTIME_DIR = join(tmpProject, '.supervisor-runtime');
+
+  const cpamcServer = new MockCpamcServer();
+  const cpamcUrl = await cpamcServer.start();
+  const oldCpamcUrl = process.env.CLIPROXYAPI_BASE_URL;
+  process.env.CLIPROXYAPI_BASE_URL = cpamcUrl;
+
+  try {
+    mkdirSync(join(tmpProject, '.pi'), { recursive: true });
+    writeFileSync(
+      join(tmpProject, '.pi', 'extensions.json'),
+      JSON.stringify({ 'orchestrator-supervisor': true }),
+    );
+
+    const eventBus = new EventEmitter();
+    // Simulate memory store returning a natural-language Markdown session summary (not JSON)
+    eventBus.on(MEMORY_CHECKPOINT_CHANNEL, (req: any) => {
+      if (req.action === 'get') {
+        req.respond({
+          ok: true,
+          content: 'Continuation authorized by user response. Current task: finish RM010 public catalog.\n# Resumen de continuación\nImplementation ready.',
+          has_more: false,
+        });
+      }
+    });
+
+    const runtime = new SupervisorRuntime(tmpProject, 'sess-md-1', {
+      events: eventBus,
+      baseUrl: cpamcUrl,
+    });
+    runtime.init({ reason: 'startup' });
+
+    // LLM calls supervisor_rotate tool with memory ID 87
+    runtime.requestRotationFromTool(87, 'Continuar con cierre de RM010');
+
+    // Emulate rotation handover
+    (runtime as any).state.rotationHandoverToken = 'handover_test_token';
+
+    const userMessages: string[] = [];
+    const alerts: string[] = [];
+    const mockNewPi = {
+      sendUserMessage: (msg: string) => {
+        userMessages.push(msg);
+      },
+      sendMessage: () => {},
+      setModel: async () => true,
+      setThinkingLevel: () => {},
+      events: eventBus,
+    };
+
+    await runtime.onNewSessionStart(mockNewPi, {
+      cwd: tmpProject,
+      mode: 'tui',
+      isProjectTrusted: () => true,
+      modelRegistry: {
+        find: (provider: string, id: string) => ({ provider, id, name: id }),
+      },
+      sessionManager: { getSessionId: () => 'sess-md-2' },
+      ui: {
+        setStatus: () => {},
+        notify: (msg: string) => {
+          alerts.push(msg);
+        },
+      },
+    });
+
+    // Wait for setImmediate auto-continue message
+    await new Promise((r) => setImmediate(r));
+
+    // Must NOT pause and must NOT have JSON parse errors
+    assert.equal(runtime.getState().userPaused, false, 'Runtime must not pause on valid markdown summary');
+    assert.equal(alerts.some((a) => /JSON parse failed/i.test(a)), false, 'Must not report JSON parse failure on markdown');
+
+    // Must automatically dispatch continuation instruction
+    assert.equal(userMessages.length, 1, 'Must automatically dispatch continuation message');
+    assert.ok(userMessages[0].includes('memory ID 87'), 'Continuation instruction must mention memory ID 87');
+
+    runtime.dispose('quit');
+  } finally {
+    await cpamcServer.stop();
+    if (oldCpamcUrl === undefined) delete process.env.CLIPROXYAPI_BASE_URL;
+    else process.env.CLIPROXYAPI_BASE_URL = oldCpamcUrl;
+    if (oldRuntimeDir === undefined) delete process.env.PI_SUPERVISOR_RUNTIME_DIR;
+    else process.env.PI_SUPERVISOR_RUNTIME_DIR = oldRuntimeDir;
+    rmSync(tmpProject, { recursive: true, force: true });
+  }
+});
+
+test('MINI-003: Transient stream disconnection error automatically dispatches continua upon settlement without human intervention', async () => {
+  const tmpProject = mkdtempSync(join(tmpdir(), 'supervisor-stream-retry-'));
+  const oldRuntimeDir = process.env.PI_SUPERVISOR_RUNTIME_DIR;
+  process.env.PI_SUPERVISOR_RUNTIME_DIR = join(tmpProject, '.supervisor-runtime');
+
+  try {
+    mkdirSync(join(tmpProject, '.pi'), { recursive: true });
+    writeFileSync(
+      join(tmpProject, '.pi', 'extensions.json'),
+      JSON.stringify({ 'orchestrator-supervisor': true }),
+    );
+
+    const hooks = new Map<string, Function>();
+    const sentUserMessages: string[] = [];
+
+    const mockPi = {
+      on: (event: string, handler: Function) => {
+        hooks.set(event, handler);
+        return () => {};
+      },
+      registerCommand: () => {},
+      registerTool: () => {},
+      sendUserMessage: (msg: string) => {
+        sentUserMessages.push(msg);
+      },
+      setModel: async () => true,
+      setThinkingLevel: () => {},
+      events: { on: () => () => {}, emit: () => {} },
+    };
+
+    orchestratorSupervisorExtension(mockPi as any, tmpProject);
+
+    const ctx: any = {
+      cwd: tmpProject,
+      mode: 'tui',
+      isProjectTrusted: () => true,
+      sessionManager: { getSessionId: () => 'sess-stream-1', getBranch: () => [] },
+      getSystemPrompt: () => 'sys',
+      getContextUsage: () => ({ tokens: 20000, contextWindow: 272000, percent: 7.3 }),
+      ui: { setStatus: () => {}, notify: () => {} },
+    };
+
+    await hooks.get('session_start')!({ reason: 'startup' }, ctx);
+
+    // Turn ends with transient stream disconnection error
+    await hooks.get('turn_end')!(
+      {
+        type: 'turn_end',
+        outcome: 'error',
+        message: {
+          role: 'assistant',
+          stopReason: 'error',
+          errorMessage: 'stream error: stream disconnected before completion: stream closed before response.completed',
+        },
+      },
+      ctx,
+    );
+
+    // Agent settles with aborted: false
+    await hooks.get('agent_settled')!({ type: 'agent_settled', aborted: false }, ctx);
+
+    // The supervisor must automatically dispatch 'continua' without user intervention!
+    assert.ok(sentUserMessages.includes('continua'), 'Must automatically dispatch continua upon transient stream error');
+
+    await hooks.get('session_shutdown')!({ reason: 'quit' }, ctx);
+  } finally {
     if (oldRuntimeDir === undefined) delete process.env.PI_SUPERVISOR_RUNTIME_DIR;
     else process.env.PI_SUPERVISOR_RUNTIME_DIR = oldRuntimeDir;
     rmSync(tmpProject, { recursive: true, force: true });
