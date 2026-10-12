@@ -1,4 +1,5 @@
 import { DEFAULT_DB_PATH, INVOCATION_BIND_CHANNEL } from './config.ts';
+import { SUPERVISOR_CHECKPOINT_CHANNEL, type MemoryCheckpointRequest } from './bridge.ts';
 import { withDatabase } from './storage/db.ts';
 import { initSchema } from './storage/schema.ts';
 import { activateSession, closeSession } from './storage/session-store.ts';
@@ -6,6 +7,8 @@ import { resolveScope, encodeScope } from './identity.ts';
 import { InvocationLease } from './lease.ts';
 import { ActivationDiagnostics } from './diagnostics/activation.ts';
 import { E5Client } from './client/e5-client.ts';
+import { saveAndIndexMemory } from './indexing/service.ts';
+import { readMemoryDetail } from './reading/get.ts';
 import type { InvocationBindRequestV1, InvocationLeaseV1 } from './protocol.ts';
 import type { Scope } from './types.ts';
 import type { OperationContext } from './tools/types.ts';
@@ -197,6 +200,138 @@ export class MemoryLifecycle {
     return operation(opCtx);
   }
 
+  async handleSupervisorCheckpoint(request: MemoryCheckpointRequest): Promise<void> {
+    if (request.action === 'save') {
+      try {
+        if (!request.title || !request.content) {
+          request.respond({ ok: false, error: 'title_and_content_required' });
+          return;
+        }
+
+        const cwd = request.cwd ?? process.cwd();
+        const scope = resolveScope(cwd, { isProjectTrusted: () => true });
+        const scopeKey = encodeScope(scope);
+        const targetScopeKey = request.scope === 'global' ? encodeScope({ kind: 'global' }) : scopeKey;
+
+        const sessionId = request.sessionId;
+        const topicKey = request.topicKey ?? (request.type === 'session_summary' || !request.type ? `session/${sessionId}/summary` : null);
+
+        withDatabase(this.dbPath, (db) => {
+          initSchema(db);
+          activateSession(db, sessionId, scopeKey, 'normal');
+        });
+
+        const saveRes = await saveAndIndexMemory(
+          this.dbPath,
+          targetScopeKey,
+          {
+            id: request.id,
+            topicKey,
+            title: request.title,
+            content: request.content,
+            type: request.type ?? 'session_summary',
+          },
+          {
+            sessionId,
+          },
+          {
+            client: this.client,
+          },
+        );
+
+        // Immediate readback verification via readMemoryDetail (paginating if has_more)
+        let readDetail = readMemoryDetail(this.dbPath, {
+          id: saveRes.memory.id,
+          global: request.scope === 'global',
+          sessionScope: scope,
+        });
+
+        let fullTitle = readDetail.field === 'title' ? readDetail.title : '';
+        let fullContent = readDetail.field === 'content' ? readDetail.content : '';
+
+        while (readDetail.has_more && readDetail.next_cursor) {
+          readDetail = readMemoryDetail(this.dbPath, {
+            id: saveRes.memory.id,
+            global: request.scope === 'global',
+            cursor: readDetail.next_cursor,
+            sessionScope: scope,
+          });
+          if (readDetail.field === 'title') {
+            fullTitle += readDetail.title;
+          } else if (readDetail.field === 'content') {
+            fullContent += readDetail.content;
+          }
+        }
+
+        if (!fullTitle && readDetail.title) fullTitle = readDetail.title;
+
+        const titleMatches = fullTitle.trim() === request.title.trim();
+        const contentMatches = fullContent.trim() === request.content.trim();
+        const verified = titleMatches && contentMatches && saveRes.committed === true;
+
+        if (!verified) {
+          request.respond({
+            ok: false,
+            id: saveRes.memory.id,
+            committed: saveRes.committed,
+            readbackVerified: false,
+            error: 'readback_verification_mismatch',
+          });
+          return;
+        }
+
+        request.respond({
+          ok: true,
+          id: saveRes.memory.id,
+          committed: saveRes.committed,
+          indexed: saveRes.indexed,
+          indexing_status: saveRes.memory.indexing_status,
+          topic_key: saveRes.memory.topic_key,
+          content_version: saveRes.memory.content_version,
+          readbackVerified: true,
+        });
+      } catch (err: any) {
+        request.respond({ ok: false, error: err.message });
+      }
+      return;
+    }
+
+    if (request.action === 'get') {
+      try {
+        const cwd = request.cwd ?? process.cwd();
+        const scope = resolveScope(cwd, { isProjectTrusted: () => true });
+
+        const detail = readMemoryDetail(this.dbPath, {
+          id: request.id,
+          global: !!request.global,
+          cursor: request.cursor,
+          sessionScope: scope,
+        });
+
+        let topicKey: string | null = null;
+        withDatabase(this.dbPath, (db) => {
+          const row = db.prepare('SELECT topic_key FROM memories WHERE id = ?').get(request.id) as { topic_key: string | null } | undefined;
+          if (row) topicKey = row.topic_key;
+        });
+
+        request.respond({
+          ok: true,
+          id: detail.id,
+          title: detail.title,
+          content: detail.content,
+          type: detail.type,
+          topic_key: topicKey,
+          content_version: detail.content_version,
+          has_more: detail.has_more,
+          next_cursor: detail.next_cursor,
+        });
+      } catch (err: any) {
+        request.respond({ ok: false, error: err.message });
+      }
+      return;
+    }
+  }
+
   registerPublicEvents(pi: any): () => void {
     const unsubs: Array<() => void> = [];
 
@@ -223,6 +358,16 @@ export class MemoryLifecycle {
         }
       });
       unsubs.push(unsubBind);
+
+      // Listen for supervisor checkpoint request on pi.events
+      const unsubCheckpoint = pi.events.on(SUPERVISOR_CHECKPOINT_CHANNEL, (request: any) => {
+        this.handleSupervisorCheckpoint(request).catch((err) => {
+          try {
+            request?.respond?.({ ok: false, error: err.message });
+          } catch {}
+        });
+      });
+      unsubs.push(unsubCheckpoint);
     }
 
     return () => {
