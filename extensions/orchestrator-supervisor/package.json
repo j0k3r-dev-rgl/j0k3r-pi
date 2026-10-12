@@ -1,0 +1,17 @@
+{
+  "name": "orchestrator-supervisor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Automatic quota, context and session failover orchestrator supervisor for Pi",
+  "type": "module",
+  "engines": {
+    "node": ">=24.19.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.ts test/**/*.test.ts"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  }
+}
