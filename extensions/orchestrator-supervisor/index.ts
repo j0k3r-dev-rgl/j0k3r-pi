@@ -97,10 +97,12 @@ export default function orchestratorSupervisorExtension(pi: ExtensionAPI, explic
     pi.registerTool({
       name: 'supervisor_rotate',
       label: 'supervisor_rotate',
-      description: 'Solicita la rotación del orquestador hacia una nueva sesión limpia. Debe llamarse tras guardar el resumen de continuación en memoria persistente con memory_save (tipo session_summary). La nueva sesión continuará automáticamente desde el ID de memoria indicado.',
+      description: 'Solicita la rotación del orquestador hacia una nueva sesión limpia. Debe llamarse tras guardar un resumen conciso de continuación en memoria persistente con memory_save (tipo session_summary). La nueva sesión continuará automáticamente desde el ID de memoria indicado.',
       promptGuidelines: [
-        'Cuando el contexto alcance o se aproxime al límite de seguridad (90%), guarda inmediatamente el estado actual y los pasos pendientes usando memory_save (type: "session_summary", title: "Resumen de continuación").',
-        'Tras guardar la memoria con éxito, invoca supervisor_rotate pasando el memory_id devuelto y el next_step para transferir el control a una sesión nueva sin perder el trabajo.',
+        'Cuando el contexto alcance o se aproxime al límite de seguridad (90%), guarda inmediatamente un resumen de continuación ESTRUCTURADO Y CONCISO (150-250 palabras) usando memory_save (type: "session_summary", title: "Resumen de continuación").',
+        'ESTRUCTURA OBLIGATORIA DEL RESUMEN (4-5 viñetas concisas): 1) Objetivo activo y límites del usuario (ej. dónde detenerse), 2) Dónde se quedó exactamente (qué se completó y qué falta), 3) Punteros exactos a los archivos con la verdad que la nueva sesión debe leer con la herramienta read (ej. plan.md, apply.md) — ¡NUNCA copies ni vuelques el contenido de esos archivos en la memoria!, 4) Estado de servicios o entorno en vivo si aplica (puertos, bases de datos, flags), 5) Próxima acción inmediata a ejecutar.',
+        'REGLA DE ORO: NUNCA vuelques transcripciones, historiales de tareas pasadas ni bloques de código en la memoria. Usa punteros a archivos.',
+        'Tras guardar la memoria con éxito, invoca supervisor_rotate pasando el memory_id devuelto y el next_step para transferir el control a una sesión nueva limpia sin perder el hilo.',
       ],
       parameters: {
         type: 'object',
