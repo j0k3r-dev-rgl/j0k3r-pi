@@ -83,6 +83,86 @@ function readJsonl(file: string): any[] {
 }
 
 describe('subagents panel and extension ui', () => {
+  it('keeps historical native components warm while updating only live tool state', () => {
+    resetPiComponentCacheForTests();
+    const messages = vi.fn();
+    const tools = vi.fn();
+    const starts = vi.fn();
+    const updates = vi.fn();
+    const expansions = vi.fn();
+    try {
+      setPiComponentProviderForSubagentRendering({
+        UserMessageComponent: class {
+          constructor(private text: string) { messages('user'); }
+          render() { return [this.text]; }
+        },
+        AssistantMessageComponent: class {
+          constructor(private message: any, private hidden: boolean) { messages('assistant'); }
+          render() { return this.message.content.map((part: any) => part.type === 'thinking' ? (this.hidden ? 'Thinking...' : part.thinking) : part.text); }
+        },
+        ToolExecutionComponent: class {
+          private result: any;
+          private expanded = false;
+          private frame = 0;
+          constructor(_name: string, private id: string) { tools(id); }
+          markExecutionStarted() { starts(this.id); }
+          setArgsComplete() {}
+          updateResult(value: any) { this.result = value; updates(this.id); }
+          setExpanded(value: boolean) { this.expanded = value; expansions(this.id); }
+          render() { return [`card-${this.id}:${++this.frame}`, ...(this.result ? [this.result.content[0].text] : []), ...(this.expanded ? [`expanded-${this.id}`] : [])]; }
+        },
+      });
+      const task: SubagentTask = { id: 'cache-task', agent: 'worker', mode: 'task', status: 'running', task: 'inspect', created_at: new Date().toISOString(),
+        thread_snapshot: { version: 1, source: 'events', items: [
+          { type: 'user', id: 'prompt', text: 'prompt text' },
+          { type: 'assistant', id: 'answer', message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'reasoning' }, { type: 'text', text: 'answer text' }] } },
+          { type: 'tool', tool_call_id: 'done', name: 'read', status: 'completed', result: { content: [{ type: 'text', text: 'finished output' }], isError: false } },
+          { type: 'tool', tool_call_id: 'live', name: 'read', status: 'running' },
+        ] } };
+      const definition = { renderResult() {} };
+      const panel = new SubagentsHistoryPanel([task], { fg: (_n: string, text: string) => text }, () => {}, () => false,
+        (text) => stripAnsi(text).length, (text, w) => text.slice(0, w), { cwd: tmp, tui: { requestRender() {} }, getToolDefinition: () => definition }, 42);
+      expect(panel.render(120).join('\n')).toContain('card-live:1');
+      expect(panel.render(120).join('\n')).toContain('card-live:2');
+      expect(messages).toHaveBeenCalledTimes(3);
+      expect(tools).toHaveBeenCalledTimes(2);
+      expect(starts).toHaveBeenCalledTimes(2);
+      expect(updates).toHaveBeenCalledTimes(1);
+      expect(expansions).toHaveBeenCalledTimes(2);
+
+      // Snapshots can be reconstructed without changing timestamps or historical content.
+      task.thread_snapshot = JSON.parse(JSON.stringify(task.thread_snapshot));
+      const live = task.thread_snapshot!.items[3] as any;
+      live.status = 'partial';
+      live.result = { content: [{ type: 'text', text: 'streamed output' }], isError: false };
+      expect(panel.render(120).join('\n')).toContain('streamed output');
+      expect(messages).toHaveBeenCalledTimes(3);
+      expect(tools).toHaveBeenCalledTimes(2);
+      expect(updates).toHaveBeenCalledTimes(2);
+      const lines = panel.render(120);
+      const row = lines.findIndex((line) => line.includes('card-done'));
+      panel.handleMouse({ type: 'click', x: 110, y: row });
+      expect(panel.render(120).join('\n')).toContain('expanded-done');
+      expect(messages).toHaveBeenCalledTimes(3);
+      expect(tools).toHaveBeenCalledTimes(2);
+      expect(updates).toHaveBeenCalledTimes(2);
+      expect(expansions).toHaveBeenCalledTimes(3);
+      panel.render(80);
+      expect(messages).toHaveBeenCalledTimes(3);
+      expect(tools).toHaveBeenCalledTimes(2);
+      panel.invalidate();
+      expect(panel.render(120).join('\n')).toContain('expanded-done');
+      expect(messages).toHaveBeenCalledTimes(6);
+      expect(tools).toHaveBeenCalledTimes(4);
+      live.status = 'completed';
+      panel.render(120);
+      live.result.content[0].text = 'final revised output';
+      expect(panel.render(120).join('\n')).toContain('final revised output');
+      expect(messages).toHaveBeenCalledTimes(6);
+      expect(tools).toHaveBeenCalledTimes(4);
+    } finally { resetPiComponentCacheForTests(); }
+  });
+
   it('recovers synchronous presentation exports without executing async factories or reading project config', () => {
     resetPiComponentCacheForTests();
     const source = path.join(tmp, 'render-only-extension.cjs');

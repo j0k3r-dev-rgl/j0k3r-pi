@@ -15,7 +15,7 @@ import { createSubagentsRenderLogger, DEFAULT_RENDER_DEBUG_LOG_PATH } from '../s
 import { SubagentManager } from '../src/manager.js';
 import { registerSubagentTools } from '../src/tools.js';
 import { SubagentsHistoryPanel } from '../src/ui.js';
-import { boundThreadSnapshot, isValidThreadSnapshot, registerSubagentRuntimeToolDefinition, renderThreadBody, resetPiComponentCacheForTests, setPiComponentProviderForSubagentRendering } from '../src/thread-view.js';
+import { boundThreadSnapshot, isValidThreadSnapshot, registerSubagentRuntimeToolDefinition, renderThreadBody, SubagentThreadRenderCache, resetPiComponentCacheForTests, setPiComponentProviderForSubagentRendering } from '../src/thread-view.js';
 import type { EffectiveSubagentProfile, SubagentErrorMetadata, SubagentModelProfiles, SubagentRunner, SubagentTask } from '../src/types.js';
 
 const require = createRequire(import.meta.url);
@@ -131,6 +131,99 @@ describe('thread view and render', () => {
       expect(lines.join('').replace(/\s+/g, '')).toBe(`user: ${text}`.replace(/\s+/g, ''));
       expect(lines.every((line) => !line.includes('\n') && visibleWidth(line) <= 16)).toBe(true);
     });
+  });
+
+  it('invalidates cached item content, expansion and identity without discarding unrelated messages', () => {
+    const constructed = vi.fn();
+    const rendered = vi.fn();
+    setPiComponentProviderForSubagentRendering({
+      UserMessageComponent: class {
+        constructor(private text: string) { constructed('user'); }
+        render(width: number) { rendered('user'); return [`${width}:${this.text}`]; }
+      },
+      AssistantMessageComponent: class {
+        constructor(private message: any, private hidden: boolean) { constructed('assistant'); }
+        render(width: number) { rendered('assistant'); return this.message.content.map((part: any) => `${width}:${part.type === 'thinking' ? (this.hidden ? 'Thinking...' : part.thinking) : part.text}`); }
+      },
+    });
+    try {
+      const snapshot = { version: 1, source: 'events', items: [
+        { type: 'user', id: 'u', text: 'first' },
+        { type: 'assistant', id: 'a', message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'reason' }, { type: 'text', text: 'answer' }] } },
+      ] };
+      const cache = new SubagentThreadRenderCache();
+      const context = { cwd: tmp, taskId: 'one', renderWidth: 80, visibleWidth, truncateToWidth: (text: string, width: number) => text.slice(0, width),
+        hideThinkingBlock: true, onItemRendered: vi.fn() };
+      const render = () => renderThreadBody(snapshot, context, cache).join('\n');
+      expect(render()).toContain('Thinking...');
+      render();
+      expect(constructed).toHaveBeenCalledTimes(3);
+      expect(rendered).toHaveBeenCalledTimes(3);
+      expect(context.onItemRendered).toHaveBeenCalledTimes(6);
+      snapshot.items = JSON.parse(JSON.stringify(snapshot.items));
+      (snapshot.items[1] as any).message.content[1].text = 'stream update';
+      expect(render()).toContain('stream update');
+      expect(constructed).toHaveBeenCalledTimes(4);
+      context.hideThinkingBlock = false;
+      expect(render()).toContain('reason');
+      expect(constructed).toHaveBeenCalledTimes(5);
+      context.renderWidth = 50;
+      expect(render()).toContain('50:stream update');
+      expect(constructed).toHaveBeenCalledTimes(5);
+      expect(rendered).toHaveBeenCalledTimes(8);
+      const assistant = snapshot.items.pop()!;
+      render();
+      snapshot.items.push(assistant);
+      render();
+      expect(constructed).toHaveBeenCalledTimes(7);
+      context.taskId = 'two';
+      render();
+      expect(constructed).toHaveBeenCalledTimes(10);
+      cache.clear();
+      render();
+      expect(constructed).toHaveBeenCalledTimes(13);
+    } finally { resetPiComponentCacheForTests(); }
+  });
+
+  it('updates native tool results only on changes and rebuilds changed arguments or renderers', () => {
+    const constructed = vi.fn();
+    const updated = vi.fn();
+    setPiComponentProviderForSubagentRendering({ ToolExecutionComponent: class {
+      private result: any;
+      constructor(_name: string, _id: string, private args: any) { constructed(); }
+      markExecutionStarted() {}
+      setArgsComplete() {}
+      updateResult(value: any, partial: boolean) { this.result = value; updated(value, partial); }
+      setExpanded() {}
+      render() { return [this.args.path, this.result?.content[0]?.text ?? 'pending']; }
+    } });
+    try {
+      const item = { type: 'tool', tool_call_id: 'call', name: 'read', status: 'partial', arguments: { path: 'one' }, result: { content: [{ type: 'text', text: 'output' }], isError: false } };
+      const snapshot = { version: 1, source: 'events', items: [item] };
+      const cache = new SubagentThreadRenderCache();
+      let definition = { renderResult() {} };
+      const context = { cwd: tmp, taskId: 'one', tui: {}, visibleWidth, truncateToWidth: (text: string, width: number) => text.slice(0, width), getToolDefinition: () => definition };
+      const render = () => renderThreadBody(snapshot, context, cache).join('\n');
+      render(); render();
+      expect(constructed).toHaveBeenCalledTimes(1);
+      expect(updated).toHaveBeenCalledTimes(1);
+      item.status = 'completed';
+      render();
+      expect(updated).toHaveBeenLastCalledWith(expect.anything(), false);
+      item.result.content[0]!.text = 'updated';
+      expect(render()).toContain('updated');
+      expect(constructed).toHaveBeenCalledTimes(1);
+      item.arguments.path = 'two';
+      expect(render()).toContain('two');
+      expect(constructed).toHaveBeenCalledTimes(2);
+      definition = { renderResult() {} };
+      render();
+      expect(constructed).toHaveBeenCalledTimes(3);
+      delete (item as any).result;
+      item.status = 'running';
+      expect(render()).toContain('pending');
+      expect(render()).not.toContain('updated');
+    } finally { resetPiComponentCacheForTests(); }
   });
 
   it('honors collapsed thinking in the text fallback without hiding assistant text', () => {

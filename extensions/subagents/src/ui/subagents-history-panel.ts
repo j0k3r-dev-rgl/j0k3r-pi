@@ -1,7 +1,7 @@
-import { isValidThreadSnapshot, renderThreadBody } from '../thread-view.js';
+import { isValidThreadSnapshot, renderThreadBody, SubagentThreadRenderCache } from '../thread-view.js';
 import type { SubagentTask, SubagentThreadRenderContext, SubagentThreadRenderTarget, SubagentThreadSnapshot, UsageStats } from '../types.js';
 import { formatTaskLabel } from '../render/tools/formatting.js';
-import { visibleWidth as terminalVisibleWidth } from '../render/text-width.js';
+import { visibleWidth as terminalVisibleWidth, wrapLineToWidth } from '../render/text-width.js';
 import {
   ARCH_ICON,
   BOX_CHARS,
@@ -170,6 +170,7 @@ export class SubagentsHistoryPanel {
   private detailRowTargetMap = new Map<number, DetailTarget>();
   private hydratedTasks = new Map<string, { signature: string; task: SubagentTask }>();
   private bodyCache = new Map<string, DetailEntry[]>();
+  private threadRenderCache = new SubagentThreadRenderCache();
   private rowTaskMap = new Map<number, string>();
   private sidebarRowTaskMap = new Map<number, string>();
   private detailRowTaskMap = new Map<number, string>();
@@ -208,6 +209,7 @@ export class SubagentsHistoryPanel {
   }
 
   invalidate(): void {
+    this.threadRenderCache.clear();
     this.bodyCache.clear();
     this.hydratedTasks.clear();
     this.rowTaskMap.clear();
@@ -966,7 +968,7 @@ export class SubagentsHistoryPanel {
   }
 
   private bodyCacheKey(task: SubagentTask, width: number): string {
-    return [this.taskSignature(task), width, this.toolOutputExpanded ? 'expanded' : 'collapsed', this.hideThinkingBlock ? 'thinking-hidden' : 'thinking-visible'].join('|');
+    return [this.taskSignature(task), JSON.stringify(task.thread_snapshot), width, this.toolOutputExpanded ? 'expanded' : 'collapsed', this.hideThinkingBlock ? 'thinking-hidden' : 'thinking-visible'].join('|');
   }
 
   private resolveTaskIdFromSnapshotItem(item: any, tasks: SubagentTask[]): string | undefined {
@@ -1136,13 +1138,14 @@ export class SubagentsHistoryPanel {
           }
         },
       };
-      const rendered = renderThreadBody(activeSnapshot, context);
+      const rendered = renderThreadBody(activeSnapshot, context, this.threadRenderCache);
       if (!entries.length) entries = (rendered.length ? rendered : ['']).map((text) => ({ text }));
 
       if ((task.status === 'failed' || task.status === 'cancelled') && task.error && !hasEquivalentSnapshotError(activeSnapshot, task.error)) {
         entries.push({ text: '' }, { text: '# error' }, { text: task.error });
       }
     } else {
+      this.threadRenderCache.clear();
       entries = this.executionFlowEntriesFor(task);
     }
     if (!allowCache) return entries;
@@ -1222,38 +1225,7 @@ export class SubagentsHistoryPanel {
   }
 
   private wrap(text: string, width: number): string[] {
-    const out: string[] = [];
-    for (const raw of text.replace(/\t/g, '  ').split('\n')) {
-      if (!raw) {
-        out.push('');
-        continue;
-      }
-      const indent = raw.match(/^\s*/)?.[0] ?? '';
-      const words = raw.trimEnd().split(/\s+/);
-      let line = indent && words.length ? indent + words.shift() : (words.shift() ?? '');
-      for (const word of words) {
-        const next = line ? `${line} ${word}` : word;
-        if (this.visibleWidth(next) <= width) {
-          line = next;
-          continue;
-        }
-        if (line) out.push(line);
-        if (this.visibleWidth(word) > width) {
-          let rest = word;
-          while (this.visibleWidth(rest) > width) {
-            let cut = Math.max(1, width);
-            while (cut > 1 && this.visibleWidth(rest.slice(0, cut)) > width) cut--;
-            out.push(rest.slice(0, cut));
-            rest = rest.slice(cut);
-          }
-          line = rest;
-        } else {
-          line = indent + word;
-        }
-      }
-      if (line) out.push(line);
-    }
-    return out;
+    return text.replace(/\t/g, '  ').split('\n').flatMap((line) => wrapLineToWidth(line, width));
   }
 
   private packMetadataFields(fields: string[], width: number, separator = ' ┃ '): string[] {

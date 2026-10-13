@@ -476,7 +476,7 @@ function assistantText(item: SubagentAssistantItem, width?: number, hideThinking
   return lines;
 }
 
-function renderAssistantItem(item: SubagentAssistantItem, context: SubagentThreadRenderContext, width: number): string[] {
+function renderAssistantItem(item: SubagentAssistantItem, context: SubagentThreadRenderContext, width: number, cached?: ThreadRenderEntry): string[] {
   const visibleContent = item.message.content.filter((part) => part.type !== 'toolCall');
   if (!visibleContent.length && !item.message.errorMessage) return [];
   const displayItem: SubagentAssistantItem = visibleContent.length === item.message.content.length
@@ -486,7 +486,9 @@ function renderAssistantItem(item: SubagentAssistantItem, context: SubagentThrea
   if (typeof componentCtor === 'function') {
     try {
       const markdownTheme = loadPiComponents()?.getMarkdownTheme?.() ?? context.theme;
-      const rendered = renderComponent(new componentCtor(displayItem.message, context.hideThinkingBlock ?? false, markdownTheme, 'Thinking...'), width);
+      const component = cached?.component ?? new componentCtor(displayItem.message, context.hideThinkingBlock ?? false, markdownTheme, 'Thinking...');
+      if (cached) cached.component = component;
+      const rendered = renderComponent(component, width);
       if (rendered?.some((line) => line.trim())) return rendered;
     } catch (error) { debugLog(context, 'assistant_component_error', { error }); }
   }
@@ -501,14 +503,16 @@ function userItemTitle(item: SubagentUserItem): string | undefined {
   return undefined;
 }
 
-function renderUserItem(item: SubagentUserItem, context: SubagentThreadRenderContext, width: number): string[] {
+function renderUserItem(item: SubagentUserItem, context: SubagentThreadRenderContext, width: number, cached?: ThreadRenderEntry): string[] {
   const title = userItemTitle(item);
   const displayText = title ? `## ${title}\n\n${item.text}` : item.text;
   const componentCtor = loadPiComponents()?.UserMessageComponent;
   if (typeof componentCtor === 'function') {
     try {
       const markdownTheme = loadPiComponents()?.getMarkdownTheme?.() ?? context.theme;
-      const rendered = renderComponent(new componentCtor(displayText, markdownTheme), width);
+      const component = cached?.component ?? new componentCtor(displayText, markdownTheme);
+      if (cached) cached.component = component;
+      const rendered = renderComponent(component, width);
       if (rendered?.some((line) => line.trim())) return rendered;
     } catch (error) { debugLog(context, 'user_component_error', { error, label: item.label }); }
   }
@@ -635,7 +639,7 @@ function cachedToolComponent(item: SubagentToolItem, context: SubagentThreadRend
   return component;
 }
 
-function renderToolItem(item: SubagentToolItem, context: SubagentThreadRenderContext, width: number): string[] {
+function renderToolItem(item: SubagentToolItem, context: SubagentThreadRenderContext, width: number, cached?: ThreadRenderEntry): string[] {
   const toolDefinition = renderableToolDefinition(item.name, [
     context.getToolDefinition?.(item.name),
     externalToolDefinitions.get(item.name),
@@ -644,11 +648,31 @@ function renderToolItem(item: SubagentToolItem, context: SubagentThreadRenderCon
   const componentCtor = loadPiComponents()?.ToolExecutionComponent;
   if (typeof componentCtor === 'function' && context.tui && toolDefinition) {
     try {
-      const component = cachedToolComponent(item, context, componentCtor, toolDefinition);
-      component.markExecutionStarted?.();
-      component.setArgsComplete?.();
-      if (item.result) component.updateResult?.(item.result, item.status === 'partial');
-      component.setExpanded?.(context.toolOutputExpanded ?? false);
+      const componentSignature = JSON.stringify([item.name, item.arguments, context.showImages, context.imageWidthCells]);
+      if (cached && (cached.componentSignature !== componentSignature || cached.toolDefinition !== toolDefinition || (!item.result && cached.hasResult))) {
+        cached.component = undefined;
+        cached.resultSignature = undefined;
+        cached.expanded = undefined;
+      }
+      const component = cached
+        ? (cached.component ?? new componentCtor(item.name, item.tool_call_id ?? item.id ?? item.name, item.arguments, { showImages: context.showImages, imageWidthCells: context.imageWidthCells }, toolDefinition, context.tui, context.cwd))
+        : cachedToolComponent(item, context, componentCtor, toolDefinition);
+      if (!cached?.component) {
+        component.markExecutionStarted?.();
+        component.setArgsComplete?.();
+      }
+      const resultSignature = JSON.stringify([item.status, item.result]);
+      if (item.result && (!cached || cached.resultSignature !== resultSignature)) component.updateResult?.(item.result, item.status === 'partial');
+      const expanded = context.toolOutputExpanded ?? false;
+      if (!cached || cached.expanded !== expanded) component.setExpanded?.(expanded);
+      if (cached) {
+        cached.component = component;
+        cached.componentSignature = componentSignature;
+        cached.toolDefinition = toolDefinition;
+        cached.resultSignature = resultSignature;
+        cached.hasResult = Boolean(item.result);
+        cached.expanded = expanded;
+      }
       const rendered = renderComponent(component, width);
       if (rendered?.some((line) => line.trim())) return rendered;
       debugLog(context, 'tool_component_empty_fallback', { name: item.name, status: item.status, width, hasToolDefinition: Boolean(toolDefinition), hasTui: Boolean(context.tui) });
@@ -668,7 +692,7 @@ function renderToolItem(item: SubagentToolItem, context: SubagentThreadRenderCon
   return fallback;
 }
 
-function renderBashItem(item: SubagentBashItem, context: SubagentThreadRenderContext, width: number): string[] {
+function renderBashItem(item: SubagentBashItem, context: SubagentThreadRenderContext, width: number, cached?: ThreadRenderEntry): string[] {
   const status = item.cancelled ? 'cancelled' : item.status ?? (item.exitCode && item.exitCode !== 0 ? 'failed' : 'completed');
   const adapted: SubagentToolItem = {
     type: 'tool',
@@ -686,7 +710,7 @@ function renderBashItem(item: SubagentBashItem, context: SubagentThreadRenderCon
         }
       : undefined,
   };
-  return renderToolItem(adapted, context, width);
+  return renderToolItem(adapted, context, width, cached);
 }
 
 function renderCustomItem(item: SubagentCustomItem, context: SubagentThreadRenderContext, width: number): string[] {
@@ -704,14 +728,14 @@ function renderCustomItem(item: SubagentCustomItem, context: SubagentThreadRende
   return [`custom ${item.customType}${item.fallbackText ? `: ${item.fallbackText}` : ''}`];
 }
 
-function renderItem(item: SubagentThreadItem, context: SubagentThreadRenderContext, width: number): string[] {
+function renderItem(item: SubagentThreadItem, context: SubagentThreadRenderContext, width: number, cached?: ThreadRenderEntry): string[] {
   switch (item.type) {
     case 'attempt': return renderAttemptItem(item, context, width);
-    case 'assistant': return renderAssistantItem(item, context, width);
-    case 'user': return renderUserItem(item, context, width);
-    case 'tool': return renderToolItem(item, context, width);
+    case 'assistant': return renderAssistantItem(item, context, width, cached);
+    case 'user': return renderUserItem(item, context, width, cached);
+    case 'tool': return renderToolItem(item, context, width, cached);
     case 'tool_result': return [`tool result${item.name ? ` ${item.name}` : ''}${item.result.isError ? ' failed' : ''}`, payloadText(item.result)].filter(Boolean);
-    case 'bash': return renderBashItem(item, context, width);
+    case 'bash': return renderBashItem(item, context, width, cached);
     case 'custom': return renderCustomItem(item, context, width);
     case 'status': return [`${item.severity ?? 'info'}: ${item.text}`];
     case 'error': return [`error: ${item.text}`];
@@ -790,10 +814,54 @@ function normalizeAttemptItems(items: SubagentThreadItem[]): SubagentThreadItem[
   return [...normalizeLegacyAttemptPrefix(items.slice(0, firstAttempt)), ...items.slice(firstAttempt)];
 }
 
-export function renderThreadBody(snapshot: unknown, context: SubagentThreadRenderContext): string[] {
-  if (!isRenderableSnapshotRoot(snapshot)) return [];
+type ThreadRenderEntry = {
+  signature?: string;
+  component?: any;
+  componentSignature?: string;
+  toolDefinition?: unknown;
+  resultSignature?: string;
+  hasResult?: boolean;
+  expanded?: boolean;
+  width?: number;
+  lines?: string[];
+};
+
+// Owned by one panel, not by the task history. Retain only the selected bounded thread.
+export class SubagentThreadRenderCache {
+  private entries = new Map<string, ThreadRenderEntry>();
+  private identity: unknown[] = [];
+
+  clear(): void {
+    this.entries.clear();
+    this.identity = [];
+  }
+
+  begin(context: SubagentThreadRenderContext): void {
+    const identity = [context.taskId, context.cwd, context.theme, context.tui, loadPiComponents(), context.showImages, context.imageWidthCells];
+    if (identity.some((value, index) => value !== this.identity[index])) this.clear();
+    this.identity = identity;
+  }
+
+  entry(key: string): ThreadRenderEntry {
+    let entry = this.entries.get(key);
+    if (!entry) {
+      entry = {};
+      this.entries.set(key, entry);
+    }
+    return entry;
+  }
+
+  prune(keys: Set<string>): void {
+    for (const key of this.entries.keys()) if (!keys.has(key)) this.entries.delete(key);
+  }
+}
+
+export function renderThreadBody(snapshot: unknown, context: SubagentThreadRenderContext, cache?: SubagentThreadRenderCache): string[] {
+  if (!isRenderableSnapshotRoot(snapshot)) { cache?.clear(); return []; }
   const width = Math.max(1, Math.floor(context.renderWidth ?? DEFAULT_RENDER_WIDTH));
   const lines: string[] = [];
+  const renderedKeys = new Set<string>();
+  cache?.begin(context);
   let attempt = 1;
   for (const [index, rawItem] of normalizeAttemptItems(snapshot.items as SubagentThreadItem[]).slice(0, DEFAULT_MAX_ITEMS).entries()) {
     try {
@@ -805,6 +873,7 @@ export function renderThreadBody(snapshot: unknown, context: SubagentThreadRende
       if (item.type === 'attempt') attempt = item.attempt;
       const itemId = 'tool_call_id' in item && item.tool_call_id ? item.tool_call_id : ('id' in item && item.id ? item.id : `item-${index}`);
       const key = `attempt-${attempt}:${itemId}`;
+      let slot = 0;
       const emitItem = (displayItem: SubagentThreadItem, target?: SubagentThreadRenderTarget) => {
         const itemContext = target ? {
           ...context,
@@ -812,7 +881,25 @@ export function renderThreadBody(snapshot: unknown, context: SubagentThreadRende
             ? { toolOutputExpanded: context.isExpanded?.(target, context.toolOutputExpanded ?? false) ?? context.toolOutputExpanded }
             : { hideThinkingBlock: !(context.isExpanded?.(target, !(context.hideThinkingBlock ?? false)) ?? !(context.hideThinkingBlock ?? false)) }),
         } : context;
-        const rendered = truncateLines(itemContext, renderItem(displayItem, itemContext, width), width);
+        const cacheKey = `${key}:${item.type}:${slot++}`;
+        renderedKeys.add(cacheKey);
+        const cached = cache?.entry(cacheKey);
+        const nativeTool = displayItem.type === 'tool' || displayItem.type === 'bash';
+        const reusableLines = !nativeTool && displayItem.type !== 'custom';
+        const signature = JSON.stringify([displayItem, displayItem.type === 'assistant' && displayItem.message.content.some((part) => part.type === 'thinking') ? itemContext.hideThinkingBlock : undefined]);
+        if (cached && cached.signature !== signature) {
+          cached.lines = undefined;
+          if (!nativeTool) cached.component = undefined;
+          cached.signature = signature;
+        }
+        // Tools still render on each frame: native loaders and asynchronous image updates stay live.
+        const rendered = reusableLines && cached?.lines && cached.width === width
+          ? cached.lines
+          : truncateLines(itemContext, renderItem(displayItem, itemContext, width, cached), width);
+        if (cached && reusableLines) {
+          cached.width = width;
+          cached.lines = rendered;
+        }
         lines.push(...rendered);
         context.onItemRendered?.(item, rendered, target);
       };
@@ -842,5 +929,6 @@ export function renderThreadBody(snapshot: unknown, context: SubagentThreadRende
       lines.push(safeTruncate(context, 'thread item unavailable', width));
     }
   }
+  cache?.prune(renderedKeys);
   return lines;
 }
