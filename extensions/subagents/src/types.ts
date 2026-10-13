@@ -280,6 +280,8 @@ export type SubagentErrorItem = {
   text: string;
 };
 
+export type SubagentThreadRenderTarget = { kind: 'tool' | 'thinking'; key: string };
+
 export type SubagentThreadRenderContext = {
   theme?: any;
   tui?: any;
@@ -294,6 +296,8 @@ export type SubagentThreadRenderContext = {
   imageWidthCells?: number;
   toolOutputExpanded?: boolean;
   hideThinkingBlock?: boolean;
+  isExpanded?: (target: SubagentThreadRenderTarget, defaultExpanded: boolean) => boolean;
+  onItemRendered?: (item: SubagentThreadItem, lines: string[], target?: SubagentThreadRenderTarget) => void;
 };
 
 export type SubagentLiveActivity = {

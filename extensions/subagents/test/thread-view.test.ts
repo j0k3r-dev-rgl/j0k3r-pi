@@ -83,6 +83,16 @@ function readJsonl(file: string): any[] {
 }
 
 describe('thread view and render', () => {
+  it('honors collapsed thinking in the text fallback without hiding assistant text', () => {
+    const snapshot = { version: 1, source: 'events', items: [{ type: 'assistant', message: { role: 'assistant', content: [
+      { type: 'thinking', thinking: 'private reasoning fallback' }, { type: 'text', text: 'public answer' },
+    ] } }] };
+    const hidden = renderText(snapshot, { hideThinkingBlock: true });
+    expect(hidden).toContain('Thinking...');
+    expect(hidden).not.toContain('private reasoning fallback');
+    expect(hidden).toContain('public answer');
+    expect(renderText(snapshot, { hideThinkingBlock: false })).toContain('private reasoning fallback');
+  });
   it('does not statically depend on sibling extension internals', () => {
     const srcDir = path.join(process.cwd(), 'src');
     const files = fs.readdirSync(srcDir, { recursive: true })
@@ -257,7 +267,7 @@ describe('thread view and render', () => {
   });
 
   it('resolves registered extension tool definitions from pi/context arrays and maps', () => {
-    const memoryTool = { name: 'memory_search', label: 'Memory Search' };
+    const memoryTool = { name: 'memory_search', label: 'Memory Search', renderResult: () => undefined };
     const readTool = { name: 'read', label: 'Read' };
 
     expect(resolveRegisteredToolDefinition({}, { tools: [memoryTool] }, 'memory_search')).toBe(memoryTool);
@@ -343,7 +353,7 @@ describe('thread view and render', () => {
       } as any, {
         cwd: tmp,
         tui: { requestRender() {} },
-        getToolDefinition: (name: string) => name === 'memory_search' ? { name, label: 'Memory Search' } : undefined,
+        getToolDefinition: (name: string) => name === 'memory_search' ? { name, label: 'Memory Search', renderResult: () => undefined } : undefined,
         renderWidth: 180,
         visibleWidth: (text: string) => text.length,
         truncateToWidth: (text: string, width: number) => text.length > width ? text.slice(0, width) : text,
@@ -379,7 +389,7 @@ describe('thread view and render', () => {
     const oldArgv1 = process.argv[1];
     process.argv[1] = path.join(shimDir, 'pi');
     try {
-      registerSubagentRuntimeToolDefinition('task-runtime-tools', 'find_symbol', { name: 'find_symbol', label: 'Find Symbol' });
+      registerSubagentRuntimeToolDefinition('task-runtime-tools', 'find_symbol', { name: 'find_symbol', label: 'Find Symbol', renderResult: () => undefined });
       const lines = renderThreadBody({
         version: 1,
         source: 'events',

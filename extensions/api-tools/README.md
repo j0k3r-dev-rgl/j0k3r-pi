@@ -77,6 +77,14 @@ When `accounts_file` is configured:
 - Alias matching: case-insensitive against `role`, `username`, or `email`.
 - Secret protection: all passwords parsed from the file are dynamically registered in the redaction list; raw passwords never appear in tool parameters, results, or logs.
 
+## Rendering and history replay
+
+Execution tools still require project-local enablement and API configuration. Presentation is registered synchronously through Pi's `registerToolRenderer`, independently of clients, configuration and network access. This keeps historical API cards renderable even when the current directory has no API configured; it does not enable API execution.
+
+The entrypoint exports `registerToolRenderers(pi)` as a presentation-only hook. Viewers such as Subagents can recover that hook from the registered tool's source metadata without invoking the execution factory. The same renderer builder owns both live tool definitions and replay resolvers, so collapsed/expanded cards remain consistent without imports between extensions.
+
+Reload Pi after changing extension code. History preserves result data, not JavaScript functions; restoring the intended card therefore requires the extension's renderer source to remain available. When it is unavailable, viewers should use a bounded text fallback rather than mistake tool metadata for a renderer.
+
 ## Contract version 2
 
 All revised tool results now report `details.contract_version = 2`.

@@ -1,6 +1,24 @@
 import { keyHint } from './pi-runtime.js';
 import type { ApiToolResult } from './types.js';
 
+export const API_TOOL_NAMES = [
+  'api_status', 'api_auth_status', 'api_login', 'api_rest_request', 'api_swagger', 'api_graphql',
+] as const;
+
+export function buildApiToolRenderers(toolName: string) {
+  return {
+    renderShell: 'self' as const,
+    renderCall: (args: any, theme: any, context?: any) => renderApiToolCall(toolName, args, theme, context),
+    renderResult: (result: ApiToolResult, options: any, theme: any, context?: any) => renderApiToolResult(toolName, result, options, theme, context),
+  };
+}
+
+/** Presentation-only entry: no config, clients, tools or lifecycle resources. */
+export function registerToolRenderers(pi: any): void {
+  pi.registerToolRenderer?.((toolName: string, next: () => unknown) =>
+    API_TOOL_NAMES.some((name) => name === toolName) ? buildApiToolRenderers(toolName) : next());
+}
+
 export type Component = {
   render(width: number): string[];
   invalidate(): void;
