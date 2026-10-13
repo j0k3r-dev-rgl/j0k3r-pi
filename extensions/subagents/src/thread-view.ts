@@ -512,7 +512,9 @@ function renderUserItem(item: SubagentUserItem, context: SubagentThreadRenderCon
       if (rendered?.some((line) => line.trim())) return rendered;
     } catch (error) { debugLog(context, 'user_component_error', { error, label: item.label }); }
   }
-  return title ? [title, item.text] : [`${item.label ?? 'user'}: ${item.text}`];
+  const fallbackText = title ? `${title}\n${item.text}` : `${item.label ?? 'user'}: ${item.text}`;
+  return fallbackText.replace(/\r\n?/g, '\n').split('\n')
+    .flatMap((line) => wrapLineToWidth(line, width));
 }
 
 function renderAttemptItem(item: SubagentAttemptItem, context: SubagentThreadRenderContext, width: number): string[] {

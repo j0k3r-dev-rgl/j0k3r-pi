@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { visibleWidth } from '@earendil-works/pi-tui';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,7 +15,7 @@ import { createSubagentsRenderLogger, DEFAULT_RENDER_DEBUG_LOG_PATH } from '../s
 import { SubagentManager } from '../src/manager.js';
 import { registerSubagentTools } from '../src/tools.js';
 import { SubagentsHistoryPanel } from '../src/ui.js';
-import { boundThreadSnapshot, isValidThreadSnapshot, registerSubagentRuntimeToolDefinition, renderThreadBody, resetPiComponentCacheForTests } from '../src/thread-view.js';
+import { boundThreadSnapshot, isValidThreadSnapshot, registerSubagentRuntimeToolDefinition, renderThreadBody, resetPiComponentCacheForTests, setPiComponentProviderForSubagentRendering } from '../src/thread-view.js';
 import type { EffectiveSubagentProfile, SubagentErrorMetadata, SubagentModelProfiles, SubagentRunner, SubagentTask } from '../src/types.js';
 
 const require = createRequire(import.meta.url);
@@ -83,6 +84,55 @@ function readJsonl(file: string): any[] {
 }
 
 describe('thread view and render', () => {
+  describe.each(['unavailable', 'throws'] as const)('user component %s', (componentState) => {
+    beforeEach(() => {
+      setPiComponentProviderForSubagentRendering(componentState === 'unavailable' ? {} : {
+        UserMessageComponent: class {
+          render(): string[] { throw new Error('Theme not initialized'); }
+        },
+      });
+    });
+    afterEach(() => resetPiComponentCacheForTests());
+
+    it.each([24, 80])('preserves all delegation sections and wraps to %i columns in fallback', (width) => {
+      const sections = [
+        '1. Goal: Plan the minimum pilot with a complete delegated instruction.',
+        '2. Known context and missing facts: Keep all five user decisions visible.',
+        '',
+        '3. Scope, paths, and exclusions: ' + 'long-path/'.repeat(12),
+        '4. Governing contracts and ready artifacts: Reuse the evidence.',
+        '5. Assigned skills: Follow the assigned contracts.',
+        '6. Expected output and evidence: Write the plan.',
+        '7. Blockers and next permitted action: Stop if blocked.',
+      ];
+      const snapshot = { version: 1, source: 'events', items: [
+        { type: 'user', label: 'delegated_task', text: sections.join('\r\n') },
+      ] };
+      const onItemRendered = vi.fn();
+      const truncateToWidth = vi.fn((text: string, max: number) => text.slice(0, max));
+      const lines = renderThreadBody(snapshot, {
+        cwd: tmp, renderWidth: width, visibleWidth, truncateToWidth, onItemRendered,
+      });
+      const expected = ['delegated task', ...sections].join('\n');
+      const userLines = lines.slice(lines.indexOf('delegated task'));
+      expect(stripAnsi(userLines.join('')).replace(/\s+/g, '')).toBe(expected.replace(/\s+/g, ''));
+      expect(lines).toContain('');
+      expect(lines.every((line) => !/[\r\n]/.test(line) && visibleWidth(line) <= width)).toBe(true);
+      expect(truncateToWidth).not.toHaveBeenCalled();
+      expect(onItemRendered).toHaveBeenCalledWith(expect.objectContaining({ type: 'user' }), userLines, undefined);
+    });
+
+    it('wraps the ordinary user prefix together with multiline text', () => {
+      const text = 'First line contains a long instruction.\nFinal line remains visible.';
+      const lines = renderThreadBody({ version: 1, source: 'events', items: [{ type: 'user', text }] }, {
+        cwd: tmp, renderWidth: 16, visibleWidth,
+        truncateToWidth: (line, width) => line.slice(0, width),
+      });
+      expect(lines.join('').replace(/\s+/g, '')).toBe(`user: ${text}`.replace(/\s+/g, ''));
+      expect(lines.every((line) => !line.includes('\n') && visibleWidth(line) <= 16)).toBe(true);
+    });
+  });
+
   it('honors collapsed thinking in the text fallback without hiding assistant text', () => {
     const snapshot = { version: 1, source: 'events', items: [{ type: 'assistant', message: { role: 'assistant', content: [
       { type: 'thinking', thinking: 'private reasoning fallback' }, { type: 'text', text: 'public answer' },
