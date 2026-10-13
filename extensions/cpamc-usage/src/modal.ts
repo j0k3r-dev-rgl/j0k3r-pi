@@ -1,5 +1,5 @@
 import type { Component, Focusable, TuiMouseEvent, TuiMouseEventResult } from "@earendil-works/pi-tui";
-import type { AccountUsage, ProviderGroup, UsagePool } from "./api.ts";
+import type { AccountUsage, ProviderGroup, UsagePool, BillingSummary } from "./api.ts";
 import { formatAmount, formatRenewalDate, formatReset, poolAvailable, poolTitle } from "./api.ts";
 
 /**
@@ -120,7 +120,7 @@ function renderThemedBar(percentage: number, width = 16, theme: ModalTheme): str
     return `${filledBar}${emptyBar}`;
 }
 
-function formatAccountLine(account: AccountUsage, isSelected: boolean, isHovered: boolean, theme: ModalTheme): string {
+export function formatAccountLine(account: AccountUsage, isSelected: boolean, isHovered: boolean, theme: ModalTheme): string {
     const marker = isSelected ? fg(theme, "accent", "▸ ") : fg(theme, "dim", "· ");
     const name = isSelected
         ? bold(theme, fg(theme, "text", account.account))
@@ -142,12 +142,45 @@ function formatAccountLine(account: AccountUsage, isSelected: boolean, isHovered
     if (account.bankedCredits != null) {
         flags.push(fg(theme, "warning", `banked ${account.bankedCredits}`));
     }
+    if (account.billing) {
+        if (account.billing.status === "pending_initial_export") {
+            flags.push(fg(theme, "warning", "[⏳ Export pendiente]"));
+        } else if (account.billing.status === "ready") {
+            const net = account.billing.totalProject.netCost.toFixed(2);
+            const cred = account.billing.totalProject.creditsApplied.toFixed(2);
+            flags.push(fg(theme, "accent", `[💵 Neto: $${net} · 🎁 Créditos: $${cred}]`));
+        }
+    }
 
     const head = account.note && account.pools.length === 0
         ? `${marker}${name} ${plan} ${fg(theme, "dim", "· sin cuota expuesta")}`
         : `${marker}${name} ${plan} ${poolsCount}`;
 
     return flags.length ? `${head} ${flags.join(" ")}` : head;
+}
+
+export function billingCardLines(billing: BillingSummary, theme: ModalTheme): string[] {
+    const lines: string[] = [];
+    if (billing.status === "pending_initial_export") {
+        lines.push(fg(theme, "accent", `  ℹ BigQuery Billing Export ('${billing.dataset}') conectado`));
+        lines.push(fg(theme, "dim", `    Esperando creación inicial de tablas por Google Cloud (proceso en curso en GCP Console)`));
+        lines.push(
+            `    ${fg(theme, "dim", "Costo Bruto:")} $0.00 USD  ·  ${fg(theme, "success", "Créditos Aplicados:")} $0.00 USD  ·  ${fg(theme, "accent", "Neto a Pagar:")} $0.00 USD`,
+        );
+    } else if (billing.status === "ready") {
+        const tp = billing.totalProject;
+        const vx = billing.vertexAi;
+        lines.push(`${fg(theme, "accent", "  ◆")} ${bold(theme, fg(theme, "syntaxFunction", "Resumen de Facturación MTD (BigQuery Export)"))}`);
+        lines.push(
+            `    ${bold(theme, fg(theme, "text", "Total Proyecto:  "))} Costo Bruto $${tp.grossCost.toFixed(2)}  ·  ${fg(theme, "success", `Créditos $${tp.creditsApplied.toFixed(2)}`)}  ·  ${fg(theme, "warning", `Neto a Pagar $${tp.netCost.toFixed(2)}`)} [${tp.currency}]`,
+        );
+        lines.push(
+            `    ${bold(theme, fg(theme, "text", "Vertex AI/Agent: "))} Costo Bruto $${vx.grossCost.toFixed(2)}  ·  ${fg(theme, "success", `Créditos $${vx.creditsApplied.toFixed(2)}`)}  ·  ${fg(theme, "warning", `Neto a Pagar $${vx.netCost.toFixed(2)}`)} [${vx.currency}]`,
+        );
+    } else if (billing.status === "error") {
+        lines.push(bold(theme, fg(theme, "warning", `  ⚠ BigQuery Billing: ${billing.error || "Error al consultar export"}`)));
+    }
+    return lines;
 }
 
 function poolLines(pool: UsagePool, theme: ModalTheme): string[] {
@@ -583,10 +616,13 @@ export class UsageModal implements Component, Focusable {
             if (this.loading) {
                 lines.push(fg(theme, "accent", `  ${SPINNER[this.frameIndex]} actualizando cuotas…`));
             }
+            if (account.billing) {
+                lines.push(...billingCardLines(account.billing, theme));
+            }
             for (const pool of account.pools) {
                 lines.push(...poolLines(pool, theme));
             }
-            if (!account.note && !account.error && account.pools.length === 0 && !this.loading) {
+            if (!account.note && !account.error && !account.billing && account.pools.length === 0 && !this.loading) {
                 lines.push(fg(theme, "dim", "  sin cuotas reportadas"));
             }
         }
