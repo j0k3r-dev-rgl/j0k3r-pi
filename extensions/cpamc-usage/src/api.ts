@@ -1,6 +1,15 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import {
+    fetchGcpBilling,
+    loadCredentialsFromFile,
+    resolveServiceAccountPath,
+    type BillingMetrics,
+    type BillingSummary,
+} from "./gcp-billing.ts";
+
+export type { BillingMetrics, BillingSummary };
 
 export type Quota = {
     used?: number;
@@ -43,6 +52,7 @@ export type AccountUsage = {
     resetRenewalDate?: string | null;
     rateLimitType: string | null;
     pools: UsagePool[];
+    billing?: BillingSummary;
     note?: string;
     error?: string;
 };
@@ -471,6 +481,7 @@ export async function fetchUsage(signal?: AbortSignal): Promise<ProviderGroup[]>
             let resetCredits: number | null = null;
             let limitReached = f.status === "quota_exhausted";
             let resetRenewalDate: string | null = null;
+            let billing: BillingSummary | undefined;
 
             try {
                 if (provider === "openai" || (f.provider || "").toLowerCase() === "codex") {
@@ -483,6 +494,26 @@ export async function fetchUsage(signal?: AbortSignal): Promise<ProviderGroup[]>
                     }
                 } else if (provider === "antigravity" || provider === "google" || provider === "gemini") {
                     pools = await fetchAntigravityQuota(f, signal);
+                } else if (provider === "vertex") {
+                    const credPath = resolveServiceAccountPath(f.name);
+                    if (credPath) {
+                        const creds = loadCredentialsFromFile(credPath);
+                        billing = await fetchGcpBilling(
+                            creds,
+                            process.env.GCP_BILLING_DATASET || "billing_export",
+                            signal,
+                        );
+                    } else {
+                        billing = {
+                            status: "error",
+                            dataset: "billing_export",
+                            table: null,
+                            totalProject: { grossCost: 0, creditsApplied: 0, netCost: 0, currency: "USD" },
+                            vertexAi: { grossCost: 0, creditsApplied: 0, netCost: 0, currency: "USD" },
+                            error: "Service account credential file not found",
+                            lastUpdated: new Date().toISOString(),
+                        };
+                    }
                 }
             } catch (err: any) {
                 errStr = err?.message || String(err);
@@ -502,8 +533,9 @@ export async function fetchUsage(signal?: AbortSignal): Promise<ProviderGroup[]>
                 resetRenewalDate,
                 rateLimitType: null,
                 pools,
+                billing,
                 error: errStr,
-                note: pools.length === 0 ? "Sin cuota activa o respuesta pendiente" : undefined,
+                note: pools.length === 0 && !billing ? "Sin cuota activa o respuesta pendiente" : undefined,
             };
         }),
     );
@@ -613,6 +645,28 @@ export function renderTextReport(groups: ProviderGroup[]): string {
             const header = `${account.account} · plan ${account.plan} · ${account.pools.length} cuota(s)`;
             lines.push(`  ${header}${flags.length ? ` · ${flags.join(" · ")}` : ""}`);
             if (account.error) lines.push(`    error: ${account.error}`);
+            if (account.billing) {
+                const b = account.billing;
+                if (b.status === "pending_initial_export") {
+                    lines.push(
+                        `    [GCP Billing Export: Dataset '${b.dataset}' conectado · En espera de generación inicial de tablas por Google Cloud]`,
+                    );
+                    lines.push(
+                        `    Consumo MTD: Costo Bruto $0.00 · Créditos Aplicados $0.00 · Neto a Pagar $0.00`,
+                    );
+                } else if (b.status === "ready") {
+                    const tp = b.totalProject;
+                    const vx = b.vertexAi;
+                    lines.push(
+                        `    [GCP Billing MTD] Total Proyecto: Costo Bruto $${tp.grossCost.toFixed(2)} · Créditos Aplicados $${tp.creditsApplied.toFixed(2)} · Neto a Pagar $${tp.netCost.toFixed(2)} (${tp.currency})`,
+                    );
+                    lines.push(
+                        `    [GCP Billing MTD] Vertex AI / Agent: Costo Bruto $${vx.grossCost.toFixed(2)} · Créditos Aplicados $${vx.creditsApplied.toFixed(2)} · Neto a Pagar $${vx.netCost.toFixed(2)} (${vx.currency})`,
+                    );
+                } else if (b.status === "error") {
+                    lines.push(`    [GCP Billing Export Error: ${b.error || "Unknown error"}]`);
+                }
+            }
             for (const pool of account.pools) {
                 lines.push(
                     `    ${poolTitle(pool)}: ${pool.availablePercentage.toFixed(1)}% libre · [${availabilityBar(pool.availablePercentage, 15)}] · ${formatReset(pool.resetAt)}`,
