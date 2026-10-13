@@ -56,6 +56,24 @@ pi install npm:pi-subagents-j0k3r
 
 Persistent memory is provided by the local [`pi-persistent-memory`](extensions/pi-persistent-memory/) extension, autodiscovered through its root `index.ts`. No external memory package is required. After `/reload`, send a user message to activate storage; the nine `memory_*` tools use `~/.memory/memories.db`. Semantic indexing/search uses the local E5 service at `http://127.0.0.1:8000`; lexical search remains available when that service is unavailable. Existing memories are not migrated automatically.
 
+#### Environment & Mobile Telemetry Setup
+
+Copy `.env.example` to `.env` to configure optional mobile telemetry and notification integrations:
+
+```bash
+cp .env.example .env
+# Edit .env and set your private ntfy channel:
+# PI_NTFY_URL=https://ntfy.sh/your_custom_topic_here
+```
+
+The configuration is tuned for autonomous unattended operation:
+- **Autocompaction disabled:** Pi's native session compaction is turned off (`compaction.enabled = false`) to preserve pristine conversation history and deterministic step tracking.
+- **Extended context capacity (up to 400%):** The environment and local proxy infrastructure support large context windows without premature truncation.
+- **Strict 90% context rotation without speculative budgeting:** Tools execute freely without preventive batch inflation. When actual reported context reaches 90%, [`orchestrator-supervisor`](extensions/orchestrator-supervisor/README.md) automatically saves a clean 5-point session summary and rotates to a fresh session without asking the user.
+- **Strict subagent completion invariant:** The supervisor never rotates or reloads sessions while delegated subagents are running in the background.
+- **Stream disconnect recovery:** Transient network/stream disconnections (`stream closed before response.completed`) automatically trigger a 1s delay and dispatch `continua` before escalating to model failover.
+- **Mobile alerts via ntfy:** Session rotations, in-session model failovers, human intervention prompts (`ask_user_question`), and critical errors dispatch real-time push alerts to your device.
+
 | Pi package | Purpose |
 |---|---|
 | [`npm:pi-subagents-j0k3r`](https://www.npmjs.com/package/pi-subagents-j0k3r) | Runtime support for the Markdown-defined subagents in this configuration. |
@@ -175,14 +193,20 @@ See [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 |---|---|---|
 | Agent Todo | [`extensions/agent-todo/README.md`](extensions/agent-todo/README.md) | Single active task checklist for the current conversation branch, plus widget/provider integration. |
 | API Tools | [`extensions/api-tools/README.md`](extensions/api-tools/README.md) | Project-local REST and GraphQL tools gated by exact `<ctx.cwd>/.pi/api.json`, with login/access-token persistence, per-request token use, bounded output, and secret-safe diagnostics. |
+| Ask User Question | [`extensions/ask-user-question/README.md`](extensions/ask-user-question/README.md) | Native interactive dock-swap questionnaire with tabs, multi-select, and instant ntfy notification when human intervention is needed. |
 | Browser Screenshot | [`extensions/browser-screenshot/README.md`](extensions/browser-screenshot/README.md) | Read-only Chrome DevTools Protocol status, tab listing, and screenshots without launching or navigating the browser. |
+| CodeGraph | [`extensions/codegraph/README.md`](extensions/codegraph/README.md) | AST-based code exploration, symbol navigation, caller/callee trails, and blast radius impact analysis without token-heavy full-file reads. |
 | Context7 | [`extensions/context7/README.md`](extensions/context7/README.md) | Safe, bounded Context7 library documentation tools without MCP. |
 | CLIProxyAPI Usage | [`extensions/cpamc-usage/README.md`](extensions/cpamc-usage/README.md) | CLIProxyAPI quota and subscription usage modal for Pi with provider account breakdown and live quota tracking. |
 | Git Diff Panel | [`extensions/git-diff-panel/README.md`](extensions/git-diff-panel/README.md) | Themed split overlay for reviewing Git changes with full Git Worktrees support (`alt+g`). |
 | Model Picker | [`extensions/j0k3r-model-picker/README.md`](extensions/j0k3r-model-picker/README.md) | Collapsible floating model selector organized by provider, account/vendor, and model (`/model-select`, `/ms`). |
+| Orchestrator Supervisor | [`extensions/orchestrator-supervisor/README.md`](extensions/orchestrator-supervisor/README.md) | Autonomous in-process orchestrator guard: CPAMC dual-window quota failover, stream disconnection auto-recovery, strict 90% unattended session rotation, subagent wait fence, WAL fsync durability, and ntfy telemetry. |
 | PDF Review | [`extensions/pdf-review/README.md`](extensions/pdf-review/README.md) | Local PDF extraction with optional OCR via OCRmyPDF/Tesseract. |
+| Persistent Memory | [`extensions/pi-persistent-memory/README.md`](extensions/pi-persistent-memory/README.md) | Hybrid semantic/lexical long-term knowledge store, session summaries, entity graph relations, and supervisor checkpoint bridge (`~/.memory/memories.db`). |
 | Skill Registry | [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md) | Routing index generator for global and project skills. Opt-in via `.pi/skill-registry.config.json` with `enabled: true`; no dedicated environment variables. |
 | Theme (j0k3r-theme) | [`extensions/j0k3r-theme/README.md`](extensions/j0k3r-theme/README.md) | Interactive TUI theme with 3D animated Arch logo banner, responsive multi-tier footer, custom editor, and `arch-electric` palette. |
+| Tools Manager | [`extensions/tools-manager/README.md`](extensions/tools-manager/README.md) | Interactive extension manager and toggle dialog for enabling/disabling tools and supervisor per project (`/extension`, `Alt+E`). |
+| TypeSafe | [`extensions/typesafe/README.md`](extensions/typesafe/README.md) | TypeSafe System One (Jev) semantic evaluation, anti-overengineering sensor, circuit breaker, and orchestrator shadow triage benchmarks. |
 | Utils | [`extensions/utils/README.md`](extensions/utils/README.md) | General utility tools, currently Markdown-to-audio conversion using local Piper/eSpeak engines with Piper voice-model, MP3, bitrate, and progress-status support. |
 | Websearch | [`extensions/websearch/README.md`](extensions/websearch/README.md) | Bounded web, community, GitHub, and research search with grouped public tool routers. Optional global config: `~/.pi/agent/websearch.json`; credentials are env-only. |
 | Workspace Services | [`extensions/workspace-services/README.md`](extensions/workspace-services/README.md) | Management of manually configured workspace services, including lifecycle, status, and bounded local logs. |
@@ -194,14 +218,20 @@ See [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 |---|---|---|---|
 | Agent Todo | `agent_todo` | Maintains one active checklist for the current conversation branch, useful for multi-step implementation or validation work. | [Read more](extensions/agent-todo/README.md) |
 | API Tools | Project REST/GraphQL tools | Exposes project-local API calls from `.pi/api.json`, including login/token handling and bounded, secret-safe responses. | [Read more](extensions/api-tools/README.md) |
+| Ask User Question | `ask_user_question` | Interactive terminal questionnaire with option previews and instant ntfy push notification to mobile devices. | [Read more](extensions/ask-user-question/README.md) |
 | Browser Screenshot | `browser_cdp_status`, `browser_tabs_list`, `browser_page_screenshot` | Inspects existing Chrome CDP tabs and captures screenshots without navigation or focus changes. | [Read more](extensions/browser-screenshot/README.md) |
+| CodeGraph | `codegraph_status`, `codegraph_node`, `codegraph_explore`, `codegraph_impact`, `codegraph_sync` | AST-based symbol inspection, call graphs, and impact analysis without full-file read overhead. | [Read more](extensions/codegraph/README.md) |
 | CLIProxyAPI Usage | `/usage` | Interactive modal displaying real-time CLIProxyAPI quota windows and active accounts by provider. | [Read more](extensions/cpamc-usage/README.md) |
 | Context7 | `context7_search_library`, `context7_get_context`, `context7_resolve_and_get_context` | Fetches focused library documentation through Context7 with bounded output and safe configuration. | [Read more](extensions/context7/README.md) |
 | Git Diff Panel | `/git-diff [worktree]`, `alt+g` | Themed split overlay for inspecting Git changes and multiple worktree diffs. | [Read more](extensions/git-diff-panel/README.md) |
 | Model Picker | `/model-select [ref]`, `/ms` | Collapsible floating model selector organized by provider and account with search and mouse support. | [Read more](extensions/j0k3r-model-picker/README.md) |
+| Orchestrator Supervisor | `/supervisor [status\|pause\|resume\|rotate]`, `supervisor_rotate` | Oversees unattended resilience: model hierarchy failover, 90% context rotation without asking the user, subagent safety fence, stream error retry, and ntfy telemetry. | [Read more](extensions/orchestrator-supervisor/README.md) |
 | PDF Review | `pdf_extract` | Extracts text and metadata from local PDFs, with optional OCR through OCRmyPDF/Tesseract. | [Read more](extensions/pdf-review/README.md) |
+| Persistent Memory | `memory_save`, `memory_get`, `memory_search`, `memory_context`, `memory_entity`, `memory_relation` | Durable long-term knowledge, session summaries, entity graph relations, and safe supervisor checkpoints. | [Read more](extensions/pi-persistent-memory/README.md) |
 | Skill Registry | `skill_registry_generate`, `skill_registry_resolve` | Builds and queries the routing index for global and project skills. | [Read more](extensions/skill-registry/README.md) |
 | Theme (j0k3r-theme) | Custom header, editor, footer, and `arch-electric` theme | Custom interactive TUI components including an animated 3D ASCII Arch banner and responsive footer. | [Read more](extensions/j0k3r-theme/README.md) |
+| Tools Manager | `/extension`, `/tools-manager`, `Alt+E` | TUI dialog to inspect and toggle extensions per project, persisting in `.pi/extensions.json`. | [Read more](extensions/tools-manager/README.md) |
+| TypeSafe | `typesafe_evaluate`, `typesafe_circuit_breaker`, `typesafe_check_overengineering` | Consultative semantic evaluation with Jev, KISS/YAGNI verification, and routing telemetry. | [Read more](extensions/typesafe/README.md) |
 | Utils | `markdown_to_audio` | Converts Markdown into local audio using Piper or eSpeak NG, with MP3 bitrate control and concise progress status. | [Read more](extensions/utils/README.md) |
 | Websearch | `web_search`, discussion, research, GitHub helpers | Provides bounded web, community, GitHub, and academic/research search tools. | [Read more](extensions/websearch/README.md) |
 | Workspace Services | `workspace_services_*`, `workspace_service_*` | Manages only the services declared in `.pi/workspace-services.json`, with local process state and bounded logs. | [Read more](extensions/workspace-services/README.md) |
@@ -331,6 +361,24 @@ pi install npm:pi-subagents-j0k3r
 
 La memoria persistente la proporciona la extensión local [`pi-persistent-memory`](extensions/pi-persistent-memory/), que Pi descubre mediante su `index.ts` raíz. No requiere un paquete externo de memoria. Después de `/reload`, envía un mensaje para activar el almacenamiento; las nueve tools `memory_*` usan `~/.memory/memories.db`. La indexación y búsqueda semántica usan E5 local en `http://127.0.0.1:8000`; la búsqueda léxica sigue disponible si ese servicio falla. No se migran recuerdos existentes automáticamente.
 
+#### Configuración de Entorno y Telemetría Móvil
+
+Copia `.env.example` a `.env` para habilitar las alertas y telemetría móvil en tu dispositivo:
+
+```bash
+cp .env.example .env
+# Edita .env y configura tu canal privado de ntfy:
+# PI_NTFY_URL=https://ntfy.sh/tu_canal_privado_aqui
+```
+
+Esta configuración está diseñada y optimizada para operar de manera autónoma y desatendida:
+- **Autocompactación desactivada:** La compactación nativa de Pi está desactivada (`compaction.enabled = false`) para preservar intacto el historial y permitir un seguimiento determinista paso a paso.
+- **Capacidad de contexto extendida (hasta 400%):** El entorno y los proxies locales soportan ventanas de contexto muy amplias sin cortes prematuros de la conversación.
+- **Límite estricto del 90% sin presupuestos especulativos:** Las herramientas corren con total libertad sin inflar tokens preventivamente. Cuando el consumo real llega al 90%, [`orchestrator-supervisor`](extensions/orchestrator-supervisor/README.md) guarda un resumen de 5 viñetas y rota a una sesión limpia automáticamente sin preguntarle nada al usuario.
+- **Espera obligatoria a subagentes:** El supervisor nunca rota ni recarga mientras haya subagentes ejecutándose en segundo plano.
+- **Recuperación ante cortes de stream:** Desconexiones de red o streaming (`stream closed before response.completed`) esperan 1s y despachan `continua` automáticamente antes de escalar a failover de modelo.
+- **Alertas móviles en ntfy:** Rotaciones de sesión, failover de modelos, preguntas con decisión humana pendiente (`ask_user_question`) y errores críticos envían alertas push en tiempo real a tu móvil.
+
 | Paquete Pi | Propósito |
 |---|---|
 | [`npm:pi-subagents-j0k3r`](https://www.npmjs.com/package/pi-subagents-j0k3r) | Soporte runtime para los subagentes definidos en Markdown de esta configuración. |
@@ -450,14 +498,20 @@ Ver [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 |---|---|---|
 | Agent Todo | [`extensions/agent-todo/README.md`](extensions/agent-todo/README.md) | Checklist de una sola tarea activa para la rama de conversación actual, más integración de widget/provider. |
 | API Tools | [`extensions/api-tools/README.md`](extensions/api-tools/README.md) | Herramientas REST y GraphQL por proyecto, activadas por `<ctx.cwd>/.pi/api.json`, con login/token, uso de token por request, salida acotada y diagnósticos seguros. |
+| Ask User Question | [`extensions/ask-user-question/README.md`](extensions/ask-user-question/README.md) | Cuestionario interactivo con tabs y previsualizaciones que envía alertas push automáticas a ntfy cuando se requiere decisión humana. |
 | Browser Screenshot | [`extensions/browser-screenshot/README.md`](extensions/browser-screenshot/README.md) | Estado, listado de pestañas y capturas de Chrome DevTools Protocol en modo de solo lectura, sin iniciar ni navegar el navegador. |
+| CodeGraph | [`extensions/codegraph/README.md`](extensions/codegraph/README.md) | Navegación e inspección de símbolos por AST, grafos de llamadas y análisis de radio de impacto sin volcar archivos enteros. |
 | Context7 | [`extensions/context7/README.md`](extensions/context7/README.md) | Herramientas seguras y acotadas para documentación de librerías con Context7, sin MCP. |
 | CLIProxyAPI Usage | [`extensions/cpamc-usage/README.md`](extensions/cpamc-usage/README.md) | Modal de cuotas y uso de suscripciones en CLIProxyAPI para Pi, con detalle por cuenta de proveedor y seguimiento en tiempo real. |
 | Git Diff Panel | [`extensions/git-diff-panel/README.md`](extensions/git-diff-panel/README.md) | Panel dividido con tema visual para revisar cambios en Git con soporte completo de Git Worktrees (`alt+g`). |
 | Model Picker | [`extensions/j0k3r-model-picker/README.md`](extensions/j0k3r-model-picker/README.md) | Selector flotante y colapsable de modelos organizado por proveedor, cuenta/fabricante y modelo (`/model-select`, `/ms`). |
+| Orchestrator Supervisor | [`extensions/orchestrator-supervisor/README.md`](extensions/orchestrator-supervisor/README.md) | Guardián in-process autónomo: failover por cuotas en CPAMC, auto-recuperación de cortes de stream, rotación limpia al 90% real sin preguntas, espera de subagentes, WAL durable y telemetría ntfy. |
 | PDF Review | [`extensions/pdf-review/README.md`](extensions/pdf-review/README.md) | Extracción local de PDF con OCR opcional vía OCRmyPDF/Tesseract. |
+| Persistent Memory | [`extensions/pi-persistent-memory/README.md`](extensions/pi-persistent-memory/README.md) | Memoria semántica y léxica a largo plazo, resúmenes de sesión, grafo de entidades y puente de checkpoints del supervisor (`~/.memory/memories.db`). |
 | Skill Registry | [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md) | Generador de índice de routing para skills globales y de proyecto. Opt-in vía `.pi/skill-registry.config.json` con `enabled: true`; sin variables de entorno dedicadas. |
 | Tema (j0k3r-theme) | [`extensions/j0k3r-theme/README.md`](extensions/j0k3r-theme/README.md) | Tema TUI interactivo con banner 3D animado de Arch Linux, pie adaptativo multiescala, editor personalizado y paleta `arch-electric`. |
+| Tools Manager | [`extensions/tools-manager/README.md`](extensions/tools-manager/README.md) | Diálogo interactivo para habilitar/deshabilitar extensiones y supervisor por proyecto, persistiendo en `.pi/extensions.json` (`/extension`, `Alt+E`). |
+| TypeSafe | [`extensions/typesafe/README.md`](extensions/typesafe/README.md) | Evaluación semántica consultiva con Jev (TypeSafe System One), guardrail anti-sobreingeniería, circuit breaker y telemetría de shadow triage. |
 | Utils | [`extensions/utils/README.md`](extensions/utils/README.md) | Utilidades generales; actualmente conversión de Markdown a audio con Piper/eSpeak local, voces Piper, MP3, bitrate y progreso en status bar. |
 | Websearch | [`extensions/websearch/README.md`](extensions/websearch/README.md) | Búsqueda web, comunidades, GitHub e investigación con salida acotada y routers públicos agrupados. Config opcional global: `~/.pi/agent/websearch.json`; credenciales solo por entorno. |
 | Workspace Services | [`extensions/workspace-services/README.md`](extensions/workspace-services/README.md) | Gestión de servicios de workspace configurados manualmente, incluyendo ciclo de vida, estado y logs locales acotados. |
@@ -469,14 +523,20 @@ Ver [`extensions/skill-registry/README.md`](extensions/skill-registry/README.md)
 |---|---|---|---|
 | Agent Todo | `agent_todo` | Mantiene una checklist activa para la rama de conversación actual; útil en trabajos de implementación o validación con varios pasos. | [Ver más](extensions/agent-todo/README.md) |
 | API Tools | Herramientas REST/GraphQL del proyecto | Expone llamadas API locales definidas en `.pi/api.json`, con login/token, respuestas acotadas y diagnósticos seguros. | [Ver más](extensions/api-tools/README.md) |
+| Ask User Question | `ask_user_question` | Cuestionario interactivo con preview de opciones y notificación push inmediata a ntfy para intervención humana. | [Ver más](extensions/ask-user-question/README.md) |
 | Browser Screenshot | `browser_cdp_status`, `browser_tabs_list`, `browser_page_screenshot` | Inspecciona pestañas Chrome CDP existentes y obtiene capturas sin navegar ni cambiar el foco. | [Ver más](extensions/browser-screenshot/README.md) |
+| CodeGraph | `codegraph_status`, `codegraph_node`, `codegraph_explore`, `codegraph_impact`, `codegraph_sync` | Inspección de símbolos, dependencias y análisis de impacto por AST sin sobrecarga de tokens. | [Ver más](extensions/codegraph/README.md) |
 | CLIProxyAPI Usage | `/usage` | Modal interactivo que muestra ventanas de cuota en tiempo real y cuentas activas por proveedor en CLIProxyAPI. | [Ver más](extensions/cpamc-usage/README.md) |
 | Context7 | `context7_search_library`, `context7_get_context`, `context7_resolve_and_get_context` | Obtiene documentación enfocada de librerías con Context7, salida acotada y configuración segura. | [Ver más](extensions/context7/README.md) |
 | Git Diff Panel | `/git-diff [worktree]`, `alt+g` | Panel dividido temático para inspeccionar cambios de Git y diffs entre múltiples worktrees. | [Ver más](extensions/git-diff-panel/README.md) |
 | Model Picker | `/model-select [ref]`, `/ms` | Selector jerárquico de modelos organizado por proveedor y cuenta, con filtrado y soporte de mouse. | [Ver más](extensions/j0k3r-model-picker/README.md) |
+| Orchestrator Supervisor | `/supervisor [status\|pause\|resume\|rotate]`, `supervisor_rotate` | Supervisión desatendida: failover de cuotas, rotación limpia al 90% sin preguntas al usuario, espera de subagentes y telemetría ntfy. | [Ver más](extensions/orchestrator-supervisor/README.md) |
 | PDF Review | `pdf_extract` | Extrae texto y metadata de PDFs locales, con OCR opcional mediante OCRmyPDF/Tesseract. | [Ver más](extensions/pdf-review/README.md) |
+| Persistent Memory | `memory_save`, `memory_get`, `memory_search`, `memory_context`, `memory_entity`, `memory_relation` | Conocimiento duradero, resúmenes de sesión, grafo de entidades y checkpoints seguros de supervisor. | [Ver más](extensions/pi-persistent-memory/README.md) |
 | Skill Registry | `skill_registry_generate`, `skill_registry_resolve` | Construye y consulta el índice de routing para skills globales y de proyecto. | [Ver más](extensions/skill-registry/README.md) |
 | Tema (j0k3r-theme) | Cabecera, editor, pie personalizados y tema `arch-electric` | Componentes TUI interactivos que incluyen banner 3D en ASCII de Arch animado y pie responsivo. | [Ver más](extensions/j0k3r-theme/README.md) |
+| Tools Manager | `/extension`, `/tools-manager`, `Alt+E` | Diálogo interactivo para habilitar/deshabilitar extensiones y supervisor por proyecto en `.pi/extensions.json`. | [Ver más](extensions/tools-manager/README.md) |
+| TypeSafe | `typesafe_evaluate`, `typesafe_circuit_breaker`, `typesafe_check_overengineering` | Evaluación semántica con Jev, sensor anti-sobreingeniería y benchmark de triage. | [Ver más](extensions/typesafe/README.md) |
 | Utils | `markdown_to_audio` | Convierte Markdown a audio local con Piper o eSpeak NG, control de bitrate MP3 y progreso compacto en status bar. | [Ver más](extensions/utils/README.md) |
 | Websearch | `web_search`, herramientas de discusión, investigación y GitHub | Provee búsquedas acotadas en web, comunidades, GitHub y fuentes académicas/de investigación. | [Ver más](extensions/websearch/README.md) |
 | Workspace Services | `workspace_services_*`, `workspace_service_*` | Gestiona solo los servicios declarados en `.pi/workspace-services.json`, con estado local de procesos y logs acotados. | [Ver más](extensions/workspace-services/README.md) |
