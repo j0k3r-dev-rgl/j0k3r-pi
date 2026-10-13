@@ -1,27 +1,12 @@
-import { loadSubagents, readSubagentsConfig, resolveEffectiveSubagentMode } from '../config.js';
-import type { SubagentMode, SubagentTask } from '../types.js';
-import { boxedComponent, emptyComponent, textComponent } from './components.js';
-import { collapsedResultHint, formatTaskLabel, formatUsage, hasAgentResponse, taskFinalText, taskResponseText } from './formatting.js';
+import { readSubagentsConfig } from '../config.js';
+import type { SubagentTask } from '../types.js';
+import { boxedComponent, emptyComponent } from './components.js';
+import { clip, formatTaskLabel, formatUsage, hasAgentResponse, taskResponseText } from './formatting.js';
 import { resolveExpandHint } from './expansion-hint.js';
 import { progressText } from './progress.js';
 import { taskFromDetails } from '../result-details.js';
 import { ARCH_ICON, themeAccent, themeBold, themeDim, themeError, themeStatus, themeSuccess, themeTitle, themeWarning } from '../completion-message.js';
 import { openSubagentsPanel } from '../panel-opener.js';
-
-export function renderSubagentTaskCall(_agent?: string, _mode?: 'task' | 'background', _theme?: any, _detail?: string) {
-  return emptyComponent();
-}
-
-function resolveRenderedSubagentRunMode(args: any, cwd: string): SubagentMode {
-  if (args.mode === 'task' || args.mode === 'background') return args.mode;
-  const config = readSubagentsConfig(cwd);
-  const definitions = new Map(loadSubagents(cwd).map((definition) => [definition.name, definition]));
-  return resolveEffectiveSubagentMode({
-    invocationMode: args.mode,
-    definition: args.agent ? definitions.get(String(args.agent).toLowerCase()) : undefined,
-    config,
-  });
-}
 
 export function renderSubagentRunCall(_args: any, _theme: any) {
   return emptyComponent();
@@ -35,6 +20,23 @@ function formatRenderedModel(task?: SubagentTask): string {
 
 function createSubagentRunBoxedComponent(result: any, { expanded, isPartial }: any, theme: any, context?: any, task?: SubagentTask) {
   const archPrefix = themeAccent(theme, ARCH_ICON);
+  if (result?.details?.action === 'message') {
+    const details = result.details;
+    const status = details.status ?? (result.isError ? 'rejected' : 'queued');
+    const acknowledgement = result.content?.filter((part: any) => part.type === 'text').map((part: any) => part.text).join('\n') ?? details.message ?? '';
+    const lines = [
+      `status: ${status === 'rejected' ? themeError(theme, status) : themeSuccess(theme, status)}`,
+      details.pending_message_count !== undefined ? `pending messages: ${details.pending_message_count}` : undefined,
+      expanded !== false && details.reason ? `reason: ${details.reason}` : undefined,
+      expanded === false && status === 'rejected' ? clip(acknowledgement, 160) : undefined,
+      expanded === false ? resolveExpandHint('to expand', context) : acknowledgement,
+    ].filter(Boolean) as string[];
+    return boxedComponent(lines, {
+      title: `${archPrefix} ${themeTitle(theme, `subagent message · ${formatTaskLabel(task)} · ${status}`)}`,
+      theme, wrapped: true,
+      onClick: task?.id ? () => openSubagentsPanel(task.id) : undefined,
+    });
+  }
   const isBg = task?.mode === 'background' || task?.effective_mode === 'background' || result?.details?.mode === 'background';
   const bgSuffix = isBg ? ' (background)' : '';
 
@@ -61,7 +63,7 @@ function createSubagentRunBoxedComponent(result: any, { expanded, isPartial }: a
       onClick: task?.id ? () => openSubagentsPanel(task.id) : undefined,
     });
   }
-  const failed = Boolean(result?.isError || task?.status === 'failed' || task?.status === 'cancelled');
+  const failed = Boolean(result?.isError || task?.status === 'failed' || task?.status === 'cancelled' || task?.status === 'interrupted');
   const isRunning = task?.status === 'running' || task?.status === 'queued';
   const status = task ? themeStatus(theme, task.status ?? (failed ? 'failed' : 'done')) : (failed ? themeError(theme, 'failed') : themeSuccess(theme, 'done'));
   const taskLabel = formatTaskLabel(task);
@@ -78,7 +80,7 @@ function createSubagentRunBoxedComponent(result: any, { expanded, isPartial }: a
     title = `${archPrefix} ${themeTitle(theme, `subagent · ${taskLabel}`)}`;
   }
 
-  const historyShortcut = readSubagentsConfig(process.cwd()).history_panel_shortcut ?? 'ctrl+,';
+  const historyShortcut = readSubagentsConfig(task?.cwd ?? result?.details?.cwd ?? context?.cwd ?? process.cwd()).history_panel_shortcut ?? 'ctrl+,';
   const detailsHint = `(click to view execution) · (${historyShortcut} or /subagents for details)`;
   const usage = task ? formatUsage(task as SubagentTask) : '';
   const renderedModel = formatRenderedModel(task);
@@ -87,11 +89,11 @@ function createSubagentRunBoxedComponent(result: any, { expanded, isPartial }: a
     const expandHint = resolveExpandHint('to expand', context);
     const metaLines = task
       ? [
-        `subagent: ${themeAccent(theme, task.agent)} · model: ${renderedModel} · effort: ${themeAccent(theme, task.effort ?? 'default/current')} · status: ${status}`,
+        `subagent: ${themeAccent(theme, task.agent)} · model: ${renderedModel} · effort: ${themeAccent(theme, task.effort ?? 'default/current')} · status: ${status}${(task.attempt ?? 1) > 1 ? ` · attempt: ${task.attempt}` : ''}`,
         usage ? themeDim(theme, `usage: ${usage}`) : undefined,
         themeDim(theme, `${detailsHint} · ${expandHint}`),
       ].filter(Boolean) as string[]
-      : [status, themeDim(theme, `${detailsHint} · ${expandHint}`)];
+      : [status, ...(failed ? (result?.content ?? []).filter((part: any) => part.type === 'text').map((part: any) => clip(part.text, 240)) : []), themeDim(theme, `${detailsHint} · ${expandHint}`)];
     return boxedComponent(metaLines, {
       title,
       theme,
@@ -111,8 +113,9 @@ function createSubagentRunBoxedComponent(result: any, { expanded, isPartial }: a
   const contentLines = [...metaLines];
   if (hasResp && responseText) {
     contentLines.push(themeTitle(theme, 'Subagent response'), ...responseText.split('\n'));
-  } else if (failed && task?.error) {
-    contentLines.push(themeError(theme, 'Subagent error'), ...task.error.split('\n'));
+  } else if (failed) {
+    const errorText = task?.error ?? (result?.content ?? []).filter((part: any) => part.type === 'text').map((part: any) => part.text).join('\n');
+    contentLines.push(themeError(theme, 'Subagent error'), ...errorText.split('\n'));
   }
   return boxedComponent(contentLines, {
     title,
@@ -141,9 +144,9 @@ export function renderSubagentRunResult(
     status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'interrupted';
 
   const getResolvedTask = (): SubagentTask | undefined => {
-    if (!rawTask?.id || !taskLookup) return rawTask;
+    if (result?.details?.action === 'message' || !rawTask?.id || !taskLookup) return rawTask;
     const liveTask = taskLookup(rawTask.id, taskWorkspace);
-    if (!liveTask) return rawTask;
+    if (!liveTask || (rawTask.attempt ?? 1) !== (liveTask.attempt ?? 1)) return rawTask;
     if (options?.isPartial) {
       return {
         ...rawTask,
@@ -185,9 +188,11 @@ export function renderSubagentRunResult(
 
   const initialTask = rawTask?.id && taskLookup ? taskLookup(rawTask.id, taskWorkspace) : undefined;
   const shouldSubscribe = Boolean(
-    managerOrEmitter
+    result?.details?.action !== 'message'
+    && managerOrEmitter
     && typeof managerOrEmitter.onTaskUpdate === 'function'
     && initialTask
+    && (rawTask?.attempt ?? 1) === (initialTask.attempt ?? 1)
     && !isTerminalStatus(initialTask.status),
   );
 

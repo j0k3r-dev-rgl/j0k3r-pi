@@ -5,16 +5,37 @@ import { installSubagentTestEnv } from '../helpers/subagent-test-helpers.js';
 const env = installSubagentTestEnv();
 
 describe('completion message render', () => {
+  it('preserves continuation identity in notification details and uses the configured expansion hint', async () => {
+    const { setExpandKeybindingProviderForTests, resetExpandKeybindingProviderForTests } = await import('../../src/render/tools/expansion-hint.js');
+    const sendMessage = vi.fn();
+    sendSubagentCompletionMessage({ sendMessage }, {
+      id: 'continued-id', agent: 'analyst', display_name: 'Follow-up audit', attempt: 2,
+      status: 'completed', mode: 'background', result: 'done', cwd: env.tmp,
+    });
+    const message = sendMessage.mock.calls[0][0];
+    expect(message.details.task).toMatchObject({ display_name: 'Follow-up audit', attempt: 2, cwd: env.tmp });
+    let renderer: any;
+    extension({ registerTool: () => undefined, registerCommand: () => undefined, registerShortcut: () => undefined,
+      registerMessageRenderer: (name: string, value: any) => { if (name === 'subagent-completion') renderer = value; } });
+    try {
+      setExpandKeybindingProviderForTests(() => 'ctrl+e');
+      const text = env.stripAnsi(renderer(message, { expanded: false }, { fg: (_n: string, t: string) => t }).render(120).join('\n'));
+      expect(text).toContain('Follow-up audit');
+      expect(text).toContain('attempt: 2');
+      expect(text).toContain('ctrl+e to expand');
+      expect(text).not.toContain('ctrl+o to expand');
+    } finally { resetExpandKeybindingProviderForTests(); }
+  });
   it('suppresses continuation guidance in failed and cancelled completion messages when continuation is disabled', () => {
     for (const status of ['failed', 'cancelled']) {
       const message = completionMessage({ id: `subtask_${status}`, agent: 'analyst', status, error: `${status} result`, cwd: env.tmp });
-      expect(message).not.toContain('subagent_continue');
+      expect(message).not.toContain('action: "continue"');
       expect(message).not.toContain('Ask the user before resuming');
       expect(message).not.toContain('Never switch models automatically');
     }
 
     const completed = completionMessage({ id: 'subtask_completed', agent: 'analyst', status: 'completed', result: 'done', cwd: env.tmp });
-    expect(completed).not.toContain('subagent_continue');
+    expect(completed).not.toContain('## optional resume');
     expect(completed).not.toContain('Ask the user before resuming');
   });
 
@@ -23,7 +44,7 @@ describe('completion message render', () => {
 
     for (const status of ['failed', 'cancelled']) {
       const message = completionMessage({ id: `subtask_${status}`, agent: 'analyst', status, error: `${status} result`, cwd: env.tmp });
-      expect(message).toContain('can be resumed with `subagent_continue`');
+      expect(message).toContain('can be resumed with `subagent_run`');
       expect(message).toContain('Ask the user before resuming');
       expect(message).toContain('model and effort');
       expect(message).toContain('Never switch models automatically');
@@ -101,7 +122,7 @@ describe('completion message render', () => {
       cwd: env.tmp,
     });
 
-    expect(sendMessage.mock.calls[0][0].content).not.toContain('subagent_continue');
+    expect(sendMessage.mock.calls[0][0].content).not.toContain('action: "continue"');
     expect(sendMessage.mock.calls[0][0].content).not.toContain('Ask the user before resuming');
   });
 
@@ -121,6 +142,16 @@ describe('completion message render', () => {
     expect(sendMessage.mock.calls[0][0]).toMatchObject({ display: true });
     expect(sendMessage.mock.calls[0][0].content).toContain('subtask_notify_1');
     expect(sendMessage.mock.calls[0][1]).toEqual({ triggerTurn: true, deliverAs: 'followUp' });
+  });
+
+  it('renders real failure notifications as errors rather than successful response sections', async () => {
+    const { renderSubagentCompletionMessage } = await import('../../src/render/completion-message.js');
+    const sendMessage = vi.fn();
+    sendSubagentCompletionMessage({ sendMessage }, { id: 'failure', agent: 'analyst', status: 'failed', error: 'provider rejected request', cwd: env.tmp });
+    const text = env.stripAnsi(renderSubagentCompletionMessage(sendMessage.mock.calls[0][0], { expanded: true }, { fg: (_n: string, t: string) => t }).render(120).join('\n'));
+    expect(text).toContain('provider rejected request');
+    expect(text).toContain('error');
+    expect(text).not.toContain('response sent to the orchestrator');
   });
 
   it('renders background completion messages with boxed borders and no background fills', () => {

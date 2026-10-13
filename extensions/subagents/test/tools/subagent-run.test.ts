@@ -8,6 +8,60 @@ import { installSubagentTestEnv } from '../helpers/subagent-test-helpers.js';
 const env = installSubagentTestEnv();
 
 describe('subagent_run tool', () => {
+  it('exposes exactly one tool with a stable action schema regardless of continuation config', async () => {
+    const fs = await import('node:fs');
+    for (const enable_continue of [false, true]) {
+      fs.writeFileSync(`${env.tmp}/.pi/subagents.json`, JSON.stringify({ enable_continue }));
+      const tools: any[] = [];
+      registerSubagentTools({ registerTool: (tool: any) => tools.push(tool) }, new SubagentManager(env.mockRunner()), env.tmp);
+      expect(tools.map((tool) => tool.name)).toEqual(['subagent_run']);
+      expect(tools[0].parameters.properties.action.anyOf.map((entry: any) => entry.const)).toEqual(['run', 'continue', 'message']);
+      expect(tools[0].parameters.required).toEqual(['task']);
+    }
+  });
+
+  it('requires explicit actions and rejects contradictory inputs without executing anything', async () => {
+    env.writeAgent('analyst');
+    const runner = vi.fn(env.mockRunner());
+    const manager = new SubagentManager(runner);
+    let tool: any;
+    registerSubagentTools({ registerTool: (value: any) => { if (value.name === 'subagent_run') tool = value; } }, manager, env.tmp);
+    for (const params of [
+      { agent: 'analyst', task_id: 'old-task', task: 'ambiguous' },
+      { action: 'invalid', agent: 'analyst', task: 'work' },
+      { action: 'continue', task: 'missing id' },
+      { action: 'message', task: 'missing id' },
+      { action: 'message', task_id: 'id', task: 'work', agent: 'analyst' },
+      { action: 'message', task_id: 'id', task: 'work', mode: 'task' },
+      { agent: 'analyst', task: '   ' },
+    ]) {
+      const result = await tool.execute('invalid', params, undefined, undefined, { cwd: env.tmp });
+      expect(result.isError, JSON.stringify(params)).toBe(true);
+    }
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it('rejects disabled continuation explicitly and renders pre-launch errors completely', async () => {
+    let tool: any;
+    const manager = new SubagentManager(env.mockRunner());
+    registerSubagentTools({ registerTool: (value: any) => { if (value.name === 'subagent_run') tool = value; } }, manager, env.tmp);
+    const result = await tool.execute('disabled', { action: 'continue', task_id: 'prior', task: 'resume' }, undefined, undefined, { cwd: env.tmp });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('continuation is disabled');
+    const theme = { fg: (_name: string, text: string) => text };
+    expect(tool.renderResult(result, { expanded: true }, theme).render(100).join('\n')).toContain('continuation is disabled');
+    expect(tool.renderResult(result, { expanded: false }, theme).render(100).join('\n')).toContain('continuation is disabled');
+    expect(manager.listTasks(env.tmp)).toHaveLength(0);
+  });
+
+  it('names currently available agents in unknown-agent errors, including newly added definitions', async () => {
+    let tool: any;
+    registerSubagentTools({ registerTool: (value: any) => { if (value.name === 'subagent_run') tool = value; } }, new SubagentManager(env.mockRunner()), env.tmp);
+    env.writeAgent('analyst');
+    const result = await tool.execute('unknown', { agent: 'missing', task: 'work' }, undefined, undefined, { cwd: env.tmp });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Available agents: analyst');
+  });
   it('README documents single-agent subagent_run behavior without batch parameters', async () => {
     const fs = await import('node:fs');
     const readme = fs.readFileSync('README.md', 'utf8');
@@ -15,7 +69,10 @@ describe('subagent_run tool', () => {
     expect(readme).toContain('subagent_mode');
     expect(readme).toContain('default_mode');
     expect(readme).toContain('input.mode ?? definition.subagent_mode ?? config.default_mode');
-    expect(readme).toContain('agent: string;');
+    expect(readme).toContain('action');
+    expect(readme).toContain('task_id');
+    expect(readme).toContain('continue');
+    expect(readme).toContain('message');
     expect(readme).not.toContain('agents?: string[];');
     expect(readme).not.toContain('Multiple agents can run from one request');
   });
@@ -84,7 +141,7 @@ describe('subagent_run tool', () => {
 
     expect(text).toContain('Sent 1 subagent task(s) to background');
     expect(text).toContain('task_id: subtask_analyst_');
-    expect(text).toContain('Do not call subagent_status or subagent_result just to wait');
+    expect(text).toContain('Do not sleep or poll just to wait for this task');
     expect(text).toContain('The subagent will notify this chat automatically when it finishes');
     expect(text).toContain('Keep the chat available so the user can continue asking questions');
     expect(result.terminate).not.toBe(true);
@@ -190,7 +247,7 @@ describe('subagent_run tool', () => {
 
     expect(result.content[0].text).toContain(rawResponse);
     expect(result.content[0].text).toContain(`task_id: ${result.details.results[0].id}`);
-    expect(result.content[0].text).not.toContain('subagent_continue');
+    expect(result.content[0].text).not.toContain('## optional resume');
     expect(result.details.results[0].result).toBe(rawResponse);
 
     const collapsedResult = runTool.renderResult(result, { expanded: false, isPartial: false }, { fg: (_name: string, text: string) => text }).render(90).join('\n');
@@ -216,7 +273,7 @@ describe('subagent_run tool', () => {
     const result = await runTool.execute('1', { agent: 'analyst', task: 'fail', mode: 'task' }, undefined, undefined, { cwd: env.tmp });
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('failed');
-    expect(result.content[0].text).not.toContain('subagent_continue');
+    expect(result.content[0].text).not.toContain('action: "continue"');
     expect(result.content[0].text).not.toContain('Ask the user before resuming');
     expect(result.content[0].text).not.toContain('Never switch models automatically');
   });
@@ -230,7 +287,7 @@ describe('subagent_run tool', () => {
     const result = await runTool.execute('1', { agent: 'analyst', task: 'fail', mode: 'task' }, undefined, undefined, { cwd: env.tmp });
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('failed');
-    expect(result.content[0].text).toContain('can be resumed with `subagent_continue`');
+    expect(result.content[0].text).toContain('can be resumed with `subagent_run`');
     expect(result.content[0].text).toContain('Ask the user before resuming');
     expect(result.content[0].text).toContain('model and effort');
     expect(result.content[0].text).toContain('Never switch models automatically');

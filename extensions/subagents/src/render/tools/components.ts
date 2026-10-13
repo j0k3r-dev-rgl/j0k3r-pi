@@ -10,25 +10,6 @@ export function emptyComponent() {
   };
 }
 
-export function textComponent(text: string) {
-  return {
-    invalidate() {},
-    render(width: number): string[] {
-      if (!text) return [];
-      return text.split('\n').map((line) => truncateToWidth(line, width, '…'));
-    },
-  };
-}
-
-export function wrappedTextComponent(text: string) {
-  return {
-    invalidate() {},
-    render(width: number) {
-      return text.split('\n').flatMap((line) => wrapLineToWidth(line, width));
-    },
-  };
-}
-
 export interface BoxedComponentOptions {
   title?: string;
   theme?: any;

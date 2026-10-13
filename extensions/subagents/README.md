@@ -1,141 +1,131 @@
 # Pi Subagents Extension (`pi-subagents-j0k3r`)
 
-Extensión de Pi para delegar tareas a subagentes definidos en Markdown con sesiones anidadas independientes, ejecución en segundo plano y **asignación dinámica de modelos mediante el pool de CPAMC**.
+Extensión de Pi para delegar tareas a subagentes definidos en Markdown, con sesiones anidadas independientes, historial y ejecución en primer o segundo plano. Expone **una sola herramienta: `subagent_run`**. El panel `/subagents`, el widget y los controles manuales permanecen disponibles.
 
----
+## Una herramienta, tres operaciones
 
-## Cómo Trabaja Realmente el Sistema
+El campo `task` contiene las instrucciones en las tres operaciones. `action` es opcional y, si se omite, equivale a `run`; las llamadas existentes con `agent` y `task` siguen funcionando.
 
-### 1. Asignación Dinámica de Modelos (CPAMC Pool + Fallback)
-El modelo y el esfuerzo de razonamiento **no se configuran manualmente en el Markdown ni en perfiles fijos**:
-* **En cada lanzamiento nuevo (`subagent_run`):** `SubagentManager` emite el hook `subagents:task:allocate`. El pool de CPAMC (`extensions/cpamc-subagent-pool`) reclama la tarea y le asigna dinámicamente el mejor modelo disponible (ej. Gemini 3.8 Flash High).
-* **En cada continuación (`subagent_continue`):** Al continuar una tarea previa, se incrementa el intento (`attempt`) y **se vuelve a disparar `subagents:task:allocate`**. Esto garantiza que la continuación no se quede trabada en un modelo sin cuota, reasignando un modelo fresco del pool automáticamente.
-* **Fallback al orquestador:** Si CPAMC no está disponible, no tiene cuota o da error, el subagente utiliza automáticamente el modelo y nivel de thinking activos en la sesión del orquestador (`ctx.model` y `ctx.thinkingLevel`).
+| `action` | Parámetros específicos | Comportamiento |
+|---|---|---|
+| `run` | `agent` obligatorio; `name`, `display_name`, `context`, `mode` opcionales | Inicia exactamente una tarea nueva. |
+| `continue` | `task_id` obligatorio; `mode` opcional | Reanuda una tarea terminada en su misma sesión anidada. Requiere `enable_continue: true`. |
+| `message` | `task_id` obligatorio | Encola instrucciones para una tarea en background activa, propiedad de esta sesión padre. No depende de `enable_continue`. |
 
-### 2. Continuación de Subagentes (`subagent_continue`)
-Permite reanudar una tarea terminal (completada, fallida o cancelada) en su **misma sesión de Pi anidada (`.jsonl`)**:
-* **Activación:** Se habilita configurando `"enable_continue": true` en `subagents.json` (global o por proyecto) y recargando con `/reload`.
-* **Preservación de contexto:** El subagente conserva toda su conversación y herramientas previas, recibiendo las nuevas instrucciones sin tener que reiniciar de cero.
-* **Parámetros:**
-  ```json
-  {
-    "task_id": "subtask_analyst_...",
-    "prompt": "Instrucciones adicionales para continuar la tarea",
-    "mode": "background" // opcional: "task" o "background"
-  }
-  ```
+No se infiere la operación del estado de la tarea. Un mensaje tardío se rechaza; **nunca se convierte automáticamente en una continuación**. `task_id` no se acepta en `run`; `agent`, `name`, `display_name` y `context` no se aceptan en `continue` ni `message`. `message` no acepta `mode`. Las instrucciones vacías y las combinaciones contradictorias devuelven errores explícitos.
 
-### 3. Modos de Ejecución
-* **`background` (por defecto en la configuración global):**
-  - Devuelve el `task_id` inmediatamente al orquestador y libera el chat.
-  - Al finalizar o fallar, Pi notifica automáticamente a la sesión principal con el resultado. No hace falta hacer polling para esperar.
-* **`task` (primer plano):**
-  - Espera sincrónicamente mostrando el progreso en vivo en el dock.
-  - Puede enviarse a segundo plano en caliente con `ctrl+h`.
-  - Doble Escape cancela la tarea en ejecución.
+### Iniciar una tarea
 
-### 4. Control en Vivo (`subagent_send_message`)
-Permite al orquestador padre inyectar mensajes de dirección en caliente a un subagente en segundo plano que esté corriendo, utilizando el puente de steering del runtime de Pi:
 ```json
 {
-  "task_id": "subtask_reviewer_...",
-  "message": "Ten en cuenta también el archivo auth.ts en tu análisis"
+  "agent": "analyst",
+  "task": "Revisa el código y documenta los hallazgos",
+  "display_name": "Revisión de seguridad"
 }
 ```
 
----
+El modo nuevo se resuelve como `input.mode ?? definition.subagent_mode ?? config.default_mode`, con fallback built-in `task`. El orquestador debe omitir `mode` salvo que el usuario pida explícitamente `task` o `background`.
 
-## Herramientas Expuestas al Orquestador
+- **`task`:** espera y devuelve la respuesta completa; muestra progreso en vivo. Se puede enviar a background con el atajo configurado (por defecto `ctrl+h`) o cancelar con doble Escape.
+- **`background`:** devuelve inmediatamente `task_id` y libera el chat. Al finalizar, fallar o cancelarse, la sesión principal recibe una notificación automática con el resultado completo. No hay que dormir ni sondear para esperar.
 
-| Herramienta | Propósito |
-|---|---|
-| `subagent_run` | Lanza una tarea asignada a un subagente (`agent`, `task`, `context`, `mode`). |
-| `subagent_continue` | *(Con `enable_continue: true`)* Reanuda una tarea previa en su misma sesión anidada. |
-| `subagent_status` | Consulta el estado y actividad actual de una tarea delegada. |
-| `subagent_result` | Lee el resultado almacenado de una tarea terminada. |
-| `subagent_list_agents` | Lista los subagentes disponibles cargados desde Markdown. |
-| `subagent_list_tasks` | Lista las tareas delegadas activas e históricas del proyecto actual. |
-| `subagent_cancel` | Cancela una tarea de subagente que esté encolada o ejecutándose. |
-| `subagent_send_message` | Envía una directriz en vivo a un subagente activo en background. |
+Las definiciones se cargan al invocar la herramienta. Un agente desconocido produce un error que enumera los agentes actualmente disponibles, incluidas sus descripciones; no existe una herramienta separada para listarlos.
 
-*(Nota: Los subagentes tienen prohibido llamarse entre sí; las herramientas `subagent_*` están bloqueadas dentro de sus sesiones anidadas).*
+### Continuar una tarea terminada
 
----
+```json
+{
+  "action": "continue",
+  "task_id": "subtask_analyst_...",
+  "task": "Continúa con la corrección aprobada"
+}
+```
 
-## Definición de Subagentes (`subagents/*.md`)
+- Conserva el ID, la sesión `.jsonl`, el contexto anterior y el nombre visible; incrementa `attempt`.
+- Admite tareas `completed`, `failed`, `cancelled` e `interrupted`. Si está en `stopping`, espera la limpieza del intento anterior. Rechaza tareas `queued` o `running` y sesiones inexistentes.
+- El modo se resuelve como `mode` explícito, `effective_mode` anterior, `mode` anterior, `default_mode` y finalmente `task`.
+- `enable_continue` se lee de la configuración efectiva en cada llamada. Si está deshabilitado, devuelve un error explicativo sin ejecutar otro intento. La herramienta y su esquema permanecen registrados; los errores y notificaciones no recomiendan continuar cuando está deshabilitado.
+- Los intentos fallidos conservan la indicación de pedir autorización antes de reanudarlos; no se admiten overrides de modelo o esfuerzo en la llamada.
 
-Los subagentes son archivos Markdown ubicados en:
-1. Globales: `~/.pi/agent/subagents/*.md`
-2. Por proyecto: `<proyecto>/.pi/subagents/*.md`
+### Enviar instrucciones en vivo
 
-### Formato
+```json
+{
+  "action": "message",
+  "task_id": "subtask_reviewer_...",
+  "task": "Incluye también el análisis de auth.ts"
+}
+```
+
+Solo la **sesión padre originaria exacta** puede enviar mensajes a su tarea en background mientras está `running`. Requiere steering soportado por Pi `>=0.82.1`. Puede aceptar mensajes antes de que el puente esté listo; el puente los procesa al inicializarse.
+
+- `queued` confirma aceptación en la cola, **no consumo por el modelo**.
+- `pending_message_count` indica mensajes pendientes; los no consumidos al terminar pasan a `undelivered_message_count`, sin reproducirse en otro intento.
+- Límites: 16 mensajes pendientes, 16 KiB UTF-8 por mensaje y 64 KiB pendientes en total.
+- Las negativas incluyen motivo estructurado, como `not_owner`, `not_running`, `unsupported_runtime` o `queue_count_limit`, y se marcan como error de herramienta.
+- El texto de los mensajes permanece en el detalle de la tarea propietaria; los resúmenes y notificaciones no lo reproducen.
+
+## Historial, resultados y render
+
+La herramienta devuelve el resultado completo al orquestador, independientemente de la expansión visual. El historial SQLite conserva resultados y eventos por workspace (`cwd`); la sesión anidada conserva su conversación. El preview de actividad está acotado, no el resultado final.
+
+El render usa tarjetas enmarcadas, sin filas duplicadas de llamada ni fondos propios: vista colapsada con identidad/estado e intento cuando es una continuación, vista expandida con respuesta o error, y progreso parcial. Los mensajes en vivo muestran su acuse, no una respuesta final de la tarea. La notificación de background conserva nombre e intento y usa el atajo real de `app.tools.expand`. El replay respeta el workspace y limpia las suscripciones al finalizar, abortar o cerrar la sesión.
+
+El modelo no tiene tools separadas de consulta, resultados ni cancelación. El usuario conserva el historial y la cancelación en `/subagents`; los entregables persistidos pueden leerse con `read`. Tras compactar contexto, no se garantiza recuperación programática de resultados históricos arbitrarios sin un artefacto o una continuación habilitada; continuar ejecuta un nuevo intento y no equivale a leer un resultado almacenado.
+
+## Definiciones de subagentes
+
+Se cargan desde `agents/*.md` y `subagents/*.md` bajo el directorio global de Pi (`$PI_CODING_AGENT_DIR` o `~/.pi/agent`), y desde `.pi/agents/*.md` y `.pi/subagents/*.md` del proyecto. Las definiciones del proyecto tienen prioridad; dentro de un mismo ámbito, `subagents` tiene prioridad sobre `agents`.
 
 ```markdown
 ---
-name: discovery
-description: Investiga código, documentación y dependencias de forma aislada
+name: analyst
+description: Revisa código y documenta hallazgos
 tools:
   - read
   - bash
-  - context7_search_library
 subagent_mode: background
 ---
 
-# Discovery Subagent
-
-Eres un investigador acotado. Lee el código asignado...
+# Analyst
+Lee únicamente el alcance asignado y documenta la evidencia.
 ```
 
-* **`tools`:** Lista permitida de herramientas (soporta comodines como `tool_*`).
-* **`subagent_mode`:** Modo preferido para este agente (`task` o `background`).
-* **Aislamiento `lean`:** Las sesiones anidadas corren en modo lean (cargan herramientas de extensiones pero no inyectan prompts globales ni sobrecargan el contexto).
+`tools` es una allowlist y acepta comodines sobre herramientas activas del padre. Las herramientas `subagent_*` están bloqueadas en las sesiones anidadas: los subagentes no pueden delegar entre sí. Las modificaciones Markdown se leen en la siguiente ejecución.
 
----
+## Configuración
 
-## Configuración (`subagents.json`)
+La configuración de `.pi/subagents.json` del proyecto sobrescribe los campos presentes en `$PI_CODING_AGENT_DIR/subagents.json` o `~/.pi/agent/subagents.json`. Los campos ausentes heredan el valor global y luego el default built-in. La extensión actual lee la configuración local sin una comprobación adicional de confianza; úsala solo en proyectos confiables.
 
-Se configura de forma global en `~/.pi/agent/subagents.json` o por proyecto en `.pi/subagents.json`:
-
-```json
-{
-  "default_mode": "background",
-  "enable_continue": true,
-  "timeout_ms": 3600000,
-  "stall_timeout_ms": 300000,
-  "max_concurrency": 5,
-  "debug": false,
-  "session_resources": "lean",
-  "background_handoff_shortcut": "ctrl+h",
-  "history_panel_shortcut": "ctrl+,",
-  "detail_cancel_shortcut": "x"
-}
-```
-
-### Campos Clave
-
-| Campo | Valor por defecto | Descripción |
+| Campo | Default built-in | Propósito |
 |---|---|---|
-| `default_mode` | `"task"` | Modo de ejecución por defecto si la llamada o el agente no especifican uno (`"task"` o `"background"`). |
-| `enable_continue` | `false` | Habilita el registro de la tool `subagent_continue` y la reanudación de sesiones previas. |
-| `timeout_ms` | `1200000` (20m) | Límite máximo de ejecución por tarea de subagente. |
-| `stall_timeout_ms` | `240000` (4m) | Tiempo de inactividad antes de considerar estancada la sesión. |
-| `max_concurrency` | `5` | Tareas simultáneas máximas permitidas por proyecto. |
-| `session_resources` | `"lean"` | Aislamiento de recursos de Pi (omite skills/temas globales para mantener ligero el contexto). |
+| `default_mode` | `"task"` | Modo cuando no lo especifican llamada o definición. |
+| `enable_continue` | `false` | Habilita únicamente `action: "continue"`; no bloquea `message`. |
+| `timeout_ms` | `1200000` | Tiempo máximo por tarea. |
+| `stall_timeout_ms` | `240000` | Límite de inactividad. |
+| `max_concurrency` | `5` | Ejecuciones simultáneas máximas. |
+| `session_resources` | `"lean"` | Aislamiento del prompt de la sesión anidada. |
+| `debug` | `false` | Logs en `.pi/subagents-debug.log` del workspace ejecutor. |
+| `history_panel_shortcut` | `"ctrl+,"` | Abrir historial. |
+| `detail_cancel_shortcut` | `"x"` | Cancelar la tarea seleccionada. |
+| `background_handoff_shortcut` | `"ctrl+h"` | Enviar primer plano a background. |
 
----
+El modo lean carga herramientas permitidas y hooks de seguridad, sin inyectar contexto o skills globales. No se necesitan credenciales adicionales para esta herramienta: se utilizan los proveedores del runtime padre. No publiques secretos en definiciones, instrucciones ni logs.
 
-## Integración con `orchestrator-supervisor`
+## Integraciones y ciclo de vida
 
-El supervisor del orquestador (`orchestrator-supervisor`) vigila activamente las herramientas de subagentes:
-* **Invariante de espera:** El supervisor detecta cualquier worker activo en segundo plano y **bloquea rotaciones de sesión o recargas** hasta que todos los subagentes hayan finalizado y entregado sus resultados.
-* Al continuar un subagente con `subagent_continue`, el supervisor vuelve a registrar la tarea como activa en su valla de seguridad.
+La extensión funciona independientemente de otras extensiones. Cuando existe un asignador como CPAMC, el manager emite `subagents:task:allocate` tanto para tareas nuevas como para continuaciones; cada intento vuelve a solicitar asignación. Sin asignador o ante fallo de asignación, usa el modelo y esfuerzo del orquestador. Al terminar emite `subagents:task:terminal`.
 
----
+El supervisor puede seguir observando `subagent_run`, los eventos y SQLite sin depender de las tools eliminadas. El historial, widget y controles manuales usan directamente el manager. Al cerrar la sesión se drenan tareas y recursos; las tareas huérfanas se reconcilian como interrumpidas sin volver a emitir resultados de background.
 
-## Atajos de Teclado en el TUI
+Después de actualizar el código, ejecuta **`/reload` o reinicia Pi** para retirar las tools viejas de la sesión y registrar el nuevo contrato. Cambiar `enable_continue` se aplica a la siguiente llamada; cambiar atajos requiere recargar.
 
-* `/subagents` o `ctrl+,` — Abre el panel interactivo con el historial y detalle de subagentes.
-* `x` — Cancela la tarea seleccionada en el panel de historial.
-* `ctrl+h` — Pasa la tarea activa en primer plano al segundo plano.
-* `ctrl+o` — Expande/colapsa las salidas de herramientas y respuestas del subagente.
-* `ctrl+t` — Muestra/oculta los bloques de pensamiento (thinking) del modelo.
+## Validación del paquete
+
+Desde el directorio de esta extensión, usando sus dependencias propias:
+
+```bash
+npm run check
+```
+
+Las pruebas cubren el contrato único, continuación, steering, límites/propiedad, cancelación, persistencia, notificaciones y render/replay. La comprobación visual final en la TUI requiere recargar la extensión.

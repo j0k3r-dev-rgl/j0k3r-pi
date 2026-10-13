@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 import { SubagentManager } from '../../src/manager.js';
-import { registerSubagentTools } from '../../src/tools.js';
 import { installSubagentTestEnv } from '../helpers/subagent-test-helpers.js';
 import type { SubagentRunner } from '../../src/types.js';
 
@@ -78,17 +77,12 @@ describe('real process cancellation settlement', () => {
     };
 
     const manager = new SubagentManager(runner);
-    let cancelTool: any;
-    registerSubagentTools({ registerTool: (tool: any) => {
-      if (tool.name === 'subagent_cancel') cancelTool = tool;
-    } }, manager);
-
     const launched = await manager.run({ agent: 'analyst', task: `cancel real bash ${marker}`, mode: 'background' }, { cwd: env.tmp });
     const taskId = launched.task_ids[0]!;
     await waitFor(() => Boolean(shellPid && sleepPid), 5_000, 25, 'spawned shell and sleep pids');
 
-    const cancelResult = await cancelTool.execute('1', { task_id: taskId }, undefined, undefined, { cwd: env.tmp });
-    expect(cancelResult.details.task).toMatchObject({ id: taskId, status: 'stopping' });
+    const cancelling = manager.cancel(taskId);
+    expect(cancelling).toMatchObject({ id: taskId, status: 'stopping' });
 
     let cancelledObservedAt = 0;
     await waitFor(() => {

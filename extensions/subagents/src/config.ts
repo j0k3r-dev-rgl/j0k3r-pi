@@ -11,18 +11,8 @@ const DEFAULT_BACKGROUND_HANDOFF_SHORTCUT = 'ctrl+h';
 const DEFAULT_HISTORY_PANEL_SHORTCUT = 'ctrl+,';
 const DEFAULT_DETAIL_CANCEL_SHORTCUT = 'x';
 const DEFAULT_RENDER_DEBUG_LOG_PATH = path.join(os.tmpdir(), 'pi-subagents-render.jsonl');
-const BLOCKED_SUBAGENT_TOOLS = new Set([
-  'subagent_run',
-  'subagent_continue',
-  'subagent_list_agents',
-  'subagent_status',
-  'subagent_result',
-  'subagent_list_tasks',
-  'subagent_cancel',
-]);
-
 function sanitizeTools(tools: string[]): string[] {
-  return tools.map(String).filter((tool) => !BLOCKED_SUBAGENT_TOOLS.has(tool) && !tool.startsWith('subagent_'));
+  return tools.map(String).filter((tool) => !tool.startsWith('subagent_'));
 }
 
 function parseScalar(value: string): any {

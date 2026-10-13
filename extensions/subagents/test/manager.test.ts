@@ -343,7 +343,6 @@ describe('manager and history integration', () => {
     expect(error).toBeInstanceOf(Error);
     expect(error.message).toBe('Subagent task is not available.');
     expect(error.message.toLowerCase()).not.toContain('resume');
-    expect(error.message).not.toContain('subagent_continue');
     expect(manager.getTask(first.task_ids[0]!, tmp)).toMatchObject({ attempt: 1, status: 'completed', result: 'initial result' });
   });
 

@@ -227,7 +227,7 @@ describe('tool render helpers', () => {
     try {
       const manager = new SubagentManager(env.mockRunner());
       let continueTool: any;
-      registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_continue') continueTool = tool; } }, manager);
+      registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') continueTool = tool; } }, manager);
 
       const backgroundTask = await manager.run({ agent: 'analyst', task: 'persist background mode', mode: 'background' }, { cwd: env.tmp });
       const bgTaskObj = manager.getTask(backgroundTask.task_ids[0]!, env.tmp);
@@ -257,7 +257,7 @@ describe('tool render helpers', () => {
       expect(resolveContinuationEffectiveMode({ previousTask: legacyTaskObj, config: { default_mode: 'background' } })).toBe('background');
 
       // Call lines return 0 lines to avoid separate text outside frame
-      const callLines = continueTool.renderCall({ task_id: legacyTaskId, prompt: 'Resume the legacy task.' }, { fg: (_name: string, text: string) => text, bold: (text: string) => text }).render(200);
+      const callLines = continueTool.renderCall({ action: 'continue', task_id: legacyTaskId, task: 'Resume the legacy task.' }, { fg: (_name: string, text: string) => text, bold: (text: string) => text }).render(200);
       expect(callLines).toHaveLength(0);
     } finally {
       process.chdir(previousCwd);
@@ -331,9 +331,9 @@ describe('tool render helpers', () => {
     expect(resultLines.at(-1)).toContain('┘');
     expect(resultLines.join('\n')).not.toContain('\x1b[4');
 
-    // Direct renderSubagentResult (single framed box with integrated title)
-    const { renderSubagentResult } = await import('../../src/render/tools/subagent-result.js');
-    const directLines = renderSubagentResult(result, { expanded: false }, { fg: (_name: string, text: string) => text }).render(80);
+    // Shared result renderer (single framed box with integrated title)
+    const { renderSubagentRunResult } = await import('../../src/render/tools/subagent-run.js');
+    const directLines = renderSubagentRunResult(result, { expanded: false }, { fg: (_name: string, text: string) => text }).render(80);
     expect(directLines[0]).toContain('┌─');
     expect(directLines[0]).toContain('┐');
     expect(directLines[0]).toContain('󰣇');
@@ -486,7 +486,7 @@ describe('tool render helpers', () => {
   });
 
   it('renders result and response sections only when actual non-whitespace response text exists', async () => {
-    const { renderSubagentResult } = await import('../../src/render/tools/subagent-result.js');
+    const { renderSubagentRunResult } = await import('../../src/render/tools/subagent-run.js');
     const theme = { fg: (_name: string, text: string) => text };
 
     // Case 1: Empty string result
@@ -501,10 +501,10 @@ describe('tool render helpers', () => {
         },
       },
     };
-    const renderedEmpty = env.stripAnsi(renderSubagentResult(emptyResult, { expanded: true }, theme).render(100).join('\n'));
+    const renderedEmpty = env.stripAnsi(renderSubagentRunResult(emptyResult, { expanded: true }, theme).render(100).join('\n'));
     expect(renderedEmpty).not.toContain('Subagent response');
-    expect(renderedEmpty).not.toContain('Subagent result ·');
-    expect(renderedEmpty).toContain('Subagent ·');
+    expect(renderedEmpty).not.toContain('subagent result ·');
+    expect(renderedEmpty).toContain('subagent ·');
 
     // Case 2: Whitespace-only result
     const whitespaceResult = {
@@ -517,10 +517,10 @@ describe('tool render helpers', () => {
         },
       },
     };
-    const renderedWs = env.stripAnsi(renderSubagentResult(whitespaceResult, { expanded: true }, theme).render(100).join('\n'));
+    const renderedWs = env.stripAnsi(renderSubagentRunResult(whitespaceResult, { expanded: true }, theme).render(100).join('\n'));
     expect(renderedWs).not.toContain('Subagent response');
-    expect(renderedWs).not.toContain('Subagent result ·');
-    expect(renderedWs).toContain('Subagent ·');
+    expect(renderedWs).not.toContain('subagent result ·');
+    expect(renderedWs).toContain('subagent ·');
 
     // Case 3: Undefined result (e.g. running or failed without response)
     const runningTask = {
@@ -533,10 +533,10 @@ describe('tool render helpers', () => {
         },
       },
     };
-    const renderedRunning = env.stripAnsi(renderSubagentResult(runningTask, { expanded: false }, theme).render(100).join('\n'));
-    expect(renderedRunning).not.toContain('Subagent result ·');
+    const renderedRunning = env.stripAnsi(renderSubagentRunResult(runningTask, { expanded: false }, theme).render(100).join('\n'));
+    expect(renderedRunning).not.toContain('subagent result ·');
     expect(renderedRunning).not.toContain('response:');
-    expect(renderedRunning).toContain('Subagent ·');
+    expect(renderedRunning).toContain('subagent ·');
 
     // Case 4: Error-only task
     const failedTask = {
@@ -549,7 +549,7 @@ describe('tool render helpers', () => {
         },
       },
     };
-    const renderedFailed = env.stripAnsi(renderSubagentResult(failedTask, { expanded: true }, theme).render(100).join('\n'));
+    const renderedFailed = env.stripAnsi(renderSubagentRunResult(failedTask, { expanded: true }, theme).render(100).join('\n'));
     expect(renderedFailed).not.toContain('Subagent response');
     expect(renderedFailed).toContain('Subagent error');
     expect(renderedFailed).toContain('fatal crash occurred');
@@ -565,28 +565,19 @@ describe('tool render helpers', () => {
         },
       },
     };
-    const renderedValid = env.stripAnsi(renderSubagentResult(validTask, { expanded: true }, theme).render(100).join('\n'));
-    expect(renderedValid).toContain('Subagent result ·');
+    const renderedValid = env.stripAnsi(renderSubagentRunResult(validTask, { expanded: true }, theme).render(100).join('\n'));
+    expect(renderedValid).toContain('subagent result ·');
     expect(renderedValid).toContain('Subagent response');
     expect(renderedValid).toContain('All unit tests passed with 100% coverage.');
   });
 
-  it('registers all 8 public subagent tools with boxed single-frame contracts (renderShell: self, empty call)', () => {
+  it('registers only subagent_run with a boxed single-frame contract (renderShell: self, empty call)', () => {
     fs.writeFileSync(path.join(env.tmp, '.pi', 'subagents.json'), JSON.stringify({ enable_continue: true }));
     const registered: Record<string, any> = {};
     const manager = new SubagentManager(env.mockRunner());
     registerSubagentTools({ registerTool: (tool: any) => { registered[tool.name] = tool; } }, manager, env.tmp);
 
-    const expectedTools = [
-      'subagent_list_agents',
-      'subagent_run',
-      'subagent_continue',
-      'subagent_status',
-      'subagent_result',
-      'subagent_list_tasks',
-      'subagent_cancel',
-      'subagent_send_message',
-    ];
+    const expectedTools = ['subagent_run'];
 
     expect(Object.keys(registered).sort()).toEqual(expectedTools.sort());
 
@@ -601,7 +592,7 @@ describe('tool render helpers', () => {
     }
   });
 
-  it('renders all 8 public subagent tools with boxed layout, ARCH_ICON header, and width safety in both collapsed and expanded states', () => {
+  it('renders subagent_run operations with boxed layout, ARCH_ICON and width safety in collapsed and expanded states', () => {
     fs.writeFileSync(path.join(env.tmp, '.pi', 'subagents.json'), JSON.stringify({ enable_continue: true }));
     const registered: Record<string, any> = {};
     const manager = new SubagentManager(env.mockRunner());
@@ -618,19 +609,15 @@ describe('tool render helpers', () => {
       result: 'task response text',
     };
 
-    const toolResults: Record<string, any> = {
-      subagent_list_agents: { details: { agents: [{ name: 'analyst', tools: ['read'] }] } },
-      subagent_run: { details: { task: sampleTask } },
-      subagent_continue: { details: { task: sampleTask } },
-      subagent_status: { details: { task: sampleTask } },
-      subagent_result: { details: { task: sampleTask, full_result: 'task response text' } },
-      subagent_list_tasks: { details: { tasks: [sampleTask] } },
-      subagent_cancel: { details: { task: sampleTask } },
-      subagent_send_message: { details: { status: 'queued', task_id: 'subtask_test_123', message: 'steer this' } },
-    };
+    const operationResults = [
+      { details: { action: 'run', task: sampleTask } },
+      { details: { action: 'continue', task: { ...sampleTask, attempt: 2 } } },
+      { details: { action: 'message', status: 'queued', task: sampleTask, message: 'queue acknowledgement' } },
+    ];
 
-    for (const [name, result] of Object.entries(toolResults)) {
-      const tool = registered[name];
+    for (const result of operationResults) {
+      const name = result.details.action;
+      const tool = registered.subagent_run;
 
       // Collapsed
       const collapsedLines = tool.renderResult(result, { expanded: false, isPartial: false }, theme).render(80);
@@ -674,12 +661,7 @@ describe('tool render helpers', () => {
     };
 
     const toolResults: Record<string, any> = {
-      subagent_list_agents: { details: { agents: [{ name: 'analyst', tools: ['read'] }] } },
-      subagent_status: { details: { task: sampleTask } },
-      subagent_result: { details: { task: sampleTask } },
-      subagent_list_tasks: { details: { tasks: [sampleTask] } },
-      subagent_cancel: { details: { task: sampleTask } },
-      subagent_send_message: { details: { status: 'queued', task_id: 'subtask_kb_123', message: 'steer this' } },
+      subagent_run: { details: { task: sampleTask } },
     };
 
     try {
@@ -706,45 +688,26 @@ describe('tool render helpers', () => {
     }
   });
 
-  it('renders subagent_status and subagent_send_message error and rejected states with boxed frames', () => {
-    fs.writeFileSync(path.join(env.tmp, '.pi', 'subagents.json'), JSON.stringify({ enable_continue: true }));
-    const registered: Record<string, any> = {};
+  it('renders live-message rejection and queue acknowledgements without task IDs or response confusion', () => {
+    let tool: any;
     const manager = new SubagentManager(env.mockRunner());
-    registerSubagentTools({ registerTool: (tool: any) => { registered[tool.name] = tool; } }, manager, env.tmp);
+    registerSubagentTools({ registerTool: (value: any) => { tool = value; } }, manager, env.tmp);
     const theme = { fg: (_n: string, t: string) => t, bold: (t: string) => t };
-
-    // subagent_status: task not found (isError / no task)
-    const statusErrorResult = { isError: true, content: [{ type: 'text', text: 'Subagent task not found' }] };
-    const statusErrorLines = registered.subagent_status.renderResult(statusErrorResult, { expanded: false }, theme).render(80);
-    expect(statusErrorLines[0]).toContain('subagent status · failed');
-    expect(statusErrorLines[1]).toContain('Subagent task not found');
-
-    // subagent_status: background task running
-    const bgTask = { id: 'bg_1', agent: 'analyst', status: 'running', mode: 'background', model: 'm', effort: 'low' };
-    const statusBgLines = registered.subagent_status.renderResult({ details: { task: bgTask } }, { expanded: false }, theme).render(80);
-    expect(statusBgLines[0]).toContain('subagent status · analyst · running (background)');
-
-    // subagent_send_message: rejected
-    const rejectedResult = {
-      details: { status: 'rejected', task_id: 't_1', reason: 'unsupported_runtime', message: 'Pi runtime too old' },
-    };
-    const sendRejectedLines = registered.subagent_send_message.renderResult(rejectedResult, { expanded: false }, theme).render(80);
-    expect(sendRejectedLines[0]).toContain('subagent send message · rejected');
-    expect(sendRejectedLines[1]).toContain('status: rejected');
-    expect(sendRejectedLines[1]).toContain('task_id: t_1');
-
-    const sendRejectedExpanded = registered.subagent_send_message.renderResult(rejectedResult, { expanded: true }, theme).render(80).join('\n');
-    expect(sendRejectedExpanded).toContain('reason: unsupported_runtime');
-    expect(sendRejectedExpanded).toContain('Pi runtime too old');
-
-    // subagent_send_message: queued
-    const queuedResult = {
-      details: { status: 'queued', task_id: 't_1', message: 'keep going', pending_message_count: 2 },
-    };
-    const sendQueuedExpanded = registered.subagent_send_message.renderResult(queuedResult, { expanded: true }, theme).render(80).join('\n');
-    expect(sendQueuedExpanded).toContain('subagent send message · queued');
-    expect(sendQueuedExpanded).toContain('pending messages: 2');
-    expect(sendQueuedExpanded).toContain('keep going');
+    for (const status of ['queued', 'rejected']) {
+      const result = {
+        isError: status === 'rejected',
+        content: [{ type: 'text', text: `${status}: acknowledgement` }],
+        details: { action: 'message', status, task_id: 'private-id', reason: status === 'rejected' ? 'unsupported_runtime' : undefined, pending_message_count: 2 },
+      };
+      const collapsed = tool.renderResult(result, { expanded: false }, theme).render(80).join('\n');
+      expect(collapsed).toContain(`subagent message · subagent · ${status}`);
+      expect(collapsed).toContain('ctrl+o to expand');
+      expect(collapsed).not.toContain('private-id');
+      const expanded = tool.renderResult(result, { expanded: true }, theme).render(80).join('\n');
+      expect(expanded).toContain(`${status}: acknowledgement`);
+      expect(expanded).toContain('pending messages: 2');
+      expect(expanded).not.toContain('Subagent response');
+    }
   });
 
   it('triggers registered panel opener when subagent run result component receives a mouse click', async () => {
