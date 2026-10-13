@@ -88,22 +88,14 @@ describe('compatibility smoke', () => {
       extension(pi);
 
       expect(calls[0]).toBe('renderer:subagent-completion');
-      expect(tools).toEqual([
-        'subagent_list_agents',
-        'subagent_run',
-        'subagent_status',
-        'subagent_result',
-        'subagent_list_tasks',
-        'subagent_cancel',
-        'subagent_send_message',
-      ]);
+      expect(tools).toEqual(['subagent_run']);
       expect(events).toEqual(['session_start', 'session_shutdown']);
       expect(shortcuts).toEqual(expect.arrayContaining(['ctrl+,', 'ctrl+h']));
       expect(commands).toEqual(['subagents']);
     });
   });
 
-  it('restores subagent_continue registration when continuation is explicitly enabled before extension initialization', async () => {
+  it('keeps only subagent_run registered when continuation is enabled', async () => {
     await withIsolatedSubagentsConfig(() => {
       const tools: string[] = [];
       extension({
@@ -113,7 +105,7 @@ describe('compatibility smoke', () => {
         registerShortcut: () => undefined,
         registerCommand: () => undefined,
       });
-      expect(tools).toContain('subagent_continue');
+      expect(tools).toEqual(['subagent_run']);
     }, { projectConfig: { enable_continue: true } });
   });
 });

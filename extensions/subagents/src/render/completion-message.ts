@@ -1,6 +1,7 @@
 import { safeErrorMetadataDetails } from '../error-metadata.js';
 import { appendSubagentResumeGuidance, formatTaskLabel } from './tools/formatting.js';
 import { wrapLineToWidth } from './text-width.js';
+import { resolveExpandHint } from './tools/expansion-hint.js';
 import { ARCH_ICON, BOX_CHARS, CYAN, LIME, RED, electricBorder, padToWidth, themeAccent, themeBg, themeBold, themeDim, themeError, themeFg, themeStatus, themeSuccess, themeTitle, themeWarning, truncateToWidth, visibleWidth } from '../ui/theme.js';
 
 function formatErrorMetadataLines(task: any): string[] {
@@ -90,6 +91,9 @@ export function sendSubagentCompletionMessage(pi: any, task: any, cwd = task?.cw
       task: {
         id: task.id,
         agent: task.agent,
+        display_name: task.display_name,
+        attempt: task.attempt,
+        cwd,
         status: task.status,
         mode: task.mode,
         effective_mode: task.effective_mode,
@@ -112,9 +116,9 @@ export function renderSubagentCompletionMessage(message: any, options: any, them
   const details = message.details ?? {};
   const task = details.task ?? details;
   const status = task.status ?? 'completed';
-  const failed = status === 'failed' || status === 'cancelled';
+  const failed = status === 'failed' || status === 'cancelled' || status === 'interrupted';
   const expanded = Boolean(options?.expanded);
-  const rawResponse = details.full_result ?? task.result;
+  const rawResponse = task.result ?? (task.error ? undefined : details.full_result);
   const hasResp = typeof rawResponse === 'string' && rawResponse.trim().length > 0;
   const responseText = hasResp ? rawResponse : '';
   const archPrefix = themeFg(theme, 'accent', ARCH_ICON, CYAN);
@@ -125,7 +129,8 @@ export function renderSubagentCompletionMessage(message: any, options: any, them
   if (!expanded) {
     sections.push(
       { text: `subagent: ${task.agent ?? 'subagent'} · model: ${task.model ?? 'default/current'} · effort: ${task.effort ?? 'default/current'} · status: ${status}`, style: 'dim' },
-      { text: 'ctrl+o to expand', style: 'dim' },
+      ...(task.attempt > 1 ? [{ text: `attempt: ${task.attempt}`, style: 'dim' as const }] : []),
+      { text: resolveExpandHint('to expand', options), style: 'dim' },
     );
   } else {
     sections.push(

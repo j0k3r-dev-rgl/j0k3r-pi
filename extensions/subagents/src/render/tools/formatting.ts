@@ -1,11 +1,10 @@
 import { readSubagentsConfig } from '../config.js';
 import type { SubagentTask } from '../types.js';
 import { truncateToWidth } from '../completion-message.js';
-import { resolveExpandHint } from './expansion-hint.js';
 
 export const SUBAGENT_RESUME_GUIDANCE = [
   '## optional resume',
-  'This task can be resumed with `subagent_continue` by sending a continuation prompt with the same `task_id`.',
+  'This task can be resumed with `subagent_run` using `action: "continue"`, instructions in `task`, and the same `task_id`.',
   'Ask the user before resuming. The user may keep the currently configured model and effort or explicitly choose a different model, effort, or both for the next attempt.',
   "Do not resume or override the model or effort without the user's explicit decision. Never switch models automatically.",
 ].join('\n');
@@ -99,61 +98,6 @@ export function formatTask(task: SubagentTask): string {
   return lines.join('\n');
 }
 
-function formatTaskListItem(task: SubagentTask): string {
-  const when = task.last_activity_at ?? task.started_at ?? task.created_at;
-  const usage = formatUsage(task);
-  const taskLabel = formatTaskLabel(task);
-  const hasResp = hasAgentResponse(task);
-  const hasPreview = Boolean(task.output_preview || hasResp);
-  const lines = [
-    `subagent: ${task.agent} · task: ${taskLabel} · status: ${task.status} · attempt: ${task.attempt ?? 1}`,
-    modelEffortLine(task),
-    usage ? `usage: ${usage}` : undefined,
-    `last: ${task.last_activity ?? 'n/a'}${when ? ` at ${when}` : ''}`,
-    hasPreview ? `preview: collapsed · ${resolveExpandHint('to expand')}` : undefined,
-    task.error ? `error: ${clip(task.error)}` : undefined,
-  ].filter(Boolean) as string[];
-  return lines.join('\n');
-}
-
-function formatTaskListRow(task: SubagentTask): string {
-  return [
-    `subagent: ${task.agent}`,
-    `model: ${task.model ?? 'default/current'}`,
-    `effort: ${task.effort ?? 'default/current'}`,
-    `status: ${task.status}`,
-  ].join(' · ');
-}
-
-export function formatTaskListSummary(tasks: SubagentTask[], context?: any): string {
-  if (!tasks.length) return 'Listed 0 subagent task(s).';
-  const mostRecent = tasks[0]!;
-  return [
-    `Listed ${tasks.length} subagent task(s).`,
-    `Most recent: ${formatTaskLabel(mostRecent)} · task_id: ${mostRecent.id} · model: ${mostRecent.model ?? 'default/current'} · effort: ${mostRecent.effort ?? 'default/current'} · status: ${mostRecent.status}`,
-    `List view: collapsed · ${resolveExpandHint('to expand', context)}`,
-  ].join('\n');
-}
-
-export function formatTaskListRender(tasks: SubagentTask[], expanded: boolean, context?: any): string {
-  if (!tasks.length) return 'Listed 0 subagent task(s).';
-  if (expanded) return `Listed ${tasks.length} subagent task(s):\n\n${tasks.map(formatTaskListItem).join('\n\n')}`;
-  const mostRecent = tasks[0]!;
-  const recentLabel = formatTaskLabel(mostRecent);
-  return [
-    `most recent: ${recentLabel} · status: ${mostRecent.status}`,
-    resolveExpandHint('to expand', context),
-  ].join('\n');
-}
-
-export function collapsedResultHint(_task: SubagentTask | undefined, _failed: boolean, context?: any): string {
-  return resolveExpandHint('to expand', context);
-}
-
-export function taskFinalText(task: SubagentTask | undefined, result?: any): string {
-  return taskResponseText(task, result);
-}
-
 export function formatTaskModeContent(tasks: SubagentTask[], cwd = process.cwd()): string {
   const content = [
     `Completed ${tasks.length} subagent task(s):`,
@@ -162,6 +106,7 @@ export function formatTaskModeContent(tasks: SubagentTask[], cwd = process.cwd()
       return [
         formatTask(task),
         responseText ? `\n# response from ${formatTaskLabel(task)}\n${responseText}` : undefined,
+        task.error ? `\n# error from ${formatTaskLabel(task)}\n${task.error}` : undefined,
       ].filter(Boolean).join('\n');
     }),
   ].join('\n\n');
@@ -183,7 +128,7 @@ export function backgroundLaunchContent(tasksOrIds: Array<SubagentTask | string>
     ...lines,
     '',
     'Background behavior:',
-    '- Do not call subagent_status or subagent_result just to wait.',
+    '- Do not sleep or poll just to wait for this task.',
     '- The subagent will notify this chat automatically when it finishes.',
     '- Keep the chat available so the user can continue asking questions while it runs.',
   ].join('\n');

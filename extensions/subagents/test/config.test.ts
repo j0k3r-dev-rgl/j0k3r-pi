@@ -400,7 +400,7 @@ describe('config and workflow loading', () => {
   });
 
   it('filters delegation tools from subagent tool allowlists', () => {
-    fs.writeFileSync(path.join(tmp, '.pi', 'subagents', 'analyst.md'), `---\nname: analyst\ntools:\n  - read\n  - subagent_run\n  - subagent_result\n  - memory_search\n---\n# Agent`);
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents', 'analyst.md'), `---\nname: analyst\ntools:\n  - read\n  - subagent_run\n  - subagent_*\n  - memory_search\n---\n# Agent`);
     fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ default_tools: ['read', 'subagent_run', 'memory_search'] }));
     const agents = loadSubagents(tmp);
     const config = readSubagentsConfig(tmp);
@@ -444,7 +444,7 @@ describe('config and workflow loading', () => {
       ].join('\n'));
     };
     writeConfiguredSubagent('discovery', ['read', 'bash', 'memory_search', 'memory_get', 'subagent_run']);
-    writeConfiguredSubagent('prd-review', ['read', 'bash', 'memory_search', 'memory_get', 'memory_add', 'memory_update', 'subagent_cancel']);
+    writeConfiguredSubagent('prd-review', ['read', 'bash', 'memory_search', 'memory_get', 'memory_add', 'memory_update', 'subagent_run']);
     writeConfiguredSubagent('sdd-explore', [
       'read',
       'bash',
@@ -459,9 +459,9 @@ describe('config and workflow loading', () => {
       'memory_get',
       'memory_add',
       'memory_update',
-      'subagent_status',
+      'subagent_run',
     ]);
-    writeConfiguredSubagent('tool-smoke', ['read', 'bash', 'skill_registry_resolve', 'context7_status', 'subagent_result']);
+    writeConfiguredSubagent('tool-smoke', ['read', 'bash', 'skill_registry_resolve', 'context7_status', 'subagent_run']);
 
     const agents = loadSubagents(tmp);
     expect(agents.map((agent) => agent.name).sort()).toEqual(['discovery', 'prd-review', 'sdd-explore', 'tool-smoke']);

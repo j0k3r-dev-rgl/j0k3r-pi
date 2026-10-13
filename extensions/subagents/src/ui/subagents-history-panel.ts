@@ -962,7 +962,7 @@ export class SubagentsHistoryPanel {
     if (typeof argsTaskId === 'string' && argsTaskId.trim()) return argsTaskId.trim();
 
     const toolName = typeof item.name === 'string' ? item.name : '';
-    const isSubagentTool = toolName === 'subagent_run' || toolName === 'subagent_continue' || toolName === 'subagent' || toolName.startsWith('subagent');
+    const isSubagentTool = toolName.startsWith('subagent');
 
     if (isSubagentTool || item.type === 'subagent') {
       const agentCandidate = item.arguments?.agent ?? item.arguments?.name;

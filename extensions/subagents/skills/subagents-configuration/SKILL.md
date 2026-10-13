@@ -64,9 +64,9 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "default_mode",
       "enable_continue",
       "subagent_mode",
-      "subagent_continue mode",
+      "subagent_run continuation mode",
       "continuation enablement",
-      "subagent_send_message",
+      "subagent_run live messages",
       "live background steering",
       "global subagents config",
       "project subagents config",
@@ -109,7 +109,7 @@ Do not load this skill for ordinary subagent delegation/use (`subagent_run`, tas
 - Graph entity/relation management belongs to the orchestrator, which can locate entities and supply graph roots to workers. Do not grant graph-write or deletion/recovery tools to ordinary workflow/research agents; tool-smoke may use them only under explicit operation-specific approval.
 - Memory saves are conditional, not an end-of-task ritual. Exclude task status, logs, complete artifacts, speculative conclusions, secrets, and volatile news. Session summaries require an explicit user request; never grant nonexistent tools or add automatic summary generation.
 - Project subagent definitions live in `.pi/agents/*.md` and `.pi/subagents/*.md`; global user definitions live in `$PI_CODING_AGENT_DIR/agents/*.md`, `$PI_CODING_AGENT_DIR/subagents/*.md`, `~/.pi/agent/agents/*.md`, or `~/.pi/agent/subagents/*.md`.
-- The npm package is the extension runtime only; do not tell users or future agents to inspect `node_modules/pi-subagents-j0k3r/agents` for subagent definitions. Use the real global/project definition directories above, or runtime listing via `subagent_list_agents` / `subagent({ action: "list" })`.
+- The npm package is the extension runtime only; do not tell users or future agents to inspect `node_modules/pi-subagents-j0k3r/agents` for subagent definitions. Use the real global/project definition directories above. The only public tool is `subagent_run`; unknown-agent errors list current valid definitions.
 - Project definitions override global definitions with the same normalized name. Within the same scope, definitions in `subagents` override definitions in `agents` with the same normalized name, and Pi should warn at session startup so users can clean up the duplicate.
 - Before proposing or editing configuration, ask which scope the user wants unless it is already explicit: global for every project, project-local for the current workspace, or definition-specific frontmatter. Do not infer configuration scope from where the npm package is installed.
 - Explain the consequence before the user chooses: global config supplies defaults to all projects, project config overrides only fields present locally and inherits missing fields globally, and definition frontmatter affects only that subagent.
@@ -117,7 +117,7 @@ Do not load this skill for ordinary subagent delegation/use (`subagent_run`, tas
 - For answer-only configuration questions, explain the choices and recommended path without editing; asking how configuration works is not authorization to change files.
 - Subagents config resolves as a cascade: project `.pi/subagents.json` overrides global `$PI_CODING_AGENT_DIR/subagents.json` or `~/.pi/agent/subagents.json`; missing project fields fall back to global config; fields missing from both fall back to built-in defaults. Communicate this precedence to users when explaining config behavior.
 - `enable_continue` is built-in default `false` and follows that same cascade. Project `enable_continue` overrides global only when present; omitting it locally inherits the global value. Continuation guidance and new continuation execution are available only when the effective value is `true`.
-- When effective `enable_continue` is `false`, `subagent_continue` is not registered, direct or stale continuation attempts must be described as generic unavailable behavior, historical task and continuation records remain visible, and failed/cancelled/interrupted/stopping terminal results plus terminal background notifications must not recommend continuation or mention `subagent_continue`.
+- `subagent_run` is always the only registered tool, with optional `action` defaulting to `run`. Explicit `continue` and `message` actions require `task_id` and use `task` for instructions. When effective `enable_continue` is `false`, `continue` returns an explanatory error, history remains visible, and failure/cancellation/interruption notifications must not recommend continuation. The flag does not disable live `message` actions.
 - Model and thinking effort are managed automatically by the CPAMC subagent pool via the `subagents:task:allocate` event hook. When CPAMC is unavailable, allocation fails, or returns no model, subagents automatically fall back to the parent orchestrator model and thinking effort from context. Manual model selection, `/subagent-models`, `default_model`, `default_effort`, and `model_profiles` keys are obsolete; legacy `model_profiles` keys in `subagents.json` are inert at runtime and are never rewritten on disk.
 - Markdown definitions should usually contain identity, description, tool allowlist, and behavioral instructions only.
 - Nested subagent sessions should use `session_resources: "lean"` by default so the subagent markdown body becomes the nested session system prompt, the delegated user prompt contains only orchestrator context/task, and workflow skills, prompt templates, themes, context files, and startup context injections are not auto-loaded.
@@ -125,9 +125,9 @@ Do not load this skill for ordinary subagent delegation/use (`subagent_run`, tas
 - Subagent task history is stored globally under data storage, but rows remain project-scoped by `cwd`; history stores delegated prompt and subagent system prompt separately.
 - Debug logging is disabled by default with `debug: false`; when enabled in global or project `subagents.json`, logs are written to the executing project's `cwd/.pi/subagents-debug.log`.
 - To install the published package globally, prefer `pi install npm:pi-subagents-j0k3r`. If the user wants future `pi update --extensions` / `pi update --all` to move to newer releases, keep the package source unpinned as `npm:pi-subagents-j0k3r` in `~/.pi/agent/settings.json`. Use `npm:pi-subagents-j0k3r@x.y.z` only when the user explicitly wants a fixed version.
-- Runtime behavior to explain: `mode=task` waits and returns the full subagent response to the orchestrator; `mode=background` frees the chat, should not be polled just to wait, and sends an automatic completion/failure notification. `subagent_continue` is available only when effective `enable_continue` is true at extension load time, so changing that flag requires `/reload` or restart. When enabled, `subagent_continue` also accepts `mode`, and continuation mode resolves as explicit continuation `mode`, then the previous attempt's `effective_mode`, then the previous persisted `mode`, then `default_mode`, then built-in `task`. `/subagents` opens the session history/detail panel; `ctrl+o` expands/collapses rendered tool output and responses; `subagent_result` reads a stored result when explicitly needed.
+- Runtime behavior to explain: `mode=task` waits and returns the full response; `mode=background` frees the chat and sends an automatic completion/failure notification without polling. `subagent_run` with `action: "continue"` checks effective `enable_continue` on each invocation. Continuation mode resolves as explicit `mode`, previous `effective_mode`, previous `mode`, `default_mode`, then built-in `task`. `/subagents` opens history/detail; Pi's configured `app.tools.expand` key expands output. There is no stored-result query tool: use existing delivered results or persisted artifacts; continuation runs a new attempt, not a passive read.
 - The old UI config key `mode: "opencode" | "claude"` is removed. Do not recommend it. History, background visibility, and task-to-background handoff are available together without an UI-mode gate.
-- `subagent_send_message` is runtime behavior, not a configurable permission bypass: it only targets a running background task owned by the exact originating parent Pi session, requires supported Pi live steering, uses bounded queues, and reports queue acceptance separately from model consumption. Message text is visible only in the owning task detail timeline, not list/notification/result summary surfaces.
+- `subagent_run` with `action: "message"` is runtime behavior, not a configurable permission bypass: it only targets a running background task owned by the exact originating parent Pi session, requires supported Pi live steering, uses bounded queues, and reports queue acceptance separately from model consumption. Message text is visible only in the owning task detail timeline, not list/notification/result summary surfaces.
 - After changing subagent markdown/config, package settings, or extension code, tell the user to `/reload` or restart Pi.
 
 Recommended global package setting in `~/.pi/agent/settings.json`:
@@ -194,7 +194,7 @@ Execution-mode resolution order:
 
 Continuation-mode resolution order (when `enable_continue` is enabled):
 
-1. Explicit `mode` in the `subagent_continue` invocation.
+1. Explicit `mode` in `subagent_run` with `action: "continue"`.
 2. Previous attempt `effective_mode`.
 3. Previous persisted `mode`.
 4. `default_mode` from effective `subagents.json` config.
@@ -220,13 +220,13 @@ Continuation-mode resolution order (when `enable_continue` is enabled):
 5. Summarize existing effective values, what will be inherited, and exactly which file would change; ask for any missing product choice such as `task` versus `background` before editing.
 6. For new subagents, choose lowercase kebab-case names and clear trigger-focused descriptions. Write definitions in English by default; use another language only when explicitly requested. Prefer `subagents` unless compatibility requires `agents`.
 7. Set minimal tool allowlists; remove any `subagent_*` entries.
-8. Do not configure `model_profiles`, `default_model`, or `default_effort` (legacy keys are inert). Configure `default_mode` and `enable_continue` only in the user-approved scope. Explain CPAMC automatic allocation and orchestrator model/effort fallback, execution-mode precedence, and that `enable_continue` needs `/reload` or restart before tool exposure changes.
+8. Do not configure `model_profiles`, `default_model`, or `default_effort` (legacy keys are inert). Configure `default_mode` and `enable_continue` only in the user-approved scope. Explain CPAMC automatic allocation and orchestrator model/effort fallback, execution-mode precedence, and that `enable_continue` is checked on each continuation call without changing tool exposure.
 9. Never add the removed UI key `mode: "opencode" | "claude"`. Configure history and handoff independently with `history_panel_shortcut`, `detail_cancel_shortcut`, and `background_handoff_shortcut`.
 10. Configure `debug: true` only for temporary diagnostics; keep it false by default and explain that logs are written under the executing project's `.pi` directory.
 11. Validate JSON syntax and Markdown frontmatter/body structure. Preserve unrelated existing keys and definitions.
-12. Explain runtime behavior when relevant: task versus background, automatic notifications, disabled generic continuation unavailability with preserved history and no continuation recommendations in failed/cancelled/interrupted/stopping terminal results or terminal background notifications, then enabled-only continuation mode preservation/override, `/subagents`, configured history shortcut, `ctrl+o`, and same-parent live steering.
+12. Explain runtime behavior when relevant: task versus background, automatic notifications, explicit disabled-continuation errors with preserved history and no continuation recommendations in failed/cancelled/interrupted/stopping terminal results or terminal background notifications, then enabled-only continuation mode preservation/override, `/subagents`, configured history shortcut, `ctrl+o`, and same-parent live steering.
 13. Tell the user to `/reload` or restart Pi after changes.
-14. If runtime validation is requested after reload, use `subagent_list_agents` for definition/config discovery and run delegated smoke tests only when the user explicitly asks for them.
+14. If runtime validation is requested after reload, inspect the real definition/config paths; run delegated smoke tests through `subagent_run` only when the user explicitly asks for them.
 
 ## Output Contract
 
@@ -238,7 +238,7 @@ Return:
 - Scope decision: global, project-local, or definition-specific; include the effective cascade and why that scope was selected.
 - User choices requested before editing, including default execution mode or override intent when relevant.
 - Tool allowlist, system-prompt isolation, Context7 scope, memory-tool scope, debug logging, CPAMC model allocation and orchestrator fallback behavior.
-- Runtime behavior explained when relevant: task vs background, automatic notifications, enabled-only continuation mode preservation/override, same-parent `subagent_send_message`, `/subagents`, `ctrl+o`, and `subagent_result`.
+- Runtime behavior explained when relevant: task vs background, automatic notifications, enabled-only continuation mode preservation/override, same-parent `subagent_run` live messages, `/subagents`, configured expansion keys, and artifact-based result access.
 - Related configuration skills considered or loaded.
 - Validation executed, or the concrete reason it was not run.
 - Required reload/restart note and open risks.
