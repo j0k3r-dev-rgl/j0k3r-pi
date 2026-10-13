@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import apiToolsExtension, { registerToolRenderers } from '../index.js';
 import {
   renderApiToolCall,
   renderApiToolResult,
@@ -9,6 +10,33 @@ import {
 } from '../src/render.js';
 
 describe('renderApiToolResult', () => {
+  it('registers presentation synchronously without loading config, creating clients or exposing execution tools', async () => {
+    const resolvers: any[] = [];
+    const loadConfig = vi.fn(async () => { throw new Error('No config access allowed for rendering'); });
+    const createClient = vi.fn();
+    const registerTool = vi.fn();
+    await apiToolsExtension({ registerTool, registerToolRenderer: (resolver: any) => resolvers.push(resolver) }, { cwd: '/nonexistent-render-only-project', loadConfig, createClient });
+    expect(loadConfig).not.toHaveBeenCalled();
+    expect(createClient).not.toHaveBeenCalled();
+    expect(registerTool).not.toHaveBeenCalled();
+    expect(resolvers).toHaveLength(1);
+    const renderer = resolvers[0]('api_rest_request', () => undefined);
+    expect(renderer.renderShell).toBe('self');
+    expect(renderer.renderResult({ content: [{ type: 'text', text: 'safe replay result' }], details: { status: 'success', action: 'request' } }, { expanded: true }).render(80).join('\n')).toContain('safe replay result');
+    const next = vi.fn(() => ({ renderShell: 'native', renderResult: () => undefined }));
+    expect(resolvers[0]('unrelated_tool', next)).toBe(next.mock.results[0].value);
+  });
+  it('provides replay renderers for all API tools without requiring their execution definitions', () => {
+    let resolver: any;
+    registerToolRenderers({ registerToolRenderer: (value: any) => { resolver = value; } });
+    for (const name of ['api_status', 'api_auth_status', 'api_login', 'api_rest_request', 'api_swagger', 'api_graphql']) {
+      const renderer = resolver(name, () => undefined);
+      expect(renderer.renderShell).toBe('self');
+      expect(typeof renderer.renderCall).toBe('function');
+      expect(typeof renderer.renderResult).toBe('function');
+    }
+  });
+
   it('uses API Tools-owned Pi runtime packages through the local adapter seam', async () => {
     const [renderSource, runtimeSource, packageSource] = await Promise.all([
       readFile(new URL('../src/render.ts', import.meta.url), 'utf8'),

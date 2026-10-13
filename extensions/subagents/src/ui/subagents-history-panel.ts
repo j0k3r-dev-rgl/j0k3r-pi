@@ -1,5 +1,5 @@
 import { isValidThreadSnapshot, renderThreadBody } from '../thread-view.js';
-import type { SubagentTask, SubagentThreadRenderContext, SubagentThreadSnapshot, UsageStats } from '../types.js';
+import type { SubagentTask, SubagentThreadRenderContext, SubagentThreadRenderTarget, SubagentThreadSnapshot, UsageStats } from '../types.js';
 import { formatTaskLabel } from '../render/tools/formatting.js';
 import { visibleWidth as terminalVisibleWidth } from '../render/text-width.js';
 import {
@@ -154,6 +154,9 @@ function snapshotHasActiveTools(snapshot: SubagentThreadSnapshot | undefined): b
     || (item.type === 'bash' && (item.status === undefined || item.status === 'running')));
 }
 
+type DetailTarget = SubagentThreadRenderTarget;
+type DetailEntry = { text: string; taskId?: string; target?: DetailTarget };
+
 export class SubagentsHistoryPanel {
   private selected = 0;
   private selectedTaskId?: string;
@@ -162,9 +165,11 @@ export class SubagentsHistoryPanel {
   private followTail = true;
   private lastMaxScroll = 0;
   private toolOutputExpanded = false;
-  private hideThinkingBlock = false;
+  private hideThinkingBlock = true;
+  private expansionOverrides = new Map<string, boolean>();
+  private detailRowTargetMap = new Map<number, DetailTarget>();
   private hydratedTasks = new Map<string, { signature: string; task: SubagentTask }>();
-  private bodyCache = new Map<string, Array<{ text: string; taskId?: string }>>();
+  private bodyCache = new Map<string, DetailEntry[]>();
   private rowTaskMap = new Map<number, string>();
   private sidebarRowTaskMap = new Map<number, string>();
   private detailRowTaskMap = new Map<number, string>();
@@ -255,7 +260,7 @@ export class SubagentsHistoryPanel {
       return undefined;
     }
 
-    const isLeftClick = event.type === 'click' || (!event.type && isLeft);
+    const isLeftClick = isLeft && (event.type === 'click' || !event.type);
     if (!isLeftClick) return undefined;
 
     // Header or footer close click [✕ Cerrar]
@@ -285,14 +290,25 @@ export class SubagentsHistoryPanel {
       const targetIndex = tasks.findIndex((t) => t.id === targetTaskId);
       if (targetIndex >= 0) {
         const changed = this.selected !== targetIndex;
-        this.selected = targetIndex;
-        this.selectedTaskId = tasks[targetIndex]?.id;
-        this.scroll = 0;
-        this.followTail = true;
-        return { handled: true, focus: true, render: changed };
+        if (changed) {
+          this.selected = targetIndex;
+          this.selectedTaskId = tasks[targetIndex]?.id;
+          this.scroll = 0;
+          this.followTail = true;
+          return { handled: true, focus: true, render: true };
+        }
       }
     }
 
+    const inDetail = !this.lastIsSplit || !hasCol || col > this.lastSidebarWidth + 2;
+    const target = inDetail ? this.detailRowTargetMap.get(row) : undefined;
+    if (target && col >= 1 && col < this.lastRenderWidth - 1) {
+      const defaultExpanded = target.kind === 'tool' ? this.toolOutputExpanded : !this.hideThinkingBlock;
+      this.expansionOverrides.set(target.key, !(this.expansionOverrides.get(target.key) ?? defaultExpanded));
+      this.bodyCache.clear();
+      this.followTail = false;
+      return { handled: true, focus: true, render: true };
+    }
     return { handled: true, focus: true };
   }
 
@@ -304,10 +320,12 @@ export class SubagentsHistoryPanel {
     }
     if (this.matchesKey(data, 'ctrl+o') || data === '\u000f') {
       this.toolOutputExpanded = !this.toolOutputExpanded;
+      this.clearExpansionOverrides('tool');
       return;
     }
     if (this.matchesKey(data, 'ctrl+t') || data === '\u0014') {
       this.hideThinkingBlock = !this.hideThinkingBlock;
+      this.clearExpansionOverrides('thinking');
       return;
     }
     if (this.matchesKey(data, 'detailCancel')) {
@@ -366,6 +384,13 @@ export class SubagentsHistoryPanel {
     }
   }
 
+  private clearExpansionOverrides(kind: DetailTarget['kind']): void {
+    for (const key of this.expansionOverrides.keys()) {
+      if (key.startsWith(`${kind}:`)) this.expansionOverrides.delete(key);
+    }
+    this.bodyCache.clear();
+  }
+
   private scrollBy(delta: number): void {
     if (delta < 0) {
       this.scroll = Math.max(0, this.scroll + delta);
@@ -419,6 +444,7 @@ export class SubagentsHistoryPanel {
   }
 
   render(width: number): string[] {
+    this.detailRowTargetMap.clear();
     if (width <= 0) return [];
     const w = width;
     this.lastRenderWidth = w;
@@ -683,6 +709,7 @@ export class SubagentsHistoryPanel {
           if (entry.taskId) {
             this.detailRowTaskMap.set(terminalRow, entry.taskId);
           }
+          if (entry.target) this.detailRowTargetMap.set(terminalRow, entry.target);
           rightCellText = structuredBody ? entry.text : this.renderFlowLine(entry.text, rightWidth);
         }
         const rightCell = this.padToWidth(rightCellText, rightWidth);
@@ -790,6 +817,7 @@ export class SubagentsHistoryPanel {
             this.detailRowTaskMap.set(terminalRow, entry.taskId);
             this.rowTaskMap.set(terminalRow, entry.taskId);
           }
+          if (entry.target) this.detailRowTargetMap.set(terminalRow, entry.target);
           cellText = structuredBody ? entry.text : this.renderFlowLine(entry.text, rightWidth);
         }
         const padded = this.padToWidth(cellText, rightWidth);
@@ -1047,20 +1075,20 @@ export class SubagentsHistoryPanel {
   }
 
   private wrapWithTaskIds(
-    entries: Array<{ text: string; taskId?: string }>,
+    entries: DetailEntry[],
     width: number,
-  ): Array<{ text: string; taskId?: string }> {
-    const out: Array<{ text: string; taskId?: string }> = [];
+  ): DetailEntry[] {
+    const out: DetailEntry[] = [];
     const isFramedBoxLine = (line: string): boolean => /[┌┐└┘│├┤┬┴┼─╭╰╮╯═║╔╗╚╝╠╣╦╩╬]/.test(line);
 
     for (const entry of entries) {
       if (isFramedBoxLine(entry.text) || this.visibleWidth(entry.text) <= width) {
-        out.push({ text: entry.text, taskId: entry.taskId });
+        out.push({ ...entry });
         continue;
       }
       const wrappedTexts = this.wrap(entry.text, width);
       for (const text of wrappedTexts) {
-        out.push({ text, taskId: entry.taskId });
+        out.push({ ...entry, text });
       }
     }
     return out;
@@ -1076,7 +1104,7 @@ export class SubagentsHistoryPanel {
     });
   }
 
-  private bodyEntriesFor(task: SubagentTask, width: number): Array<{ text: string; taskId?: string }> {
+  private bodyEntriesFor(task: SubagentTask, width: number): DetailEntry[] {
     const activeSnapshot = isValidThreadSnapshot(task.thread_snapshot) ? task.thread_snapshot : undefined;
     const allowCache = !snapshotHasActiveTools(activeSnapshot);
     const cacheKey = this.bodyCacheKey(task, width);
@@ -1084,9 +1112,12 @@ export class SubagentsHistoryPanel {
       const cached = this.bodyCache.get(cacheKey);
       if (cached) return cached;
     }
-    let entries: Array<{ text: string; taskId?: string }>;
+    let entries: DetailEntry[];
     if (activeSnapshot) {
-      const context = {
+      entries = [];
+      const knownTasks = this.tasks();
+      const targetFor = (target: DetailTarget): DetailTarget => ({ ...target, key: `${target.kind}:${task.id}:${task.attempt ?? 1}:${target.key}` });
+      const context: SubagentThreadRenderContext = {
         ...this.renderContext,
         theme: this.renderContext.theme ?? this.theme,
         cwd: this.renderContext.cwd ?? process.cwd(),
@@ -1096,39 +1127,17 @@ export class SubagentsHistoryPanel {
         renderWidth: width,
         toolOutputExpanded: this.toolOutputExpanded,
         hideThinkingBlock: this.hideThinkingBlock,
+        isExpanded: (target, defaultExpanded) => this.expansionOverrides.get(targetFor(target).key) ?? defaultExpanded,
+        onItemRendered: (item, lines, target) => {
+          const taskId = this.resolveTaskIdFromSnapshotItem(item, knownTasks);
+          for (const text of lines) {
+            const resolved = taskId ? { cleanLine: text, taskId } : this.resolveTaskIdFromFlowLine(text, knownTasks);
+            entries.push({ text: resolved.cleanLine, taskId: resolved.taskId, target: target ? targetFor(target) : undefined });
+          }
+        },
       };
       const rendered = renderThreadBody(activeSnapshot, context);
-      const rawLines = rendered.length ? rendered : [''];
-      const knownTasks = this.tasks();
-
-      if (activeSnapshot.items.length <= 1) {
-        const taskId = activeSnapshot.items[0]
-          ? this.resolveTaskIdFromSnapshotItem(activeSnapshot.items[0], knownTasks)
-          : undefined;
-        entries = rawLines.map((text) => {
-          const resolved = taskId ? { cleanLine: text, taskId } : this.resolveTaskIdFromFlowLine(text, knownTasks);
-          return { text: resolved.cleanLine, taskId: resolved.taskId };
-        });
-      } else {
-        const itemSlices: Array<{ lines: string[]; taskId?: string }> = [];
-        for (const item of activeSnapshot.items) {
-          const itemLines = renderThreadBody({ ...activeSnapshot, items: [item] }, context);
-          const taskId = this.resolveTaskIdFromSnapshotItem(item, knownTasks);
-          itemSlices.push({ lines: itemLines, taskId });
-        }
-        const flatLines = itemSlices.flatMap((s) => s.lines);
-        if (flatLines.length === rawLines.length && flatLines.join('\n') === rawLines.join('\n')) {
-          entries = itemSlices.flatMap((s) => s.lines.map((text) => {
-            const resolved = s.taskId ? { cleanLine: text, taskId: s.taskId } : this.resolveTaskIdFromFlowLine(text, knownTasks);
-            return { text: resolved.cleanLine, taskId: resolved.taskId };
-          }));
-        } else {
-          entries = rawLines.map((lineText) => {
-            const resolved = this.resolveTaskIdFromFlowLine(lineText, knownTasks);
-            return { text: resolved.cleanLine, taskId: resolved.taskId };
-          });
-        }
-      }
+      if (!entries.length) entries = (rendered.length ? rendered : ['']).map((text) => ({ text }));
 
       if ((task.status === 'failed' || task.status === 'cancelled') && task.error && !hasEquivalentSnapshotError(activeSnapshot, task.error)) {
         entries.push({ text: '' }, { text: '# error' }, { text: task.error });

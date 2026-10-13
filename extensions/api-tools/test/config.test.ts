@@ -144,8 +144,17 @@ describe('loadApiConfig', () => {
     expect(config.warnings.filter((w) => w.code === 'unsupported_auth_metadata')).toHaveLength(0);
   });
 
-  it('loads real project config from disa-rgl when executed against its directory', async () => {
-    const config = await loadApiConfig({ cwd: '/home/j0k3r/projects/disa-rgl' });
+  it('loads login config from an isolated project directory', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'api-tools-login-project-'));
+    await writeApiJson(cwd, JSON.stringify({
+      enabled: true,
+      url: 'https://api.example.test',
+      auth: {
+        type: 'login', login_path: '/api/v1/auth/login', identifier_field: 'identifier',
+        accounts_file: 'core-api/dev/.seed-credentials.json', account_alias: 'PLATFORM_ADMIN',
+      },
+    }));
+    const config = await loadApiConfig({ cwd, gitInspector: gitInspector('ignored') });
     expect(config.exists).toBe(true);
     expect(config.enabled).toBe(true);
     expect(config.auth.type).toBe('login');

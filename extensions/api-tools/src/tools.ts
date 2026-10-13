@@ -10,19 +10,11 @@ import { failureDocument, frameText, record, successDocument } from './result-fo
 import { getAuthMetadataStatus, redactDeep } from './security.js';
 import { executeSwaggerAction } from './swagger.js';
 import { DISCOVERY_PAGE_SIZE as SWAGGER_DISCOVERY_PAGE_SIZE } from './swagger/discovery.js';
-import { renderApiToolCall, renderApiToolResult } from './render.js';
+import { API_TOOL_NAMES, buildApiToolRenderers } from './render.js';
+export { API_TOOL_NAMES } from './render.js';
 import { resolveLocalAccount } from './accounts.js';
 import type { GitFileInspector } from './git.js';
 import type { ApiActionDocument, ApiClient, ApiToolResult, ApiToolsConfig, ApiWarning, DynamicCredentials } from './types.js';
-
-export const API_TOOL_NAMES = [
-  'api_status',
-  'api_auth_status',
-  'api_login',
-  'api_rest_request',
-  'api_swagger',
-  'api_graphql',
-] as const;
 
 export interface RegisterApiToolsOptions {
   cwd?: string;
@@ -376,14 +368,6 @@ function continuationPageLimit(tool: 'api_rest_request' | 'api_swagger' | 'api_g
   return undefined;
 }
 
-function buildRenderers(toolName: string) {
-  return {
-    renderShell: 'self' as const,
-    renderCall: (args: any, theme: any, context?: any) => renderApiToolCall(toolName, args, theme, context),
-    renderResult: (result: ApiToolResult, options: any, theme: any, context?: any) => renderApiToolResult(toolName, result, options, theme, context),
-  };
-}
-
 function rejectCursorExecutionInputs(params: Record<string, unknown>): ApiToolResult | undefined {
   if (typeof params.cursor !== 'string') return undefined;
   const forbidden = Object.keys(params).filter((key) => !['action', 'cursor'].includes(key));
@@ -434,7 +418,7 @@ export async function registerApiTools(pi: any, options: RegisterApiToolsOptions
     ],
     parameters: EMPTY_PARAMETERS,
     execute: async () => continuation.finalize({ tool: 'api_rest_request', action: 'status', document: buildStatusDocument(config), secretValues: config.secretValues, limits: { ...config.limits, maxRecordsPerPage: continuationPageLimit('api_rest_request', 'status') } }),
-    ...buildRenderers('api_status'),
+    ...buildApiToolRenderers('api_status'),
   });
 
   pi.registerTool({
@@ -447,7 +431,7 @@ export async function registerApiTools(pi: any, options: RegisterApiToolsOptions
     ],
     parameters: EMPTY_PARAMETERS,
     execute: async () => continuation.finalize({ tool: 'api_rest_request', action: 'auth_status', document: buildAuthStatusDocument(config, options.now), secretValues: config.secretValues, limits: { ...config.limits, maxRecordsPerPage: continuationPageLimit('api_rest_request', 'auth_status') } }),
-    ...buildRenderers('api_auth_status'),
+    ...buildApiToolRenderers('api_auth_status'),
   });
 
   pi.registerTool({
@@ -460,7 +444,7 @@ export async function registerApiTools(pi: any, options: RegisterApiToolsOptions
     ],
     parameters: LOGIN_PARAMETERS,
     execute: async (_id: string, params: Record<string, unknown>, signal?: AbortSignal) => continuation.finalize({ tool: 'api_rest_request', action: 'login', document: await executeLoginTool(params, signal, config, client, cwd, options.gitFileInspector), secretValues: config.secretValues, limits: { ...config.limits, maxRecordsPerPage: continuationPageLimit('api_rest_request', 'login') } }),
-    ...buildRenderers('api_login'),
+    ...buildApiToolRenderers('api_login'),
   });
 
   pi.registerTool({
@@ -480,7 +464,7 @@ export async function registerApiTools(pi: any, options: RegisterApiToolsOptions
       const document = await executeRestTool(params, signal, config, client);
       return continuation.finalize({ tool: 'api_rest_request', action: 'request', document, secretValues: config.secretValues, limits: { ...config.limits, maxRecordsPerPage: continuationPageLimit('api_rest_request', 'request') } });
     },
-    ...buildRenderers('api_rest_request'),
+    ...buildApiToolRenderers('api_rest_request'),
   });
 
   if (config.swagger.enabled && config.swagger.valid) {
@@ -502,7 +486,7 @@ export async function registerApiTools(pi: any, options: RegisterApiToolsOptions
         const document = await executeSwaggerAction(params, signal, client, config);
         return continuation.finalize({ tool: 'api_swagger', action, document, secretValues: config.secretValues, limits: { ...config.limits, maxRecordsPerPage: continuationPageLimit('api_swagger', action) } });
       },
-      ...buildRenderers('api_swagger'),
+      ...buildApiToolRenderers('api_swagger'),
     });
   }
 
@@ -525,7 +509,7 @@ export async function registerApiTools(pi: any, options: RegisterApiToolsOptions
         const document = await executeGraphqlAction(params, signal, client, config);
         return continuation.finalize({ tool: 'api_graphql', action, document, secretValues: config.secretValues, limits: { ...config.limits, maxRecordsPerPage: continuationPageLimit('api_graphql', action) } });
       },
-      ...buildRenderers('api_graphql'),
+      ...buildApiToolRenderers('api_graphql'),
     });
   }
 }

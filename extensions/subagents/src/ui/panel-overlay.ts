@@ -50,7 +50,7 @@ function toolsFromAccessor(owner: any, name: string): unknown {
   if (typeof owner?.getAllTools !== 'function') return undefined;
   try {
     const info = toolFromRegistry(owner.getAllTools(), name);
-    return info ? (resolveSubagentExternalToolDefinitionFromInfo(name, info) ?? info) : undefined;
+    return info ? resolveSubagentExternalToolDefinitionFromInfo(name, info) : undefined;
   } catch {
     return undefined;
   }

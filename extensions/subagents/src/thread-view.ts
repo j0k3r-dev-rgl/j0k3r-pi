@@ -14,6 +14,7 @@ import type {
   SubagentStatusItem,
   SubagentThreadItem,
   SubagentThreadRenderContext,
+  SubagentThreadRenderTarget,
   SubagentThreadSnapshot,
   SubagentToolItem,
   SubagentToolResultItem,
@@ -212,6 +213,7 @@ export function resetPiComponentCacheForTests(): void {
   builtInToolDefinitionCache.clear();
   externalToolDefinitions.clear();
   externalToolSourcesLoaded.clear();
+  externalToolRenderersBySource.clear();
   runtimeToolDefinitionsByTask.clear();
   toolComponentCacheByTask.clear();
 }
@@ -234,9 +236,13 @@ function sourcePathFromToolInfo(info: unknown): string | undefined {
   return path.isAbsolute(rawPath) ? rawPath : baseDir ? path.resolve(baseDir, rawPath) : path.resolve(rawPath);
 }
 
-function createToolCapturePi(captured: unknown[]): Record<string, any> {
+type ToolRendererResolver = (name: string, next: () => unknown) => unknown;
+const externalToolRenderersBySource = new Map<string, ToolRendererResolver[]>();
+
+function createToolCapturePi(captured: unknown[], renderers: ToolRendererResolver[]): Record<string, any> {
   return {
     registerTool: (tool: unknown) => { captured.push(tool); },
+    registerToolRenderer: (resolver: ToolRendererResolver) => { renderers.push(resolver); },
     registerCommand: () => undefined,
     registerShortcut: () => undefined,
     registerFlag: () => undefined,
@@ -258,30 +264,35 @@ function createToolCapturePi(captured: unknown[]): Record<string, any> {
 
 function loadExternalToolSource(sourcePath: string): void {
   if (externalToolSourcesLoaded.has(sourcePath)) return;
-  externalToolSourcesLoaded.add(sourcePath);
   if (!fs.existsSync(sourcePath)) return;
   const packageRoot = findRunningPiPackageRoot();
-  if (!packageRoot) return;
   try {
-    const piRequire = createRequire(path.join(packageRoot, 'package.json'));
+    const piRequire = createRequire(packageRoot ? path.join(packageRoot, 'package.json') : import.meta.resolve('@earendil-works/pi-coding-agent'));
     const { createJiti } = piRequire('jiti') as { createJiti: (filename: string, options?: Record<string, unknown>) => (id: string) => any };
-    const jiti = createJiti(path.join(packageRoot, 'package.json'), {
+    const jiti = createJiti(packageRoot ? path.join(packageRoot, 'package.json') : import.meta.url, {
       moduleCache: true,
       interopDefault: true,
-      alias: {
+      ...(packageRoot ? { alias: {
         '@earendil-works/pi-coding-agent': packageRoot,
         '@earendil-works/pi-tui': path.join(packageRoot, 'node_modules', '@earendil-works', 'pi-tui', 'dist', 'index.js'),
-      },
+      } } : {}),
     });
     const mod = jiti(sourcePath);
-    const register = mod?.default ?? mod;
-    if (typeof register !== 'function') return;
+    // Prefer the synchronous presentation contract, never initialize an API client for replay.
+    const register = mod?.registerToolRenderers ?? mod?.default ?? mod;
+    if (typeof register !== 'function' || register.constructor?.name === 'AsyncFunction') return;
     const captured: unknown[] = [];
-    const maybePromise = register(createToolCapturePi(captured));
-    if (maybePromise && typeof maybePromise.then === 'function') return;
-    for (const tool of captured) {
-      if (isRecord(tool) && typeof tool.name === 'string') registerSubagentExternalToolDefinition(tool.name, tool);
+    const renderers: ToolRendererResolver[] = [];
+    const maybePromise = register(createToolCapturePi(captured, renderers));
+    if (maybePromise && typeof maybePromise.then === 'function') {
+      void Promise.resolve(maybePromise).catch(() => undefined);
+      return;
     }
+    for (const tool of captured) {
+      if (isRecord(tool) && typeof tool.name === 'string' && hasToolRenderer(tool)) registerSubagentExternalToolDefinition(tool.name, tool);
+    }
+    externalToolRenderersBySource.set(sourcePath, renderers);
+    externalToolSourcesLoaded.add(sourcePath);
   } catch {}
 }
 
@@ -290,7 +301,17 @@ export function resolveSubagentExternalToolDefinitionFromInfo(name: string, info
   const existing = externalToolDefinitions.get(name);
   if (existing) return existing;
   const sourcePath = sourcePathFromToolInfo(info);
-  if (sourcePath) loadExternalToolSource(sourcePath);
+  if (sourcePath) {
+    loadExternalToolSource(sourcePath);
+    const resolvers = externalToolRenderersBySource.get(sourcePath) ?? [];
+    const resolve = (index: number): unknown => index < resolvers.length
+      ? resolvers[index]!(name, () => resolve(index + 1))
+      : externalToolDefinitions.get(name);
+    try {
+      const rendered = resolve(0);
+      if (hasToolRenderer(rendered)) return rendered;
+    } catch {}
+  }
   return externalToolDefinitions.get(name);
 }
 
@@ -301,7 +322,7 @@ function renderableToolDefinition(name: string, candidates: unknown[], cwd: stri
     const rehydrated = resolveSubagentExternalToolDefinitionFromInfo(name, candidate);
     if (hasToolRenderer(rehydrated)) return rehydrated;
   }
-  return candidates.find(Boolean) ?? builtInToolDefinition(name, cwd);
+  return builtInToolDefinition(name, cwd);
 }
 
 function hasUsablePiComponents(value: unknown): value is Record<string, any> {
@@ -430,7 +451,7 @@ function truncateLines(context: SubagentThreadRenderContext, lines: string[], wi
   return out;
 }
 
-function assistantText(item: SubagentAssistantItem, width?: number): string[] {
+function assistantText(item: SubagentAssistantItem, width?: number, hideThinking = false): string[] {
   const lines: string[] = [];
   for (const part of item.message.content) {
     if (part.type === 'text' && part.text.trim()) {
@@ -440,6 +461,7 @@ function assistantText(item: SubagentAssistantItem, width?: number): string[] {
         lines.push(part.text);
       }
     } else if (part.type === 'thinking' && (part.thinking ?? part.text)?.trim()) {
+      if (hideThinking) { lines.push('Thinking...'); continue; }
       const thinkingRaw = (part.thinking ?? part.text)!.trim();
       const prefix = 'thinking: ';
       if (width && width > 0) {
@@ -468,7 +490,7 @@ function renderAssistantItem(item: SubagentAssistantItem, context: SubagentThrea
       if (rendered?.some((line) => line.trim())) return rendered;
     } catch (error) { debugLog(context, 'assistant_component_error', { error }); }
   }
-  return assistantText(displayItem, width);
+  return assistantText(displayItem, width, context.hideThinkingBlock ?? false);
 }
 
 function userItemTitle(item: SubagentUserItem): string | undefined {
@@ -635,7 +657,11 @@ function renderToolItem(item: SubagentToolItem, context: SubagentThreadRenderCon
   const result = item.result ? payloadText(item.result) : '';
   const args = toolArgumentSummary(item.name, item.arguments);
   const state = item.result?.isError ? 'failed' : item.status;
-  const fallback = [`${item.name} ${state}${args ? ` · ${args}` : ''}`, ...(result ? [result] : [])];
+  const resultLines = result.split('\n');
+  const visibleResult = context.toolOutputExpanded ? resultLines : resultLines.slice(0, 10);
+  const fallback = [`${item.name} ${state}${args ? ` · ${args}` : ''}`, ...(result ? visibleResult : []),
+    !context.toolOutputExpanded && resultLines.length > 10 ? '(click to expand)' : '',
+  ].filter(Boolean);
   debugLog(context, 'tool_fallback_rendered', { name: item.name, status: item.status, fallbackPreview: fallback.join('\n').slice(0, 1000) });
   return fallback;
 }
@@ -766,14 +792,50 @@ export function renderThreadBody(snapshot: unknown, context: SubagentThreadRende
   if (!isRenderableSnapshotRoot(snapshot)) return [];
   const width = Math.max(1, Math.floor(context.renderWidth ?? DEFAULT_RENDER_WIDTH));
   const lines: string[] = [];
-  for (const rawItem of normalizeAttemptItems(snapshot.items as SubagentThreadItem[]).slice(0, DEFAULT_MAX_ITEMS)) {
+  let attempt = 1;
+  for (const [index, rawItem] of normalizeAttemptItems(snapshot.items as SubagentThreadItem[]).slice(0, DEFAULT_MAX_ITEMS).entries()) {
     try {
       if (!isThreadItem(rawItem)) {
         lines.push(safeTruncate(context, malformedItemText(rawItem), width));
         continue;
       }
       const item = boundItem(rawItem, DEFAULT_TEXT_LIMIT);
-      lines.push(...truncateLines(context, renderItem(item, context, width), width));
+      if (item.type === 'attempt') attempt = item.attempt;
+      const itemId = 'tool_call_id' in item && item.tool_call_id ? item.tool_call_id : ('id' in item && item.id ? item.id : `item-${index}`);
+      const key = `attempt-${attempt}:${itemId}`;
+      const emitItem = (displayItem: SubagentThreadItem, target?: SubagentThreadRenderTarget) => {
+        const itemContext = target ? {
+          ...context,
+          ...(target.kind === 'tool'
+            ? { toolOutputExpanded: context.isExpanded?.(target, context.toolOutputExpanded ?? false) ?? context.toolOutputExpanded }
+            : { hideThinkingBlock: !(context.isExpanded?.(target, !(context.hideThinkingBlock ?? false)) ?? !(context.hideThinkingBlock ?? false)) }),
+        } : context;
+        const rendered = truncateLines(itemContext, renderItem(displayItem, itemContext, width), width);
+        lines.push(...rendered);
+        context.onItemRendered?.(item, rendered, target);
+      };
+      if (item.type === 'assistant' && context.onItemRendered) {
+        let run: typeof item.message.content = [];
+        let runKind: string | undefined;
+        let runIndex = 0;
+        const flush = () => {
+          if (!run.length) return;
+          emitItem({ ...item, message: { ...item.message, content: run, errorMessage: undefined } },
+            runKind === 'thinking' ? { kind: 'thinking', key: `${key}:thinking-${runIndex}` } : undefined);
+          run = [];
+          runIndex++;
+        };
+        for (const part of item.message.content) {
+          if (part.type === 'toolCall') { flush(); runKind = undefined; continue; }
+          if (runKind !== part.type) flush();
+          runKind = part.type;
+          run.push(part);
+        }
+        flush();
+        if (item.message.errorMessage) emitItem({ ...item, message: { ...item.message, content: [] } });
+      } else {
+        emitItem(item, item.type === 'tool' || item.type === 'bash' || item.type === 'custom' ? { kind: 'tool', key } : undefined);
+      }
     } catch {
       lines.push(safeTruncate(context, 'thread item unavailable', width));
     }

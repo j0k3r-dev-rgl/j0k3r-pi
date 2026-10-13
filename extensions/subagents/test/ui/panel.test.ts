@@ -14,7 +14,7 @@ import { createSubagentsRenderLogger, DEFAULT_RENDER_DEBUG_LOG_PATH } from '../.
 import { SubagentManager } from '../../src/manager.js';
 import { registerSubagentTools } from '../../src/tools.js';
 import { SubagentsHistoryPanel } from '../../src/ui.js';
-import { boundThreadSnapshot, isValidThreadSnapshot, preloadPiComponentsForSubagentRendering, registerSubagentRuntimeToolDefinition, renderThreadBody, resetPiComponentCacheForTests, setPiComponentProviderForSubagentRendering } from '../../src/thread-view.js';
+import { boundThreadSnapshot, isValidThreadSnapshot, preloadPiComponentsForSubagentRendering, registerSubagentRuntimeToolDefinition, renderThreadBody, resolveSubagentExternalToolDefinitionFromInfo, resetPiComponentCacheForTests, setPiComponentProviderForSubagentRendering } from '../../src/thread-view.js';
 import type { EffectiveSubagentProfile, SubagentErrorMetadata, SubagentModelProfiles, SubagentRunner, SubagentTask } from '../../src/types.js';
 
 const require = createRequire(import.meta.url);
@@ -83,6 +83,198 @@ function readJsonl(file: string): any[] {
 }
 
 describe('subagents panel and extension ui', () => {
+  it('recovers synchronous presentation exports without executing async factories or reading project config', () => {
+    resetPiComponentCacheForTests();
+    const source = path.join(tmp, 'render-only-extension.cjs');
+    fs.writeFileSync(source, `
+      exports.default = async function() { throw new Error('Execution factory must not run'); };
+      exports.registerToolRenderers = function(pi) {
+        pi.registerToolRenderer((name, next) => name === 'synthetic_api' ? {
+          renderShell: 'self',
+          renderCall: () => ({ invalidate() {}, render() { return ['replay-call']; } }),
+          renderResult: (_result, options) => ({ invalidate() {}, render() { return [options.expanded ? 'replay-expanded' : 'replay-collapsed']; } })
+        } : next());
+      };
+    `);
+    const info = { name: 'synthetic_api', description: 'Metadata only', parameters: {}, sourceInfo: { path: source } };
+    try {
+      const definition: any = resolveRegisteredToolDefinition({}, { getAllTools: () => [info] }, 'synthetic_api');
+      expect(definition?.renderShell).toBe('self');
+      expect(definition.renderResult({}, { expanded: false }).render(80)).toEqual(['replay-collapsed']);
+      resetPiComponentCacheForTests();
+      expect((resolveSubagentExternalToolDefinitionFromInfo('synthetic_api', info) as any)?.renderShell).toBe('self');
+    } finally { resetPiComponentCacheForTests(); }
+  });
+
+  it('skips async execution factories and composes presentation resolver next chains', () => {
+    resetPiComponentCacheForTests();
+    const asyncSource = path.join(tmp, 'async-execution.cjs');
+    const marker = path.join(tmp, 'factory-was-executed');
+    fs.writeFileSync(asyncSource, `module.exports = async function() { require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'bad'); };`);
+    const source = path.join(tmp, 'resolver-chain.cjs');
+    fs.writeFileSync(source, `exports.registerToolRenderers = function(pi) {
+      pi.registerToolRenderer((_name, next) => next());
+      pi.registerToolRenderer((name, next) => name === 'chain_tool' ? { renderShell: 'self', renderResult() {} } : next());
+    };`);
+    try {
+      expect(resolveSubagentExternalToolDefinitionFromInfo('async_tool', { sourceInfo: { path: asyncSource } })).toBeUndefined();
+      expect(fs.existsSync(marker)).toBe(false);
+      expect((resolveSubagentExternalToolDefinitionFromInfo('chain_tool', { sourceInfo: { path: source } }) as any)?.renderShell).toBe('self');
+    } finally { resetPiComponentCacheForTests(); }
+  });
+
+  it('rejects renderer-less metadata instead of passing it to native components', () => {
+    resetPiComponentCacheForTests();
+    try {
+      const native = vi.fn();
+      setPiComponentProviderForSubagentRendering({ ToolExecutionComponent: class {
+        constructor(...args: any[]) { native(...args); }
+        render() { return ['generic green box']; }
+      } });
+      const metadata = { name: 'synthetic_api', description: 'metadata', parameters: {} };
+      expect(resolveRegisteredToolDefinition({}, { getAllTools: () => [metadata] }, 'synthetic_api')).toBeUndefined();
+      const lines = renderThreadBody({ version: 1, source: 'events', items: [{ type: 'tool', name: 'synthetic_api', status: 'completed', result: { content: [{ type: 'text', text: 'safe output' }], isError: false } }] }, {
+        cwd: tmp, tui: {}, visibleWidth: (text) => text.length, truncateToWidth: (text, w) => text.slice(0, w), getToolDefinition: () => metadata,
+      });
+      expect(native).not.toHaveBeenCalled();
+      expect(lines.join('\n')).toContain('safe output');
+      expect(lines.join('\n')).not.toContain('generic green box');
+    } finally { resetPiComponentCacheForTests(); }
+  });
+  it.each([60, 120])('expands only the clicked tool/thinking at width %s and preserves state across refresh and navigation', (width) => {
+    resetPiComponentCacheForTests();
+    try {
+      setPiComponentProviderForSubagentRendering({
+        ToolExecutionComponent: class {
+          private expanded = false;
+          constructor(private name: string, private id: string) {}
+          markExecutionStarted() {}
+          setArgsComplete() {}
+          updateResult() {}
+          setExpanded(value: boolean) { this.expanded = value; }
+          render() { return [`card-${this.id}`, ...(this.expanded ? [`output-${this.id}`] : [])]; }
+        },
+        AssistantMessageComponent: class {
+          constructor(private message: any, private hidden: boolean) {}
+          render() { return this.message.content.map((part: any) => part.type === 'thinking' ? (this.hidden ? 'Thinking...' : part.thinking) : part.text); }
+        },
+      });
+      const makeTask = (id: string): SubagentTask => ({ id, agent: id, mode: 'task', status: 'completed', task: 'inspect', created_at: new Date().toISOString(),
+        thread_snapshot: { version: 1, source: 'events', items: [
+          { type: 'assistant', id: 'assistant', message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'reasoning-first' }, { type: 'text', text: 'visible answer' }, { type: 'thinking', thinking: 'reasoning-second' }] } },
+          { type: 'tool', tool_call_id: 'one', name: 'read', status: 'completed' },
+          { type: 'tool', tool_call_id: 'two', name: 'read', status: 'completed' },
+        ] } });
+      const tasks = [makeTask('first'), makeTask('second')];
+      const close = vi.fn();
+      const panel = new SubagentsHistoryPanel(tasks, { fg: (_n: string, t: string) => t }, close, () => false, (text) => stripAnsi(text).length,
+        (text, w) => text.slice(0, w), { cwd: tmp, tui: { requestRender() {} }, getToolDefinition: () => ({ name: 'read', renderResult: () => undefined }) }, 40);
+      const click = (needle: string) => {
+        const lines = panel.render(width);
+        const row = lines.findIndex((line) => line.includes(needle));
+        expect(row, needle).toBeGreaterThan(0);
+        return panel.handleMouse({ type: 'click', button: 'left', x: width - 8, y: row });
+      };
+      expect(panel.render(width).join('\n')).not.toContain('reasoning-first');
+      expect(click('Thinking...')?.render).toBe(true);
+      expect(panel.render(width).join('\n')).toContain('reasoning-first');
+      expect(panel.render(width).join('\n')).not.toContain('reasoning-second');
+      expect(click('visible answer')?.render).not.toBe(true);
+      expect(click('card-one')?.render).toBe(true);
+      expect(panel.render(width).join('\n')).toContain('output-one');
+      expect(panel.render(width).join('\n')).not.toContain('output-two');
+      panel.invalidate();
+      expect(panel.render(width).join('\n')).toContain('output-one');
+      panel.handleInput('\u000f');
+      expect(panel.render(width).join('\n')).toContain('output-two');
+      panel.handleInput('\u000f');
+      expect(panel.render(width).join('\n')).not.toContain('output-one');
+      panel.handleInput('\u0014');
+      expect(panel.render(width).join('\n')).toContain('reasoning-second');
+      panel.handleInput('\u0014');
+      expect(panel.render(width).join('\n')).not.toContain('reasoning-first');
+      click('card-one');
+      const rows = panel.render(width);
+      const otherRow = rows.findIndex((line) => line.includes('○') && (line.includes('second:completed') || line.includes('second · completed')));
+      expect(otherRow).toBeGreaterThan(0);
+      panel.handleMouse({ type: 'click', x: 3, y: otherRow });
+      expect(panel.render(width).join('\n')).not.toContain('output-one');
+      const backRow = panel.render(width).findIndex((line) => line.includes('○') && (line.includes('first:completed') || line.includes('first · completed')));
+      expect(backRow).toBeGreaterThan(0);
+      panel.handleMouse({ type: 'click', x: 3, y: backRow });
+      expect(panel.render(width).join('\n')).toContain('output-one');
+      expect(click('card-one')?.render).toBe(true);
+      expect(panel.render(width).join('\n')).not.toContain('output-one');
+      expect(close).not.toHaveBeenCalled();
+      panel.handleMouse({ type: 'click', x: width - 2, y: 0 });
+      expect(close).toHaveBeenCalledOnce();
+    } finally { resetPiComponentCacheForTests(); }
+  });
+  it.each([60, 120])('keeps fallback card clicks aligned through scroll, wrapped thinking and resize at width %s', (width) => {
+    resetPiComponentCacheForTests();
+    try {
+      setPiComponentProviderForSubagentRendering({});
+      const thought = 'thinking wrapped line '.repeat(12) + 'THINKING_END';
+      const output = Array.from({ length: 14 }, (_, index) => `result-${index}`).join('\n');
+      const task: SubagentTask = { id: 'fallback', agent: 'analyst', mode: 'task', status: 'completed', task: 'inspect', created_at: new Date().toISOString(), thread_snapshot: { version: 1, source: 'events', items: [
+        { type: 'assistant', message: { role: 'assistant', content: [{ type: 'thinking', thinking: thought }] } },
+        { type: 'tool', name: 'read', tool_call_id: 'read-one', status: 'completed', result: { content: [{ type: 'text', text: output }], isError: false } },
+      ] } };
+      const panel = new SubagentsHistoryPanel([task], { fg: (_n: string, t: string) => t }, () => undefined, () => false,
+        (text) => stripAnsi(text).length, (text, w) => text.slice(0, w), { cwd: tmp }, 18);
+      panel.render(width);
+      panel.handleInput('\u000f');
+      const lines = panel.render(width);
+      const resultRow = lines.findIndex((line) => line.includes('result-12'));
+      expect(resultRow).toBeGreaterThan(0);
+      const scroll = panel.getRenderDebugState().scrollOffset;
+      expect(panel.handleMouse({ type: 'press', button: 'left', x: width - 8, y: resultRow })?.render).not.toBe(true);
+      expect(panel.handleMouse({ type: 'release', button: 'left', x: width - 8, y: resultRow })?.render).not.toBe(true);
+      expect(panel.handleMouse({ type: 'click', button: 'right', x: width - 8, y: resultRow })).toBeUndefined();
+      expect(panel.handleMouse({ type: 'click', button: 'left', x: width - 8, y: resultRow })?.render).toBe(true);
+      expect(panel.render(width).join('\n')).not.toContain('result-12');
+      expect(panel.getRenderDebugState().scrollOffset).toBeLessThanOrEqual(scroll);
+      panel.handleMouse({ type: 'wheel', x: width - 8, y: 4, wheelDelta: -100 });
+      const top = panel.render(width);
+      const thinkingRow = top.findIndex((line) => line.includes('Thinking...'));
+      expect(thinkingRow).toBeGreaterThan(0);
+      expect(panel.handleMouse({ type: 'click', x: width - 8, y: thinkingRow })?.render).toBe(true);
+      const expanded = panel.render(width);
+      const wrappedRow = expanded.findIndex((line) => line.includes('THINKING_END'));
+      expect(wrappedRow).toBeGreaterThan(thinkingRow);
+      expect(panel.handleMouse({ type: 'click', x: width - 8, y: wrappedRow })?.render).toBe(true);
+      expect(panel.render(width).join('\n')).not.toContain('THINKING_END');
+      const resized = panel.render(width === 60 ? 120 : 60);
+      expect(resized.join('\n')).toContain('Thinking...');
+      expect(panel.getRenderDebugState().widthViolationCount).toBe(0);
+    } finally { resetPiComponentCacheForTests(); }
+  });
+
+  it('preserves an individually expanded live tool through snapshot updates', () => {
+    resetPiComponentCacheForTests();
+    try {
+      setPiComponentProviderForSubagentRendering({});
+      const makeTool = (name: string, id: string, prefix: string) => ({ type: 'tool' as const, name, tool_call_id: id, status: 'partial' as const,
+        result: { content: [{ type: 'text', text: Array.from({ length: 14 }, (_, n) => `${prefix}-${n}`).join('\n') }], isError: false } });
+      const task: SubagentTask = { id: 'live', agent: 'analyst', mode: 'background', status: 'running', task: 'work', created_at: new Date().toISOString(),
+        thread_snapshot: { version: 1, source: 'events', items: [makeTool('read', 'stable', 'old')] } };
+      const panel = new SubagentsHistoryPanel(() => [task], { fg: (_n: string, t: string) => t }, () => undefined, () => false,
+        (text) => stripAnsi(text).length, (text, w) => text.slice(0, w), { cwd: tmp }, 45);
+      let lines = panel.render(120);
+      const row = lines.findIndex((line) => line.includes('read partial'));
+      expect(panel.handleMouse({ type: 'click', x: 100, y: row })?.render).toBe(true);
+      expect(panel.render(120).join('\n')).toContain('old-13');
+      task.thread_snapshot!.items[0] = makeTool('read', 'stable', 'new');
+      task.thread_snapshot!.items.push(makeTool('bash', 'other', 'other'));
+      task.last_activity = 'updated live result';
+      lines = panel.render(120);
+      expect(lines.join('\n')).toContain('new-13');
+      expect(lines.join('\n')).not.toContain('other-13');
+      panel.invalidate();
+      expect(panel.render(120).join('\n')).toContain('new-13');
+    } finally { resetPiComponentCacheForTests(); }
+  });
+
   it('captures later extension tool renderers so inherited tools render inside selected snapshots', () => {
     resetPiComponentCacheForTests();
     try {
@@ -789,11 +981,11 @@ describe('subagents panel and extension ui', () => {
       const keybindings = { matches: (data: string, keybinding: string) => keybinding === 'app.thinking.toggle' && data === '\u001b[116;5u' };
       const panel = new SubagentsHistoryPanel([task], { fg: (_name: string, text: string) => text }, () => undefined, createSubagentsPanelKeyMatcher(keybindings), (text) => text.length, (text, width) => text.length > width ? text.slice(0, width) : text, { cwd: tmp });
 
-      expect(panel.render(160).join('\n')).toContain('thinking-hidden:false:private reasoning');
-      panel.handleInput('\u001b[116;5u');
       expect(panel.render(160).join('\n')).toContain('thinking-hidden:true:private reasoning');
-      panel.handleInput('\u0014');
+      panel.handleInput('\u001b[116;5u');
       expect(panel.render(160).join('\n')).toContain('thinking-hidden:false:private reasoning');
+      panel.handleInput('\u0014');
+      expect(panel.render(160).join('\n')).toContain('thinking-hidden:true:private reasoning');
     } finally {
       process.argv[1] = oldArgv1;
       resetPiComponentCacheForTests();
