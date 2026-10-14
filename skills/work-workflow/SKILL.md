@@ -4,7 +4,7 @@ description: "Run authorized Planned Workflow lifecycle with lightweight contrac
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "16.0"
+  version: "16.1"
 registry:
   category: "workflow"
   domains: "openspec, planned-workflow, artifact-lifecycle"
@@ -40,7 +40,7 @@ Own the lightweight lifecycle, phase gates, independent verification, and archiv
 - The orchestrator supplies exact absolute artifact and skill paths, reads each returned artifact, and checks required fields before advancing. Do not assume lean subagents inherit global context.
 - Follow AGENTS.md's compact seven-field delegation contract: reference existing artifact sections instead of repeating them, write each exact path once, and transmit only new decisions/context. Summarize applicable scope, Configuration Lock, Git limits, and user decisions not available in assigned contracts. Writable paths are not permission to make incidental configuration changes.
 - **Pre-Mutation Summary Gate**: Before apply or any orchestrator mutation, summarize scope, planned changes, exclusions, validation, and risks; obtain explicit user authorization before mutating files. Artifacts do not grant authorization.
-- Verify every `MINI-###` independently. Failed verification stops advancement; return to apply only with applicable authorization and an explicit remediation next action.
+- Verify every `MINI-###` independently against current behavior and applicable code/scope constraints. Follow `AGENTS.md`'s TDD method-versus-reporting rule and the compact artifact contract; do not introduce a TDD-history review gate. Failed required verification stops advancement; return to apply only with applicable authorization and an explicit remediation next action.
 - Archive only after passing verification, unchanged candidate evidence, and explicit user archive authorization. Move the complete tree to `openspec/archive/YYYY-MM-DD/<change-slug>/` without overwriting a destination.
 - Preserve historical artifacts. Do not convert or delete old changes automatically; if asked to resume an incompatible historical contract, agree a bounded Planned Workflow contract before implementation.
 
@@ -51,7 +51,7 @@ Own the lightweight lifecycle, phase gates, independent verification, and archiv
 3. Delegate a compact `plan.md` with concrete acceptance, directory-based scope, validation, and `MINI-###` items. Use the narrowest common parent for sibling areas; do not prescribe files or enumerate its child directories. Narrow excessive scope with the user.
 4. Check status, required sections, unique IDs, evidence references, and parseable Execution Scope. `BLOCKED` stops advancement.
 5. Summarize the implementation and obtain apply authorization; delegate `02-apply` with its authorization evidence and exact scope-source path.
-6. Read `apply.md`; delegate independent verification against the complete `MINI-###` set.
+6. Read the compact implementation summary and final validation in `apply.md`; arrange any contract-required live acceptance with its assigned owner, then delegate independent verification against the complete `MINI-###` set. Do not request formatting-only rewrites or retrospective TDD evidence.
 7. Read `verify.md`; require PASS, evidence for every item, and a continuity snapshot before reporting verified completion.
 8. Ask for archive authorization only when verification passed. The orchestrator then performs the Archive Safety Checks below directly; do not launch a subagent.
 

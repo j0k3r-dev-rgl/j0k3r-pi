@@ -65,6 +65,7 @@ If any material reference is missing, placeholder-based, contradictory, or outsi
 - Reuse the existing change directory and reference discovery.md EVID-### items directly when supplied; do not repeat completed investigation or add a separate synthesis phase.
 - Define scope using the narrowest common parent directory, not predicted files or child-directory inventories. Separate additional reading roots from modification roots. Do not require Paths per MINI item; implementation chooses necessary files within the boundary.
 - Keep the contract small and implementation-ready. If scope cannot fit one coherent contract, return BLOCKED for scope clarification/splitting rather than recreating separate specification phases.
+- Define behavioral acceptance, test/regression commands, and phase ownership. Require TDD execution where applicable, but no saved RED/GREEN proof, cycle histories, or process-audit acceptance criteria; follow the assigned artifact contract.
 
 ## Artifact Contract
 

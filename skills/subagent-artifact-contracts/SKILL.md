@@ -4,7 +4,7 @@ description: "define canonical discovery and Planned Workflow Markdown artifacts
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "2.2"
+  version: "2.3"
 registry:
   category: "workflow"
   domains: "subagents, markdown-artifacts, openspec, handoff-contracts, execution-scope"
@@ -147,23 +147,22 @@ Sections after Workflow Status:
 
 Resolve material product questions with the user; record approved decisions in the relevant contract item and unresolved questions under Open Decisions. Missing material decisions make the plan BLOCKED, not permission to invent acceptance or introduce another review phase. Existing product documents may be cited as inputs, never required solely to replace a removed phase.
 
-Every item has concrete acceptance, validation, and dependencies (`None` when absent). Execution Scope owns the directory boundary once; do not require per-item file lists or repeat directory inventories. File/symbol references may be evidence or explicit user constraints, not an obligatory implementation prescription. Reference `discovery.md` evidence IDs directly when available. Include only technical decisions necessary to implement; do not recreate a multi-document specification lifecycle inside this file. Split or clarify excessive scope with the user.
+Every item has concrete acceptance, validation, and dependencies (`None` when absent). Define tests and regression checks, not TDD-history deliverables; `AGENTS.md` owns the method-versus-reporting rule. Execution Scope owns the directory boundary once; do not require per-item file lists or repeat directory inventories. File/symbol references may be evidence or explicit user constraints, not an obligatory implementation prescription. Reference `discovery.md` evidence IDs directly when available. Include only technical decisions necessary to implement; do not recreate a multi-document specification lifecycle inside this file. Split or clarify excessive scope with the user.
 
 ### `apply.md`
 
 Sections after Workflow Status:
 
-1. Workflow & Contracts
-2. Authorization Record
-3. One evidence record per `MINI-###`
-4. Approved Deviations
-5. Attempt Record
-6. Candidate Identity
-7. Residual Risks
-8. Verification Inputs
-9. Next Permitted Action
+1. Workflow & Authorization — change slug, authority plan, and who approved the action/scope with a time or message reference.
+2. Implementation Summary — concise implemented outcome and covered `MINI-###` IDs; list actual created/modified/deleted files once.
+3. Final Validation — commands actually run, aggregate outcomes including failures/skips, and required checks still pending with their assigned phase/owner.
+4. Deviations & Residual Risks — only actual deviations, unresolved risks, or blockers; `None` when absent.
+5. Candidate Identity — base revision and current candidate identity needed to verify the implementation.
+6. Next Permitted Action
 
-Authorization records who approved, when or the session/message reference, action, scope, authority artifact, and change slug. Record actual created/modified/deleted files in implementation evidence after the work; these are observed results, not an upfront orchestrator file list. Evidence follows the approved change-type validation policy. `READY` means every item is implemented and independently verifiable, not merely that existing tests pass.
+Keep the artifact compact. Do not create per-scenario implementation evidence matrices, TDD-cycle histories, raw logs, transcript excerpts, or routine attempt records. Reference existing test reports only when needed to explain a failure or limitation. Acceptance-level proof belongs to independent `verify.md` and, where required, the live acceptance artifact—not a second copy in apply.
+
+`READY` means the approved implementation is complete and the required apply-phase validation has passed, so the candidate can enter acceptance/verification; it is not final delivery approval or a claim that later HTTP/independent verification already passed. Missing TDD history is not a blocker under `AGENTS.md`. Actual defects, unmet implementation acceptance, and failed/unexecuted required apply checks remain blockers. Previously written artifacts remain consumable without a formatting-only rewrite.
 
 ### `verify.md`
 
@@ -173,12 +172,12 @@ Sections after Workflow Status:
 2. Contracts & Candidate Reviewed
 3. Evidence Matrix — one row per `MINI-###`, acceptance checks, evidence, PASS or issue
 4. Acceptance Coverage
-5. Implementation Evidence Review
+5. Implementation & Final Validation Review
 6. Issues & Required User Decision
-7. Skill Compliance
+7. Applicable Code & Scope Compliance
 8. Post-Verification Continuity Snapshot
 
-Only `Verification Result: PASS` can produce READY. Independently verify every `MINI-###` against `plan.md`; do not rely only on apply's claims. Any incomplete/failed check blocks advancement.
+Only `Verification Result: PASS` can produce READY. Independently verify every `MINI-###` against `plan.md` using current code, tests, and applicable live acceptance; do not rely only on apply's claims. Review final validation and relevant code/scope compliance, not the implementer's TDD chronology or whether it was recorded. Any incomplete/failed required functional check blocks advancement. The evidence matrix owns acceptance proof; do not duplicate it in the remaining sections.
 
 The continuity snapshot records the exact verified deliverable paths, each file's SHA-256 (or explicit absent state for required deletions), and an aggregate SHA-256 of the sorted path/state/hash records. Exclude the verification artifact itself and unrelated files. Recompute immediately before archive/delivery; drift invalidates the prior verification and blocks that boundary. Record evidence commands in the artifact. If safe snapshot evidence cannot be obtained, return BLOCKED.
 
