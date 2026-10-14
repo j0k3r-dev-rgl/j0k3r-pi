@@ -52,7 +52,7 @@ If equal-authority sources conflict, stop and surface the exact conflict.
 - For unknown code, behavior, dependencies, tests, or project structure when preparing an implementation change, delegate bounded `00-discovery` in Planned Workflow (project files read-only; assigned `openspec/changes/<change-slug>/discovery.md` writable) unless the user explicitly requests or authorizes direct investigation.
 - Direct orchestrator execution is normally limited to routing, answers to direct factual questions, exact known reads, trivial localized edits, and lightweight validation. Explicit user authorization to work without delegation expands this boundary to the approved task scope.
 - **Research-to-Direct Execution Fast Path**: When a completed deep research or investigation (such as from `deep-researcher` producing `report.md` and `sources.md`) has already identified the exact root cause, files, and proposed solution, the orchestrator MUST NOT force an unnecessary Planned Workflow cycle (e.g. running redundant `00-discovery` or multi-phase ceremony). The orchestrator is fully authorized to apply the targeted fix directly (Direct Orchestrator), validate it through the project's tests (`mvn test`, `bun test`, etc.) following the Pre-Mutation Summary Gate, and present the verified outcome.
-- When direct execution without delegation is explicitly authorized, the orchestrator may inspect, plan, implement, and validate the requested work itself, while preserving all scope, configuration-lock, validation, and Git policies. When modifying code directly, the orchestrator must load and adhere to `skills/anti-overengineering/SKILL.md` and `skills/tdd/SKILL.md` to guarantee the simplest sufficient change without speculative complexity and validate behavior through the required test evidence path.
+- When direct execution without delegation is explicitly authorized, the orchestrator may inspect, plan, implement, and validate the requested work itself, while preserving all scope, configuration-lock, validation, and Git policies. When modifying code directly, the orchestrator must load and adhere to `skills/anti-overengineering/SKILL.md` and `skills/tdd/SKILL.md` to guarantee the simplest sufficient change without speculative complexity and validate behavior through the required tests.
 - Unexpected scope growth, new repositories, new services, or new product/architecture decisions require renewed approval.
 
 ## Research and Code Inspection
@@ -96,14 +96,16 @@ Use the smallest useful skill set.
 
 ## Change Validation Policy
 
-Use the smallest evidence path that fits the change:
+Use the smallest validation method that fits the change:
 
 - **Behavior change or bug fix** → RED → GREEN → REFACTOR.
 - **Behavior-preserving refactor** → BASELINE → REFACTOR → REGRESSION.
 - **Mechanical or generated change** → BASELINE → CHANGE → DIFF/REGRESSION.
 - **Documentation or configuration** → structural validation only.
 
-Never label a step RED unless it fails for the expected reason.
+Never label a step RED unless it fails for the expected behavior, rather than a broken test setup.
+
+TDD is a required implementation method, not a documentary acceptance gate. Apply must use it, but must not produce RED/GREEN histories, per-cycle logs, or retrospective proof. Keep apply reporting to a compact implementation summary, actual changed files, final validation commands/results, and real blockers; formats belong to `skills/subagent-artifact-contracts/SKILL.md`. Planning must not add TDD-history deliverables. The orchestrator and verifier assess the current code, required tests, independent acceptance checks, and live HTTP acceptance when the approved contract requires it—not whether TDD history was recorded. Never block, ask for an exception, reconstruct history, or re-delegate/re-run work solely to fill missing TDD records. This applies to active changes as well as future work; preserve historical artifacts without rewriting them. Actual defects, unmet acceptance, failed or unexecuted required checks, and inability to perform required validation remain blockers.
 
 ## workflow Rules
 

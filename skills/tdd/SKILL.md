@@ -4,7 +4,7 @@ description: "guide test-driven development (TDD) and regression strategy. Use f
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "3.1"
+  version: "3.2"
 registry:
   category: "quality"
   domains: "tdd, testing, regression-testing"
@@ -28,9 +28,9 @@ Do not load it for advice-only conversations or prose-only documentation changes
 This skill owns:
 
 - test strategy for the approved change;
-- choice of evidence path;
+- choice of test-first or regression validation method;
 - reuse of existing tests and frameworks; and
-- concise validation reporting.
+- a concise final validation summary, not a TDD audit trail.
 
 It does not own workflow choice, repository-wide reorganization, dependency installation, or commit authority.
 
@@ -45,9 +45,11 @@ It does not own workflow choice, repository-wide reorganization, dependency inst
 - Ask before changing frameworks, installing dependencies, or migrating colocated tests.
 - Prefer the smallest test layer that can prove the required contract without hiding it behind mocks.
 - For feature removal, delete obsolete tests and keep only coverage for supported behavior.
-- For security or safety-sensitive behavior, include negative evidence for the prohibited outcome.
+- For security or safety-sensitive behavior, include tests for the prohibited outcome.
+- Execute TDD for behavior changes: observe the expected behavior fail before implementing the fix, then make the test pass and refactor as needed. Compilation failures and broken mocks are not behavior RED.
+- Follow `AGENTS.md`'s distinction between mandatory TDD execution and optional history: do not save cycle-by-cycle proof or reconstruct an earlier RED. Do not weaken production behavior or tests to manufacture a pass.
 
-## Evidence Paths
+## Validation Methods
 
 - **Behavior change or bug fix** → RED → GREEN → REFACTOR.
 - **Behavior-preserving refactor** → BASELINE → REFACTOR → REGRESSION.
@@ -61,14 +63,16 @@ Stop and trigger the decision protocol when:
 
 - no usable test framework or environment exists;
 - multiple frameworks plausibly own the same layer;
-- baseline evidence is blocked by unrelated failures;
+- the necessary baseline cannot run because of unrelated failures;
 - the correct test layer is unavailable;
 - relevant tests are colocated and migration is undecided;
 - the right existing file needs a structural split first; or
-- RED is required but the issue is not reproducible.
+- the behavior needed for the current test-first change cannot be reproduced or tested.
+
+These gates concern actual execution and validation, not missing records from earlier TDD cycles.
 
 - **Circuit Breaker**: When any of the test gates above are triggered:
-  - **Subagent execution**: trip the circuit breaker and return `BLOCKED` immediately, specifying the exact test failure, missing environment, or irreproducible condition. Never skip tests, fake results, or mark implementation ready without required evidence.
+  - **Subagent execution**: trip the circuit breaker and return `BLOCKED` immediately, specifying the exact test failure, missing environment, or irreproducible condition. Never skip required tests, fake results, or mark implementation ready without required validation.
   - **Orchestrator execution**: stop immediately, report the test blocker concisely, and ask the user for the missing decision before modifying code.
 
 ## Execution Steps
@@ -77,20 +81,13 @@ Stop and trigger the decision protocol when:
 2. Detect the existing test framework, commands, roots, and candidate owner files.
 3. Run the narrowest baseline when needed.
 4. Select the owning test file or justify a new one.
-5. Apply the matching evidence path.
+5. Execute the matching validation method; confirm behavior RED during the work, without recording a TDD chronology.
 6. Run focused validation, then relevant broader regression checks.
-7. Report selected test file, layer, commands, outcomes, and remaining risks.
+7. Report only final validation commands/results and unresolved risks in the normal task artifact or response.
 
 ## Output Contract
 
-Return:
-
-- Skill applied: `tdd`.
-- Change type and evidence path.
-- Existing test candidates inspected and selected owner file.
-- Framework and layer used.
-- Commands run and results.
-- Any blocked validation, unresolved risk, or required user decision.
+Use the governing task's output format; do not append a separate skill report. Include only a compact final validation summary: commands actually run, outcomes (including failures or skips), and any unresolved risk or blocker. Reference existing reports only when needed to understand an issue. Do not report RED/GREEN chronology, raw logs, inspected-test inventories, or per-cycle evidence.
 
 ## References
 

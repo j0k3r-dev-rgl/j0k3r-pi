@@ -42,7 +42,7 @@ The delegated prompt must provide the seven standard fields in order and must ex
 - the exact `verify.md` output path;
 - exact authority artifact paths to verify against;
 - exact `apply.md` path;
-- a reference to actual change evidence in apply.md and the approved directory boundary; do not require an orchestrator-supplied file inventory;
+- a reference to the implementation summary and final validation in apply.md and the approved directory boundary; do not require an orchestrator-supplied file inventory;
 - the scope-source artifact path that contains `## Execution Scope`;
 - exact assigned `SKILL.md` paths, including `skills/subagent-artifact-contracts/SKILL.md`; and
 - exact validation command references from the authority artifact.
@@ -55,7 +55,7 @@ If a material reference is missing, placeholder-based, or required verification 
 - Never create, edit, delete, or write files other than the exact assigned `verify.md` output path.
 - Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `verify.md`.
 - Read `apply.md` first.
-- Derive the full `MINI-###` set and acceptance checks from `plan.md`; use `apply.md`, referenced evidence, assigned skills, and relevant files within the approved read boundary. Select checks independently using actual change evidence; do not assume apply's file list proves completeness.
+- Derive the full `MINI-###` set and acceptance checks from `plan.md`; use the compact `apply.md` summary, assigned skills, and current files within the approved read boundary. Select checks independently against the actual candidate; do not assume apply's file list or passing test summary proves completeness.
 - Read only exact assigned skills.
 - Do not read unrelated artifacts or the full conversation unless explicitly required.
 - Do not modify implementation files or tests.
@@ -63,8 +63,9 @@ If a material reference is missing, placeholder-based, or required verification 
 ## Verification Rules
 
 - Derive the approved deliverable and acceptance set independently from the contracts.
-- Validate every `MINI-###` and its acceptance checks independently, preserving the contract → apply evidence → verify evidence chain.
-- Run focused checks and relevant regression checks independently.
+- Validate every `MINI-###` and its acceptance checks independently against current code, test execution, and live HTTP acceptance when required by the approved contract.
+- Review actual code/scope constraints and final validation, not the implementer's TDD chronology. Do not demand saved RED/GREEN proof or fail a candidate solely because it is absent; follow the assigned artifact contract.
+- Run focused checks and relevant regression checks independently. Do not reconstruct historical RED or request implementation reruns merely to fill process records.
 - A passing verification requires the continuity snapshot required by the artifact contract.
 - Any non-passing result remains `BLOCKED`.
 

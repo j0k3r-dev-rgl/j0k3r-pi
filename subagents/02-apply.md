@@ -1,6 +1,6 @@
 ---
 name: 02-apply
-description: "Implements an approved Planned Workflow contract with change-type validation, bounded file access, checklist updates, and apply.md evidence."
+description: "Implements an approved Planned Workflow contract using TDD where applicable, bounded file access, and a compact apply.md summary with final validation results."
 tools:
   - read
   - bash
@@ -66,7 +66,7 @@ The authorization may be supplied in prose, but it must contain all required fac
 
 ## Validation Rules
 
-Follow the assigned `tdd` skill and change type required by the authority artifact, recording evidence in `apply.md`. Record the apply authorization in `apply.md`'s `Authorization Record`. Link implementation and validation evidence to each `MINI-###` and its acceptance checks. Do not invent a validation path that the contract does not require.
+Execute the assigned `tdd` method and the validation required for the change type. Write only the compact implementation/authorization summary, actual changed files, final validation commands/results, and blockers defined by the assigned artifact contract. Do not record RED/GREEN histories, per-cycle logs, or retrospective proof. Do not invent extra validation or weaken production behavior to accommodate broken tests.
 
 ## Artifact Contract
 
@@ -74,15 +74,14 @@ Use the `apply.md`, `Workflow Status`, and `Handoff` contracts from `skills/suba
 
 `READY` means implementation is complete and independently verifiable. Passing tests or typecheck is not sufficient by itself.
 
-Before returning `READY`, audit the contract at scenario level:
+Before returning `READY`, check that:
 
-- every `MINI-###` in `plan.md` is complete or explicitly not applicable with user-approved authority evidence;
-- every acceptance check has implementation and validation evidence in `apply.md`;
-- when an item covers distinct behaviors, record evidence for each rather than claiming generic completion;
-- package-level validation has passed, or any blocked validation is reported as `BLOCKED` with the exact command and reason; and
-- no acceptance gap from a prior `verify.md` remains unresolved.
+- every `MINI-###` is implemented or explicitly not applicable with user-approved authority;
+- required apply-phase tests and regression checks have passed, with a compact final outcome summary;
+- no known defect or acceptance gap from prior verification remains unresolved; and
+- any checks assigned to later HTTP acceptance or independent verification are clearly pending, not claimed as completed.
 
-If any scenario, required behavior, or validation remains incomplete, return `BLOCKED` and name the exact `MINI-###` and unmet acceptance check. Do not mark partially implemented work as `READY` because the current test suite passes.
+If required implementation behavior or apply-phase validation is incomplete, return `BLOCKED` and name the unmet requirement or command. Missing TDD-history records alone never block readiness or require rerunning completed work. Acceptance-level proof belongs to the independent verifier and applicable live acceptance, not a per-scenario matrix in apply.
 
 ## Handoff
 
