@@ -14,3 +14,17 @@ Command: `/usage`
   - Strict secret protection: private keys remain strictly in-memory and are never leaked in UI or logs.
 - Displays interactive TUI modal with tabs for providers, account lists, progress bars, and billing cards.
 - Supports headless text report via `/usage --text`.
+
+## MWAPI credits
+
+With an enabled `mwapi` OpenAI-compatible provider at `https://api.mwapi.dev/v1` in global CLIProxyAPI configuration, `/usage` shows **remaining / initial USD credits and consumed USD**, not hourly quotas or token estimates.
+
+- Uses the same `POST /api/v1/usage-check/lookup` endpoint as [MWAPI's reseller portal](https://api.mwapi.dev/reseller).
+- Discovers the credential's auth index through CLIProxyAPI Management API and uses its `$TOKEN$` substitution. No second API-key copy, environment variable, or Pi credential setting is needed; keys are not included in the display or errors.
+- Refreshes when the modal opens, on its refresh action, and for `/usage --text`. No background polling or inference is performed. Management requests have an 8-second timeout and pass through caller cancellation.
+- Displays the provider's reported credit amounts without estimating deductions from token usage. Failed or malformed responses show an unknown-balance error, never an invented zero or 500 USD balance.
+- Requires the existing `CLIPROXYAPI_MANAGEMENT_KEY` and optional `CLIPROXYAPI_BASE_URL` (default `http://127.0.0.1:8317`). Only the named MWAPI provider with the exact HTTPS endpoint is queried.
+
+Run `/reload` after updating the extension, then open `/usage` and select MWAPI. No additional tools or package dependencies are introduced.
+
+Validation: `node --test test/*.test.ts` from this extension directory.

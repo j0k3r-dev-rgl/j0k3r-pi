@@ -126,7 +126,8 @@ export function formatAccountLine(account: AccountUsage, isSelected: boolean, is
         ? bold(theme, fg(theme, "text", account.account))
         : fg(theme, isHovered ? "text" : "muted", account.account);
     const plan = fg(theme, isSelected ? "syntaxKeyword" : "dim", `[${account.plan}${account.tier ? ` · ${account.tier}` : ""}]`);
-    const poolsCount = fg(theme, "dim", `· ${account.pools.length} cuota(s)`);
+    const poolKind = account.pools.some((pool) => pool.currency) ? "crédito(s)" : "cuota(s)";
+    const poolsCount = fg(theme, "dim", `· ${account.pools.length} ${poolKind}`);
 
     const flags: string[] = [];
     if (account.limitReached) {
@@ -184,6 +185,13 @@ export function billingCardLines(billing: BillingSummary, theme: ModalTheme): st
 }
 
 function poolLines(pool: UsagePool, theme: ModalTheme): string[] {
+    if (pool.currency) {
+        return [
+            `  ${fg(theme, "accent", "◆")} ${bold(theme, fg(theme, "syntaxFunction", poolTitle(pool)))}`,
+            `    ${bold(theme, fg(theme, "success", poolAvailable(pool)))}`,
+            `    ${fg(theme, "muted", `${pool.used.toFixed(2)} ${pool.currency} consumidos`)}`,
+        ];
+    }
     const pct = pool.availablePercentage;
     let statusColor = "success";
     if (pct < 20) statusColor = "error";

@@ -281,6 +281,72 @@ async function fetchOpenCodeGoQuota(signal?: AbortSignal): Promise<AccountUsage 
     }
 }
 
+async function fetchMwapiCredits(signal?: AbortSignal): Promise<AccountUsage[]> {
+    type CompatibilityGroup = {
+        name?: string;
+        disabled?: boolean;
+        "base-url"?: string;
+        "api-key-entries"?: Array<{ "auth-index"?: string }>;
+    };
+    const account = (): AccountUsage => ({
+        id: "mwapi", provider: "mwapi", account: "MWAPI", authType: "api_key",
+        plan: "Créditos USD", tier: null, limitReached: false, bankedCredits: null,
+        rateLimitType: null, pools: [],
+    });
+    let groups: CompatibilityGroup[];
+    try {
+        const config = await callManagement<{ "openai-compatibility"?: CompatibilityGroup[] }>(
+            "/v0/management/openai-compatibility", signal,
+        );
+        groups = config["openai-compatibility"] ?? [];
+    } catch {
+        signal?.throwIfAborted();
+        return [{ ...account(), error: "No se pudo consultar la configuración de créditos MWAPI" }];
+    }
+    const providers = groups.filter((group) =>
+        group.name?.toLowerCase() === "mwapi" && !group.disabled &&
+        group["base-url"]?.replace(/\/+$/, "") === "https://api.mwapi.dev/v1",
+    );
+    return Promise.all(providers.flatMap((provider) => {
+        const entries = provider["api-key-entries"]?.length ? provider["api-key-entries"] : [{}];
+        return entries.map(async (entry, index) => {
+            const result = { ...account(), id: `mwapi-${entry["auth-index"] || index}` };
+            try {
+                const authIndex = entry["auth-index"];
+                if (!authIndex) throw new Error("Missing auth index");
+                // CPAMC resolves the key; Pi neither copies it nor sends it to a configurable origin.
+                const response = await executeApiCall(
+                    authIndex, "POST", "https://api.mwapi.dev/api/v1/usage-check/lookup",
+                    { "Content-Type": "application/json", Accept: "application/json" },
+                    JSON.stringify({ key: "$TOKEN$" }), signal,
+                );
+                const payload = parseJsonBody(response.body);
+                const credits = payload?.data?.pay_as_you_go;
+                const validAmount = (value: unknown): value is number =>
+                    typeof value === "number" && Number.isFinite(value) && value >= 0;
+                if (response.status_code !== 200 || payload?.code !== 0 || credits?.unit !== "USD" ||
+                    !validAmount(credits.quota_limit) || !validAmount(credits.quota_used) ||
+                    !validAmount(credits.quota_remaining)) {
+                    throw new Error("Invalid credits response");
+                }
+                result.limitReached = credits.quota_remaining === 0;
+                result.pools = [{
+                    label: "Créditos", displayName: "Créditos MWAPI", currency: "USD",
+                    used: credits.quota_used, available: credits.quota_remaining,
+                    total: credits.quota_limit, unlimited: false,
+                    availablePercentage: credits.quota_limit > 0
+                        ? Math.max(0, Math.min(100, credits.quota_remaining / credits.quota_limit * 100)) : 0,
+                    resetAt: null, windowLabel: null, modelCount: 0, models: [],
+                }];
+            } catch {
+                signal?.throwIfAborted();
+                result.error = "No se pudieron consultar los créditos MWAPI; saldo desconocido";
+            }
+            return result;
+        });
+    }));
+}
+
 function parseJsonBody(bodyStr?: string): any {
     if (!bodyStr || typeof bodyStr !== "string") return null;
     try {
@@ -540,6 +606,8 @@ export async function fetchUsage(signal?: AbortSignal): Promise<ProviderGroup[]>
         }),
     );
 
+    accounts.push(...await fetchMwapiCredits(signal));
+
     const byProvider = new Map<string, AccountUsage[]>();
     for (const entry of accounts) {
         const list = byProvider.get(entry.provider);
@@ -622,6 +690,10 @@ export function poolTitle(pool: UsagePool): string {
 }
 
 export function poolAvailable(pool: UsagePool): string {
+    if (pool.currency && pool.available != null) {
+        const total = pool.total != null ? ` de ${pool.total.toFixed(2)} ${pool.currency}` : "";
+        return `${pool.available.toFixed(2)} ${pool.currency} disponibles${total}`;
+    }
     if (pool.unlimited) return "∞ libre";
     return `${formatAmount(pool.availablePercentage)}% libre`;
 }
@@ -642,7 +714,8 @@ export function renderTextReport(groups: ProviderGroup[]): string {
                 flags.push(`${account.resetCredits} reset(s)${renew}`);
             }
             if (account.bankedCredits != null) flags.push(`banked ${account.bankedCredits}`);
-            const header = `${account.account} · plan ${account.plan} · ${account.pools.length} cuota(s)`;
+            const poolKind = account.pools.some((pool) => pool.currency) ? "crédito(s)" : "cuota(s)";
+            const header = `${account.account} · plan ${account.plan} · ${account.pools.length} ${poolKind}`;
             lines.push(`  ${header}${flags.length ? ` · ${flags.join(" · ")}` : ""}`);
             if (account.error) lines.push(`    error: ${account.error}`);
             if (account.billing) {
@@ -668,9 +741,13 @@ export function renderTextReport(groups: ProviderGroup[]): string {
                 }
             }
             for (const pool of account.pools) {
-                lines.push(
-                    `    ${poolTitle(pool)}: ${pool.availablePercentage.toFixed(1)}% libre · [${availabilityBar(pool.availablePercentage, 15)}] · ${formatReset(pool.resetAt)}`,
-                );
+                if (pool.currency) {
+                    lines.push(`    ${poolTitle(pool)}: ${poolAvailable(pool)} · ${pool.used.toFixed(2)} ${pool.currency} consumidos`);
+                } else {
+                    lines.push(
+                        `    ${poolTitle(pool)}: ${pool.availablePercentage.toFixed(1)}% libre · [${availabilityBar(pool.availablePercentage, 15)}] · ${formatReset(pool.resetAt)}`,
+                    );
+                }
             }
         }
     }
