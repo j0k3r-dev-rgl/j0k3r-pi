@@ -23,6 +23,35 @@ describe("MINI-003: TUI Modal Billing Visualization", () => {
         pools: [],
     };
 
+    it("renders MWAPI as USD credits, not hourly quotas or percentages", async () => {
+        const account: AccountUsage = {
+            ...baseAccount,
+            id: "mwapi",
+            provider: "mwapi",
+            account: "MWAPI",
+            plan: "Créditos USD",
+            pools: [{
+                label: "Créditos", displayName: "Créditos MWAPI", currency: "USD",
+                used: 0.38867, available: 499.61133, total: 500, unlimited: false,
+                availablePercentage: 99.922266, resetAt: null, windowLabel: null, modelCount: 0, models: [],
+            }],
+        };
+        assert.match(formatAccountLine(account, false, false, dummyTheme), /crédito\(s\)/);
+        const modal = new UsageModal({
+            theme: dummyTheme, tui: { requestRender: () => {} }, done: () => {},
+            load: async () => [{ provider: "mwapi", accounts: [account] }],
+        });
+        try {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            const rendered = modal.render(120).join("\n");
+            assert.match(rendered, /499\.61 USD disponibles de 500\.00 USD/);
+            assert.match(rendered, /0\.39 USD consumidos/);
+            assert.doesNotMatch(rendered, /% libre|reset n\/a|5h|5 hs/);
+        } finally {
+            modal.dispose();
+        }
+    });
+
     it("formatAccountLine renders pending export badge when billing is pending_initial_export", () => {
         const acc: AccountUsage = {
             ...baseAccount,
