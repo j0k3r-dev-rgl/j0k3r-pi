@@ -141,9 +141,12 @@ Sections after Workflow Status:
 2. Scope & Exclusions
 3. Execution Scope
 4. `MINI-###` items with Contract, Acceptance, Canonical sources, Validation, Depends on
-5. Risks & Constraints
-6. Open Decisions
-7. Next Permitted Action
+5. Parallel Units (optional) — only when two or more independent MINI groups touch disjoint directories
+6. Risks & Constraints
+7. Open Decisions
+8. Next Permitted Action
+
+Parallel Units, when present, is one bullet per unit: `UNIT-A: MINI-001, MINI-002 | Writable: /abs/root/module-a/**`. Writable roots must be disjoint between units and inside Execution Scope Writable Paths; no MINI in one unit may depend on a MINI in another. Shared files (lockfiles, barrels, shared config, common test setup) belong to exactly one unit or keep the change sequential. Add one integrated validation command run after all units finish. Omit the section when work is not cleanly separable; never split only to create parallelism.
 
 Resolve material product questions with the user; record approved decisions in the relevant contract item and unresolved questions under Open Decisions. Missing material decisions make the plan BLOCKED, not permission to invent acceptance or introduce another review phase. Existing product documents may be cited as inputs, never required solely to replace a removed phase.
 
@@ -160,7 +163,7 @@ Sections after Workflow Status:
 5. Candidate Identity — base revision and current candidate identity needed to verify the implementation.
 6. Next Permitted Action
 
-Keep the artifact compact. Do not create per-scenario implementation evidence matrices, TDD-cycle histories, raw logs, transcript excerpts, or routine attempt records. Reference existing test reports only when needed to explain a failure or limitation. Acceptance-level proof belongs to independent `verify.md` and, where required, the live acceptance artifact—not a second copy in apply.
+Keep the artifact compact. With Parallel Units, each worker writes its own `apply-<UNIT-ID>.md` with the same sections, covering only its unit; it never writes another unit's artifact or files. Do not create per-scenario implementation evidence matrices, TDD-cycle histories, raw logs, transcript excerpts, or routine attempt records. Reference existing test reports only when needed to explain a failure or limitation. Acceptance-level proof belongs to independent `verify.md` and, where required, the live acceptance artifact—not a second copy in apply.
 
 `READY` means the approved implementation is complete and the required apply-phase validation has passed, so the candidate can enter acceptance/verification; it is not final delivery approval or a claim that later HTTP/independent verification already passed. Missing TDD history is not a blocker under `AGENTS.md`. Actual defects, unmet implementation acceptance, and failed/unexecuted required apply checks remain blockers. Previously written artifacts remain consumable without a formatting-only rewrite.
 

@@ -4,7 +4,7 @@ description: "Run authorized Planned Workflow lifecycle with lightweight contrac
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "16.1"
+  version: "16.2"
 registry:
   category: "workflow"
   domains: "openspec, planned-workflow, artifact-lifecycle"
@@ -32,6 +32,8 @@ Own the lightweight lifecycle, phase gates, independent verification, and archiv
 - Use `openspec/changes/<change-slug>/` with optional `discovery.md`, `plan.md`, `apply.md`, and `verify.md`. Resolve material product questions with the user before marking the plan READY; record decisions or blockers in plan.md, without a separate PRD artifact or review phase.
 - Local discovery writes only its assigned `discovery.md`; reuse its evidence IDs directly. Discovery may be the final deliverable of an investigation-only request.
 - Keep one phase active at a time. Delegate contract creation to `01-planning`, implementation to `02-apply`, verification independently to `03-verify`. The orchestrator performs archive directly after user approval; archive is not a delegated phase.
+- **Parallel Apply Units**: Within the apply phase, when `plan.md` defines `Parallel Units`, launch one `02-apply` worker per unit concurrently (background, in the same orchestrator turn). Each worker receives only its unit ID, its unit's Writable Paths, and its own `apply-<UNIT-ID>.md` output path. Units must have disjoint Writable Paths and no `Depends on` across units; otherwise run them sequentially. Never split work into units the plan did not define.
+- **Parallel Discovery Fan-Out**: When pre-implementation questions are independent, launch several `00-discovery` workers concurrently, each with its own bounded question and `discovery-<topic>.md` path; read all before planning.
 - Assign `skills/anti-overengineering/SKILL.md` alongside artifact contracts when delegating `01-planning` and `02-apply` to enforce simplest-sufficient design and implementation; do not assign it to `00-discovery` or `03-verify`.
 - Assign `skills/tdd/SKILL.md` in Assigned skills when delegating `02-apply` for code/test changes, and to `01-planning` when defining validation strategy.
 - Resolve and assign project-specific skills (from `.pi/skills/`, `.agents/skills/`, or `skill_registry_resolve`) in Assigned skills for delegated subagents whenever the task touches project code or domain logic.
@@ -50,8 +52,8 @@ Own the lightweight lifecycle, phase gates, independent verification, and archiv
 2. If local facts are missing, assign `discovery.md`; read its evidence before planning. Do not duplicate research or add a separate synthesis phase.
 3. Delegate a compact `plan.md` with concrete acceptance, directory-based scope, validation, and `MINI-###` items. Use the narrowest common parent for sibling areas; do not prescribe files or enumerate its child directories. Narrow excessive scope with the user.
 4. Check status, required sections, unique IDs, evidence references, and parseable Execution Scope. `BLOCKED` stops advancement.
-5. Summarize the implementation and obtain apply authorization; delegate `02-apply` with its authorization evidence and exact scope-source path.
-6. Read the compact implementation summary and final validation in `apply.md`; arrange any contract-required live acceptance with its assigned owner, then delegate independent verification against the complete `MINI-###` set. Do not request formatting-only rewrites or retrospective TDD evidence.
+5. Summarize the implementation and obtain apply authorization; delegate `02-apply` with its authorization evidence and exact scope-source path. With `Parallel Units`, one authorization covers all units; dispatch every independent unit at once and wait for all completion notifications.
+6. Read the compact implementation summary and final validation in `apply.md` (or every `apply-<UNIT-ID>.md`). For parallel units, run the Surface Check: `git status --porcelain` changed paths must each fall inside exactly one unit's Writable Paths and match that unit's reported files; any overlap, out-of-surface change, or failed unit blocks verification until remediated. Then run the plan's integrated validation command once, arrange any contract-required live acceptance with its assigned owner, and delegate one independent verification against the complete `MINI-###` set. Do not request formatting-only rewrites or retrospective TDD evidence.
 7. Read `verify.md`; require PASS, evidence for every item, and a continuity snapshot before reporting verified completion.
 8. Ask for archive authorization only when verification passed. The orchestrator then performs the Archive Safety Checks below directly; do not launch a subagent.
 

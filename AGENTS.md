@@ -118,6 +118,7 @@ TDD is a required implementation method, not a documentary acceptance gate. Appl
 - `BLOCKED` stops advancement.
 - `02-apply` requires an implementation summary plus explicit user authorization.
 - `03-verify` must be independent.
+- **Parallel fan-out**: when delegated tasks are independent (separate discovery questions, `Parallel Units` in plan.md), launch them concurrently in one turn instead of serially; details live in `work-workflow`.
 - The orchestrator archives the complete change directory directly only after passing verification, unchanged continuity evidence, and explicit user approval of archive. Follow the archive safety checks in `work-workflow`; never delegate archive.
 - Lifecycle details live in `skills/work-workflow/SKILL.md`.
 

@@ -55,6 +55,7 @@ The authorization may be supplied in prose, but it must contain all required fac
 
 - **Circuit Breaker**: If any material decision, requirement, or scope boundary is unresolved or ambiguous, return `BLOCKED` immediately with the exact question or blocker. Never invent assumptions, choose speculative defaults, or make user-owned product/architecture decisions.
 - Write only the exact assigned `apply.md` output path plus implementation files inside the approved `Execution Scope`; do not write other workflow artifacts.
+- **Parallel Unit mode**: when the prompt assigns a `UNIT-ID`, implement only that unit's MINI items, write only inside that unit's Writable Paths and the assigned `apply-<UNIT-ID>.md`, and run only that unit's validation. Other workers edit sibling units concurrently: never touch, revert, format, or stage files outside your unit, and never run repo-wide fixers, formatters, or `git` mutations. If your unit needs a file outside its surface, return `BLOCKED` naming the file.
 - Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `apply.md`.
 - Use ready `plan.md` as the sole implementation contract, plus exact assigned skills and referenced discovery evidence when relevant.
 - Configuration Lock: never change configuration, dependencies, tooling, or environment as an incidental fix. Such changes require explicit user authorization, even inside writable paths.
