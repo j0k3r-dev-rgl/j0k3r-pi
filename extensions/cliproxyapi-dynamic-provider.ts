@@ -243,6 +243,24 @@ async function fetchCLIProxyModels(signal?: AbortSignal) {
 }
 
 export default function cliproxyapiDynamicProvider(pi: ExtensionAPI) {
+    pi.on("before_provider_request", (event, ctx) => {
+        if (ctx.model?.provider !== PROVIDER_ID || !ctx.model.id.startsWith("mwapi/")) return;
+        const payload = event.payload as { tools?: Array<{ function?: { parameters?: Record<string, unknown> } }> } | null;
+        if (!payload || !Array.isArray(payload.tools)) return;
+        let changed = false;
+        const tools = payload.tools.map((tool) => {
+            const parameters = tool.function?.parameters;
+            if (!parameters || parameters.type !== "object" || !parameters.properties ||
+                !Array.isArray(parameters.oneOf)) return tool;
+            // MWAPI rejects root oneOf. Retain the base contract on the wire;
+            // registered schemas still enforce branch constraints when tools execute.
+            const { oneOf: _oneOf, ...compatible } = parameters;
+            changed = true;
+            return { ...tool, function: { ...tool.function, parameters: compatible } };
+        });
+        return changed ? { ...payload, tools } : undefined;
+    });
+
     pi.registerProvider(PROVIDER_ID, {
         name: "CLIProxyAPI",
         baseUrl: `${resolveBaseUrl()}/v1`,
