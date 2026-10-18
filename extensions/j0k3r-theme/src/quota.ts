@@ -18,6 +18,25 @@ export function selectQuotaAccount<T extends ModelAccount>(
 	return matches.length === 1 ? matches[0] : undefined;
 }
 
+export function selectModelPools<T extends Pick<AccountUsage["pools"][number], "label" | "displayName">>(
+	modelId: string,
+	pools: T[],
+): T[] {
+	const lower = modelId.toLowerCase();
+	let family = "";
+	if (lower.includes("gemini")) family = "gemini";
+	else if (lower.includes("claude")) family = "claude";
+	else if (lower.includes("gpt")) family = "gpt";
+
+	if (!family) return pools;
+	const filtered = pools.filter((pool) => {
+		const label = (pool.label ?? "").toLowerCase();
+		const display = (pool.displayName ?? "").toLowerCase();
+		return label.includes(family) || display.includes(family);
+	});
+	return filtered.length > 0 ? filtered : pools;
+}
+
 export function formatQuota(
 	pools: Pick<AccountUsage["pools"][number], "label" | "windowLabel" | "availablePercentage" | "resetAt">[],
 	now = Date.now(),
@@ -67,5 +86,5 @@ export async function fetchModelQuota(provider: string, modelId: string, signal?
 		account = selectQuotaAccount(provider, modelId, accounts, modelsByAccount);
 	}
 
-	return formatQuota(account?.pools ?? []);
+	return formatQuota(selectModelPools(modelId, account?.pools ?? []));
 }
