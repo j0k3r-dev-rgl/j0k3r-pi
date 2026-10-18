@@ -31,8 +31,14 @@ function formatContextTokens(value: number | null | undefined): string {
 	return formatNumber(value);
 }
 
+function getTokenSpeedStatus(footerData: ReadonlyFooterDataProvider): string {
+	return footerData.getExtensionStatuses().get("tokenSpeed") ?? "";
+}
+
 function getExtensionStatus(footerData: ReadonlyFooterDataProvider): string {
-	const entries = Array.from(footerData.getExtensionStatuses().entries());
+	const entries = Array.from(footerData.getExtensionStatuses().entries()).filter(
+		([key]) => key !== "tokenSpeed",
+	);
 	if (entries.length === 0) return "";
 
 	const memoryCandidates: string[] = [];
@@ -48,6 +54,20 @@ function getExtensionStatus(footerData: ReadonlyFooterDataProvider): string {
 	}
 
 	return entries.map(([, v]) => v).join(" · ");
+}
+
+function compactTokenSpeed(status: string, maxLength: number): string {
+	if (visibleWidth(status) <= maxLength) return status;
+
+	// Strip parenthetical metadata suffix first (e.g. " (TTFT: 240 ms)" or " (tok in s)")
+	const withoutSuffix = status.replace(/\s*\([^)]*\)\S*/g, "").replace(/\u200b/g, "").trimEnd();
+	if (visibleWidth(withoutSuffix) <= maxLength) return withoutSuffix;
+
+	// Compact prefix: remove "TPS:" keeping icon/styling and measurement
+	const shortPrefix = withoutSuffix.replace(/TPS:\s*/i, "");
+	if (visibleWidth(shortPrefix) <= maxLength) return shortPrefix;
+
+	return truncateToWidth(withoutSuffix, maxLength, "…");
 }
 
 function compactExtensionStatus(status: string, maxLength: number): string {
@@ -340,12 +360,13 @@ export class J0k3rThemeFooter implements Component {
 		const context = this.ctx.getContextUsage();
 		const rawModel = this.ctx.model ? `${this.ctx.model.provider}/${this.ctx.model.id}` : "no-model";
 		const effort = this.getThinkingLevel();
-		const extensionStatus = getExtensionStatus(this.footerData);
+		const tokenSpeed = getTokenSpeedStatus(this.footerData);
+		const memoryStatus = getExtensionStatus(this.footerData);
 
 		const usedTokens = context?.tokens ?? 0;
 		const winTokens = context?.contextWindow ?? this.ctx.model?.contextWindow ?? 0;
 		const percentVal = context?.percent ?? null;
-		const cacheKey = `${width}:${rawModel}:${effort}:${input}:${output}:${usedTokens}:${winTokens}:${percentVal}:${extensionStatus}`;
+		const cacheKey = `${width}:${rawModel}:${effort}:${input}:${output}:${usedTokens}:${winTokens}:${percentVal}:${tokenSpeed}:${memoryStatus}`;
 
 		if (this.cachedBottomLine && this.cachedBottomLine.key === cacheKey) {
 			return this.cachedBottomLine.output;
@@ -379,9 +400,17 @@ export class J0k3rThemeFooter implements Component {
 		const cCompact = `${electric(percentColor, percentStr)} ${this.theme.fg("muted", usedContextStr)}`;
 		const cSlim = electric(percentColor, percentStr);
 
-		const sFull = extensionStatus ? electric(CYAN, extensionStatus) : "";
-		const sCompact = extensionStatus ? electric(CYAN, compactExtensionStatus(extensionStatus, 14)) : "";
-		const sSlim = extensionStatus ? electric(CYAN, compactExtensionStatus(extensionStatus, 6)) : "";
+		const speedFull = tokenSpeed;
+		const speedCompact = tokenSpeed ? compactTokenSpeed(tokenSpeed, 14) : "";
+		const speedSlim = tokenSpeed ? compactTokenSpeed(tokenSpeed, 8) : "";
+
+		const memFull = memoryStatus ? electric(CYAN, memoryStatus) : "";
+		const memCompact = memoryStatus ? electric(CYAN, compactExtensionStatus(memoryStatus, 14)) : "";
+		const memSlim = memoryStatus ? electric(CYAN, compactExtensionStatus(memoryStatus, 6)) : "";
+
+		const sFull = joinSegments([speedFull, memFull]);
+		const sCompact = joinSegments([speedCompact, memCompact]);
+		const sSlim = joinSegments([speedSlim, memSlim]);
 
 		// Priority 1: Split layout (Left + Right gap >= 2)
 		const splitProfiles = [
