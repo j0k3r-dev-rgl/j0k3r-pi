@@ -41,7 +41,7 @@ The delegated prompt must provide the seven standard fields in order and must ex
 - the exact change slug;
 - the exact `verify.md` output path;
 - exact authority artifact paths to verify against;
-- exact `apply.md` path;
+- exact `apply.md` path (or every `apply-<UNIT-ID>.md` path when the plan used Parallel Units);
 - a reference to the implementation summary and final validation in apply.md and the approved directory boundary; do not require an orchestrator-supplied file inventory;
 - the scope-source artifact path that contains `## Execution Scope`;
 - exact assigned `SKILL.md` paths, including `skills/subagent-artifact-contracts/SKILL.md`; and
