@@ -478,6 +478,7 @@ export const sdkSubagentRunner: SubagentRunner = async ({ definition, task, task
         continuation?.attempt ?? 1,
         onQueuedMessageStart,
         continuation?.previous_snapshot,
+        config.tool_stall_timeout_ms,
       );
       if (signal.aborted) {
         outcome = 'cancelled';

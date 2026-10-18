@@ -198,6 +198,7 @@ describe('config and workflow loading', () => {
     expect(config.max_concurrency).toBe(5);
     expect(config.timeout_ms).toBe(1200000);
     expect(config.stall_timeout_ms).toBe(240000);
+    expect(config.tool_stall_timeout_ms).toBe(1800000);
     expect(config.default_mode).toBe('task');
   });
 

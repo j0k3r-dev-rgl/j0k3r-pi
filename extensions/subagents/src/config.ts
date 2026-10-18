@@ -7,6 +7,7 @@ const DEFAULT_TOOLS = ['read', 'memory_context', 'memory_search', 'memory_get'];
 const DEFAULT_MAX_CONCURRENCY = 5;
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
 const DEFAULT_STALL_TIMEOUT_MS = 4 * 60 * 1000;
+const DEFAULT_TOOL_STALL_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_BACKGROUND_HANDOFF_SHORTCUT = 'ctrl+h';
 const DEFAULT_HISTORY_PANEL_SHORTCUT = 'ctrl+,';
 const DEFAULT_DETAIL_CANCEL_SHORTCUT = 'x';
@@ -243,6 +244,7 @@ export function readSubagentsConfig(cwd: string): SubagentsConfig {
     project_model_profiles: projectModelProfiles,
     timeout_ms: positiveInteger(raw.timeout_ms, DEFAULT_TIMEOUT_MS),
     stall_timeout_ms: positiveInteger(raw.stall_timeout_ms, DEFAULT_STALL_TIMEOUT_MS),
+    tool_stall_timeout_ms: positiveInteger(raw.tool_stall_timeout_ms, DEFAULT_TOOL_STALL_TIMEOUT_MS),
     max_concurrency: positiveInteger(raw.max_concurrency, DEFAULT_MAX_CONCURRENCY),
     default_tools: sanitizeTools(Array.isArray(raw.default_tools) ? raw.default_tools.map(String) : DEFAULT_TOOLS),
     session_resources: parseSessionResources(raw.session_resources ?? raw.sessionResources),

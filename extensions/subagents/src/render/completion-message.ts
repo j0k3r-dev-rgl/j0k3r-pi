@@ -107,8 +107,10 @@ export function sendSubagentCompletionMessage(pi: any, task: any, cwd = task?.cw
       },
     },
   }, {
+    // steer: delivered after the parent's current tool batch instead of waiting
+    // for the whole run to settle; when idle, triggerTurn starts a turn directly.
     triggerTurn: true,
-    deliverAs: 'followUp',
+    deliverAs: 'steer',
   });
 }
 
