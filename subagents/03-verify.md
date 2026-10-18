@@ -52,7 +52,7 @@ If a material reference is missing, placeholder-based, or required verification 
 
 ## Boundaries
 
-- **Circuit Breaker**: If any material decision, requirement, or scope boundary is unresolved or ambiguous, return `BLOCKED` immediately with the exact question or blocker. Never invent assumptions, choose speculative defaults, or make user-owned product/architecture decisions.
+- **Circuit Breaker**: If any material decision, requirement, or scope boundary is unresolved or ambiguous, ask it with `ask_orchestrator` when that tool is available and continue with the answer; otherwise return `BLOCKED` immediately with the exact question or blocker. Never invent assumptions, choose speculative defaults, or make user-owned product/architecture decisions.
 - Never create, edit, delete, or write files other than the exact assigned `verify.md` output path.
 - Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `verify.md`.
 - Read `apply.md` first.

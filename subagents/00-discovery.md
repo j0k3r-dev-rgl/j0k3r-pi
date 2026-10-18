@@ -56,7 +56,7 @@ The prompt must also supply the change slug, exact absolute `openspec/changes/<c
 
 ## Boundaries
 
-- **Circuit Breaker**: If any material decision, requirement, or scope boundary is unresolved or ambiguous, return `BLOCKED` immediately with the exact question or blocker. Never invent assumptions, choose speculative defaults, or make user-owned product/architecture decisions.
+- **Circuit Breaker**: If any material decision, requirement, or scope boundary is unresolved or ambiguous, ask it with `ask_orchestrator` when that tool is available and continue with the answer; otherwise return `BLOCKED` immediately with the exact question or blocker. Never invent assumptions, choose speculative defaults, or make user-owned product/architecture decisions.
 - Local investigation only; write solely the assigned discovery.md and create its parent directory if needed. Reuse the active change folder. Never overwrite another investigation; update existing evidence only when assigned to that investigation.
 - Reuse supplied context; do not reread files only to restate it.
 - Receive directory roots consolidated under the narrowest common parent, not an exhaustive file or subdirectory list. Select relevant files and symbols within those roots; respect explicit user restrictions, assigned artifacts, and exclusions. Request additional access before investigating outside the approved boundary.
