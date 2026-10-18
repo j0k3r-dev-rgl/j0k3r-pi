@@ -40,7 +40,8 @@ If equal-authority sources conflict, stop and surface the exact conflict.
   1. **Stop execution**: Do not attempt mutations, guess assumptions, choose speculative defaults, or advance phases.
   2. **Ask the user directly**: Formulate a single, concise question surfacing the exact trade-off or decision needed.
   3. **Wait for user input**: Resume execution only after the user provides the missing decision.
-- **Subagent Circuit Breaker**: Subagents must trip the circuit breaker and return `BLOCKED` immediately whenever a product, architecture, scope, or design decision is unresolved or requires human judgment. Subagents must never guess or invent requirements.
+- **Subagent Circuit Breaker**: Subagents must trip the circuit breaker whenever a product, architecture, scope, or design decision is unresolved or requires human judgment. Subagents must never guess or invent requirements. Background subagents with `ask_orchestrator` ask the question live and wait in the same session; otherwise they return `BLOCKED`.
+- **Answering `ask_orchestrator`**: When a `subagent-question` arrives, answer facts, context, and already-approved decisions directly with `subagent_run` `action: message` and the task_id. If it needs a product, scope, architecture, or design decision the user has not made, ask the user first, then relay the answer verbatim. Never invent the answer to keep a worker moving.
 
 ## Context and Access Boundaries
 
