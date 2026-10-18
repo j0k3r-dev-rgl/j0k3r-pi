@@ -114,6 +114,29 @@ export function sendSubagentCompletionMessage(pi: any, task: any, cwd = task?.cw
   });
 }
 
+export function sendSubagentQuestionMessage(pi: any, task: any, question: string): void {
+  const label = formatTaskLabel(task);
+  pi.sendMessage?.({
+    customType: 'subagent-question',
+    content: [
+      `Subagent ${label} is waiting on ask_orchestrator`,
+      `task_id: ${task.id}`,
+      '',
+      '## question',
+      '',
+      question,
+      '',
+      'Answer with subagent_run action=message, this task_id, and the answer in task. The subagent resumes in the same session.',
+      'Answer facts, context, and already-approved decisions yourself. If it needs a product, scope, architecture, or design decision the user has not made, ask the user first and then relay the answer.',
+    ].join('\n'),
+    display: true,
+    details: { task_id: task.id, agent: task.agent, question },
+  }, {
+    triggerTurn: true,
+    deliverAs: 'steer',
+  });
+}
+
 export function renderSubagentCompletionMessage(message: any, options: any, theme: any) {
   const details = message.details ?? {};
   const task = details.task ?? details;

@@ -429,3 +429,18 @@ describe('completion message render', () => {
     expect(message).not.toContain('hidden prompt body');
   });
 });
+
+describe('subagent question delivery', () => {
+  it('steers ask_orchestrator questions into the parent with answer instructions', async () => {
+    const { sendSubagentQuestionMessage } = await import('../../src/render/completion-message.js');
+    const sendMessage = vi.fn();
+    sendSubagentQuestionMessage({ sendMessage }, { id: 'subtask_q_1', agent: 'analyst' }, 'Which port?');
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const [message, options] = sendMessage.mock.calls[0];
+    expect(options).toEqual({ triggerTurn: true, deliverAs: 'steer' });
+    expect(message.customType).toBe('subagent-question');
+    expect(message.content).toContain('task_id: subtask_q_1');
+    expect(message.content).toContain('Which port?');
+    expect(message.content).toContain('action=message');
+  });
+});
