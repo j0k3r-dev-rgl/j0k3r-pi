@@ -38,9 +38,54 @@ afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-function writeAgent(name: string, body = '# Agent\nhello') {
-  fs.writeFileSync(path.join(tmp, '.pi', 'subagents', `${name}.md`), `---\nname: ${name}\ndescription: ${name} agent\ntools:\n  - read\n  - memory_search\n---\n${body}`);
+function writeAgent(name: string, body = '# Agent\nhello', extraFrontmatter = '') {
+  fs.writeFileSync(path.join(tmp, '.pi', 'subagents', `${name}.md`), `---\nname: ${name}\ndescription: ${name} agent\n${extraFrontmatter}tools:\n  - read\n  - memory_search\n---\n${body}`);
 }
+
+describe('per-agent effort from definition frontmatter', () => {
+  it('uses definition effort over orchestrator effort', async () => {
+    writeAgent('verifier', '# Agent\nhello', 'effort: medium\n');
+    let runnerEffort: string | undefined;
+    const runner: SubagentRunner = async ({ effectiveProfile }) => {
+      runnerEffort = effectiveProfile?.effort.value;
+      return { result: 'ok', effort: effectiveProfile?.effort.value };
+    };
+    const manager = new SubagentManager(runner);
+    const result = await manager.run(
+      { agent: 'verifier', task: 'verify', mode: 'task' },
+      { cwd: tmp, model: { provider: 'orchestrator', id: 'model' }, thinkingLevel: 'high' },
+    );
+    expect(runnerEffort).toBe('medium');
+    expect(result.results?.[0]).toMatchObject({ effort: 'medium', effort_source: 'definition' });
+  });
+
+  it('uses definition effort over allocator effort while keeping the allocated model', async () => {
+    writeAgent('verifier', '# Agent\nhello', 'effort: medium\n');
+    const handlers: Array<(data: any) => void> = [];
+    const bus = {
+      on: (_channel: string, handler: (data: any) => void) => { handlers.push(handler); return () => {}; },
+      emit: (channel: string, data: any) => { if (channel === 'subagents:task:allocate') handlers.forEach((h) => h(data)); },
+    };
+    bus.on('subagents:task:allocate', (event: SubagentTaskAllocationEvent) => {
+      event.claimModel(async () => ({ model: { provider: 'cliproxyapi', id: 'claimed' }, effort: 'high' }));
+    });
+    let runnerEffort: string | undefined;
+    const runner: SubagentRunner = async ({ effectiveProfile }) => {
+      runnerEffort = effectiveProfile?.effort.value;
+      return { result: 'ok' };
+    };
+    const manager = new SubagentManager(runner, undefined, undefined, undefined, bus as any);
+    const runResult = await manager.run(
+      { agent: 'verifier', task: 'verify', mode: 'background' },
+      { cwd: tmp, model: { provider: 'orchestrator', id: 'model' }, thinkingLevel: 'high' },
+    );
+    const taskId = runResult.task_ids[0]!;
+    await vi.waitFor(() => expect(manager.getTask(taskId)?.status).toBe('completed'));
+    const task = manager.getTask(taskId)!;
+    expect(runnerEffort).toBe('medium');
+    expect(task).toMatchObject({ model: 'cliproxyapi/claimed', model_source: 'allocated', effort: 'medium', effort_source: 'definition' });
+  });
+});
 
 function mockRunner(delay = 0): SubagentRunner {
   return async ({ definition, task }) => {

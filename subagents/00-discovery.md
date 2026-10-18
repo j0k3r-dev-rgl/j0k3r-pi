@@ -1,6 +1,7 @@
 ---
 name: 00-discovery
 description: "Investigates bounded local code/context without changing project files and preserves evidence in the assigned openspec/changes/<change-slug>/discovery.md. No internet research."
+effort: medium
 tools:
   - read
   - write

@@ -1,6 +1,7 @@
 ---
 name: 03-verify
 description: "Independently verifies an approved Planned Workflow implementation from apply.md and applicable contracts, then writes verify.md with bounded evidence."
+effort: medium
 tools:
   - read
   - bash

@@ -999,6 +999,16 @@ export class SubagentManager {
           task.effort_source = 'orchestrator';
         }
 
+        // Per-agent frontmatter effort overrides both allocated and orchestrator effort.
+        if (definition.effort) {
+          effectiveProfile = {
+            ...effectiveProfile,
+            effort: { value: definition.effort, source: 'definition', label: profileSourceLabel('definition', definition.effort, String) },
+          };
+          task.effort = definition.effort;
+          task.effort_source = 'definition';
+        }
+
         task.status = 'running';
         task.started_at = nowIso();
         task.last_activity_at = task.started_at;
