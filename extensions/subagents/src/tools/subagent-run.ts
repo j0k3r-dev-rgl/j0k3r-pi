@@ -82,7 +82,7 @@ export function createSubagentRunTool(manager: SubagentManager, pi: any) {
             task: existing && acknowledgement.status === 'queued' ? compactTaskWithoutFinalText(existing) : undefined,
           };
           const text = `${acknowledgement.status}: ${acknowledgement.message}`;
-          return acknowledgement.status === 'queued' ? ok(text, details) : { ...fail(text), details };
+          return acknowledgement.status === 'queued' || acknowledgement.status === 'answered' ? ok(text, details) : { ...fail(text), details };
         } catch (error) {
           return { ...fail(error), details: { action, cwd } };
         }

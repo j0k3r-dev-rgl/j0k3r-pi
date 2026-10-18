@@ -76,6 +76,46 @@ describe('subagent runner interaction-required bridge', () => {
     expect(activities.some((activity) => activity.system_prompt === '# Analyst\nSYSTEM_SENTINEL')).toBe(true);
   });
 
+  it('registers ask_orchestrator as a child custom tool only when the manager offers it', async () => {
+    vi.resetModules();
+    const session = {
+      subscribe: vi.fn(() => vi.fn()),
+      prompt: vi.fn(async () => undefined),
+      messages: [{ role: 'assistant', content: 'done' }],
+      dispose: vi.fn(async () => undefined),
+    };
+    const createAgentSession = vi.fn((_options: any) => ({ session }));
+    class DefaultResourceLoader {
+      options: any;
+      reload = vi.fn(async () => undefined);
+      constructor(options: any) { this.options = options; }
+    }
+    vi.doMock('@earendil-works/pi-coding-agent', () => ({
+      DefaultResourceLoader,
+      getAgentDir: () => '/agent-dir',
+      SessionManager: { inMemory: vi.fn(() => ({})) },
+      createAgentSession,
+    }));
+    const { sdkSubagentRunner } = await import('../../src/runner.js');
+    const definition: SubagentDefinition = { name: 'analyst', description: 'analysis', filePath: '/tmp/analyst.md', instructions: '# Analyst', tools: ['read'] };
+    const config: SubagentsConfig = { timeout_ms: 10_000, stall_timeout_ms: 10_000, max_concurrency: 1, default_tools: ['read'], model_profiles: {}, session_resources: 'lean' };
+    const base = { definition, task: 'work', cwd: '/workspace', ctx: { model: { provider: 'test', id: 'model' } }, config, signal: new AbortController().signal };
+
+    const ask = vi.fn(async () => 'answer');
+    await sdkSubagentRunner({ ...base, askOrchestrator: ask });
+    const withTool = createAgentSession.mock.calls[0][0];
+    expect(withTool.tools).toEqual(['read', 'ask_orchestrator']);
+    expect(withTool.customTools.map((tool: any) => tool.name)).toEqual(['ask_orchestrator']);
+    const toolResult = await withTool.customTools[0].execute('call', { question: 'port?' });
+    expect(ask).toHaveBeenCalledWith('port?');
+    expect(toolResult.content[0].text).toContain('answer');
+
+    await sdkSubagentRunner(base);
+    const withoutTool = createAgentSession.mock.calls[1][0];
+    expect(withoutTool.tools).toEqual(['read']);
+    expect(withoutTool.customTools).toBeUndefined();
+  });
+
   it('resolves configured models through modelRuntime.getModel before falling back to modelRegistry', async () => {
     vi.resetModules();
     const resolvedModel = { provider: 'runtime', id: 'resolved-model' };

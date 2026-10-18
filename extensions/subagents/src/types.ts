@@ -337,6 +337,11 @@ export type LiveSteeringBridge = {
 
 export type SendMessageResult =
   | {
+      status: 'answered';
+      task_id: string;
+      message: 'Answer delivered to the waiting ask_orchestrator call.';
+    }
+  | {
       status: 'queued';
       task_id: string;
       pending_message_count: number;
@@ -420,5 +425,7 @@ export type SubagentRunner = (input: {
   registerLiveBridge?: (bridge: LiveSteeringBridge) => void;
   clearLiveBridge?: () => void;
   onQueuedMessageStart?: () => void;
+  /** Background only: ask the parent orchestrator and wait for its answer (ask_orchestrator tool). */
+  askOrchestrator?: (question: string) => Promise<string>;
   onActivity?: (activity: { message: string; output?: string; prompt?: string; system_prompt?: string; transcript?: string; usage?: UsageStats; effort?: ThinkingEffort; thread_snapshot?: SubagentThreadSnapshot; interaction_request?: SubagentInteractionRequest; nested_session_path?: string; pi_retry_attempts?: number; live_activity?: SubagentLiveActivityProjection }) => void;
 }) => Promise<{ result: string; model?: string; effort?: ThinkingEffort; fallback_used?: boolean; usage?: UsageStats; error_metadata?: SubagentErrorMetadata; thread_snapshot?: SubagentThreadSnapshot; interaction_request?: SubagentInteractionRequest; system_prompt?: string; nested_session_path?: string }>;

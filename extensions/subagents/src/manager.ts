@@ -311,6 +311,8 @@ export class SubagentManager {
   private runnerSettlements = new Map<string, Promise<void>>();
   private stopDispositions = new Map<string, StopDisposition>();
   private liveStates = new Map<string, LiveTaskState>();
+  // Live child -> orchestrator questions (ask_orchestrator), one pending per task.
+  private pendingQuestions = new Map<string, { resolve: (answer: string) => void; reject: (error: Error) => void }>();
   private taskUpdateListeners = new Set<() => void>();
   private terminalCleanups = new Map<string, Promise<void>>();
 
@@ -320,7 +322,40 @@ export class SubagentManager {
     private onTerminalBackgroundTask?: (task: SubagentTask, cwd: string) => void,
     private onInteractionPromptActive?: (active: boolean) => void,
     private events?: any,
+    private onOrchestratorQuestion?: (task: SubagentTask, question: string, cwd: string) => void,
   ) {}
+
+  /** Child-side: ask the parent orchestrator and wait for its answer in the same session. */
+  askOrchestrator(taskId: string, question: string, signal?: AbortSignal): Promise<string> {
+    const task = this.tasks.get(taskId);
+    if (!task || task.status !== 'running') return Promise.reject(new Error(`Subagent task ${taskId} is not running.`));
+    if (!this.onOrchestratorQuestion) return Promise.reject(new Error('ask_orchestrator is unavailable in this session.'));
+    if (this.pendingQuestions.has(taskId)) return Promise.reject(new Error('A question to the orchestrator is already pending for this task.'));
+    const text = sanitizeInteractionTransportText(question).trim();
+    if (!text) return Promise.reject(new Error('ask_orchestrator requires a non-empty question.'));
+    return new Promise<string>((resolve, reject) => {
+      const settle = () => {
+        this.pendingQuestions.delete(taskId);
+        signal?.removeEventListener('abort', onAbort);
+      };
+      const onAbort = () => { settle(); reject(new Error('Subagent was aborted while waiting for the orchestrator.')); };
+      if (signal?.aborted) return onAbort();
+      signal?.addEventListener('abort', onAbort, { once: true });
+      this.pendingQuestions.set(taskId, {
+        resolve: (answer) => { settle(); resolve(answer); },
+        reject: (error) => { settle(); reject(error); },
+      });
+      task.last_activity = 'awaiting orchestrator answer';
+      task.last_activity_at = nowIso();
+      const cwd = this.taskCwds.get(taskId) ?? process.cwd();
+      this.record(cwd, task, task.last_activity, true);
+      try {
+        this.onOrchestratorQuestion!(task, text, cwd);
+      } catch (error) {
+        this.pendingQuestions.get(taskId)?.reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  }
 
   async drainOwnerSession(sessionId?: string, reason = 'Pi session shutdown'): Promise<void> {
     return this.drainTasks((task) => task.session_id === sessionId, reason);
@@ -553,6 +588,7 @@ export class SubagentManager {
   }
 
   private closeTaskLiveState(task: SubagentTask): void {
+    this.pendingQuestions.get(task.id)?.reject(new Error(`Subagent task ${task.id} ended before the orchestrator answered.`));
     const state = this.liveStates.get(task.id);
     closeLiveState(task, state);
     this.liveStates.delete(task.id);
@@ -600,6 +636,20 @@ export class SubagentManager {
     const liveState = this.liveStates.get(input.task_id);
     if (!liveState || !liveState.parentSessionId || liveState.parentSessionId !== input.session_id) {
       return { status: 'rejected', task_id: input.task_id, reason: 'not_owner', message: 'Only the exact originating parent Pi session may message this live background task.' };
+    }
+    const pendingQuestion = this.pendingQuestions.get(input.task_id);
+    if (pendingQuestion) {
+      const answer = sanitizeInteractionTransportText(input.message ?? '');
+      if (!answer.trim()) {
+        return { status: 'rejected', task_id: input.task_id, reason: 'empty_message', message: 'Live background messages must not be empty or whitespace-only.' };
+      }
+      if (utf8ByteLength(answer) > MAX_MESSAGE_BYTES) {
+        return { status: 'rejected', task_id: input.task_id, reason: 'message_too_large', message: 'Live background messages must be at most 16 KiB of UTF-8 text.' };
+      }
+      pendingQuestion.resolve(answer);
+      task.last_activity = 'orchestrator answered; resuming';
+      task.last_activity_at = nowIso();
+      return { status: 'answered', task_id: input.task_id, message: 'Answer delivered to the waiting ask_orchestrator call.' };
     }
     if (liveState.bridgeReady && !liveState.bridge) {
       return { status: 'rejected', task_id: input.task_id, reason: 'missing_live_session', message: `Subagent task ${input.task_id} has no live session available for steering.` };
@@ -1019,6 +1069,9 @@ export class SubagentManager {
         let result: Awaited<ReturnType<SubagentRunner>> | undefined;
         while (true) {
           const runnerPromise = this.runner({
+            askOrchestrator: (task.effective_mode ?? task.mode) === 'background' && this.onOrchestratorQuestion
+              ? (question: string) => this.askOrchestrator(id, question, controller.signal)
+              : undefined,
             definition,
             task: taskText,
             taskId: id,

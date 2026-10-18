@@ -1,6 +1,6 @@
 import { readSubagentsConfig, subagentSourceWarnings } from '../config.js';
 import { SubagentManager } from '../manager.js';
-import { renderSubagentCompletionMessage, sendSubagentCompletionMessage } from '../render/completion-message.js';
+import { renderSubagentCompletionMessage, sendSubagentCompletionMessage, sendSubagentQuestionMessage } from '../render/completion-message.js';
 import { registerSubagentTools, triggerClaudeBackgroundHandoff } from '../tools.js';
 import { ClaudeBackgroundWidget, ClaudeBackgroundWidgetState } from '../ui/background-widget.js';
 import { preloadPiComponentsForSubagentRendering, registerSubagentExternalToolDefinition } from '../thread-view.js';
@@ -47,6 +47,11 @@ export default function subagentsExtension(pi: any): void {
     },
     (active) => { setWidgetInputSuspended('interaction', active); },
     pi.events,
+    (task, question) => {
+      const taskSessionId = typeof task?.session_id === 'string' && task.session_id.length > 0 ? task.session_id : undefined;
+      if (taskSessionId && taskSessionId !== activeSessionId) throw new Error('The parent orchestrator session is no longer active.');
+      sendSubagentQuestionMessage(pi, task, question);
+    },
   );
   registerSubagentTools(pi, manager, process.cwd());
 

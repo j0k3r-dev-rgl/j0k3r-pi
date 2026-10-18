@@ -42,6 +42,67 @@ function writeAgent(name: string, body = '# Agent\nhello', extraFrontmatter = ''
   fs.writeFileSync(path.join(tmp, '.pi', 'subagents', `${name}.md`), `---\nname: ${name}\ndescription: ${name} agent\n${extraFrontmatter}tools:\n  - read\n  - memory_search\n---\n${body}`);
 }
 
+describe('ask_orchestrator: background child questions answered live', () => {
+  const writeBackgrounder = () => fs.writeFileSync(path.join(tmp, '.pi', 'subagents', 'backgrounder.md'), `---\nname: backgrounder\ndescription: background agent\nsubagent_mode: background\ntools:\n  - read\n---\n# Agent`);
+  const sessionCtx = () => ({ cwd: tmp, sessionManager: { getSessionId: () => 'parent-a' } });
+
+  it('delivers the question to the parent and resolves it with the next live message without restarting', async () => {
+    writeBackgrounder();
+    const asked: Array<{ taskId: string; question: string }> = [];
+    let runnerCalls = 0;
+    const manager = new SubagentManager(async ({ askOrchestrator }) => {
+      runnerCalls += 1;
+      expect(askOrchestrator).toBeTypeOf('function');
+      const answer = await askOrchestrator!('Which port should the API use?');
+      return { result: `used ${answer}` };
+    }, undefined, undefined, undefined, undefined, (task, question) => asked.push({ taskId: task.id, question }));
+
+    const run = await manager.run({ agent: 'backgrounder', task: 'work', mode: 'background' }, sessionCtx());
+    const taskId = run.task_ids[0]!;
+    await vi.waitFor(() => expect(asked).toHaveLength(1));
+    expect(asked[0]).toEqual({ taskId, question: 'Which port should the API use?' });
+    expect(manager.getTask(taskId)?.last_activity).toContain('awaiting orchestrator answer');
+
+    const notOwner = manager.sendMessage({ task_id: taskId, message: '9999', session_id: 'parent-b' });
+    expect(notOwner).toMatchObject({ status: 'rejected', reason: 'not_owner' });
+
+    const answered = manager.sendMessage({ task_id: taskId, message: '8080', session_id: 'parent-a' });
+    expect(answered).toMatchObject({ status: 'answered', task_id: taskId });
+    await vi.waitFor(() => expect(manager.getTask(taskId)?.status).toBe('completed'));
+    expect(manager.getTask(taskId)?.result).toBe('used 8080');
+    expect(runnerCalls).toBe(1);
+  });
+
+  it('rejects the pending question when the task is cancelled', async () => {
+    writeBackgrounder();
+    let rejection: unknown;
+    const asked: string[] = [];
+    const manager = new SubagentManager(async ({ askOrchestrator, signal }) => {
+      try { await askOrchestrator!('Need a decision'); } catch (error) { rejection = error; }
+      if (signal.aborted) throw new Error('Subagent was aborted');
+      return { result: 'unreachable' };
+    }, undefined, undefined, undefined, undefined, (_task, question) => asked.push(question));
+
+    const run = await manager.run({ agent: 'backgrounder', task: 'work', mode: 'background' }, sessionCtx());
+    const taskId = run.task_ids[0]!;
+    await vi.waitFor(() => expect(asked).toHaveLength(1));
+    manager.cancel(taskId, 'user stop');
+    await vi.waitFor(() => expect(rejection).toBeInstanceOf(Error));
+    expect(manager.sendMessage({ task_id: taskId, message: 'late', session_id: 'parent-a' })).toMatchObject({ status: 'rejected' });
+  });
+
+  it('does not offer ask_orchestrator to task-mode runs', async () => {
+    writeAgent('analyst');
+    let offered: unknown = 'unset';
+    const manager = new SubagentManager(async ({ askOrchestrator }) => {
+      offered = askOrchestrator;
+      return { result: 'ok' };
+    }, undefined, undefined, undefined, undefined, () => {});
+    await manager.run({ agent: 'analyst', task: 'work', mode: 'task' }, sessionCtx());
+    expect(offered).toBeUndefined();
+  });
+});
+
 describe('per-agent effort from definition frontmatter', () => {
   it('uses definition effort over orchestrator effort', async () => {
     writeAgent('verifier', '# Agent\nhello', 'effort: medium\n');
