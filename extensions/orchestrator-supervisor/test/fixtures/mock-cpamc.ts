@@ -1,6 +1,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 
 export interface MockCpamcOptions {
+  inventoryUnavailable?: boolean;
   mainWhamUsedPercentPrimary?: number;
   mainWhamUsedPercentSecondary?: number;
   mainWhamLimitReached?: boolean;
@@ -19,6 +20,8 @@ export class MockCpamcServer {
   private server: Server;
   public port = 0;
   public options: MockCpamcOptions;
+  /** Number of POST /v0/management/api-call requests received (quota probes). */
+  public apiCallCount = 0;
 
   constructor(options: MockCpamcOptions = {}) {
     this.options = {
@@ -54,11 +57,16 @@ export class MockCpamcServer {
     const url = new URL(req.url ?? '/', `http://127.0.0.1:${this.port}`);
 
     if (req.method === 'GET' && url.pathname === '/v0/management/auth-files') {
+      if (this.options.inventoryUnavailable) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'inventory_unavailable' }));
+        return;
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       const files: any[] = [
         { name: 'main.json', auth_index: 0, disabled: false },
         { name: 'second.json', auth_index: 1, disabled: false },
-        { name: 'j0k3r.json', auth_index: 2, disabled: false, project_id: 'proj-j0k3r' },
+        { name: 'gemini-account.json', auth_index: 2, disabled: false, project_id: 'proj-gemini-account' },
       ];
       if (this.options.ambiguousMainPrefix) {
         files.push({ name: 'main-dup.json', auth_index: 9, disabled: false });
@@ -74,8 +82,8 @@ export class MockCpamcServer {
         res.end(JSON.stringify({ models: [{ id: 'main/gpt-6.1-sol' }] }));
       } else if (fileName === 'second.json') {
         res.end(JSON.stringify({ models: [{ id: 'second/gpt-6.1-sol' }] }));
-      } else if (fileName === 'j0k3r.json') {
-        res.end(JSON.stringify({ models: [{ id: 'j0k3r/gemini-3.8-flash-high' }] }));
+      } else if (fileName === 'gemini-account.json') {
+        res.end(JSON.stringify({ models: [{ id: 'gemini-account/gemini-3.8-flash-high' }] }));
       } else {
         res.end(JSON.stringify({ models: [] }));
       }
@@ -83,6 +91,7 @@ export class MockCpamcServer {
     }
 
     if (req.method === 'POST' && url.pathname === '/v0/management/api-call') {
+      this.apiCallCount++;
       let body = '';
       req.on('data', (chunk) => (body += chunk));
       req.on('end', () => {

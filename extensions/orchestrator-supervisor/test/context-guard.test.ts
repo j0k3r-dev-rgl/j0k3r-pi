@@ -154,3 +154,113 @@ test('MINI-004: extractFallbackDetails computes systemPrompt, compaction summary
   assert.equal(metrics.tokens, 3700);
 });
 
+test('S6: ContextGuard honours an injected rotationThresholdPercent for the reserve decision and the tool ceiling', () => {
+  const guard = new ContextGuard({ rotationThresholdPercent: 50 });
+
+  // Reported metrics: 140,000 / 272,000 = 51.5%, above the injected 50% but below the default 90%.
+  const reportedAbove = guard.evaluateUsage(
+    { tokens: 140000, contextWindow: 272000, percent: 51.5 },
+    'cliproxyapi/main/gpt-6.1-sol',
+  );
+  assert.equal(reportedAbove.isFallback, false);
+  assert.equal(reportedAbove.isReserveExceeded, true);
+
+  const reportedBelow = guard.evaluateUsage(
+    { tokens: 100000, contextWindow: 272000, percent: 36.8 },
+    'cliproxyapi/main/gpt-6.1-sol',
+  );
+  assert.equal(reportedBelow.isReserveExceeded, false);
+
+  // Fallback estimation: (2,000 default system prompt + 544,000 entries) / 4 = 136,500 tokens = 50.2%.
+  const fallbackAbove = guard.evaluateUsage(
+    { tokens: null, contextWindow: 272000, percent: null },
+    'cliproxyapi/main/gpt-6.1-sol',
+    { entriesChars: 544000 },
+  );
+  assert.equal(fallbackAbove.isFallback, true);
+  assert.equal(fallbackAbove.isReserveExceeded, true);
+
+  const fallbackBelow = guard.evaluateUsage(
+    { tokens: null, contextWindow: 272000, percent: null },
+    'cliproxyapi/main/gpt-6.1-sol',
+    { entriesChars: 200000 },
+  );
+  assert.equal(fallbackBelow.isReserveExceeded, false);
+
+  // Injected ceiling = floor(50% * 272,000) = 136,000 tokens.
+  const atCeiling = guard.interceptToolCall({ toolName: 'bash', input: {} }, 136000, 272000);
+  assert.ok(atCeiling);
+  assert.equal(atCeiling.block, true);
+  assert.equal(atCeiling.terminate, true);
+  assert.equal(
+    atCeiling.reason,
+    'L\u00edmite de seguridad de contexto alcanzado (50%). Rotaci\u00f3n autom\u00e1tica de sesi\u00f3n programada al finalizar el turno.',
+  );
+
+  const belowCeiling = guard.interceptToolCall({ toolName: 'bash', input: {} }, 135999, 272000);
+  assert.equal(belowCeiling, null);
+});
+
+test('S6: ContextGuard defaults to the module rotation threshold and ceiling when no options are provided', () => {
+  const guard = new ContextGuard();
+
+  const reportedAbove = guard.evaluateUsage(
+    { tokens: 245000, contextWindow: 272000, percent: 90.07 },
+    'cliproxyapi/main/gpt-6.1-sol',
+  );
+  assert.equal(reportedAbove.isReserveExceeded, true);
+
+  const reportedBelow = guard.evaluateUsage(
+    { tokens: 244000, contextWindow: 272000, percent: 89.7 },
+    'cliproxyapi/main/gpt-6.1-sol',
+  );
+  assert.equal(reportedBelow.isReserveExceeded, false);
+
+  // Default ceiling = floor(90% * 272,000) = 244,800 tokens.
+  const atCeiling = guard.interceptToolCall({ toolName: 'bash', input: {} }, 244800, 272000);
+  assert.ok(atCeiling);
+  assert.equal(atCeiling.block, true);
+
+  const belowCeiling = guard.interceptToolCall({ toolName: 'bash', input: {} }, 244799, 272000);
+  assert.equal(belowCeiling, null);
+});
+
+test('S9: the ceiling reason never promises an automatic rotation that is switched off', () => {
+  const guard = new ContextGuard({ rotationThresholdPercent: 90 });
+
+  guard.setAutoRotate(false);
+  const blocked = guard.interceptToolCall({ toolName: 'bash', input: {} }, 245000, 272000);
+  assert.ok(blocked);
+  assert.equal(blocked.block, true, 'the safety ceiling still blocks with the switch off');
+  assert.equal(blocked.terminate, true);
+  assert.match(blocked.reason, /Límite de seguridad de contexto alcanzado \(90%\)/);
+  assert.doesNotMatch(blocked.reason, /Rotación automática de sesión programada/);
+  // The guidance must point at the only remaining human surface: the bare command and the
+  // panel action. A removed subcommand is what this assertion exists to prevent.
+  assert.match(blocked.reason, /\/supervisor\b/);
+  assert.match(blocked.reason, /«rotate now»/);
+  assert.doesNotMatch(blocked.reason, /\/supervisor (status|models|pause|resume|cancel|rotate|panel)\b/);
+
+  guard.setAutoRotate(true);
+  assert.match(
+    guard.interceptToolCall({ toolName: 'bash', input: {} }, 245000, 272000)!.reason,
+    /Rotación automática de sesión programada al finalizar el turno\./,
+  );
+});
+
+test('S6: a live ContextGuard adopts a rotation threshold changed from the panel', () => {
+  const guard = new ContextGuard({ rotationThresholdPercent: 90 });
+  const usage = { tokens: 140000, contextWindow: 272000, percent: 51.5 };
+
+  // The instance starts on its constructed value: below it nothing rotates.
+  assert.equal(guard.evaluateUsage(usage, 'cliproxyapi/main/gpt-6.1-sol').isReserveExceeded, false);
+  assert.equal(guard.interceptToolCall({ toolName: 'bash', input: {} }, 140000, 272000), null);
+
+  // The panel lowers the threshold; this same instance must decide with the new value.
+  guard.setRotationThresholdPercent(50);
+  assert.equal(guard.evaluateUsage(usage, 'cliproxyapi/main/gpt-6.1-sol').isReserveExceeded, true);
+  const atNewCeiling = guard.interceptToolCall({ toolName: 'bash', input: {} }, 136000, 272000);
+  assert.ok(atNewCeiling);
+  assert.equal(atNewCeiling.terminate, true);
+  assert.match(atNewCeiling.reason, /\(50%\)/);
+});

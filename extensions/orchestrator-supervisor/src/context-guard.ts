@@ -1,5 +1,5 @@
-import { CONTEXT_RESERVE_PERCENT, MODEL_CANDIDATES } from './config.ts';
-import type { ModelCandidateId } from './types.ts';
+import { CONTEXT_RESERVE_PERCENT } from './config.ts';
+import type { CandidateId } from './types.ts';
 
 export interface ContextUsageMetrics {
   tokens: number;
@@ -18,6 +18,30 @@ export interface FallbackTokenDetails {
 
 export class ContextGuard {
   private pendingBatchToolOutputBudget = 0;
+  private rotationThresholdPercent: number;
+  /** Whether the threshold trigger may ask for an automatic rotation; the ceiling blocks either way. */
+  private autoRotate = true;
+
+  constructor(options?: { rotationThresholdPercent?: number }) {
+    this.rotationThresholdPercent = options?.rotationThresholdPercent ?? CONTEXT_RESERVE_PERCENT;
+  }
+
+  /**
+   * Adopts the automatic-rotation capability changed from the control panel. The safety
+   * ceiling keeps blocking tool calls when it is off; only the promised rotation changes,
+   * so the reason never announces an automatic action that will not happen.
+   */
+  setAutoRotate(enabled: boolean): void {
+    this.autoRotate = enabled;
+  }
+
+  /**
+   * Adopts a threshold changed from the control panel, so a live session rotates with the
+   * value the operator just chose instead of the one captured at construction.
+   */
+  setRotationThresholdPercent(percent: number): void {
+    this.rotationThresholdPercent = percent;
+  }
 
   resetBatchBudget(): void {
     this.pendingBatchToolOutputBudget = 0;
@@ -28,8 +52,6 @@ export class ContextGuard {
   }
 
   getProviderContextWindowCap(modelId: string, reportedWindow?: number): number {
-    const candidate = MODEL_CANDIDATES.find((c) => c.id === modelId);
-    if (candidate) return candidate.contextWindowCap;
     const lower = String(modelId || '').toLowerCase();
     if (lower.includes('gemini')) return 370000;
     if (lower.includes('claude')) return 200000;
@@ -130,7 +152,7 @@ export class ContextGuard {
     if (rawUsage.tokens !== null && typeof rawUsage.tokens === 'number') {
       const tokens = rawUsage.tokens;
       const percent = (tokens / effectiveWindow) * 100;
-      const isReserveExceeded = percent >= CONTEXT_RESERVE_PERCENT;
+      const isReserveExceeded = percent >= this.rotationThresholdPercent;
       return {
         tokens,
         contextWindow: effectiveWindow,
@@ -152,7 +174,7 @@ export class ContextGuard {
 
     const estimatedTokens = Math.max(1, Math.ceil(totalChars / 4));
     const percent = (estimatedTokens / effectiveWindow) * 100;
-    const isReserveExceeded = percent >= CONTEXT_RESERVE_PERCENT;
+    const isReserveExceeded = percent >= this.rotationThresholdPercent;
 
     return {
       tokens: estimatedTokens,
@@ -186,19 +208,23 @@ export class ContextGuard {
           ? toolCall.name
           : 'unknown';
 
-    // Memory tools and supervisor_rotate are essential lifecycle tools and must NEVER be blocked
-    if (toolName.startsWith('memory_') || toolName === 'supervisor_rotate') {
+    // Memory tools, supervisor_rotate, and subagent_run are essential lifecycle tools and must NEVER be blocked
+    if (toolName.startsWith('memory_') || ['supervisor_rotate', 'subagent_run'].includes(toolName)) {
       return null;
     }
 
-    const ceilingTokens = Math.floor((CONTEXT_RESERVE_PERCENT / 100) * contextWindow);
+    const ceilingTokens = Math.floor((this.rotationThresholdPercent / 100) * contextWindow);
 
-    // Strict 90%: Only trigger when actual current tokens reach the 90% boundary without speculative inflation
+    // Strict boundary: only trigger when actual current tokens reach the configured ceiling
+    // without speculative inflation.
     if (currentEstimatedTokens >= ceilingTokens) {
+      const consequence = this.autoRotate
+        ? 'Rotación automática de sesión programada al finalizar el turno.'
+        : 'Rotación automática deshabilitada en el panel: ejecutá /supervisor y usá la acción «rotate now», o liberá contexto.';
       return {
         block: true,
         terminate: true,
-        reason: 'Límite de seguridad de contexto alcanzado (90%). Rotación automática de sesión programada al finalizar el turno.',
+        reason: `Límite de seguridad de contexto alcanzado (${this.rotationThresholdPercent}%). ${consequence}`,
       };
     }
 

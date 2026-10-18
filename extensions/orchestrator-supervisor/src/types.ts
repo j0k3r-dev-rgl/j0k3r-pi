@@ -1,15 +1,37 @@
-export type ModelCandidateId =
-  | 'cliproxyapi/main/gpt-6.1-sol'
-  | 'cliproxyapi/second/gpt-6.1-sol'
-  | 'cliproxyapi/j0k3r/gemini-3.8-flash-high';
+export type CandidateId = string;
+// Retained alias: candidate IDs are now any `<provider>/<modelId>` route, where the
+// model id itself may contain slashes (for example `cliproxyapi/main/gpt-6.1-sol`).
+export type ModelCandidateId = CandidateId;
+
+export type CandidateSource = 'account' | 'registered';
+export type QuotaProtocol = 'wham' | 'gemini' | 'none';
 
 export interface ModelCandidate {
-  id: ModelCandidateId;
-  prefix: 'main' | 'second' | 'j0k3r';
+  id: CandidateId;
+  source: CandidateSource;
+  quotaProtocol: QuotaProtocol;
+  /** Account routes only: CLIProxyAPI credential prefix. */
+  prefix?: string;
+  /** Account routes only: verified quota protocol family. */
+  family?: 'codex' | 'gemini';
   modelSlug: string;
   provider: string;
   reasoningEffort: 'high';
-  contextWindowCap: number;
+  /** Known-safe context ceiling; omitted means fall back to the reported window. */
+  contextWindowCap?: number;
+  /**
+   * Public-host-proven effort levels for this concrete model (`supportedModelEfforts`),
+   * enriched by the panel host from the actual registry model. Absent or empty means the
+   * capability is unknown: the effort picker then offers Default only, never an invented
+   * level.
+   */
+  supportedEfforts?: import('./model-effort.ts').ModelEffort[];
+}
+
+export interface RegisteredModel {
+  provider: string;
+  id: string;
+  contextWindow?: number;
 }
 
 export interface WhamWindowUsage {
@@ -38,7 +60,7 @@ export interface GeminiQuotaResult {
 }
 
 export interface CandidateQuotaStatus {
-  candidateId: ModelCandidateId;
+  candidateId: CandidateId;
   isEligible: boolean;
   reason: string;
   whamUsage?: WhamQuotaResult;
@@ -77,13 +99,27 @@ export interface JournalEntry {
   operationKind?: 'git_commit' | 'git_push' | 'file_mutation' | 'bash' | 'other';
 }
 
+/**
+ * A genuine safety stop. It is never a user preference: the supervisor refuses its own
+ * automatic and manual rotation while one of these is recorded, and only an explicit
+ * human decision (switching the master configuration off and on) clears it.
+ */
+export type SupervisorSafetyFaultKind = 'credentials' | 'handover' | 'wal';
+
+export interface SupervisorSafetyFault {
+  kind: SupervisorSafetyFaultKind;
+  /** Short human-readable cause; never a credential, token or response body. */
+  message: string;
+  at: number;
+}
+
 export interface SupervisorState {
   flowIdentity: string;
   sessionId: string;
-  activeModel: ModelCandidateId;
-  status: 'active' | 'paused' | 'cancelled' | 'rotating' | 'idle' | 'stopped';
-  userPaused: boolean;
-  userCancelled: boolean;
+  activeModel: CandidateId;
+  status: 'active' | 'idle' | 'stopped';
+  /** Set when a safety fence halted the runtime; absent in normal operation. */
+  safetyFault?: SupervisorSafetyFault;
   activeGeneration: number;
   lastCheckpointMemoryId?: number;
   rotationHandoverToken?: string;
@@ -99,11 +135,9 @@ export interface SupervisorState {
     changeSlug?: string;
     step: string;
   };
+  owedProviderTurn?: boolean;
+  pendingTaskDeliveries?: string[];
+  pendingJobDeliveries?: string[];
   uncertainMutationsCount: number;
   updatedAt: number;
-}
-
-export interface ReloadGuardQuery {
-  cwd: string;
-  defer: (reason: string) => void;
 }
