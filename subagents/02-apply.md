@@ -1,6 +1,7 @@
 ---
 name: 02-apply
 description: "Implements an approved Planned Workflow contract using TDD where applicable, bounded file access, and a compact apply.md summary with final validation results."
+effort: high
 tools:
   - read
   - bash

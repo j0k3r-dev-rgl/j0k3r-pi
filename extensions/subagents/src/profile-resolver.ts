@@ -31,7 +31,9 @@ function resolveModel(_definition: SubagentDefinition, _config: SubagentsConfig,
   return field('unresolved', undefined, modelLabel);
 }
 
-function resolveEffort(_definition: SubagentDefinition, _config: SubagentsConfig, ctx: any): ResolvedProfileField<ThinkingEffort> {
+function resolveEffort(definition: SubagentDefinition, _config: SubagentsConfig, ctx: any): ResolvedProfileField<ThinkingEffort> {
+  // Per-agent frontmatter `effort:` wins; otherwise inherit the orchestrator.
+  if (definition.effort) return field('definition', definition.effort, String);
   const orchestratorEffort = effortFromCtx(ctx);
   if (orchestratorEffort) return field('orchestrator', orchestratorEffort, String);
   return field('unresolved', undefined, String);

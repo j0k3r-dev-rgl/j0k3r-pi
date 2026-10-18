@@ -1,6 +1,7 @@
 ---
 name: 01-planning
 description: "Creates or updates plan.md as the delegated Planned Workflow implementation contract from approved bounded context, using bounded code and external research when needed."
+effort: high
 tools:
   - read
   - write
