@@ -114,7 +114,7 @@ El modo lean carga herramientas permitidas y hooks de seguridad, sin inyectar co
 
 ## Integraciones y ciclo de vida
 
-La extensión funciona independientemente de otras extensiones. Cuando existe un asignador como CPAMC, el manager emite `subagents:task:allocate` tanto para tareas nuevas como para continuaciones; cada intento vuelve a solicitar asignación. Sin asignador o ante fallo de asignación, usa el modelo y esfuerzo del orquestador. Al terminar emite `subagents:task:terminal`.
+La extensión funciona independientemente de otras extensiones. Cuando existe un asignador (como `orchestrator-supervisor`), el manager emite `subagents:task:allocate` tanto para tareas nuevas como para continuaciones; cada intento vuelve a solicitar asignación. Sin asignador o ante fallo de asignación, usa el modelo y esfuerzo del orquestador. Al terminar emite `subagents:task:terminal`.
 
 El supervisor puede seguir observando `subagent_run`, los eventos y SQLite sin depender de las tools eliminadas. El historial, widget y controles manuales usan directamente el manager. Al cerrar la sesión se drenan tareas y recursos; las tareas huérfanas se reconcilian como interrumpidas sin volver a emitir resultados de background.
 

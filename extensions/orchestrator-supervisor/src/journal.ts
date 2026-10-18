@@ -117,11 +117,10 @@ export class FlowJournal {
       try {
         const raw = readFileSync(this.journalPath, 'utf8');
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          this.entries = parsed;
-        }
+        if (!Array.isArray(parsed) || parsed.some((e) => !e || typeof e.toolCallId !== 'string' || !['pending', 'settled', 'uncertain'].includes(e.status) || typeof e.isMutating !== 'boolean')) throw new Error('invalid journal');
+        this.entries = parsed;
       } catch {
-        this.entries = [];
+        throw new Error('Supervisor journal is corrupt; inspect it before resuming.');
       }
     }
   }
@@ -139,7 +138,7 @@ export class FlowJournal {
     const argsString = JSON.stringify(params.args ?? {});
     const argsHash = createHash('sha256').update(argsString).digest('hex').slice(0, 16);
     const argsSummary = params.toolName === 'bash'
-      ? (typeof params.args?.command === 'string' ? params.args.command.slice(0, 120) : 'bash command')
+      ? (typeof params.args?.command === 'string' ? 'bash command (redacted)' : 'bash command')
       : (typeof params.args?.path === 'string' ? params.args.path : `${params.toolName} args`);
 
     const entry: JournalEntry = {
@@ -241,7 +240,7 @@ export class FlowJournal {
       const raw = readFileSync(this.statePath, 'utf8');
       return JSON.parse(raw);
     } catch {
-      return null;
+      throw new Error('Supervisor state is corrupt; inspect it before resuming.');
     }
   }
 }

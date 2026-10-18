@@ -36,9 +36,10 @@ const mockTheme = {
   bold: (text) => text,
 };
 
-test("MINI-001: SUPPORTED_EXTENSIONS contains 11 current opt-in items including codegraph, typesafe, and orchestrator-supervisor", () => {
-  assert.equal(SUPPORTED_EXTENSIONS.length, 11);
+test("MINI-001: SUPPORTED_EXTENSIONS contains 10 current opt-in items including codegraph and typesafe", () => {
+  assert.equal(SUPPORTED_EXTENSIONS.length, 10);
   assert.equal(SUPPORTED_EXTENSIONS.some((e) => /engram|memory/.test(e.id)), false, "Memory is managed by Pi native resources");
+  assert.equal(SUPPORTED_EXTENSIONS.some((e) => e.id === "orchestrator-supervisor"), false, "orchestrator-supervisor is managed via /supervisor panel switch");
   const codegraph = SUPPORTED_EXTENSIONS.find((e) => e.id === "codegraph");
   assert.ok(codegraph, "codegraph must exist in SUPPORTED_EXTENSIONS");
   assert.deepEqual(codegraph, {
@@ -53,14 +54,6 @@ test("MINI-001: SUPPORTED_EXTENSIONS contains 11 current opt-in items including 
     id: "typesafe",
     name: "typesafe",
     description: "TypeSafe System One (Jev) semantic AI evaluation",
-  });
-
-  const supervisor = SUPPORTED_EXTENSIONS.find((e) => e.id === "orchestrator-supervisor");
-  assert.ok(supervisor, "orchestrator-supervisor must exist in SUPPORTED_EXTENSIONS");
-  assert.deepEqual(supervisor, {
-    id: "orchestrator-supervisor",
-    name: "orchestrator-supervisor",
-    description: "Automatic quota, context & session failover supervisor",
   });
 });
 
@@ -101,48 +94,21 @@ test("MINI-001: clicking on any extension item row (0 to 8) accurately toggles t
   }
 });
 
-test("MINI-001: clicking on action buttons row (y = 30 for 11 items) invokes saveConfig or dismisses", () => {
+test("MINI-001: clicking on action buttons row (y = 28 for 10 items) invokes saveConfig or dismisses", () => {
   const tmp = mkdtempSync(join(tmpdir(), "tools-manager-test-"));
   try {
     let doneResult;
     const modal = new ToolsManagerModal(tmp, mockTheme, (res) => { doneResult = res; });
 
-    // Buttons row for 11 items is 5 + 11*2 + 3 = 30.
-    modal.handleMouse({ button: "left", type: "click", x: 35, y: 30 });
+    // Buttons row for 10 items is 5 + 10*2 + 3 = 28.
+    modal.handleMouse({ button: "left", type: "click", x: 35, y: 28 });
     assert.deepEqual(doneResult, { action: "cancel" });
 
-    // Reset doneResult and click save at y = 30, x = 15.
+    // Reset doneResult and click save at y = 28, x = 15.
     doneResult = undefined;
-    modal.handleMouse({ button: "left", type: "click", x: 15, y: 30 });
+    modal.handleMouse({ button: "left", type: "click", x: 15, y: 28 });
     assert.ok(doneResult);
     assert.equal(doneResult.action, "save");
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test("MINI-001: clicking on orchestrator-supervisor row (index 10, y = 25) toggles checked state and persists to .pi/extensions.json", () => {
-  const tmp = mkdtempSync(join(tmpdir(), "tools-manager-test-"));
-  try {
-    const piDir = join(tmp, ".pi");
-    const configPath = join(piDir, "extensions.json");
-    mkdirSync(piDir, { recursive: true });
-    writeFileSync(configPath, JSON.stringify({ "foreign-key": true, "orchestrator-supervisor": false }), "utf8");
-
-    let doneResult;
-    const modal = new ToolsManagerModal(tmp, mockTheme, (res) => { doneResult = res; });
-
-    // orchestrator-supervisor is index 10, rendered at y = 5 + 2*10 = 25.
-    const res = modal.handleMouse({ button: "left", type: "click", x: 10, y: 25 });
-    assert.deepEqual(res, { handled: true, render: true });
-
-    modal.saveConfig();
-    assert.ok(doneResult);
-    assert.equal(doneResult.selected?.["orchestrator-supervisor"], true);
-
-    const saved = JSON.parse(readFileSync(configPath, "utf8"));
-    assert.equal(saved["foreign-key"], true);
-    assert.equal(saved["orchestrator-supervisor"], true);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

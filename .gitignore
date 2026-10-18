@@ -57,7 +57,8 @@ bin
 models-store.json
 # Local Pi runtime state
 /subagents.json
-/cpamc-subagent-pool-state.json
+/orchestrator-supervisor/
+/extensions/orchestrator-supervisor/.runtime/
 .atl/
 .codegraph/
 

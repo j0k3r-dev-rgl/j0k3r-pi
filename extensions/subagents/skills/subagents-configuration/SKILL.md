@@ -1,6 +1,6 @@
 ---
 name: subagents-configuration
-description: "configure Pi Subagents with explicit global/project scope, markdown definitions, cascaded subagents.json defaults, opt-in continuation, automatic CPAMC model allocation with orchestrator fallback, execution modes, tool allowlists, shortcuts, history, and live background steering guidance."
+description: "configure Pi Subagents with explicit global/project scope, markdown definitions, cascaded subagents.json defaults, opt-in continuation, automatic supervisor model allocation with orchestrator fallback, execution modes, tool allowlists, shortcuts, history, and live background steering guidance."
 license: Apache-2.0
 metadata:
   author: j0k3r
@@ -55,7 +55,7 @@ Use this block as the machine-readable source for `.pi/skill-registry.json` gene
       "subagent config",
       "subagents.json",
       "model allocation",
-      "CPAMC allocation",
+      "supervisor model allocation",
       "orchestrator model fallback",
       "tool allowlist configuration",
       "subagent history configuration",
@@ -118,7 +118,7 @@ Do not load this skill for ordinary subagent delegation/use (`subagent_run`, tas
 - Subagents config resolves as a cascade: project `.pi/subagents.json` overrides global `$PI_CODING_AGENT_DIR/subagents.json` or `~/.pi/agent/subagents.json`; missing project fields fall back to global config; fields missing from both fall back to built-in defaults. Communicate this precedence to users when explaining config behavior.
 - `enable_continue` is built-in default `false` and follows that same cascade. Project `enable_continue` overrides global only when present; omitting it locally inherits the global value. Continuation guidance and new continuation execution are available only when the effective value is `true`.
 - `subagent_run` is always the only registered tool, with optional `action` defaulting to `run`. Explicit `continue` and `message` actions require `task_id` and use `task` for instructions. When effective `enable_continue` is `false`, `continue` returns an explanatory error, history remains visible, and failure/cancellation/interruption notifications must not recommend continuation. The flag does not disable live `message` actions.
-- Model and thinking effort are managed automatically by the CPAMC subagent pool via the `subagents:task:allocate` event hook. When CPAMC is unavailable, allocation fails, or returns no model, subagents automatically fall back to the parent orchestrator model and thinking effort from context. Manual model selection, `/subagent-models`, `default_model`, `default_effort`, and `model_profiles` keys are obsolete; legacy `model_profiles` keys in `subagents.json` are inert at runtime and are never rewritten on disk.
+- Model and thinking effort are managed automatically by orchestrator-supervisor via the `subagents:task:allocate` event hook. When the supervisor allocator is disabled, unavailable, allocation fails, or returns no model, subagents automatically fall back to the parent orchestrator model and thinking effort from context. Manual model selection, `/subagent-models`, `default_model`, `default_effort`, and `model_profiles` keys are obsolete; legacy `model_profiles` keys in `subagents.json` are inert at runtime and are never rewritten on disk.
 - Markdown definitions should usually contain identity, description, tool allowlist, and behavioral instructions only.
 - Nested subagent sessions should use `session_resources: "lean"` by default so the subagent markdown body becomes the nested session system prompt, the delegated user prompt contains only orchestrator context/task, and workflow skills, prompt templates, themes, context files, and startup context injections are not auto-loaded.
 - In lean mode, extensions are loaded for allowlisted tools and tool-safety hooks only; prompt/context lifecycle hooks such as `before_agent_start` and `context` must not inject hidden messages into subagent turns.
@@ -183,7 +183,7 @@ Tool entries can include `*` wildcards such as `tool_*`. Wildcards expand at sub
 
 Model and effort allocation:
 
-Model and thinking effort are allocated automatically by the CPAMC subagent pool (e.g. Gemini 3.8 Flash with high effort) through the `subagents:task:allocate` event hook. When CPAMC is unavailable, allocation is unclaimed, or an allocator error occurs, the runner falls back to the current orchestrator model and thinking effort from the parent session context. Manual model configuration, `/subagent-models`, and legacy `model_profiles` entries are obsolete and inert.
+Model and thinking effort are allocated automatically by orchestrator-supervisor through the `subagents:task:allocate` event hook. When the supervisor is disabled, unavailable, allocation is unclaimed, or an allocator error occurs, the runner falls back to the current orchestrator model and thinking effort from the parent session context. Manual model configuration, `/subagent-models`, and legacy `model_profiles` entries are obsolete and inert.
 
 Execution-mode resolution order:
 
@@ -220,7 +220,7 @@ Continuation-mode resolution order (when `enable_continue` is enabled):
 5. Summarize existing effective values, what will be inherited, and exactly which file would change; ask for any missing product choice such as `task` versus `background` before editing.
 6. For new subagents, choose lowercase kebab-case names and clear trigger-focused descriptions. Write definitions in English by default; use another language only when explicitly requested. Prefer `subagents` unless compatibility requires `agents`.
 7. Set minimal tool allowlists; remove any `subagent_*` entries.
-8. Do not configure `model_profiles`, `default_model`, or `default_effort` (legacy keys are inert). Configure `default_mode` and `enable_continue` only in the user-approved scope. Explain CPAMC automatic allocation and orchestrator model/effort fallback, execution-mode precedence, and that `enable_continue` is checked on each continuation call without changing tool exposure.
+8. Do not configure `model_profiles`, `default_model`, or `default_effort` (legacy keys are inert). Configure `default_mode` and `enable_continue` only in the user-approved scope. Explain orchestrator-supervisor automatic allocation and orchestrator model/effort fallback, execution-mode precedence, and that `enable_continue` is checked on each continuation call without changing tool exposure.
 9. Never add the removed UI key `mode: "opencode" | "claude"`. Configure history and handoff independently with `history_panel_shortcut`, `detail_cancel_shortcut`, and `background_handoff_shortcut`.
 10. Configure `debug: true` only for temporary diagnostics; keep it false by default and explain that logs are written under the executing project's `.pi` directory.
 11. Validate JSON syntax and Markdown frontmatter/body structure. Preserve unrelated existing keys and definitions.
@@ -237,7 +237,7 @@ Return:
 - Package settings and subagents/config fields added, changed, or preserved.
 - Scope decision: global, project-local, or definition-specific; include the effective cascade and why that scope was selected.
 - User choices requested before editing, including default execution mode or override intent when relevant.
-- Tool allowlist, system-prompt isolation, Context7 scope, memory-tool scope, debug logging, CPAMC model allocation and orchestrator fallback behavior.
+- Tool allowlist, system-prompt isolation, Context7 scope, memory-tool scope, debug logging, orchestrator-supervisor model allocation and orchestrator fallback behavior.
 - Runtime behavior explained when relevant: task vs background, automatic notifications, enabled-only continuation mode preservation/override, same-parent `subagent_run` live messages, `/subagents`, configured expansion keys, and artifact-based result access.
 - Related configuration skills considered or loaded.
 - Validation executed, or the concrete reason it was not run.

@@ -79,8 +79,6 @@ test('MINI-006: FlowJournal saves and loads state.json with atomic rename and di
       sessionId: 'session-1',
       activeModel: 'cliproxyapi/main/gpt-6.1-sol',
       status: 'active',
-      userPaused: false,
-      userCancelled: false,
       activeGeneration: 1,
       uncertainMutationsCount: 0,
       updatedAt: Date.now(),
@@ -130,4 +128,3 @@ test('MINI-006: FlowJournal classifies git commit vs git push and tracks partial
     rmSync(tmpDir, { recursive: true, force: true });
   }
 });
-

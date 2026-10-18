@@ -22,6 +22,8 @@ export interface ClassificationAction {
 
 export class ErrorClassifier {
   private activeOrchestratorSessionId: string;
+  private maxTransientFailures: number;
+  private cooldownMs: number;
   private consecutiveErrors = new Map<ModelCandidateId, number>();
   private cooldowns = new Map<ModelCandidateId, number>();
   private excludedUntilRestored = new Map<
@@ -29,12 +31,37 @@ export class ErrorClassifier {
     { reason: 'auth_revoked' | 'model_not_found'; timestamp: number }
   >();
 
-  constructor(activeOrchestratorSessionId: string) {
+  constructor(
+    activeOrchestratorSessionId: string,
+    options?: { maxTransientFailures?: number; cooldownMs?: number },
+  ) {
     this.activeOrchestratorSessionId = activeOrchestratorSessionId;
+    this.maxTransientFailures = options?.maxTransientFailures ?? MAX_TRANSIENT_FAILURES;
+    this.cooldownMs = options?.cooldownMs ?? COOLDOWN_DURATION_MS;
   }
 
   setSessionId(sessionId: string): void {
     this.activeOrchestratorSessionId = sessionId;
+  }
+
+  /**
+   * Adopts a failure policy changed from the control panel. Counters and cooldowns already
+   * registered stay as they are: this changes the rule, not the history that produced it.
+   */
+  setFailurePolicy(options: { maxTransientFailures?: number; cooldownMs?: number }): void {
+    if (options.maxTransientFailures !== undefined) this.maxTransientFailures = options.maxTransientFailures;
+    if (options.cooldownMs !== undefined) this.cooldownMs = options.cooldownMs;
+  }
+
+  /**
+   * The operator reads this in the reason of a failover, so it must name the cooldown
+   * this runtime actually uses: a hardcoded duration would describe a policy that is not
+   * running. Whole minutes read as `5m`; anything shorter keeps its exact length.
+   */
+  private cooldownLabel(): string {
+    if (this.cooldownMs > 0 && this.cooldownMs % 60_000 === 0) return `${this.cooldownMs / 60_000}m`;
+    if (this.cooldownMs > 0 && this.cooldownMs % 1000 === 0) return `${this.cooldownMs / 1000}s`;
+    return `${this.cooldownMs}ms`;
   }
 
   getConsecutiveErrors(candidateId: ModelCandidateId): number {
@@ -176,7 +203,7 @@ export class ErrorClassifier {
       !options.freshQuotaStatus.isUnknown;
 
     if (isLiteralHardQuota || isQuotaConfirmedExhausted) {
-      this.setCooldown(candidateId, COOLDOWN_DURATION_MS);
+      this.setCooldown(candidateId, this.cooldownMs);
       return {
         type: 'immediate_failover',
         isHardQuota: true,
@@ -189,13 +216,13 @@ export class ErrorClassifier {
     const current = (this.consecutiveErrors.get(candidateId) ?? 0) + 1;
     this.consecutiveErrors.set(candidateId, current);
 
-    if (current >= MAX_TRANSIENT_FAILURES) {
-      this.setCooldown(candidateId, COOLDOWN_DURATION_MS);
+    if (current >= this.maxTransientFailures) {
+      this.setCooldown(candidateId, this.cooldownMs);
       return {
         type: 'cooldown_failover',
         consecutiveErrors: current,
         shouldAbortRetry: true,
-        reason: `3 consecutive transient provider errors on ${candidateId}; putting into 15m cooldown and failing over.`,
+        reason: `Transient failures reached the configured limit of ${this.maxTransientFailures} on ${candidateId}; putting into ${this.cooldownLabel()} cooldown and failing over.`,
       };
     }
 
@@ -209,7 +236,7 @@ export class ErrorClassifier {
       consecutiveErrors: current,
       retryDelayMs,
       shouldAbortRetry: false,
-      reason: `Transient provider error (attempt ${current}/${MAX_TRANSIENT_FAILURES}). Retrying in ${retryDelayMs}ms.`,
+      reason: `Transient provider error (attempt ${current}/${this.maxTransientFailures}). Retrying in ${retryDelayMs}ms.`,
     };
   }
 }

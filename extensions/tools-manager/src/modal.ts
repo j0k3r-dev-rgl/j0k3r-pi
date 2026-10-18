@@ -20,7 +20,6 @@ export const SUPPORTED_EXTENSIONS: ToolExtensionItem[] = [
 	{ id: "pdf-review", name: "pdf-review", description: "PDF inspection & text review" },
 	{ id: "codegraph", name: "codegraph", description: "CodeGraph semantic exploration & index management" },
 	{ id: "typesafe", name: "typesafe", description: "TypeSafe System One (Jev) semantic AI evaluation" },
-	{ id: "orchestrator-supervisor", name: "orchestrator-supervisor", description: "Automatic quota, context & session failover supervisor" },
 ];
 
 export interface ModalResult {
