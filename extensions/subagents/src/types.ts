@@ -81,6 +81,8 @@ export type SubagentsConfig = {
   project_model_profiles?: SubagentModelProfiles;
   timeout_ms: number;
   stall_timeout_ms: number;
+  /** Inactivity budget while a tool call is in flight (long tests/builds). */
+  tool_stall_timeout_ms?: number;
   max_concurrency: number;
   default_tools: string[];
   session_resources?: SubagentSessionResources;

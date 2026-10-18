@@ -126,7 +126,7 @@ describe('completion message render', () => {
     expect(sendMessage.mock.calls[0][0].content).not.toContain('Ask the user before resuming');
   });
 
-  it('delivers background completion messages as followUp and triggers an LLM turn immediately', () => {
+  it('delivers background completion messages as steer and triggers an LLM turn immediately', () => {
     const sendMessage = vi.fn();
     sendSubagentCompletionMessage({ sendMessage }, {
       id: 'subtask_notify_1',
@@ -141,7 +141,7 @@ describe('completion message render', () => {
     expect(sendMessage).toHaveBeenCalledTimes(1);
     expect(sendMessage.mock.calls[0][0]).toMatchObject({ display: true });
     expect(sendMessage.mock.calls[0][0].content).toContain('subtask_notify_1');
-    expect(sendMessage.mock.calls[0][1]).toEqual({ triggerTurn: true, deliverAs: 'followUp' });
+    expect(sendMessage.mock.calls[0][1]).toEqual({ triggerTurn: true, deliverAs: 'steer' });
   });
 
   it('renders real failure notifications as errors rather than successful response sections', async () => {

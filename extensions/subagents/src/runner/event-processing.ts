@@ -228,6 +228,9 @@ export async function promptWithInactivity(
   attempt = 1,
   onQueuedMessageStart?: () => void,
   previousSnapshot?: SubagentThreadSnapshot,
+  // Budget while a tool call is in flight (long tests/builds may stay silent);
+  // falls back to the idle budget when not supplied.
+  toolStallTimeoutMs = stallTimeoutMs,
 ): Promise<{ result: string; usage: UsageStats; thread_snapshot?: SubagentThreadSnapshot; interaction_request?: SubagentInteractionRequest }> {
   let output = '';
   const snapshotBuilder = new ThreadSnapshotBuilder(displayPrompt, delegatedContext, cwd, previousSnapshot, promptLabel, attempt);
@@ -237,6 +240,7 @@ export async function promptWithInactivity(
   let transcript = `${systemPrompt ? `# system prompt\n\n${systemPrompt}\n\n` : ''}# ${promptLabel === 'continuation' ? 'continuation prompt' : 'delegated prompt'}\n\n${prompt}\n\n# subagent execution\n`;
   let lastActivity = Date.now();
   let stalled = false;
+  let stalledAfterMs = stallTimeoutMs;
   const initialMessagesLength = promptLabel === 'continuation' && Array.isArray(session.messages) ? session.messages.length : 0;
   let sawToolActivity = false;
   let piRetryAttempts = 0;
@@ -338,15 +342,18 @@ export async function promptWithInactivity(
   }) ?? (() => {});
   const interval = setInterval(() => {
     if (stalled) return;
+    let budget = stallTimeoutMs;
     if (activeToolCalls.size === 0) {
       if (Date.now() - lastActivity <= stallTimeoutMs) return;
     } else {
+      budget = Math.max(stallTimeoutMs, toolStallTimeoutMs);
       const oldestToolUpdate = Math.min(...[...activeToolCalls.values()].map((entry) => entry.lastUpdate));
-      if (Date.now() - oldestToolUpdate <= stallTimeoutMs) return;
+      if (Date.now() - oldestToolUpdate <= budget) return;
     }
     stalled = true;
-    transcript += `\n\n--- stall ---\nstalled for ${stallTimeoutMs}ms; aborting session\n`;
-    onActivity?.({ message: `stalled for ${stallTimeoutMs}ms; aborting session`, output, transcript, usage, thread_snapshot: snapshotBuilder.snapshot(), interaction_request: latestInteractionRequest, pi_retry_attempts: piRetryAttempts, live_activity: liveActivity.project() });
+    stalledAfterMs = budget;
+    transcript += `\n\n--- stall ---\nstalled for ${budget}ms; aborting session\n`;
+    onActivity?.({ message: `stalled for ${budget}ms; aborting session`, output, transcript, usage, thread_snapshot: snapshotBuilder.snapshot(), interaction_request: latestInteractionRequest, pi_retry_attempts: piRetryAttempts, live_activity: liveActivity.project() });
     session.abort?.().catch?.(() => {});
   }, Math.min(5000, Math.max(500, stallTimeoutMs / 4)));
   try {
@@ -364,9 +371,9 @@ export async function promptWithInactivity(
       const metadata = normalizeErrorMetadata({
         category: 'stall_timeout',
         phase: 'runner_session',
-        message: `Subagent stalled for ${stallTimeoutMs}ms without final response.`,
+        message: `Subagent stalled for ${stalledAfterMs}ms without final response.`,
         partial_result_available: Boolean(output.trim() || thread_snapshot?.items?.length),
-        details: { stall_timeout_ms: String(stallTimeoutMs) },
+        details: { stall_timeout_ms: String(stalledAfterMs) },
       });
       transcript += `\n\n# subagent failure\n\n${metadata.message}`;
       onActivity?.({ message: `failed: ${metadata.message}`, output: '', transcript, usage, thread_snapshot, interaction_request: latestInteractionRequest, pi_retry_attempts: piRetryAttempts, live_activity: liveActivity.project() });
