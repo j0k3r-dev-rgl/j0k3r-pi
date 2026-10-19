@@ -4,7 +4,7 @@ description: "Route software requests between Direct Orchestrator and Planned Wo
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "12.0"
+  version: "12.1"
 registry:
   category: "workflow"
   domains: "workflow-routing, orchestration, openspec"
@@ -27,7 +27,7 @@ This skill selects Direct Orchestrator or Planned Workflow, classifies advice ve
 ## Hard Rules
 
 - Apply explicit no-delegation authorization first: use Direct Orchestrator for the approved scope, including investigation, planning, implementation, and validation. Do not delegate or create mandatory Planned Workflow ceremony under this override.
-- **Research-to-Direct Execution Fast Path**: If a prior deep research or investigation (such as from `deep-researcher`) has already identified the exact root cause, files, and proposed solution, do not force Planned Workflow or redundant `00-discovery`. Route directly to Direct Orchestrator to apply the targeted fix, run tests, and report the verified outcome.
+- **Research-to-Direct Execution Fast Path**: Reuse completed research with an exact root cause, files, and solution. Route the targeted implementation to Direct Orchestrator only with applicable user implementation authorization under `AGENTS.md`; otherwise present findings and stop. Do not repeat discovery/planning or request authorization already granted. Research alone never grants mutation authority.
 - Without that override, use Direct Orchestrator for answers to direct factual questions, exact known reads, trivial localized edits, and lightweight validation; use Planned Workflow for bounded implementation needing a shared contract.
 - When requested to investigate, research, or inspect a topic, behavior, question, architecture, or codebase outside an implementation change, delegate to `deep-researcher` (which writes `report.md` and `sources.md`).
 - For unknown local code, behavior, tests, or structure before an implementation change in Planned Workflow, delegate `00-discovery` with an exact absolute `openspec/changes/<change-slug>/discovery.md` output path. Project files remain read-only; only that artifact may be written.

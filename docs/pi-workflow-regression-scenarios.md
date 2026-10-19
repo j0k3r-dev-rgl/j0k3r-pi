@@ -24,7 +24,7 @@ Related skills are handoff hints, not additional owners. A lower-ranked generic 
 | ID | Request | Expected result |
 |---|---|---|
 | WF-01 | “Which workflow should I use?” | `workflow-triage`; `ADVICE_ONLY`; no project inspection or execution. |
-| WF-02 | Small explicit bounded code fix | Direct Orchestrator only when exact files/symbols and trivial patch are already known; otherwise delegated `00-discovery` first, then TDD and anti-overengineering. |
+| WF-02 | Small explicit bounded code fix | Use Direct Orchestrator for a known trivial patch, an explicit direct override, or an authorized targeted fix already resolved by completed research. Otherwise use bounded discovery in Planned Workflow; never duplicate sufficient research. Apply TDD and anti-overengineering to code changes. |
 | WF-03 | Medium multi-file feature with shared plan | Planned Workflow delegates planning, apply, and independent verify; after user approval, the orchestrator archives directly. |
 | WF-04 | Work cannot fit a coherent lightweight contract | Resolve material decisions or split scope with the user; do not introduce another workflow. |
 | WF-05 | User explicitly requests execution without delegation | Direct Orchestrator investigates, plans, implements, and validates within approved scope; no delegated phases. |
@@ -48,6 +48,16 @@ Related skills are handoff hints, not additional owners. A lower-ranked generic 
 | WF-21 | User explicitly requests product documentation | Use project-documentation independently; its ownership modules are not Planned Workflow phases. |
 | WF-22 | Decision is missing or ambiguous | Trip circuit breaker immediately: stop execution, ask user directly for the decision, do not mutate files or guess defaults. |
 | WF-23 | Orchestrator prepares to mutate files | Present Pre-Mutation Summary Gate to user (files, changes, rationale, validation) before applying modifications. |
+| WF-24 | Research identifies exact cause and fix, but user requested analysis only | Present findings and stop; sufficient evidence permits reusing research, not implementation. |
+| WF-25 | User authorizes the targeted fix after sufficient research | Direct Orchestrator applies and validates after the summary gate; no repeated discovery/planning or redundant consent. Configuration Lock still applies. |
+| WF-26 | A subagent has an unresolved material decision and a live parent-question channel | Stop dependent work, ask through ask_orchestrator, wait in the same session; return BLOCKED when no channel/resolution exists. Parent answers facts/approved decisions, asks user for unmade decisions, and does not invent authority. |
+| WF-27 | plan.md defines independent Parallel Units | Launch independent workers concurrently in one turn, omitting mode unless explicitly requested by the user; manager chooses mode. Integrate once and run one combined independent verify, not one verify per unit. |
+| WF-28 | Parallel apply starts with pre-existing modified/untracked files | Capture pre-apply path/state/content and index identities. Surface Check attributes only baseline-relative deltas; unchanged pre-existing work is not worker output. Never clean/stash/reset or demand a commit. |
+| WF-29 | A worker changes a file that was already modified before apply | Content identity must reveal the delta even when git status/name is unchanged. New outside-surface or concurrent edits require attribution; missing baseline blocks rather than retrospective reconstruction. |
+| WF-30 | New verify snapshot must be reproducible | Record exact present/absent identities and SHA-256 of UTF-8 JSON.stringify of path-sorted three-string records, with the complete read-only command and concrete paths. Repeat at delivery/archive; drift blocks. Reject duplicate paths and unexpected symlinks; preserve historical encodings. |
+| WF-31 | Verify sections could duplicate acceptance evidence | Keep proof once in the MINI matrix; other sections contain only gaps, discrepancies, or references. Matching hashes do not replace functional acceptance. |
+| WF-32 | Routing cache is stale/missing or returns many candidates | Resolve directly against live sources with include_related:false for owner selection; no cache writes or generate prerequisite. Read selected skills only, retaining mandatory guardrails. |
+| WF-33 | A rule is repeated across workflow documents | Keep authorization in AGENTS, routing in triage, lifecycle in work-workflow, and formats in artifact-contracts; preserve lean-worker boundaries and explicit assigned-contract reads. |
 
 ## Compact delegation and directory scope
 

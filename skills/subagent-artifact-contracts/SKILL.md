@@ -4,7 +4,7 @@ description: "define canonical discovery and Planned Workflow Markdown artifacts
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "2.3"
+  version: "2.4"
 registry:
   category: "workflow"
   domains: "subagents, markdown-artifacts, openspec, handoff-contracts, execution-scope"
@@ -30,7 +30,7 @@ Own artifact structure, status, execution-scope fields, evidence, and handoffs. 
 - Use English for reusable workflow artifacts and all handoffs. Research/news reports follow their explicitly assigned language.
 - Reference these templates rather than copying them into agent definitions.
 - `READY` requires concrete paths, IDs, evidence and commands required by the artifact; no placeholders or invented authority.
-- **Circuit Breaker**: Missing material evidence, unresolved decisions, scope ambiguities, or required user choices trip the circuit breaker. Return `BLOCKED` immediately with the exact blocker; never guess, assume defaults, or invent authority.
+- **Circuit Breaker**: Missing material evidence, unresolved decisions, scope ambiguities, or required choices stop dependent work immediately. If `ask_orchestrator` is available, ask the exact question and wait in the same session; otherwise, or if the response does not resolve the blocker, return `BLOCKED`. Resume only within supplied authority; never guess, invent requirements, or treat a factual answer as new implementation/configuration permission. Actual failed/unexecuted required checks remain blockers until resolved.
 - Each artifact-producing agent writes only its assigned artifact. `02-apply` additionally edits authorized implementation paths. Archive belongs to the orchestrator, not a subagent; its safety checks live in `work-workflow`.
 - Discovery leaves project files unchanged except for its exact assigned `discovery.md` and creation of that artifact's parent directory.
 - Artifact status and handoff status must agree. Successful handoffs contain no repeated evidence, file inventories, or summaries.
@@ -101,7 +101,7 @@ Every governed delegated result returns exactly:
 - Next action: <one permitted action or None>
 ```
 
-No text follows this block. Evidence belongs inside the artifact. If required output authority is missing, return `BLOCKED` with `Artifact: None`; do not invent a path. If multiple blockers exist, detail them in the artifact when possible and name the primary one here.
+No text follows this block. Evidence belongs inside the artifact. If required output authority remains missing after the Circuit Breaker question/fallback, return `BLOCKED` with `Artifact: None`; do not invent a path. If multiple blockers exist, detail them in the artifact when possible and name the primary one here.
 
 ## Evidence-First File Access
 
@@ -174,15 +174,21 @@ Sections after Workflow Status:
 1. Verification Result
 2. Contracts & Candidate Reviewed
 3. Evidence Matrix — one row per `MINI-###`, acceptance checks, evidence, PASS or issue
-4. Acceptance Coverage
-5. Implementation & Final Validation Review
+4. Acceptance Coverage — gaps or exceptions only; otherwise reference the matrix
+5. Implementation & Final Validation Review — validation outcome and discrepancies, not copied acceptance proof
 6. Issues & Required User Decision
-7. Applicable Code & Scope Compliance
+7. Applicable Code & Scope Compliance — relevant scope findings only
 8. Post-Verification Continuity Snapshot
 
 Only `Verification Result: PASS` can produce READY. Independently verify every `MINI-###` against `plan.md` using current code, tests, and applicable live acceptance; do not rely only on apply's claims. Review final validation and relevant code/scope compliance, not the implementer's TDD chronology or whether it was recorded. Any incomplete/failed required functional check blocks advancement. The evidence matrix owns acceptance proof; do not duplicate it in the remaining sections.
 
-The continuity snapshot records the exact verified deliverable paths, each file's SHA-256 (or explicit absent state for required deletions), and an aggregate SHA-256 of the sorted path/state/hash records. Exclude the verification artifact itself and unrelated files. Recompute immediately before archive/delivery; drift invalidates the prior verification and blocks that boundary. Record evidence commands in the artifact. If safe snapshot evidence cannot be obtained, return BLOCKED.
+The continuity snapshot records exact verified deliverables, excluding the verification artifact itself and unrelated files. For new snapshots, use this deterministic encoding:
+
+- Each record is a three-string array `[absolutePath, state, hash]`: normalized absolute path, `present` with lowercase SHA-256 of raw file bytes, or `absent` with an empty hash for a required deletion. Reject duplicate paths, unreadable files, directories, and unexpected symlinks; absence means ENOENT, not any read error. If a symlink is an approved deliverable, define its explicit identity/encoding before verification rather than silently hashing its target.
+- Sort by `absolutePath` using JavaScript string comparison (`a < b`, not locale-dependent sorting). The aggregate is SHA-256 of the UTF-8 bytes of `JSON.stringify(sortedRecords)`, with no indentation, BOM, or trailing newline. Include the records and aggregate once; counts are derived, not separately maintained evidence.
+- Include the complete read-only command actually executed, with concrete deliverable paths and all calculation code (or an existing versioned script plus its exact invocation). It must reproduce every record and the aggregate without parsing prose, ellipses, omitted code, or locale assumptions. Rerun that same command immediately before archive/delivery; any record/aggregate drift invalidates continuity and blocks that boundary.
+
+Preserve historical snapshots and their recorded encoding; do not rewrite or reverify them solely to adopt this format. If their original calculation cannot safely be reproduced, report the missing evidence and stop at the continuity boundary. A matching snapshot is not functional acceptance. If safe snapshot evidence cannot be obtained, return BLOCKED.
 
 ## References
 

@@ -4,7 +4,7 @@ description: "create, review, or update Pi skills and their SKILL.md files. Use 
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "2.0"
+  version: "2.1"
 registry:
   category: "workflow"
   domains: "skills, routing, agent-configuration"
@@ -54,8 +54,8 @@ This skill owns:
    - Execution Steps;
    - Output Contract;
    - References.
-4. Regenerate the skill registry.
-5. Run at least three routing checks:
+4. Validate the live registry in memory (`skill_registry_generate` with `write:false`); write derived outputs only for explicitly authorized registry maintenance. Ordinary routing uses `skill_registry_resolve` directly and never requires a cache refresh.
+5. Run at least three read-only routing checks with `include_related:false`, then read only selected skills:
    - path-only or weak-intent + path;
    - intent-only;
    - realistic mixed intent + path.

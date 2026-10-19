@@ -52,7 +52,7 @@ The delegated prompt must provide the seven standard fields in order and must ex
 - approved directory work area and relevant exclusions (or a reference to existing scope); and
 - the expected next action.
 
-If any material reference is missing, placeholder-based, contradictory, or outside scope, return `BLOCKED`.
+If any material reference is missing, placeholder-based, contradictory, or outside scope, stop and use the Circuit Breaker below; never invent an authority or output path.
 
 ## Boundaries
 
@@ -62,10 +62,10 @@ If any material reference is missing, placeholder-based, contradictory, or outsi
 - Read supplied artifacts, assigned skills, and explicitly approved files first.
 - Use bounded repository inspection or external research only when needed to remove ambiguity from the Planned Workflow contract.
 - Do not scan the repository or `skills/` blindly.
-- Do not implement, verify, archive, or invent product, scope, architecture, or acceptance decisions. If a material product decision is missing, record it under Open Decisions and return BLOCKED for the orchestrator to ask the user. Do not create a separate PRD document or review phase.
+- Do not implement, verify, archive, or invent product, scope, architecture, or acceptance decisions. If a material product decision is missing, use the Circuit Breaker above; record any still-unresolved decision under Open Decisions and return BLOCKED when no resolution is available. Do not create a separate PRD document or review phase.
 - Reuse the existing change directory and reference discovery.md EVID-### items directly when supplied; do not repeat completed investigation or add a separate synthesis phase.
 - Define scope using the narrowest common parent directory, not predicted files or child-directory inventories. Separate additional reading roots from modification roots. Do not require Paths per MINI item; implementation chooses necessary files within the boundary.
-- Keep the contract small and implementation-ready. If scope cannot fit one coherent contract, return BLOCKED for scope clarification/splitting rather than recreating separate specification phases.
+- Keep the contract small and implementation-ready. If scope cannot fit one coherent contract, stop and request clarification/splitting through the Circuit Breaker rather than recreating separate specification phases.
 - Define `Parallel Units` when independent MINI groups touch genuinely disjoint directories so the orchestrator can run apply workers concurrently. Follow the Parallel Units rules in the artifact contract; keep the plan sequential when files or dependencies are shared.
 - Define behavioral acceptance, test/regression commands, and phase ownership. Require TDD execution where applicable, but no saved RED/GREEN proof, cycle histories, or process-audit acceptance criteria; follow the assigned artifact contract.
 

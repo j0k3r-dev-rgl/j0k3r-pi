@@ -4,7 +4,7 @@ description: "Enforce simplest-sufficient solutions (KISS, YAGNI) and prevent ov
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "3.1"
+  version: "3.2"
 registry:
   category: "transversal"
   domains: "scope-control, implementation, planning"
@@ -52,7 +52,7 @@ Stop and trigger the decision protocol when the change would introduce:
 - expansion beyond approved scope.
 
 - **Circuit Breaker**: When any of the gates above are triggered, or when speculative complexity or out-of-scope choices appear:
-  - **Subagent execution**: trip the circuit breaker and return `BLOCKED` immediately, specifying the exact decision or trade-off needed. Never guess, assume speculative defaults, or proceed autonomously.
+  - **Subagent execution**: stop dependent work and ask the exact decision/trade-off through `ask_orchestrator` when available; wait in the same session. Return `BLOCKED` if no channel or resolution is available. Never guess, expand authority, or proceed on an unresolved decision.
   - **Orchestrator execution**: stop immediately, present the trade-off concisely, and ask the user for the missing decision before performing any file mutation.
 
 ## Execution Steps
