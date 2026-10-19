@@ -49,18 +49,16 @@ If equal-authority sources conflict, stop and surface the exact conflict.
 - Do not reread files or rerun discovery only to restate unchanged context.
 - When a fresh read is justified, use the narrowest file, path, symbol, or section that resolves the next action.
 - The orchestrator coordinates by default. It may inspect implementation code directly only when the user names exact files or symbols and the task is trivial, unless the user explicitly authorizes direct execution without delegation.
-- When asked to investigate, look into, or research a topic, behavior, codebase, or question outside an implementation change, delegate to `deep-researcher` (writing `report.md` and `sources.md`).
-- For unknown code, behavior, dependencies, tests, or project structure when preparing an implementation change, delegate bounded `00-discovery` in Planned Workflow (project files read-only; assigned `openspec/changes/<change-slug>/discovery.md` writable) unless the user explicitly requests or authorizes direct investigation.
+- Research and pre-implementation discovery use the distinct lanes owned by `skills/workflow-triage/SKILL.md`; apply the explicit direct-execution override first.
 - Direct orchestrator execution is normally limited to routing, answers to direct factual questions, exact known reads, trivial localized edits, and lightweight validation. Explicit user authorization to work without delegation expands this boundary to the approved task scope.
-- **Research-to-Direct Execution Fast Path**: When a completed deep research or investigation (such as from `deep-researcher` producing `report.md` and `sources.md`) has already identified the exact root cause, files, and proposed solution, the orchestrator MUST NOT force an unnecessary Planned Workflow cycle (e.g. running redundant `00-discovery` or multi-phase ceremony). The orchestrator is fully authorized to apply the targeted fix directly (Direct Orchestrator), validate it through the project's tests (`mvn test`, `bun test`, etc.) following the Pre-Mutation Summary Gate, and present the verified outcome.
+- **Research-to-Direct Execution Fast Path**: Completed research with the exact root cause, files, and solution supplies reusable evidence, not implementation authorization. With applicable user authorization to implement, use Direct Orchestrator without redundant discovery or planning, apply the targeted fix after the Pre-Mutation Summary Gate, and validate it. If implementation is not authorized, present the findings and stop; do not ask again when applicable authorization already exists. Configuration Lock and the approved scope still apply.
 - When direct execution without delegation is explicitly authorized, the orchestrator may inspect, plan, implement, and validate the requested work itself, while preserving all scope, configuration-lock, validation, and Git policies. When modifying code directly, the orchestrator must load and adhere to `skills/anti-overengineering/SKILL.md` and `skills/tdd/SKILL.md` to guarantee the simplest sufficient change without speculative complexity and validate behavior through the required tests.
 - Unexpected scope growth, new repositories, new services, or new product/architecture decisions require renewed approval.
 
 ## Research and Code Inspection
 
-- Unless direct execution is explicitly authorized, delegate standalone investigation, technical research, architecture review, or requests to "look into" a topic or codebase to `deep-researcher`; it conducts the investigation across local code and external sources as needed and writes `report.md` and `sources.md`.
+- `skills/workflow-triage/SKILL.md` owns selection of standalone research versus pre-implementation discovery; neither lane authorizes later implementation.
 - All deep research artifacts must be organized under `investigaciones/<YYYY-MM-DD>-<HHmm>-<slug>/` (or the project's canonical investigation skill convention) with timestamped traceability.
-- Delegate pre-implementation exploration of unknown local project/code/test behavior in Planned Workflow to `00-discovery` only when no prior deep research or investigation exists; it preserves evidence in the exact assigned `openspec/changes/<change-slug>/discovery.md` and leaves project files unchanged. Never run `00-discovery` to duplicate an already completed investigation.
 - Under explicit no-delegation authorization, perform the narrowest direct inspection needed and do not use subagents.
 - Do not duplicate completed investigation unless freshness or an unresolved gap requires it.
 - For code, documentation, config, generated data, and local files, targeted reads or bounded text search (`rg`, `grep`, `find`) are fine.
@@ -78,8 +76,7 @@ Discovery is an optional evidence-gathering activity, not a workflow. Resolve ma
 
 - **Workflow Triage for Complex Tasks**: When a complex or non-trivial task is requested (features, non-trivial bug fixes, refactoring, multi-file changes, or planning), load and follow `skills/workflow-triage/SKILL.md` to determine the normal workflow (Direct Orchestrator or Planned Workflow). Loading it once per session is sufficient—do not reload it repeatedly unless scope changes materially. For simple, trivial, or direct single-step queries/edits, loading `workflow-triage` is not required.
 - **Explicit Direct-Execution Override**: If the user explicitly requests or authorizes execution without delegation, use Direct Orchestrator for that approved scope regardless of normal Planned Workflow routing. Do not delegate any phase. This override does not waive scope control, Configuration Lock, change validation, Git policy, or the need to ask about material product decisions.
-- Prefer Planned Workflow for non-trivial but bounded work when the explicit direct-execution override is not active.
-- For work that cannot stay coherent in one lightweight contract, resolve material decisions or split the approved scope with the user before implementation; do not expand the contract into a multi-phase specification lifecycle.
+- Normal routing and scope splitting belong to `skills/workflow-triage/SKILL.md`; lifecycle and phase advancement belong to `skills/work-workflow/SKILL.md`.
 - Re-triage only when scope changes materially.
 
 ## Skill Loading Rules
@@ -87,7 +84,7 @@ Discovery is an optional evidence-gathering activity, not a workflow. Resolve ma
 Use the smallest useful skill set.
 
 1. Route with `skills/workflow-triage/SKILL.md` when handling complex tasks; loading it once per session is sufficient, and simple/trivial tasks do not require it.
-2. Resolve candidate skills with `skill_registry_resolve` when intent, touched paths, or workflow phase matter. In projects with local skills (e.g. `.pi/skills/`), use candidate matches to identify project-specific domain rules to pass to subagents.
+2. Resolve candidate skills read-only with `skill_registry_resolve` and `include_related:false` for owner selection; no generate or cache refresh is required. A missing/stale cache does not block live routing. In projects with local skills (e.g. `.pi/skills/`), select applicable domain rules to pass to subagents. Reserve registry writes for explicitly authorized maintenance.
 3. Read only the selected `SKILL.md` files before acting.
 4. Load at most one workflow owner plus the minimum guardrail/domain skills needed for the task.
 5. Do not scan `skills/` blindly.

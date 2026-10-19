@@ -4,7 +4,7 @@ description: "Run authorized Planned Workflow lifecycle with lightweight contrac
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "16.2"
+  version: "16.3"
 registry:
   category: "workflow"
   domains: "openspec, planned-workflow, artifact-lifecycle"
@@ -28,17 +28,17 @@ Own the lightweight lifecycle, phase gates, independent verification, and archiv
 ## Hard Rules
 
 - Keep one coherent contract, not a bundle of proposal/specification/design/task documents.
-- **Bypass Redundant Discovery**: If a completed deep research report (e.g. from `investigaciones/`) already identified the root cause, target files, and concrete solution, do not run `00-discovery`. The orchestrator can proceed directly to implementation under the Direct Orchestrator fast path or plan increments directly if the user requests a formal plan.
+- Reuse prior research under the authorization and fast-path rules in `AGENTS.md` and `workflow-triage`; do not repeat discovery. Evidence does not authorize implementation or phase advancement.
 - Use `openspec/changes/<change-slug>/` with optional `discovery.md`, `plan.md`, `apply.md`, and `verify.md`. Resolve material product questions with the user before marking the plan READY; record decisions or blockers in plan.md, without a separate PRD artifact or review phase.
 - Local discovery writes only its assigned `discovery.md`; reuse its evidence IDs directly. Discovery may be the final deliverable of an investigation-only request.
 - Keep one phase active at a time. Delegate contract creation to `01-planning`, implementation to `02-apply`, verification independently to `03-verify`. The orchestrator performs archive directly after user approval; archive is not a delegated phase.
-- **Parallel Apply Units**: Within the apply phase, when `plan.md` defines `Parallel Units`, launch one `02-apply` worker per unit concurrently (background, in the same orchestrator turn). Each worker receives only its unit ID, its unit's Writable Paths, and its own `apply-<UNIT-ID>.md` output path. Units must have disjoint Writable Paths and no `Depends on` across units; otherwise run them sequentially. Never split work into units the plan did not define.
+- **Parallel Apply Units**: Within the apply phase, when `plan.md` defines `Parallel Units`, launch one `02-apply` worker per unit concurrently in the same orchestrator turn. Omit `mode` unless the user explicitly requested it; the manager selects execution mode. Never force background mode contrary to the tool contract. Each worker receives only its unit ID, its unit's Writable Paths, and its own `apply-<UNIT-ID>.md` output path. Units must have disjoint Writable Paths and no `Depends on` across units; otherwise run them sequentially. Never split work into units the plan did not define.
 - **Parallel Discovery Fan-Out**: When pre-implementation questions are independent, launch several `00-discovery` workers concurrently, each with its own bounded question and `discovery-<topic>.md` path; read all before planning.
 - Assign `skills/anti-overengineering/SKILL.md` alongside artifact contracts when delegating `01-planning` and `02-apply` to enforce simplest-sufficient design and implementation; do not assign it to `00-discovery` or `03-verify`.
 - Assign `skills/tdd/SKILL.md` in Assigned skills when delegating `02-apply` for code/test changes, and to `01-planning` when defining validation strategy.
 - Resolve and assign project-specific skills (from `.pi/skills/`, `.agents/skills/`, or `skill_registry_resolve`) in Assigned skills for delegated subagents whenever the task touches project code or domain logic.
 - If a required subagent is unavailable, stop as `BLOCKED`; do not silently take over.
-- **Circuit Breaker**: If an open decision, ambiguity, or missing user choice is encountered at any phase, the circuit breaker trips immediately. Stop execution, surface the exact decision to the user, and do not advance or mutate until answered.
+- **Circuit Breaker**: Stop dependent execution and phase advancement on a material unresolved decision. Subagents use the live-question/fallback rule in the assigned artifact contract; the orchestrator answers facts and approved decisions, and asks the user for unmade product/scope/architecture decisions under `AGENTS.md`. A factual answer is not new authority.
 - The orchestrator supplies exact absolute artifact and skill paths, reads each returned artifact, and checks required fields before advancing. Do not assume lean subagents inherit global context.
 - Follow AGENTS.md's compact seven-field delegation contract: reference existing artifact sections instead of repeating them, write each exact path once, and transmit only new decisions/context. Summarize applicable scope, Configuration Lock, Git limits, and user decisions not available in assigned contracts. Writable paths are not permission to make incidental configuration changes.
 - **Pre-Mutation Summary Gate**: Before apply or any orchestrator mutation, summarize scope, planned changes, exclusions, validation, and risks; obtain explicit user authorization before mutating files. Artifacts do not grant authorization.
@@ -52,10 +52,18 @@ Own the lightweight lifecycle, phase gates, independent verification, and archiv
 2. If local facts are missing, assign `discovery.md`; read its evidence before planning. Do not duplicate research or add a separate synthesis phase.
 3. Delegate a compact `plan.md` with concrete acceptance, directory-based scope, validation, and `MINI-###` items. Use the narrowest common parent for sibling areas; do not prescribe files or enumerate its child directories. Narrow excessive scope with the user.
 4. Check status, required sections, unique IDs, evidence references, and parseable Execution Scope. `BLOCKED` stops advancement.
-5. Summarize the implementation and obtain apply authorization; delegate `02-apply` with its authorization evidence and exact scope-source path. With `Parallel Units`, one authorization covers all units; dispatch every independent unit at once and wait for all completion notifications.
-6. Read the compact implementation summary and final validation in `apply.md` (or every `apply-<UNIT-ID>.md`). For parallel units, run the Surface Check: `git status --porcelain` changed paths must each fall inside exactly one unit's Writable Paths and match that unit's reported files; any overlap, out-of-surface change, or failed unit blocks verification until remediated. Then run the plan's integrated validation command once, arrange any contract-required live acceptance with its assigned owner, and delegate one independent verification against the complete `MINI-###` set. Do not request formatting-only rewrites or retrospective TDD evidence.
+5. Summarize the implementation and obtain applicable apply authorization; capture the Surface Check baseline below before delegation. Delegate `02-apply` with its authorization evidence and exact scope-source path. With `Parallel Units`, one authorization covers all units; dispatch every independent unit at once and consume completion notifications without polling.
+6. Read the compact implementation summary and final validation in `apply.md` (or every `apply-<UNIT-ID>.md`), then run the baseline-relative Surface Check below. An unexplained delta, overlap, out-of-surface change, failed unit, or missing baseline blocks verification until attribution/remediation is resolved. Then run the plan's integrated validation command once, arrange any contract-required live acceptance with its assigned owner, and delegate one independent verification against the complete `MINI-###` set. Do not request formatting-only rewrites or retrospective TDD evidence.
 7. Read `verify.md`; require PASS, evidence for every item, and a continuity snapshot before reporting verified completion.
 8. Ask for archive authorization only when verification passed. The orchestrator then performs the Archive Safety Checks below directly; do not launch a subagent.
+
+## Baseline-relative Surface Check
+
+- Before apply, capture a read-only baseline: base revision, index/worktree status, and content identities for tracked and non-ignored untracked paths. Include explicitly authorized ignored deliverables separately; exclude known runtime/secret material. Store only path/state/hash metadata in existing change evidence, never raw contents. For a retry or later unit, capture its own pre-delegation baseline.
+- Within Writable Paths, record each file's state and SHA-256 (or symlink target identity), including pre-existing modifications/untracked files; absence is explicit and newly created paths must be detected. Keep index identity separate so staging or unstaging cannot masquerade as no change. Name/status comparisons alone are insufficient.
+- Compare the post-apply state to this baseline, not to HEAD or the entire dirty status list. Attribute only newly created/deleted/changed records to apply. Each implementation delta belongs to exactly one assigned writable surface and matches that worker's reported files; separately assigned output artifacts are expected orchestrator evidence, not another unit's implementation surface. Pre-existing unchanged paths are not worker changes.
+- New changes outside assigned surfaces, shared/overlapping ownership, or concurrent edits to a worker's surface require attribution before proceeding; a baseline alone cannot prove who wrote a file. Preserve all pre-existing work: never clean, stash, reset, stage, or require a commit to satisfy this check. If no trustworthy pre-apply baseline exists, stop rather than reconstruct it retrospectively.
+- This is change attribution, not acceptance or sandboxing; integrated tests and independent verification still assess the resulting candidate.
 
 ## Archive Safety Checks
 

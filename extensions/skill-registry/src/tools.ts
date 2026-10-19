@@ -98,10 +98,10 @@ export function registerSkillRegistryTools(pi: any): void {
     name: 'skill_registry_generate',
     label: 'Skill Registry Generate',
     description: 'Generate the project skill registry from global and project Pi/Agent skills. Stack-agnostic and dependency-free at runtime except this extension.',
-    promptSnippet: 'Generate the skill registry before workflow planning/delegation when skills may affect routing.',
+    promptSnippet: 'Generate the skill registry for maintenance or dry-run validation, not ordinary workflow routing.',
     promptGuidelines: [
-      'Use skill_registry_generate before formal workflow planning or workflow subagent delegation when the active workflow requires fresh skill routing context.',
-      'After skill_registry_generate, read selected SKILL.md files before relying on their detailed instructions.',
+      'Use skill_registry_resolve directly for ordinary routing; it builds a live in-memory index without writes, even if the cache is missing or stale.',
+      'Registry writes require explicit authorization for maintenance; use write:false for in-memory validation.',
     ],
     parameters: Type.Object({
       write: Type.Optional(Type.Boolean({ description: 'Whether to write .pi/skill-registry.json and .pi/skill-registry.md. Defaults to true.' })),
@@ -132,9 +132,8 @@ export function registerSkillRegistryTools(pi: any): void {
     description: 'Resolve candidate skills from the live registry for intent/paths/workflow phase with read-only cache-awareness.',
     promptSnippet: 'Read-only skill routing helper for matching intent, touched paths, and workflow phase. The output is a routing candidate index, not a playbook.',
     promptGuidelines: [
-      'Use skill_registry_resolve when you need candidate skills before taking routing decisions.',
-      'Read the returned SKILL.md files before acting.',
-      'Read selected SKILL.md files before acting on any skill guidance.',
+      'Use skill_registry_resolve with include_related:false for owner selection; no generate or cache refresh is required.',
+      'Read selected SKILL.md files before acting on any skill guidance; candidates and related matches are not mandatory loads.',
     ],
     parameters: Type.Object({
       intent: Type.Optional(Type.String({ description: 'Natural-language routing intent.' })),

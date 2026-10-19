@@ -57,7 +57,7 @@ Parameters:
 }
 ```
 
-Use `write: false` for validation or dry-run routing checks.
+Use `write: false` for in-memory validation. Use `skill_registry_resolve` directly for ordinary routing; generation is not a prerequisite. Writes are maintenance operations requiring explicit authorization.
 
 #### `skill_registry_resolve`
 
@@ -77,7 +77,7 @@ Parameters:
 Behavior:
 
 - Resolves against a **live in-memory registry** generated for the call (no writes).
-- Treat the first direct match as the **primary** skill. Consider at most two more direct matches as secondary context; related matches stay advisory.
+- Use `include_related:false` for owner selection. Select the applicable canonical owner from the candidates; consider at most two more direct matches only when relevant. Related matches stay advisory, and required guardrails still apply.
 - If `stale_check` is enabled:
   - compares live `content_hash` against `.pi/skill-registry.json`,
   - reports `fresh`, `stale`, `missing`, or `invalid` cache state,
@@ -86,7 +86,8 @@ Behavior:
 - Returns direct matches and one-hop related matches (separated).
 - Output is routing-only guidance:
   - no `SKILL.md` content is included,
-  - response guidance always recommends reading each returned `SKILL.md` before acting.
+  - read only selected `SKILL.md` files before applying their instructions; candidates are not mandatory loads.
+- A missing or stale cache does not block live routing or require a refresh. Reserve cache writes for authorized maintenance.
 - Interactive TUI rendering is compact by default: the detailed routing result is kept for the agent in tool content/details, but the visible tool row shows only a summary until the user expands tool output with Pi's native tool-expand keybinding (default `ctrl+o`).
 
 Response shape includes:
@@ -269,7 +270,7 @@ Parámetros:
 }
 ```
 
-Usa `write: false` para validación o checks dry-run de routing.
+Usa `write: false` para validación en memoria. Para routing ordinario usa directamente `skill_registry_resolve`; generar no es un requisito previo. Las escrituras son mantenimiento y requieren autorización explícita.
 
 #### `skill_registry_resolve`
 
@@ -289,6 +290,7 @@ Parámetros:
 Comportamiento:
 
 - Resuelve contra un **registry vivo en memoria** generado para la llamada (sin escrituras).
+- Usa `include_related:false` para seleccionar el owner canónico aplicable; considera como máximo otros dos matches directos solo si son pertinentes. Los relacionados son orientativos y los guardrails obligatorios siguen aplicándose.
 - Si `stale_check` está habilitado:
   - compara `content_hash` vivo contra `.pi/skill-registry.json`,
   - reporta estado de caché `fresh`, `stale`, `missing` o `invalid`,
@@ -297,7 +299,8 @@ Comportamiento:
 - Devuelve matches directos y matches relacionados a un salto (separados).
 - La salida es solo guía de routing:
   - no incluye contenido de `SKILL.md`,
-  - la respuesta siempre recomienda leer cada `SKILL.md` devuelto antes de actuar.
+  - lee solo los `SKILL.md` seleccionados antes de aplicar sus instrucciones; los candidatos no son cargas obligatorias.
+- Una caché faltante o desactualizada no bloquea el routing vivo ni requiere refrescarla. Reserva las escrituras de caché para mantenimiento autorizado.
 - El render TUI interactivo es compacto por defecto: el resultado detallado queda en content/details de la tool para el agente, pero la fila visible muestra solo un resumen hasta que el usuario expande el output con el keybinding nativo de Pi (default `ctrl+o`).
 
 La forma de respuesta incluye:

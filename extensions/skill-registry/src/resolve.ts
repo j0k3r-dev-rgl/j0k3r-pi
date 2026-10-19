@@ -509,7 +509,7 @@ export function getRegistryStatus(
     };
   }
 
-  warnings.push('cached skill-registry.json does not match live content. Consider running skill_registry_generate to refresh.');
+  warnings.push('cached skill-registry.json does not match live content. Routing uses live sources; no refresh is required. Refresh only for explicitly authorized maintenance.');
   return {
     status: {
       source: 'live',
@@ -549,7 +549,7 @@ export async function resolveSkillRegistry(options: { cwd?: string; homeDir?: st
 
   const guidance = [
     `Registry resolved from live sources (source: ${registryStatus.source}) with cache status ${registryStatus.cache}.`,
-    'Read each returned SKILL.md path before applying skill instructions.',
+    'Read selected SKILL.md files before applying their instructions; candidates and related matches are advisory, not mandatory loads.',
     directMatches.length > 0
       ? `Use ${directMatches[0].name} as the primary skill. Consider at most ${Math.min(2, Math.max(0, directMatches.length - 1))} additional direct matches as secondary context.`
       : 'No direct skill matched; refine intent or paths before loading additional skills.',

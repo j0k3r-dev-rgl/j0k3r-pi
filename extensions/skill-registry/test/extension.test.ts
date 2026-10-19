@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -68,6 +68,11 @@ describe('skill registry extension', () => {
       expect(pi.registerCommand).toHaveBeenCalledWith('skill-registry', expect.objectContaining({ description: expect.any(String), handler: expect.any(Function) }));
       expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(['skill_registry_generate', 'skill_registry_resolve']));
       expect(commands['skill-registry']).toBeTruthy();
+      const generateTool = tools.find((tool) => tool.name === 'skill_registry_generate');
+      expect(generateTool.promptSnippet).toMatch(/maintenance/i);
+      expect(generateTool.promptGuidelines.join(' ')).toContain('skill_registry_resolve');
+      expect(generateTool.promptGuidelines.join(' ')).toContain('explicit authorization');
+      expect(generateTool.promptGuidelines.join(' ')).not.toContain('before formal workflow planning');
     });
   });
 
@@ -96,12 +101,25 @@ describe('skill registry extension', () => {
       const promptGuidelines = resolveTool?.promptGuidelines?.join('\n') ?? '';
       expect(promptGuidelines).toContain('Read selected SKILL.md files before acting');
       expect(resolveTool?.promptSnippet).toMatch(/Read-only/i);
+      expect(promptGuidelines).toContain('include_related:false');
+      expect(promptGuidelines).not.toContain('Read the returned SKILL.md');
 
-      const result = await resolveTool?.execute('id', { intent: 'resolver-test' }, undefined, undefined, { cwd, homeDir });
+      const piDirectory = path.join(cwd, '.pi');
+      const cachePath = path.join(piDirectory, 'skill-registry.json');
+      const staleCache = JSON.stringify({ schema_version: 2, skills: [], skill_count: 0, content_hash: 'old-cache' });
+      await writeFile(cachePath, staleCache, 'utf8');
+      const beforeEntries = await readdir(piDirectory);
+      const result = await resolveTool?.execute('id', { intent: 'resolver-test', include_related: false }, undefined, undefined, { cwd, homeDir });
       expect(result?.content?.[0]?.text).toContain('skill registry resolve');
       expect(Array.isArray(result?.details?.matches)).toBe(true);
       expect(result?.details?.matches?.[0]?.read_before_acting).toContain('Read .pi/skills/basic/SKILL.md before acting');
-      expect(result?.details?.guidance?.join(' ')).toContain('Read');
+      expect(result?.details?.guidance?.join(' ')).toContain('Read selected SKILL.md');
+      expect(result?.details?.guidance?.join(' ')).not.toContain('Read each returned');
+      expect(result?.details?.warnings?.join(' ')).toContain('Routing uses live sources; no refresh is required');
+      expect(result?.details?.query?.include_related).toBe(false);
+      expect(result?.details?.related_matches).toEqual([]);
+      expect(await readdir(piDirectory)).toEqual(beforeEntries);
+      expect(await readFile(cachePath, 'utf8')).toBe(staleCache);
       expect(commands['skill-registry']).toBeTruthy();
     });
   });

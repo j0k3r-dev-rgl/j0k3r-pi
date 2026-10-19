@@ -4,7 +4,7 @@ description: "guide test-driven development (TDD) and regression strategy. Use f
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "3.2"
+  version: "3.3"
 registry:
   category: "quality"
   domains: "tdd, testing, regression-testing"
@@ -72,7 +72,7 @@ Stop and trigger the decision protocol when:
 These gates concern actual execution and validation, not missing records from earlier TDD cycles.
 
 - **Circuit Breaker**: When any of the test gates above are triggered:
-  - **Subagent execution**: trip the circuit breaker and return `BLOCKED` immediately, specifying the exact test failure, missing environment, or irreproducible condition. Never skip required tests, fake results, or mark implementation ready without required validation.
+  - **Subagent execution**: stop dependent work and report the exact test failure, missing environment, or irreproducible condition through `ask_orchestrator` when available; wait in the same session. Return `BLOCKED` if no channel or resolution is available. Never skip required tests, fake results, treat an explanation as a passing check, or mark implementation ready without required validation.
   - **Orchestrator execution**: stop immediately, report the test blocker concisely, and ask the user for the missing decision before modifying code.
 
 ## Execution Steps

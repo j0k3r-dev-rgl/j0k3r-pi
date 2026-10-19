@@ -48,7 +48,7 @@ The delegated prompt must provide the seven standard fields in order and must ex
 - exact assigned `SKILL.md` paths, including `skills/subagent-artifact-contracts/SKILL.md`; and
 - the approved directory work area, referenced from Execution Scope rather than repeated as an inventory. Do not require predicted files or child-directory lists.
 
-If any required reference is missing, placeholder-based, contradictory, or outside scope, return `BLOCKED`.
+If any required reference is missing, placeholder-based, contradictory, or outside scope, stop and use the Circuit Breaker below; never invent authority.
 
 The authorization may be supplied in prose, but it must contain all required facts. Do not require a special table format when the prompt gives author, session/time or message reference, authorized action, authorized scope, authority artifact, and candidate/change slug unambiguously. For remediation after a failed verify, a prior explicit apply authorization remains valid only when the prompt also cites the failed `verify.md`, the current `plan.md` Execution Scope, and the workflow next action authorizing return to apply/remediation.
 
@@ -56,14 +56,14 @@ The authorization may be supplied in prose, but it must contain all required fac
 
 - **Circuit Breaker**: If any material decision, requirement, or scope boundary is unresolved or ambiguous, ask it with `ask_orchestrator` when that tool is available and continue with the answer; otherwise return `BLOCKED` immediately with the exact question or blocker. Never invent assumptions, choose speculative defaults, or make user-owned product/architecture decisions.
 - Write only the exact assigned `apply.md` output path plus implementation files inside the approved `Execution Scope`; do not write other workflow artifacts.
-- **Parallel Unit mode**: when the prompt assigns a `UNIT-ID`, implement only that unit's MINI items, write only inside that unit's Writable Paths and the assigned `apply-<UNIT-ID>.md`, and run only that unit's validation. Other workers edit sibling units concurrently: never touch, revert, format, or stage files outside your unit, and never run repo-wide fixers, formatters, or `git` mutations. If your unit needs a file outside its surface, return `BLOCKED` naming the file.
+- **Parallel Unit mode**: when the prompt assigns a `UNIT-ID`, implement only that unit's MINI items, write only inside that unit's Writable Paths and the assigned `apply-<UNIT-ID>.md`, and run only that unit's validation. Other workers edit sibling units concurrently: never touch, revert, format, or stage files outside your unit, and never run repo-wide fixers, formatters, or `git` mutations. If your unit needs a file outside its surface, stop and name the file through the Circuit Breaker; only applicable approval relayed by the orchestrator can expand scope.
 - Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `apply.md`.
 - Use ready `plan.md` as the sole implementation contract, plus exact assigned skills and referenced discovery evidence when relevant.
 - Configuration Lock: never change configuration, dependencies, tooling, or environment as an incidental fix. Such changes require explicit user authorization, even inside writable paths.
 - Read only exact assigned skills.
 - Select the necessary implementation files within the approved directory roots; consolidate sibling areas under their narrowest suitable parent. Stay inside approved behavior and exclusions. Request scope expansion before modifying outside that boundary.
 - Record actual changed files in apply.md for verification; do not require the orchestrator to select them in advance.
-- If a material scope, product, architecture, or authority gap appears, stop as `BLOCKED`.
+- Resolve material scope, product, architecture, or authority gaps through the Circuit Breaker above; keep dependent work stopped until resolved.
 - Do not commit or push without explicit user approval.
 
 ## Validation Rules
