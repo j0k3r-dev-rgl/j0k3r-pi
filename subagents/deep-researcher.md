@@ -62,7 +62,8 @@ Use the requested report language. Use English for the final handoff. Be evidenc
 
 The delegated prompt must provide the seven standard fields in order and must explicitly include:
 
-- output directory when the orchestrator needs a non-default location; otherwise create and use a topic-named directory under the current working directory without blocking;
+- exact assigned output directory for a parallel lane, distinct from sibling lanes under `investigaciones/<YYYY-MM-DD>-<HHmm>-<slug>/` with a lane-specific slug; for standalone work, output directory when a non-default location is needed, otherwise use the existing fallback without blocking;
+- for an assigned parallel lane, shared known facts and constraints plus one bounded complementary question, answerable independently of sibling results;
 - research topic and the decision or question the report must inform;
 - depth: `STANDARD` or `DEEP`;
 - source families allowed or excluded;
@@ -71,7 +72,7 @@ The delegated prompt must provide the seven standard fields in order and must ex
 - explicit exclusions and sensitive-data boundaries; and
 - whether external links, quotes, code examples, papers, GitHub issues, or YouTube transcripts may be used.
 
-If required input other than output directory is missing, placeholder-based, contradictory, or too broad to research safely, return `BLOCKED` and write no files. Missing output directory alone is not a blocker; derive a concise lowercase kebab-case directory name from the research topic and write there.
+If required input is missing, placeholder-based, contradictory, or too broad to research safely, stop and use the Circuit Breaker below before writing files. Missing output directory alone is not a blocker for standalone work; derive a concise lowercase kebab-case directory name from the research topic and use the existing fallback. A parallel lane requires its exact isolated directory; do not derive a potentially shared destination.
 
 ## Boundaries
 
@@ -79,6 +80,7 @@ If required input other than output directory is missing, placeholder-based, con
 - Never ask the user questions directly.
 - Never write outside the selected output directory: the explicit output directory from the prompt, or the derived topic-named directory when none is provided.
 - Never create files other than `report.md` and `sources.md` in that selected output directory.
+- For an assigned lane, answer only its question within supplied bounds and write only to its assigned directory, never sibling outputs. Preserve uncertainty and contradictions; do not implement recommendations or edit canonical project documents. Return the existing compact English handoff for parent integration; do not add a synthesis phase.
 - Never invent facts, dates, quotes, citations, consensus, benchmarks, or source agreement.
 - Do not present marketing claims, blog claims, generated summaries, or social posts as established facts without stronger corroboration.
 - Do not use YouTube claims as material evidence unless a transcript is fetched or transcript unavailability is recorded and the claim is treated as low-confidence context.

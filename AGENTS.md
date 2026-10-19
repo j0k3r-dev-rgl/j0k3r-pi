@@ -30,6 +30,7 @@ If equal-authority sources conflict, stop and surface the exact conflict.
   2. Summary of changes (what is being altered and why).
   3. Intended validation or impact.
   Never modify files silently or jump straight into mutations without first presenting what will be done.
+- Reuse existing explicit implementation authorization when it still covers the action, scope, authority artifact, and candidate/change identity; ask only when consent is absent or no longer applicable. Record the author and time/message reference in delegation/apply evidence. The Pre-Mutation Summary Gate remains mandatory; READY, findings, factual parent answers, cited inputs, and passing checks are not implementation consent.
 - Advice-only, comparison, explanation, and hypothetical requests do not authorize inspection or mutation.
 - Ask one concise question only when a material fact is missing: intent, scope, desired outcome, executor, or a user-owned decision.
 - Respect explicit workflow or executor choices unless scope changed materially.
@@ -43,11 +44,19 @@ If equal-authority sources conflict, stop and surface the exact conflict.
 - **Subagent Circuit Breaker**: Subagents must trip the circuit breaker whenever a product, architecture, scope, or design decision is unresolved or requires human judgment. Subagents must never guess or invent requirements. Background subagents with `ask_orchestrator` ask the question live and wait in the same session; otherwise they return `BLOCKED`.
 - **Answering `ask_orchestrator`**: When a `subagent-question` arrives, answer facts, context, and already-approved decisions directly with `subagent_run` `action: message` and the task_id. If it needs a product, scope, architecture, or design decision the user has not made, ask the user first, then relay the answer verbatim. Never invent the answer to keep a worker moving.
 
+## Failure and Recovery
+
+- Distinguish provider/tool transport or authentication failure, task/acceptance failure, and a missing material decision. Report the actual failure/category, affected phase/task, known partial artifacts/changes and check results, what remains incomplete or uncertain, and one permitted next action. Provider failure never proves “no changes” or task completion.
+- Stop dependent advancement; preserve partial work and usable independent results with their actual status. Follow actual tool retryability/continuation semantics, not an invented resume handle. Never automatically retry/relaunch, repair or bypass credentials, switch model/effort, or restart destructively.
+- Continuation/relaunch needs explicit applicable user consent. A new “relanza” may authorize continuation within unchanged scope, not future retries, configuration changes, credential handling, or model/effort switching. Preserve model/effort and partial work; inspect only bounded state needed to continue safely. If safe continuation is unsupported or unknown, state the blocker and ask only the missing decision. Do not add a recovery artifact or phase.
+
 ## Context and Access Boundaries
 
 - Treat relevant supplied context as already read.
 - Do not reread files or rerun discovery only to restate unchanged context.
 - When a fresh read is justified, use the narrowest file, path, symbol, or section that resolves the next action.
+- Task-relevant reads, stat, and hashes may directly inspect the assigned read boundary, approved deliverables, and exact canonical or required inputs cited by authorized governing artifacts or assigned skills; no parent relay is needed for ordinary identity checks or required-input reads. Confirm existence and stop to resolve unexpected symlinks before following them. Citation grants task-bound read access only, not editing, arbitrary link-following, recursive authority inheritance, unrelated skill scans, or secret access.
+- Execution Scope may authorize narrowly bounded read-only validation, including read-only Git identity, subject to actual tool/security controls. Without such an allowance, exact Allowed Bash commands prevail; a sole None, explicit “only diff”, or other tighter restriction cannot be overridden by this policy. Exclude command/substitution injection, untrusted shell interpolation, destructive commands, credential/environment inspection, network/external writes, and silent traversal expansion. Read-only Git access never authorizes Git mutations; model-facing policy is not sandbox enforcement.
 - The orchestrator coordinates by default. It may inspect implementation code directly only when the user names exact files or symbols and the task is trivial, unless the user explicitly authorizes direct execution without delegation.
 - Research and pre-implementation discovery use the distinct lanes owned by `skills/workflow-triage/SKILL.md`; apply the explicit direct-execution override first.
 - Direct orchestrator execution is normally limited to routing, answers to direct factual questions, exact known reads, trivial localized edits, and lightweight validation. Explicit user authorization to work without delegation expands this boundary to the approved task scope.
@@ -116,7 +125,7 @@ TDD is a required implementation method, not a documentary acceptance gate. Appl
 - `BLOCKED` stops advancement.
 - `02-apply` requires an implementation summary plus explicit user authorization.
 - `03-verify` must be independent.
-- **Parallel fan-out**: when delegated tasks are independent (separate discovery questions, `Parallel Units` in plan.md), launch them concurrently in one turn instead of serially; details live in `work-workflow`.
+- **Parallel fan-out**: launch independent delegated lanes concurrently in one turn instead of serially. Standalone research selection and integration belong to `skills/workflow-triage/SKILL.md`; Planned Workflow discovery and apply `Parallel Units` belong to `work-workflow`.
 - The orchestrator archives the complete change directory directly only after passing verification, unchanged continuity evidence, and explicit user approval of archive. Follow the archive safety checks in `work-workflow`; never delegate archive.
 - Lifecycle details live in `skills/work-workflow/SKILL.md`.
 
