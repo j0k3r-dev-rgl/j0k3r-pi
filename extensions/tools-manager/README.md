@@ -6,7 +6,7 @@
 
 ## Supported Opt-In Extensions
 
-The manager supports toggling 10 workspace extensions:
+The manager supports toggling 9 workspace extensions:
 1. `browser-screenshot`: Browser CDP, tabs & screenshots
 2. `youtube-research`: YouTube search & transcripts
 3. `api-tools`: REST, GraphQL & Swagger tools
@@ -16,7 +16,6 @@ The manager supports toggling 10 workspace extensions:
 7. `websearch`: Web search tools
 8. `pdf-review`: PDF inspection & text review
 9. `codegraph`: CodeGraph semantic exploration & index management
-10. `typesafe`: TypeSafe System One (Jev) semantic AI evaluation
 
 ## Persistence & Foreign Key Preservation
 

@@ -46,52 +46,9 @@ const sharedDiscussionRefProperties = {
   reviewCommentsOffset: Type.Optional(Type.Number({ description: 'Pull request review comment pagination offset where supported.' })),
 };
 
-const stackGetBranches = stackSources.map((source) => Type.Object({
-  source: Type.Literal(source),
-  ref: sharedDiscussionRefProperties.ref,
-  question: sharedDiscussionRefProperties.question,
-}));
-
-const githubIssueBranches = ['github_issue', 'github_issues'] as const;
-const githubPullRequestBranches = ['github_pull_request', 'github_pull_requests'] as const;
-const githubDiscussionBranches = ['github_discussion', 'github_discussions'] as const;
-
-const discussionGetParameters = {
-  ...Type.Object(sharedDiscussionRefProperties),
-  oneOf: [
-    ...stackGetBranches,
-    ...githubIssueBranches.map((source) => Type.Object({
-      source: Type.Literal(source),
-      ref: sharedDiscussionRefProperties.ref,
-      issue: sharedDiscussionRefProperties.issue,
-      commentsLimit: sharedDiscussionRefProperties.commentsLimit,
-      commentsOffset: sharedDiscussionRefProperties.commentsOffset,
-    })),
-    ...githubPullRequestBranches.map((source) => Type.Object({
-      source: Type.Literal(source),
-      ref: sharedDiscussionRefProperties.ref,
-      pull_request: sharedDiscussionRefProperties.pull_request,
-      commentsLimit: sharedDiscussionRefProperties.commentsLimit,
-      commentsOffset: sharedDiscussionRefProperties.commentsOffset,
-      reviewCommentsLimit: sharedDiscussionRefProperties.reviewCommentsLimit,
-      reviewCommentsOffset: sharedDiscussionRefProperties.reviewCommentsOffset,
-    })),
-    ...githubDiscussionBranches.map((source) => Type.Object({
-      source: Type.Literal(source),
-      ref: sharedDiscussionRefProperties.ref,
-      discussion: sharedDiscussionRefProperties.discussion,
-      commentsLimit: sharedDiscussionRefProperties.commentsLimit,
-      commentsOffset: sharedDiscussionRefProperties.commentsOffset,
-    })),
-    Type.Object({
-      source: Type.Literal('hacker_news'),
-      ref: sharedDiscussionRefProperties.ref,
-      story_id: sharedDiscussionRefProperties.story_id,
-      commentsLimit: sharedDiscussionRefProperties.commentsLimit,
-      commentsOffset: sharedDiscussionRefProperties.commentsOffset,
-    }),
-  ],
-};
+// Every field is validated here. Former source branches repeated optional
+// properties and allowed extra keys, adding no validation beyond this object.
+const discussionGetParameters = Type.Object(sharedDiscussionRefProperties);
 
 const discussionAnswersParameters = Type.Object({
   source: sourceSchema(stackSources),
@@ -100,61 +57,13 @@ const discussionAnswersParameters = Type.Object({
   limit: Type.Optional(Type.Number({ description: 'Maximum answers to return.' })),
 });
 
-const discussionCommentsParameters = {
-  ...Type.Object({
-    ...sharedDiscussionRefProperties,
-    source: sourceSchema(discussionCommentSources),
-    article_id: Type.Optional(Type.Number({ description: 'Dev.to article id when source is devto.' })),
-    topLevelLimit: Type.Optional(Type.Number({ description: 'Maximum top-level Dev.to comments to return.' })),
-    topLevelOffset: Type.Optional(Type.Number({ description: 'Dev.to top-level comment pagination offset.' })),
-  }),
-  oneOf: [
-    ...stackSources.map((source) => Type.Object({
-      source: Type.Literal(source),
-      ref: sharedDiscussionRefProperties.ref,
-      question: sharedDiscussionRefProperties.question,
-      commentsLimit: sharedDiscussionRefProperties.commentsLimit,
-      commentsOffset: sharedDiscussionRefProperties.commentsOffset,
-    })),
-    ...githubIssueBranches.map((source) => Type.Object({
-      source: Type.Literal(source),
-      ref: sharedDiscussionRefProperties.ref,
-      issue: sharedDiscussionRefProperties.issue,
-      commentsLimit: sharedDiscussionRefProperties.commentsLimit,
-      commentsOffset: sharedDiscussionRefProperties.commentsOffset,
-    })),
-    ...githubPullRequestBranches.map((source) => Type.Object({
-      source: Type.Literal(source),
-      ref: sharedDiscussionRefProperties.ref,
-      pull_request: sharedDiscussionRefProperties.pull_request,
-      commentsLimit: sharedDiscussionRefProperties.commentsLimit,
-      commentsOffset: sharedDiscussionRefProperties.commentsOffset,
-      reviewCommentsLimit: sharedDiscussionRefProperties.reviewCommentsLimit,
-      reviewCommentsOffset: sharedDiscussionRefProperties.reviewCommentsOffset,
-    })),
-    ...githubDiscussionBranches.map((source) => Type.Object({
-      source: Type.Literal(source),
-      ref: sharedDiscussionRefProperties.ref,
-      discussion: sharedDiscussionRefProperties.discussion,
-      commentsLimit: sharedDiscussionRefProperties.commentsLimit,
-      commentsOffset: sharedDiscussionRefProperties.commentsOffset,
-    })),
-    Type.Object({
-      source: Type.Literal('devto'),
-      ref: sharedDiscussionRefProperties.ref,
-      article_id: Type.Optional(Type.Number({ description: 'Dev.to article id when source is devto.' })),
-      topLevelLimit: Type.Optional(Type.Number({ description: 'Maximum top-level Dev.to comments to return.' })),
-      topLevelOffset: Type.Optional(Type.Number({ description: 'Dev.to top-level comment pagination offset.' })),
-    }),
-    Type.Object({
-      source: Type.Literal('hacker_news'),
-      ref: sharedDiscussionRefProperties.ref,
-      story_id: sharedDiscussionRefProperties.story_id,
-      commentsLimit: sharedDiscussionRefProperties.commentsLimit,
-      commentsOffset: sharedDiscussionRefProperties.commentsOffset,
-    }),
-  ],
-};
+const discussionCommentsParameters = Type.Object({
+  ...sharedDiscussionRefProperties,
+  source: sourceSchema(discussionCommentSources),
+  article_id: Type.Optional(Type.Number({ description: 'Dev.to article id when source is devto.' })),
+  topLevelLimit: Type.Optional(Type.Number({ description: 'Maximum top-level Dev.to comments to return.' })),
+  topLevelOffset: Type.Optional(Type.Number({ description: 'Dev.to top-level comment pagination offset.' })),
+});
 
 type StackSource = typeof stackSources[number];
 type DiscussionGetSource = typeof discussionGetSources[number];

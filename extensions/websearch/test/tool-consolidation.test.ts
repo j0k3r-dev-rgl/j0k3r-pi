@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { Check } from 'typebox/value';
 import { registerWebsearchTools } from '../src/tools.js';
 import { createMockPi, execute, response } from './helpers.js';
 
@@ -94,25 +95,74 @@ describe('public tool consolidation routers', () => {
     expect(graph.details.data.items[0]).toMatchObject({ source: 'openalex', title: 'Citing work', followup_tool: 'research_get' });
   });
 
-  it('grouped public tool schemas expose source-specific variants', () => {
+  it('grouped public tool schemas retain source-specific fields and guidance', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: {}, fetch: vi.fn<typeof fetch>() });
 
     const discussionGet = pi.tools.find((tool) => tool.name === 'discussion_get')!.parameters as any;
-    expect(discussionGet.oneOf).toBeDefined();
-    const hackerNewsGetBranch = discussionGet.oneOf.find((branch: any) => branch.properties?.source?.const === 'hacker_news');
-    expect(hackerNewsGetBranch.properties.story_id).toBeDefined();
-    expect(hackerNewsGetBranch.properties.reviewCommentsLimit).toBeUndefined();
+    expect(discussionGet.oneOf).toBeUndefined();
+    expect(discussionGet.properties.story_id.description).toContain('Hacker News');
+    expect(discussionGet.properties.reviewCommentsLimit.description).toContain('pull request');
+    expect(discussionGet.properties.source.anyOf).toContainEqual({ const: 'hacker_news', type: 'string' });
 
     const discussionComments = pi.tools.find((tool) => tool.name === 'discussion_comments_get')!.parameters as any;
-    const devtoCommentsBranch = discussionComments.oneOf.find((branch: any) => branch.properties?.source?.const === 'devto');
-    expect(devtoCommentsBranch.properties.article_id).toBeDefined();
-    expect(devtoCommentsBranch.properties.pull_request).toBeUndefined();
+    expect(discussionComments.oneOf).toBeUndefined();
+    expect(discussionComments.properties.article_id.description).toContain('devto');
+    expect(discussionComments.properties.pull_request.description).toContain('GitHub pull request');
+    expect(discussionComments.properties.source.anyOf).toContainEqual({ const: 'devto', type: 'string' });
 
     const researchGraph = pi.tools.find((tool) => tool.name === 'research_graph_get')!.parameters as any;
     const crossrefBranch = researchGraph.oneOf.find((branch: any) => branch.properties?.source?.const === 'crossref');
     expect(crossrefBranch.properties.graph.const).toBe('references');
     expect(JSON.stringify(crossrefBranch)).not.toContain('citations');
+  });
+
+  it('discussion schemas preserve legacy validation without repeating source branches', () => {
+    const pi = createMockPi();
+    registerWebsearchTools(pi, { env: {}, fetch: vi.fn<typeof fetch>() });
+
+    // Legacy branches had optional fields and allowed extra properties. The root
+    // already validates every field, so these branches add no input constraints.
+    const stack = ['stack_overflow', 'server_fault', 'unix_linux', 'super_user', 'dba'];
+    const sourceFields = [
+      ...stack.map((source) => [source, ['ref', 'question']] as const),
+      ...['github_issue', 'github_issues'].map((source) => [source, ['ref', 'issue', 'commentsLimit', 'commentsOffset']] as const),
+      ...['github_pull_request', 'github_pull_requests'].map((source) => [source, ['ref', 'pull_request', 'commentsLimit', 'commentsOffset', 'reviewCommentsLimit', 'reviewCommentsOffset']] as const),
+      ...['github_discussion', 'github_discussions'].map((source) => [source, ['ref', 'discussion', 'commentsLimit', 'commentsOffset']] as const),
+      ['hacker_news', ['ref', 'story_id', 'commentsLimit', 'commentsOffset']] as const,
+    ];
+    const values = [undefined, null, false, 0, 42, -1, 1.5, '', 'selected-ref', [], {}];
+
+    for (const name of ['discussion_get', 'discussion_comments_get']) {
+      const schema = pi.tools.find((tool) => tool.name === name)!.parameters as any;
+      const { oneOf: _branches, ...root } = schema;
+      const branches = name === 'discussion_comments_get'
+        ? [...sourceFields.map(([source, fields]) => [source, stack.includes(source) ? [...fields, 'commentsLimit', 'commentsOffset'] : fields] as const), ['devto', ['ref', 'article_id', 'topLevelLimit', 'topLevelOffset']] as const]
+        : sourceFields;
+      const legacy = {
+        ...root,
+        oneOf: branches.map(([source, fields]) => ({
+          type: 'object',
+          properties: { source: { type: 'string', const: source }, ...Object.fromEntries(fields.map((field) => [field, root.properties[field]])) },
+          required: ['source'],
+        })),
+      };
+      const cases: unknown[] = [null, [], {}, { source: 'unknown' }, { source: 'devto' }, { source: 42 }];
+      for (const [source] of branches) {
+        cases.push({ source }, { source, ref: 'selected-ref' }, { source, extra: true });
+        for (const field of Object.keys(root.properties)) {
+          if (field === 'source') continue;
+          for (const value of values) cases.push({ source, [field]: value });
+        }
+      }
+      for (const input of cases) {
+        expect(Check(schema, input), `${name}: ${JSON.stringify(input)}`).toBe(Check(legacy, input));
+      }
+      expect(Check(schema, { source: 'github_issue', commentsLimit: 'invalid' })).toBe(false);
+      expect(Check(schema, { source: 'unknown', ref: 42 })).toBe(false);
+      expect(Check(schema, { source: 'github_issues', ref: 42 })).toBe(true);
+      expect(JSON.stringify(schema).length, `${name} serialized schema size`).toBeLessThan(3000);
+    }
   });
 
   it('github_get routes repo/file/release operations while github_code_search stays public', async () => {

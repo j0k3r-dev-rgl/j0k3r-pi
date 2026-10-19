@@ -19,7 +19,6 @@ export const SUPPORTED_EXTENSIONS: ToolExtensionItem[] = [
 	{ id: "websearch", name: "websearch", description: "Web search tools" },
 	{ id: "pdf-review", name: "pdf-review", description: "PDF inspection & text review" },
 	{ id: "codegraph", name: "codegraph", description: "CodeGraph semantic exploration & index management" },
-	{ id: "typesafe", name: "typesafe", description: "TypeSafe System One (Jev) semantic AI evaluation" },
 ];
 
 export interface ModalResult {
