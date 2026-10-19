@@ -83,10 +83,10 @@ Every governed workflow artifact starts with this block, with no preceding text:
 - Choose the narrowest common parent that covers the approved work. For example, module/controllers, module/services, and module/tests become module/**. Do not list children already covered by a parent.
 - Explicit user restrictions to particular files or narrower paths take precedence over parent consolidation; never broaden them for brevity.
 - Prefer one work area; use multiple roots only for genuinely separate areas. Do not silently broaden to the repository root when that materially exceeds the approved boundary; ask for clarification instead.
-- Allowed Paths covers read access, including the writable work area and only necessary additional read-only roots. Writable Paths is the smaller modification boundary. Required artifacts and assigned skills remain exact, separately authorized inputs/outputs.
+- Allowed Paths covers read access, including the writable work area and only necessary additional read-only roots. Writable Paths is the smaller modification boundary. Required artifacts and assigned skills remain exact, separately authorized inputs/outputs. Exact canonical/required inputs cited by authorized governing artifacts or assigned skills are task-bound read-only inputs under AGENTS.md; for example, an assigned skill's required skill-template.md may be read without a parent roundtrip. This never grants editing or authority to follow arbitrary references.
 - The subagent selects files to inspect, create, edit, or delete within that boundary as needed for the approved behavior. Directory access does not authorize unrelated cleanup, configuration changes, or destructive work outside the goal. Stop and request expansion before leaving the boundary.
-- Allowed Bash contains exact authorized commands, or the sole item `None` when no shell commands are permitted. `None` is not executable.
-- Notes describe exclusions and constraints; writable configuration paths still require explicit configuration authorization.
+- Allowed Bash contains exact authorized commands and/or a narrowly described read-only validation allowance for task-relevant reads/stat/hash of authorized paths and read-only Git identity, or the sole item `None` when no shell commands are permitted. `None` is not executable. An allowance must bound paths, operations, and exclusions; it is not a generic shell grant. Without an allowance, exact commands remain authoritative. A sole None, explicit “only diff”, or other tighter restriction prevails over defaults; existing exact-command scopes need no historical rewrite.
+- Notes describe exclusions and constraints; writable configuration paths still require explicit configuration authorization. Read-only allowances exclude command/substitution injection, untrusted shell interpolation, destructive commands, credential/environment inspection, network/external writes, and silent traversal expansion. Actual tool/security gates prevail; read-only Git identity never permits Git mutation.
 - This is an authorization contract, not a claim that every tool is technically sandboxed.
 
 ### Handoff
@@ -105,7 +105,7 @@ No text follows this block. Evidence belongs inside the artifact. If required ou
 
 ## Evidence-First File Access
 
-- Scope paths are boundaries, not proof that files exist. Confirm inferred paths before reading.
+- Scope paths are boundaries, not proof that files exist. Confirm inferred paths before reading; resolve unexpected symlinks before following them rather than silently widening access. Exact cited inputs grant only task-bound reading, not recursive authority, unrelated skill scans, or secret access. Perform permitted reads/stat/hashes directly within the applicable scope; ordinary identity checks do not require a parent relay.
 - Treat `ENOENT` as `NOT_FOUND`; do not retry guessed filename variants.
 - Use concrete file/line, symbol, command, revision, or source references. Distinguish observed facts from inference.
 - Keep raw secrets, credentials, and unrelated private data out of artifacts.
@@ -146,7 +146,7 @@ Sections after Workflow Status:
 7. Open Decisions
 8. Next Permitted Action
 
-Parallel Units, when present, is one bullet per unit: `UNIT-A: MINI-001, MINI-002 | Writable: /abs/root/module-a/**`. Writable roots must be disjoint between units and inside Execution Scope Writable Paths; no MINI in one unit may depend on a MINI in another. Shared files (lockfiles, barrels, shared config, common test setup) belong to exactly one unit or keep the change sequential. Add one integrated validation command run after all units finish. Omit the section when work is not cleanly separable; never split only to create parallelism.
+Parallel Units, when present, is one bullet per unit: `UNIT-A: MINI-001, MINI-002 | Writable: /abs/root/module-a/**`. Writable roots must be disjoint between units and inside Execution Scope Writable Paths; no MINI in one unit may depend on a MINI in another. Shared files (lockfiles, barrels, shared config, common test setup) belong to exactly one unit or keep the change sequential. Do not manufacture units for shared canonical files. Add one integrated validation command run after all units finish; retain one final independent verification over the complete candidate, not one verifier per unit/check. Check concurrency follows work-workflow's fixed-candidate isolation rule; failed/missing prerequisites stop dependent work without discarding usable independent results. Omit the section when work is not cleanly separable; never split only to create parallelism.
 
 Resolve material product questions with the user; record approved decisions in the relevant contract item and unresolved questions under Open Decisions. Missing material decisions make the plan BLOCKED, not permission to invent acceptance or introduce another review phase. Existing product documents may be cited as inputs, never required solely to replace a removed phase.
 
@@ -156,7 +156,7 @@ Every item has concrete acceptance, validation, and dependencies (`None` when ab
 
 Sections after Workflow Status:
 
-1. Workflow & Authorization — change slug, authority plan, and who approved the action/scope with a time or message reference.
+1. Workflow & Authorization — change slug, authority plan, and who approved the action/scope with a time or message reference; capture applicable existing consent rather than requiring duplicate approval.
 2. Implementation Summary — concise implemented outcome and covered `MINI-###` IDs; list actual created/modified/deleted files once.
 3. Final Validation — commands actually run, aggregate outcomes including failures/skips, and required checks still pending with their assigned phase/owner.
 4. Deviations & Residual Risks — only actual deviations, unresolved risks, or blockers; `None` when absent.
@@ -182,7 +182,7 @@ Sections after Workflow Status:
 
 Only `Verification Result: PASS` can produce READY. Independently verify every `MINI-###` against `plan.md` using current code, tests, and applicable live acceptance; do not rely only on apply's claims. Review final validation and relevant code/scope compliance, not the implementer's TDD chronology or whether it was recorded. Any incomplete/failed required functional check blocks advancement. The evidence matrix owns acceptance proof; do not duplicate it in the remaining sections.
 
-The continuity snapshot records exact verified deliverables, excluding the verification artifact itself and unrelated files. For new snapshots, use this deterministic encoding:
+The continuity snapshot records exact verified deliverables, excluding the verification artifact itself and unrelated files. Verify may directly compute approved deliverable identities under the applicable exact command or bounded read-only validation allowance; no parent relay is required. Tighter restrictions and actual tool/security controls prevail; if scope does not permit the calculation, stop and ask for the missing authority. For new snapshots, use this deterministic encoding:
 
 - Each record is a three-string array `[absolutePath, state, hash]`: normalized absolute path, `present` with lowercase SHA-256 of raw file bytes, or `absent` with an empty hash for a required deletion. Reject duplicate paths, unreadable files, directories, and unexpected symlinks; absence means ENOENT, not any read error. If a symlink is an approved deliverable, define its explicit identity/encoding before verification rather than silently hashing its target.
 - Sort by `absolutePath` using JavaScript string comparison (`a < b`, not locale-dependent sorting). The aggregate is SHA-256 of the UTF-8 bytes of `JSON.stringify(sortedRecords)`, with no indentation, BOM, or trailing newline. Include the records and aggregate once; counts are derived, not separately maintained evidence.
