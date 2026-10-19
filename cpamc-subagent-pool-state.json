@@ -1,0 +1,229 @@
+{
+  "version": 1,
+  "updatedAt": "2026-10-18T08:26:20.918Z",
+  "accounts": [
+    {
+      "prefix": "1990",
+      "authIndex": "99429ed48e8c7bc4",
+      "email": "mauricio1990arg@gmail.com",
+      "status": "healthy",
+      "lastRequestStartedAt": 1792311980143,
+      "quota": {
+        "remainingFraction": 1,
+        "usedPercentage": 0,
+        "window": "5 hs",
+        "lastCheckedAt": "2026-10-18T08:26:20.917Z",
+        "status": "known"
+      }
+    },
+    {
+      "prefix": "cic",
+      "authIndex": "508cfb443af80f0c",
+      "email": "cic.eva.peron@gmail.com",
+      "status": "healthy",
+      "lastRequestStartedAt": 1792305932541,
+      "quota": {
+        "remainingFraction": 1,
+        "usedPercentage": 0,
+        "window": "5 hs",
+        "lastCheckedAt": "2026-10-18T06:45:33.675Z",
+        "status": "known"
+      }
+    },
+    {
+      "prefix": "fiorella",
+      "authIndex": "f46acb8e89873c1a",
+      "email": "fiorellaaguila80@gmail.com",
+      "status": "healthy",
+      "lastRequestStartedAt": 1792303640512,
+      "quota": {
+        "remainingFraction": 1,
+        "usedPercentage": 0,
+        "window": "5 hs",
+        "lastCheckedAt": "2026-10-18T06:07:21.030Z",
+        "status": "known"
+      }
+    },
+    {
+      "prefix": "j0k3r",
+      "authIndex": "f0175016006efe0f",
+      "email": "j0k3r.dev.rgl@gmail.com",
+      "status": "healthy",
+      "lastRequestStartedAt": 1792303640513,
+      "quota": {
+        "remainingFraction": 1,
+        "usedPercentage": 0,
+        "window": "5 hs",
+        "lastCheckedAt": "2026-10-18T06:07:21.839Z",
+        "status": "known"
+      }
+    },
+    {
+      "prefix": "j0k3r2",
+      "authIndex": "a4b02f617820a4b8",
+      "email": "j0k3r.dev.rgl.2@gmail.com",
+      "status": "healthy",
+      "lastRequestStartedAt": 1792303640514,
+      "quota": {
+        "remainingFraction": 1,
+        "usedPercentage": 0,
+        "window": "5 hs",
+        "lastCheckedAt": "2026-10-18T06:07:21.753Z",
+        "status": "known"
+      }
+    },
+    {
+      "prefix": "j0k3r3",
+      "authIndex": "5e2bd72df052e7f9",
+      "email": "j0k3r.dev.rgl.3@gmail.com",
+      "status": "healthy",
+      "lastRequestStartedAt": 1792303640515,
+      "quota": {
+        "remainingFraction": 1,
+        "usedPercentage": 0,
+        "window": "5 hs",
+        "lastCheckedAt": "2026-10-18T06:07:21.186Z",
+        "status": "known"
+      }
+    },
+    {
+      "prefix": "j0k3r4",
+      "authIndex": "a3af57d97a3081b3",
+      "email": "j0k3r.dev.rgl.4@gmail.com",
+      "status": "healthy",
+      "lastRequestStartedAt": 1792303640516,
+      "quota": {
+        "remainingFraction": 1,
+        "usedPercentage": 0,
+        "window": "5 hs",
+        "lastCheckedAt": "2026-10-18T06:07:21.166Z",
+        "status": "known"
+      }
+    },
+    {
+      "prefix": "j0k3r5",
+      "authIndex": "65559586969f6905",
+      "email": "j0k3r.dev.rgl.5@gmail.com",
+      "status": "healthy",
+      "lastRequestStartedAt": 1792303640517,
+      "quota": {
+        "remainingFraction": 1,
+        "usedPercentage": 0,
+        "window": "5 hs",
+        "lastCheckedAt": "2026-10-18T06:07:21.034Z",
+        "status": "known"
+      }
+    },
+    {
+      "prefix": "J0k3r6",
+      "authIndex": "0e837cbb736f44e8",
+      "email": "j0k3r.dev.rgl.6@gmail.com",
+      "status": "healthy",
+      "lastRequestStartedAt": 1792303640518,
+      "quota": {
+        "remainingFraction": 1,
+        "usedPercentage": 0,
+        "window": "5 hs",
+        "lastCheckedAt": "2026-10-18T06:07:21.733Z",
+        "status": "known"
+      }
+    },
+    {
+      "prefix": "j0k3r7",
+      "authIndex": "b2e06968eb5606e9",
+      "email": "j0k3r.dev.rgl.7@gmail.com",
+      "status": "healthy",
+      "lastRequestStartedAt": 1792303640519,
+      "quota": {
+        "remainingFraction": 1,
+        "usedPercentage": 0,
+        "window": "5 hs",
+        "lastCheckedAt": "2026-10-18T06:07:21.029Z",
+        "status": "known"
+      }
+    },
+    {
+      "prefix": "pdas",
+      "authIndex": "1e43d7b23fe52816",
+      "email": "pdasriogallegos@gmail.com",
+      "status": "healthy",
+      "lastRequestStartedAt": 1792303640520,
+      "quota": {
+        "remainingFraction": 1,
+        "usedPercentage": 0,
+        "window": "5 hs",
+        "lastCheckedAt": "2026-10-18T06:07:21.825Z",
+        "status": "known"
+      }
+    },
+    {
+      "prefix": "rglpdas",
+      "authIndex": "606fe72bd199a8c0",
+      "email": "rglpdas@gmail.com",
+      "status": "healthy",
+      "lastRequestStartedAt": 1792303640521,
+      "quota": {
+        "remainingFraction": 1,
+        "usedPercentage": 0,
+        "window": "5 hs",
+        "lastCheckedAt": "2026-10-18T06:07:21.664Z",
+        "status": "known"
+      }
+    },
+    {
+      "prefix": "tahiel",
+      "authIndex": "81b7ddcc6b8e8c88",
+      "email": "tahiel2015rgl@gmail.com",
+      "status": "healthy",
+      "lastRequestStartedAt": 1792303640522,
+      "quota": {
+        "remainingFraction": 1,
+        "usedPercentage": 0,
+        "window": "5 hs",
+        "lastCheckedAt": "2026-10-18T06:07:21.077Z",
+        "status": "known"
+      }
+    },
+    {
+      "prefix": "unpa",
+      "authIndex": "8c2b8484efe16212",
+      "email": "mauricio.maldonado.unpa.uarg@gmail.com",
+      "status": "healthy",
+      "lastRequestStartedAt": 1792303640523,
+      "quota": {
+        "remainingFraction": 1,
+        "usedPercentage": 0,
+        "window": "5 hs",
+        "lastCheckedAt": "2026-10-18T06:07:21.005Z",
+        "status": "known"
+      }
+    },
+    {
+      "prefix": "vertex-global",
+      "authIndex": "898536f262027aaa",
+      "email": "cliproxy-vertex@sias-478809.iam.gserviceaccount.com",
+      "status": "unknown",
+      "lastRequestStartedAt": 1792303640524,
+      "quota": {
+        "remainingFraction": 0,
+        "window": "5 hs",
+        "status": "unknown"
+      }
+    },
+    {
+      "prefix": "ytest664",
+      "authIndex": "5cca4b090d236962",
+      "email": "ytest664@gmail.com",
+      "status": "healthy",
+      "lastRequestStartedAt": 1792303640525,
+      "quota": {
+        "remainingFraction": 1,
+        "usedPercentage": 0,
+        "window": "5 hs",
+        "lastCheckedAt": "2026-10-18T06:07:21.028Z",
+        "status": "known"
+      }
+    }
+  ],
+  "leases": {}
+}
