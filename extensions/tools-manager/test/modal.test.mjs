@@ -36,8 +36,8 @@ const mockTheme = {
   bold: (text) => text,
 };
 
-test("MINI-001: SUPPORTED_EXTENSIONS contains 10 current opt-in items including codegraph and typesafe", () => {
-  assert.equal(SUPPORTED_EXTENSIONS.length, 10);
+test("MINI-001: SUPPORTED_EXTENSIONS contains 9 current opt-in items without typesafe", () => {
+  assert.equal(SUPPORTED_EXTENSIONS.length, 9);
   assert.equal(SUPPORTED_EXTENSIONS.some((e) => /engram|memory/.test(e.id)), false, "Memory is managed by Pi native resources");
   assert.equal(SUPPORTED_EXTENSIONS.some((e) => e.id === "orchestrator-supervisor"), false, "orchestrator-supervisor is managed via /supervisor panel switch");
   const codegraph = SUPPORTED_EXTENSIONS.find((e) => e.id === "codegraph");
@@ -48,13 +48,9 @@ test("MINI-001: SUPPORTED_EXTENSIONS contains 10 current opt-in items including 
     description: "CodeGraph semantic exploration & index management",
   });
 
-  const typesafe = SUPPORTED_EXTENSIONS.find((e) => e.id === "typesafe");
-  assert.ok(typesafe, "typesafe must exist in SUPPORTED_EXTENSIONS");
-  assert.deepEqual(typesafe, {
-    id: "typesafe",
-    name: "typesafe",
-    description: "TypeSafe System One (Jev) semantic AI evaluation",
-  });
+  assert.equal(SUPPORTED_EXTENSIONS.some((e) => e.id === "typesafe"), false);
+  const modal = new ToolsManagerModal(tmpdir(), mockTheme, () => {});
+  assert.doesNotMatch(modal.render(80).join("\n"), /typesafe|TypeSafe|Jev/);
 });
 
 test("MINI-001: loadCurrentState initializes codegraph to false when config is missing or omits it", () => {
@@ -67,6 +63,9 @@ test("MINI-001: loadCurrentState initializes codegraph to false when config is m
     assert.ok(doneResult);
     assert.equal(doneResult.action, "save");
     assert.equal(doneResult.selected?.codegraph, false);
+    assert.equal(Object.hasOwn(doneResult.selected, "typesafe"), false);
+    const saved = JSON.parse(readFileSync(join(tmp, ".pi", "extensions.json"), "utf8"));
+    assert.equal(Object.hasOwn(saved, "typesafe"), false);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -94,19 +93,19 @@ test("MINI-001: clicking on any extension item row (0 to 8) accurately toggles t
   }
 });
 
-test("MINI-001: clicking on action buttons row (y = 28 for 10 items) invokes saveConfig or dismisses", () => {
+test("MINI-001: clicking on action buttons row (y = 26 for 9 items) invokes saveConfig or dismisses", () => {
   const tmp = mkdtempSync(join(tmpdir(), "tools-manager-test-"));
   try {
     let doneResult;
     const modal = new ToolsManagerModal(tmp, mockTheme, (res) => { doneResult = res; });
 
-    // Buttons row for 10 items is 5 + 10*2 + 3 = 28.
-    modal.handleMouse({ button: "left", type: "click", x: 35, y: 28 });
+    // Buttons row for 9 items is 5 + 9*2 + 3 = 26.
+    modal.handleMouse({ button: "left", type: "click", x: 35, y: 26 });
     assert.deepEqual(doneResult, { action: "cancel" });
 
-    // Reset doneResult and click save at y = 28, x = 15.
+    // Reset doneResult and click save at y = 26, x = 15.
     doneResult = undefined;
-    modal.handleMouse({ button: "left", type: "click", x: 15, y: 28 });
+    modal.handleMouse({ button: "left", type: "click", x: 15, y: 26 });
     assert.ok(doneResult);
     assert.equal(doneResult.action, "save");
   } finally {
