@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import extension from '../../index.js';
 import { SubagentStructuredError, normalizeErrorMetadata } from '../../src/error-metadata.js';
 import { SubagentManager } from '../../src/manager.js';
+import type { SubagentRunner } from '../../src/types.js';
 import { registerSubagentTools } from '../../src/tools.js';
 import { installSubagentTestEnv } from '../helpers/subagent-test-helpers.js';
 
@@ -278,19 +279,36 @@ describe('subagent_run tool', () => {
     expect(result.content[0].text).not.toContain('Never switch models automatically');
   });
 
-  it('returns an error tool result when any task-mode subagent fails', async () => {
+  it('guides one task-mode retry then escalates its second failure without launching another attempt', async () => {
     env.writeAgent('analyst');
     await import('node:fs').then((fs) => fs.writeFileSync(`${env.tmp}/.pi/subagents.json`, JSON.stringify({ enable_continue: true })));
-    const manager = new SubagentManager(async () => { throw new Error('review failed'); });
+    const fs = await import('node:fs');
+    const nestedSessionPath = `${env.tmp}/retry-session.jsonl`;
+    fs.writeFileSync(nestedSessionPath, '{"type":"session"}\n');
+    const runner = vi.fn<SubagentRunner>(async ({ onActivity }) => {
+      onActivity?.({ message: 'nested session ready', nested_session_path: nestedSessionPath });
+      throw new Error('review failed');
+    });
+    const manager = new SubagentManager(runner);
     let runTool: any;
     registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
-    const result = await runTool.execute('1', { agent: 'analyst', task: 'fail', mode: 'task' }, undefined, undefined, { cwd: env.tmp });
+    const ctx = { cwd: env.tmp };
+    const result = await runTool.execute('1', { agent: 'analyst', task: 'fail', mode: 'task' }, undefined, undefined, ctx);
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('failed');
-    expect(result.content[0].text).toContain('can be resumed with `subagent_run`');
-    expect(result.content[0].text).toContain('Ask the user before resuming');
-    expect(result.content[0].text).toContain('model and effort');
-    expect(result.content[0].text).toContain('Never switch models automatically');
+    expect(result.content[0].text).toContain('Automatically retry this task once');
+    expect(result.content[0].text).toContain('Do not ask the user to select model or effort');
+    expect(result.content[0].text).not.toContain('Ask the user before resuming');
+    expect(result.content[0].text).not.toContain('choose a different model');
+    expect(runner).toHaveBeenCalledTimes(1);
+
+    const taskId = result.details.results[0].id;
+    const retry = await runTool.execute('2', { action: 'continue', task_id: taskId, task: 'Retry the failed task once' }, undefined, undefined, ctx);
+    expect(retry.isError).toBe(true);
+    expect(retry.content[0].text).toContain('attempt: 2');
+    expect(retry.content[0].text).toContain('Stop and inform the user');
+    expect(retry.content[0].text).not.toContain('Automatically retry this task once');
+    expect(runner).toHaveBeenCalledTimes(2);
   });
 
   it('exposes only safe structured error summaries in subagent_run details while preserving legacy error text', async () => {

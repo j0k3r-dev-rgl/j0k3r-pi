@@ -112,7 +112,9 @@ describe('subagent_run action=continue', () => {
     const result = await tool.execute('failed', { action: 'continue', task_id: first.task_ids[0], task: 'follow-up' }, undefined, undefined, { cwd: env.tmp });
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain(error);
-    expect(result.content[0].text).toContain('action: "continue"');
+    expect(result.content[0].text).toContain('Stop and inform the user');
+    expect(result.content[0].text).toContain('Do not retry again without explicit user approval');
+    expect(result.content[0].text).not.toContain('Automatically retry this task once');
     expect(result.details.task).toMatchObject({ id: first.task_ids[0], attempt: 2, status: 'failed' });
   });
 
