@@ -39,7 +39,7 @@ function createTempFixture(name: string): { dir: string; dbPath: string; cleanup
   };
 }
 
-test('Activation: Pi autodiscovers the root entrypoint and registers nine tools without storage or network activity', async () => {
+test('Activation: Pi autodiscovers the root entrypoint and registers ten tools without storage or network activity', async () => {
   const { dir, dbPath, cleanup } = createTempFixture('discovery');
   const originalFetch = globalThis.fetch;
   const storageState = () => existsSync(DEFAULT_DB_PATH)
@@ -67,7 +67,7 @@ test('Activation: Pi autodiscovers the root entrypoint and registers nine tools 
     assert.equal(loaded.extensions.length, 1);
     assert.deepEqual([...loaded.extensions[0].tools.keys()].sort(), [
       'memory_context', 'memory_delete', 'memory_deleted_list', 'memory_entity',
-      'memory_get', 'memory_relation', 'memory_restore', 'memory_save', 'memory_search',
+      'memory_get', 'memory_history', 'memory_relation', 'memory_restore', 'memory_save', 'memory_search',
     ]);
     assert.equal(existsSync(dbPath), false);
     assert.deepEqual(storageState(), beforeLoading, 'Autodiscovery must not touch the real memory database');
@@ -95,7 +95,7 @@ test('Activation: session startup reports registered memory tools without creati
     createMemoryExtension(dbPath, { client: new OfflineE5Client() })(pi);
     assert.ok(handlers.has('session_start'), 'Registered tools should publish their own status');
     for (const handler of handlers.get('session_start')!) await handler({}, ctx);
-    assert.equal(statuses.get('pi-persistent-memory'), 'memory · 9 tools');
+    assert.equal(statuses.get('pi-persistent-memory'), 'memory · 10 tools');
     assert.equal(existsSync(dbPath), false);
     for (const handler of handlers.get('session_shutdown')!) await handler({ reason: 'quit' }, ctx);
     assert.equal(statuses.get('pi-persistent-memory'), undefined);
@@ -518,43 +518,43 @@ test('M6-A01 & M6-A05: complete nine-tool public SDK flow preserves graph, recov
     assert.equal(outcome.isError, expectedError, `${name}: ${JSON.stringify(outcome.result)}`);
     assert.ok(Buffer.byteLength(JSON.stringify(outcome.result)) <= 6144, name);
     const text = outcome.result.content.find((block: any) => block.type === 'text')?.text ?? '';
-    return expectedError ? text : JSON.parse(text);
+    return expectedError ? text : { ...outcome.result.details, text };
   }
   try {
     const a = await openSdk(dir);
     assert.equal(existsSync(dbPath), false);
     await a.prompt('Work on this project; do not save any session summary unless I explicitly request it.');
     const initial = await call(a, 'memory_save', { title: 'C++ graph decision', content: 'Use scoped graph relationships for the C++ service.', type: 'decision', topic_key: 'architecture/graph' });
-    assert.equal(initial.indexed, true);
+    assert.match(initial.text, /saved and indexed/);
     const id = initial.id;
     const detail = await call(a, 'memory_get', { id });
-    assert.equal(detail.content, 'Use scoped graph relationships for the C++ service.');
-    assert.ok((await call(a, 'memory_context', {})).items.some((item: any) => item.id === id));
+    assert.ok(detail.text.endsWith('\n\nUse scoped graph relationships for the C++ service.'));
+    assert.ok((await call(a, 'memory_context', {})).text.includes(`[${id}] C++ graph decision`));
     for (const mode of ['semantic', 'hybrid', 'fts5']) {
       const before = requests.length;
-      assert.ok((await call(a, 'memory_search', { mode, query: 'C++' })).results.some((item: any) => item.id === id));
+      assert.ok((await call(a, 'memory_search', { mode, query: 'C++' })).text.includes(`[${id}] C++ graph decision`));
       if (mode === 'fts5') assert.equal(requests.length, before);
     }
     const project = await call(a, 'memory_entity', { action: 'save', type: 'project', name: dir.split('/').pop() });
     const memoryNode = await call(a, 'memory_entity', { action: 'save', type: 'memory', name: String(id), memory_id: id });
     const react = await call(a, 'memory_entity', { action: 'save', type: 'technology', name: 'React', scope: 'global' });
-    assert.ok((await call(a, 'memory_entity', { action: 'list' })).entities.some((entity: any) => entity.id === memoryNode.id));
+    assert.ok((await call(a, 'memory_entity', { action: 'list' })).text.includes(`[${memoryNode.id}]`));
     const relations = [];
     for (const relation_type of RELATION_TYPES) {
       relations.push(await call(a, 'memory_relation', { action: 'save', source: project.id, target: react.id, relation_type }));
     }
     await call(a, 'memory_relation', { action: 'save', source: memoryNode.id, target: react.id, relation_type: 'references' });
     const graph = await call(a, 'memory_search', { mode: 'graph', entity_id: react.id });
-    assert.ok(graph.nodes.some((node: any) => node.id === memoryNode.id));
-    assert.ok(graph.edges.some((edge: any) => edge.source === project.id && edge.target === react.id));
+    assert.ok(graph.text.includes(`[${memoryNode.id}]`));
+    assert.ok(graph.text.includes(`[${project.id}] --uses--> [${react.id}]`));
     await call(a, 'memory_relation', { action: 'delete', id: relations[0].id });
     const noInferenceBeforeDelete = requests.length;
     await call(a, 'memory_delete', { id, owner_scope: 'project' });
     assert.equal(requests.length, noInferenceBeforeDelete);
     await call(a, 'memory_get', { id }, true);
-    assert.ok((await call(a, 'memory_deleted_list', {})).items.some((item: any) => item.id === id));
-    assert.equal((await call(a, 'memory_search', { mode: 'fts5', query: 'C++' })).results.length, 0);
-    assert.ok(!(await call(a, 'memory_search', { mode: 'graph', entity_id: react.id })).nodes.some((node: any) => node.id === memoryNode.id));
+    assert.ok((await call(a, 'memory_deleted_list', {})).text.includes(`[${id}] C++ graph decision`));
+    assert.equal((await call(a, 'memory_search', { mode: 'fts5', query: 'C++' })).count, 0);
+    assert.ok(!(await call(a, 'memory_search', { mode: 'graph', entity_id: react.id })).text.includes(`[${memoryNode.id}]`));
     await call(a, 'memory_restore', { id, owner_scope: 'project' });
     assert.equal(requests.length, noInferenceBeforeDelete);
     assert.equal((await call(a, 'memory_save', { action: 'reindex', id })).succeeded, 1);
@@ -562,7 +562,7 @@ test('M6-A01 & M6-A05: complete nine-tool public SDK flow preserves graph, recov
     assert.equal(replaced.id, id);
     const liveNode = await call(a, 'memory_entity', { action: 'get', id: memoryNode.id });
     assert.equal(liveNode.id, memoryNode.id);
-    assert.equal(liveNode.memory_summary.title, 'C++ revised decision');
+    assert.match(liveNode.text, /C\+\+ revised decision/);
     withDatabase(dbPath, (db) => assert.equal(db.prepare("SELECT count(*) AS n FROM memories WHERE type='session_summary'").get()!.n, 0));
     await a.prompt('Please persist an English summary of this session now.');
     await call(a, 'memory_save', { title: 'Requested session summary', content: 'Validated memory and graph operations during this session.', type: 'session_summary' });
@@ -573,7 +573,7 @@ test('M6-A01 & M6-A05: complete nine-tool public SDK flow preserves graph, recov
     await b.prompt('Create knowledge for this separate project.');
     const foreign = await call(b, 'memory_save', { title: 'Private project note', content: 'This belongs to another project.', type: 'note' });
     await call(a, 'memory_get', { id: foreign.id }, true);
-    assert.equal((await call(a, 'memory_get', { id: foreign.id, global: true })).content, 'This belongs to another project.');
+    assert.ok((await call(a, 'memory_get', { id: foreign.id, global: true })).text.endsWith('\n\nThis belongs to another project.'));
     await call(a, 'memory_delete', { id: foreign.id, owner_scope: 'project' }, true);
     assert.equal((await call(b, 'memory_get', { id: foreign.id })).id, foreign.id);
     const firstChild = await openSdk(dir, { parentId: a.sessionManager.getSessionId() });
@@ -719,10 +719,9 @@ test('M6-A02: public SDK save preserves committed text and distinguishes cancell
     assert.equal(rejected.result.details.category, 'input_error');
     const unavailable = await context.executeTool('memory_save', { title: 'Unavailable service note', content: 'Service availability failures preserve a successful text save.', type: 'note' });
     assert.equal(unavailable.isError, false);
-    const unavailableData = JSON.parse(unavailable.result.content[0].text);
-    assert.equal(unavailableData.committed, true);
-    assert.equal(unavailableData.indexed, false);
-    assert.match(unavailableData.notice, /unavailable/);
+    assert.match(unavailable.result.content[0].text, /saved; indexing pending/);
+    assert.match(unavailable.result.content[0].text, /unavailable/);
+    assert.equal(unavailable.result.details.indexing_status, 'pending');
     for (const result of [invalid.result, rejected.result, unavailable.result]) {
       assert.ok(Buffer.byteLength(JSON.stringify(result)) <= 6144);
     }

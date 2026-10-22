@@ -11,6 +11,7 @@ import {
   DeletedListSchema,
   EntitySchema,
   RelationSchema,
+  HistorySchema,
 } from './schemas.ts';
 import {
   SAVE_TOOL_DESCRIPTION,
@@ -22,6 +23,7 @@ import {
   DELETED_LIST_DESCRIPTION,
   ENTITY_TOOL_DESCRIPTION,
   RELATION_TOOL_DESCRIPTION,
+  HISTORY_TOOL_DESCRIPTION,
   MEMORY_TOOL_GUIDELINES,
 } from './descriptions.ts';
 import { executeSaveTool } from './save.ts';
@@ -33,6 +35,7 @@ import { executeRestoreTool } from './restore.ts';
 import { executeDeletedListTool } from './deleted-list.ts';
 import { executeEntityTool } from './entity.ts';
 import { executeRelationTool } from './relation.ts';
+import { executeHistoryTool } from './history.ts';
 import { createToolRenderers } from '../render/index.ts';
 
 export const TOOL_NAMES = [
@@ -45,6 +48,7 @@ export const TOOL_NAMES = [
   'memory_deleted_list',
   'memory_entity',
   'memory_relation',
+  'memory_history',
 ] as const;
 
 export type ToolName = (typeof TOOL_NAMES)[number];
@@ -97,6 +101,7 @@ export function createMemoryTools(lifecycle?: MemoryLifecycle): ToolDefinition[]
     memory_deleted_list: createToolRenderers('memory_deleted_list'),
     memory_entity: createToolRenderers('memory_entity'),
     memory_relation: createToolRenderers('memory_relation'),
+    memory_history: createToolRenderers('memory_history'),
   };
 
   return [
@@ -180,6 +185,15 @@ export function createMemoryTools(lifecycle?: MemoryLifecycle): ToolDefinition[]
       parameters: RelationSchema,
       execute: wrapExecutor('memory_relation', executeRelationTool),
       ...renderers.memory_relation,
+    },
+    {
+      name: 'memory_history',
+      label: 'Memory: User History',
+      description: HISTORY_TOOL_DESCRIPTION,
+      promptGuidelines: MEMORY_TOOL_GUIDELINES.memory_history,
+      parameters: HistorySchema,
+      execute: wrapExecutor('memory_history', executeHistoryTool),
+      ...renderers.memory_history,
     },
   ];
 }

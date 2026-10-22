@@ -1,13 +1,13 @@
 # Pi Persistent Memory
 
-Independent TypeScript extension providing nine persistent-memory tools for Pi.
+Independent TypeScript extension providing ten persistent-memory tools for Pi.
 
-Status: **MINI-001–MINI-006 completed and validated; Pi loading enabled**. The root `index.ts` exposes the existing implementation for automatic discovery in `~/.pi/agent/extensions/pi-persistent-memory/`. Subagent definitions use the supported `memory_*` tools.
+Status: **MINI-001–MINI-006 completed and validated; user message history enabled; Pi loading enabled**. The root `index.ts` exposes the existing implementation for automatic discovery in `~/.pi/agent/extensions/pi-persistent-memory/`. Subagent definitions use the supported `memory_*` tools.
 
 ## Activation
 
 1. Run `/reload` or restart Pi after updating this checkout. No external memory package or extra entry in `settings.json` is required.
-2. Verify the nine `memory_*` tools are present. In the TUI, `memory · 9 tools` reports registration, not database readiness or E5 health.
+2. Verify the ten `memory_*` tools are present. In the TUI, `memory · 10 tools` reports registration, not database readiness or E5 health.
 3. Send a user message to activate the session and initialize `~/.memory/memories.db` on demand. Loading, session selection and reload alone never open storage or call E5.
 
 The extension is global to this agent directory and uses Pi's native resource controls (`pi config`), not `.pi/extensions.json` opt-in flags. Project identity configuration is read only from trusted `.pi/memory.json`; otherwise the existing remote/folder fallback applies. No prior database is imported or deleted automatically.
@@ -50,6 +50,7 @@ Keep title/content in concise English, technical identifiers intact, and include
 | Discover graph IDs | `memory_entity` get/list. Save requires authorized graph management; entity types/scopes/memory associations are immutable. |
 | Graph neighborhood | `memory_search` with `mode: graph` and a real string `entity_id`; no query/cursor. Bounded to 2 hops and 20 entities, not exhaustive. |
 | Directed graph edges | Authorized `memory_relation` using existing source/target entity IDs and a supported relation type. |
+| User prompt history | `memory_history` with `action: search` (chronological/lexical FTS across current project sessions) or `action: get` (full message by ID). Strictly project-scoped. |
 
 All tools declare concise `promptGuidelines`. Pi incorporates active tool guidance; the generic subagent runner incorporates only effective allowlisted tool guidance into `## Active Tool Guidelines` for lean workers. This needs no extra injection hook or sibling-extension dependency. Discovery/planning/apply/verify definitions allow context/search/get/save; ordinary workers do not gain graph writes or deletion/recovery permissions. News research retains save-only access and must not blindly replace unread records.
 
@@ -79,6 +80,27 @@ To update a selected record, first call `memory_get({"id": 42})` and read all pa
   "type": "convention"
 }
 ```
+
+### Execution responses
+
+Tools return concise English text to the agent, not internal JSON envelopes. Definitions, inputs, permissions, storage and retrieval logic are unchanged.
+
+- Search/context: IDs, titles and excerpts; cross-project searches retain ownership labels. Scores, excerpt coordinates and routine status fields are omitted.
+- Full reads: title and exact stored content, with explicit title/content page labels when paginated. User message history retains message IDs, dates and session IDs.
+- Writes: short confirmations distinguish saved text from pending indexing. Errors retain their category and a committed memory ID when available; notices and lexical fallback remain visible.
+- Recovery: deleted listings retain owner and deletion date. Graph output retains entity/relation IDs, directed edges, memory links and partial-result warnings.
+- Pagination: only partial responses include the exact cursor and continuation instruction. Existing structured `details` remain available to the renderer; model-facing `content` is readable text and must not be parsed as JSON.
+
+Example complete search response:
+
+```text
+1 memory excerpts on this page.
+
+[12] Offline memory tests
+Run regression tests with the offline network guard.
+```
+
+The complete serialized tool result remains bounded to 6 KiB. Readers and paginated lists budget against the same text formatter used for execution; no smaller hard limit or extra automatic retrieval is introduced. Reload Pi to activate updated response formatting.
 
 ### Search, full reading, and continuation
 
@@ -167,10 +189,11 @@ Graph entity IDs are strings from `memory_entity`, not integer memory IDs. Entit
 
 ## Architecture and Scope (MINI-005)
 
-- **Nine Agent-Facing Tools (`src/tools/`)**:
+- **Ten Agent-Facing Tools (`src/tools/`)**:
   - `memory_save`: Saves durable English memory or executes reindex. Save requires `title`, `content`, `type`; returns compact confirmation without echoing submitted text. Reindex rejects textual fields and supports specific ID or sequential bulk (<= 5 memories). Explicit user request required for `session_summary` saving with reserved key `session/<session-id>/summary`.
   - `memory_search`: Multi-modal search (`hybrid` default, `semantic`, `fts5`, `graph`). Enforces query for non-graph and `entity_id` for graph. Contradictory arguments rejected. Excerpts bounded <= 5 memories per page.
   - `memory_get`: Retrieves full active memory title and content progressively. Bounded pages sliced on Unicode code-point boundaries with opaque stateless cursors. Soft-deleted memories hidden.
+  - `memory_history`: Project-isolated human message history tool. Action `search` queries or lists messages across sessions with append-safe keyset pagination (`before_id`) and lexical FTS5; action `get` retrieves full message text with byte-offset Unicode code-point pagination. Enforces strict server-resolved project key authority.
   - `memory_context`: Retrieves prioritized context: active `session_summary` first, project summary second, recent authorized memories third. Deduplicated by memory ID and topic key. Missing summaries normal (no automatic generation).
   - `memory_delete` & `memory_restore`: Recoverable soft-deletion and restoration. Requires `owner_scope` assertion ('project' or 'global') verified against target record before mutation.
   - `memory_deleted_list`: Recovery audit page returning recovery metadata only (`id`, `title`, `owner`, `type`, `deleted_at`); deleted text remains hidden.

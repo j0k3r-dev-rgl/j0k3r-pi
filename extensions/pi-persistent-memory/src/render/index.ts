@@ -30,6 +30,10 @@ function callArguments(toolName: string, args: any): string {
       return [args?.action ?? 'list', args?.name ? `"${args.name}"` : args?.id ?? ''].filter(Boolean).join(' ');
     case 'memory_relation':
       return [args?.action ?? 'save', args?.source && args?.target ? `${args.source} → ${args.target}` : args?.id ?? ''].filter(Boolean).join(' ');
+    case 'memory_history':
+      return args?.action === 'get'
+        ? `#${args?.id ?? ''}`
+        : [args?.query ? `"${args.query}"` : 'recent', args?.session_id ? `session:${args.session_id}` : ''].filter(Boolean).join(' ');
     default:
       return '';
   }
@@ -58,6 +62,10 @@ function resultSummary(toolName: string, details: any): string {
       return `Entity completed${id}`;
     case 'memory_relation':
       return `Relation completed${id}`;
+    case 'memory_history':
+      return details.action === 'get'
+        ? `Retrieved message #${details.id}`
+        : `Found ${details.count ?? 0} message(s)`;
     default:
       return 'Completed';
   }

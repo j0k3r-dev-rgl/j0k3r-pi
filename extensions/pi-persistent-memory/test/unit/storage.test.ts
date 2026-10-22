@@ -89,7 +89,7 @@ test('M1-A01: initSchema creates versioned schema idempotently and reports versi
       initSchema(db);
 
       const meta = db.prepare('SELECT version FROM schema_meta;').get() as { version: number };
-      assert.equal(meta.version, 1);
+      assert.equal(meta.version, 2);
     });
 
     // Incompatible version mismatch
@@ -103,6 +103,158 @@ test('M1-A01: initSchema creates versioned schema idempotently and reports versi
     cleanup();
   }
 });
+
+test('MINI-001: initSchema upgrades v1 schema to v2 additively preserving existing data', () => {
+  const { dbPath, cleanup } = createTempDb();
+  try {
+    // 1. Manually create v1 schema with data
+    withDatabase(dbPath, (db) => {
+      db.exec(`
+        CREATE TABLE schema_meta (
+          version INTEGER PRIMARY KEY,
+          updated_at TEXT NOT NULL
+        );
+        INSERT INTO schema_meta (version, updated_at) VALUES (1, datetime('now'));
+
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY,
+          scope_key TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          status TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          closed_at TEXT
+        );
+
+        CREATE TABLE memories (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          scope_key TEXT NOT NULL,
+          title TEXT NOT NULL,
+          content TEXT NOT NULL,
+          type TEXT NOT NULL,
+          topic_key TEXT,
+          content_version INTEGER NOT NULL DEFAULT 1,
+          deleted_at TEXT,
+          indexing_status TEXT NOT NULL DEFAULT 'pending',
+          pending_reason TEXT,
+          session_id TEXT NOT NULL,
+          invoking_parent_session_id TEXT,
+          invocation_id TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (session_id) REFERENCES sessions(id)
+        );
+
+        INSERT INTO sessions (id, scope_key, kind, status, created_at, updated_at)
+        VALUES ('sess-v1', '["project","p1"]', 'normal', 'open', datetime('now'), datetime('now'));
+
+        INSERT INTO memories (scope_key, title, content, type, session_id, created_at, updated_at)
+        VALUES ('["project","p1"]', 'Pre-existing Memory', 'Important v1 knowledge', 'note', 'sess-v1', datetime('now'), datetime('now'));
+      `);
+    });
+
+    // 2. Run initSchema which must migrate to v2
+    withDatabase(dbPath, (db) => {
+      initSchema(db);
+
+      const meta = db.prepare('SELECT version FROM schema_meta;').get() as { version: number };
+      assert.equal(meta.version, 2);
+
+      // Verify existing memory is intact
+      const mem = db.prepare('SELECT * FROM memories WHERE id = 1;').get() as any;
+      assert.equal(mem.title, 'Pre-existing Memory');
+      assert.equal(mem.content, 'Important v1 knowledge');
+
+      // Verify user_messages table exists
+      const msgTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='user_messages';").get() as any;
+      assert.ok(msgTable, 'user_messages table must exist');
+
+      // Verify user_messages_fts exists
+      const ftsTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='user_messages_fts';").get() as any;
+      assert.ok(ftsTable, 'user_messages_fts virtual table must exist');
+    });
+  } finally {
+    cleanup();
+  }
+});
+
+test('MINI-001: history-store createUserMessage, getUserMessage and searchUserMessages with keyset pagination', async () => {
+  const { dbPath, cleanup } = createTempDb();
+  try {
+    const { createUserMessage, getUserMessage, searchUserMessages } = await import('../../src/storage/history-store.ts');
+    withDatabase(dbPath, (db) => {
+      initSchema(db);
+
+      // Need active sessions for foreign keys
+      activateSession(db, 'sess-1', '["project","p1"]', 'normal');
+      activateSession(db, 'sess-2', '["project","p2"]', 'normal');
+
+      // Create messages in project 1
+      const m1 = createUserMessage(db, { sessionId: 'sess-1', projectKey: 'git:/repo1', content: 'First message: deploy kubernetes cluster' });
+      const m2 = createUserMessage(db, { sessionId: 'sess-1', projectKey: 'git:/repo1', content: 'Second message: configure ingress nginx' });
+      const m3 = createUserMessage(db, { sessionId: 'sess-1', projectKey: 'git:/repo1', content: 'Third message: deploy redis cache' });
+
+      // Create message in project 2
+      const mOther = createUserMessage(db, { sessionId: 'sess-2', projectKey: 'git:/repo2', content: 'Foreign message: deploy secret in repo2' });
+
+      assert.ok(m1.id > 0);
+      assert.ok(m2.id > m1.id);
+      assert.ok(m3.id > m2.id);
+
+      // Test getUserMessage
+      const fetched1 = getUserMessage(db, m1.id, 'git:/repo1');
+      assert.ok(fetched1);
+      assert.equal(fetched1.content, 'First message: deploy kubernetes cluster');
+
+      // Cross-project fail-closed: querying m1 with project 2 returns null
+      const fetchedCross1 = getUserMessage(db, m1.id, 'git:/repo2');
+      assert.equal(fetchedCross1, null, 'Must not disclose message from different project');
+
+      // Cross-project fail-closed: querying foreign message from project 1 returns null
+      const fetchedCross2 = getUserMessage(db, mOther.id, 'git:/repo1');
+      assert.equal(fetchedCross2, null, 'Must not disclose foreign project message');
+
+      // Non-existent id returns null
+      const fetchedNonExistent = getUserMessage(db, 99999, 'git:/repo1');
+      assert.equal(fetchedNonExistent, null);
+
+      // Search all messages in project 1 (descending)
+      const listAll = searchUserMessages(db, { projectKey: 'git:/repo1', limit: 10 });
+      assert.equal(listAll.length, 3);
+      assert.deepEqual(listAll.map((m) => m.id), [m3.id, m2.id, m1.id]);
+
+      // Keyset pagination: beforeId
+      const page1 = searchUserMessages(db, { projectKey: 'git:/repo1', limit: 2 });
+      assert.equal(page1.length, 2);
+      assert.deepEqual(page1.map((m) => m.id), [m3.id, m2.id]);
+
+      // Next page using beforeId = m2.id
+      const page2 = searchUserMessages(db, { projectKey: 'git:/repo1', beforeId: m2.id, limit: 2 });
+      assert.equal(page2.length, 1);
+      assert.equal(page2[0].id, m1.id);
+
+      // Append-safe check: inserting a new message before fetching page 2 does not disrupt page 2
+      const m4 = createUserMessage(db, { sessionId: 'sess-1', projectKey: 'git:/repo1', content: 'Fourth message: new arrival' });
+      assert.ok(m4.id > m3.id);
+      const page2Again = searchUserMessages(db, { projectKey: 'git:/repo1', beforeId: m2.id, limit: 2 });
+      assert.equal(page2Again.length, 1);
+      assert.equal(page2Again[0].id, m1.id);
+
+      // Lexical FTS search: 'deploy' matches m1 and m3 in project 1, but NOT mOther in project 2
+      const searchDeploy = searchUserMessages(db, { projectKey: 'git:/repo1', query: 'deploy', limit: 10 });
+      assert.equal(searchDeploy.length, 2);
+      assert.deepEqual(searchDeploy.map((m) => m.id), [m3.id, m1.id]);
+
+      // Lexical FTS search with session filter
+      const searchSession = searchUserMessages(db, { projectKey: 'git:/repo1', sessionId: 'sess-1', query: 'ingress', limit: 10 });
+      assert.equal(searchSession.length, 1);
+      assert.equal(searchSession[0].id, m2.id);
+    });
+  } finally {
+    cleanup();
+  }
+});
+
 
 test('M1-A05 & M1-A08: cleanupTerminalChildSession deletes empty child session and retains child with knowledge', () => {
   const { dbPath, cleanup } = createTempDb();
@@ -438,7 +590,7 @@ test('M1-A01: Concurrent fresh database initialization across multiple workers s
         const journal = db.prepare('PRAGMA journal_mode;').get() as { journal_mode: string };
         assert.equal(journal.journal_mode, 'wal');
         const meta = db.prepare('SELECT version FROM schema_meta;').get() as { version: number };
-        assert.equal(meta.version, 1);
+        assert.equal(meta.version, 2);
       });
     } finally {
       cleanup();

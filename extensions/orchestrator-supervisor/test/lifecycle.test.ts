@@ -85,6 +85,16 @@ function panelEnter(panel: any, id: string, rows: readonly string[]): void {
 function createMockEventBus() {
   const listeners = new Map<string, Array<(event: any) => void>>();
   const checkpoints = new Map<number, { title: string; content: string; type: string }>();
+  listeners.set('memory:supervisor:checkpoint:v1', [(payload: any) => {
+    if (payload.action === 'save') {
+      const id = payload.id ?? 7;
+      checkpoints.set(id, { title: payload.title, content: payload.content, type: payload.type });
+      payload.respond?.({ ok: true, id, readbackVerified: true });
+    } else if (payload.action === 'get') {
+      const item = checkpoints.get(payload.id) ?? { title: 'Checkpoint', content: '- Goal\n- Next action', type: 'session_summary' };
+      payload.respond?.({ ok: true, id: payload.id, content: item.content, type: item.type });
+    }
+  }]);
   return {
     on: (channel: string, handler: (event: any) => void) => {
       const list = listeners.get(channel) ?? [];
@@ -97,16 +107,6 @@ function createMockEventBus() {
       };
     },
     emit: (channel: string, payload: any) => {
-      if (channel === 'memory:supervisor:checkpoint:v1' && payload) {
-        if (payload.action === 'save') {
-          const id = payload.id ?? 7;
-          checkpoints.set(id, { title: payload.title, content: payload.content, type: payload.type });
-          payload.respond?.({ ok: true, id, readbackVerified: true });
-        } else if (payload.action === 'get') {
-          const item = checkpoints.get(payload.id) ?? { title: 'Checkpoint', content: '- Goal\n- Next action', type: 'session_summary' };
-          payload.respond?.({ ok: true, id: payload.id, content: item.content, type: item.type });
-        }
-      }
       const list = listeners.get(channel) ?? [];
       for (const handler of list) handler(payload);
     },
@@ -138,7 +138,6 @@ function host(mode = 'tui', replacement: { beforeHandover?: (ctx: any, hooks: Ma
     setModel: async () => true, setThinkingLevel: () => {},
   };
   const ctx: any = { cwd: dir, mode, hasUI: true, isProjectTrusted: () => true, isIdle: () => true,
-    events,
     sessionManager: { getSessionId: () => sessionId, getSessionFile: () => 'parent.jsonl', getBranch: () => branch },
     model: { provider: 'custom', id: 'manual', contextWindow: 10000 },
     getContextUsage: () => ({ tokens: 100, contextWindow: 10000, percent: 1 }),
@@ -157,7 +156,6 @@ function host(mode = 'tui', replacement: { beforeHandover?: (ctx: any, hooks: Ma
       sessionId = 'session-two';
       const nextHooks = new Map<string, any>(), nextCommands = new Map<string, any>(), nextTools = new Map<string, any>();
       const fresh = { ...ctx,
-        events,
         model: replacement.model ?? ctx.model,
         sessionManager: { getSessionId: () => 'session-two', getSessionFile: () => 'new.jsonl' },
         sendMessage: async (...args: any[]) => sent.push(args),
@@ -315,9 +313,11 @@ test('loads standalone; child sessions do not initialize or execute supervisor',
   } finally { await h.close(); }
 });
 
-test('rotation verifies existing tools; reports scheduled, then uses fresh session context', async () => {
+test('rotation uses pi.events without ctx.events or nested memory tools; then uses fresh session context', async () => {
   const h = host();
   try {
+    assert.equal('events' in h.ctx, false, 'Real Pi tool contexts do not expose the event bus');
+    h.ctx.executeTool = async () => { throw new Error('Rotation must not call or parse model-facing memory tools'); };
     await h.hooks.get('session_start')({ reason: 'startup' }, h.ctx);
     const result = await h.tools.get('supervisor_rotate').execute('rotate', { summary: '- Goal\n- Next action', continue_task: true }, undefined, undefined, h.ctx);
     assert.match(result.content[0].text, /scheduled/i);

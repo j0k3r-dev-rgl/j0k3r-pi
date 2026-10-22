@@ -63,8 +63,19 @@ export const RELATION_TOOL_DESCRIPTION =
   'action="delete" requires a known relation id and explicit deletion authorization; deletes the edge, not its endpoint entities. ' +
   'scope selects the target write scope, not cross-project access. Endpoints must be compatible with that scope; use graph search to inspect stored direction.';
 
+export const HISTORY_TOOL_DESCRIPTION =
+  'Search and retrieve human user message history across all sessions of the current project only. ' +
+  'action="search" queries messages chronologically (omit query to list recent project messages, or provide lexical full-text query; optional session_id filter). ' +
+  'action="get" retrieves full message content by positive integer id. ' +
+  'History is strictly project-isolated: linked Git worktrees share history, independent clones and different projects remain separated. ' +
+  'Never invent or forge cursors; cross-project queries and global scope fail closed.';
+
 // Pi core and lean subagents consume these only for active, allowlisted tools.
 export const MEMORY_TOOL_GUIDELINES = {
+  memory_history: [
+    'Use memory_history to recall previous user prompts, instructions, and questions across past and current sessions of the current project. Use action="search" to find or list user messages and action="get" to inspect full message content by id.',
+    'Do not use memory_history for curated knowledge, decisions, conventions, or lessons (use memory_search/memory_get for curated memory). memory_history is strictly project-local: cross-project history queries and global scope are prohibited and fail closed.',
+  ],
   memory_save: [
     'Use memory_save before closing work that establishes confirmed reusable knowledge within approved scope: decisions, conventions, verified bug causes/fixes, lessons, or explicit preferences. No separate request is needed for these notes; skip saves when there is no durable learning and obey explicit no-memory-write constraints.',
     'For memory_save, provide English title/content/type with source/context; use a stable same-topic topic_key or known id, retaining its key on id updates. Read existing content with memory_get or supplied full context before replacement and preserve valid facts; without retrieval or full context, do not blindly replace a record. Use the current project scope unless global knowledge is authorized.',

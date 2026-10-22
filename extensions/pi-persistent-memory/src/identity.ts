@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { resolve, join, basename } from 'node:path';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import type { Scope } from './types.ts';
 
@@ -160,4 +160,91 @@ export function resolveScope(
   }
 
   return { kind: 'project', project: basename(resolvedCwd) };
+}
+
+export function resolveHistoryProjectKey(
+  cwd: string,
+  options?: { isProjectTrusted?: () => boolean },
+): string {
+  const resolvedCwd = resolve(cwd);
+  const home = resolve(homedir());
+
+  if (resolvedCwd === home) {
+    throw new Error('history_scope_invalid: Cannot record or query history in home directory');
+  }
+
+  const trusted = options?.isProjectTrusted ? options.isProjectTrusted() : true;
+  if (!trusted) {
+    throw new Error('project_not_trusted: Project folder is not trusted');
+  }
+
+  let isNotGitRepo = false;
+
+  try {
+    let rawOutput = '';
+    try {
+      rawOutput = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
+        cwd: resolvedCwd,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim();
+    } catch (err: any) {
+      const stderr = (err?.stderr?.toString() ?? '') + (err?.stdout?.toString() ?? '');
+      const status = err?.status;
+
+      if (status === 128 && stderr.toLowerCase().includes('not a git repository')) {
+        isNotGitRepo = true;
+        throw err;
+      }
+
+      if (stderr.toLowerCase().includes('unknown option') || stderr.toLowerCase().includes('unrecognized option') || !stderr) {
+        rawOutput = execFileSync('git', ['rev-parse', '--git-common-dir'], {
+          cwd: resolvedCwd,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }).trim();
+      } else {
+        throw err;
+      }
+    }
+
+    const commonDirCandidate = resolve(resolvedCwd, rawOutput);
+    const canonicalCommonDir = realpathSync(commonDirCandidate);
+    return `git:${canonicalCommonDir}`;
+  } catch (err: any) {
+    if (isNotGitRepo) {
+      // Non-Git fallback (only on verified status 128 with "not a git repository")
+      try {
+        const canonicalCwd = realpathSync(resolvedCwd);
+        if (canonicalCwd === home) {
+          throw new Error('history_scope_invalid: Cannot record or query history in home directory');
+        }
+        return `path:${canonicalCwd}`;
+      } catch (pathErr: any) {
+        if (pathErr?.message?.includes('history_scope_invalid')) {
+          throw pathErr;
+        }
+        throw new Error(`history_identity_error: Failed to canonicalize directory path: ${pathErr.message}`);
+      }
+    }
+
+    const stderr = (err?.stderr?.toString() ?? '') + (err?.stdout?.toString() ?? '');
+    const status = err?.status;
+    if (status === 128 && stderr.toLowerCase().includes('not a git repository')) {
+      try {
+        const canonicalCwd = realpathSync(resolvedCwd);
+        if (canonicalCwd === home) {
+          throw new Error('history_scope_invalid: Cannot record or query history in home directory');
+        }
+        return `path:${canonicalCwd}`;
+      } catch (pathErr: any) {
+        if (pathErr?.message?.includes('history_scope_invalid')) {
+          throw pathErr;
+        }
+        throw new Error(`history_identity_error: Failed to canonicalize directory path: ${pathErr.message}`);
+      }
+    }
+
+    throw new Error(`history_identity_error: Failed to resolve Git identity: ${err.message}`);
+  }
 }
