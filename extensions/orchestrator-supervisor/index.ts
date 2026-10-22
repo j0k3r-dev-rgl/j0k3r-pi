@@ -604,7 +604,7 @@ export default function supervisor(pi: ExtensionAPI, overrides: SupervisorHostOv
       try {
         await assertWorkSettled(ctx, defaultSubagentTaskRegistry);
         if (hasPending(r)) throw new Error('Rotation deferred: unsettled mutation effects');
-        const checkpoint = await verifiedCheckpoint(ctx, params as { summary?: string; memory_id?: number });
+        const checkpoint = await verifiedCheckpoint(ctx, params as { summary?: string; memory_id?: number }, pi.events);
         await assertWorkSettled(ctx, defaultSubagentTaskRegistry);
         if (runtime !== r || r.disposed || halted(r) || hasPending(r)) throw new Error('Session changed or has unsettled effects during checkpoint');
         r.ready = { token: randomUUID(), sessionId: r.sessionId, checkpoint, continueTask: (params as any).continue_task === true };

@@ -1,4 +1,5 @@
 import type { AgentToolResult } from '@earendil-works/pi-coding-agent';
+import { formatMemoryOutput } from './output.ts';
 
 export const MAX_TOOL_RESULT_BYTES = 6144;
 
@@ -16,15 +17,7 @@ export function formatToolContentText(
   if (typeof contentData === 'string') {
     return contentData;
   }
-  const pretty = JSON.stringify(contentData, null, 2);
-  const prettyLen = Buffer.byteLength(
-    JSON.stringify({ content: [{ type: 'text', text: pretty }], details, isError }),
-    'utf8',
-  );
-  if (prettyLen <= MAX_TOOL_RESULT_BYTES) {
-    return pretty;
-  }
-  return JSON.stringify(contentData);
+  return formatMemoryOutput(contentData);
 }
 
 export function measureSerializedToolResult(
@@ -92,7 +85,7 @@ export function formatErrorResult(
   errorMessage: string,
   details: Record<string, any> = {},
 ): AgentToolResult {
-  const safeMessage = sanitizeErrorMessage(errorMessage);
+  const safeMessage = `${details.id !== undefined ? `[${details.id}] ` : ''}${sanitizeErrorMessage(errorMessage)}`;
   const result: AgentToolResult = {
     content: [{ type: 'text', text: `Error: ${safeMessage}` }],
     details: { ...details, error: safeMessage },

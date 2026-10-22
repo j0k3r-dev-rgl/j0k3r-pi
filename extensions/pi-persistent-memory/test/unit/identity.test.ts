@@ -9,6 +9,7 @@ import {
   encodeScope,
   decodeScope,
   normalizeGitRemote,
+  resolveHistoryProjectKey,
 } from '../../src/identity.ts';
 
 function createTempDir(prefix: string): { dir: string; cleanup: () => void } {
@@ -143,5 +144,109 @@ test('M1-A02: Git repo with no remotes and non-git folder fall back to basename(
   } finally {
     c1();
     c2();
+  }
+});
+
+test('MINI-002: resolveHistoryProjectKey linked worktrees share history key', () => {
+  const { dir: baseDir, cleanup } = createTempDir('git-worktrees');
+  try {
+    const mainRepo = join(baseDir, 'main-repo');
+    const worktreePath = join(baseDir, 'linked-worktree');
+    mkdirSync(mainRepo, { recursive: true });
+
+    execFileSync('git', ['init'], { cwd: mainRepo });
+    execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: mainRepo });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: mainRepo });
+    writeFileSync(join(mainRepo, 'README.md'), '# Main Repo');
+    execFileSync('git', ['add', '.'], { cwd: mainRepo });
+    execFileSync('git', ['commit', '-m', 'Initial commit'], { cwd: mainRepo });
+
+    execFileSync('git', ['worktree', 'add', '-b', 'feature-branch', worktreePath], { cwd: mainRepo });
+
+    const keyMain = resolveHistoryProjectKey(mainRepo, { isProjectTrusted: () => true });
+    const keyWorktree = resolveHistoryProjectKey(worktreePath, { isProjectTrusted: () => true });
+
+    assert.ok(keyMain.startsWith('git:'), 'Key must start with git:');
+    assert.equal(keyMain, keyWorktree, 'Main repo and linked worktree must share identical project key');
+
+    // Subdirectory in main repo must also have the identical key
+    const subDir = join(mainRepo, 'subdir', 'nested');
+    mkdirSync(subDir, { recursive: true });
+    const keySub = resolveHistoryProjectKey(subDir, { isProjectTrusted: () => true });
+    assert.equal(keySub, keyMain, 'Subdirectory must share project key with repo root');
+  } finally {
+    cleanup();
+  }
+});
+
+test('MINI-002: resolveHistoryProjectKey independent clones have distinct project keys', () => {
+  const { dir: clone1, cleanup: c1 } = createTempDir('clone1');
+  const { dir: clone2, cleanup: c2 } = createTempDir('clone2');
+  try {
+    execFileSync('git', ['init'], { cwd: clone1 });
+    execFileSync('git', ['init'], { cwd: clone2 });
+
+    const key1 = resolveHistoryProjectKey(clone1, { isProjectTrusted: () => true });
+    const key2 = resolveHistoryProjectKey(clone2, { isProjectTrusted: () => true });
+
+    assert.ok(key1.startsWith('git:'));
+    assert.ok(key2.startsWith('git:'));
+    assert.notEqual(key1, key2, 'Independent clones must have distinct project keys');
+  } finally {
+    c1();
+    c2();
+  }
+});
+
+test('MINI-002: resolveHistoryProjectKey non-Git dirs with equal basenames have distinct path keys', () => {
+  const { dir: rootA, cleanup: c1 } = createTempDir('rootA');
+  const { dir: rootB, cleanup: c2 } = createTempDir('rootB');
+  try {
+    const dirA = join(rootA, 'my-project');
+    const dirB = join(rootB, 'my-project');
+    mkdirSync(dirA, { recursive: true });
+    mkdirSync(dirB, { recursive: true });
+
+    const keyA = resolveHistoryProjectKey(dirA, { isProjectTrusted: () => true });
+    const keyB = resolveHistoryProjectKey(dirB, { isProjectTrusted: () => true });
+
+    assert.ok(keyA.startsWith('path:'));
+    assert.ok(keyB.startsWith('path:'));
+    assert.notEqual(keyA, keyB, 'Equal directory basenames across different paths must have distinct keys');
+  } finally {
+    c1();
+    c2();
+  }
+});
+
+test('MINI-002: resolveHistoryProjectKey fails closed on untrusted directory and home directory', () => {
+  const { dir, cleanup } = createTempDir('fail-closed');
+  try {
+    // Untrusted
+    assert.throws(() => {
+      resolveHistoryProjectKey(dir, { isProjectTrusted: () => false });
+    }, /project_not_trusted/);
+
+    // Home directory
+    assert.throws(() => {
+      resolveHistoryProjectKey(homedir(), { isProjectTrusted: () => true });
+    }, /history_scope_invalid/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('MINI-002: resolveHistoryProjectKey corrupt git repository fails closed without falling back to path', () => {
+  const { dir, cleanup } = createTempDir('corrupt-git');
+  try {
+    execFileSync('git', ['init'], { cwd: dir });
+    // Corrupt config by writing invalid syntax so git fails with "fatal: bad config line 1 in file .git/config"
+    writeFileSync(join(dir, '.git', 'config'), '[core\nunclosed section');
+
+    assert.throws(() => {
+      resolveHistoryProjectKey(dir, { isProjectTrusted: () => true });
+    }, /history_identity_error/);
+  } finally {
+    cleanup();
   }
 });

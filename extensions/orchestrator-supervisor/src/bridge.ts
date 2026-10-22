@@ -95,27 +95,6 @@ export class SubagentTaskRegistry {
 
 export const defaultSubagentTaskRegistry = new SubagentTaskRegistry();
 
-export function toolText(result: any): string {
-  return (result?.content ?? []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n');
-}
-
-export function toolData(result: any): any {
-  if (result?.isError) throw new Error(toolText(result) || 'Existing tool failed');
-  if (result?.details?.data) return result.details.data;
-  try { return JSON.parse(toolText(result)); }
-  catch { throw new Error('Existing memory tool returned an unsupported response'); }
-}
-
-export async function existingTool(ctx: any, name: string, args: any): Promise<any> {
-  if (!ctx.tools?.some((t: any) => t.name === name) || typeof ctx.executeTool !== 'function') {
-    throw new Error(`Required existing tool is unavailable: ${name}`);
-  }
-  const outcome = await ctx.executeTool(name, args);
-  if (outcome.isError) throw new Error(toolText(outcome.result) || `${name} failed`);
-  if (!outcome.result || !Array.isArray(outcome.result.content)) throw new Error(`${name} returned an unsupported execution outcome`);
-  return outcome.result;
-}
-
 export async function saveMemoryCheckpoint(
   events: any,
   options: { cwd: string; sessionId?: string; title: string; content: string; type?: string; id?: number },
@@ -161,9 +140,9 @@ export async function saveMemoryCheckpoint(
 
 export async function getMemoryCheckpoint(
   events: any,
-  options: { cwd: string; sessionId?: string; id: number },
+  options: { cwd: string; sessionId?: string; id: number; cursor?: string },
   timeoutMs = 10000,
-): Promise<{ ok: boolean; id?: number; content?: string; type?: string; error?: string }> {
+): Promise<{ ok: boolean; id?: number; content?: string; type?: string; has_more?: boolean; next_cursor?: string | null; error?: string }> {
   return new Promise((resolve) => {
     let settled = false;
     const timer = setTimeout(() => {
@@ -187,6 +166,7 @@ export async function getMemoryCheckpoint(
         cwd: options.cwd,
         sessionId: options.sessionId ?? '',
         id: options.id,
+        cursor: options.cursor,
         respond,
       });
     } catch (err: any) {
@@ -224,13 +204,15 @@ export async function assertWorkSettled(ctx: any, registry?: SubagentTaskRegistr
 export async function verifiedCheckpoint(
   ctx: any,
   params: { summary?: string; memory_id?: number },
+  events: any,
 ): Promise<{ id: number; content: string }> {
   let id = params.memory_id;
-  const events = ctx?.events || ctx?.pi?.events;
   const cwd = ctx?.cwd ?? process.cwd();
   const sessionId = ctx?.sessionId ?? ctx?.sessionManager?.getSessionId?.() ?? '';
-  const hasEventListener = Boolean(events && typeof events.emit === 'function' &&
-    (typeof events.listenerCount !== 'function' || events.listenerCount(SUPERVISOR_CHECKPOINT_CHANNEL) > 0));
+  if (!events || typeof events.emit !== 'function' ||
+      (typeof events.listenerCount === 'function' && events.listenerCount(SUPERVISOR_CHECKPOINT_CHANNEL) === 0)) {
+    throw new Error('Cannot verify checkpoint: persistent memory event bridge unavailable');
+  }
 
   if (params.summary !== undefined) {
     const summary = params.summary.trim();
@@ -238,56 +220,48 @@ export async function verifiedCheckpoint(
       throw new Error('Checkpoint summary must contain 1–12000 characters');
     }
 
-    if (hasEventListener) {
-      const saveRes = await saveMemoryCheckpoint(events, {
-        cwd,
-        sessionId,
-        title: 'Supervisor continuity checkpoint',
-        content: summary,
-        type: 'session_summary',
-      });
-      if (!saveRes.ok || !saveRes.readbackVerified || !saveRes.id) {
-        throw new Error(`Failed to save checkpoint: ${saveRes.error || 'readback verification failed'}`);
-      }
-      id = saveRes.id;
-    } else if (typeof ctx?.executeTool === 'function') {
-      const toolName = ctx.tools?.some((t: any) => t.name === 'memory_save') ? 'memory_save' : 'memory_save';
-      const saved = toolData(await existingTool(ctx, toolName, {
-        title: 'Supervisor continuity checkpoint', content: summary, type: 'session_summary', capture_prompt: false,
-      }));
-      id = saved.id;
-    } else {
-      throw new Error('Cannot save checkpoint: event bus and memory tools unavailable');
+    const saveRes = await saveMemoryCheckpoint(events, {
+      cwd,
+      sessionId,
+      title: 'Supervisor continuity checkpoint',
+      content: summary,
+      type: 'session_summary',
+    });
+    if (!saveRes.ok || !saveRes.readbackVerified || !saveRes.id) {
+      throw new Error(`Failed to save checkpoint: ${saveRes.error || 'readback verification failed'}`);
     }
+    id = saveRes.id;
   }
 
   if (!Number.isSafeInteger(id) || id! <= 0) {
     throw new Error('Checkpoint requires a positive memory_id or a summary');
   }
 
-  let content: string;
-  let type: string | undefined;
-
-  if (hasEventListener) {
-    const getRes = await getMemoryCheckpoint(events, { cwd, sessionId, id: id! });
-    if (!getRes.ok || typeof getRes.content !== 'string') {
-      throw new Error(`Failed to read checkpoint: ${getRes.error || 'empty content'}`);
+  let content = '';
+  let cursor: string | undefined;
+  const seenCursors = new Set<string>();
+  do {
+    const page = await getMemoryCheckpoint(events, { cwd, sessionId, id: id!, cursor });
+    if (!page.ok || page.id !== id || typeof page.content !== 'string') {
+      throw new Error(`Failed to read checkpoint: ${page.error || 'invalid readback'}`);
     }
-    content = getRes.content;
-    type = getRes.type;
-  } else if (typeof ctx?.executeTool === 'function') {
-    const data = toolData(await existingTool(ctx, 'memory_get', { id }));
-    content = data.content;
-    type = data.type;
-  } else {
-    throw new Error('Cannot verify checkpoint: event bus and memory tools unavailable');
-  }
+    if (page.type !== 'session_summary') {
+      throw new Error('Checkpoint must be a session_summary observation');
+    }
+    content += page.content;
+    if (content.length > 12000) throw new Error('Checkpoint readback is empty or too large');
+    cursor = undefined;
+    if (page.has_more) {
+      if (typeof page.next_cursor !== 'string' || !page.next_cursor || seenCursors.has(page.next_cursor)) {
+        throw new Error('Failed to read checkpoint: invalid continuation cursor');
+      }
+      cursor = page.next_cursor;
+      seenCursors.add(cursor);
+    }
+  } while (cursor);
 
-  if (typeof content !== 'string' || !content.trim() || content.length > 12000) {
+  if (!content.trim()) {
     throw new Error('Checkpoint readback is empty or too large');
-  }
-  if (type !== 'session_summary') {
-    throw new Error('Checkpoint must be a session_summary observation');
   }
   if (params.summary !== undefined && content !== params.summary.trim()) {
     throw new Error('Checkpoint readback mismatch');

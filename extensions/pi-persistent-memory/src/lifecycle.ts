@@ -3,7 +3,8 @@ import { SUPERVISOR_CHECKPOINT_CHANNEL, type MemoryCheckpointRequest } from './b
 import { withDatabase } from './storage/db.ts';
 import { initSchema } from './storage/schema.ts';
 import { activateSession, closeSession } from './storage/session-store.ts';
-import { resolveScope, encodeScope } from './identity.ts';
+import { createUserMessage } from './storage/history-store.ts';
+import { resolveScope, encodeScope, resolveHistoryProjectKey } from './identity.ts';
 import { InvocationLease } from './lease.ts';
 import { ActivationDiagnostics } from './diagnostics/activation.ts';
 import { E5Client } from './client/e5-client.ts';
@@ -39,8 +40,19 @@ export class MemoryLifecycle {
     this.client = options?.client;
   }
 
-  async handleMessageStart(event: any, ctx: any): Promise<void> {
-    if (event?.message?.role !== 'user') {
+  async handleInput(event: any, ctx: any): Promise<void> {
+    // Child lease check (subagent sessions must not record user history)
+    if (this.boundLease !== null) {
+      return;
+    }
+
+    // Human origin check: only interactive or rpc
+    if (event?.source !== 'interactive' && event?.source !== 'rpc') {
+      return;
+    }
+
+    // Emptiness check
+    if (!event?.text || typeof event.text !== 'string' || event.text.trim().length === 0) {
       return;
     }
 
@@ -49,7 +61,38 @@ export class MemoryLifecycle {
       return;
     }
 
-    if (this.activeNormalSessionId === sessionId && this.normalGeneration) {
+    const trusted = ctx?.isProjectTrusted ? ctx.isProjectTrusted() : true;
+    const cwd = ctx?.cwd ?? process.cwd();
+
+    let projectKey: string;
+    let scopeKey: string;
+    try {
+      projectKey = resolveHistoryProjectKey(cwd, { isProjectTrusted: () => trusted });
+      const scope = resolveScope(cwd, { isProjectTrusted: () => trusted });
+      scopeKey = encodeScope(scope);
+    } catch {
+      // Fail-closed: do not persist if scope/project key cannot be resolved or is untrusted
+      return;
+    }
+
+    withDatabase(this.dbPath, (db) => {
+      initSchema(db);
+      activateSession(db, sessionId, scopeKey, 'normal');
+      createUserMessage(db, {
+        sessionId,
+        projectKey,
+        content: event.text, // Exact input preserved without .trim()
+      });
+    });
+  }
+
+  async handleMessageStart(event: any, ctx: any): Promise<void> {
+    if (event?.message?.role !== 'user') {
+      return;
+    }
+
+    const sessionId = ctx?.sessionManager?.getSessionId?.() ?? ctx?.sessionId;
+    if (typeof sessionId !== 'string' || sessionId.length === 0) {
       return;
     }
 
@@ -334,6 +377,13 @@ export class MemoryLifecycle {
 
   registerPublicEvents(pi: any): () => void {
     const unsubs: Array<() => void> = [];
+
+    // Capture user input at verified SDK input event
+    unsubs.push(
+      pi.on('input', async (event: any, ctx: any) => {
+        await this.handleInput(event, ctx);
+      })
+    );
 
     // Message start for normal session activation
     unsubs.push(

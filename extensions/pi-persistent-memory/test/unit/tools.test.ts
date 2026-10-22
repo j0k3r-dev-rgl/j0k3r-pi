@@ -14,6 +14,89 @@ import type { OperationContext } from '../../src/tools/types.ts';
 import { Compile } from 'typebox/compile';
 import { RELATION_TYPES } from '../../src/graph/types.ts';
 import { OfflineE5Client } from '../fixtures/offline-e5.ts';
+import { formatSuccessResult, formatErrorResult } from '../../src/tools/result-helper.ts';
+
+const resultText = (result: any): string => result.content[0].text;
+const listedIds = (result: any): string[] => [...resultText(result).matchAll(/^\[([^\]\n]+)\]/gm)].map((match) => match[1]);
+
+function pageBody(result: any): string {
+  const text = resultText(result);
+  const start = text.indexOf('\n\n') + 2;
+  const end = result.details?.has_more ? text.lastIndexOf('\n\nMore available.') : text.length;
+  return text.slice(start, end);
+}
+
+test('Execution output: search is readable, lean and keeps fallback and continuation visible', () => {
+  const data = {
+    status: 'ok', requested_mode: 'hybrid', actual_mode: 'fts5',
+    scope: { kind: 'project', project: 'current', explicit_global: true },
+    results: [{ id: 12, title: 'Offline tests', excerpt: 'Use the network guard.',
+      scope: { kind: 'project', project: 'other' }, type: 'lesson', updated_at: '2026-10-22',
+      score: 0.123, excerpt_meta: { field: 'content', start: 0, end: 22 } }],
+    warnings: ['semantic_unavailable'], has_more: true, next_cursor: 'exact-cursor',
+  };
+  const result = formatSuccessResult(data);
+  const text = resultText(result);
+  assert.match(text, /\[12\] Offline tests/);
+  assert.match(text, /Use the network guard/);
+  assert.match(text, /other/);
+  assert.match(text, /fts5/);
+  assert.match(text, /semantic_unavailable/);
+  assert.match(text, /cursor: exact-cursor/);
+  assert.doesNotMatch(text, /excerpt_meta|updated_at|explicit_global|requested_mode|"status"|"score"/);
+  assert.ok(text.length < JSON.stringify(data, null, 2).length * 0.65);
+});
+
+test('Execution output: matching title excerpts are not repeated', () => {
+  const text = resultText(formatSuccessResult({ results: [{ id: 1, title: 'Offline tests', excerpt: 'Offline tests' }],
+    requested_mode: 'fts5', actual_mode: 'fts5', has_more: false }));
+  assert.equal(text.match(/Offline tests/g)?.length, 1);
+});
+
+test('Execution output: complete reads preserve exact text without paging internals', () => {
+  const content = 'Line one\n\n"Quoted" \\ path 🚀\n';
+  const title = 'Offline tests\n"Exact" 🚀';
+  const result = formatSuccessResult({ id: 12, title, content, type: 'lesson',
+    field: 'content', offset: 0, total_field_bytes: 99, page_bytes: 99, content_version: 2,
+    scope_key: '["project","current"]', created_at: 'date', updated_at: 'date',
+    has_more: false, next_cursor: null });
+  assert.equal(resultText(result), `[12] ${title}\n\n${content}`);
+});
+
+test('Execution output: confirmations distinguish saved text from pending indexing and errors retain IDs', () => {
+  const result = formatSuccessResult({ action: 'save', id: 12, committed: true, indexed: false,
+    indexing_status: 'pending', notice: 'unavailable: E5 offline', status: 'saved' });
+  assert.match(resultText(result), /Memory \[12\] saved; indexing pending/);
+  assert.match(resultText(result), /E5 offline/);
+  assert.doesNotMatch(resultText(result), /"committed"|"indexed"|"status"/);
+  const error = formatErrorResult('cancelled: text remains pending', { id: 12, committed: true });
+  assert.match(resultText(error), /\[12\].*cancelled/);
+  assert.equal(error.isError, true);
+});
+
+test('Execution output: empty, recovery and graph outputs expose only useful state', () => {
+  const empty = resultText(formatSuccessResult({ results: [], requested_mode: 'fts5', actual_mode: 'fts5',
+    scope: { kind: 'project' }, warnings: [], has_more: false, next_cursor: null }));
+  assert.match(empty, /0 memory excerpts/);
+  assert.doesNotMatch(empty, /cursor|Warning|fallback|null|false/);
+  const deleted = resultText(formatSuccessResult({ items: [{ id: 4, title: 'Recover me',
+    scope_key: '["global"]', deleted_at: '2026-10-22', type: 'note' }], has_more: false }));
+  assert.match(deleted, /\[4\] Recover me \(global\)/);
+  assert.match(deleted, /Deleted: 2026-10-22/);
+  const graph = resultText(formatSuccessResult({ root: { id: 'root' },
+    nodes: [{ id: 'root', type: 'concept', display_name: 'Root', scope: { kind: 'global' } }],
+    edges: [{ id: 'edge', source: 'child', target: 'root', type: 'uses', direction: 'incoming' }],
+    associations: [{ id: 'link', memory_id: 12, entity_id: 'root' }],
+    limits: { has_more: true, depth_limit: true, entity_limit: false, byte_limit: false } }));
+  assert.match(graph, /\[child\] --uses--> \[root\]/);
+  assert.match(graph, /Memory \[12\] linked to entity \[root\]/);
+  assert.match(graph, /Partial graph \(depth limit\).*focused graph root/);
+  const reindex = resultText(formatSuccessResult({ action: 'reindex', processed: 5, succeeded: 3,
+    failed: 1, stale: 1, remaining: 2, notice: 'Service unavailable', has_more: true, next_cursor: 'retry-cursor' }));
+  assert.match(reindex, /5 processed, 3 indexed, 1 failed, 1 stale, 2 remaining/);
+  assert.match(reindex, /Service unavailable/);
+  assert.match(reindex, /cursor: retry-cursor/);
+});
 
 function createTempDb(): { dbPath: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), 'pi-memory-mini-005-tools-'));
@@ -48,9 +131,9 @@ function createMockOpContext(dbPath: string, scope: Scope, sessionId = 'test-ses
   };
 }
 
-test('M5-A01: Exactly nine tools register with valid provider-compatible flat schemas and additionalProperties false', () => {
+test('M5-A01: Exactly ten tools register with valid provider-compatible flat schemas and additionalProperties false', () => {
   const tools = createMemoryTools();
-  assert.equal(tools.length, 9);
+  assert.equal(tools.length, 10);
 
   const registeredNames = tools.map((t) => t.name).sort();
   const expectedNames = [
@@ -59,6 +142,7 @@ test('M5-A01: Exactly nine tools register with valid provider-compatible flat sc
     'memory_deleted_list',
     'memory_entity',
     'memory_get',
+    'memory_history',
     'memory_relation',
     'memory_restore',
     'memory_save',
@@ -322,7 +406,7 @@ test('M5-A06: Complete serialized AgentToolResult is <= 6144 bytes across all to
   }
 });
 
-test('M5-A04 & M5-A06 RED: memory_get giant title and content reconstructs losslessly with valid JSON and <= 6144 bytes', async () => {
+test('M5-A04 & M5-A06: memory_get giant title and content reconstructs losslessly with readable pages and <= 6144 bytes', async () => {
   const { dbPath, cleanup } = createTempDb();
   try {
     const tools = createMemoryTools();
@@ -364,22 +448,20 @@ test('M5-A04 & M5-A06 RED: memory_get giant title and content reconstructs lossl
       const byteLen = Buffer.byteLength(serialized, 'utf8');
       assert.ok(byteLen <= 6144, `Page ${pageCount} serialized byte length ${byteLen} exceeds 6144`);
 
-      // Assertion 3: content[0].text must be valid JSON (no broken syntax from raw string slicing)
+      // The exact returned field is readable text, including quotes, Unicode and newlines.
       assert.ok(res.content && res.content[0] && res.content[0].type === 'text');
-      let parsed: any;
-      assert.doesNotThrow(() => {
-        parsed = JSON.parse((res.content[0] as any).text);
-      }, `Page ${pageCount} content[0].text must be valid JSON`);
+      const field = (res.details as any).field;
+      assert.ok(field === 'title' || field === 'content');
 
       // Assertion 4: Details truncated flag must not be true (no data loss)
       assert.notEqual((res.details as any)?.truncated, true, `Page ${pageCount} must not be truncated with data loss`);
 
-      if (parsed.field === 'title') {
-        accumulatedTitle += parsed.title;
-        assert.equal(parsed.content, '');
-      } else if (parsed.field === 'content') {
-        accumulatedContent += parsed.content;
+      if (field === 'title') {
+        accumulatedTitle += pageBody(res);
+      } else {
+        accumulatedContent += pageBody(res);
       }
+      if ((res.details as any).has_more) assert.ok(resultText(res).includes(`cursor: ${(res.details as any).next_cursor}`));
 
       cursor = (res.details as any)?.next_cursor ?? undefined;
     } while (cursor);
@@ -432,16 +514,15 @@ test('M5-A06: memory_search mode graph on dense graph produces valid serialized 
     const byteLen = Buffer.byteLength(serialized, 'utf8');
     assert.ok(byteLen <= 6144, `Graph search serialized byte length ${byteLen} exceeds 6144 bytes`);
 
-    // Assertion 3: content[0].text is valid JSON
-    assert.doesNotThrow(() => {
-      JSON.parse((res.content[0] as any).text);
-    }, 'Graph search content[0].text must be valid JSON');
+    assert.match(resultText(res), /Graph root: \[root-entity-1\]/);
+    assert.match(resultText(res), /--depends_on-->/);
+    assert.doesNotMatch(resultText(res), /"scope"|"canonical_name"/);
   } finally {
     cleanup();
   }
 });
 
-test('M5-A04 & M5-A06: All nine tools handle giant data with <= 6144 bytes, isError: false, valid JSON, exact ID sets', async () => {
+test('M5-A04 & M5-A06: All tools handle giant data with <= 6144 bytes, readable output and exact ID sets', async () => {
   const { dbPath, cleanup } = createTempDb();
   try {
     const tools = createMemoryTools();
@@ -465,7 +546,7 @@ test('M5-A04 & M5-A06: All nine tools handle giant data with <= 6144 bytes, isEr
     assert.equal(giantSaveRes.isError, false);
     const saveLen = Buffer.byteLength(JSON.stringify(giantSaveRes), 'utf8');
     assert.ok(saveLen <= 6144, `memory_save confirmation byte length ${saveLen} exceeds 6144`);
-    assert.doesNotThrow(() => JSON.parse((giantSaveRes.content[0] as any).text));
+    assert.match(resultText(giantSaveRes), /saved and indexed/);
     const savedId = (giantSaveRes.details as any)?.id;
     assert.ok(savedId > 0);
 
@@ -501,11 +582,10 @@ test('M5-A04 & M5-A06: All nine tools handle giant data with <= 6144 bytes, isEr
       assert.equal(sRes.isError, false, `Search page ${searchPages} isError must be false`);
       const sLen = Buffer.byteLength(JSON.stringify(sRes), 'utf8');
       assert.ok(sLen <= 6144, `Search page ${searchPages} byte length ${sLen} exceeds 6144`);
-      assert.doesNotThrow(() => JSON.parse((sRes.content[0] as any).text));
-      const sParsed = JSON.parse((sRes.content[0] as any).text);
-      for (const r of sParsed.results) {
-        assert.ok(!collectedSearchIds.has(r.id), `Search duplicate ID ${r.id} detected on page ${searchPages}`);
-        collectedSearchIds.add(r.id);
+      for (const rawId of listedIds(sRes)) {
+        const id = Number(rawId);
+        assert.ok(!collectedSearchIds.has(id), `Search duplicate ID ${id} detected on page ${searchPages}`);
+        collectedSearchIds.add(id);
       }
       searchCursor = (sRes.details as any)?.next_cursor ?? undefined;
     } while (searchCursor);
@@ -529,11 +609,10 @@ test('M5-A04 & M5-A06: All nine tools handle giant data with <= 6144 bytes, isEr
       assert.equal(cRes.isError, false, `Context page ${contextPages} isError must be false`);
       const cLen = Buffer.byteLength(JSON.stringify(cRes), 'utf8');
       assert.ok(cLen <= 6144, `Context page ${contextPages} byte length ${cLen} exceeds 6144`);
-      assert.doesNotThrow(() => JSON.parse((cRes.content[0] as any).text));
-      const cParsed = JSON.parse((cRes.content[0] as any).text);
-      for (const item of cParsed.items) {
-        assert.ok(!collectedContextIds.has(item.id), `Context duplicate ID ${item.id} detected on page ${contextPages}`);
-        collectedContextIds.add(item.id);
+      for (const rawId of listedIds(cRes)) {
+        const id = Number(rawId);
+        assert.ok(!collectedContextIds.has(id), `Context duplicate ID ${id} detected on page ${contextPages}`);
+        collectedContextIds.add(id);
       }
       contextCursor = (cRes.details as any)?.next_cursor ?? undefined;
     } while (contextCursor);
@@ -574,11 +653,10 @@ test('M5-A04 & M5-A06: All nine tools handle giant data with <= 6144 bytes, isEr
       assert.equal(dlRes.isError, false, `Deleted list page ${delPages} isError must be false`);
       const dlLen = Buffer.byteLength(JSON.stringify(dlRes), 'utf8');
       assert.ok(dlLen <= 6144, `Deleted list page ${delPages} byte length ${dlLen} exceeds 6144`);
-      assert.doesNotThrow(() => JSON.parse((dlRes.content[0] as any).text));
-      const dlParsed = JSON.parse((dlRes.content[0] as any).text);
-      for (const item of dlParsed.items) {
-        assert.ok(!collectedDelIds.has(item.id), `Deleted list duplicate ID ${item.id} on page ${delPages}`);
-        collectedDelIds.add(item.id);
+      for (const rawId of listedIds(dlRes)) {
+        const id = Number(rawId);
+        assert.ok(!collectedDelIds.has(id), `Deleted list duplicate ID ${id} on page ${delPages}`);
+        collectedDelIds.add(id);
       }
       delCursor = (dlRes.details as any)?.next_cursor ?? undefined;
     } while (delCursor);
@@ -650,11 +728,9 @@ test('M5-A04 & M5-A06: All nine tools handle giant data with <= 6144 bytes, isEr
       assert.equal(elRes.isError, false);
       const elLen = Buffer.byteLength(JSON.stringify(elRes), 'utf8');
       assert.ok(elLen <= 6144, `Entity list page ${entPages} byte length ${elLen} exceeds 6144`);
-      assert.doesNotThrow(() => JSON.parse((elRes.content[0] as any).text));
-      const elParsed = JSON.parse((elRes.content[0] as any).text);
-      for (const e of elParsed.entities) {
-        assert.ok(!collectedEntityIds.has(e.id), `Entity list duplicate ID ${e.id} on page ${entPages}`);
-        collectedEntityIds.add(e.id);
+      for (const id of listedIds(elRes)) {
+        assert.ok(!collectedEntityIds.has(id), `Entity list duplicate ID ${id} on page ${entPages}`);
+        collectedEntityIds.add(id);
       }
       entCursor = (elRes.details as any)?.next_cursor ?? undefined;
     } while (entCursor);
@@ -691,6 +767,49 @@ test('M5-A04 & M5-A06: All nine tools handle giant data with <= 6144 bytes, isEr
     assert.equal(relDelRes.isError, false);
     const relDelLen = Buffer.byteLength(JSON.stringify(relDelRes), 'utf8');
     assert.ok(relDelLen <= 6144);
+
+    // 9. memory_history: action search and get with giant data <= 6144 bytes, valid JSON, isError: false
+    const historyTool = tools.find((t) => t.name === 'memory_history')!;
+    const { createUserMessage } = await import('../../src/storage/history-store.ts');
+    const { resolveHistoryProjectKey } = await import('../../src/identity.ts');
+    const projectKey = resolveHistoryProjectKey(process.cwd());
+
+    let msgIdGiant: number = 0;
+    withDatabase(dbPath, (db) => {
+      // Create giant user message
+      const giantMsg = createUserMessage(db, {
+        sessionId: opCtx.sessionId,
+        projectKey,
+        content: 'Giant user prompt ' + 'P'.repeat(10000),
+      });
+      msgIdGiant = giantMsg.id;
+    });
+
+    const histSearchRes = await historyTool.execute(
+      'call-hist-search',
+      { action: 'search' },
+      undefined,
+      undefined,
+      opCtx as any,
+    );
+    assert.equal(histSearchRes.isError, false);
+    const histSearchLen = Buffer.byteLength(JSON.stringify(histSearchRes), 'utf8');
+    assert.ok(histSearchLen <= 6144, `memory_history search length ${histSearchLen} exceeds 6144`);
+    assert.ok(listedIds(histSearchRes).includes(String(msgIdGiant)));
+
+    const histGetRes = await historyTool.execute(
+      'call-hist-get',
+      { action: 'get', id: msgIdGiant },
+      undefined,
+      undefined,
+      opCtx as any,
+    );
+    assert.equal(histGetRes.isError, false);
+    const histGetLen = Buffer.byteLength(JSON.stringify(histGetRes), 'utf8');
+    assert.ok(histGetLen <= 6144, `memory_history get length ${histGetLen} exceeds 6144`);
+    assert.match(resultText(histGetRes), /Message \[\d+\]/);
+    assert.match(resultText(histGetRes), /Giant user prompt/);
+    assert.ok(resultText(histGetRes).includes(`cursor: ${(histGetRes.details as any).next_cursor}`));
   } finally {
     cleanup();
   }

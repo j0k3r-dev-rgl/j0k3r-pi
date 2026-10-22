@@ -25,7 +25,11 @@ export function initSchema(db: DatabaseSync): void {
 
     const row = db.prepare('SELECT version FROM schema_meta LIMIT 1;').get() as { version?: number } | undefined;
     if (row && typeof row.version === 'number') {
-      if (row.version !== SCHEMA_VERSION) {
+      if (row.version === 1) {
+        db.prepare(`
+          UPDATE schema_meta SET version = ?, updated_at = datetime('now');
+        `).run(SCHEMA_VERSION);
+      } else if (row.version !== SCHEMA_VERSION) {
         throw new SchemaVersionMismatchError(row.version, SCHEMA_VERSION);
       }
     } else {
@@ -138,6 +142,24 @@ export function initSchema(db: DatabaseSync): void {
         FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE,
         FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE,
         FOREIGN KEY (session_id) REFERENCES sessions(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS user_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        project_key TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES sessions(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_user_messages_project ON user_messages(project_key, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_user_messages_session ON user_messages(session_id);
+
+      CREATE VIRTUAL TABLE IF NOT EXISTS user_messages_fts USING fts5(
+        content,
+        content='user_messages',
+        content_rowid='id'
       );
     `);
 

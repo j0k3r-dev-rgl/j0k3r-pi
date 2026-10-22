@@ -405,3 +405,113 @@ test('M1-A04: Continuation from another parent preserves child ID and attributes
     cleanup();
   }
 });
+
+test('MINI-003: handleInput captures human messages, preserves exact text, and excludes subagent & extension messages', async () => {
+  const { dbPath, cleanup } = createTempDb();
+  try {
+    const lifecycle = new MemoryLifecycle(dbPath, { client: new OfflineE5Client() });
+    const ctx = {
+      sessionId: 'sess-human-1',
+      cwd: '/tmp',
+      isProjectTrusted: () => true,
+    };
+
+    // 1. Interactive message with leading/trailing newlines and spaces: exact text preserved
+    const promptText = '  \nHello Pi, please inspect this code.\n\nThank you!  \t';
+    await lifecycle.handleInput({
+      type: 'input',
+      source: 'interactive',
+      text: promptText,
+    }, ctx);
+
+    // Verify written to DB
+    withDatabase(dbPath, (db) => {
+      const rows = db.prepare('SELECT * FROM user_messages;').all() as any[];
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].session_id, 'sess-human-1');
+      assert.equal(rows[0].content, promptText, 'Exact prompt text including leading/trailing whitespace must be preserved');
+    });
+
+    // 2. RPC message: also captured
+    await lifecycle.handleInput({
+      type: 'input',
+      source: 'rpc',
+      text: 'Run tests via RPC',
+    }, ctx);
+
+    withDatabase(dbPath, (db) => {
+      const rows = db.prepare('SELECT * FROM user_messages;').all() as any[];
+      assert.equal(rows.length, 2);
+      assert.equal(rows[1].content, 'Run tests via RPC');
+    });
+
+    // 3. Repeated identical submissions across turns: both preserved
+    await lifecycle.handleInput({
+      type: 'input',
+      source: 'interactive',
+      text: 'continue',
+    }, ctx);
+    await lifecycle.handleInput({
+      type: 'input',
+      source: 'interactive',
+      text: 'continue',
+    }, ctx);
+
+    withDatabase(dbPath, (db) => {
+      const rows = db.prepare('SELECT * FROM user_messages WHERE content = ?;').all('continue') as any[];
+      assert.equal(rows.length, 2, 'Two legitimate identical submissions must both be recorded');
+      assert.notEqual(rows[0].id, rows[1].id);
+    });
+
+    // 4. Extension-generated message: source: 'extension' must NOT be captured
+    await lifecycle.handleInput({
+      type: 'input',
+      source: 'extension',
+      text: 'Autonomous agent message from an extension',
+    }, ctx);
+
+    withDatabase(dbPath, (db) => {
+      const rows = db.prepare('SELECT * FROM user_messages WHERE content = ?;').all('Autonomous agent message from an extension') as any[];
+      assert.equal(rows.length, 0, 'Extension messages must be excluded');
+    });
+
+    // 5. Empty or whitespace-only message: must NOT be captured
+    await lifecycle.handleInput({
+      type: 'input',
+      source: 'interactive',
+      text: '   \n\t  ',
+    }, ctx);
+
+    withDatabase(dbPath, (db) => {
+      const rows = db.prepare('SELECT * FROM user_messages WHERE content = ?;').all('   \n\t  ') as any[];
+      assert.equal(rows.length, 0, 'Whitespace-only messages must be ignored');
+    });
+
+    // 6. Subagent invocation: bound lease active -> must NOT capture
+    const identity: InvocationIdentityV1 = {
+      version: 1,
+      invocationId: 'inv-subagent-input',
+      childSessionId: 'child-sess-input',
+      invokingParentSessionId: 'sess-human-1',
+    };
+    lifecycle.bindChildInvocation({
+      version: 1,
+      identity,
+      childContext: ctx,
+      accept: () => {},
+    });
+
+    await lifecycle.handleInput({
+      type: 'input',
+      source: 'interactive',
+      text: 'Prompt delivered inside subagent child runtime',
+    }, { sessionId: 'child-sess-input', cwd: '/tmp', isProjectTrusted: () => true });
+
+    withDatabase(dbPath, (db) => {
+      const rows = db.prepare('SELECT * FROM user_messages WHERE session_id = ?;').all('child-sess-input') as any[];
+      assert.equal(rows.length, 0, 'Subagent child inputs must never be captured in user history');
+    });
+  } finally {
+    cleanup();
+  }
+});

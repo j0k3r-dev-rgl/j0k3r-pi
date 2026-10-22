@@ -96,3 +96,15 @@ export const RelationSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+
+export const HistorySchema = Type.Object(
+  {
+    action: Type.String({ enum: ['search', 'get'], description: 'search queries or lists message history across current project; get retrieves full message content by id' }),
+    query: Type.Optional(Type.String({ description: 'Lexical full-text search query; omit to list recent project messages' })),
+    session_id: Type.Optional(Type.String({ description: 'Optional session filter to search messages from a specific session within current project' })),
+    id: Type.Optional(Type.Integer({ minimum: 1, description: 'Message ID required for action=get' })),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: 'Maximum messages per search page (default 5)' })),
+    cursor: Type.Optional(Type.String({ description: 'Opaque continuation cursor from previous history call; never invent or forge' })),
+  },
+  { additionalProperties: false },
+);
