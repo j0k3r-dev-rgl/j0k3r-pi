@@ -27,8 +27,9 @@ describe('completion message render', () => {
     } finally { resetExpandKeybindingProviderForTests(); }
   });
   it('suppresses continuation guidance in failed and cancelled completion messages when continuation is disabled', () => {
-    for (const status of ['failed', 'cancelled']) {
+    for (const status of ['failed', 'cancelled', 'interrupted', 'stopping']) {
       const message = completionMessage({ id: `subtask_${status}`, agent: 'analyst', status, error: `${status} result`, cwd: env.tmp });
+      expect(message).not.toContain('## recovery');
       expect(message).not.toContain('action: "continue"');
       expect(message).not.toContain('Ask the user before resuming');
       expect(message).not.toContain('Never switch models automatically');
@@ -39,15 +40,45 @@ describe('completion message render', () => {
     expect(completed).not.toContain('Ask the user before resuming');
   });
 
-  it('adds English resume instructions only to failed and cancelled completion messages when continuation is enabled', async () => {
+  it('instructs one automatic continuation after the first failure without offering model overrides', async () => {
     await import('node:fs').then((fs) => fs.writeFileSync(`${env.tmp}/.pi/subagents.json`, JSON.stringify({ enable_continue: true })));
+    for (const attempt of [undefined, 1]) {
+      const message = completionMessage({ id: 'first-failure', agent: 'analyst', status: 'failed', attempt, cwd: env.tmp });
+      expect(message).toContain('Automatically retry this task once');
+      expect(message).toContain('action: "continue"');
+      expect(message).toContain('same `task_id`');
+      expect(message).toContain('first-failure');
+      expect(message).toContain('Do not ask the user to select model or effort');
+      expect(message).not.toContain('Ask the user before resuming');
+      expect(message).not.toContain('choose a different model');
+      expect(message).not.toContain('Never switch models automatically');
+    }
+  });
 
-    for (const status of ['failed', 'cancelled']) {
-      const message = completionMessage({ id: `subtask_${status}`, agent: 'analyst', status, error: `${status} result`, cwd: env.tmp });
-      expect(message).toContain('can be resumed with `subagent_run`');
-      expect(message).toContain('Ask the user before resuming');
-      expect(message).toContain('model and effort');
-      expect(message).toContain('Never switch models automatically');
+  it('stops and informs the user after a failed second or later attempt', async () => {
+    await import('node:fs').then((fs) => fs.writeFileSync(`${env.tmp}/.pi/subagents.json`, JSON.stringify({ enable_continue: true })));
+    for (const attempt of [2, 3]) {
+      const message = completionMessage({ id: 'retry-failure', agent: 'analyst', status: 'failed', attempt, cwd: env.tmp });
+      expect(message).toContain(`attempt: ${attempt}`);
+      expect(message).toContain('Stop and inform the user');
+      expect(message).toContain('Do not retry again without explicit user approval');
+      expect(message).toContain('Do not start a new task to reset the retry limit');
+      expect(message).not.toContain('Automatically retry this task once');
+    }
+  });
+
+  it('never instructs automatic retries for cancelled, interrupted, stopping or completed tasks', async () => {
+    await import('node:fs').then((fs) => fs.writeFileSync(`${env.tmp}/.pi/subagents.json`, JSON.stringify({ enable_continue: true })));
+    for (const status of ['cancelled', 'interrupted', 'stopping', 'completed']) {
+      const message = completionMessage({ id: status, agent: 'analyst', status, attempt: 1, cwd: env.tmp });
+      expect(message).not.toContain('Automatically retry this task once');
+      if (status === 'completed') {
+        expect(message).not.toContain('## recovery');
+      } else {
+        expect(message).toContain('Do not automatically resume a cancelled, interrupted, or stopping task');
+        expect(message).toContain('Ask the user before resuming');
+        expect(message).not.toContain('choose a different model');
+      }
     }
   });
 

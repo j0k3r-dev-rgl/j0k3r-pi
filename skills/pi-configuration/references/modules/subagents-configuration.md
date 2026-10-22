@@ -1,10 +1,10 @@
 ---
 name: subagents-configuration
-description: "configure Pi Subagents with explicit global/project scope, markdown definitions, cascaded subagents.json defaults, opt-in continuation, automatic CPAMC model allocation with orchestrator fallback, execution modes, tool allowlists, shortcuts, history, and live background steering guidance."
+description: "configure Pi Subagents with explicit global/project scope, markdown definitions, cascaded subagents.json defaults, opt-in continuation, automatic orchestrator-supervisor model allocation with orchestrator fallback, execution modes, tool allowlists, shortcuts, history, and live background steering guidance."
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "1.5"
+  version: "1.6"
 ---
 
 # Subagents Configuration
@@ -19,7 +19,7 @@ Do not load this module for ordinary subagent delegation/use (`subagent_run`, ta
 
 ## Canonical Scope
 
-Own Subagents configuration guidance: global/project cascade, definition tool allowlists, execution modes, continuation, history, shortcuts, and CPAMC allocation with orchestrator fallback. `pi-configuration` owns routing; software workflows own implementation. Do not configure providers, credentials, or CPAMC quota policy through Subagents settings.
+Own Subagents configuration guidance: global/project cascade, definition tool allowlists, execution modes, continuation, history, shortcuts, and orchestrator-supervisor allocation with orchestrator fallback. `pi-configuration` owns routing; software workflows own implementation. Do not configure providers, credentials, or supervisor model pools through `subagents.json`.
 
 ## Hard Rules
 
@@ -41,7 +41,9 @@ Own Subagents configuration guidance: global/project cascade, definition tool al
 - Subagents config resolves as a cascade: project `.pi/subagents.json` overrides global `$PI_CODING_AGENT_DIR/subagents.json` or `~/.pi/agent/subagents.json`; missing project fields fall back to global config; fields missing from both fall back to built-in defaults. Communicate this precedence to users when explaining config behavior.
 - `enable_continue` is built-in default `false` and follows that same cascade. Project `enable_continue` overrides global only when present; omitting it locally inherits the global value. Continuation guidance and new continuation execution are available only when the effective value is `true`.
 - `subagent_run` is always the only registered tool, with optional `action` defaulting to `run`. Explicit `continue` and `message` actions require `task_id` and use `task` for instructions. When effective `enable_continue` is `false`, `continue` returns an explanatory error, history remains visible, and failure/cancellation/interruption notifications must not recommend continuation. The flag does not disable live `message` actions.
-- Model and thinking effort are managed automatically by the CPAMC subagent pool via the `subagents:task:allocate` event hook. When CPAMC is unavailable, allocation fails, or returns no model, subagents automatically fall back to the parent orchestrator model and thinking effort from context. Manual model selection, `/subagent-models`, `default_model`, `default_effort`, and `model_profiles` keys are obsolete; legacy `model_profiles` keys in `subagents.json` are inert at runtime and are never rewritten on disk.
+- Each new run and continuation requests automatic model/effort allocation through `subagents:task:allocate`. When enabled with active candidates, `orchestrator-supervisor` selects the least-loaded configured model, rotating ties, and supplies its configured effort when present. If disabled, unavailable, unclaimed, empty, or allocation fails, the runner uses the parent orchestrator model/effort. Markdown frontmatter `effort` takes precedence over allocated or inherited effort. `subagent_run` accepts no model/effort override parameters: never solicit per-call choices or promise the same selection on a retry. `/subagent-models`, `default_model`, `default_effort`, and legacy `model_profiles` in `subagents.json` are obsolete/inert; do not rewrite legacy entries.
+- Supervisor model configuration is separate from the `subagents.json` field cascade. In `/supervisor`, the Subagents tab selects one global or project document: `<Pi agent directory>/orchestrator-supervisor/subagents.json` or `<project root>/.pi/orchestrator-supervisor/subagents.json`. It does not merge fields between those scopes; missing fields use built-in defaults. With no scope selection, existing legacy flow-scoped storage remains in use. Orchestrator and Subagents tabs select scopes independently; use the panel for model pool and per-model effort configuration, only with explicit authorization.
+- Recovery guidance is an instruction to the orchestrator, not a runner retry loop. After a failed first attempt, continue once automatically with the same `task_id` only when `enable_continue` is true and continuation is safe. After a failed second or later attempt, stop and inform the user of the error and partial work; further retries require approval. Never reset this limit by starting another task. Cancelled, interrupted, or stopping tasks require explicit permission to resume. If continuation is disabled or unsafe, stop and inform the user instead.
 - Markdown definitions should usually contain identity, description, tool allowlist, and behavioral instructions only.
 - Nested subagent sessions should use `session_resources: "lean"` by default so the subagent markdown body becomes the nested session system prompt, the delegated user prompt contains only orchestrator context/task, and workflow skills, prompt templates, themes, context files, and startup context injections are not auto-loaded.
 - In lean mode, extensions are loaded for allowlisted tools and tool-safety hooks only; prompt/context lifecycle hooks such as `before_agent_start` and `context` must not inject hidden messages into subagent turns.
@@ -106,7 +108,7 @@ Tool entries can include `*` wildcards such as `tool_*`. Wildcards expand at sub
 
 Model and effort allocation:
 
-Model and thinking effort are allocated automatically by the CPAMC subagent pool (e.g. Gemini 3.8 Flash with high effort) through the `subagents:task:allocate` event hook. When CPAMC is unavailable, allocation is unclaimed, or an allocator error occurs, the runner falls back to the current orchestrator model and thinking effort from the parent session context. Manual model configuration, `/subagent-models`, and legacy `model_profiles` entries are obsolete and inert.
+Each attempt resolves its model from the supervisor allocator, otherwise the current parent orchestrator. Effort resolves as Markdown definition `effort`, then allocated effort, then parent orchestrator effort. Configure the supervisor pool in the Subagents tab of `/supervisor`, not through tool-call parameters or legacy `model_profiles`. The selected global/project supervisor document is separate from the execution defaults inherited through `subagents.json`.
 
 Execution-mode resolution order:
 
@@ -128,7 +130,7 @@ Continuation-mode resolution order (when `enable_continue` is enabled):
 - If the user has not chosen configuration scope, ask: **global for every project, project-local for this workspace, or one subagent definition only?** Do not edit until they choose.
 - If the requested local value differs from an existing global value, explain that local wins and ask whether the user wants an override or wants to change the global default instead.
 - If the user asks for a default execution mode without naming one, ask whether omitted runs should wait in `task` or free the chat in `background`; explain automatic notification behavior before they choose.
-- If the user asks how to configure models for subagents, explain that CPAMC handles automatic model allocation and quota balancing, falling back to the current orchestrator model/effort when CPAMC is unavailable; manual model profiles are obsolete.
+- If the user asks how to configure models for subagents, explain `/supervisor` → Subagents, explicit global/project scope selection, least-loaded allocation with rotating ties, orchestrator fallback, and definition-effort precedence. The pool does not use quota filtering. Changing configured candidates/efforts requires explicit authorization; per-call model/effort overrides are unsupported.
 - If the user requests a new definition but does not specify `agents` versus `subagents`, recommend `subagents` and ask only when compatibility with another harness may require `agents`.
 - If the subagent will modify files, run bash, or write memory, ask whether the planned workflow or stricter review is required.
 - If the subagent needs human input, require a structured `interaction_required` request with enough prompt, payload, and expected-response data for the parent to answer.
@@ -143,11 +145,11 @@ Continuation-mode resolution order (when `enable_continue` is enabled):
 5. Summarize existing effective values, what will be inherited, and exactly which file would change; ask for any missing product choice such as `task` versus `background` before editing.
 6. For new subagents, choose lowercase kebab-case names and clear trigger-focused descriptions. Write definitions in English by default; use another language only when explicitly requested. Prefer `subagents` unless compatibility requires `agents`.
 7. Set minimal tool allowlists; remove any `subagent_*` entries.
-8. Do not configure `model_profiles`, `default_model`, or `default_effort` (legacy keys are inert). Configure `default_mode` and `enable_continue` only in the user-approved scope. Explain CPAMC automatic allocation and orchestrator model/effort fallback, execution-mode precedence, and that `enable_continue` is checked on each continuation call without changing tool exposure.
+8. Do not configure `model_profiles`, `default_model`, or `default_effort` (legacy keys are inert). Configure `default_mode` and `enable_continue` only in the user-approved scope. Explain supervisor allocation and scope selection, orchestrator fallback, definition-effort precedence, execution-mode precedence, and that `enable_continue` is checked on each continuation call without changing tool exposure. Never offer model/effort overrides through `subagent_run`.
 9. Never add the removed UI key `mode: "opencode" | "claude"`. Configure history and handoff independently with `history_panel_shortcut`, `detail_cancel_shortcut`, and `background_handoff_shortcut`.
 10. Configure `debug: true` only for temporary diagnostics; keep it false by default and explain that logs are written under the executing project's `.pi` directory.
 11. Validate JSON syntax and Markdown frontmatter/body structure. Preserve unrelated existing keys and definitions.
-12. Explain runtime behavior when relevant: task versus background, automatic notifications, explicit disabled-continuation errors with preserved history and no continuation recommendations in failed/cancelled/interrupted/stopping terminal results or terminal background notifications, then enabled-only continuation mode preservation/override, `/subagents`, configured history shortcut, `ctrl+o`, and same-parent live steering.
+12. Explain runtime behavior when relevant: task versus background, automatic notifications, explicit disabled-continuation errors with preserved history and no continuation recommendations in failed/cancelled/interrupted/stopping terminal results or terminal background notifications, then the enabled-and-safe first-failure retry and second-failure escalation policy, cancellation safeguards, continuation mode preservation/override, `/subagents`, configured history shortcut, `ctrl+o`, and same-parent live steering.
 13. Tell the user to `/reload` or restart Pi after changes.
 14. If runtime validation is requested after reload, inspect the real definition/config paths; run delegated smoke tests through `subagent_run` only when the user explicitly asks for them.
 
@@ -160,7 +162,7 @@ Return:
 - Package settings and subagents/config fields added, changed, or preserved.
 - Scope decision: global, project-local, or definition-specific; include the effective cascade and why that scope was selected.
 - User choices requested before editing, including default execution mode or override intent when relevant.
-- Tool allowlist, system-prompt isolation, Context7 scope, memory-tool scope, debug logging, CPAMC model allocation and orchestrator fallback behavior.
+- Tool allowlist, system-prompt isolation, Context7 scope, memory-tool scope, debug logging, supervisor scope selection and model allocation, definition-effort precedence, orchestrator fallback, and recovery safeguards.
 - Runtime behavior explained when relevant: task vs background, automatic notifications, enabled-only continuation mode preservation/override, same-parent `subagent_run` live messages, `/subagents`, configured expansion keys, and artifact-based result access.
 - Related configuration skills considered or loaded.
 - Validation executed, or the concrete reason it was not run.

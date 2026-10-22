@@ -3,17 +3,25 @@ import type { SubagentTask } from '../types.js';
 import { truncateToWidth } from '../completion-message.js';
 
 export const SUBAGENT_RESUME_GUIDANCE = [
-  '## optional resume',
-  'This task can be resumed with `subagent_run` using `action: "continue"`, instructions in `task`, and the same `task_id`.',
-  'Ask the user before resuming. The user may keep the currently configured model and effort or explicitly choose a different model, effort, or both for the next attempt.',
-  "Do not resume or override the model or effort without the user's explicit decision. Never switch models automatically.",
+  'Model and effort are resolved automatically for each attempt by the configured allocator or orchestrator fallback, with definition effort taking precedence.',
+  'Do not ask the user to select model or effort, promise the same selection, or pass unsupported model/effort parameters.',
+  'Preserve partial work and the approved scope. Do not start a new task to reset the retry limit.',
 ].join('\n');
 
-export function appendSubagentResumeGuidance(text: string, tasks: Array<Pick<SubagentTask, 'status'>>, cwd = process.cwd()): string {
-  return readSubagentsConfig(cwd).enable_continue
-    && tasks.some((task) => task.status === 'failed' || task.status === 'cancelled' || task.status === 'interrupted' || task.status === 'stopping')
-    ? `${text}\n\n${SUBAGENT_RESUME_GUIDANCE}`
-    : text;
+export function appendSubagentResumeGuidance(text: string, tasks: Array<Pick<SubagentTask, 'status'> & Partial<Pick<SubagentTask, 'id' | 'attempt'>>>, cwd = process.cwd()): string {
+  if (!readSubagentsConfig(cwd).enable_continue) return text;
+  const guidance = tasks.flatMap((task) => {
+    if (!['failed', 'cancelled', 'interrupted', 'stopping'].includes(task.status)) return [];
+    const attempt = task.attempt ?? 1;
+    const identity = `task_id: ${task.id ?? 'see task result'} · attempt: ${attempt}`;
+    const instruction = task.status !== 'failed'
+      ? 'Do not automatically resume a cancelled, interrupted, or stopping task. Ask the user before resuming.'
+      : attempt >= 2
+        ? 'Stop and inform the user that the retry failed, including the error and any partial work. Do not retry again without explicit user approval.'
+        : 'Automatically retry this task once without asking the user, using `subagent_run` with `action: "continue"`, instructions in `task`, and the same `task_id`. If continuation is unavailable or unsafe, stop and inform the user instead.';
+    return [`${identity}\n${instruction}`];
+  });
+  return guidance.length ? `${text}\n\n## recovery\n${guidance.join('\n\n')}\n\n${SUBAGENT_RESUME_GUIDANCE}` : text;
 }
 
 export function clip(text: string | undefined, limit = 240): string {

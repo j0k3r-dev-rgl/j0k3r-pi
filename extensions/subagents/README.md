@@ -45,7 +45,8 @@ Las definiciones se cargan al invocar la herramienta. Un agente desconocido prod
 - Admite tareas `completed`, `failed`, `cancelled` e `interrupted`. Si está en `stopping`, espera la limpieza del intento anterior. Rechaza tareas `queued` o `running` y sesiones inexistentes.
 - El modo se resuelve como `mode` explícito, `effective_mode` anterior, `mode` anterior, `default_mode` y finalmente `task`.
 - `enable_continue` se lee de la configuración efectiva en cada llamada. Si está deshabilitado, devuelve un error explicativo sin ejecutar otro intento. La herramienta y su esquema permanecen registrados; los errores y notificaciones no recomiendan continuar cuando está deshabilitado.
-- Los intentos fallidos conservan la indicación de pedir autorización antes de reanudarlos; no se admiten overrides de modelo o esfuerzo en la llamada.
+- Si falla el primer intento y la continuación está habilitada y es segura, el mensaje indica al orquestador reintentar una sola vez con `action: "continue"` y el mismo `task_id`, sin preguntar. Si falla el segundo intento o uno posterior, debe detenerse e informar al usuario; otro reintento requiere aprobación explícita. No debe iniciar otra tarea para reiniciar este límite. Es una instrucción al orquestador, no un bucle automático del runner.
+- Las tareas canceladas, interrumpidas o en proceso de detenerse no se reanudan automáticamente. Modelo y esfuerzo se resuelven de nuevo en cada intento según el asignador o el fallback al orquestador, con prioridad del esfuerzo definido en el Markdown; no se ofrecen elecciones manuales ni se admiten overrides en la llamada.
 
 ### Enviar instrucciones en vivo
 
