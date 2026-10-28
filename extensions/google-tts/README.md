@@ -1,17 +1,19 @@
 # Audio manual con Gemini TTS para Pi
 
-Cada respuesta final del **orquestador interactivo** ofrece un control independiente: **Generar audio → Generando… → Reproducir**. No hay generación al terminar una respuesta ni reproducción al terminar de generar.
+Cada respuesta final del **orquestador interactivo** ofrece **Generar y escuchar** para empezar a reproducir mientras Google genera el audio en streaming. No hay generación ni reproducción automática al terminar la respuesta.
 
 ## Uso rápido
 
 1. Ejecuta `/reload` después de actualizar la extensión.
 2. Con TTS activado (`/tts on`), termina una respuesta nueva.
-3. Pulsa **Generar audio** bajo la respuesta. Solo entonces se envía el texto limpio a Google Vertex AI y se consumen los créditos correspondientes.
-4. Cuando cambie a **Reproducir**, pulsa de nuevo para escucharla. Durante la reproducción aparecen **Pausar** y **Detener**; en pausa, **Continuar** y **Detener**. Puedes volver a reproducir el mismo audio sin otra síntesis.
+3. Pulsa **Generar y escuchar** bajo la respuesta. Solo entonces se envía el texto limpio a Google Vertex AI y se consumen los créditos correspondientes; la reproducción comienza progresivamente.
+4. Durante la reproducción aparecen **Pausar** y **Detener**; en pausa, **Continuar** y **Detener**. El audio completado se conserva para repetirlo sin otra síntesis.
+
+En streaming, **Pausar** suspende el reproductor, no garantiza pausar la generación ni la facturación de Google; la presión de la tubería puede ralentizar la recepción. **Detener** cancela la operación de red y descarta el audio si aún no se completó; una petición enviada puede haber consumido créditos. Un nuevo prompt, desactivar TTS o cerrar la extensión también la cancelan.
 
 **Pausar / Continuar** conserva la posición del reproductor. **Detener** vuelve al estado **Reproducir**: la siguiente reproducción empieza desde el principio, sin generar de nuevo.
 
-El clic requiere el modo de pantalla completa de Pi. En el modo normal de terminal, o sin ratón, usa los comandos numerados que aparecen junto al control: `/tts generate 1` y `/tts play 1`.
+El clic requiere el modo de pantalla completa de Pi. En el modo normal de terminal, o sin ratón, usa el comando numerado que aparece junto al control: `/tts stream 1`.
 
 ## Comandos
 
@@ -20,7 +22,7 @@ El clic requiere el modo de pantalla completa de Pi. En el modo normal de termin
 | `/tts` | Estado, modelo, voz, estilo y ayuda. |
 | `/tts on` | Activa los controles manuales para nuevas respuestas finales. |
 | `/tts off` | Oculta/deshabilita los controles y detiene la reproducción. |
-| `/tts generate <n>` | Genera el audio de la respuesta indicada, sin reproducirlo. |
+| `/tts stream <n>` | Genera y reproduce progresivamente el audio de la respuesta indicada. |
 | `/tts play <n>` | Reproduce el audio generado; si está pausado, continúa. |
 | `/tts pause [n]` | Pausa la reproducción sin perder la posición. |
 | `/tts resume [n]` | Continúa la reproducción pausada. |
@@ -35,9 +37,9 @@ En `pause`, `resume` y `stop`, el número es opcional: sin él se controla el au
 | `/tts voice [nombre]` | Consulta o cambia la voz: Kore, Fenrir, Puck, Charon o Aoede. |
 | `/tts style [estilo]` | Consulta o cambia la entonación. |
 
-`/tts model flash` selecciona `gemini-3.8-flash-tts` (predeterminado); `/tts model lite` selecciona `gemini-3.8-flash-lite-tts`. Cambiar de modelo no genera audio, no activa TTS si está apagado y no elimina los audios existentes. El cambio dura hasta recargar o cerrar la extensión. Para comparar, selecciona el modelo antes de generar el audio de otra respuesta.
+`/tts model flash` selecciona `gemini-3.8-flash-tts`; `/tts model lite` selecciona `gemini-3.8-flash-lite-tts` (predeterminado). Cambiar de modelo no genera audio, no activa TTS si está apagado y no elimina los audios existentes. El cambio dura hasta recargar o cerrar la extensión. Para comparar, selecciona el modelo antes de generar el audio de otra respuesta.
 
-`/tts speak` ya no sintetiza ni reproduce frases: muestra una indicación para usar los controles separados.
+`/tts speak` no sintetiza ni reproduce frases: muestra una indicación para usar el control de streaming.
 
 ## Alcance y límites
 
@@ -45,7 +47,7 @@ En `pause`, `resume` y `stop`, el número es opcional: sin él se controla el au
 - Espera a que el agente quede asentado (`agent_settled`), sin continuaciones automáticas. Ignora mensajes de herramientas, respuestas abortadas, errores y texto vacío después de la limpieza.
 - La activación conserva su valor inicial existente (`enabled: true`). `/tts off` impide nuevas síntesis y reproducciones; `/tts on` no genera nada por sí solo. Los cambios de los comandos solo duran durante la sesión de la extensión.
 - Conserva la limpieza Markdown/código y el límite existente de 3000 caracteres. No resume la respuesta con otro modelo.
-- El audio se mantiene en memoria por mensaje. Un nuevo prompt detiene la reproducción, sin eliminar el audio ya generado. Al cerrar o recargar la extensión se libera; los controles guardados en la sesión vuelven a ofrecer **Generar audio** al reabrirla.
+- El audio se mantiene en memoria por mensaje. Un nuevo prompt detiene la reproducción, sin eliminar el audio ya generado. Al cerrar o recargar la extensión se libera; los controles guardados en la sesión vuelven a ofrecer **Generar y escuchar** al reabrirla.
 - Los controles siguen la rama activa de la conversación. Los ajustes de modelo/voz/estilo se aplican a las siguientes generaciones; la velocidad se aplica al reproducir.
 - Desactivar o cerrar la extensión descarta resultados de síntesis pendientes. Una petición ya enviada puede haber consumido créditos.
 
@@ -86,7 +88,7 @@ La extensión lee el archivo al solicitar una síntesis, no al activar los contr
 
 ## Proveedor y reproducción
 
-Se conserva el proveedor existente: `gemini-3.8-flash-tts` en Google Cloud Vertex AI, ubicación `global`, voz inicial `Kore`, velocidad inicial 1.18x. Las credenciales locales existentes se leen únicamente al solicitar una síntesis; esta modificación no cambia ni copia credenciales ni añade configuración de proyecto.
+El proveedor es Google Cloud Vertex AI, con `gemini-3.8-flash-lite-tts` como modelo inicial, ubicación `global`, voz inicial `Kore` y velocidad inicial 1.18x. Las credenciales locales existentes se leen únicamente al solicitar una síntesis; esta modificación no cambia ni copia credenciales ni añade configuración de proyecto.
 
 La reproducción usa `ffplay`, que debe estar disponible y tener acceso a una salida de audio. La pausa usa las señales `SIGSTOP`/`SIGCONT` de Linux/macOS sobre el mismo proceso, sin reiniciar el audio; no está disponible en Windows nativo. Puede oírse una pequeña cola ya almacenada en los búferes de audio, especialmente por SSH. En SSH depende de la configuración de audio del entorno; la extensión no crea túneles ni sockets. `/tts stop`, un nuevo prompt y el cierre de sesión detienen el proceso aunque esté pausado.
 

@@ -9,6 +9,14 @@ export class AudioPlayer {
    * Si ya hay una reproducción activa, la detiene antes de comenzar la nueva.
    */
   async play(audioBuffer: Buffer, speed: number = 1.0): Promise<void> {
+    return this.playInput((async function* () { yield audioBuffer; })(), speed, false);
+  }
+
+  async playStream(chunks: AsyncIterable<Buffer>, speed: number = 1.0): Promise<void> {
+    return this.playInput(chunks, speed, true);
+  }
+
+  private async playInput(chunks: AsyncIterable<Buffer>, speed: number, pcm: boolean): Promise<void> {
     this.stop();
 
     return new Promise<void>((resolve, reject) => {
@@ -24,6 +32,7 @@ export class AudioPlayer {
           }
         }
 
+        if (pcm) args.push("-f", "s16le", "-sample_rate", "24000", "-ch_layout", "mono");
         args.push("-i", "pipe:0");
 
         const proc = spawn("ffplay", args, {
@@ -60,11 +69,21 @@ export class AudioPlayer {
           finish(code === 0 ? undefined : new Error(`ffplay terminó con ${signal ?? `código ${code}`}.`));
         });
 
-        try {
-          proc.stdin.end(audioBuffer);
-        } catch (error) {
-          fail(error instanceof Error ? error : new Error("No se pudo enviar el audio a ffplay."));
-        }
+        void (async () => {
+          try {
+            for await (const chunk of chunks) {
+              if (playback.stopped || settled) break;
+              if (!proc.stdin.write(chunk)) await new Promise<void>((resolve, reject) => {
+                const cleanup = () => { proc.stdin.off("drain", drained); proc.stdin.off("error", failed); proc.stdin.off("close", closed); };
+                const drained = () => { cleanup(); resolve(); };
+                const failed = (error: Error) => { cleanup(); reject(error); };
+                const closed = () => { cleanup(); reject(new Error("La tubería de audio se cerró.")); };
+                proc.stdin.once("drain", drained); proc.stdin.once("error", failed); proc.stdin.once("close", closed);
+              });
+            }
+            if (!playback.stopped && !settled) proc.stdin.end();
+          } catch (error) { fail(error instanceof Error ? error : new Error("No se pudo enviar el audio a ffplay.")); }
+        })();
       } catch (err) {
         reject(err);
       }
