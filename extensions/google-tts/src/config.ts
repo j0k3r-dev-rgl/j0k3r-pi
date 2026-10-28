@@ -37,7 +37,7 @@ export interface TTSConfig {
 
 export const defaultConfig: TTSConfig = {
   enabled: true,
-  model: "gemini-3.8-flash-tts",
+  model: "gemini-3.8-flash-lite-tts",
   location: "global",
   voice: "Kore",
   style: "speaking rapidly, clear and concise, direct",

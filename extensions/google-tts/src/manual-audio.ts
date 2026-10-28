@@ -6,14 +6,15 @@ import { cleanTextForSpeech } from "./text-cleaner.js";
 
 export const AUDIO_ENTRY = "google-tts-audio";
 export interface AudioEntry { messageId: string; number: number }
-export type AudioAction = "generate" | "play" | "pause" | "resume" | "stop";
-interface AudioState { text: string; status: "idle" | "generating" | "ready" | "playing" | "paused"; audio?: Buffer }
+export type AudioAction = "stream" | "play" | "pause" | "resume" | "stop";
+interface AudioState { text: string; status: "idle" | "ready" | "playing" | "paused"; audio?: Buffer }
 
 export class ManualAudio {
   private states = new Map<string, AudioState>();
   private context?: ExtensionContext;
   private epoch = 0;
   private playbackEpoch = 0;
+  private streamAbort?: AbortController;
   onChange = () => {};
 
   private config: TTSConfig;
@@ -48,8 +49,7 @@ export class ManualAudio {
     const state = this.state(card);
     if (!state) return [];
     switch (state.status) {
-      case "idle": return [{ label: "Generar audio", action: "generate" }];
-      case "generating": return [{ label: "Generando…" }];
+      case "idle": return [{ label: "Generar y escuchar", action: "stream" }];
       case "ready": return [{ label: "Reproducir", action: "play" }];
       case "playing": return [{ label: "Pausar", action: "pause" }, { label: "Detener", action: "stop" }];
       case "paused": return [{ label: "Continuar", action: "resume" }, { label: "Detener", action: "stop" }];
@@ -93,14 +93,15 @@ export class ManualAudio {
   }
   stop() {
     this.playbackEpoch++;
+    this.streamAbort?.abort();
+    this.streamAbort = undefined;
     this.player.stop();
-    for (const state of this.states.values()) if (state.status === "playing" || state.status === "paused") state.status = "ready";
+    for (const state of this.states.values()) if (state.status === "playing" || state.status === "paused") state.status = state.audio ? "ready" : "idle";
     this.onChange();
   }
   disable() {
     this.epoch++;
     this.stop();
-    for (const state of this.states.values()) if (state.status === "generating") state.status = "idle";
     this.onChange();
   }
   reset() { this.disable(); this.states.clear(); this.context = undefined; }
@@ -115,28 +116,50 @@ export class ManualAudio {
     const state = card && this.state(card);
     if (!state) { this.context?.ui.notify("Respuesta no encontrada. Usa el número junto al botón de audio.", "warning"); return; }
     const epoch = this.epoch;
-    if (state.status === "generating" || state.status === "playing") return;
+    if (state.status === "playing") return;
     if (state.status === "paused") {
       if (kind === "play") this.playbackAction("resume", number);
       return;
     }
-    if (kind === "generate") {
+    if (kind === "stream") {
       if (state.audio) return;
-      state.status = "generating";
+      this.stop();
+      const playbackEpoch = this.playbackEpoch;
+      const controller = new AbortController();
+      this.streamAbort = controller;
+      state.status = "playing";
       this.onChange();
-      try {
-        const audio = await this.service.synthesize(state.text, this.config.voice, this.config.style, this.config.model, this.config.location);
-        if (epoch !== this.epoch || !this.available()) return;
-        state.audio = audio;
-        state.status = "ready";
-      } catch {
-        if (epoch !== this.epoch) return;
-        state.status = "idle";
-        this.context?.ui.notify("No se pudo generar el audio. Puedes volver a intentarlo.", "error");
-      } finally { this.onChange(); }
+      const chunks: Buffer[] = [];
+      let size = 0;
+      const service = this.service;
+      const config = this.config;
+      const self = this;
+      let complete = false;
+      const source = (async function* () {
+        for await (const chunk of service.stream(state.text, config.voice, config.style, config.model, config.location, controller.signal)) {
+          if (!self.cards().some(c => c.messageId === card!.messageId)) { controller.abort(); throw new Error("Rama cambiada."); }
+          size += chunk.length;
+          if (size > 16 * 1024 * 1024) throw new Error("Audio demasiado largo.");
+          chunks.push(chunk);
+          yield chunk;
+        }
+        controller.signal.throwIfAborted();
+        state.audio = pcmWav(Buffer.concat(chunks));
+        complete = true;
+      })();
+      try { await this.player.playStream(source, config.speed); }
+      catch {
+        controller.abort();
+        if (epoch === this.epoch && playbackEpoch === this.playbackEpoch) this.context?.ui.notify("No se pudo generar o reproducir el audio en streaming.", "error");
+      } finally {
+        controller.abort();
+        if (this.streamAbort === controller) this.streamAbort = undefined;
+        if (epoch === this.epoch && playbackEpoch === this.playbackEpoch) state.status = complete ? "ready" : "idle";
+        this.onChange();
+      }
       return;
     }
-    if (!state.audio) { this.context?.ui.notify("Primero pulsa Generar audio.", "warning"); return; }
+    if (!state.audio) { this.context?.ui.notify("Primero pulsa Generar y escuchar.", "warning"); return; }
     this.stop();
     const playbackEpoch = this.playbackEpoch;
     state.status = "playing";
@@ -152,6 +175,15 @@ export class ManualAudio {
     const control = this.controls(card).find(c => action ? c.action === action : c.action);
     if (control?.action) await this.action(control.action, String(card.number));
   }
+}
+
+function pcmWav(pcm: Buffer): Buffer {
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0); header.writeUInt32LE(36 + pcm.length, 4); header.write("WAVEfmt ", 8);
+  header.writeUInt32LE(16, 16); header.writeUInt16LE(1, 20); header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(24000, 24); header.writeUInt32LE(48000, 28); header.writeUInt16LE(2, 32); header.writeUInt16LE(16, 34);
+  header.write("data", 36); header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
 }
 
 function finalText(message: any, maxCharacters: number): string {

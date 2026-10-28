@@ -123,7 +123,7 @@ export default function (pi: ExtensionAPI) {
           break;
         }
 
-        case "generate":
+        case "stream":
         case "play": {
           if (!config.enabled) {
             ctx.ui.notify("Activa TTS con /tts on.", "warning");
@@ -134,7 +134,7 @@ export default function (pi: ExtensionAPI) {
         }
 
         case "speak": {
-          ctx.ui.notify("Usa Generar audio y después Reproducir en la respuesta. No se genera ni reproduce audio automáticamente.", "info");
+          ctx.ui.notify("Usa Generar y escuchar en la respuesta. No se genera ni reproduce audio automáticamente.", "info");
           break;
         }
 
@@ -144,7 +144,7 @@ export default function (pi: ExtensionAPI) {
           let help = `Estado Gemini TTS: ${status} ${playing}\nModelo: ${config.model} (Vertex Global)\nVoz: ${config.voice} | Estilo: "${config.style}" | Velocidad: ${config.speed}x\n\nComandos:\n`;
           help += `• /tts on             - Activar controles de audio manual\n`;
           help += `• /tts off            - Desactivar controles y detener audio\n`;
-          help += `• /tts generate <n>   - Generar audio de la respuesta n, sin reproducir\n`;
+          help += `• /tts stream <n>     - Generar y escuchar progresivamente\n`;
           help += `• /tts play <n>       - Reproducir audio ya generado\n`;
           help += `• /tts pause [n]      - Pausar el audio sin perder la posición\n`;
           help += `• /tts resume [n]     - Continuar el audio pausado\n`;

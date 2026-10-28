@@ -164,6 +164,27 @@ test("failed pause or resume leaves the player state unchanged", () => {
   `);
 });
 
+test("streaming player consumes chunks incrementally with PCM arguments", () => {
+  isolated(`
+    let passedArgs;
+    childProcess.spawn = (_command, args) => {
+      passedArgs = args;
+      const child = originalSpawn(process.execPath, ['-e', "process.stdin.on('data', () => process.send('chunk')); process.stdin.resume(); process.stdin.on('end', () => process.exit(0))"], { stdio: ['pipe', 'ignore', 'ignore', 'ipc'] });
+      children.push(child); return child;
+    };
+    syncBuiltinESMExports();
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    const chunks = (async function* () { yield Buffer.from([1, 2]); await gate; yield Buffer.from([3, 4]); })();
+    const pending = outcome(player.playStream(chunks, 1));
+    await once(children[0], 'message');
+    assert.ok(passedArgs.includes('s16le'));
+    assert.deepEqual(passedArgs.slice(passedArgs.indexOf('-f'), passedArgs.indexOf('-i')), ['-f', 's16le', '-sample_rate', '24000', '-ch_layout', 'mono']);
+    release();
+    assert.equal((await pending).ok, true);
+  `);
+});
+
 test("old player shutdown does not clear the replacement playback", () => {
   isolated(`
     fakePlayer("process.send('ready'); setInterval(() => {}, 1000)");

@@ -38,7 +38,7 @@ export class GoogleTTSService {
     };
   }
 
-  private async getAccessToken(): Promise<string> {
+  private async getAccessToken(signal?: AbortSignal): Promise<string> {
     const now = Math.floor(Date.now() / 1000);
     if (this.cachedToken && this.tokenExpiresAt > now + 60) {
       return this.cachedToken;
@@ -66,6 +66,7 @@ export class GoogleTTSService {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
+      signal,
     });
 
     if (!res.ok) {
@@ -80,64 +81,45 @@ export class GoogleTTSService {
     return this.cachedToken;
   }
 
-  async synthesize(
-    text: string,
-    voiceName: string = "Kore",
-    style: string = "cheerful and friendly",
-    model: string = "gemini-3.8-flash-tts",
-    location: string = "global"
-  ): Promise<Buffer> {
+  async *stream(text: string, voice: string, style: string, model: string, location: string, signal: AbortSignal): AsyncGenerator<Buffer> {
     const creds = this.loadServiceAccount();
-    const token = await this.getAccessToken();
-
-    const url = `https://aiplatform.googleapis.com/v1/projects/${creds.project_id}/locations/${location}/publishers/google/models/${model}:generateContent`;
-
-    const requestBody = {
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text,
-              speechMetadata: {
-                style,
-              },
-            },
-          ],
-        },
-      ],
-      generationConfig: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          voiceConfig: {
-            voice: voiceName,
-          },
-        },
-      },
-    };
-
+    const token = await this.getAccessToken(signal);
+    signal.throwIfAborted();
+    const url = `https://aiplatform.googleapis.com/v1/projects/${creds.project_id}/locations/${location}/publishers/google/models/${model}:streamGenerateContent?alt=sse`;
     const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(requestBody),
+      method: "POST", signal,
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text, speechMetadata: { style } }] }], generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { voice } } } }),
     });
-
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`Error en Vertex AI Gemini TTS (${res.status}): ${errText}`);
-    }
-
-    const data = (await res.json()) as any;
-    const part = data.candidates?.[0]?.content?.parts?.[0];
-    const base64Audio = part?.inlineData?.data;
-
-    if (!base64Audio) {
-      throw new Error("El modelo de Gemini no devolvió audio en la respuesta.");
-    }
-
-    return Buffer.from(base64Audio, "base64");
+    if (!res.ok || !res.body) throw new Error(`Error de streaming TTS (${res.status}).`);
+    const decoder = new TextDecoder();
+    let pending = "", found = false, finished = false;
+    const reader = res.body.getReader();
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        pending += decoder.decode(value, { stream: !done });
+        if (pending.length > 16 * 1024 * 1024) throw new Error("Evento SSE demasiado grande.");
+        let boundary: RegExpExecArray | null;
+        while ((boundary = /\r?\n\r?\n/.exec(pending))) {
+          const event = pending.slice(0, boundary.index);
+          pending = pending.slice(boundary.index + boundary[0].length);
+          const data = event.split(/\r?\n/).filter(line => line.startsWith("data:")).map(line => line.slice(5).trimStart()).join("\n");
+          if (!data || data === "[DONE]") continue;
+          const json = JSON.parse(data);
+          if (json.error) throw new Error("Error del proveedor TTS.");
+          for (const candidate of json.candidates ?? []) {
+            if (candidate.finishReason && candidate.finishReason !== "STOP") throw new Error("Generación TTS incompleta.");
+            if (candidate.finishReason === "STOP") finished = true;
+            for (const part of candidate.content?.parts ?? []) {
+              if (part.inlineData?.data) { found = true; yield Buffer.from(part.inlineData.data, "base64"); }
+            }
+          }
+        }
+        if (done) break;
+      }
+      if (pending.trim() || !found || !finished) throw new Error("Stream TTS incompleto o sin audio.");
+    } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
   }
+
 }
