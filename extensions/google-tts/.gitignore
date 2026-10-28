@@ -1,0 +1,4 @@
+# Local credentials location must remain private even outside this repository.
+.env
+.env.*
+!.env.example
