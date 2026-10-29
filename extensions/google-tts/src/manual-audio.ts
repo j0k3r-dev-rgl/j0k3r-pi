@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { TTSConfig } from "./config.js";
+import { selectedPort, type TTSPreferences } from "./config.js";
 import type { GoogleTTSService } from "./tts-service.js";
 import type { AudioPlayer } from "./audio-player.js";
 import { cleanTextForSpeech } from "./text-cleaner.js";
@@ -17,15 +17,16 @@ export class ManualAudio {
   private streamAbort?: AbortController;
   onChange = () => {};
 
-  private config: TTSConfig;
+  private preferences: TTSPreferences;
   private service: GoogleTTSService;
   private player: AudioPlayer;
-  constructor(config: TTSConfig, service: GoogleTTSService, player: AudioPlayer) {
-    this.config = config;
+  constructor(preferences: TTSPreferences, service: GoogleTTSService, player: AudioPlayer) {
+    this.preferences = preferences;
     this.service = service;
     this.player = player;
   }
 
+  private get config() { return this.preferences.config; }
   attach(ctx: ExtensionContext) { if (ctx.mode === "tui") this.context = ctx; }
   available() { return this.context?.mode === "tui" && this.config.enabled; }
   private entries(): any[] { return this.context?.sessionManager.getBranch() ?? []; }
@@ -90,6 +91,9 @@ export class ManualAudio {
     if (this.cards().some(c => c.messageId === last.id)) return;
     const number = Math.max(0, ...this.cards().map(c => c.number)) + 1;
     pi.appendEntry(AUDIO_ENTRY, { messageId: last.id, number } satisfies AudioEntry);
+    if (this.preferences.autoRead) void this.action("stream", String(number)).catch(() => {
+      this.context?.ui.notify("No se pudo iniciar la lectura automática.", "error");
+    });
   }
   stop() {
     this.playbackEpoch++;
@@ -147,7 +151,7 @@ export class ManualAudio {
         state.audio = pcmWav(Buffer.concat(chunks));
         complete = true;
       })();
-      try { await this.player.playStream(source, config.speed); }
+      try { await this.player.playStream(source, config.speed, selectedPort(this.preferences)); }
       catch {
         controller.abort();
         if (epoch === this.epoch && playbackEpoch === this.playbackEpoch) this.context?.ui.notify("No se pudo generar o reproducir el audio en streaming.", "error");
@@ -164,7 +168,7 @@ export class ManualAudio {
     const playbackEpoch = this.playbackEpoch;
     state.status = "playing";
     this.onChange();
-    try { await this.player.play(state.audio, this.config.speed); }
+    try { await this.player.play(state.audio, this.config.speed, selectedPort(this.preferences)); }
     catch { if (epoch === this.epoch) this.context?.ui.notify("No se pudo reproducir el audio. Comprueba ffplay.", "error"); }
     finally {
       if (epoch === this.epoch && playbackEpoch === this.playbackEpoch) state.status = "ready";
