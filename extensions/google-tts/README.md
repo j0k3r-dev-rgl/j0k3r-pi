@@ -144,9 +144,40 @@ pactl list short modules | grep native-protocol-tcp
 ss -ltn | grep ':4713'
 ```
 
-**Seguridad:** mantén `listen=127.0.0.1`; no lo cambies por `0.0.0.0` ni abras el puerto en el router o firewall. La regla permite a los procesos locales acceder al audio, incluido el cliente SSH que termina el túnel.
+Comprueba también que el servidor TCP acepta conexiones, no solo que el puerto escucha:
 
-**Duración:** esta carga es temporal y se pierde al reiniciar el servidor de audio o el PC. Comprueba si el módulo ya está cargado antes de repetirla. La configuración persistente depende de si el PC usa PulseAudio o PipeWire; no se configuró ni validó una receta de persistencia durante esta instalación.
+```bash
+LC_ALL=C PULSE_SERVER=tcp:127.0.0.1:4713 pactl info
+```
+
+Debe mostrar la información del servidor de audio, no `Connection refused`. El audio local puede funcionar aunque el receptor TCP no esté habilitado.
+
+**Seguridad:** mantén `listen=127.0.0.1`; no lo cambies por `0.0.0.0` ni abras el puerto en el router o firewall. El receptor local permite acceso al audio a procesos locales y a quienes puedan utilizar el túnel. `auth-ip-acl` es una opción de PulseAudio; no se debe asumir que PipeWire aplique esa lista: la restricción de red de este ejemplo es `listen=127.0.0.1`.
+
+**Duración:** `pactl load-module` modifica solo el proceso actual; se pierde al reiniciar el servidor de audio o el PC. Comprueba si el módulo ya está cargado antes de repetirlo.
+
+#### Hacer persistente el receptor en PipeWire
+
+Si `pactl info` muestra `PulseAudio (on PipeWire ...)`, puedes pedir que `pipewire-pulse` cargue el módulo al arrancar. Hazlo una vez **en cada PC receptor**, en la cuenta que reproduce el audio. Crea el directorio:
+
+```bash
+mkdir -p ~/.config/pipewire/pipewire-pulse.conf.d
+```
+
+Crea `~/.config/pipewire/pipewire-pulse.conf.d/50-google-tts.conf` con este contenido:
+
+```ini
+pulse.cmd = [
+    {
+        cmd = "load-module"
+        args = "module-native-protocol-tcp listen=127.0.0.1 port=4713"
+    }
+]
+```
+
+El módulo cargado manualmente sigue funcionando durante la sesión actual; no hace falta reiniciar ahora. Tras el próximo reinicio del PC o de `pipewire-pulse`, repite `ss -ltn | grep ':4713'` y el `pactl info` con `PULSE_SERVER` indicado arriba. El receptor solo estará disponible mientras PipeWire y la sesión del usuario estén funcionando. Si hay otro proceso ocupando `4713`, resuelve ese conflicto antes de continuar. Esta receta sigue la [documentación de PipeWire](https://docs.pipewire.org/1.6/page_man_pipewire-pulse_conf_5.html); su persistencia tras reiniciar aún no se ha validado en la instalación de ejemplo.
+
+Para **PulseAudio sin PipeWire**, la configuración persistente es distinta; esta receta no se aplica. Consulta la documentación de tu distribución.
 
 ### 2. Configurar el túnel en cada PC
 
@@ -207,11 +238,21 @@ Que el puerto escuche no demuestra que PulseAudio acepte la conexión ni identif
 
 ### Otros PC, celular y Termius
 
-Repite los pasos 1 y 2 en cada PC Linux desde el que quieras recibir audio. **Un puerto remoto no puede pertenecer a dos túneles simultáneos**: si el PC anterior sigue conectado, otro dispositivo puede fallar al intentar reservar `14713` o el audio puede seguir llegando al PC anterior.
+Repite los pasos 1 y 2 en cada PC Linux desde el que quieras recibir audio: cada PC necesita su propio receptor TCP y su configuración de SSH. Si usa PipeWire, puedes aplicar allí también la receta persistente anterior. No hace falta volver a configurar Google en cada PC.
+
+Para mantener varias conexiones simultáneas, asigna un puerto **remoto distinto en el servidor** a cada una. El puerto local `4713` puede repetirse porque pertenece a PCs diferentes. Por ejemplo:
+
+| Dispositivo | Puerto remoto en el servidor | Receptor local |
+|---|---:|---:|
+| Casa | `14714` | `127.0.0.1:4713` en la PC de casa |
+| Trabajo | `14715` | `127.0.0.1:4713` en la PC del trabajo |
+| Otra PC | `14716` | `127.0.0.1:4713` en esa PC |
+
+Para casa, por ejemplo, la regla SSH sería `RemoteForward 127.0.0.1:14714 127.0.0.1:4713`; en trabajo sustituye `14714` por `14715`. Registra esos mismos puertos remotos en `/tts config` → **Salida** y selecciona manualmente el dispositivo antes de reproducir. El túnel de la PC seleccionada debe estar activo. Estos números son ejemplos: usa los que correspondan a tus conexiones.
+
+La salida sigue al **túnel**, no a la pantalla desde la que te conectas. **Un puerto remoto no puede pertenecer a dos túneles simultáneos**: si compartes `14713`, el anterior debe liberarlo antes de conectar el siguiente; de lo contrario, el reenvío puede fallar o el audio seguir llegando al otro dispositivo. La extensión no detecta ni cambia dispositivos automáticamente.
 
 En Termius, la equivalencia es un **Remote port forwarding**: origen remoto `127.0.0.1:14713` y destino hacia el receptor PulseAudio del celular. Usa la dirección y el puerto del receptor que tengas configurado allí; Termius por sí solo no es ese receptor. La aplicación receptora y su instalación en el celular no se documentaron ni validaron en esta configuración.
-
-La salida sigue al **túnel**, no a la pantalla desde la que te conectas. Para usar el mismo `14713` desde otro dispositivo, el túnel anterior debe liberar ese puerto. Si necesitas ambos túneles a la vez, requieren puertos remotos distintos. Añádelos en `/tts config` → **Salida** y selecciona manualmente el que quieras; la extensión no detecta ni cambia dispositivos automáticamente. La ruta de Termius/celular no se ha validado con un receptor real.
 
 ### Diagnóstico rápido
 
@@ -221,7 +262,7 @@ La salida sigue al **túnel**, no a la pantalla desde la que te conectas. Para u
 | `remote port forwarding failed` | Puerto remoto ocupado por otra conexión, reglas SSH o reenvío no permitido. |
 | El sonido sale en otro dispositivo | Qué cliente mantiene el túnel de `14713`; abrir Herdr desde el celular no redirige un túnel del PC. |
 | Cambiar `.zshrc` no afecta a Pi | El proceso persistente conserva el entorno con el que arrancó; `/reload` no lo sustituye. |
-| Funciona hasta reiniciar el PC | La carga con `pactl load-module` era temporal; verifica y vuelve a habilitar el receptor local. |
+| Funciona hasta reiniciar el PC | La carga con `pactl load-module` era temporal. En PipeWire, configura la carga persistente descrita arriba y comprueba el receptor tras reiniciar; en PulseAudio, consulta su configuración específica. |
 
 ## Pruebas locales
 
