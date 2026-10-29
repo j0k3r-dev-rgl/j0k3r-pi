@@ -1,12 +1,12 @@
 # Audio manual con Gemini TTS para Pi
 
-Cada respuesta final del **orquestador interactivo** ofrece **Generar y escuchar** para empezar a reproducir mientras Google genera el audio en streaming. No hay generación ni reproducción automática al terminar la respuesta.
+Cada respuesta final del **orquestador interactivo** ofrece **Generar y escuchar** para reproducir mientras Google genera el audio en streaming. Por defecto no hay generación automática; puedes activar **Activar lectura automática** en `/tts config` para leer cada respuesta final elegible.
 
 ## Uso rápido
 
-1. Ejecuta `/reload` después de actualizar la extensión.
-2. Con TTS activado (`/tts on`), termina una respuesta nueva.
-3. Pulsa **Generar y escuchar** bajo la respuesta. Solo entonces se envía el texto limpio a Google Vertex AI y se consumen los créditos correspondientes; la reproducción comienza progresivamente.
+1. Ejecuta `/reload` después de actualizar la extensión y abre `/tts config`.
+2. Opcionalmente activa **Activar lectura automática**; está desactivada por defecto. Selecciona **Guardar y cerrar** para aplicar los cambios o `Esc` para cancelarlos.
+3. Con TTS activado (`/tts on`), termina una respuesta nueva. En modo manual, pulsa **Generar y escuchar** bajo la respuesta; con lectura automática, la síntesis y reproducción comienzan al finalizar. Ambos modos envían el texto limpio a Google Vertex AI y pueden consumir créditos.
 4. Durante la reproducción aparecen **Pausar** y **Detener**; en pausa, **Continuar** y **Detener**. El audio completado se conserva para repetirlo sin otra síntesis.
 
 En streaming, **Pausar** suspende el reproductor, no garantiza pausar la generación ni la facturación de Google; la presión de la tubería puede ralentizar la recepción. **Detener** cancela la operación de red y descarta el audio si aún no se completó; una petición enviada puede haber consumido créditos. Un nuevo prompt, desactivar TTS o cerrar la extensión también la cancelan.
@@ -20,6 +20,7 @@ El clic requiere el modo de pantalla completa de Pi. En el modo normal de termin
 | Comando | Acción |
 |---|---|
 | `/tts` | Estado, modelo, voz, estilo y ayuda. |
+| `/tts config` | Abre el panel flotante de configuración y salidas (`/tts settings` también funciona). |
 | `/tts on` | Activa los controles manuales para nuevas respuestas finales. |
 | `/tts off` | Oculta/deshabilita los controles y detiene la reproducción. |
 | `/tts stream <n>` | Genera y reproduce progresivamente el audio de la respuesta indicada. |
@@ -34,10 +35,10 @@ En `pause`, `resume` y `stop`, el número es opcional: sin él se controla el au
 |---|---|
 | `/tts model [flash\|lite]` | Consulta el modelo activo o selecciona Flash / Flash-Lite para nuevas generaciones. |
 | `/tts speed [multiplicador]` | Consulta o cambia la velocidad entre 0.5x y 3x. |
-| `/tts voice [nombre]` | Consulta o cambia la voz: Kore, Fenrir, Puck, Charon o Aoede. |
+| `/tts voice [nombre o ID]` | Consulta o cambia la voz; escribe el nombre o ID exacto. |
 | `/tts style [estilo]` | Consulta o cambia la entonación. |
 
-`/tts model flash` selecciona `gemini-3.8-flash-tts`; `/tts model lite` selecciona `gemini-3.8-flash-lite-tts` (predeterminado). Cambiar de modelo no genera audio, no activa TTS si está apagado y no elimina los audios existentes. El cambio dura hasta recargar o cerrar la extensión. Para comparar, selecciona el modelo antes de generar el audio de otra respuesta.
+`/tts model flash` selecciona `gemini-3.8-flash-tts`; `/tts model lite` selecciona `gemini-3.8-flash-lite-tts` (predeterminado). Cambiar de modelo no genera audio, no activa TTS si está apagado y no elimina los audios existentes. Para comparar, selecciona el modelo antes de generar el audio de otra respuesta.
 
 `/tts speak` no sintetiza ni reproduce frases: muestra una indicación para usar el control de streaming.
 
@@ -45,11 +46,23 @@ En `pause`, `resume` y `stop`, el número es opcional: sin él se controla el au
 
 - Solo funciona en la TUI del orquestador. No genera audio ni controles en subagentes SDK, RPC, JSON o modo print. No expone herramientas al modelo ni añade los controles a su contexto.
 - Espera a que el agente quede asentado (`agent_settled`), sin continuaciones automáticas. Ignora mensajes de herramientas, respuestas abortadas, errores y texto vacío después de la limpieza.
-- La activación conserva su valor inicial existente (`enabled: true`). `/tts off` impide nuevas síntesis y reproducciones; `/tts on` no genera nada por sí solo. Los cambios de los comandos solo duran durante la sesión de la extensión.
-- Conserva la limpieza Markdown/código y el límite existente de 3000 caracteres. No resume la respuesta con otro modelo.
+- La activación conserva su valor inicial existente (`enabled: true`). `/tts off` impide nuevas síntesis y reproducciones; `/tts on` no genera nada por sí solo. La lectura automática está desactivada inicialmente y solo actúa cuando TTS está activado.
+- Conserva la limpieza Markdown/código y el límite inicial de 3000 caracteres, configurable desde el panel. No resume la respuesta con otro modelo.
 - El audio se mantiene en memoria por mensaje. Un nuevo prompt detiene la reproducción, sin eliminar el audio ya generado. Al cerrar o recargar la extensión se libera; los controles guardados en la sesión vuelven a ofrecer **Generar y escuchar** al reabrirla.
-- Los controles siguen la rama activa de la conversación. Los ajustes de modelo/voz/estilo se aplican a las siguientes generaciones; la velocidad se aplica al reproducir.
+- Los controles siguen la rama activa de la conversación. En lectura automática también permiten pausar, detener y repetir. Los ajustes de modelo/voz/estilo se aplican a las siguientes generaciones; la velocidad y la salida se aplican a la siguiente reproducción.
 - Desactivar o cerrar la extensión descarta resultados de síntesis pendientes. Una petición ya enviada puede haber consumido créditos.
+
+## Panel, persistencia y dispositivos
+
+En `/tts config`, usa **↑/↓** y **Enter** para cambiar TTS, lectura automática, modelo, voz, estilo, velocidad, ubicación y límite de caracteres. En **Salida** puedes añadir un dispositivo con un nombre y el **puerto remoto del servidor** (1–65535); entra en él para seleccionarlo, cambiar nombre/puerto o eliminarlo. **Entorno predeterminado** no impone ninguna salida y conserva el entorno heredado de Pi. Los cambios se aplican al elegir **Guardar y cerrar**; `Esc` cancela el panel o vuelve al menú anterior.
+
+En **Voz**, el panel consulta en vivo el catálogo de Google para el proyecto de las credenciales y muestra únicamente las voces que los metadatos identifican como español argentino. Para evitar recorrer páginas de otros idiomas, pide a Google los resultados que contienen `Argentin` en el nombre o la descripción y verifica sus metadatos localmente. Por ejemplo, Google identifica las voces observadas como idioma `es-419`, región `419` y acento `Argentina Spanish`: `es-419` por sí solo no significa argentino. El filtro también admite `es-AR` o región `AR`, y oculta datos insuficientes o contradictorios. Si Google cambia sus etiquetas o descripciones, algunas voces argentinas podrían quedar fuera; el acento efectivo solo puede comprobarse escuchándolas.
+
+Usa **Buscar** para filtrar por nombre o descripción dentro de los resultados argentinos, y **Siguiente página** / **Página anterior** si Google devuelve varias páginas. Una página filtrada puede quedar vacía aunque existan coincidencias en páginas posteriores: sigue con **Siguiente página**. Seleccionar una voz usa su ID; después selecciona **Guardar y cerrar**. También puedes introducir un nombre o ID manualmente, incluso si la consulta falla; esa entrada no se filtra ni se verifica. La voz guardada no cambia hasta que selecciones otra y guardes. El catálogo solo se consulta al abrir Voz o pedir otra búsqueda o página; no sintetiza ni reproduce audio. La consulta requiere conexión y acceso a Voices API (`v1beta1`, ubicación `global`); un error no modifica la voz guardada. Google indica que listar voces no se factura, pero generar audio sí puede consumir créditos.
+
+Las preferencias de la extensión se guardan, sin credenciales, en `<directorio-global-de-Pi>/google-tts/settings.json`, normalmente `~/.pi/agent/google-tts/settings.json`; se respeta `PI_CODING_AGENT_DIR`. Se comparten entre proyectos y sobreviven a `/reload` y nuevas sesiones. Los comandos `/tts on`, `off`, `model`, `voice`, `speed` y `style` también se guardan. La extensión escribe el archivo con permisos `600`; si no puede leerlo o está mal formado, avisa y no lo sobrescribe. Los cambios de otra instancia de Pi se cargan al recargar; no hay sincronización simultánea entre instancias.
+
+Al seleccionar un dispositivo, únicamente el `ffplay` de esa reproducción recibe `PULSE_SERVER=tcp:127.0.0.1:<puerto>` y `SDL_AUDIODRIVER=pulseaudio`. No modifica el entorno de Pi, no detecta dispositivos ni crea túneles o receptores. Cambiar la salida no mueve una reproducción que ya comenzó.
 
 ## Credenciales de Gemini TTS: archivo obligatorio y protegido
 
@@ -90,7 +103,7 @@ La extensión lee el archivo al solicitar una síntesis, no al activar los contr
 
 El proveedor es Google Cloud Vertex AI, con `gemini-3.8-flash-lite-tts` como modelo inicial, ubicación `global`, voz inicial `Kore` y velocidad inicial 1.18x. Las credenciales locales existentes se leen únicamente al solicitar una síntesis; esta modificación no cambia ni copia credenciales ni añade configuración de proyecto.
 
-La reproducción usa `ffplay`, que debe estar disponible y tener acceso a una salida de audio. La pausa usa las señales `SIGSTOP`/`SIGCONT` de Linux/macOS sobre el mismo proceso, sin reiniciar el audio; no está disponible en Windows nativo. Puede oírse una pequeña cola ya almacenada en los búferes de audio, especialmente por SSH. En SSH depende de la configuración de audio del entorno; la extensión no crea túneles ni sockets. `/tts stop`, un nuevo prompt y el cierre de sesión detienen el proceso aunque esté pausado.
+La reproducción usa `ffplay`, que debe estar disponible y tener acceso a una salida de audio. La pausa usa las señales `SIGSTOP`/`SIGCONT` de Linux/macOS sobre el mismo proceso, sin reiniciar el audio; no está disponible en Windows nativo. Puede oírse una pequeña cola ya almacenada en los búferes de audio, especialmente por SSH. Con la salida predeterminada, SSH depende del entorno; para una salida seleccionada, el túnel y el receptor deben estar preparados por el usuario. La extensión no crea túneles ni sockets. `/tts stop`, un nuevo prompt y el cierre de sesión detienen su propio reproductor aunque esté pausado.
 
 La extensión usa módulos nativos de Node y los tipos del host Pi, sin dependencias de otras extensiones. El renderizado propio es necesario porque Pi no ofrece un botón reactivo nativo dentro de entradas del historial; no sustituye el editor ni captura sus atajos.
 
@@ -166,7 +179,7 @@ Herdr utiliza la configuración SSH del PC. Si acabas de editarla, desconecta y 
 
 ### 3. Seleccionar la salida donde corre Pi
 
-En el **servidor**, el proceso de Pi / `ffplay` debe heredar:
+Para usar **Entorno predeterminado** en el **servidor**, el proceso de Pi / `ffplay` puede heredar:
 
 ```zsh
 export PULSE_SERVER=tcp:127.0.0.1:14713
@@ -198,7 +211,7 @@ Repite los pasos 1 y 2 en cada PC Linux desde el que quieras recibir audio. **Un
 
 En Termius, la equivalencia es un **Remote port forwarding**: origen remoto `127.0.0.1:14713` y destino hacia el receptor PulseAudio del celular. Usa la dirección y el puerto del receptor que tengas configurado allí; Termius por sí solo no es ese receptor. La aplicación receptora y su instalación en el celular no se documentaron ni validaron en esta configuración.
 
-La salida sigue al **túnel**, no a la pantalla desde la que te conectas. Para usar el mismo `14713` desde otro dispositivo, el túnel anterior debe liberar ese puerto. Si necesitas ambos túneles a la vez, requieren puertos remotos distintos y el reproductor debe apuntar al elegido; la extensión no incluye selección automática de dispositivo ni un comando `/tts output`.
+La salida sigue al **túnel**, no a la pantalla desde la que te conectas. Para usar el mismo `14713` desde otro dispositivo, el túnel anterior debe liberar ese puerto. Si necesitas ambos túneles a la vez, requieren puertos remotos distintos. Añádelos en `/tts config` → **Salida** y selecciona manualmente el que quieras; la extensión no detecta ni cambia dispositivos automáticamente. La ruta de Termius/celular no se ha validado con un receptor real.
 
 ### Diagnóstico rápido
 
@@ -218,4 +231,4 @@ Desde `extensions/google-tts/`, con Node 24:
 node --test test/*.test.ts
 ```
 
-Las pruebas sustituyen la síntesis y usan reproductores simulados o procesos Node aislados para comprobar tuberías, señales y cierre seguro: no leen credenciales, no llaman a Google y no emiten sonido. La comprobación visual y el audio real se prueban manualmente en Pi después de `/reload`.
+Las pruebas sustituyen la síntesis y usan reproductores simulados o procesos Node aislados para comprobar tuberías, señales y cierre seguro: no leen credenciales, no llaman a Google y no emiten sonido. Las pruebas del panel usan los componentes TUI de la instalación anfitriona de Pi; si está en una ubicación no estándar, indica su directorio mediante `PI_PACKAGE_DIR`. La comprobación visual y el audio real se prueban manualmente en Pi después de `/reload`.

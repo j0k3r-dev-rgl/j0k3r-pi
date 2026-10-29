@@ -8,15 +8,15 @@ export class AudioPlayer {
    * Permite acelerar la reproducción con atempo (0.5x a 3.0x) sin alterar el tono.
    * Si ya hay una reproducción activa, la detiene antes de comenzar la nueva.
    */
-  async play(audioBuffer: Buffer, speed: number = 1.0): Promise<void> {
-    return this.playInput((async function* () { yield audioBuffer; })(), speed, false);
+  async play(audioBuffer: Buffer, speed: number = 1.0, port?: number): Promise<void> {
+    return this.playInput((async function* () { yield audioBuffer; })(), speed, false, port);
   }
 
-  async playStream(chunks: AsyncIterable<Buffer>, speed: number = 1.0): Promise<void> {
-    return this.playInput(chunks, speed, true);
+  async playStream(chunks: AsyncIterable<Buffer>, speed: number = 1.0, port?: number): Promise<void> {
+    return this.playInput(chunks, speed, true, port);
   }
 
-  private async playInput(chunks: AsyncIterable<Buffer>, speed: number, pcm: boolean): Promise<void> {
+  private async playInput(chunks: AsyncIterable<Buffer>, speed: number, pcm: boolean, port?: number): Promise<void> {
     this.stop();
 
     return new Promise<void>((resolve, reject) => {
@@ -38,6 +38,7 @@ export class AudioPlayer {
         const proc = spawn("ffplay", args, {
           stdio: ["pipe", "ignore", "ignore"],
           detached: false,
+          ...(port === undefined ? {} : { env: { ...process.env, PULSE_SERVER: `tcp:127.0.0.1:${port}`, SDL_AUDIODRIVER: "pulseaudio" } }),
         });
 
         const playback = { process: proc, stopped: false, paused: false };

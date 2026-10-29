@@ -185,6 +185,30 @@ test("streaming player consumes chunks incrementally with PCM arguments", () => 
   `);
 });
 
+test("selected output sets PulseAudio only for ffplay for both streaming and replay", () => {
+  isolated(`
+    const calls = [];
+    childProcess.spawn = (command, args, options) => {
+      calls.push({ command, args, options });
+      const child = originalSpawn(process.execPath, ['-e', "process.stdin.resume(); process.stdin.on('end', () => process.exit(0))"], { stdio: ['pipe', 'ignore', 'ignore', 'ipc'] });
+      children.push(child); return child;
+    };
+    syncBuiltinESMExports();
+    const pulseBefore = process.env.PULSE_SERVER;
+    const driverBefore = process.env.SDL_AUDIODRIVER;
+    await player.play(Buffer.from('audio'), 1, 14713);
+    await player.playStream((async function* () { yield Buffer.from([1, 2]); })(), 1, 14714);
+    await player.play(Buffer.from('default'), 1);
+    assert.equal(calls[0].command, 'ffplay');
+    assert.equal(calls[0].options.env.PULSE_SERVER, 'tcp:127.0.0.1:14713');
+    assert.equal(calls[1].options.env.PULSE_SERVER, 'tcp:127.0.0.1:14714');
+    assert.equal(calls[0].options.env.SDL_AUDIODRIVER, 'pulseaudio');
+    assert.equal(calls[2].options.env, undefined, 'default must inherit the process environment unchanged');
+    assert.equal(process.env.PULSE_SERVER === pulseBefore, true, 'parent PulseAudio setting is unchanged');
+    assert.equal(process.env.SDL_AUDIODRIVER === driverBefore, true, 'parent SDL setting is unchanged');
+  `);
+});
+
 test("old player shutdown does not clear the replacement playback", () => {
   isolated(`
     fakePlayer("process.send('ready'); setInterval(() => {}, 1000)");
