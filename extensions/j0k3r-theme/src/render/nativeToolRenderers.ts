@@ -114,8 +114,13 @@ export const readRenderers = {
 
 				if (!options.expanded) {
 					// Collapsed view: display file path and line count/bytes
-					const allLines = text.split("\n");
-					const lineCount = text.length > 0 ? allLines.length : 0;
+					let lineCount = 0;
+					if (text.length > 0) {
+						lineCount = 1;
+						for (let i = 0; i < text.length; i++) {
+							if (text.charCodeAt(i) === 10) lineCount++;
+						}
+					}
 					const byteCount = Buffer.byteLength(text, "utf-8");
 					const hint = toolHint("to expand");
 					lines.push(`${lineCount} lines, ${formatSize(byteCount)} · ${hint}`);
