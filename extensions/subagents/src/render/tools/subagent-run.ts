@@ -213,6 +213,11 @@ export function renderSubagentRunResult(
     cleanup = () => {
       if (cleanedUp) return;
       cleanedUp = true;
+      if (renderThrottleTimer) {
+        clearTimeout(renderThrottleTimer);
+        renderThrottleTimer = undefined;
+      }
+      pendingRender = false;
       if (context?.state?.cleanup === cleanup) {
         context.state.cleanup = undefined;
       }
@@ -251,15 +256,46 @@ export function renderSubagentRunResult(
       } catch {}
     }
 
-    unsubscribeListener = managerOrEmitter!.onTaskUpdate!(() => {
+    let renderThrottleTimer: ReturnType<typeof setTimeout> | undefined;
+    let pendingRender = false;
+
+    const doRender = () => {
       comp.invalidate();
       context?.requestRender?.();
       context?.ui?.requestRender?.();
       pi?.ui?.requestRender?.();
-      const current = taskLookup ? taskLookup(rawTask!.id, taskWorkspace) : undefined;
-      if (!current || isTerminalStatus(current.status)) {
-        cleanup?.();
+    };
+
+    const scheduleThrottledRender = () => {
+      if (!renderThrottleTimer) {
+        doRender();
+        renderThrottleTimer = setTimeout(() => {
+          renderThrottleTimer = undefined;
+          if (pendingRender) {
+            pendingRender = false;
+            scheduleThrottledRender();
+          }
+        }, 50);
+        renderThrottleTimer.unref?.();
+      } else {
+        pendingRender = true;
       }
+    };
+
+    unsubscribeListener = managerOrEmitter!.onTaskUpdate!(() => {
+      const current = taskLookup ? taskLookup(rawTask!.id, taskWorkspace) : undefined;
+      const isTerminal = !current || isTerminalStatus(current.status);
+      if (isTerminal) {
+        if (renderThrottleTimer) {
+          clearTimeout(renderThrottleTimer);
+          renderThrottleTimer = undefined;
+        }
+        pendingRender = false;
+        doRender();
+        cleanup?.();
+        return;
+      }
+      scheduleThrottledRender();
     });
   }
 

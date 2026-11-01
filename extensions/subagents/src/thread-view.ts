@@ -885,14 +885,26 @@ export function renderThreadBody(snapshot: unknown, context: SubagentThreadRende
         renderedKeys.add(cacheKey);
         const cached = cache?.entry(cacheKey);
         const nativeTool = displayItem.type === 'tool' || displayItem.type === 'bash';
-        const reusableLines = !nativeTool && displayItem.type !== 'custom';
-        const signature = JSON.stringify([displayItem, displayItem.type === 'assistant' && displayItem.message.content.some((part) => part.type === 'thinking') ? itemContext.hideThinkingBlock : undefined]);
-        if (cached && cached.signature !== signature) {
+        const isLiveTool = (displayItem.type === 'tool' && (displayItem.status === 'running' || displayItem.status === 'partial' || displayItem.status === 'pending'))
+          || (displayItem.type === 'bash' && displayItem.status === 'running');
+        const reusableLines = !isLiveTool && displayItem.type !== 'custom';
+        const signature = JSON.stringify([
+          displayItem,
+          displayItem.type === 'assistant' && displayItem.message.content.some((part) => part.type === 'thinking') ? itemContext.hideThinkingBlock : undefined,
+          nativeTool ? itemContext.toolOutputExpanded : undefined,
+        ]);
+        const toolName = displayItem.type === 'bash' ? 'bash' : (displayItem.type === 'tool' ? displayItem.name : undefined);
+        const currentDef = nativeTool && toolName ? renderableToolDefinition(toolName, [
+          itemContext.getToolDefinition?.(toolName),
+          externalToolDefinitions.get(toolName),
+          runtimeToolDefinition(itemContext.taskId, toolName),
+        ], itemContext.cwd) : undefined;
+        if (cached && (cached.signature !== signature || (nativeTool && cached.toolDefinition !== currentDef))) {
           cached.lines = undefined;
-          if (!nativeTool) cached.component = undefined;
+          if (!nativeTool || cached.toolDefinition !== currentDef) cached.component = undefined;
           cached.signature = signature;
         }
-        // Tools still render on each frame: native loaders and asynchronous image updates stay live.
+        // Active tools still render on each frame: native loaders and asynchronous image updates stay live.
         const rendered = reusableLines && cached?.lines && cached.width === width
           ? cached.lines
           : truncateLines(itemContext, renderItem(displayItem, itemContext, width, cached), width);
