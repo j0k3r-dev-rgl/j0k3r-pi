@@ -747,7 +747,7 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 		};
 
 		triggerGitRefresh = (cwd: string) => {
-			void refreshGitInfo(cwd);
+			scheduleGitRefresh(cwd, 120);
 		};
 
 		const setupGitWatcher = (cwd: string): void => {

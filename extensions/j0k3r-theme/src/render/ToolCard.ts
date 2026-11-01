@@ -17,6 +17,12 @@ export interface ToolCardState {
 	isError?: boolean;
 	expanded?: boolean;
 	borderColor?: string;
+	cachedLines?: string[];
+	cachedWidth?: number;
+	cachedExpanded?: boolean;
+	cachedTopBorder?: string[];
+	cachedTopBorderWidth?: number;
+	cachedTopBorderColor?: string;
 }
 
 export interface ToolRenderContext<TState = ToolCardState, TArgs = any> {
@@ -59,17 +65,20 @@ export class ToolCardCallComponent implements Component {
 
 		if (this.state.hasResult) {
 			if (
-				this.cachedWidth === innerWidth &&
-				this.cachedBorderColor === borderColor &&
-				this.cachedTopBorder
+				this.state.cachedTopBorder &&
+				this.state.cachedTopBorderWidth === innerWidth &&
+				this.state.cachedTopBorderColor === borderColor
 			) {
-				return this.cachedTopBorder;
+				return this.state.cachedTopBorder;
 			}
 			const topBorder = cardTopBorder(this.toolName, action, innerWidth, borderColor, borderColor);
+			this.state.cachedTopBorderWidth = innerWidth;
+			this.state.cachedTopBorderColor = borderColor;
+			this.state.cachedTopBorder = [topBorder];
 			this.cachedWidth = innerWidth;
 			this.cachedBorderColor = borderColor;
-			this.cachedTopBorder = [topBorder];
-			return this.cachedTopBorder;
+			this.cachedTopBorder = this.state.cachedTopBorder;
+			return this.state.cachedTopBorder;
 		}
 
 		const topBorder = cardTopBorder(this.toolName, action, innerWidth, borderColor, borderColor);
@@ -88,6 +97,11 @@ export class ToolCardCallComponent implements Component {
 		this.cachedWidth = undefined;
 		this.cachedBorderColor = undefined;
 		this.cachedTopBorder = undefined;
+		if (this.state) {
+			this.state.cachedTopBorder = undefined;
+			this.state.cachedTopBorderWidth = undefined;
+			this.state.cachedTopBorderColor = undefined;
+		}
 	}
 }
 
@@ -108,8 +122,13 @@ export class ToolCardResultComponent implements Component {
 		}
 
 		// Si el resultado ya no es parcial (ejecución terminada), cachear las líneas por ancho
-		if (!this.state.isPartial && this.cachedWidth === width && this.cachedLines !== undefined) {
-			return this.cachedLines;
+		if (
+			!this.state.isPartial &&
+			this.state.cachedLines !== undefined &&
+			this.state.cachedWidth === width &&
+			this.state.cachedExpanded === this.state.expanded
+		) {
+			return this.state.cachedLines;
 		}
 
 		const innerWidth = Math.max(0, width - 2);
@@ -122,6 +141,9 @@ export class ToolCardResultComponent implements Component {
 		if (!this.state.isPartial) {
 			this.cachedWidth = width;
 			this.cachedLines = lines;
+			this.state.cachedWidth = width;
+			this.state.cachedExpanded = this.state.expanded;
+			this.state.cachedLines = lines;
 		}
 
 		return lines;
@@ -130,5 +152,10 @@ export class ToolCardResultComponent implements Component {
 	invalidate(): void {
 		this.cachedWidth = undefined;
 		this.cachedLines = undefined;
+		if (this.state) {
+			this.state.cachedWidth = undefined;
+			this.state.cachedExpanded = undefined;
+			this.state.cachedLines = undefined;
+		}
 	}
 }
