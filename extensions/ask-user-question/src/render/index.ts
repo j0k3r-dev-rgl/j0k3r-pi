@@ -11,13 +11,13 @@ const RED = "\x1b[38;2;243;139;168m";
 const RESET = "\x1b[0m";
 
 function pad(text: string, width: number): string {
+  if (width <= 0) return "";
   const vis = visibleWidth(text);
-  if (vis <= width) {
-    return text + " ".repeat(width - vis);
-  }
+  if (vis === width) return text;
+  if (vis < width) return text + " ".repeat(width - vis);
   const fitted = truncateToWidth(text, width, "");
   const visFitted = visibleWidth(fitted);
-  return fitted + " ".repeat(Math.max(0, width - visFitted));
+  return visFitted < width ? fitted + " ".repeat(width - visFitted) : fitted;
 }
 
 function boxLine(content: string, innerWidth: number, borderColor: string): string {
