@@ -12,8 +12,13 @@ type TuiLike = { requestRender(): void };
 type Done = (value: undefined) => void;
 
 function pad(text: string, width: number): string {
-	const clipped = truncateToWidth(text, Math.max(0, width), "");
-	return clipped + " ".repeat(Math.max(0, width - visibleWidth(clipped)));
+	if (width <= 0) return "";
+	const vis = visibleWidth(text);
+	if (vis === width) return text;
+	if (vis < width) return text + " ".repeat(width - vis);
+	const clipped = truncateToWidth(text, width, "");
+	const visClipped = visibleWidth(clipped);
+	return visClipped < width ? clipped + " ".repeat(width - visClipped) : clipped;
 }
 
 function relCwd(cwd: string): string {

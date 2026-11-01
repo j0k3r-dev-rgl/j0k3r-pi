@@ -59,13 +59,13 @@ export function fit(text: string, width: number): string {
 }
 
 export function pad(text: string, width: number): string {
+  if (width <= 0) return '';
   const vis = visibleWidth(text);
-  if (vis <= width) {
-    return text + ' '.repeat(width - vis);
-  }
+  if (vis === width) return text;
+  if (vis < width) return text + ' '.repeat(width - vis);
   const fitted = fit(text, width);
   const visFitted = visibleWidth(fitted);
-  return fitted + ' '.repeat(Math.max(0, width - visFitted));
+  return visFitted < width ? fitted + ' '.repeat(width - visFitted) : fitted;
 }
 
 export function boxLine(content: string, innerWidth: number, borderColor: string = CYAN): string {
@@ -112,7 +112,7 @@ export function frameContent(
 ): string[] {
   const framed: string[] = [];
   for (const rawLine of lines) {
-    const subLines = rawLine.split(/\r?\n/);
+    const subLines = rawLine.includes('\n') ? rawLine.split(/\r?\n/) : [rawLine];
     for (const sub of subLines) {
       framed.push(boxLine(sub, innerWidth, borderColor));
     }
@@ -396,11 +396,15 @@ export function renderContext7ToolResult(
     },
     render(width: number): string[] {
       if (width <= 0) return [];
-      if (!options?.isPartial && cachedWidth === width && cachedLines !== undefined) {
+      const isExpanded = options?.expanded === true;
+      if (!options?.isPartial && context?.state) {
+        if (context.state.cachedWidth === width && context.state.cachedExpanded === isExpanded && context.state.cachedLines) {
+          return context.state.cachedLines;
+        }
+      } else if (!options?.isPartial && cachedWidth === width && cachedLines !== undefined) {
         return cachedLines;
       }
 
-      const isExpanded = options?.expanded === true;
       const keyHint = getKeyHint(theme, isExpanded ? 'collapse' : 'expand');
       const bodyLines: string[] = [];
 
@@ -443,6 +447,11 @@ export function renderContext7ToolResult(
       if (!options?.isPartial) {
         cachedWidth = width;
         cachedLines = finalLines;
+        if (context?.state) {
+          context.state.cachedWidth = width;
+          context.state.cachedExpanded = isExpanded;
+          context.state.cachedLines = finalLines;
+        }
       }
 
       return finalLines;

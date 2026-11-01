@@ -71,11 +71,11 @@ export function fit(text: string, width: number): string {
  * Pad a string to a specific visible width, truncating if necessary.
  */
 export function pad(text: string, width: number): string {
+  if (width <= 0) return '';
   const len = visibleWidth(text);
-  if (len >= width) {
-    return fit(text, width);
-  }
-  return text + ' '.repeat(width - len);
+  if (len === width) return text;
+  if (len < width) return text + ' '.repeat(width - len);
+  return fit(text, width);
 }
 
 /**

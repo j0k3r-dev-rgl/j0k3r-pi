@@ -45,8 +45,13 @@ function fit(text: string, width: number): string {
 }
 
 function pad(text: string, width: number): string {
+	if (width <= 0) return "";
+	const vis = visibleWidth(text);
+	if (vis === width) return text;
+	if (vis < width) return text + " ".repeat(width - vis);
 	const fitted = fit(text, width);
-	return fitted + " ".repeat(Math.max(0, width - visibleWidth(fitted)));
+	const visFitted = visibleWidth(fitted);
+	return visFitted < width ? fitted + " ".repeat(width - visFitted) : fitted;
 }
 
 function titledBorder(title: string, innerWidth: number): string {
