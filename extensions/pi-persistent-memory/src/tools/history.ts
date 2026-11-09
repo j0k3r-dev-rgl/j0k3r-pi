@@ -17,7 +17,7 @@ export async function executeHistoryTool(
       return formatErrorResult('history_scope_invalid: Message history is not available in global scope');
     }
 
-    const cwd = process.cwd();
+    const cwd = opCtx.cwd ?? process.cwd();
     let projectKey: string;
     try {
       projectKey = resolveHistoryProjectKey(cwd);
