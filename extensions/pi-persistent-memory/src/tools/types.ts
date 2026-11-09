@@ -8,6 +8,8 @@ export interface OperationContext {
   isChild: boolean;
   invokingParentSessionId?: string | null;
   invocationId?: string | null;
+  /** Working directory of the calling session; DSH sets it, pi leaves it unset. */
+  cwd?: string;
   signal: AbortSignal;
   assertActive: () => void;
   dbPath: string;
