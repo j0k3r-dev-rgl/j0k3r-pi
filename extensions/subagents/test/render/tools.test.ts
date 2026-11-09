@@ -6,12 +6,30 @@ import { registerSubagentTools } from '../../src/tools.js';
 import { resetExpandKeybindingProviderForTests, setExpandKeybindingProviderForTests } from '../../src/render/tools/expansion-hint.js';
 import { boxedComponent } from '../../src/render/tools/components.js';
 import { taskFromDetails } from '../../src/tools/result-details.js';
+import { backgroundLaunchContent } from '../../src/render/tools/formatting.js';
 import type { SubagentTask } from '../../src/types.js';
 import { installSubagentTestEnv } from '../helpers/subagent-test-helpers.js';
 
 const env = installSubagentTestEnv();
 
 describe('tool render helpers', () => {
+  it('reports known launch model, effort and execution identity without inventing unresolved values', () => {
+    const task = {
+      id: 'task-guardrails', agent: 'analyst', task: 'inspect', status: 'running',
+      attempt: 2, model: 'provider/resolved-model', effort: 'high',
+      nested_session_path: '/workspace/nested-session.jsonl',
+    } as SubagentTask;
+    const launch = backgroundLaunchContent([task], 'Started');
+    expect(launch).toContain('model: provider/resolved-model');
+    expect(launch).toContain('effort: high');
+    expect(launch).toContain('attempt: 2');
+    expect(launch).toContain('executor: /workspace/nested-session.jsonl');
+    const unresolved = backgroundLaunchContent([{ ...task, model: undefined, effort: undefined, nested_session_path: undefined }]);
+    expect(unresolved).toContain('model: unresolved');
+    expect(unresolved).toContain('effort: unresolved');
+    expect(unresolved).not.toContain('default/current');
+  });
+
   it('boxedComponent captures press and executes onClick strictly once on click (MINI-003)', () => {
     let clicked = 0;
     const comp = boxedComponent('hello world', {

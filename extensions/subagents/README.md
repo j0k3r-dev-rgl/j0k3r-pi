@@ -27,7 +27,7 @@ No se infiere la operación del estado de la tarea. Un mensaje tardío se rechaz
 El modo nuevo se resuelve como `input.mode ?? definition.subagent_mode ?? config.default_mode`, con fallback built-in `task`. El orquestador debe omitir `mode` salvo que el usuario pida explícitamente `task` o `background`.
 
 - **`task`:** espera y devuelve la respuesta completa; muestra progreso en vivo. Se puede enviar a background con el atajo configurado (por defecto `ctrl+h`) o cancelar con doble Escape.
-- **`background`:** devuelve inmediatamente `task_id` y libera el chat. Al finalizar, fallar o cancelarse, la sesión principal recibe una notificación automática con el resultado completo. No hay que dormir ni sondear para esperar.
+- **`background`:** devuelve inmediatamente `task_id` y libera el chat. El acuse incluye intento, modelo/esfuerzo conocidos y sesión ejecutora cuando ya existe; los valores pendientes se muestran como `unresolved`, no como una selección confirmada. Al finalizar, fallar o cancelarse, la sesión principal recibe una notificación automática con el resultado completo. No hay que dormir ni sondear para esperar.
 
 Las definiciones se cargan al invocar la herramienta. Un agente desconocido produce un error que enumera los agentes actualmente disponibles, incluidas sus descripciones; no existe una herramienta separada para listarlos.
 
@@ -66,9 +66,15 @@ Solo la **sesión padre originaria exacta** puede enviar mensajes a su tarea en 
 - Las negativas incluyen motivo estructurado, como `not_owner`, `not_running`, `unsupported_runtime` o `queue_count_limit`, y se marcan como error de herramienta.
 - El texto de los mensajes permanece en el detalle de la tarea propietaria; los resúmenes y notificaciones no lo reproducen.
 
+### Preguntas del hijo al orquestador
+
+En tareas en background, cuando existe el manejador de preguntas del padre, el manager inyecta dinámicamente `ask_orchestrator` como herramienta local del hijo: no necesita aparecer en `tools:` del Markdown. El hijo espera la respuesta en la misma sesión; el padre contesta con `subagent_run action: message`, que devuelve `answered` en vez de encolar steering. La propiedad de la sesión padre sigue siendo obligatoria y cancelar la tarea rechaza la espera pendiente.
+
+En modo `task` no se ofrece esta herramienta: el padre está esperando el resultado. Si falta una decisión material, el hijo devuelve `BLOCKED`; no debe suponerse que añadir el nombre a la allowlist habilita el canal ni cambiar de modo sin respetar la elección del usuario. Una aclaración factual no autoriza ampliar alcance o modificar configuración.
+
 ## Historial, resultados y render
 
-La herramienta devuelve el resultado completo al orquestador, independientemente de la expansión visual. El historial SQLite conserva resultados y eventos por workspace (`cwd`); la sesión anidada conserva su conversación. El preview de actividad está acotado, no el resultado final.
+La herramienta devuelve el resultado completo al orquestador, independientemente de la expansión visual. Las notificaciones finales de background incluyen también intento, modelo/esfuerzo conocidos y la identidad de sesión anidada cuando está disponible, para poder atribuir implementación y verificación sin recuperar el transcript. El historial SQLite conserva resultados y eventos por workspace (`cwd`); la sesión anidada conserva su conversación. El preview de actividad está acotado, no el resultado final.
 
 El render usa tarjetas enmarcadas, sin filas duplicadas de llamada ni fondos propios: vista colapsada con identidad/estado e intento cuando es una continuación, vista expandida con respuesta o error, y progreso parcial. Los mensajes en vivo muestran su acuse, no una respuesta final de la tarea. La notificación de background conserva nombre e intento y usa el atajo real de `app.tools.expand`. El replay respeta el workspace y limpia las suscripciones al finalizar, abortar o cerrar la sesión.
 

@@ -5,6 +5,23 @@ import { installSubagentTestEnv } from '../helpers/subagent-test-helpers.js';
 const env = installSubagentTestEnv();
 
 describe('completion message render', () => {
+  it('delivers real execution metadata to the parent without requiring transcript recovery', () => {
+    const sendMessage = vi.fn();
+    sendSubagentCompletionMessage({ sendMessage }, {
+      id: 'identity', agent: 'verifier', status: 'completed', attempt: 2,
+      model: 'provider/resolved', effort: 'high', result: 'PASS', cwd: env.tmp,
+      nested_session_path: '/workspace/reviewer.jsonl',
+    });
+    const payload = sendMessage.mock.calls[0][0];
+    expect(payload.content).toContain('model: provider/resolved · effort: high');
+    expect(payload.content).toContain('attempt: 2');
+    expect(payload.content).toContain('executor: /workspace/reviewer.jsonl');
+    expect(payload.details.task.nested_session_path).toBe('/workspace/reviewer.jsonl');
+    const unknown = completionMessage({ id: 'queued', agent: 'analyst', status: 'cancelled', cwd: env.tmp });
+    expect(unknown).toContain('model: unresolved · effort: unresolved');
+    expect(unknown).not.toContain('executor: undefined');
+  });
+
   it('preserves continuation identity in notification details and uses the configured expansion hint', async () => {
     const { setExpandKeybindingProviderForTests, resetExpandKeybindingProviderForTests } = await import('../../src/render/tools/expansion-hint.js');
     const sendMessage = vi.fn();
