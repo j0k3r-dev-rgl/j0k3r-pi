@@ -4,7 +4,7 @@ description: "define canonical discovery and Planned Workflow Markdown artifacts
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "2.4"
+  version: "2.5"
 registry:
   category: "workflow"
   domains: "subagents, markdown-artifacts, openspec, handoff-contracts, execution-scope"
@@ -156,7 +156,7 @@ Every item has concrete acceptance, validation, and dependencies (`None` when ab
 
 Sections after Workflow Status:
 
-1. Workflow & Authorization — change slug, authority plan, and who approved the action/scope with a time or message reference; capture applicable existing consent rather than requiring duplicate approval.
+1. Workflow & Authorization — change slug, authority plan, and who approved the action/scope with a time or message reference; capture applicable existing consent rather than requiring duplicate approval. For new Planned changes, reference the plan SHA-256 in the orchestrator-owned flow.json receipt and the implementation's real task/nested-session identity from runtime metadata (including attempt when relevant), not just the role or model.
 2. Implementation Summary — concise implemented outcome and covered `MINI-###` IDs; list actual created/modified/deleted files once.
 3. Final Validation — commands actually run, aggregate outcomes including failures/skips, and required checks still pending with their assigned phase/owner.
 4. Deviations & Residual Risks — only actual deviations, unresolved risks, or blockers; `None` when absent.
@@ -172,7 +172,7 @@ Keep the artifact compact. With Parallel Units, each worker writes its own `appl
 Sections after Workflow Status:
 
 1. Verification Result
-2. Contracts & Candidate Reviewed
+2. Contracts & Candidate Reviewed — actual plan/candidate identities and the reviewer's runtime task/nested-session identity; compare it with every implementing session, including Parallel Units. A different model is neither necessary nor sufficient for independence.
 3. Evidence Matrix — one row per `MINI-###`, acceptance checks, evidence, PASS or issue
 4. Acceptance Coverage — gaps or exceptions only; otherwise reference the matrix
 5. Implementation & Final Validation Review — validation outcome and discrepancies, not copied acceptance proof
@@ -189,6 +189,12 @@ The continuity snapshot records exact verified deliverables, excluding the verif
 - Include the complete read-only command actually executed, with concrete deliverable paths and all calculation code (or an existing versioned script plus its exact invocation). It must reproduce every record and the aggregate without parsing prose, ellipses, omitted code, or locale assumptions. Rerun that same command immediately before archive/delivery; any record/aggregate drift invalidates continuity and blocks that boundary.
 
 Preserve historical snapshots and their recorded encoding; do not rewrite or reverify them solely to adopt this format. If their original calculation cannot safely be reproduced, report the missing evidence and stop at the continuity boundary. A matching snapshot is not functional acceptance. If safe snapshot evidence cannot be obtained, return BLOCKED.
+
+## Structured Receipt Boundary
+
+For new Planned changes, `work-workflow` owns the commands that maintain `flow.json`; workers never edit it alongside their assigned artifact. The receipt links the approved plan digest, user consent reference, integrated candidate records, apply-artifact digests, implementing executor identity and independent verification identity/artifact digest. It complements these Markdown contracts; it is not a second acceptance matrix or proof of actual user approval.
+
+Only record actual runtime identities and granted consent. Missing identity is an evidence gap, not permission to invent a session ID. Do not migrate historical artifacts just to add receipts. Direct Orchestrator work does not acquire a mandatory Planned lifecycle or independent-verifier requirement.
 
 ## References
 

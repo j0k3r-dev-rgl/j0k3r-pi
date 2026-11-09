@@ -4,7 +4,7 @@ description: "Run authorized Planned Workflow lifecycle with lightweight contrac
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "16.3"
+  version: "16.4"
 registry:
   category: "workflow"
   domains: "openspec, planned-workflow, artifact-lifecycle"
@@ -29,15 +29,15 @@ Own the lightweight lifecycle, phase gates, independent verification, and archiv
 
 - Keep one coherent contract, not a bundle of proposal/specification/design/task documents.
 - Reuse prior research under the authorization and fast-path rules in `AGENTS.md` and `workflow-triage`; do not repeat discovery. Evidence does not authorize implementation or phase advancement.
-- Use `openspec/changes/<change-slug>/` with optional `discovery.md`, `plan.md`, `apply.md`, and `verify.md`. Resolve material product questions with the user before marking the plan READY; record decisions or blockers in plan.md, without a separate PRD artifact or review phase.
+- Use `openspec/changes/<change-slug>/` with optional `discovery.md`, `plan.md`, `apply.md`, and `verify.md`. New Planned changes also use the lightweight `flow.json` receipt described below; Markdown remains the contract. Resolve material product questions with the user before marking the plan READY; record decisions or blockers in plan.md, without a separate PRD artifact or review phase.
 - Local discovery writes only its assigned `discovery.md`; reuse its evidence IDs directly. Discovery may be the final deliverable of an investigation-only request.
 - Keep one phase active at a time. Delegate contract creation to `01-planning`, implementation to `02-apply`, verification independently to `03-verify`. Never overlap implementation edits with verification of that candidate. The orchestrator performs archive directly after user approval; archive is not a delegated phase.
 - **Concurrent validation checks**: After their prerequisite candidate is fixed, independent checks may overlap only when dependencies are absent and isolation is established: no shared mutable ports, databases, fixtures, files, caches, or other resources; no candidate mutation or checker conflicts. Use sequential checks when isolation or side effects are unknown. Failed/missing prerequisites stop dependent work and prevent final PASS; preserve usable independent results with their actual status. This is not cross-phase execution, a new runtime capability, or provider retry permission. Do not manufacture Parallel Units for shared canonical files or assign a verifier per check/unit; retain one final independent `03-verify` over the complete candidate and MINI set after prerequisite results are available.
 - **Parallel Apply Units**: Within the apply phase, when `plan.md` defines `Parallel Units`, launch one `02-apply` worker per unit concurrently in the same orchestrator turn. Omit `mode` unless the user explicitly requested it; the manager selects execution mode. Never force background mode contrary to the tool contract. Each worker receives only its unit ID, its unit's Writable Paths, and its own `apply-<UNIT-ID>.md` output path. Units must have disjoint Writable Paths and no `Depends on` across units; otherwise run them sequentially. Never split work into units the plan did not define.
-- **Parallel Discovery Fan-Out**: When pre-implementation questions are independent, launch several `00-discovery` workers concurrently, each with its own bounded question and `discovery-<topic>.md` path; read all before planning.
+- **Parallel Discovery Fan-Out**: When pre-implementation questions are independent, launch several `00-discovery` workers concurrently, each with its own bounded question, `discovery-<topic>.md` path and disjoint EVID ID range; read all before planning. Evidence references must resolve unambiguously across those artifacts.
 - Assign `skills/anti-overengineering/SKILL.md` alongside artifact contracts when delegating `01-planning` and `02-apply` to enforce simplest-sufficient design and implementation; do not assign it to `00-discovery` or `03-verify`.
 - Assign `skills/tdd/SKILL.md` in Assigned skills when delegating `02-apply` for code/test changes, and to `01-planning` when defining validation strategy.
-- Resolve and assign project-specific skills (from `.pi/skills/`, `.agents/skills/`, or `skill_registry_resolve`) in Assigned skills for delegated subagents whenever the task touches project code or domain logic.
+- Resolve and assign project-specific skills (from `.pi/skills/`, `.agents/skills/`, or `skill_registry_resolve`) in Assigned skills for delegated subagents whenever the task touches project code or domain logic. For non-trivial business rules or domain boundaries, resolve `domain-driven-design`; reuse project vocabulary and record only necessary domain decisions in plan.md. Do not impose DDD or domain documents on CRUD, infrastructure, UI-only, or mechanical work.
 - If a required subagent is unavailable, stop as `BLOCKED`; do not silently take over.
 - **Circuit Breaker**: Stop dependent execution and phase advancement on a material unresolved decision. Subagents use the live-question/fallback rule in the assigned artifact contract; the orchestrator answers facts and approved decisions, and asks the user for unmade product/scope/architecture decisions under `AGENTS.md`. A factual answer is not new authority. Provider/tool and task failures follow AGENTS.md's failure/recovery rule; preserve partial work, report uncertainty, and do not advance dependent phases or relaunch without applicable consent.
 - The orchestrator supplies exact absolute artifact and skill paths, reads each returned artifact, and checks required fields before advancing. Do not assume lean subagents inherit global context.
@@ -52,11 +52,35 @@ Own the lightweight lifecycle, phase gates, independent verification, and archiv
 1. Resolve the exact change directory and next permitted action from approved context.
 2. If local facts are missing, assign `discovery.md`; read its evidence before planning. Do not duplicate research or add a separate synthesis phase.
 3. Delegate a compact `plan.md` with concrete acceptance, directory-based scope, validation, and `MINI-###` items. Use the narrowest common parent for sibling areas; do not prescribe files or enumerate its child directories. Narrow excessive scope with the user.
-4. Check status, required sections, unique IDs, evidence references, and parseable Execution Scope. `BLOCKED` stops advancement.
-5. Read the ready plan, announce the exact implementation/validation summary, and reuse applicable explicit apply authorization; obtain authorization only if absent or no longer applicable. Capture the Surface Check baseline below before delegation. Delegate `02-apply` with the author/time or message, action, scope, authority artifact, change identity, and exact scope-source path. With `Parallel Units`, one authorization covers all units; dispatch every independent unit at once and consume completion notifications without polling.
+4. Run the read-only plan check below for new changes; check status, required sections, unique IDs, evidence references, and parseable Execution Scope. `BLOCKED` stops advancement.
+5. Read the ready plan, announce the exact implementation/validation summary, and reuse applicable explicit apply authorization; obtain authorization only if absent or no longer applicable. Record the existing consent and run the apply check below. Capture the Surface Check baseline below before delegation. Delegate `02-apply` with the author/time or message, action, scope, authority artifact, change identity, and exact scope-source path. With `Parallel Units`, one authorization covers all units; dispatch every independent unit at once and consume completion notifications without polling.
 6. Read the compact implementation summary and final validation in `apply.md` (or every `apply-<UNIT-ID>.md`), then run the baseline-relative Surface Check below. An unexplained delta, overlap, out-of-surface change, failed unit, or missing baseline blocks verification until attribution/remediation is resolved. Then run the plan's integrated validation command once, arrange any contract-required live acceptance with its assigned owner, and delegate one independent verification against the complete `MINI-###` set. Do not request formatting-only rewrites or retrospective TDD evidence.
-7. Read `verify.md`; require PASS, evidence for every item, and a continuity snapshot before reporting verified completion.
+7. Read `verify.md`; require PASS, evidence for every item, and a continuity snapshot before reporting verified completion. Record the independent verification receipt and run the delivery check below. Never claim an independent review for Direct Orchestrator self-validation.
 8. Ask for archive authorization only when verification passed. The orchestrator then performs the Archive Safety Checks below directly; do not launch a subagent.
+
+## Executable Checks (New Planned Changes)
+
+Run the bundled Node script by its absolute installed path; it needs no package installation. `<change-dir>` is the exact absolute active change directory. Resolve actual values before running commands; the placeholders below are documentation only.
+
+```bash
+node <skill-dir>/scripts/flow-check.mjs check <change-dir> --phase plan
+node <skill-dir>/scripts/flow-check.mjs authorize <change-dir> --author <user> --reference <approval-message>
+node <skill-dir>/scripts/flow-check.mjs check <change-dir> --phase apply
+# After Surface Check and integrated validation, list the complete deliverable set, including deletions:
+node <skill-dir>/scripts/flow-check.mjs candidate <change-dir> --executor <implementation-session> --files <absolute-deliverable> ...
+node <skill-dir>/scripts/flow-check.mjs check <change-dir> --phase verify
+# After an independent reviewer produces PASS and its continuity snapshot:
+node <skill-dir>/scripts/flow-check.mjs verify <change-dir> --executor <verification-session>
+node <skill-dir>/scripts/flow-check.mjs check <change-dir> --phase deliver
+```
+
+- `check` is read-only. `authorize`, `candidate`, and `verify` atomically update only `flow.json` in the supplied change directory. Run these receipt mutations sequentially; atomic replacement is not a multi-process transaction. They record evidence, never create user consent or perform implementation/archive. Announce these writes under the mutation gate.
+- The authorization binds the raw SHA-256 of plan.md to the author's approval reference. Any byte change stops reuse: inspect the diff. Existing consent can be recorded again for editorial-only changes still covered by the original action/scope; a material scope/intent change requires renewed user approval. Never auto-renew a stale receipt or ask again solely because a hash changed.
+- Candidate identity uses sorted `[absolutePath, state, hash]` records and the same JSON/SHA-256 encoding as the artifact contract. Supply all actual deliverables from the baseline-relative Surface Check, not only convenient files; include required deletions. The script rejects duplicates, redirects, non-files and paths outside Writable Paths, but cannot discover an omitted deliverable or authenticate an approval.
+- Capture one integrated candidate after every Parallel Unit and required integrated check passes; the script checks every `apply-UNIT-*.md` declared by the plan. A new candidate clears the previous verification receipt. An edited apply/verify artifact or candidate drift stops its corresponding boundary.
+- Use the real nested session identity from runtime metadata for each executor, not an agent name, preset or model. Different models are not required. For parallel implementation, use `candidate --executors <unit-session-a> <unit-session-b> --files ...` instead of `--executor`; preserve each unit's task/session identity in its apply artifact. The script rejects a verifier matching any recorded implementation session. Recorded identities remain auditable declarations, not cryptographic identity proof.
+- The script checks structure and content continuity, not business correctness, permission isolation, live HTTP acceptance or write provenance. Tests, Surface Check, independent review and explicit archive approval remain mandatory where applicable. Rerun `check --phase deliver` immediately before delivery/archive; archive still uses the complete safety procedure below.
+- Existing changes keep their recorded evidence/encoding; do not migrate or block historical delivery just because flow.json is absent. Explicit no-delegation work stays Direct Orchestrator: no mandatory plan/receipt/independent worker or added lifecycle is introduced.
 
 ## Baseline-relative Surface Check
 
