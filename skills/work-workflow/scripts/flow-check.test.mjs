@@ -40,6 +40,29 @@ test('validates a READY plan; references do not count as duplicate definitions',
   ok(f.run('check', '--phase', 'plan'));
   assert.equal(readFileSync(plan, 'utf8').includes('EVID-001'), true);
 });
+test('the canonical plan template passes the read-only planning self-check', (t) => {
+  const f = fixture(t);
+  const contract = readFileSync(new URL('../../subagent-artifact-contracts/SKILL.md', import.meta.url), 'utf8');
+  const planSection = contract.split('### `plan.md`')[1]?.split('### `apply.md`')[0];
+  const template = planSection?.match(/```markdown\n([\s\S]*?)\n```/)?.[1];
+  assert.ok(template, 'The plan contract must supply an executable Markdown template');
+  writeFileSync(join(f.dir, 'plan.md'), template.replaceAll('/absolute/workspace/root', f.root) + '\n');
+  ok(f.run('check', '--phase', 'plan'));
+  assert.throws(() => readFileSync(join(f.dir, 'flow.json')), /ENOENT/);
+});
+test('rejects empty or next-line-only MINI fields and explanatory Open Decisions', (t) => {
+  const f = fixture(t);
+  const plan = join(f.dir, 'plan.md');
+  const original = readFileSync(plan, 'utf8');
+  for (const label of ['Contract', 'Acceptance', 'Canonical sources', 'Validation', 'Depends on']) {
+    for (const value of ['', '\n  - Detail on the next line']) {
+      writeFileSync(plan, original.replace(new RegExp(`- ${label}: [^\\n]+`), `- ${label}:${value}`));
+      blocked(f.run('check', '--phase', 'plan'), new RegExp(`missing ${label}`));
+    }
+  }
+  writeFileSync(plan, original.replace('## Open Decisions\nNone', '## Open Decisions\nNone. All decisions are resolved.'));
+  blocked(f.run('check', '--phase', 'plan'), /Open Decisions/);
+});
 test('supports parallel discovery evidence and conventional bold contract labels', (t) => {
   const f = fixture(t);
   const plan = join(f.dir, 'plan.md');

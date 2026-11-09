@@ -4,7 +4,7 @@ description: "define canonical discovery and Planned Workflow Markdown artifacts
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "2.5"
+  version: "2.7"
 registry:
   category: "workflow"
   domains: "subagents, markdown-artifacts, openspec, handoff-contracts, execution-scope"
@@ -148,6 +148,48 @@ Sections after Workflow Status:
 
 Parallel Units, when present, is one bullet per unit: `UNIT-A: MINI-001, MINI-002 | Writable: /abs/root/module-a/**`. Writable roots must be disjoint between units and inside Execution Scope Writable Paths; no MINI in one unit may depend on a MINI in another. Shared files (lockfiles, barrels, shared config, common test setup) belong to exactly one unit or keep the change sequential. Do not manufacture units for shared canonical files. Add one integrated validation command run after all units finish; retain one final independent verification over the complete candidate, not one verifier per unit/check. Check concurrency follows work-workflow's fixed-candidate isolation rule; failed/missing prerequisites stop dependent work without discarding usable independent results. Omit the section when work is not cleanly separable; never split only to create parallelism.
 
+Use this minimal syntax example as the starting shape; replace its example root, behavior, sources, and commands with approved task-specific values before returning READY. Keep MINI field labels and a non-empty value on the same line; indented details may follow. When all decisions are resolved, Open Decisions contains only the literal `None`; put approved decisions in the relevant MINI, not after that sentinel.
+
+```markdown
+## Workflow Status
+- Status: READY
+- Blockers: None
+
+## Goal
+Return one from the source module.
+
+## Scope & Exclusions
+Source module only; no dependency or configuration changes.
+
+## Execution Scope
+- Root: /absolute/workspace/root
+- Allowed Paths:
+  - /absolute/workspace/root/src/**
+- Writable Paths:
+  - /absolute/workspace/root/src/**
+- Allowed Bash:
+  - node --check src/code.js
+- Notes: No Git mutations or unrelated changes.
+
+## MINI-001: Source module result
+- Contract: The source module returns one.
+- Acceptance: Calling the module returns the numeric value one.
+- Canonical sources: Approved user request to return one.
+- Validation: Apply runs node --check src/code.js; verify checks the return value independently.
+- Depends on: None
+
+## Risks & Constraints
+Syntax validation does not prove the return value; independent behavioral verification is required.
+
+## Open Decisions
+None
+
+## Next Permitted Action
+The orchestrator checks the plan and confirms applicable implementation consent before apply.
+```
+
+For new Planned changes, `01-planning` calls `workflow_check` with the assigned absolute `change_dir` and `phase: "plan"` before its READY handoff. Resolve concrete paths before execution; placeholders above are documentation, not tool inputs. Fix structural defects in the assigned plan and recheck within the same invocation. Missing tool authority or a failed required check means BLOCKED, not unchecked READY. Workers use only the read-only tool for their assigned gate; `workflow_record` (`authorize`, `candidate`, `verify`) belongs to the orchestrator. Never weaken the checker. The orchestrator still performs its own plan gate.
+
 Resolve material product questions with the user; record approved decisions in the relevant contract item and unresolved questions under Open Decisions. Missing material decisions make the plan BLOCKED, not permission to invent acceptance or introduce another review phase. Existing product documents may be cited as inputs, never required solely to replace a removed phase.
 
 Every item has concrete acceptance, validation, and dependencies (`None` when absent). Define tests and regression checks, not TDD-history deliverables; `AGENTS.md` owns the method-versus-reporting rule. Execution Scope owns the directory boundary once; do not require per-item file lists or repeat directory inventories. File/symbol references may be evidence or explicit user constraints, not an obligatory implementation prescription. Reference `discovery.md` evidence IDs directly when available. Include only technical decisions necessary to implement; do not recreate a multi-document specification lifecycle inside this file. Split or clarify excessive scope with the user.
@@ -192,7 +234,7 @@ Preserve historical snapshots and their recorded encoding; do not rewrite or rev
 
 ## Structured Receipt Boundary
 
-For new Planned changes, `work-workflow` owns the commands that maintain `flow.json`; workers never edit it alongside their assigned artifact. The receipt links the approved plan digest, user consent reference, integrated candidate records, apply-artifact digests, implementing executor identity and independent verification identity/artifact digest. It complements these Markdown contracts; it is not a second acceptance matrix or proof of actual user approval.
+For new Planned changes, `work-workflow` owns `workflow_record` operations that maintain `flow.json`; workers never call that tool or edit the receipt alongside their assigned artifact. `workflow_check` supplies read-only gates to both the orchestrator and authorized workers; these do not replace required tests or acceptance. The receipt links the approved plan digest, user consent reference, integrated candidate records, apply-artifact digests, implementing executor identity and independent verification identity/artifact digest. It complements these Markdown contracts; it is not a second acceptance matrix or proof of actual user approval.
 
 Only record actual runtime identities and granted consent. Missing identity is an evidence gap, not permission to invent a session ID. Do not migrate historical artifacts just to add receipts. Direct Orchestrator work does not acquire a mandatory Planned lifecycle or independent-verifier requirement.
 

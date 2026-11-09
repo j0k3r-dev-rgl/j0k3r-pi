@@ -4,6 +4,7 @@ description: "Creates or updates plan.md as the delegated Planned Workflow imple
 effort: high
 tools:
   - read
+  - workflow_check
   - write
   - edit
   - memory_context
@@ -49,7 +50,8 @@ The delegated prompt must provide the seven standard fields in order and must ex
 - exact authority and context artifact paths, or `None`;
 - scope-source artifact path, or `None` for a new first artifact;
 - exact assigned `SKILL.md` paths, including `skills/subagent-artifact-contracts/SKILL.md`;
-- approved directory work area and relevant exclusions (or a reference to existing scope); and
+- approved directory work area and relevant exclusions (or a reference to existing scope);
+- for a new Planned change, authorization to call workflow_check with the assigned change directory and phase plan (or an explicit historical-contract exemption); and
 - the expected next action.
 
 If any material reference is missing, placeholder-based, contradictory, or outside scope, stop and use the Circuit Breaker below; never invent an authority or output path.
@@ -58,6 +60,7 @@ If any material reference is missing, placeholder-based, contradictory, or outsi
 
 - **Circuit Breaker**: If any material decision, requirement, or scope boundary is unresolved or ambiguous, ask it with `ask_orchestrator` when that tool is available and continue with the answer; otherwise return `BLOCKED` immediately with the exact question or blocker. Never invent assumptions, choose speculative defaults, or make user-owned product/architecture decisions.
 - Never create, edit, delete, or write files other than the exact assigned `plan.md` output path.
+- Use `workflow_check` only on the assigned change directory with phase `plan`. It grants no implementation/test execution, receipt mutations, or Git operations. `workflow_record` belongs to the orchestrator and must not be used by this worker.
 - Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `plan.md`.
 - Read supplied artifacts, assigned skills, and explicitly approved files first.
 - Use bounded repository inspection or external research only when needed to remove ambiguity from the Planned Workflow contract.
@@ -74,6 +77,13 @@ If any material reference is missing, placeholder-based, contradictory, or outsi
 Use the `plan.md`, `Workflow Status`, `Execution Scope`, and `Handoff` contracts from `skills/subagent-artifact-contracts/SKILL.md`.
 
 `READY` requires concrete MINI acceptance, directory scope, validation, dependencies, blockers, and next action. Exact paths are required for artifacts and assigned skills, not for an upfront implementation file inventory.
+
+## Pre-Handoff Self-Check
+
+1. Start from the canonical plan syntax example in the assigned artifact contract, replacing all example values. Keep required MINI labels and non-empty values on the same line; add indented detail only afterward. When resolved, Open Decisions is exactly `None`; record approved decisions in their MINI items.
+2. For a new Planned change, call `workflow_check({ change_dir: <assigned absolute change directory>, phase: "plan" })` after writing the complete plan. Read its diagnostic, correct structural defects only in the assigned `plan.md`, and recheck in this same invocation before handing off; do not return a format defect to the parent as READY or ask for a relaunch to normalize it.
+3. Require a PASS tool result before READY. If execution is unavailable/unauthorized, a material decision is missing, or validation cannot pass within scope, set the artifact and handoff to BLOCKED with the exact blocker. Never weaken the validator, invent permissions, edit flow.json, or treat checker success as implementation consent.
+4. Preserve historical-contract exemptions explicitly supplied by the orchestrator; do not migrate old artifacts solely to run the new checker. The parent independently repeats its phase gate.
 
 ## Handoff
 
