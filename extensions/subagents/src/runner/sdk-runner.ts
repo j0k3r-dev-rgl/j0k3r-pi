@@ -10,7 +10,8 @@ import { buildPrompt } from './prompt.js';
 import { promptWithInactivity, structuredMetadataFromError } from './event-processing.js';
 import { expandToolPatterns } from '../tool-patterns.js';
 import { composeLeanSystemPrompt } from './tool-guidelines.js';
-import { ASK_ORCHESTRATOR_GUIDELINE, ASK_ORCHESTRATOR_TOOL, createAskOrchestratorTool } from './ask-orchestrator-tool.js';
+import { ASK_ORCHESTRATOR_GUIDELINE, createAskOrchestratorTool } from './ask-orchestrator-tool.js';
+import { REPORT_ORCHESTRATOR_GUIDELINE, createReportOrchestratorTool } from './report-orchestrator-tool.js';
 
 function modelLabel(model: any): string | undefined {
   if (!model) return undefined;
@@ -407,19 +408,26 @@ function createLiveSteeringBridge(session: any, piVersion: unknown) {
   };
 }
 
-export const sdkSubagentRunner: SubagentRunner = async ({ definition, task, taskId, parentPiSessionId, context, cwd, ctx, config, signal, effectiveProfile, nested_session_path, continuation, registerLiveBridge, clearLiveBridge, onQueuedMessageStart, onActivity, askOrchestrator }) => {
+export const sdkSubagentRunner: SubagentRunner = async ({ definition, task, taskId, parentPiSessionId, context, cwd, ctx, config, signal, effectiveProfile, nested_session_path, continuation, registerLiveBridge, clearLiveBridge, onQueuedMessageStart, onActivity, askOrchestrator, reportOrchestrator }) => {
   const profile = effectiveProfile ?? resolveEffectiveSubagentProfile({ agentName: definition.name, definition, config, ctx });
   const preferred = selectedModel({ ctx, definition, profile });
   const effort = profile.effort.value;
   const configuredTools = definition.tools?.length ? definition.tools : config.default_tools;
   const baseTools = expandToolPatterns(configuredTools, activeToolNames(ctx));
   // Background runs get ask_orchestrator so they can pause on a question instead of returning BLOCKED.
-  const customTools = askOrchestrator ? [createAskOrchestratorTool(askOrchestrator)] : [];
-  const tools = askOrchestrator ? [...baseTools, ASK_ORCHESTRATOR_TOOL] : baseTools;
+  const customTools = [
+    ...(askOrchestrator ? [createAskOrchestratorTool(askOrchestrator)] : []),
+    ...(reportOrchestrator ? [createReportOrchestratorTool(reportOrchestrator)] : []),
+  ];
+  const tools = [...new Set([...baseTools, ...customTools.map((tool) => tool.name)])];
   const baseSystemPrompt = config.session_resources === 'lean'
     ? composeLeanSystemPrompt(definition.instructions, baseTools, ctx)
     : definition.instructions;
-  const systemPrompt = askOrchestrator ? `${baseSystemPrompt}\n\n- ${ASK_ORCHESTRATOR_GUIDELINE}` : baseSystemPrompt;
+  const guidelines = [
+    ...(askOrchestrator ? [ASK_ORCHESTRATOR_GUIDELINE] : []),
+    ...(reportOrchestrator ? [REPORT_ORCHESTRATOR_GUIDELINE] : []),
+  ];
+  const systemPrompt = guidelines.length ? `${baseSystemPrompt}\n\n${guidelines.map((guideline) => `- ${guideline}`).join('\n')}` : baseSystemPrompt;
   const prompt = continuation?.prompt ?? buildPrompt(definition, task, context, tools);
   onActivity?.({
     message: continuation ? 'continuation prompt prepared' : 'orchestrator prompt prepared',
