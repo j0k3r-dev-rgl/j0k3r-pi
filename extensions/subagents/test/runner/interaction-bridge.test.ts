@@ -102,13 +102,18 @@ describe('subagent runner interaction-required bridge', () => {
     const base = { definition, task: 'work', cwd: '/workspace', ctx: { model: { provider: 'test', id: 'model' } }, config, signal: new AbortController().signal };
 
     const ask = vi.fn(async () => 'answer');
-    await sdkSubagentRunner({ ...base, askOrchestrator: ask });
+    const report = vi.fn();
+    await sdkSubagentRunner({ ...base, askOrchestrator: ask, reportOrchestrator: report } as any);
     const withTool = createAgentSession.mock.calls[0][0];
-    expect(withTool.tools).toEqual(['read', 'ask_orchestrator']);
-    expect(withTool.customTools.map((tool: any) => tool.name)).toEqual(['ask_orchestrator']);
+    expect(withTool.tools).toEqual(['read', 'ask_orchestrator', 'report_orchestrator']);
+    expect(withTool.customTools.map((tool: any) => tool.name)).toEqual(['ask_orchestrator', 'report_orchestrator']);
     const toolResult = await withTool.customTools[0].execute('call', { question: 'port?' });
     expect(ask).toHaveBeenCalledWith('port?');
     expect(toolResult.content[0].text).toContain('answer');
+    const reportResult = await withTool.customTools[1].execute('report-call', { report: 'Tests are running.' });
+    expect(report).toHaveBeenCalledWith('Tests are running.');
+    expect(reportResult.details.sent).toBe(true);
+    expect(reportResult.content[0].text).toContain('Continue');
 
     await sdkSubagentRunner(base);
     const withoutTool = createAgentSession.mock.calls[1][0];

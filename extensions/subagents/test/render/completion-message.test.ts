@@ -478,6 +478,30 @@ describe('completion message render', () => {
   });
 });
 
+describe('informational report delivery', () => {
+  it('delivers a progress message without asking the parent to answer or advance', async () => {
+    const { sendSubagentReportMessage, renderSubagentReportMessage } = await import('../../src/render/report-message.js');
+    const sendMessage = vi.fn();
+    sendSubagentReportMessage({ sendMessage }, { id: 'report-task', agent: 'analyst', attempt: 2 } as any, 'Tests running 漢字');
+    const [message, options] = sendMessage.mock.calls[0]!;
+    expect(message.customType).toBe('subagent-report');
+    expect(message.content).toContain('No answer is required');
+    expect(message.content).toContain('Tests running 漢字');
+    expect(message.content).toContain('attempt: 2');
+    expect(message.content).not.toContain('action=message');
+    expect(options).toEqual({ triggerTurn: true, deliverAs: 'steer' });
+    const theme = { fg: (_name: string, text: string) => text };
+    const keyHint = vi.fn(() => 'configured key');
+    const collapsed = renderSubagentReportMessage(message, { expanded: false, keyHint }, theme).render(80).join('\n');
+    expect(collapsed).toContain('continuing');
+    expect(collapsed).not.toContain('Tests running');
+    expect(keyHint).toHaveBeenCalledWith('app.tools.expand', 'to expand');
+    const expanded = renderSubagentReportMessage(message, { expanded: true }, theme).render(80).join('\n');
+    expect(expanded).toContain('Tests running 漢字');
+    expect(() => sendSubagentReportMessage({}, {} as any, 'progress')).toThrow(/unavailable/);
+  });
+});
+
 describe('subagent question delivery', () => {
   it('steers ask_orchestrator questions into the parent with answer instructions', async () => {
     const { sendSubagentQuestionMessage } = await import('../../src/render/completion-message.js');

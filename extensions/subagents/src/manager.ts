@@ -323,6 +323,7 @@ export class SubagentManager {
     private onInteractionPromptActive?: (active: boolean) => void,
     private events?: any,
     private onOrchestratorQuestion?: (task: SubagentTask, question: string, cwd: string) => void,
+    private onOrchestratorReport?: (task: SubagentTask, report: string, cwd: string) => void,
   ) {}
 
   /** Child-side: ask the parent orchestrator and wait for its answer in the same session. */
@@ -944,6 +945,7 @@ export class SubagentManager {
     let effectiveProfile = initialEffectiveProfile;
     const cwd = ctx?.cwd ?? process.cwd();
     const id = task.id;
+    const attempt = task.attempt ?? 1;
     const controller = new AbortController();
     this.tasks.set(id, task);
     this.taskCwds.set(id, cwd);
@@ -1071,6 +1073,20 @@ export class SubagentManager {
           const runnerPromise = this.runner({
             askOrchestrator: (task.effective_mode ?? task.mode) === 'background' && this.onOrchestratorQuestion
               ? (question: string) => this.askOrchestrator(id, question, controller.signal)
+              : undefined,
+            reportOrchestrator: (task.effective_mode ?? task.mode) === 'background' && this.onOrchestratorReport && parentSessionId
+              ? (report: string) => {
+                if (controller.signal.aborted || this.tasks.get(id) !== task || task.status !== 'running' || (task.attempt ?? 1) !== attempt || this.liveStates.get(id)?.attempt !== attempt) {
+                  throw new Error('This subagent attempt is no longer running.');
+                }
+                const text = sanitizeInteractionTransportText(report).trim();
+                if (!text || Buffer.byteLength(text, 'utf8') > 16 * 1024) throw new Error('Report must contain 1–16384 UTF-8 bytes.');
+                this.onOrchestratorReport!(task, text, cwd);
+                task.last_activity = 'informational report sent; continuing work';
+                task.last_activity_at = nowIso();
+                this.record(cwd, task, task.last_activity, true);
+                this.notifyTaskUpdate(id, onTaskUpdate, true);
+              }
               : undefined,
             definition,
             task: taskText,

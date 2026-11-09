@@ -66,6 +66,24 @@ Solo la **sesión padre originaria exacta** puede enviar mensajes a su tarea en 
 - Las negativas incluyen motivo estructurado, como `not_owner`, `not_running`, `unsupported_runtime` o `queue_count_limit`, y se marcan como error de herramienta.
 - El texto de los mensajes permanece en el detalle de la tarea propietaria; los resúmenes y notificaciones no lo reproducen.
 
+### Reportes informativos sin detener el trabajo
+
+Para pedir progreso a un subagente en background, el padre usa el canal existente, sin otra tool pública:
+
+```json
+{
+  "action": "message",
+  "task_id": "subtask_analyst_...",
+  "task": "Send a concise progress report with report_orchestrator, then continue the assigned work without waiting for a reply."
+}
+```
+
+El acuse `queued` sigue indicando solo aceptación, no que el hijo ya haya leído la petición. Al consumirla, el hijo puede llamar a la tool interna `report_orchestrator({ report: "..." })`: recibe un acuse de envío y continúa en el mismo intento, sin esperar respuesta del padre. La notificación `subagent-report` llega al contexto del orquestador y a la TUI con identidad/intento, vista compacta y expansión nativa; no es un resultado final, aceptación, permiso ni una pregunta pendiente. No requiere contestar ni autoriza avanzar fases. El padre puede informar al usuario y esperar la notificación final sin sondear ni reenviar peticiones periódicamente.
+
+El runner inyecta la tool solo cuando hay transporte al padre para una tarea iniciada en background y una identidad padre disponible; no hace falta añadirla al Markdown. No está disponible en ejecuciones iniciadas en modo `task` (incluido un traspaso posterior a background). No se cambia de modo para habilitarla. El callback queda vinculado al intento y sesión padre: al terminar/cancelarse, cambiar de sesión o reanudarse otro intento, el callback anterior ya no puede entregar reportes. No depende de `enable_continue`. Cada reporte admite hasta 16 KiB UTF-8; se rechazan vacíos/excesos sin truncar, y el transporte aplica la sanitización existente. No incluyas secretos, transcripciones ni datos privados ajenos. El acuse confirma el envío al runtime padre, no que el modelo padre lo haya leído. Un fallo de envío se informa al hijo sin crear una espera de respuesta ni terminar automáticamente su trabajo.
+
+`report_orchestrator` es para información solicitada, no para ocultar bloqueos: si falta una decisión necesaria, se mantiene el canal `ask_orchestrator` y sus límites. Ambas tools existen solo en la sesión hija; el orquestador conserva únicamente `subagent_run` como tool pública de esta extensión.
+
 ### Preguntas del hijo al orquestador
 
 En tareas en background, cuando existe el manejador de preguntas del padre, el manager inyecta dinámicamente `ask_orchestrator` como herramienta local del hijo: no necesita aparecer en `tools:` del Markdown. El hijo espera la respuesta en la misma sesión; el padre contesta con `subagent_run action: message`, que devuelve `answered` en vez de encolar steering. La propiedad de la sesión padre sigue siendo obligatoria y cancelar la tarea rechaza la espera pendiente.
