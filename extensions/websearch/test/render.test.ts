@@ -93,6 +93,29 @@ describe('websearch TUI rendering', () => {
     expect(resultLines[resultLines.length - 1]).toContain('╰');
   });
 
+  it.each([false, true])('reuses shared-state cached results with expanded=%s and updates on toggle', (expanded) => {
+    const context = { state: {} };
+    const result = {
+      details: { status: 'success', data: { title: 'Cached detail' } },
+      content: [{ type: 'text', text: fullIssueBody }],
+    };
+    const component = renderWebsearchToolResult('discussion_get', result, { expanded }, theme, context);
+    const lines = component.render(80);
+
+    expect(component.render(80)).toBe(lines);
+    const recreated = renderWebsearchToolResult('discussion_get', result, { expanded }, theme, context);
+    expect(recreated.render(80)).toBe(lines);
+    expect(lines.join('\n')).toContain(expanded ? 'ctrl+o collapse' : 'ctrl+o expand');
+    expect(lines.join('\n').includes('WEBSEARCH_RENDER_FULL_BODY_END')).toBe(expanded);
+
+    const toggled = renderWebsearchToolResult('discussion_get', result, { expanded: !expanded }, theme, context);
+    const toggledLines = toggled.render(80);
+    expect(toggledLines).not.toBe(lines);
+    expect(toggledLines.join('\n')).toContain(expanded ? 'ctrl+o expand' : 'ctrl+o collapse');
+    expect(toggledLines.join('\n').includes('WEBSEARCH_RENDER_FULL_BODY_END')).toBe(!expanded);
+    expect(toggled.render(80)).toBe(toggledLines);
+  });
+
   it('uses electric red border on failure', () => {
     const context: any = { state: {} };
     const result = {
