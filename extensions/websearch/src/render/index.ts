@@ -466,6 +466,7 @@ export function renderWebsearchToolResult(
     },
     render(width: number): string[] {
       if (width <= 0) return [];
+      const isExpanded = options?.expanded === true;
       if (!options?.isPartial && context?.state) {
         if (context.state.cachedWidth === width && context.state.cachedExpanded === isExpanded && context.state.cachedLines) {
           return context.state.cachedLines;
@@ -473,7 +474,6 @@ export function renderWebsearchToolResult(
       } else if (!options?.isPartial && cachedWidth === width && cachedLines !== undefined) {
         return cachedLines;
       }
-      const isExpanded = options?.expanded === true;
       const keyHint = getKeyHint(theme, isExpanded ? 'collapse' : 'expand');
       const bodyLines: string[] = [];
       const title = (text: string) => theme?.fg?.('toolTitle', theme?.bold?.(text) ?? text) ?? text;
