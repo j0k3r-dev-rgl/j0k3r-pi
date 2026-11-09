@@ -4,6 +4,7 @@ description: "Implements an approved Planned Workflow contract using TDD where a
 effort: high
 tools:
   - read
+  - workflow_check
   - bash
   - write
   - edit
@@ -75,6 +76,8 @@ Execute the assigned `tdd` method and the validation required for the change typ
 Use the `apply.md`, `Workflow Status`, and `Handoff` contracts from `skills/subagent-artifact-contracts/SKILL.md`.
 
 `READY` means implementation is complete and independently verifiable. Passing tests or typecheck is not sufficient by itself.
+
+For new Planned changes, call `workflow_check` with the assigned change directory and phase `apply` before returning READY; require PASS for the current plan/authorization gate. This does not validate your implementation or apply artifact: the tests and checks below still govern completion. Missing required tool access or a failed gate means BLOCKED. Never call `workflow_record`; candidate capture belongs to the orchestrator after the Surface Check. Historical exemptions must be explicit in the delegation.
 
 Before returning `READY`, check that:
 

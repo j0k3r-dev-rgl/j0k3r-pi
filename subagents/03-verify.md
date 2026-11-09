@@ -4,6 +4,7 @@ description: "Independently verifies an approved Planned Workflow implementation
 effort: medium
 tools:
   - read
+  - workflow_check
   - bash
   - write
   - edit
@@ -73,6 +74,8 @@ If a material reference is missing, placeholder-based, or required verification 
 ## Artifact Contract
 
 Use the `verify.md`, `Workflow Status`, and `Handoff` contracts from `skills/subagent-artifact-contracts/SKILL.md`.
+
+For new Planned changes, call `workflow_check` with the assigned change directory and phase `verify` before the READY handoff; require PASS for authorization and candidate continuity. This gate does not validate your verify.md or replace independent acceptance and the continuity snapshot. Never call `workflow_record` or phase deliver: the orchestrator records your completed independent verification afterward. Missing required tool access or a failed gate means BLOCKED. Historical exemptions must be explicit in the delegation.
 
 Only `Verification Result: PASS` may produce artifact and handoff `READY`.
 

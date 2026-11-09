@@ -4,7 +4,7 @@ description: "Run authorized Planned Workflow lifecycle with lightweight contrac
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "16.4"
+  version: "16.6"
 registry:
   category: "workflow"
   domains: "openspec, planned-workflow, artifact-lifecycle"
@@ -51,8 +51,8 @@ Own the lightweight lifecycle, phase gates, independent verification, and archiv
 
 1. Resolve the exact change directory and next permitted action from approved context.
 2. If local facts are missing, assign `discovery.md`; read its evidence before planning. Do not duplicate research or add a separate synthesis phase.
-3. Delegate a compact `plan.md` with concrete acceptance, directory-based scope, validation, and `MINI-###` items. Use the narrowest common parent for sibling areas; do not prescribe files or enumerate its child directories. Narrow excessive scope with the user.
-4. Run the read-only plan check below for new changes; check status, required sections, unique IDs, evidence references, and parseable Execution Scope. `BLOCKED` stops advancement.
+3. Delegate a compact `plan.md` with concrete acceptance, directory-based scope, validation, and `MINI-###` items. Use the narrowest common parent for sibling areas; do not prescribe files or enumerate its child directories. Narrow excessive scope with the user. For new changes, explicitly authorize `workflow_check` on the assigned absolute change directory with phase plan. Direct `01-planning` to use the artifact contract's syntax example, fix structural errors and recheck within the same invocation, and return READY only after PASS. Workers receive only the read-only tool; `workflow_record` remains orchestrator-only. Explicitly identify historical exemptions rather than migrating old artifacts.
+4. Independently run the read-only plan check below for new changes; check status, required sections, unique IDs, evidence references, and parseable Execution Scope. A completed task whose plan fails this check is a task/acceptance failure, not a successful delivery or a reason for an unbounded formatting loop; apply AGENTS.md's existing recovery limits before any continuation. `BLOCKED` stops advancement.
 5. Read the ready plan, announce the exact implementation/validation summary, and reuse applicable explicit apply authorization; obtain authorization only if absent or no longer applicable. Record the existing consent and run the apply check below. Capture the Surface Check baseline below before delegation. Delegate `02-apply` with the author/time or message, action, scope, authority artifact, change identity, and exact scope-source path. With `Parallel Units`, one authorization covers all units; dispatch every independent unit at once and consume completion notifications without polling.
 6. Read the compact implementation summary and final validation in `apply.md` (or every `apply-<UNIT-ID>.md`), then run the baseline-relative Surface Check below. An unexplained delta, overlap, out-of-surface change, failed unit, or missing baseline blocks verification until attribution/remediation is resolved. Then run the plan's integrated validation command once, arrange any contract-required live acceptance with its assigned owner, and delegate one independent verification against the complete `MINI-###` set. Do not request formatting-only rewrites or retrospective TDD evidence.
 7. Read `verify.md`; require PASS, evidence for every item, and a continuity snapshot before reporting verified completion. Record the independent verification receipt and run the delivery check below. Never claim an independent review for Direct Orchestrator self-validation.
@@ -60,26 +60,28 @@ Own the lightweight lifecycle, phase gates, independent verification, and archiv
 
 ## Executable Checks (New Planned Changes)
 
-Run the bundled Node script by its absolute installed path; it needs no package installation. `<change-dir>` is the exact absolute active change directory. Resolve actual values before running commands; the placeholders below are documentation only.
+Use the globally installed `workflow_check` and `workflow_record` tools; resolve the actual absolute change directory and runtime identities before calling. Examples below show field shapes, not literal placeholder inputs.
 
-```bash
-node <skill-dir>/scripts/flow-check.mjs check <change-dir> --phase plan
-node <skill-dir>/scripts/flow-check.mjs authorize <change-dir> --author <user> --reference <approval-message>
-node <skill-dir>/scripts/flow-check.mjs check <change-dir> --phase apply
-# After Surface Check and integrated validation, list the complete deliverable set, including deletions:
-node <skill-dir>/scripts/flow-check.mjs candidate <change-dir> --executor <implementation-session> --files <absolute-deliverable> ...
-node <skill-dir>/scripts/flow-check.mjs check <change-dir> --phase verify
-# After an independent reviewer produces PASS and its continuity snapshot:
-node <skill-dir>/scripts/flow-check.mjs verify <change-dir> --executor <verification-session>
-node <skill-dir>/scripts/flow-check.mjs check <change-dir> --phase deliver
+```text
+workflow_check({ change_dir, phase: "plan" })
+workflow_record({ change_dir, action: "authorize", author, reference, plan_sha256 })
+workflow_check({ change_dir, phase: "apply" })
+# After Surface Check and integrated validation, include every deliverable/deletion and implementation session:
+workflow_record({ change_dir, action: "candidate", executors: [implementation_session], files: [absolute_deliverable] })
+workflow_check({ change_dir, phase: "verify" })
+# After the independent reviewer produces PASS and its continuity snapshot:
+workflow_record({ change_dir, action: "verify", executor: verification_session })
+workflow_check({ change_dir, phase: "deliver" })
 ```
 
-- `check` is read-only. `authorize`, `candidate`, and `verify` atomically update only `flow.json` in the supplied change directory. Run these receipt mutations sequentially; atomic replacement is not a multi-process transaction. They record evidence, never create user consent or perform implementation/archive. Announce these writes under the mutation gate.
-- The authorization binds the raw SHA-256 of plan.md to the author's approval reference. Any byte change stops reuse: inspect the diff. Existing consent can be recorded again for editorial-only changes still covered by the original action/scope; a material scope/intent change requires renewed user approval. Never auto-renew a stale receipt or ask again solely because a hash changed.
+Each result names the next permitted action, never executes it automatically. Stop on BLOCKED or tool failure. If a required tool is unavailable, report the blocker instead of silently falling back to long shell commands. The existing scripts/flow-check.mjs CLI remains available for explicit maintenance/automation and shares the extension-owned engine.
+
+- `workflow_check` is read-only and available to the orchestrator and authorized workers. `workflow_record` actions `authorize`, `candidate`, and `verify` atomically update only `flow.json` in the supplied change directory. Keep `workflow_record` out of worker allowlists. Receipt mutations use the host file-mutation queue and sequential execution; atomic replacement is not a multi-process transaction. They record evidence, never create user consent or perform implementation/archive. Announce these writes under the mutation gate.
+- Supply the `plan_sha256` returned by the actual reviewed plan check when recording authorization; a digest mismatch blocks the write. The authorization binds the raw SHA-256 of plan.md to the author's approval reference. Any byte change stops reuse: inspect the diff. Existing consent can be recorded again for editorial-only changes still covered by the original action/scope; a material scope/intent change requires renewed user approval. Never auto-renew a stale receipt or ask again solely because a hash changed.
 - Candidate identity uses sorted `[absolutePath, state, hash]` records and the same JSON/SHA-256 encoding as the artifact contract. Supply all actual deliverables from the baseline-relative Surface Check, not only convenient files; include required deletions. The script rejects duplicates, redirects, non-files and paths outside Writable Paths, but cannot discover an omitted deliverable or authenticate an approval.
 - Capture one integrated candidate after every Parallel Unit and required integrated check passes; the script checks every `apply-UNIT-*.md` declared by the plan. A new candidate clears the previous verification receipt. An edited apply/verify artifact or candidate drift stops its corresponding boundary.
-- Use the real nested session identity from runtime metadata for each executor, not an agent name, preset or model. Different models are not required. For parallel implementation, use `candidate --executors <unit-session-a> <unit-session-b> --files ...` instead of `--executor`; preserve each unit's task/session identity in its apply artifact. The script rejects a verifier matching any recorded implementation session. Recorded identities remain auditable declarations, not cryptographic identity proof.
-- The script checks structure and content continuity, not business correctness, permission isolation, live HTTP acceptance or write provenance. Tests, Surface Check, independent review and explicit archive approval remain mandatory where applicable. Rerun `check --phase deliver` immediately before delivery/archive; archive still uses the complete safety procedure below.
+- Use the real nested session identity from runtime metadata for each executor, not an agent name, preset or model. Different models are not required. For parallel implementation, supply every unit session in the candidate action's `executors` array; preserve each unit's task/session identity in its apply artifact. The script rejects a verifier matching any recorded implementation session. Recorded identities remain auditable declarations, not cryptographic identity proof.
+- The script checks structure and content continuity, not business correctness, permission isolation, live HTTP acceptance or write provenance. Tests, Surface Check, independent review and explicit archive approval remain mandatory where applicable. Rerun `workflow_check` with phase deliver immediately before delivery/archive; archive still uses the complete safety procedure below.
 - Existing changes keep their recorded evidence/encoding; do not migrate or block historical delivery just because flow.json is absent. Explicit no-delegation work stays Direct Orchestrator: no mandatory plan/receipt/independent worker or added lifecycle is introduced.
 
 ## Baseline-relative Surface Check
