@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createWorkflowCheckTool } from '../src/tools/workflow-check.ts';
+import { checkWorkflow, recordWorkflow } from '../src/core/flow-check.ts';
 import { createWorkflowRecordTool } from '../src/tools/workflow-record.ts';
 
 function fixture(t) {
@@ -119,6 +120,168 @@ test('oversized diagnostics can be retrieved without losing data', async (t) => 
     offset = result.details.next_offset;
   }
   assert.match(diagnostic, /flow-check: BLOCKED/);
+});
+
+function stagedFixture(t) {
+  const f = fixture(t);
+  const mini = (id, depends) => `## ${id}: work\n- Contract: Implement agreed behavior\n- Acceptance: Behavior matches the contract\n- Canonical sources: User request\n- Validation: node --test\n- Depends on: ${depends}\n`;
+  const path = join(f.dir, 'plan.md');
+  const original = readFileSync(path, 'utf8');
+  const start = original.indexOf('## MINI-001');
+  const end = original.indexOf('## Risks & Constraints');
+  const contract = join(f.root, 'src/contracts/messages.md');
+  mkdirSync(join(f.root, 'src/contracts'));
+  const plan = original.slice(0, start)
+    + mini('MINI-001', 'None') + mini('MINI-002', 'MINI-001')
+    + mini('MINI-003', 'MINI-001') + mini('MINI-004', 'MINI-002, MINI-003')
+    + `## Apply Sequence\n- Preparation: MINI-001\n- Integration: MINI-004\n`
+    + `## Parallel Units\n- UNIT-SERVER: MINI-002 | Writable: ${f.root}/src/actions.ts ; ${f.root}/src/server-tests/**\n- UNIT-UI: MINI-003 | Writable: ${f.root}/src/component.tsx\n`
+    + `## Integrated Validation\n- Owner: Integration worker\n- Command: node --test\n`
+    + `## Project Contracts\n- ${contract}\n` + original.slice(end);
+  writeFileSync(path, plan);
+  const authorize = () => recordWorkflow(f.dir, 'authorize', { author: 'fixture', reference: 'user approval', plan_sha256: checkWorkflow(f.dir, 'plan').plan_sha256 });
+  const summaries = () => {
+    for (const name of ['apply-preparation.md', 'apply-UNIT-SERVER.md', 'apply-UNIT-UI.md', 'apply-integration.md']) {
+      writeFileSync(join(f.dir, name), '## Workflow Status\n- Status: READY\n- Blockers: None\n');
+    }
+  };
+  return { ...f, path, plan, contract, authorize, summaries };
+}
+
+test('supports preparation, same-directory independent files and final integration without new phases', (t) => {
+  const f = stagedFixture(t);
+  f.authorize();
+  checkWorkflow(f.dir, 'apply'); // Contract creation is authorized preparation, not a planning write.
+  writeFileSync(f.contract, '# Message contract\n');
+  f.summaries();
+  const options = { executors: ['prep', 'server', 'ui', 'integration'], files: [f.contract] };
+  recordWorkflow(f.dir, 'candidate', options);
+  checkWorkflow(f.dir, 'verify');
+  for (const executor of options.executors) {
+    assert.throws(() => recordWorkflow(f.dir, 'verify', { executor }), /independent/);
+  }
+  writeFileSync(f.contract, '# Changed contract\n');
+  assert.throws(() => checkWorkflow(f.dir, 'verify'), /drift|contract/i);
+});
+
+test('staged apply rejects incomplete ownership, backwards dependencies and shared concurrent files', (t) => {
+  const f = stagedFixture(t);
+  for (const [from, to, error] of [
+    ['- Preparation: MINI-001', '- Preparation: None', /assign every MINI/],
+    ['- Integration: MINI-004', '- Integration: MINI-002, MINI-004', /ownership/],
+    ['- Depends on: None', '- Depends on: MINI-002', /cycle|dependency/i],
+    ['- Depends on: MINI-001\n## MINI-004', '- Depends on: MINI-002\n## MINI-004', /Cross-unit/],
+    [`${f.root}/src/component.tsx`, `${f.root}/src/actions.ts`, /overlap/i],
+    [`${f.root}/src/component.tsx`, `${f.root}/src/**`, /overlap/i],
+    [`${f.root}/src/component.tsx`, `${f.root}/outside.tsx`, /Writable Paths/],
+    ['- Preparation: MINI-001', '- Preparation: MINI-099', /ownership/],
+    ['- Preparation: MINI-001', '- Preparation: MINI-001\n- Preparation: None', /Apply Sequence/],
+    ['- Command: node --test', '- Command:', /Integrated Validation/],
+    ['- Owner: Integration worker', '- Owner:', /Integrated Validation/],
+    ['- Preparation: MINI-001', '- Prepare: MINI-001', /Apply Sequence/],
+    ['- Integration: MINI-004', '', /Apply Sequence/],
+    [`${f.root}/src/actions.ts ; ${f.root}/src/server-tests/**`, `${f.root}/src/actions.ts ; ${f.root}/src/actions.ts`, /overlap/i],
+  ]) {
+    writeFileSync(f.path, f.plan.replace(from, to));
+    assert.throws(() => checkWorkflow(f.dir, 'plan'), error, `${from} -> ${to}`);
+  }
+});
+
+test('rejects empty staged sections and a sequence without concurrent units', (t) => {
+  const f = stagedFixture(t);
+  for (const replacement of ['', '- Preparation: None\n- Integration: None']) {
+    writeFileSync(f.path, f.plan.replace('- Preparation: MINI-001\n- Integration: MINI-004', replacement));
+    assert.throws(() => checkWorkflow(f.dir, 'plan'), /Apply Sequence|assign every MINI/);
+  }
+  writeFileSync(f.path, f.plan.replace(/- UNIT-UI:[^\n]+\n/, ''));
+  assert.throws(() => checkWorkflow(f.dir, 'plan'), /at least two/);
+});
+
+test('staged candidate requires preparation and integration summaries and all executor identities', (t) => {
+  const f = stagedFixture(t);
+  f.authorize();
+  writeFileSync(f.contract, '# Contract\n');
+  f.summaries();
+  const options = { executors: ['prep', 'server', 'ui', 'integration'], files: [f.contract] };
+  assert.throws(() => recordWorkflow(f.dir, 'candidate', { ...options, executors: ['server', 'ui'] }), /executor/i);
+  for (const name of ['apply-preparation.md', 'apply-integration.md']) {
+    rmSync(join(f.dir, name));
+    assert.throws(() => recordWorkflow(f.dir, 'candidate', options), new RegExp(name));
+    f.summaries();
+  }
+  recordWorkflow(f.dir, 'candidate', options);
+  writeFileSync(join(f.dir, 'apply-preparation.md'), '## Workflow Status\n- Status: READY\n- Blockers: None\nChanged');
+  assert.throws(() => checkWorkflow(f.dir, 'verify'), /summary changed/);
+});
+
+test('optional preparation and integration stages require only the declared summaries', (t) => {
+  const f = stagedFixture(t);
+  const plan = f.plan.replace('- Preparation: MINI-001', '- Preparation: None')
+    .replace('- Integration: MINI-004', '- Integration: None')
+    .replace('UNIT-SERVER: MINI-002', 'UNIT-SERVER: MINI-001, MINI-002, MINI-004')
+    .replace('- Depends on: MINI-002, MINI-003', '- Depends on: MINI-002')
+    .replace('## MINI-003: work\n- Contract: Implement agreed behavior\n- Acceptance: Behavior matches the contract\n- Canonical sources: User request\n- Validation: node --test\n- Depends on: MINI-001', '## MINI-003: work\n- Contract: Implement agreed behavior\n- Acceptance: Behavior matches the contract\n- Canonical sources: User request\n- Validation: node --test\n- Depends on: None');
+  writeFileSync(f.path, plan);
+  f.authorize();
+  writeFileSync(f.contract, '# Contract\n');
+  f.summaries();
+  rmSync(join(f.dir, 'apply-preparation.md'));
+  rmSync(join(f.dir, 'apply-integration.md'));
+  recordWorkflow(f.dir, 'candidate', { executors: ['server', 'ui'], files: [f.contract] });
+  checkWorkflow(f.dir, 'verify');
+});
+
+test('staged apply rejects acyclic backwards preparation and unit dependencies', (t) => {
+  const f = stagedFixture(t);
+  const independentUI = f.plan.replace('- Depends on: MINI-001\n## MINI-004', '- Depends on: None\n## MINI-004');
+  writeFileSync(f.path, independentUI.replace('- Depends on: None', '- Depends on: MINI-003'));
+  assert.throws(() => checkWorkflow(f.dir, 'plan'), /Cross-unit/);
+  writeFileSync(f.path, f.plan.replace('- Depends on: MINI-002, MINI-003', '- Depends on: None')
+    .replace('- Depends on: MINI-001\n## MINI-003', '- Depends on: MINI-004\n## MINI-003'));
+  assert.throws(() => checkWorkflow(f.dir, 'plan'), /Cross-unit/);
+});
+
+test('missing project contracts block candidate capture and read-only inputs block delivery on drift', (t) => {
+  const f = stagedFixture(t);
+  // Contract is outside Writable Paths, but remains inside Allowed Paths.
+  const plan = f.plan.replace(`- Writable Paths:\n  - ${f.root}/src/**`, `- Writable Paths:\n  - ${f.root}/src/actions.ts\n  - ${f.root}/src/server-tests/**\n  - ${f.root}/src/component.tsx`);
+  writeFileSync(f.path, plan);
+  f.authorize();
+  f.summaries();
+  const file = join(f.root, 'src/actions.ts');
+  writeFileSync(file, 'export const action = () => 1;');
+  const options = { executors: ['prep', 'server', 'ui', 'integration'], files: [file] };
+  assert.throws(() => recordWorkflow(f.dir, 'candidate', options), /ENOENT/);
+  writeFileSync(f.contract, '# Contract\n');
+  recordWorkflow(f.dir, 'candidate', options);
+  writeFileSync(join(f.dir, 'verify.md'), '## Workflow Status\n- Status: READY\n- Blockers: None\n\n## Verification Result\nVerification Result: PASS\n## Evidence Matrix\n'
+    + ['001', '002', '003', '004'].map((id) => `| MINI-${id} | integrated behavior assertion | PASS |`).join('\n'));
+  recordWorkflow(f.dir, 'verify', { executor: 'reviewer' });
+  checkWorkflow(f.dir, 'deliver');
+  writeFileSync(f.contract, '# Changed\n');
+  assert.throws(() => checkWorkflow(f.dir, 'deliver'), /contract.*drift/i);
+});
+
+test('project contracts include unchanged read-only references in continuity and reject unsafe paths', (t) => {
+  const f = stagedFixture(t);
+  writeFileSync(f.contract, '# Existing contract\n');
+  f.authorize();
+  f.summaries();
+  const file = join(f.root, 'src/actions.ts');
+  writeFileSync(file, 'export const action = () => 1;');
+  recordWorkflow(f.dir, 'candidate', { executors: ['prep', 'server', 'ui', 'integration'], files: [file] });
+  const receipt = JSON.parse(readFileSync(join(f.dir, 'flow.json'), 'utf8'));
+  assert.equal(receipt.implementation.contracts[0][0], f.contract);
+  writeFileSync(f.contract, '# Drift\n');
+  assert.throws(() => checkWorkflow(f.dir, 'verify'), /contract.*drift/i);
+  for (const target of [join(f.dir, 'plan.md'), join(f.root, 'outside.md'), `${f.contract}/**`, f.contract + '\n- ' + f.contract]) {
+    writeFileSync(f.path, f.plan.replace(`- ${f.contract}\n`, `- ${target}\n`));
+    assert.throws(() => checkWorkflow(f.dir, 'plan'), /Project Contracts/);
+  }
+  writeFileSync(f.path, f.plan);
+  rmSync(f.contract);
+  symlinkSync(file, f.contract);
+  assert.throws(() => checkWorkflow(f.dir, 'plan'), /symlink/i);
 });
 
 test('preserves cancellation instead of reporting a validation failure', async (t) => {

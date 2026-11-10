@@ -143,27 +143,70 @@ function planAt(dir) {
   }
   const units = [];
   const owners = new Map();
+  const sequence = section(text, 'Apply Sequence');
+  if (!sequence && /^## Apply Sequence\s*$/im.test(prose(text))) fail('Apply Sequence must not be empty');
+  const stages = new Map();
+  if (sequence) {
+    for (const line of sequence.split(/\r?\n/)) {
+      const match = line.match(/^- (Preparation|Integration): (None|MINI-\d{3,}(?:, MINI-\d{3,})*)$/);
+      if (!match || stages.has(match[1])) fail('Malformed Apply Sequence; require one Preparation and Integration line');
+      const minis = match[2] === 'None' ? [] : match[2].split(', ');
+      stages.set(match[1], minis);
+      for (const id of minis) {
+        if (!ids.has(id) || owners.has(id)) fail(`Invalid apply MINI ownership: ${id}`);
+        owners.set(id, match[1]);
+      }
+    }
+    if (stages.size !== 2) fail('Apply Sequence requires Preparation and Integration');
+  }
   for (const line of section(text, 'Parallel Units').split(/\r?\n/).filter((line) => line.trim())) {
     const match = line.match(/^- (UNIT-[A-Z0-9-]+): (MINI-\d{3,}(?:, MINI-\d{3,})*) \| Writable: (.+)$/);
     if (!match) fail('Malformed Parallel Units line');
     if (units.some((unit) => unit.id === match[1])) fail('Duplicate Parallel Units');
-    const area = boundary(match[3]);
-    if (!area.tree || !writable.some((item) => item.tree && covered(area.path, item))) fail('Parallel unit outside Writable Paths');
-    if (units.some((unit) => inside(unit.area.path, area.path) || inside(area.path, unit.area.path))) fail('Parallel Units have overlapping write surfaces');
+    const areas = match[3].split(' ; ').map(boundary);
+    for (let i = 0; i < areas.length; i++) {
+      const area = areas[i];
+      if (!writable.some((item) => covered(area.path, item) && (!area.tree || item.tree))) fail('Parallel unit outside Writable Paths');
+      safePath(area.path, true);
+      const overlaps = (other) => covered(area.path, other) || covered(other.path, area);
+      if (areas.slice(0, i).some(overlaps) || units.some((unit) => unit.areas.some(overlaps))) fail('Parallel Units have overlapping write surfaces');
+    }
     const minis = match[2].split(', ');
     for (const id of minis) {
       if (!ids.has(id) || owners.has(id)) fail(`Invalid parallel MINI ownership: ${id}`);
       owners.set(id, match[1]);
     }
-    units.push({ id: match[1], area, minis });
+    units.push({ id: match[1], areas, minis });
   }
+  if (sequence && units.length < 2) fail('Apply Sequence requires at least two Parallel Units');
   if (units.length) {
-    if (owners.size !== ids.size) fail('Parallel Units must assign every MINI once');
+    if (owners.size !== ids.size) fail('Parallel Units and Apply Sequence must assign every MINI once');
     for (const [id, deps] of dependencies) {
-      if (deps.some((dep) => owners.get(dep) !== owners.get(id))) fail(`Cross-unit parallel dependency: ${id}`);
+      const owner = owners.get(id);
+      for (const dep of deps) {
+        const prerequisite = owners.get(dep);
+        const earlierStage = sequence && (owner === 'Integration' || (owner !== 'Preparation' && prerequisite === 'Preparation'));
+        if (owner === prerequisite || earlierStage) continue;
+        fail(`Cross-unit parallel dependency: ${id}`);
+      }
     }
   }
-  return { hash: sha(raw), text, ids: [...ids], writable, applyNames: units.length ? units.map(({ id }) => `apply-${id}.md`) : ['apply.md'] };
+  const integrated = section(text, 'Integrated Validation');
+  if (sequence && (!/^- Owner: \S[^\n]*$/m.test(integrated) || !/^- Command: \S[^\n]*$/m.test(integrated))) fail('Apply Sequence requires Integrated Validation Owner and Command');
+  const contracts = [];
+  for (const line of section(text, 'Project Contracts').split(/\r?\n/).filter((line) => line.trim())) {
+    if (!line.startsWith('- ')) fail('Malformed Project Contracts line');
+    const item = boundary(line.slice(2));
+    if (item.tree || contracts.includes(item.path) || !inside(root, item.path) || inside(join(root, 'openspec'), item.path) || inside(dir, item.path) || !allowed.some((area) => covered(item.path, area))) fail('Project Contracts require unique exact project files outside workflow artifacts and inside Allowed Paths');
+    safePath(item.path, true);
+    contracts.push(item.path);
+  }
+  const applyNames = units.length ? [
+    ...(stages.get('Preparation')?.length ? ['apply-preparation.md'] : []),
+    ...units.map(({ id }) => `apply-${id}.md`),
+    ...(stages.get('Integration')?.length ? ['apply-integration.md'] : []),
+  ] : ['apply.md'];
+  return { hash: sha(raw), text, ids: [...ids], writable, contracts, applyNames };
 }
 function receiptAt(dir, optional = false) {
   const raw = bytes(join(dir, 'flow.json'), true);
@@ -207,10 +250,14 @@ function recordsFor(paths, plan) {
     }
   }).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
 }
+function contractRecords(plan) {
+  return plan.contracts.map((path) => [path, 'present', sha(bytes(path))]).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+}
 function implementation(receipt, dir, plan) {
   const impl = receipt.implementation;
   if (!Array.isArray(impl?.executors) || !impl.executors.length || impl.executors.some((id) => typeof id !== 'string' || !id.trim()) || new Set(impl.executors).size !== impl.executors.length || !Array.isArray(impl.records) || !impl.records.length) fail('Missing candidate implementation receipt');
   if (impl.records.some((r) => !Array.isArray(r) || r.length !== 3 || typeof r[0] !== 'string' || !['present', 'absent'].includes(r[1]) || (r[1] === 'absent' ? r[2] !== '' : !/^[a-f0-9]{64}$/.test(r[2])))) fail('Invalid candidate records');
+  if (plan.contracts.length && JSON.stringify(contractRecords(plan)) !== JSON.stringify(impl.contracts)) fail('Project contract drift: content changed or missing contract identities');
   const current = recordsFor(impl.records.map(([path]) => path), plan);
   if (JSON.stringify(current) !== JSON.stringify(impl.records) || sha(JSON.stringify(current)) !== impl.sha256) fail('Candidate drift: content/state changed');
   if (JSON.stringify(applyHashes(dir, plan)) !== JSON.stringify(impl.apply)) fail('Implementation summary changed; capture candidate again');
@@ -302,8 +349,8 @@ export function recordWorkflow(directory, action, options) {
       for (const [path] of records) if (inside(dir, path)) fail('Workflow artifacts cannot be candidate deliverables');
       const executors = options.executors;
       if (!Array.isArray(executors) || !executors.length || executors.some((id) => typeof id !== 'string' || !id.trim()) || new Set(executors).size !== executors.length) fail('Candidate requires unique non-empty executor identities');
-      if (executors.length < plan.applyNames.length) fail('Record every Parallel Unit implementation executor');
-      receipt.implementation = { executors, records, sha256: sha(JSON.stringify(records)), apply: applyHashes(dir, plan) };
+      if (executors.length < plan.applyNames.length) fail('Record every Parallel Unit and preparation/integration implementation executor');
+      receipt.implementation = { executors, records, sha256: sha(JSON.stringify(records)), apply: applyHashes(dir, plan), ...(plan.contracts.length ? { contracts: contractRecords(plan) } : {}) };
       delete receipt.verification;
       save(dir, receipt);
     } else {

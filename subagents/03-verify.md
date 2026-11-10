@@ -43,7 +43,7 @@ The delegated prompt must provide the seven standard fields in order and must ex
 - the exact change slug;
 - the exact `verify.md` output path;
 - exact authority artifact paths to verify against;
-- exact `apply.md` path (or every `apply-<UNIT-ID>.md` path when the plan used Parallel Units);
+- exact `apply.md` path or every declared unit/preparation/integration summary path, plus canonical Project Contracts and their reviewed identities;
 - a reference to the implementation summary and final validation in apply.md and the approved directory boundary; do not require an orchestrator-supplied file inventory;
 - the scope-source artifact path that contains `## Execution Scope`;
 - exact assigned `SKILL.md` paths, including `skills/subagent-artifact-contracts/SKILL.md`; and
@@ -56,7 +56,7 @@ If a material reference is missing, placeholder-based, or required verification 
 - **Circuit Breaker**: If any material decision, requirement, or scope boundary is unresolved or ambiguous, ask it with `ask_orchestrator` when that tool is available and continue with the answer; otherwise return `BLOCKED` immediately with the exact question or blocker. Never invent assumptions, choose speculative defaults, or make user-owned product/architecture decisions.
 - Never create, edit, delete, or write files other than the exact assigned `verify.md` output path.
 - Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `verify.md`.
-- Read `apply.md` first.
+- Read the assigned apply summary or all declared stage/unit summaries first. For parallel/staged candidates read `../skills/work-workflow/references/parallel-apply.md` relative to this definition; do not require a monolithic apply.md.
 - Derive the full `MINI-###` set and acceptance checks from `plan.md`; use the compact `apply.md` summary, assigned skills, and current files within the approved read boundary. Select checks independently against the actual candidate; do not assume apply's file list or passing test summary proves completeness.
 - Read only exact assigned skills.
 - Do not read unrelated artifacts or the full conversation unless explicitly required.
@@ -65,7 +65,7 @@ If a material reference is missing, placeholder-based, or required verification 
 ## Verification Rules
 
 - Derive the approved deliverable and acceptance set independently from the contracts.
-- Validate every `MINI-###` and its acceptance checks independently against current code, test execution, and live HTTP acceptance when required by the approved contract.
+- Validate every `MINI-###` and its acceptance checks independently against current code, test execution, and live acceptance when required by the approved contract. Review the actual project interface (HTTP, server function/action, loader/action, local library or IPC), canonical modular documentation and both provider/consumer behavior. Verify joined integration beyond mocks, user-approved organization and all preparation/unit/integration executors. No fixed frontend/backend split or HTTP-only check is assumed; do not finish implementation during verification.
 - Review actual code/scope constraints and final validation, not the implementer's TDD chronology. Do not demand saved RED/GREEN proof or fail a candidate solely because it is absent; follow the assigned artifact contract.
 - Run focused checks and relevant regression checks independently. Do not reconstruct historical RED or request implementation reruns merely to fill process records.
 - A passing verification requires the continuity snapshot required by the artifact contract.
