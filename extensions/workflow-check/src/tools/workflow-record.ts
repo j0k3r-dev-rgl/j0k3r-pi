@@ -1,6 +1,6 @@
 import { resolve, join } from 'node:path';
-import { recordWorkflow } from '../core/flow-check.mjs';
-import { diagnosticPage } from './diagnostic.mjs';
+import { recordWorkflow } from '../core/flow-check.ts';
+import { diagnosticPage } from './diagnostic.ts';
 
 const text = { type: 'string', minLength: 1, maxLength: 4096 };
 const fields = {
