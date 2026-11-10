@@ -1,9 +1,9 @@
 import { resolve } from 'node:path';
-import { checkWorkflow } from '../core/flow-check.mjs';
+import { checkWorkflow } from '../core/flow-check.ts';
 
 const phases = ['plan', 'apply', 'verify', 'deliver'];
 
-import { diagnosticPage } from './diagnostic.mjs';
+import { diagnosticPage } from './diagnostic.ts';
 
 export function createWorkflowCheckTool() {
   return {

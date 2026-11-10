@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Compatibility CLI; the workflow-check extension owns the single validation engine.
-import { main } from '../../../extensions/workflow-check/src/core/flow-check.mjs';
+import { main } from '../../../extensions/workflow-check/src/core/flow-check.ts';
 export { main };
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

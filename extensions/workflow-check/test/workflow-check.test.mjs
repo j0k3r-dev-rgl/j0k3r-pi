@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createWorkflowCheckTool } from '../src/tools/workflow-check.mjs';
-import { createWorkflowRecordTool } from '../src/tools/workflow-record.mjs';
+import { createWorkflowCheckTool } from '../src/tools/workflow-check.ts';
+import { createWorkflowRecordTool } from '../src/tools/workflow-record.ts';
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'pi-workflow-tool-'));

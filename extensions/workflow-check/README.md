@@ -35,7 +35,7 @@ Both tools use Pi's native tool shell and Text components: collapsed status/coun
 
 ## Implementation and validation
 
-`src/core/flow-check.mjs` owns the single dependency-free engine, shared by both tools and the historical `skills/work-workflow/scripts/flow-check.mjs` CLI. The extension never imports a sibling extension or its dependency tree. Host-provided Pi packages are declared peers; no npm install is required for the Node test suite.
+`src/core/flow-check.ts` owns the single dependency-free engine, shared by both tools and the historical `skills/work-workflow/scripts/flow-check.mjs` CLI. The extension never imports a sibling extension or its dependency tree. Host-provided Pi packages are declared peers; no npm install is required for the Node test suite.
 
 ```bash
 cd extensions/workflow-check && npm test
@@ -44,5 +44,7 @@ node --test skills/work-workflow/scripts/flow-check.test.mjs
 ```
 
 To include the actual Pi loader/render smoke check, run the package-local tests with `PI_WORKFLOW_TEST_HOST` set to the installed Pi package directory (not another extension). Without that explicit host path, only the loader/render test is skipped; all dependency-free functional and worker-allowlist tests still run.
+
+The CLI and Node tests require Node 22.19+ (native TypeScript loading). Internal engine/tool modules use `.ts` imports so Pi's extension loader can refresh them during `/reload`; native JavaScript module caching can otherwise retain obsolete exports after in-process updates. Regression tests exercise both an in-process update/reload and the full lifecycle through the actual Pi loader.
 
 CLI receipt operations remain available for explicit automation; normal agents should use the tools. Neither a receipt nor a tool result authenticates user consent or the truth of supplied executor identities.
