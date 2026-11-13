@@ -57,6 +57,20 @@ export interface SubagentTaskAllocationEvent {
   claimModel: (allocator: SubagentTaskAllocationClaim) => void;
 }
 
+export interface SubagentTaskFailoverEvent {
+  taskId: string;
+  attempt: number;
+  parentSessionId?: string;
+  agent: string;
+  cwd: string;
+  signal: AbortSignal;
+  failedModel?: ModelRef;
+  excludedModels: string[];
+  errorCategory?: SubagentErrorCategory;
+  /** Synchronous registration of an async replacement model allocator */
+  claimModel: (allocator: SubagentTaskAllocationClaim) => void;
+}
+
 export interface SubagentTaskTerminalEvent {
   taskId: string;
   attempt?: number;

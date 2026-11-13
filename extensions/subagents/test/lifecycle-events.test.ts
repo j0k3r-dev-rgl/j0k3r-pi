@@ -270,6 +270,96 @@ describe('SubagentManager lifecycle events and cleanups', () => {
     expect(cleanupRan).toBe(true);
   });
 
+  it('automatically fails over to another allocated model and continues the nested session on provider errors', async () => {
+    writeAgent('failover-agent');
+    const nestedPath = path.join(tmp, 'failover-session.jsonl');
+    fs.writeFileSync(nestedPath, '{"type":"session"}\n');
+
+    const bus = new SimpleEventBus();
+    const seenModels: string[] = [];
+    const seenContinuations: Array<string | undefined> = [];
+    let terminalCount = 0;
+
+    bus.on('subagents:task:allocate', (event: SubagentTaskAllocationEvent) => {
+      event.claimModel(async () => ({
+        model: { provider: 'openai', id: 'm1' },
+        effort: 'low',
+      }));
+    });
+
+    bus.on('subagents:task:failover', (event: any) => {
+      event.claimModel(async () => ({
+        model: { provider: 'google', id: 'm2' },
+        effort: 'high',
+      }));
+    });
+
+    bus.on('subagents:task:terminal', (event: SubagentTaskTerminalEvent) => {
+      terminalCount += 1;
+      expect(event.status).toBe('completed');
+    });
+
+    let call = 0;
+    const runner: SubagentRunner = async ({ effectiveProfile, continuation, onActivity }) => {
+      call += 1;
+      const m = effectiveProfile?.model.value;
+      seenModels.push(m ? `${m.provider}/${m.id}` : 'unknown');
+      seenContinuations.push(continuation?.prompt);
+      if (call === 1) {
+        onActivity?.({ message: 'nested session ready', nested_session_path: nestedPath });
+        throw new Error('429 rate limit exceeded');
+      }
+      return {
+        result: 'recovered and completed',
+        model: m ? `${m.provider}/${m.id}` : undefined,
+        effort: effectiveProfile?.effort.value,
+        nested_session_path: nestedPath,
+      };
+    };
+
+    const manager = new SubagentManager(runner, undefined, undefined, undefined, bus);
+    const res = await manager.run({ agent: 'failover-agent', task: 'do work' }, { cwd: tmp });
+
+    expect(seenModels).toEqual(['openai/m1', 'google/m2']);
+    expect(seenContinuations[0]).toBeUndefined();
+    expect(seenContinuations[1]).toMatch(/Resume the response interrupted by a provider error/);
+    expect(res.results?.[0].status).toBe('completed');
+    expect(res.results?.[0].result).toBe('recovered and completed');
+    expect(res.results?.[0].model).toBe('google/m2');
+    expect(res.results?.[0].attempt).toBe(2);
+    expect(res.results?.[0].fallback_used).toBe(true);
+    expect(terminalCount).toBe(1);
+  });
+
+  it('fails normally when failover is unclaimed (e.g. single-model pool) or on cancellation', async () => {
+    writeAgent('single-model-agent');
+    const bus = new SimpleEventBus();
+    let failoverEvents = 0;
+    let terminalStatus: string | undefined;
+
+    bus.on('subagents:task:allocate', (event: SubagentTaskAllocationEvent) => {
+      event.claimModel(async () => ({ model: { provider: 'openai', id: 'only-one' } }));
+    });
+    bus.on('subagents:task:failover', (event: any) => {
+      failoverEvents += 1;
+      event.claimModel(async () => undefined);
+    });
+    bus.on('subagents:task:terminal', (event: SubagentTaskTerminalEvent) => {
+      terminalStatus = event.status;
+    });
+
+    const runner: SubagentRunner = async () => {
+      throw new Error('503 upstream unavailable');
+    };
+
+    const manager = new SubagentManager(runner, undefined, undefined, undefined, bus);
+    const res = await manager.run({ agent: 'single-model-agent', task: 'fail once' }, { cwd: tmp });
+
+    expect(failoverEvents).toBe(1);
+    expect(res.results?.[0].status).toBe('failed');
+    expect(terminalStatus).toBe('failed');
+  });
+
   it('emits subagents:task:terminal on background task completion and awaits cleanup', async () => {
     writeAgent('bg-worker');
     const bus = new SimpleEventBus();
