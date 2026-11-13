@@ -97,7 +97,7 @@ test("quota account is chosen only for an exact unique prefixed model", () => {
   assert.equal(selectQuotaAccount("cliproxyapi", "main/gpt-5", accounts, models), undefined);
   models.set("two", ["main/gemini-3"]);
   assert.equal(selectQuotaAccount("cliproxyapi", "main/gemini-3", accounts, models), undefined);
-  assert.equal(selectQuotaAccount("opencode-go", "glm-5", [{ id: "opencode-go", pools: [] }], models)?.id, "opencode-go");
+  assert.equal(selectQuotaAccount("opencode-go", "glm-5", [{ id: "opencode-go", pools: [] }], models), undefined);
 });
 
 test("fetchModelQuota follows the active CPA model to its unique auth quota", async () => {
@@ -506,6 +506,106 @@ test("fetchModelQuota filters multi-group account pools for active Gemini model 
     // Unmapped model returns undefined (zero cross-account guessing)
     const unmapped = await fetchModelQuota("cliproxyapi", "gemini-4-argon-unmapped");
     assert.equal(unmapped, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.CLIPROXYAPI_MANAGEMENT_KEY;
+    else process.env.CLIPROXYAPI_MANAGEMENT_KEY = originalKey;
+  }
+});
+
+test("selectModelPools returns empty instead of falling back to another family's quota", () => {
+  const claudeOnlyPools = [
+    {
+      label: "Claude and GPT models (5 hs)",
+      displayName: "Claude and GPT models · 5 hs",
+      windowLabel: "5 hs",
+      availablePercentage: 100,
+    },
+    {
+      label: "Claude and GPT models (Semanal)",
+      displayName: "Claude and GPT models · Semanal",
+      windowLabel: "Semanal",
+      availablePercentage: 67,
+    },
+  ];
+  assert.deepEqual(selectModelPools("j0k3r/gemini-4-hydrogen-xhigh", claudeOnlyPools), []);
+  assert.equal(selectModelPools("j0k3r/claude-opus-4-6-thinking", claudeOnlyPools).length, 2);
+});
+
+test("fetchModelQuota separates Gemini (retrieveUserQuota) from Claude/GPT (retrieveUserQuotaSummary) on the same Antigravity account", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env.CLIPROXYAPI_MANAGEMENT_KEY;
+  process.env.CLIPROXYAPI_MANAGEMENT_KEY = "test-key";
+
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/auth-files")) {
+      return Response.json({
+        files: [
+          { id: "auth-ag", name: "ag-account", auth_index: "index-ag", provider: "antigravity", email: "user@example.org" },
+        ],
+      });
+    }
+    if (url.includes("/auth-files/models")) {
+      return Response.json({
+        models: [
+          { id: "j0k3r/gemini-4-hydrogen-xhigh" },
+          { id: "j0k3r/claude-opus-4-6-thinking" },
+          { id: "j0k3r/gpt-oss-120b-medium" },
+        ],
+      });
+    }
+    if (url.endsWith("/v0/management/api-call")) {
+      const payload = JSON.parse(String(init?.body ?? "{}"));
+      if (payload.url.endsWith("retrieveUserQuotaSummary")) {
+        return Response.json({
+          status_code: 200,
+          body: JSON.stringify({
+            groups: [
+              {
+                displayName: "Claude and GPT models",
+                buckets: [
+                  { remainingFraction: 1.0, window: "5h" },
+                  { remainingFraction: 0.42, window: "weekly" },
+                ],
+              },
+            ],
+          }),
+        });
+      }
+      if (payload.url.endsWith("retrieveUserQuota")) {
+        return Response.json({
+          status_code: 200,
+          body: JSON.stringify({
+            buckets: [
+              { modelId: "gemini-2.5-pro", remainingFraction: 0.85, resetTime: "2026-09-23T17:00:00Z" },
+              { modelId: "gemini-3-flash", remainingFraction: 0.85, resetTime: "2026-09-23T17:00:00Z" },
+            ],
+          }),
+        });
+      }
+    }
+    return new Response("Not found", { status: 404 });
+  };
+
+  try {
+    const geminiQuota = await fetchModelQuota("cliproxyapi", "j0k3r/gemini-4-hydrogen-xhigh");
+    assert.ok(geminiQuota);
+    assert.match(geminiQuota, /85%/);
+    assert.doesNotMatch(geminiQuota, /42%/);
+    assert.doesNotMatch(geminiQuota, /Semanal/);
+
+    const claudeQuota = await fetchModelQuota("cliproxyapi", "j0k3r/claude-opus-4-6-thinking");
+    assert.ok(claudeQuota);
+    assert.match(claudeQuota, /100%/);
+    assert.match(claudeQuota, /42%/);
+    assert.doesNotMatch(claudeQuota, /85%/);
+
+    const gptQuota = await fetchModelQuota("cliproxyapi", "j0k3r/gpt-oss-120b-medium");
+    assert.ok(gptQuota);
+    assert.match(gptQuota, /100%/);
+    assert.match(gptQuota, /42%/);
+    assert.doesNotMatch(gptQuota, /85%/);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalKey === undefined) delete process.env.CLIPROXYAPI_MANAGEMENT_KEY;

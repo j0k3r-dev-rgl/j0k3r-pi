@@ -12,7 +12,6 @@ export function selectQuotaAccount<T extends ModelAccount>(
 	accounts: T[],
 	modelsByAccount: Map<string, string[]>,
 ): T | undefined {
-	if (provider === "opencode-go") return accounts.find((account) => account.id === "opencode-go");
 	if (provider !== "cliproxyapi") return undefined;
 	const matches = accounts.filter((account) => modelsByAccount.get(account.id)?.includes(modelId));
 	return matches.length === 1 ? matches[0] : undefined;
@@ -34,7 +33,13 @@ export function selectModelPools<T extends Pick<AccountUsage["pools"][number], "
 		const display = (pool.displayName ?? "").toLowerCase();
 		return label.includes(family) || display.includes(family);
 	});
-	return filtered.length > 0 ? filtered : pools;
+	if (filtered.length > 0) return filtered;
+
+	const hasFamilyScopedPools = pools.some((pool) => {
+		const text = `${pool.label ?? ""} ${pool.displayName ?? ""}`.toLowerCase();
+		return text.includes("gemini") || text.includes("claude") || text.includes("gpt");
+	});
+	return hasFamilyScopedPools ? [] : pools;
 }
 
 export function formatQuota(
@@ -60,31 +65,25 @@ export function formatQuota(
 }
 
 export async function fetchModelQuota(provider: string, modelId: string, signal?: AbortSignal): Promise<string | undefined> {
-	if (provider !== "opencode-go" && provider !== "cliproxyapi") return undefined;
+	if (provider !== "cliproxyapi") return undefined;
 	const combinedSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS);
 	const groups = await fetchUsage(combinedSignal);
 	const accounts = groups.flatMap((group) => group.accounts);
-	let account: AccountUsage | undefined;
-
-	if (provider === "opencode-go") {
-		account = selectQuotaAccount(provider, modelId, accounts, new Map());
-	} else {
-		const base = (process.env.CLIPROXYAPI_BASE_URL || DEFAULT_BASE_URL).trim().replace(/\/+$/, "");
-		const key = (process.env.CLIPROXYAPI_MANAGEMENT_KEY || "").trim();
-		const modelsByAccount = new Map<string, string[]>();
-		await Promise.all(accounts.filter((entry) => entry.id !== "opencode-go" && entry.authFileName).map(async (entry) => {
-			const url = new URL(`${base}/v0/management/auth-files/models`);
-			url.searchParams.set("name", entry.authFileName!);
-			const response = await fetch(url, {
-				headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
-				signal: combinedSignal,
-			});
-			if (!response.ok) throw new Error(`auth-files/models HTTP ${response.status}`);
-			const data = await response.json() as { models?: Array<{ id?: string }> };
-			modelsByAccount.set(entry.id, (data.models ?? []).map((model) => model.id).filter((id): id is string => typeof id === "string"));
-		}));
-		account = selectQuotaAccount(provider, modelId, accounts, modelsByAccount);
-	}
+	const base = (process.env.CLIPROXYAPI_BASE_URL || DEFAULT_BASE_URL).trim().replace(/\/+$/, "");
+	const key = (process.env.CLIPROXYAPI_MANAGEMENT_KEY || "").trim();
+	const modelsByAccount = new Map<string, string[]>();
+	await Promise.all(accounts.filter((entry) => entry.authFileName).map(async (entry) => {
+		const url = new URL(`${base}/v0/management/auth-files/models`);
+		url.searchParams.set("name", entry.authFileName!);
+		const response = await fetch(url, {
+			headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
+			signal: combinedSignal,
+		});
+		if (!response.ok) throw new Error(`auth-files/models HTTP ${response.status}`);
+		const data = await response.json() as { models?: Array<{ id?: string }> };
+		modelsByAccount.set(entry.id, (data.models ?? []).map((model) => model.id).filter((id): id is string => typeof id === "string"));
+	}));
+	const account = selectQuotaAccount(provider, modelId, accounts, modelsByAccount);
 
 	return formatQuota(selectModelPools(modelId, account?.pools ?? []));
 }

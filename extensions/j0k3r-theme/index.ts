@@ -457,7 +457,7 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 			quota = undefined;
 			activeFooter?.setQuota();
 		}
-		if (provider !== "opencode-go" && provider !== "cliproxyapi") return;
+		if (provider !== "cliproxyapi") return;
 		quotaLoading = true;
 		void fetchModelQuota(provider, modelId)
 			.then((value) => {
