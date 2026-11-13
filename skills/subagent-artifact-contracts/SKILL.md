@@ -4,7 +4,7 @@ description: "define canonical discovery and Planned Workflow Markdown artifacts
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "2.4"
+  version: "3.0"
 registry:
   category: "workflow"
   domains: "subagents, markdown-artifacts, openspec, handoff-contracts, execution-scope"
@@ -141,12 +141,60 @@ Sections after Workflow Status:
 2. Scope & Exclusions
 3. Execution Scope
 4. `MINI-###` items with Contract, Acceptance, Canonical sources, Validation, Depends on
-5. Parallel Units (optional) — only when two or more independent MINI groups touch disjoint directories
-6. Risks & Constraints
-7. Open Decisions
-8. Next Permitted Action
+5. Project Contracts (when cross-unit interfaces are involved) — exact canonical project files outside workflow artifacts; include relevant modular fragments, never a duplicate specification in plan.md
+6. Apply Sequence (optional) and Parallel Units (optional) — preparation/integration MINI groups and concurrent units with disjoint write surfaces
+7. Integrated Validation (for new parallel plans) — Owner and concrete Command permitted by Allowed Bash
+8. Risks & Constraints — include the parallelism assessment and inherited user organization/executor decisions
+9. Open Decisions
+10. Next Permitted Action
 
-Parallel Units, when present, is one bullet per unit: `UNIT-A: MINI-001, MINI-002 | Writable: /abs/root/module-a/**`. Writable roots must be disjoint between units and inside Execution Scope Writable Paths; no MINI in one unit may depend on a MINI in another. Shared files (lockfiles, barrels, shared config, common test setup) belong to exactly one unit or keep the change sequential. Do not manufacture units for shared canonical files. Add one integrated validation command run after all units finish; retain one final independent verification over the complete candidate, not one verifier per unit/check. Check concurrency follows work-workflow's fixed-candidate isolation rule; failed/missing prerequisites stop dependent work without discarding usable independent results. Omit the section when work is not cleanly separable; never split only to create parallelism.
+Before planning or executing parallel work, read `../work-workflow/references/parallel-apply.md` for the canonical sequence, ownership and project-contract rules. Parallel Units uses one bullet per unit: `- UNIT-A: MINI-001, MINI-002 | Writable: /abs/root/module-a/**`. Multiple surfaces use ` ; `; exact files are allowed for independent siblings in the same directory. Every concurrent surface must be disjoint and inside Execution Scope Writable Paths. Prefer directory roots and preserve explicit user choices; never have two workers edit the same file.
+
+Optional Apply Sequence contains exactly `- Preparation: MINI-###, MINI-###` and `- Integration: MINI-###` (or None for an absent stage). With it, at least two units are required and every MINI belongs exactly once to a stage or unit. Preparation depends only on itself; units may depend on preparation and themselves, not peers/integration; integration follows the join. Without it, legacy Parallel Units retains all-MINI ownership and no cross-unit dependencies. New parallel plans include Integrated Validation with `- Owner: ...` and `- Command: ...`; the staged checker requires both. No empty optional sections or new phase is necessary.
+
+Project Contracts is a bullet list of exact absolute files inside Root/Allowed Paths and outside openspec/workflow artifacts. Creation/update belongs to an authorized apply MINI, never an extra write by 01-planning. Reuse project conventions, types and schemas, documenting behavior modularly without imposing HTTP/OpenAPI or generators. The orchestrator validates and pins the same file identities before consumers launch, then rechecks at fan-in. Candidate capture additionally hashes these references, including unchanged inputs. Missing/changed contracts stop dependent work; no worker silently revises a shared agreement. One independent verifier reviews the complete candidate and integration. An unresolved decision pauses affected work, not isolated independent approved units; the live-question channel and existing recovery limits still apply.
+
+Use this minimal syntax example as the starting shape; replace its example root, behavior, sources, and commands with approved task-specific values before returning READY. Keep MINI field labels and a non-empty value on the same line; indented details may follow. When all decisions are resolved, Open Decisions contains only the literal `None`; put approved decisions in the relevant MINI, not after that sentinel.
+
+```markdown
+## Workflow Status
+- Status: READY
+- Blockers: None
+
+## Goal
+Return one from the source module.
+
+## Scope & Exclusions
+Source module only; no dependency or configuration changes.
+
+## Execution Scope
+- Root: /absolute/workspace/root
+- Allowed Paths:
+  - /absolute/workspace/root/src/**
+- Writable Paths:
+  - /absolute/workspace/root/src/**
+- Allowed Bash:
+  - node --check src/code.js
+- Notes: No Git mutations or unrelated changes.
+
+## MINI-001: Source module result
+- Contract: The source module returns one.
+- Acceptance: Calling the module returns the numeric value one.
+- Canonical sources: Approved user request to return one.
+- Validation: Apply runs node --check src/code.js; verify checks the return value independently.
+- Depends on: None
+
+## Risks & Constraints
+Syntax validation does not prove the return value; independent behavioral verification is required.
+
+## Open Decisions
+None
+
+## Next Permitted Action
+The orchestrator checks the plan and confirms applicable implementation consent before apply.
+```
+
+For new Planned changes, `01-planning` calls `workflow_check` with the assigned absolute `change_dir` and `phase: "plan"` before its READY handoff. Resolve concrete paths before execution; placeholders above are documentation, not tool inputs. Fix structural defects in the assigned plan and recheck within the same invocation. Missing tool authority or a failed required check means BLOCKED, not unchecked READY. Workers use only the read-only tool for their assigned gate; `workflow_record` (`authorize`, `candidate`, `verify`) belongs to the orchestrator. Never weaken the checker. The orchestrator still performs its own plan gate.
 
 Resolve material product questions with the user; record approved decisions in the relevant contract item and unresolved questions under Open Decisions. Missing material decisions make the plan BLOCKED, not permission to invent acceptance or introduce another review phase. Existing product documents may be cited as inputs, never required solely to replace a removed phase.
 
@@ -156,14 +204,14 @@ Every item has concrete acceptance, validation, and dependencies (`None` when ab
 
 Sections after Workflow Status:
 
-1. Workflow & Authorization — change slug, authority plan, and who approved the action/scope with a time or message reference; capture applicable existing consent rather than requiring duplicate approval.
+1. Workflow & Authorization — change slug, authority plan, and who approved the action/scope with a time or message reference; capture applicable existing consent rather than requiring duplicate approval. For new Planned changes, reference the plan SHA-256 in the orchestrator-owned flow.json receipt and the implementation's real task/nested-session identity from runtime metadata (including attempt when relevant), not just the role or model.
 2. Implementation Summary — concise implemented outcome and covered `MINI-###` IDs; list actual created/modified/deleted files once.
 3. Final Validation — commands actually run, aggregate outcomes including failures/skips, and required checks still pending with their assigned phase/owner.
 4. Deviations & Residual Risks — only actual deviations, unresolved risks, or blockers; `None` when absent.
 5. Candidate Identity — base revision and current candidate identity needed to verify the implementation.
 6. Next Permitted Action
 
-Keep the artifact compact. With Parallel Units, each worker writes its own `apply-<UNIT-ID>.md` with the same sections, covering only its unit; it never writes another unit's artifact or files. Do not create per-scenario implementation evidence matrices, TDD-cycle histories, raw logs, transcript excerpts, or routine attempt records. Reference existing test reports only when needed to explain a failure or limitation. Acceptance-level proof belongs to independent `verify.md` and, where required, the live acceptance artifact—not a second copy in apply.
+Keep the artifact compact. With Parallel Units, each worker writes `apply-<UNIT-ID>.md` covering only its unit. Declared preparation/integration workers write `apply-preparation.md`/`apply-integration.md` with the same compact sections and their actual session identities. Each stage/unit uses a separate executor; no worker writes another's artifact. Preparation records validated canonical contract file identities; integration records the joined checks and any sequentially authorized edits. New contract documentation is an implementation deliverable inside the project's approved writable scope, not a workflow artifact. No monolithic apply.md is required. Do not create per-scenario implementation evidence matrices, TDD-cycle histories, raw logs, transcript excerpts, or routine attempt records. Reference existing test reports only when needed to explain a failure or limitation. Acceptance-level proof belongs to independent `verify.md` and, where required, the live acceptance artifact—not a second copy in apply.
 
 `READY` means the approved implementation is complete and the required apply-phase validation has passed, so the candidate can enter acceptance/verification; it is not final delivery approval or a claim that later HTTP/independent verification already passed. Missing TDD history is not a blocker under `AGENTS.md`. Actual defects, unmet implementation acceptance, and failed/unexecuted required apply checks remain blockers. Previously written artifacts remain consumable without a formatting-only rewrite.
 
@@ -172,7 +220,7 @@ Keep the artifact compact. With Parallel Units, each worker writes its own `appl
 Sections after Workflow Status:
 
 1. Verification Result
-2. Contracts & Candidate Reviewed
+2. Contracts & Candidate Reviewed — actual plan/candidate and canonical project-contract identities and the reviewer's runtime task/nested-session identity; compare it with every implementing session, including preparation, all units and integration. A different model is neither necessary nor sufficient for independence.
 3. Evidence Matrix — one row per `MINI-###`, acceptance checks, evidence, PASS or issue
 4. Acceptance Coverage — gaps or exceptions only; otherwise reference the matrix
 5. Implementation & Final Validation Review — validation outcome and discrepancies, not copied acceptance proof
@@ -182,13 +230,19 @@ Sections after Workflow Status:
 
 Only `Verification Result: PASS` can produce READY. Independently verify every `MINI-###` against `plan.md` using current code, tests, and applicable live acceptance; do not rely only on apply's claims. Review final validation and relevant code/scope compliance, not the implementer's TDD chronology or whether it was recorded. Any incomplete/failed required functional check blocks advancement. The evidence matrix owns acceptance proof; do not duplicate it in the remaining sections.
 
-The continuity snapshot records exact verified deliverables, excluding the verification artifact itself and unrelated files. Verify may directly compute approved deliverable identities under the applicable exact command or bounded read-only validation allowance; no parent relay is required. Tighter restrictions and actual tool/security controls prevail; if scope does not permit the calculation, stop and ask for the missing authority. For new snapshots, use this deterministic encoding:
+The continuity snapshot records exact verified deliverables and declared canonical project-contract inputs (deduplicated), excluding the verification artifact itself and unrelated files. Review provider and consumer conformance and real integrated behavior, not only matching mocks; never finish integration implementation during verification. Verify may directly compute approved deliverable identities under the applicable exact command or bounded read-only validation allowance; no parent relay is required. Tighter restrictions and actual tool/security controls prevail; if scope does not permit the calculation, stop and ask for the missing authority. For new snapshots, use this deterministic encoding:
 
 - Each record is a three-string array `[absolutePath, state, hash]`: normalized absolute path, `present` with lowercase SHA-256 of raw file bytes, or `absent` with an empty hash for a required deletion. Reject duplicate paths, unreadable files, directories, and unexpected symlinks; absence means ENOENT, not any read error. If a symlink is an approved deliverable, define its explicit identity/encoding before verification rather than silently hashing its target.
 - Sort by `absolutePath` using JavaScript string comparison (`a < b`, not locale-dependent sorting). The aggregate is SHA-256 of the UTF-8 bytes of `JSON.stringify(sortedRecords)`, with no indentation, BOM, or trailing newline. Include the records and aggregate once; counts are derived, not separately maintained evidence.
 - Include the complete read-only command actually executed, with concrete deliverable paths and all calculation code (or an existing versioned script plus its exact invocation). It must reproduce every record and the aggregate without parsing prose, ellipses, omitted code, or locale assumptions. Rerun that same command immediately before archive/delivery; any record/aggregate drift invalidates continuity and blocks that boundary.
 
 Preserve historical snapshots and their recorded encoding; do not rewrite or reverify them solely to adopt this format. If their original calculation cannot safely be reproduced, report the missing evidence and stop at the continuity boundary. A matching snapshot is not functional acceptance. If safe snapshot evidence cannot be obtained, return BLOCKED.
+
+## Structured Receipt Boundary
+
+For new Planned changes, `work-workflow` owns `workflow_record` operations that maintain `flow.json`; workers never call that tool or edit the receipt alongside their assigned artifact. `workflow_check` supplies read-only gates to both the orchestrator and authorized workers; these do not replace required tests or acceptance. The receipt links the approved plan digest, user consent reference, integrated candidate records, apply-artifact digests, implementing executor identity and independent verification identity/artifact digest. It complements these Markdown contracts; it is not a second acceptance matrix or proof of actual user approval.
+
+Only record actual runtime identities and granted consent. Missing identity is an evidence gap, not permission to invent a session ID. Do not migrate historical artifacts just to add receipts. Direct Orchestrator work does not acquire a mandatory Planned lifecycle or independent-verifier requirement.
 
 ## References
 

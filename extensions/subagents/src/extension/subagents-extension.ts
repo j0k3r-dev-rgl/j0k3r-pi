@@ -2,6 +2,7 @@ import { readSubagentsConfig, subagentSourceWarnings } from '../config.js';
 import { SubagentManager } from '../manager.js';
 import { renderSubagentCompletionMessage, sendSubagentCompletionMessage, sendSubagentQuestionMessage } from '../render/completion-message.js';
 import { registerSubagentTools, triggerClaudeBackgroundHandoff } from '../tools.js';
+import { sendSubagentReportMessage, renderSubagentReportMessage } from '../render/report-message.js';
 import { ClaudeBackgroundWidget, ClaudeBackgroundWidgetState } from '../ui/background-widget.js';
 import { preloadPiComponentsForSubagentRendering, registerSubagentExternalToolDefinition } from '../thread-view.js';
 import { registerSubagentsPanelOpener, showSubagentsPanel } from '../ui/panel-overlay.js';
@@ -27,6 +28,7 @@ export default function subagentsExtension(pi: any): void {
     };
   }
   pi.registerMessageRenderer?.('subagent-completion', renderSubagentCompletionMessage);
+  pi.registerMessageRenderer?.('subagent-report', renderSubagentReportMessage);
   const widgetInputSuspensions = new Set<string>();
   let activeSessionId: string | undefined;
   const setWidgetInputSuspended = (reason: string, active: boolean): void => {
@@ -51,6 +53,10 @@ export default function subagentsExtension(pi: any): void {
       const taskSessionId = typeof task?.session_id === 'string' && task.session_id.length > 0 ? task.session_id : undefined;
       if (taskSessionId && taskSessionId !== activeSessionId) throw new Error('The parent orchestrator session is no longer active.');
       sendSubagentQuestionMessage(pi, task, question);
+    },
+    (task, report) => {
+      if (!task.session_id || task.session_id !== activeSessionId) throw new Error('The owning parent session is no longer active.');
+      sendSubagentReportMessage(pi, task, report);
     },
   );
   registerSubagentTools(pi, manager, process.cwd());

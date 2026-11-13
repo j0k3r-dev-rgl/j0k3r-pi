@@ -10,7 +10,27 @@ import { publishInteractionResponse, sanitizeInteractionTransportText } from './
 import { classifyThrownError, deriveErrorString, enrichErrorMetadata, normalizeErrorMetadata, SubagentStructuredError } from './error-metadata.js';
 import { effortFromCtx, modelFromCtx, profileSourceLabel, resolveEffectiveSubagentProfile } from './profile-resolver.js';
 import type { SubagentInteractionRequest, SubagentInteractionResponse } from './interaction-channel.js';
-import type { EffectiveSubagentProfile, LiveSteeringBridge, ModelRef, SendMessageResult, SubagentContinueInput, SubagentDefinition, SubagentErrorMetadata, SubagentRunInput, SubagentRunResult, SubagentsConfig, SubagentRunner, SubagentTask, SubagentTaskAllocationClaim, SubagentTaskAllocationEvent, SubagentTaskTerminalEvent, ThinkingEffort } from './types.js';
+import type { EffectiveSubagentProfile, LiveSteeringBridge, ModelRef, SendMessageResult, SubagentContinueInput, SubagentDefinition, SubagentErrorMetadata, SubagentRunInput, SubagentRunResult, SubagentsConfig, SubagentRunner, SubagentTask, SubagentTaskAllocationClaim, SubagentTaskAllocationEvent, SubagentTaskFailoverEvent, SubagentTaskTerminalEvent, ThinkingEffort } from './types.js';
+
+const FAILOVER_CONTINUATION_PROMPT =
+  'Resume the response interrupted by a provider error, only within the already authorized task. Reconcile effects before executing tools; do not replay mutations or infer any new consent.';
+
+const FAILOVER_EXCLUDED_CATEGORIES = new Set([
+  'cancelled',
+  'interrupted',
+  'total_timeout',
+  'tool_failure',
+  'serialization_failure',
+]);
+
+function isInteractionControlError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.startsWith('Subagent interaction cancelled by main user:')
+    || message.startsWith('Subagent interaction retry limit exceeded.')
+    || message.startsWith('Subagent interaction requires main-thread handling;')
+  );
+}
 
 type StopDisposition = {
   status: Extract<SubagentTask['status'], 'failed' | 'cancelled' | 'interrupted'>;
@@ -323,6 +343,7 @@ export class SubagentManager {
     private onInteractionPromptActive?: (active: boolean) => void,
     private events?: any,
     private onOrchestratorQuestion?: (task: SubagentTask, question: string, cwd: string) => void,
+    private onOrchestratorReport?: (task: SubagentTask, report: string, cwd: string) => void,
   ) {}
 
   /** Child-side: ask the parent orchestrator and wait for its answer in the same session. */
@@ -944,6 +965,7 @@ export class SubagentManager {
     let effectiveProfile = initialEffectiveProfile;
     const cwd = ctx?.cwd ?? process.cwd();
     const id = task.id;
+    const attempt = task.attempt ?? 1;
     const controller = new AbortController();
     this.tasks.set(id, task);
     this.taskCwds.set(id, cwd);
@@ -1065,99 +1087,219 @@ export class SubagentManager {
         task.last_activity = 'started';
         this.record(cwd, task, 'started', true);
         this.notifyTaskUpdate(id, onTaskUpdate, true);
+        const timeoutPromise = new Promise<never>((_resolve, reject) => {
+          timeout = setTimeout(() => {
+            timedOut = true;
+            this.stopDispositions.set(id, {
+              status: 'failed',
+              metadata: {
+                category: 'total_timeout',
+                message: `timed out after ${config.timeout_ms}ms`,
+                phase: 'manager',
+                retryable: false,
+                partial_result_available: false,
+                details: { timeout_ms: String(config.timeout_ms) },
+              },
+              fallbackError: `timed out after ${config.timeout_ms}ms`,
+            });
+            this.transitionToStopping(task, `timed out after ${config.timeout_ms}ms`, cwd);
+            this.notifyTaskUpdate(id, onTaskUpdate, true);
+            controller.abort();
+            reject(new Error(`timed out after ${config.timeout_ms}ms`));
+          }, config.timeout_ms);
+        });
+        const abortPromise = new Promise<never>((_resolve, reject) => {
+          if (controller.signal.aborted) reject(new Error('Subagent was aborted'));
+          else controller.signal.addEventListener('abort', () => reject(new Error('Subagent was aborted')), { once: true });
+        });
+        timeoutPromise.catch(() => {});
+        abortPromise.catch(() => {});
+
         let interactionsHandled = 0;
+        let activeNestedSessionPath = nestedSessionPath;
+        let activePreviousSnapshot = previousSnapshot;
+        let activeContinuationPrompt = continuationPrompt;
+        const excludedModels: string[] = [];
         let result: Awaited<ReturnType<SubagentRunner>> | undefined;
         while (true) {
-          const runnerPromise = this.runner({
-            askOrchestrator: (task.effective_mode ?? task.mode) === 'background' && this.onOrchestratorQuestion
-              ? (question: string) => this.askOrchestrator(id, question, controller.signal)
-              : undefined,
-            definition,
-            task: taskText,
-            taskId: id,
-            parentPiSessionId: parentSessionId,
-            context,
-            cwd,
-            ctx,
-            config,
-            signal: controller.signal,
-            effectiveProfile,
-            nested_session_path: nestedSessionPath,
-            continuation: continuationPrompt ? { prompt: continuationPrompt, attempt: task.attempt ?? 1, previous_snapshot: previousSnapshot } : undefined,
-            registerLiveBridge: (bridge) => this.registerLiveBridge(id, bridge, parentSessionId, task.attempt ?? 1),
-            clearLiveBridge: () => this.clearLiveBridge(id, task.attempt ?? 1),
-            onQueuedMessageStart: () => this.consumeQueuedMessage(id),
-            onActivity: (activity) => {
-              if (task.status === 'stopping' || isTerminalStatus(task.status)) return;
-              task.last_activity_at = nowIso();
-              if (activity.live_activity) task.live_activity = activity.live_activity;
-              task.last_activity = activity.live_activity?.current?.label ?? activity.message;
-              if (activity.output) task.output_preview = compactOutput(activity.output);
-              if (activity.prompt) {
-                if (continuationPrompt) task.continuation_prompt = sanitizeInteractionTransportText(activity.prompt);
-                else task.prompt = sanitizeInteractionTransportText(activity.prompt);
+          const currentAttempt = task.attempt ?? 1;
+          try {
+            const runnerPromise = this.runner({
+              askOrchestrator: (task.effective_mode ?? task.mode) === 'background' && this.onOrchestratorQuestion
+                ? (question: string) => this.askOrchestrator(id, question, controller.signal)
+                : undefined,
+              reportOrchestrator: (task.effective_mode ?? task.mode) === 'background' && this.onOrchestratorReport && parentSessionId
+                ? (report: string) => {
+                  if (controller.signal.aborted || this.tasks.get(id) !== task || task.status !== 'running' || (task.attempt ?? 1) !== currentAttempt || this.liveStates.get(id)?.attempt !== currentAttempt) {
+                    throw new Error('This subagent attempt is no longer running.');
+                  }
+                  const text = sanitizeInteractionTransportText(report).trim();
+                  if (!text || Buffer.byteLength(text, 'utf8') > 16 * 1024) throw new Error('Report must contain 1–16384 UTF-8 bytes.');
+                  this.onOrchestratorReport!(task, text, cwd);
+                  task.last_activity = 'informational report sent; continuing work';
+                  task.last_activity_at = nowIso();
+                  this.record(cwd, task, task.last_activity, true);
+                  this.notifyTaskUpdate(id, onTaskUpdate, true);
+                }
+                : undefined,
+              definition,
+              task: taskText,
+              taskId: id,
+              parentPiSessionId: parentSessionId,
+              context,
+              cwd,
+              ctx,
+              config,
+              signal: controller.signal,
+              effectiveProfile,
+              nested_session_path: activeNestedSessionPath,
+              continuation: activeContinuationPrompt ? { prompt: activeContinuationPrompt, attempt: currentAttempt, previous_snapshot: activePreviousSnapshot } : undefined,
+              registerLiveBridge: (bridge) => this.registerLiveBridge(id, bridge, parentSessionId, currentAttempt),
+              clearLiveBridge: () => this.clearLiveBridge(id, currentAttempt),
+              onQueuedMessageStart: () => this.consumeQueuedMessage(id),
+              onActivity: (activity) => {
+                if (task.status === 'stopping' || isTerminalStatus(task.status)) return;
+                task.last_activity_at = nowIso();
+                if (activity.live_activity) task.live_activity = activity.live_activity;
+                task.last_activity = activity.live_activity?.current?.label ?? activity.message;
+                if (activity.output) task.output_preview = compactOutput(activity.output);
+                if (activity.prompt) {
+                  if (activeContinuationPrompt) task.continuation_prompt = sanitizeInteractionTransportText(activity.prompt);
+                  else task.prompt = sanitizeInteractionTransportText(activity.prompt);
+                }
+                if (activity.system_prompt) task.system_prompt = sanitizeInteractionTransportText(activity.system_prompt);
+                if (activity.transcript) task.transcript = sanitizeInteractionTransportText(activity.transcript);
+                if (activity.usage) task.usage = activity.usage;
+                if (activity.effort) task.effort = activity.effort;
+                if (activity.thread_snapshot) task.thread_snapshot = sanitizeUnknown(activity.thread_snapshot);
+                if (activity.interaction_request) task.interaction_request = activity.interaction_request;
+                if (activity.nested_session_path) task.nested_session_path = activity.nested_session_path;
+                if (activity.pi_retry_attempts !== undefined) task.pi_retry_attempts = activity.pi_retry_attempts;
+                const importantActivity = activity.message === 'interaction required'
+                  || Boolean(activity.interaction_request)
+                  || (Boolean(activity.thread_snapshot) && !activity.message.startsWith('streaming '));
+                this.record(cwd, task, activity.message, importantActivity);
+                this.notifyTaskUpdate(id, onTaskUpdate, importantActivity);
+              },
+            });
+            runnerPromise.catch(() => {});
+            activeRunnerSettlement = runnerPromise.then(() => undefined, () => undefined);
+            result = await Promise.race([runnerPromise, timeoutPromise, abortPromise]);
+            await activeRunnerSettlement;
+            activeRunnerSettlement = undefined;
+          } catch (runError) {
+            await activeRunnerSettlement?.catch(() => undefined);
+            activeRunnerSettlement = undefined;
+            if ((task as SubagentTask).status === 'stopping' || isTerminalStatus(task.status) || timedOut || controller.signal.aborted || isInteractionControlError(runError)) {
+              throw runError;
+            }
+            const errMeta = runError instanceof SubagentStructuredError
+              ? runError.error_metadata
+              : classifyThrownError(runError, { phase: 'manager' });
+            if (FAILOVER_EXCLUDED_CATEGORIES.has(errMeta.category)) {
+              throw runError;
+            }
+            const failedRef = effectiveProfile.model.value;
+            const failedId = failedRef ? `${failedRef.provider}/${failedRef.id}` : task.model;
+            if (failedId && !excludedModels.includes(failedId)) excludedModels.push(failedId);
+
+            let failoverClaim: SubagentTaskAllocationClaim | undefined;
+            const failoverEvent: SubagentTaskFailoverEvent = {
+              taskId: id,
+              attempt: currentAttempt,
+              parentSessionId,
+              agent: definition.name,
+              cwd,
+              signal: controller.signal,
+              failedModel: failedRef,
+              excludedModels: [...excludedModels],
+              errorCategory: errMeta.category,
+              claimModel: (allocator) => {
+                failoverClaim = allocator;
+              },
+            };
+            this.emitEvent('subagents:task:failover', failoverEvent, ctx);
+
+            let nextClaim: { model?: ModelRef; effort?: ThinkingEffort } | undefined;
+            if (failoverClaim && !controller.signal.aborted) {
+              try {
+                nextClaim = await failoverClaim(controller.signal);
+              } catch {
+                nextClaim = undefined;
               }
-              if (activity.system_prompt) task.system_prompt = sanitizeInteractionTransportText(activity.system_prompt);
-              if (activity.transcript) task.transcript = sanitizeInteractionTransportText(activity.transcript);
-              if (activity.usage) task.usage = activity.usage;
-              if (activity.effort) task.effort = activity.effort;
-              if (activity.thread_snapshot) task.thread_snapshot = sanitizeUnknown(activity.thread_snapshot);
-              if (activity.interaction_request) task.interaction_request = activity.interaction_request;
-              if (activity.nested_session_path) task.nested_session_path = activity.nested_session_path;
-              if (activity.pi_retry_attempts !== undefined) task.pi_retry_attempts = activity.pi_retry_attempts;
-              const importantActivity = activity.message === 'interaction required'
-                || Boolean(activity.interaction_request)
-                || (Boolean(activity.thread_snapshot) && !activity.message.startsWith('streaming '));
-              this.record(cwd, task, activity.message, importantActivity);
-              this.notifyTaskUpdate(id, onTaskUpdate, importantActivity);
-            },
-          });
-          runnerPromise.catch(() => {});
-          activeRunnerSettlement = runnerPromise.then(() => undefined, () => undefined);
-          const timeoutPromise = new Promise<never>((_resolve, reject) => {
-            timeout = setTimeout(() => {
-              timedOut = true;
-              this.stopDispositions.set(id, {
-                status: 'failed',
-                metadata: {
-                  category: 'total_timeout',
-                  message: `timed out after ${config.timeout_ms}ms`,
-                  phase: 'manager',
-                  retryable: false,
-                  partial_result_available: false,
-                  details: { timeout_ms: String(config.timeout_ms) },
-                },
-                fallbackError: `timed out after ${config.timeout_ms}ms`,
-              });
-              this.transitionToStopping(task, `timed out after ${config.timeout_ms}ms`, cwd);
-              this.notifyTaskUpdate(id, onTaskUpdate, true);
-              controller.abort();
-              reject(new Error(`timed out after ${config.timeout_ms}ms`));
-            }, config.timeout_ms);
-          });
-          const abortPromise = new Promise<never>((_resolve, reject) => {
-            if (controller.signal.aborted) reject(new Error('Subagent was aborted'));
-            else controller.signal.addEventListener('abort', () => reject(new Error('Subagent was aborted')), { once: true });
-          });
-          result = await Promise.race([runnerPromise, timeoutPromise, abortPromise]);
-          await activeRunnerSettlement;
-          activeRunnerSettlement = undefined;
-          if (timeout) {
-            clearTimeout(timeout);
-            timeout = undefined;
+            }
+
+            if (!nextClaim?.model || controller.signal.aborted || (task as SubagentTask).status === 'stopping' || timedOut) {
+              throw runError;
+            }
+
+            const nextAttempt = currentAttempt + 1;
+            const nextEffort = definition.effort ?? nextClaim.effort ?? effectiveProfile.effort.value;
+            const nextEffortSource = definition.effort
+              ? 'definition'
+              : nextClaim.effort
+                ? 'allocated'
+                : effectiveProfile.effort.source;
+            effectiveProfile = {
+              ...effectiveProfile,
+              model: {
+                value: nextClaim.model,
+                source: 'allocated',
+                label: profileSourceLabel('allocated', nextClaim.model, (v) => `${v.provider}/${v.id}`),
+              },
+              effort: nextEffort ? {
+                value: nextEffort,
+                source: nextEffortSource,
+                label: profileSourceLabel(nextEffortSource, nextEffort, String),
+              } : effectiveProfile.effort,
+            };
+            task.attempt = nextAttempt;
+            const liveState = this.liveStates.get(id);
+            if (liveState) liveState.attempt = nextAttempt;
+            task.model = modelRefLabel(nextClaim.model);
+            task.model_source = 'allocated';
+            task.fallback_used = true;
+            if (nextEffort) {
+              task.effort = nextEffort;
+              task.effort_source = nextEffortSource;
+            }
+            if (task.nested_session_path && fs.existsSync(task.nested_session_path)) {
+              activeNestedSessionPath = task.nested_session_path;
+              activePreviousSnapshot = task.thread_snapshot;
+              activeContinuationPrompt = FAILOVER_CONTINUATION_PROMPT;
+            }
+            task.last_activity = `model failed (${errMeta.category}); continuing with ${task.model}`;
+            task.last_activity_at = nowIso();
+            this.record(cwd, task, task.last_activity, true);
+            this.notifyTaskUpdate(id, onTaskUpdate, true);
+            continue;
           }
           if ((task as SubagentTask).status === 'stopping') {
+            if (timeout) {
+              clearTimeout(timeout);
+              timeout = undefined;
+            }
             this.finalizeStop(task, parentSessionId, cwd, onTaskUpdate);
             await this.runTerminalCleanups(task, parentSessionId, ctx);
             return;
           }
           if (isTerminalStatus(task.status)) {
+            if (timeout) {
+              clearTimeout(timeout);
+              timeout = undefined;
+            }
             await this.runTerminalCleanups(task, parentSessionId, ctx);
             return;
           }
 
           const interactionRequest = result.interaction_request;
-          if (!interactionRequest) break;
+          if (!interactionRequest) {
+            if (timeout) {
+              clearTimeout(timeout);
+              timeout = undefined;
+            }
+            break;
+          }
           subagentAuditLog(cwd, 'interaction_bridge_request_detected', { taskId: id, agent: definition.name, ...interactionLogFields(interactionRequest) });
           if (task.mode === 'background') {
             subagentAuditLog(cwd, 'interaction_bridge_background_blocked', { taskId: id, agent: definition.name, ...interactionLogFields(interactionRequest) });
@@ -1175,7 +1317,7 @@ export class SubagentManager {
           if (result.system_prompt ?? task.system_prompt) task.system_prompt = sanitizeInteractionTransportText(result.system_prompt ?? task.system_prompt!);
           task.model = result.model ?? task.model;
           task.effort = result.effort ?? task.effort;
-          task.fallback_used = result.fallback_used;
+          task.fallback_used = task.fallback_used || result.fallback_used;
           if (result.thread_snapshot) task.thread_snapshot = sanitizeUnknown(result.thread_snapshot);
           if (result.nested_session_path) task.nested_session_path = result.nested_session_path;
           task.interaction_request = interactionRequest;
@@ -1217,7 +1359,7 @@ export class SubagentManager {
         if (result.system_prompt ?? task.system_prompt) task.system_prompt = sanitizeInteractionTransportText(result.system_prompt ?? task.system_prompt!);
         task.model = result.model ?? task.model;
         task.effort = result.effort ?? task.effort;
-        task.fallback_used = result.fallback_used;
+        task.fallback_used = task.fallback_used || result.fallback_used;
         if (result.thread_snapshot) task.thread_snapshot = sanitizeUnknown(result.thread_snapshot);
         if (result.nested_session_path) task.nested_session_path = result.nested_session_path;
         delete task.interaction_request;

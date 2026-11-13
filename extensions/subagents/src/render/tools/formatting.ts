@@ -124,7 +124,11 @@ export function formatTaskModeContent(tasks: SubagentTask[], cwd = process.cwd()
 export function backgroundLaunchContent(tasksOrIds: Array<SubagentTask | string>, verb = 'Sent'): string {
   const lines = tasksOrIds.map((item) => {
     if (typeof item === 'object' && item !== null) {
-      return `- ${formatTaskLabel(item)} · task_id: ${item.id}`;
+      return [
+        `- ${formatTaskLabel(item)} · task_id: ${item.id} · attempt: ${item.attempt ?? 1}`,
+        `  model: ${item.model ?? 'unresolved'} · effort: ${item.effort ?? 'unresolved'}`,
+        item.nested_session_path ? `  executor: ${item.nested_session_path}` : undefined,
+      ].filter(Boolean).join('\n');
     }
     const raw = String(item);
     const match = raw.match(/^subtask_([^_]+)_/);

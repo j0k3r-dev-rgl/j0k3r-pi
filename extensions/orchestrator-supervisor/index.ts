@@ -11,6 +11,7 @@ import { assertWorkSettled, verifiedCheckpoint, defaultSubagentTaskRegistry } fr
 import { type SupervisorPanelState } from './src/supervisor-panel.ts';
 import { createSupervisorDashboard } from './src/supervisor-dashboard.ts';
 import { loadSubagentConfig, updateSubagentConfig, selectSubagentConfigScope } from './src/subagent-config.ts';
+import { discoverSubagents } from './src/subagent-discovery.ts';
 import { resolveConfigurationLocation } from './src/configuration-scope.ts';
 import { registerSubagentAssignment } from './src/subagent-assignment.ts';
 import { isValidCandidateId } from './src/candidate-id.ts';
@@ -440,6 +441,7 @@ export default function supervisor(pi: ExtensionAPI, overrides: SupervisorHostOv
             },
           },
           candidates: subagentCandidates,
+          agentNames: discoverSubagents(ctx.cwd).map(agent => agent.name),
           error: subagents.error,
           applyConfig: patch => {
             if (!current()) throw new Error('The supervisor panel session was replaced.');
@@ -522,7 +524,7 @@ export default function supervisor(pi: ExtensionAPI, overrides: SupervisorHostOv
   };
 
   pi.registerCommand('supervisor', {
-    description: 'Supervisor configuration: independent Project/Global sources and effective paths for Orchestrator and Subagents; Orchestrator state, model slots and automation; Subagents enable, unique Pi model slots (2–20) and least-loaded model assignment.',
+    description: 'Supervisor configuration: independent Project/Global sources and effective paths for Orchestrator and Subagents; Orchestrator state, model slots and automation; Subagents enable, Default and per-subagent model pools (2–20 slots), and least-loaded model assignment.',
     handler: async (args, ctx) => {
       if (args.trim()) {
         notify(ctx, 'Usage: /supervisor (opens the configuration panel). Only settings live there; rotation stays automatic or on explicit request.', 'warning');

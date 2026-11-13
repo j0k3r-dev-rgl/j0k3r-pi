@@ -29,6 +29,21 @@ export const SUBAGENT_MODEL_COUNT_DEFAULT = 5;
 
 const CONFIG_LABEL = 'subagent configuration';
 
+export type SubagentPoolMode = 'inherit' | 'custom' | 'disabled';
+
+export interface SubagentAgentPoolConfig {
+  mode: SubagentPoolMode;
+  modelCount: number;
+  priorityCandidateIds: string[];
+  modelEfforts?: Record<string, ModelEffort>;
+}
+
+export interface EffectiveSubagentPool {
+  mode: SubagentPoolMode;
+  candidateIds: string[];
+  modelEfforts?: Record<string, ModelEffort>;
+}
+
 export interface SubagentConfig {
   /** False keeps the feature off: no subagent model preference applies. */
   enabled: boolean;
@@ -52,6 +67,12 @@ export interface SubagentConfig {
    * truncated, including an entry for a model hidden by the current `modelCount`.
    */
   modelEfforts?: Record<string, ModelEffort>;
+  /**
+   * Optional per-subagent pool overrides, keyed by normalized lowercase subagent name.
+   * Each entry chooses between inheriting the top-level Default pool (`inherit`), using
+   * its own model pool (`custom`), or bypassing allocation (`disabled`).
+   */
+  subagentPools?: Record<string, SubagentAgentPoolConfig>;
 }
 
 export const DEFAULT_SUBAGENT_CONFIG: SubagentConfig = {
@@ -152,6 +173,38 @@ function readModelEfforts(value: unknown): Record<string, ModelEffort> | undefin
   return efforts;
 }
 
+function readPoolMode(value: unknown): SubagentPoolMode {
+  if (value === undefined) return 'inherit';
+  if (value === 'inherit' || value === 'custom' || value === 'disabled') return value;
+  throw new Error(`Malformed ${CONFIG_LABEL}: subagent pool mode must be inherit, custom, or disabled`);
+}
+
+function readSubagentPools(value: unknown): Record<string, SubagentAgentPoolConfig> | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(`Malformed ${CONFIG_LABEL}: subagentPools must be an object`);
+  }
+  const result: Record<string, SubagentAgentPoolConfig> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (!key || key.trim() !== key || key !== key.toLowerCase() || /[\r\n\0]/.test(key)) {
+      throw new Error(`Malformed ${CONFIG_LABEL}: invalid subagent name "${key}" in subagentPools`);
+    }
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      throw new Error(`Malformed ${CONFIG_LABEL}: subagentPools["${key}"] must be an object`);
+    }
+    const raw = entry as Record<string, unknown>;
+    const normalized: SubagentAgentPoolConfig = {
+      mode: readPoolMode(raw.mode),
+      modelCount: readModelCount(raw.modelCount),
+      priorityCandidateIds: readPriorityCandidateIds(raw.priorityCandidateIds),
+    };
+    const modelEfforts = readModelEfforts(raw.modelEfforts);
+    if (modelEfforts !== undefined) normalized.modelEfforts = modelEfforts;
+    result[key] = normalized;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
 /**
  * Normalizes a stored document to a usable config. An absent field keeps its default; a
  * present-but-unusable field is an error, so a damaged document is reported instead of
@@ -174,6 +227,8 @@ export function validateSubagentConfig(value: unknown): SubagentConfig {
   };
   const modelEfforts = readModelEfforts(raw.modelEfforts);
   if (modelEfforts !== undefined) config.modelEfforts = modelEfforts;
+  const subagentPools = readSubagentPools(raw.subagentPools);
+  if (subagentPools !== undefined) config.subagentPools = subagentPools;
   return config;
 }
 
@@ -182,8 +237,32 @@ export function validateSubagentConfig(value: unknown): SubagentConfig {
  * saved entries than the count only the existing entries are returned; this never invents
  * a model, and it never drops a hidden one from the document.
  */
-export function getActiveSubagentCandidateIds(config: SubagentConfig): string[] {
+export function getActiveSubagentCandidateIds(config: Pick<SubagentConfig, 'modelCount' | 'priorityCandidateIds'>): string[] {
   return config.priorityCandidateIds.slice(0, config.modelCount).filter(id => id !== '');
+}
+
+/**
+ * Resolves the effective allocation pool for one subagent name (`event.agent`), falling
+ * back to the top-level Default pool when no custom/disabled override applies.
+ */
+export function resolveSubagentEffectivePool(config: SubagentConfig, agentName?: string): EffectiveSubagentPool {
+  const normalized = agentName?.trim().toLowerCase();
+  const entry = normalized ? config.subagentPools?.[normalized] : undefined;
+  if (entry?.mode === 'disabled') {
+    return { mode: 'disabled', candidateIds: [] };
+  }
+  if (entry?.mode === 'custom') {
+    return {
+      mode: 'custom',
+      candidateIds: getActiveSubagentCandidateIds(entry),
+      ...(entry.modelEfforts !== undefined ? { modelEfforts: entry.modelEfforts } : {}),
+    };
+  }
+  return {
+    mode: 'inherit',
+    candidateIds: getActiveSubagentCandidateIds(config),
+    ...(config.modelEfforts !== undefined ? { modelEfforts: config.modelEfforts } : {}),
+  };
 }
 
 /** Reads the stored document. Throws on an unreadable or unusable document; never writes. */
