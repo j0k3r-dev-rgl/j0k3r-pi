@@ -214,13 +214,13 @@ test('subagent dashboard saves real JSON and reopens independently of Orchestrat
     let switches = 0;
     h.pi.setModel = async () => { switches += 1; return true; };
     const panel = await panelFor(h);
-    assert.match(panelText(panel), /Orchestrator/);
-    assert.match(panelText(panel), /Subagents/);
+    assert.match(panelText(panel), /Orquestador/);
+    assert.match(panelText(panel), /Subagentes/);
     assert.throws(() => readFileSync(subagentPath), { code: 'ENOENT' });
     panel.handleInput('\t');
     assert.equal(panel.activeTab, 'subagents');
     assert.throws(() => readFileSync(subagentPath), { code: 'ENOENT' });
-    const rows = ['toggle', 'modelCount', 'slot:1', 'slot:2', 'slot:3', 'slot:4', 'slot:5'];
+    const rows = ['toggle', 'target', 'modelCount', 'slot:1', 'slot:2', 'slot:3', 'slot:4', 'slot:5'];
     panelEnter(panel, 'toggle', rows);
     panelHighlight(panel, 'modelCount', rows);
     panel.handleInput('\x1b[D');
@@ -229,7 +229,7 @@ test('subagent dashboard saves real JSON and reopens independently of Orchestrat
       for (const character of id) panel.handleInput(character);
       assert.match(panelText(panel), new RegExp(id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
       panel.handleInput('\r');
-      assert.match(panelText(panel), /Select reasoning effort/);
+      assert.match(panelText(panel), /Elegir nivel de razonamiento/);
       panel.handleInput('\r'); // Confirm Default; neither stage may save alone.
     };
     assign(1, 'cliproxyapi/same-account/model-a');
@@ -246,7 +246,7 @@ test('subagent dashboard saves real JSON and reopens independently of Orchestrat
     panel.handleInput('\x1b');
     panelEnter(panel, 'slot:3', rows);
     for (const character of 'image-only') panel.handleInput(character);
-    assert.match(panelText(panel), /no model matches/i);
+    assert.match(panelText(panel), /ningún modelo coincide/i);
     panel.handleInput('\x1b');
     panel.handleInput('\x1b');
     const reopened = await panelFor(h);
@@ -263,13 +263,13 @@ test('subagent dashboard saves real JSON and reopens independently of Orchestrat
     reopened.handleInput('\x1b');
     const afterClear = await panelFor(h);
     afterClear.handleInput('\t');
-    assert.match(panelText(afterClear), /1\. \(empty\)/);
+    assert.match(panelText(afterClear), /1\. \(vacío\)/);
     assert.match(panelText(afterClear), /2\. cliproxyapi\/same-account\/model-b/);
     panelEnter(afterClear, 'slot:1', rows);
     for (const character of 'same-account/model-a') afterClear.handleInput(character);
     assert.match(panelText(afterClear), /cliproxyapi\/same-account\/model-a/);
     afterClear.handleInput('\r');
-    assert.match(panelText(afterClear), /Select reasoning effort/);
+    assert.match(panelText(afterClear), /Elegir nivel de razonamiento/);
     afterClear.handleInput('\r');
     assert.deepEqual(JSON.parse(readFileSync(subagentPath, 'utf8')).priorityCandidateIds,
       ['cliproxyapi/same-account/model-a', 'cliproxyapi/same-account/model-b']);
@@ -289,16 +289,16 @@ test('invalid subagent JSON refuses edits without preventing Orchestrator access
     const subagentPath = join(dirname(mainPath), 'subagents.json');
     writeFileSync(subagentPath, '{broken-json');
     const panel = await panelFor(h);
-    assert.match(panelText(panel), /Orchestrator/);
+    assert.match(panelText(panel), /Orquestador/);
     panel.handleInput('\t');
     assert.equal(panel.activeTab, 'subagents');
-    assert.match(panelText(panel), /invalid JSON|configuration.*(?:unavailable|error)/i);
+    assert.match(panelText(panel), /invalid JSON|configuración.*(?:no disponible|error)/i);
     panel.handleInput('\r');
     panel.handleInput('\x1b[C');
     assert.equal(readFileSync(subagentPath, 'utf8'), '{broken-json');
     panel.handleInput('\t');
     assert.equal(panel.activeTab, 'orchestrator');
-    assert.match(panelText(panel), /Priority slots/);
+    assert.match(panelText(panel), /Modelos prioritarios/);
     assert.equal(readFileSync(mainPath, 'utf8'), mainBefore);
     assert.equal(h.ctx.model.id, 'manual');
   } finally { await h.close(); }
@@ -713,15 +713,15 @@ test('status discovers accounts immediately after reload without changing model 
     // Opening the panel performs the catalogue refresh the old status command triggered.
     const panel = await panelFor(h);
     const text = panelText(panel);
-    assert.match(text, /inventory: cliproxyapi\/main\/gpt-6.1-sol/);
-    assert.doesNotMatch(text, /inventory: .*—/, 'a clean inventory read must not carry an error');
+    assert.match(text, /inventario: cliproxyapi\/main\/gpt-6\.1-sol/);
+    assert.doesNotMatch(text, /inventario: .*—/, 'a clean inventory read must not carry an error');
     assert.doesNotMatch(text, /not discovered yet/);
     assert.equal(h.ctx.model.id, 'second/gpt-6.1-sol');
     assert.equal(h.sent.length, 0);
     await h.hooks.get('session_shutdown')({ reason: 'reload' }, h.ctx);
     await h.hooks.get('session_start')({ reason: 'reload' }, h.ctx);
     const reloaded = await panelFor(h);
-    assert.match(panelText(reloaded), /inventory: cliproxyapi\/main\/gpt-6.1-sol/);
+    assert.match(panelText(reloaded), /inventario: cliproxyapi\/main\/gpt-6\.1-sol/);
     assert.equal(h.ctx.model.id, 'second/gpt-6.1-sol');
     assert.equal(h.sent.length, 0);
   } finally { await h.close(); }
@@ -731,11 +731,11 @@ test('status reports failed discovery truthfully and preserves the last inventor
   const h = await quotaHost();
   try {
     const panel = await panelFor(h);
-    assert.match(panelText(panel), /inventory: cliproxyapi\/main\/gpt-6.1-sol/);
+    assert.match(panelText(panel), /inventario: cliproxyapi\/main\/gpt-6\.1-sol/);
     h.server.options.inventoryUnavailable = true;
     const failed = await panelFor(h);
     const text = panelText(failed);
-    assert.match(text, /inventory: .*cliproxyapi\/main\/gpt-6\.1-sol/);
+    assert.match(text, /inventario: .*cliproxyapi\/main\/gpt-6\.1-sol/);
     assert.match(text, /— Account inventory unavailable/);
     assert.doesNotMatch(text, /not discovered yet/);
     assert.equal(h.sent.length, 0);
@@ -754,7 +754,7 @@ test('status distinguishes an empty registered-model inventory from undiscovered
     h.ctx.modelRegistry.find = () => undefined;
     const panel = await panelFor(h);
     const text = panelText(panel);
-    assert.match(text, /inventory: none/);
+    assert.match(text, /inventario: ninguno/);
     assert.doesNotMatch(text, /not discovered yet/);
     assert.equal(h.ctx.model.id, 'main/gpt-6.1-sol');
     assert.equal(h.sent.length, 0);
@@ -990,8 +990,8 @@ test('interrupting a response keeps the supervisor active across reload and allo
     await h.hooks.get('turn_end')({ message: failedMessage }, h.ctx);
     await h.hooks.get('agent_before_settle')(errorBoundary(), h.ctx);
     await h.hooks.get('agent_settled')({ aborted: true }, h.ctx);
-    assert.match(panelText(await panelFor(h)), /runtime: active/);
-    assert.doesNotMatch(panelText(await panelFor(h)), /halted/);
+    assert.match(panelText(await panelFor(h)), /● activo/);
+    assert.doesNotMatch(panelText(await panelFor(h)), /halted|pausado/);
     assert.equal(h.sent.length, 0, 'an abort must not start a continuation');
 
     await h.hooks.get('session_shutdown')({ reason: 'reload' }, h.ctx);
@@ -1000,7 +1000,7 @@ test('interrupting a response keeps the supervisor active across reload and allo
     await h.tick();
     assert.equal(h.sent.length, 0, 'interrupted recovery debt must stay retired after reload');
     assert.equal(h.ctx.model.id, 'main/gpt-6.1-sol');
-    assert.match(panelText(await panelFor(h)), /runtime: active/);
+    assert.match(panelText(await panelFor(h)), /● activo/);
     const result = await h.tools.get('supervisor_rotate').execute('rotate', { summary: '- Goal\n- Next action' }, undefined, undefined, h.ctx);
     assert.equal(result.details.scheduled, true);
     assert.equal(h.sent.length, 1);
@@ -1015,7 +1015,7 @@ test('S6: an abort and reload preserve the uncertain-effect fence until explicit
     await h.hooks.get('session_shutdown')({ reason: 'reload' }, h.ctx);
     await h.hooks.get('session_start')({ reason: 'reload' }, h.ctx);
     await h.hooks.get('agent_settled')({ aborted: true }, h.ctx);
-    assert.match(panelText(await panelFor(h)), /uncertain effects: 1/);
+    assert.match(panelText(await panelFor(h)), /efectos inciertos: 1/);
     await assert.rejects(h.tools.get('supervisor_rotate').execute('rotate', { summary: '- Goal\n- Next action' }, undefined, undefined, h.ctx), /interrupted mutation effects are unconfirmed/i);
     const blocked = await h.hooks.get('tool_call')({ toolCallId: 'new-write', toolName: 'write', input: { path: 'other.txt', content: 'new' } }, h.ctx);
     assert.equal(blocked?.block, true, 'uncertain effects fence new mutations');
@@ -1056,8 +1056,8 @@ test('S3: the picker catalogue is Pi chat models only; discovery enriches quota,
     await h.hooks.get('session_shutdown')({ reason: 'reload' }, h.ctx);
     await h.hooks.get('session_start')({ reason: 'reload' }, h.ctx);
     const report = panelText(await panelFor(h));
-    assert.match(report, /inventory: .*anthropic\/claude-sonnet-4-5/);
-    assert.match(report, /inventory: .*openai\/gpt-5/);
+    assert.match(report, /inventario: .*anthropic\/claude-sonnet-4-5/);
+    assert.match(report, /inventario: .*openai\/gpt-5/);
     assert.doesNotMatch(report, /imagen/, 'non-chat models are never routing targets');
     assert.equal(h.ctx.model.id, 'main/gpt-6.1-sol');
     assert.equal(h.sent.length, 0);
@@ -1183,7 +1183,7 @@ test('T3/S5: a disabled project creates no runtime and its panel reports it off'
     assert.equal(h.statuses.some(([key, value]) => key === 'orchestrator-supervisor' && value === undefined), true,
       'session_start must clear a stale status line');
     const panel = await panelFor(h);
-    assert.match(panelText(panel), /off for this project/);
+    assert.match(panelText(panel), /Apagado para este proyecto/);
     assert.equal(h.sent.length, 0);
   } finally { await h.close(); }
 });
@@ -1204,7 +1204,7 @@ test('T3/S5: a malformed config keeps the supervisor disabled, reports why and i
     assert.equal(diagnostic[1], 'warning');
     // A damaged source stays read-only while both tabs and source selection remain usable.
     const panel = await panelFor(h);
-    assert.match(panelText(panel), /configuration error:.*invalid JSON/);
+    assert.match(panelText(panel), /Error de configuración:.*invalid JSON/);
     panel.handleInput('\r');
     assert.equal(loadSupervisorConfig(h.dir).source, 'invalid');
     assert.equal(readFileSync(path, 'utf8'), raw, 'a malformed file is never rewritten');
@@ -1226,7 +1226,7 @@ test('T3/S7: the poll timer does not act once the project is disabled', async ()
     assert.equal(clearSpy.cleared.length, 1, 'the disabled poll timer is stopped');
     assert.equal(h.sent.length, 0, 'a disabled supervisor never dispatches work');
     const panel = await panelFor(h);
-    assert.match(panelText(panel), /off for this project/);
+    assert.match(panelText(panel), /Apagado para este proyecto/);
   } finally { await h.close(); }
 });
 
@@ -1241,7 +1241,7 @@ test('T3/S7: disabling mid-session stops the timer and cancels a pending rotatio
     try { panel.handleInput('\r'); } finally { spy.restore(); }
     assert.equal(spy.cleared.length, 1, 'disabling stops the poll timer immediately');
     assert.equal(isSupervisorEnabled(h.dir), false, 'the panel persisted the disable');
-    assert.match(panelText(panel), /off for this project/);
+    assert.match(panelText(panel), /Apagado para este proyecto/);
     assert.equal(h.statuses.at(-1)[1], undefined, 'the status line is cleared');
     await h.commands.get('supervisor-rotate').handler(token, h.ctx);
     assert.deepEqual(h.notices.at(-1), ['Rotation rejected: no matching verified handover.', 'warning']);
@@ -1256,7 +1256,7 @@ test('T3/S4: enabling again in the same session recreates the runtime without a 
     const panel = await panelFor(h);
     panel.handleInput('\r'); // on -> off
     assert.equal(isSupervisorEnabled(h.dir), false);
-    assert.match(panelText(panel), /off for this project/);
+    assert.match(panelText(panel), /Apagado para este proyecto/);
     const spy = installTimerSpy();
     try { panel.handleInput('\r'); } finally { spy.restore(); } // off -> on recreates the runtime
     assert.deepEqual(spy.intervals.map(entry => entry.ms), [60000], 'the poll timer runs again with the default interval');
@@ -1279,7 +1279,7 @@ test('T3/S9: with no config file the supervisor keeps its previous defaults', as
   try {
     assert.equal(h.intervalMs(), 60000, 'the default poll interval is unchanged');
     assert.equal(isSupervisorEnabled(h.dir), true);
-    assert.match(panelText(await panelFor(h)), /inventory: cliproxyapi\/main\/gpt-6\.1-sol/);
+    assert.match(panelText(await panelFor(h)), /inventario: cliproxyapi\/main\/gpt-6\.1-sol/);
     assert.equal(h.ctx.model.id, 'main/gpt-6.1-sol', 'the active model is unchanged');
     assert.equal(h.sent.length, 0);
   } finally { await h.close(); }
@@ -1296,7 +1296,7 @@ test('T3/S7: an out-of-band disable stops a runtime left running from an earlier
     try { await h.hooks.get('session_start')({ reason: 'reload' }, h.ctx); } finally { spy.restore(); }
     assert.equal(spy.cleared.length, 1, 'the running poll timer is stopped by the disable, not by the next tick');
     const panel = await panelFor(h);
-    assert.match(panelText(panel), /off for this project/);
+    assert.match(panelText(panel), /Apagado para este proyecto/);
     assert.equal(h.statuses.at(-1)[1], undefined, 'the status line is cleared');
     assert.equal(h.sent.length, 0, 'no automatic work is dispatched');
   } finally { await h.close(); }
@@ -1327,7 +1327,7 @@ test('T6/S4: the panel opens with the supervisor off, switches it on and off, an
     while (!panel && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
     assert.ok(panel, 'the panel must open while the supervisor is off');
     assert.ok(panel.render(80).length > 0, 'it renders a modal body');
-    assert.match(panelText(panel), /off for this project/);
+    assert.match(panelText(panel), /Apagado para este proyecto/);
 
     // Off -> on from the panel: the runtime and its timer appear without a reload.
     const on = installTimerSpy();
@@ -1345,7 +1345,8 @@ test('T6/S4: the panel opens with the supervisor off, switches it on and off, an
     // Back on, then edit the poll interval: the live runtime adopts it without a reload (S6).
     const again = installTimerSpy();
     try { panel.handleInput('\r'); } finally { again.restore(); }
-    panelHighlight(panel, 'poll', rowsFor(h));
+    panelEnter(panel, 'thresholdsToggle', rowsFor(h));
+    panelHighlight(panel, 'poll', getPanelRowIds(loadSupervisorConfig(h.dir).config, true));
     const live = installTimerSpy();
     try { panel.handleInput('\x1b[C'); } finally { live.restore(); }
     assert.equal(loadSupervisorConfig(h.dir).config.pollIntervalSeconds, 65, 'the panel persisted the new interval');
@@ -1370,12 +1371,12 @@ test('T6/S4: an unusable source remains read-only without blocking the other tab
     writeFileSync(path, raw);
 
     const panel = await panelFor(h);
-    assert.match(panelText(panel), /configuration error:.*invalid JSON/);
+    assert.match(panelText(panel), /Error de configuración:.*invalid JSON/);
     panel.handleInput('\r');
     assert.equal(readFileSync(path, 'utf8'), raw, 'the file is untouched');
     panel.handleInput('\t');
-    assert.match(panelText(panel), /Subagent router configuration/);
-    assert.doesNotMatch(panelText(panel), /configuration error:/);
+    assert.match(panelText(panel), /Configuración de Subagentes/);
+    assert.doesNotMatch(panelText(panel), /Error de configuración:/);
   } finally { await h.close(); }
 });
 
@@ -1520,10 +1521,10 @@ test('S6: interrupted effects require explicit panel confirmation, never a reloa
     // Off-state diagnostics read the persisted journal, so the panel asks first.
     updateSupervisorConfig(h.dir, { enabled: false });
     const panel = await panelFor(h);
-    assert.match(panelText(panel), /off for this project/);
+    assert.match(panelText(panel), /Apagado para este proyecto/);
     panel.handleInput('\r');
     assert.equal(isSupervisorEnabled(h.dir), false, 'the first Enter only arms the confirmation');
-    assert.match(panelText(panel), /press enter again to confirm enabling/i);
+    assert.match(panelText(panel), /Presioná Enter de nuevo para confirmar/i);
     panel.handleInput('\r');
     assert.equal(isSupervisorEnabled(h.dir), true, 'the second Enter confirms and enables');
 
@@ -1542,8 +1543,8 @@ test('S6: rejected credentials are an honest safety fault cleared only by an exp
 
     // The state view must expose the same fault that blocks automatic work and rotation.
     const panel = await panelFor(h);
-    assert.match(panelText(panel), /runtime: halted: credentials/);
-    assert.doesNotMatch(panelText(panel), /runtime: active/);
+    assert.match(panelText(panel), /halted: credentials/);
+    assert.doesNotMatch(panelText(panel), /● activo/);
     panel.handleInput('\r'); // off
     assert.equal(isSupervisorEnabled(h.dir), false);
     panel.handleInput('\r'); // on: the explicit enable clears the recorded fault
@@ -1629,27 +1630,27 @@ test('configuration scopes: public panel persists independent sources, reopens, 
     await h.hooks.get('session_start')({ reason: 'reload' }, h.ctx);
     const panel = await panelFor(h);
     const scopeRows = ['scope', ...rowsFor(h)];
-    assert.match(panelText(panel), /Configuration source: Global/);
+    assert.match(panelText(panel), /Origen de config: Global/);
     panelHighlight(panel, 'scope', scopeRows); panel.handleInput('\x1b[D');
-    assert.match(panelText(panel), /Configuration source: Project/);
+    assert.match(panelText(panel), /Origen de config: Proyecto/);
     assert.equal(loadSupervisorConfig(h.dir).config.enabled, false);
-    assert.match(panelText(panel), /off for this project/);
+    assert.match(panelText(panel), /Apagado para este proyecto/);
     panel.handleInput('\x1b[C');
     assert.equal(loadSupervisorConfig(h.dir).config.enabled, true);
-    assert.match(panelText(panel), /uncertain effects: 1/);
+    assert.match(panelText(panel), /efectos inciertos: 1/);
     const blocked = await h.hooks.get('tool_call')({ toolCallId: 'rejected', toolName: 'write', input: {} }, h.ctx);
     assert.equal(blocked?.block, true, 'scope changes must never acknowledge uncertain effects');
     panel.handleInput('\t');
-    panelHighlight(panel, 'scope', ['scope', 'toggle', 'modelCount']); panel.handleInput('\r');
-    assert.match(panelText(panel), /Configuration source: Project/);
-    panelEnter(panel, 'modelCount', ['scope', 'toggle', 'modelCount']); panel.handleInput('\x1b[C');
+    panelHighlight(panel, 'scope', ['scope', 'toggle', 'target', 'modelCount']); panel.handleInput('\r');
+    assert.match(panelText(panel), /Origen de config: Proyecto/);
+    panelEnter(panel, 'modelCount', ['scope', 'toggle', 'target', 'modelCount']); panel.handleInput('\x1b[C');
     assert.equal(loadSubagentConfig(h.dir).config.modelCount, 6);
     assert.equal(resolveSubagentConfigPath(h.dir), join(h.dir, '.pi', 'orchestrator-supervisor', 'subagents.json'));
     const reopened = await panelFor(h);
-    assert.match(panelText(reopened), /Configuration source: Global/);
+    assert.match(panelText(reopened), /Origen de config: Global/);
     reopened.handleInput('\t');
-    assert.match(panelText(reopened), /Configuration source: Project/);
-    assert.match(panelText(reopened), /Model count\s+\[-\] 6/);
+    assert.match(panelText(reopened), /Origen de config: Proyecto/);
+    assert.match(panelText(reopened), /Cantidad de modelos\s+\[-\] 6/);
     assert.equal(readFileSync(legacy, 'utf8'), before);
     assert.equal(h.sent.length, 0);
   } finally {
@@ -1671,22 +1672,22 @@ test('effort selection: public dashboard saves Default atomically and restores i
     panelEnter(panel, 'slot:1', rows);
     for (const character of 'test/reasoner') panel.handleInput(character);
     panel.handleInput('\r');
-    assert.match(panelText(panel), /Select reasoning effort/);
+    assert.match(panelText(panel), /Elegir nivel de razonamiento/);
     assert.equal(readFileSync(resolveSupervisorConfigPath(h.dir), 'utf8'), before, 'choosing a model alone must not save');
     // Standalone node has no host capability module: the honest available option is Default.
-    assert.match(panelText(panel), /Default/);
+    assert.match(panelText(panel), /Por defecto/);
     panel.handleInput('\r');
     assert.deepEqual(loadSupervisorConfig(h.dir).config.priorityCandidateIds, ['test/reasoner']);
     assert.equal(loadSupervisorConfig(h.dir).config.modelEfforts, undefined);
     const reopened = await panelFor(h);
-    assert.match(panelText(reopened), /test\/reasoner \[Default\]/);
+    assert.match(panelText(reopened), /test\/reasoner \[Por defecto\]/);
     reopened.handleInput('\t');
-    panelEnter(reopened, 'slot:1', ['scope', 'toggle', 'modelCount', 'slot:1']);
+    panelEnter(reopened, 'slot:1', ['scope', 'toggle', 'target', 'modelCount', 'slot:1']);
     for (const character of 'test/reasoner') reopened.handleInput(character);
     reopened.handleInput('\r');
-    assert.match(panelText(reopened), /Select reasoning effort/);
+    assert.match(panelText(reopened), /Elegir nivel de razonamiento/);
     reopened.handleInput('\x1b');
-    assert.match(panelText(reopened), /Assign subagent slot/);
+    assert.match(panelText(reopened), /Asignar slot de subagente/);
     assert.equal(loadSubagentConfig(h.dir).source, 'default', 'cancel must not create a child preference file');
   } finally { await h.close(); }
 });
@@ -1751,7 +1752,7 @@ test('effort overrides: a live panel Default edit applies at the next successful
     panelEnter(panel, 'slot:2', ['scope', ...rowsFor(h)]);
     for (const character of target) panel.handleInput(character);
     panel.handleInput('\r');
-    assert.match(panelText(panel), /Select reasoning effort/);
+    assert.match(panelText(panel), /Elegir nivel de razonamiento/);
     panel.handleInput('\r'); // Default: standalone host cannot prove explicit capabilities.
     assert.deepEqual(loadSupervisorConfig(h.dir).config.modelEfforts, {});
     assert.deepEqual(efforts, [], 'a panel save must not mutate the current model effort');
