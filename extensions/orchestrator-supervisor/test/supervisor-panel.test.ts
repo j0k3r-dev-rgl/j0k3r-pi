@@ -116,6 +116,11 @@ function selectRow(h: Harness, id: string): void {
   assert.equal(h.component.selectedRowId, id);
 }
 
+function expandThresholds(h: Harness): void {
+  selectRow(h, 'thresholdsToggle');
+  h.component.handleInput('\r');
+}
+
 test('PANEL-001 (S1, S2, S6): rows show modelCount slots and every configurable threshold', () => {
   const h = harness({
     config: {
@@ -128,33 +133,34 @@ test('PANEL-001 (S1, S2, S6): rows show modelCount slots and every configurable 
       priorityCandidateIds: [idMain, idSecond],
     },
   });
+  expandThresholds(h);
   const lines = h.render(100);
   const lineWith = (fragment: string) => lines.find(line => line.includes(fragment));
 
-  assert.ok(lineWith('Switches'), lines.join('\n'));
-  assert.ok(lineWith('Priority slots (1-5)'), lines.join('\n'));
-  assert.ok(lineWith('Thresholds'), lines.join('\n'));
+  assert.ok(lineWith('Interruptores'), lines.join('\n'));
+  assert.ok(lineWith('Modelos prioritarios (1-5)'), lines.join('\n'));
+  assert.ok(lineWith('Umbrales avanzados'), lines.join('\n'));
 
   assert.ok(lineWith(`1. ${idMain}`), lines.join('\n'));
   assert.ok(lineWith(`2. ${idSecond}`), lines.join('\n'));
-  assert.equal(lines.filter(line => line.includes('(empty)')).length, 3);
-  assert.match(lineWith('Model count')!, /5/);
+  assert.equal(lines.filter(line => line.includes('(vacío)')).length, 3);
+  assert.match(lineWith('Cantidad de modelos')!, /5/);
 
-  assert.match(lineWith('Rotation threshold')!, /77%/);
-  assert.match(lineWith('Codex quota threshold')!, /88%/);
-  assert.match(lineWith('Retries')!, /4/);
+  assert.match(lineWith('Umbral de rotación')!, /77%/);
+  assert.match(lineWith('Umbral cuota Codex')!, /88%/);
+  assert.match(lineWith('Reintentos')!, /4/);
   assert.match(lineWith('Cooldown')!, /25 min/);
-  assert.match(lineWith('Poll interval')!, /90 s/);
+  assert.match(lineWith('Intervalo de poll')!, /90 s/);
 
   // The number of visible slot editors follows modelCount, not a fixed five.
   const two = harness({ config: { modelCount: 2 } });
   assert.equal(slotLines(two.render(100)).length, 2);
   for (let slot = 1; slot <= 2; slot++) {
-    assert.ok(two.text().includes(`${slot}. (empty)`), two.text());
+    assert.ok(two.text().includes(`${slot}. (vacío)`), two.text());
   }
   const ten = harness({ config: { modelCount: 10 } });
   assert.equal(slotLines(ten.render(100)).length, 10);
-  assert.ok(ten.text().includes('Priority slots (1-10)'), ten.text());
+  assert.ok(ten.text().includes('Modelos prioritarios (1-10)'), ten.text());
 });
 
 test('PANEL-002 (S4): Enter flips the supervisor switch and notifies the host once per flip', () => {
@@ -164,13 +170,13 @@ test('PANEL-002 (S4): Enter flips the supervisor switch and notifies the host on
   assert.deepEqual(h.patches, [{ enabled: false }]);
   assert.deepEqual(h.enabledChanges, [[false, false]]);
   assert.equal(h.closedCount(), 0);
-  assert.ok(h.text().includes('[ ] Disabled'), h.text());
-  assert.ok(!h.text().includes('[x] Enabled'));
+  assert.ok(h.text().includes('[ ] Deshabilitado'), h.text());
+  assert.ok(!h.text().includes('[x] Habilitado'));
 
   h.component.handleInput('\r');
   assert.deepEqual(h.patches, [{ enabled: false }, { enabled: true }]);
   assert.deepEqual(h.enabledChanges, [[false, false], [true, false]]);
-  assert.ok(h.text().includes('[x] Enabled'), h.text());
+  assert.ok(h.text().includes('[x] Habilitado'), h.text());
 });
 
 test('PANEL-003 (S1): the keyboard path assigns a slot via the filtered picker and keeps the dialog open', () => {
@@ -180,14 +186,14 @@ test('PANEL-003 (S1): the keyboard path assigns a slot via the filtered picker a
   selectRow(h, 'slot:2');
 
   h.component.handleInput('\r');
-  assert.ok(h.text().includes('Assign priority slot 2'), h.text());
+  assert.ok(h.text().includes('Asignar slot prioritario 2'), h.text());
 
   for (const character of 'second') h.component.handleInput(character);
   assert.ok(h.text().includes(idSecond), h.text());
   assert.ok(!h.text().includes(idMain), h.text());
 
   h.component.handleInput('\r');
-  assert.ok(h.text().includes('Select reasoning effort: slot 2'), h.text());
+  assert.ok(h.text().includes('Elegir nivel de razonamiento: slot 2'), h.text());
   assert.deepEqual(h.patches, [], 'model selection alone does not save until effort is confirmed');
 
   h.component.handleInput('\r');
@@ -195,8 +201,8 @@ test('PANEL-003 (S1): the keyboard path assigns a slot via the filtered picker a
   assert.equal(h.closedCount(), 0);
 
   const back = h.text();
-  assert.ok(!back.includes('Assign priority slot'), back);
-  assert.ok(!back.includes('Select reasoning effort'), back);
+  assert.ok(!back.includes('Asignar slot prioritario'), back);
+  assert.ok(!back.includes('Elegir nivel de razonamiento'), back);
   assert.ok(back.includes(`1. ${idMain}`), back);
   assert.ok(back.includes(`2. ${idSecond}`), back);
 });
@@ -207,14 +213,14 @@ test('PANEL-004 (S3): duplicates are refused even for hidden entries and clearin
 
   h.component.handleInput('\r');
   const picker = h.text();
-  assert.ok(picker.includes('(in slot 1)'), picker);
+  assert.ok(picker.includes('(en slot 1)'), picker);
   // idFallback lives at stored index 3: hidden behind modelCount=2, yet still owned.
-  assert.ok(picker.includes('(in slot 3)'), picker);
+  assert.ok(picker.includes('(en slot 3)'), picker);
 
   // The first entry is already used in slot 1: Enter must refuse and persist nothing.
   h.component.handleInput('\r');
   assert.equal(h.patches.length, 0);
-  assert.ok(h.text().includes('Assign priority slot 2'), h.text());
+  assert.ok(h.text().includes('Asignar slot prioritario 2'), h.text());
 
   // Selecting the hidden duplicate (idFallback) is likewise refused.
   h.component.handleInput('\x1b[B');
@@ -222,9 +228,9 @@ test('PANEL-004 (S3): duplicates are refused even for hidden entries and clearin
   h.component.handleInput('\r');
   assert.equal(h.patches.length, 0, 'a hidden duplicate is never assigned again');
 
-  // Walk down to the `clear` entry and drop slot 2; the hidden entries survive in order.
+  // Walk down to the `vaciar` entry and drop slot 2; the hidden entries survive in order.
   h.component.handleInput('\x1b[B');
-  assert.ok(h.text().includes('clear'), h.text());
+  assert.ok(h.text().includes('vaciar'), h.text());
   h.component.handleInput('\r');
   assert.deepEqual(h.patches, [{ priorityCandidateIds: [idMain, idFallback, idHidden] }]);
   assert.deepEqual(h.current().priorityCandidateIds, [idMain, idFallback, idHidden]);
@@ -248,6 +254,7 @@ test('PANEL-005 (S6): arrow keys step each threshold and clamp at both bounds', 
     const config = (value: number): Partial<SupervisorConfig> => ({ [c.field]: value });
 
     const stepped = harness({ config: config(c.mid) });
+    expandThresholds(stepped);
     selectRow(stepped, c.id);
     stepped.component.handleInput('\x1b[D');
     assert.deepEqual(stepped.patches, [{ [c.field]: c.mid - c.step }], `${c.id}: step down`);
@@ -255,16 +262,19 @@ test('PANEL-005 (S6): arrow keys step each threshold and clamp at both bounds', 
     assert.deepEqual(stepped.patches.at(-1), { [c.field]: c.mid }, `${c.id}: step up`);
 
     const nearMax = harness({ config: config(c.max - 1) });
+    expandThresholds(nearMax);
     selectRow(nearMax, c.id);
     nearMax.component.handleInput('\x1b[C');
     assert.deepEqual(nearMax.patches, [{ [c.field]: c.max }], `${c.id}: clamp up to max`);
 
     const nearMin = harness({ config: config(c.min + 1) });
+    expandThresholds(nearMin);
     selectRow(nearMin, c.id);
     nearMin.component.handleInput('\x1b[D');
     assert.deepEqual(nearMin.patches, [{ [c.field]: c.min }], `${c.id}: clamp down to min`);
 
     const atMax = harness({ config: config(c.max) });
+    expandThresholds(atMax);
     selectRow(atMax, c.id);
     atMax.component.handleInput('\x1b[C');
     atMax.component.handleInput('\x1b[C');
@@ -272,6 +282,7 @@ test('PANEL-005 (S6): arrow keys step each threshold and clamp at both bounds', 
     assert.equal(atMax.current()[c.field], c.max, `${c.id}: max unchanged`);
 
     const atMin = harness({ config: config(c.min) });
+    expandThresholds(atMin);
     selectRow(atMin, c.id);
     atMin.component.handleInput('\x1b[D');
     atMin.component.handleInput('\x1b[D');
@@ -289,22 +300,24 @@ test('PANEL-006 (S8): clicks flip the switch, open pickers, step thresholds and 
   const h = harness({ config: { enabled: true } });
 
   const initial = h.render(100);
-  const yToggle = initial.findIndex(line => line.includes('[x] Enabled'));
+  const yToggle = initial.findIndex(line => line.includes('[x] Habilitado'));
   assert.ok(yToggle >= 0, initial.join('\n'));
   h.component.handleMouse(mouseClick(5, yToggle));
   assert.deepEqual(h.patches, [{ enabled: false }]);
   assert.deepEqual(h.enabledChanges, [[false, false]]);
-  assert.ok(h.render(100)[yToggle].includes('[ ] Disabled'));
+  assert.ok(h.render(100)[yToggle].includes('[ ] Deshabilitado'));
 
   const ySlot1 = h.render(100).findIndex(line => line.includes('1. '));
   h.component.handleMouse(mouseClick(5, ySlot1));
   assert.equal(h.component.selectedRowId, 'slot:1');
-  assert.ok(h.text().includes('Assign priority slot 1'), h.text());
+  assert.ok(h.text().includes('Asignar slot prioritario 1'), h.text());
   assert.equal(h.patches.length, 1);
 
   h.component.handleInput('\x1b'); // Escape returns to the rows view.
+  const yThresh = h.render(100).findIndex(line => line.includes('Umbrales avanzados'));
+  h.component.handleMouse(mouseClick(5, yThresh));
   const rowLines = h.render(100);
-  const yRotation = rowLines.findIndex(line => line.includes('Rotation threshold'));
+  const yRotation = rowLines.findIndex(line => line.includes('Umbral de rotación'));
   const minusX = rowLines[yRotation].indexOf('[-]');
   const plusX = rowLines[yRotation].indexOf('[+]');
   assert.ok(minusX >= 0 && plusX > minusX, rowLines[yRotation]);
@@ -321,9 +334,9 @@ test('PANEL-006 (S8): clicks flip the switch, open pickers, step thresholds and 
   assert.equal(h.component.selectedRowId, 'cooldown');
   assert.equal(h.patches.length, afterSteps);
 
-  // Header, footer and wheel events change nothing.
+  // Header, footer and wheel events change no persisted config.
   const before = h.patches.length;
-  const footerY = rowLines.findIndex(line => line.includes('esc close'));
+  const footerY = rowLines.findIndex(line => line.includes('esc cerrar'));
   h.component.handleMouse(mouseClick(3, 0));
   h.component.handleMouse(mouseClick(3, footerY));
   h.component.handleMouse(mouseWheel(yRotation, 1));
@@ -343,11 +356,12 @@ test('PANEL-007 (S8, S6): Escape closes and a refused write reports without chan
   assert.equal(failing.patches.length, 0);
   assert.equal(failing.enabledChanges.length, 0);
   assert.equal(failing.errors.length, 1);
-  assert.match(failing.errors[0], /configuration|save/i);
+  assert.match(failing.errors[0], /configuración|guardar/i);
   assert.equal(failing.text(), before);
   assert.equal(failing.closedCount(), 0);
 
   const failingStep = harness({ failApply: true });
+  expandThresholds(failingStep);
   selectRow(failingStep, 'rotation');
   const stepBefore = failingStep.text();
   failingStep.component.handleInput('\x1b[C');
@@ -367,7 +381,7 @@ test('PANEL-008 (S8): every line fits the width and an unbound panel closes with
     h.component.handleInput('\r');
     const picker = h.render(width);
     assert.ok(picker.every(line => visibleWidth(line) <= width), `picker @${String(width)}: ${JSON.stringify(picker)}`);
-    assert.ok(picker.some(line => line.includes('Assign priority slot 1')), picker.join('\n'));
+    assert.ok(picker.some(line => line.includes('Asignar slot')), picker.join('\n'));
   }
 
   const input = harness({ bound: false });
@@ -383,8 +397,11 @@ test('PANEL-008 (S8): every line fits the width and an unbound panel closes with
 
 test('PANEL-009 (S8): the keyboard path reaches every dynamic row', () => {
   const h = harness({ config: { modelCount: 4 } });
-  const rows = [...h.rowIds()];
-  assert.deepEqual(rows, ['toggle', 'autoRotate', 'autoSwitch', 'modelCount', 'slot:1', 'slot:2', 'slot:3', 'slot:4', 'rotation', 'codexQuota', 'retries', 'cooldown', 'poll']);
+  expandThresholds(h);
+  // Reset back to top
+  for (let i = 0; i < 20; i++) h.component.handleInput('\x1b[A');
+  const rows = [...getPanelRowIds(h.current(), true)];
+  assert.deepEqual(rows, ['toggle', 'autoRotate', 'autoSwitch', 'modelCount', 'slot:1', 'slot:2', 'slot:3', 'slot:4', 'thresholdsToggle', 'rotation', 'codexQuota', 'retries', 'cooldown', 'poll']);
 
   assert.equal(h.component.selectedRowId, 'toggle');
   const visited = [h.component.selectedRowId];
@@ -410,7 +427,7 @@ test('PANEL-009 (S8): the keyboard path reaches every dynamic row', () => {
   const lines = h.render(100);
   const highlighted = lines.filter(line => line.startsWith('→ '));
   assert.equal(highlighted.length, 1, lines.join('\n'));
-  assert.ok(highlighted[0].includes('[x] Enabled'), highlighted[0]);
+  assert.ok(highlighted[0].includes('[x] Habilitado'), highlighted[0]);
 });
 
 test('PANEL-010 (S6): stepping every configured range never persists a value outside it', () => {
@@ -427,6 +444,7 @@ test('PANEL-010 (S6): stepping every configured range never persists a value out
 
     // Walk down many times from the max: every persisted value stays inside the range.
     const down = harness({ config: { [field]: max } });
+    if (id !== 'modelCount') expandThresholds(down);
     selectRow(down, id);
     for (let press = 0; press < 2000; press++) down.component.handleInput('\x1b[D');
     for (const patch of down.patches) {
@@ -437,6 +455,7 @@ test('PANEL-010 (S6): stepping every configured range never persists a value out
 
     // Walk up many times from the min: every persisted value stays inside the range.
     const up = harness({ config: { [field]: min } });
+    if (id !== 'modelCount') expandThresholds(up);
     selectRow(up, id);
     for (let press = 0; press < 5000; press++) up.component.handleInput('\x1b[C');
     for (const patch of up.patches) {
@@ -483,7 +502,7 @@ test('PANEL-012 (S8): an unbound panel closes without writing, including from an
   const picker = harness({ config: { priorityCandidateIds: [] } });
   selectRow(picker, 'slot:1');
   picker.component.handleInput('\r'); // open the picker while bound
-  assert.ok(picker.text().includes('Assign priority slot 1'), picker.text());
+  assert.ok(picker.text().includes('Asignar slot prioritario 1'), picker.text());
   picker.setBound(false);
   picker.component.handleInput('a');
   assert.equal(picker.closedCount(), 1);
@@ -493,25 +512,25 @@ test('PANEL-012 (S8): an unbound panel closes without writing, including from an
 test('PANEL-013 (S9): the two capability switches have their own toggle rows and persist on Enter and click', () => {
   const h = harness({ config: { autoRotate: true, autoSwitchModel: true } });
   const lines = h.render(100);
-  assert.ok(lines.some(line => line.includes('[x] Auto rotation')), lines.join('\n'));
-  assert.ok(lines.some(line => line.includes('[x] Auto model switch')), lines.join('\n'));
+  assert.ok(lines.some(line => line.includes('[x] Rotación automática')), lines.join('\n'));
+  assert.ok(lines.some(line => line.includes('[x] Cambio automático de modelo')), lines.join('\n'));
 
   selectRow(h, 'autoRotate');
   h.component.handleInput('\r');
   assert.deepEqual(h.patches, [{ autoRotate: false }]);
   assert.deepEqual(h.enabledChanges, [], 'a capability switch never restarts the runtime');
-  assert.ok(h.text().includes('[ ] Auto rotation'), h.text());
+  assert.ok(h.text().includes('[ ] Rotación automática'), h.text());
 
-  const ySwitch = h.render(100).findIndex(line => line.includes('[ ] Auto model switch') || line.includes('[x] Auto model switch'));
+  const ySwitch = h.render(100).findIndex(line => line.includes('[ ] Cambio automático de modelo') || line.includes('[x] Cambio automático de modelo'));
   assert.ok(ySwitch >= 0, h.text());
   h.component.handleMouse(mouseClick(5, ySwitch));
   assert.deepEqual(h.patches, [{ autoRotate: false }, { autoSwitchModel: false }]);
   assert.deepEqual(h.enabledChanges, []);
-  assert.ok(h.text().includes('[ ] Auto model switch'), h.text());
+  assert.ok(h.text().includes('[ ] Cambio automático de modelo'), h.text());
 
   // Both switches are reachable from the keyboard and carry the configured state.
   const off = harness({ config: { autoRotate: false, autoSwitchModel: false } });
-  assert.ok(off.text().includes('[ ] Auto rotation'), off.text());
+  assert.ok(off.text().includes('[ ] Rotación automática'), off.text());
   selectRow(off, 'autoSwitch');
   off.component.handleInput('\r');
   assert.deepEqual(off.patches, [{ autoSwitchModel: true }]);
@@ -530,18 +549,18 @@ test('PANEL-014 (S2): the panel shows runtime state, not only configuration', ()
     },
   });
   const text = h.text();
-  assert.ok(text.includes('State'), text);
-  assert.ok(text.includes('runtime: active'), text);
-  assert.ok(text.includes(`model: ${idSecond}`), text);
-  assert.ok(text.includes('checkpoint: 4379 pending'), text);
-  assert.ok(text.includes('uncertain effects: 2'), text);
+  assert.ok(text.includes('◆ Estado'), text);
+  assert.ok(text.includes('activo'), text);
+  assert.ok(text.includes(`modelo: ${idSecond}`), text);
+  assert.ok(text.includes('checkpoint: 4379 pendiente'), text);
+  assert.ok(text.includes('efectos inciertos: 2'), text);
   assert.ok(text.includes('Account inventory unavailable'), text);
 
   // A saved checkpoint stays visible after the handover, and an off project says so.
   const saved = harness({ state: { lastCheckpoint: 4378, inventory: 'none' } });
-  assert.ok(saved.text().includes('checkpoint: #4378 saved'), saved.text());
+  assert.ok(saved.text().includes('checkpoint: #4378 guardado'), saved.text());
   const off = harness({ state: { running: false, enabled: false } });
-  assert.ok(off.text().includes('off for this project'), off.text());
+  assert.ok(off.text().includes('Apagado para este proyecto'), off.text());
 });
 
 test('PANEL-015 (S2, S3): stepping modelCount grows and shrinks the visible slots without touching the list', () => {
@@ -549,14 +568,14 @@ test('PANEL-015 (S2, S3): stepping modelCount grows and shrinks the visible slot
   const h = harness({ config: { modelCount: 2, priorityCandidateIds: ten } });
 
   assert.equal(slotLines(h.render(100)).length, 2);
-  assert.ok(h.text().includes('Priority slots (1-2)'), h.text());
+  assert.ok(h.text().includes('Modelos prioritarios (1-2)'), h.text());
 
   selectRow(h, 'modelCount');
   h.component.handleInput('\x1b[C');
   h.component.handleInput('\x1b[C');
   assert.deepEqual(h.patches, [{ modelCount: 3 }, { modelCount: 4 }]);
   assert.equal(slotLines(h.render(100)).length, 4);
-  assert.ok(h.text().includes('Priority slots (1-4)'), h.text());
+  assert.ok(h.text().includes('Modelos prioritarios (1-4)'), h.text());
   assert.equal(getPanelRowIds(h.current()).filter(id => id.startsWith('slot:')).length, 4);
   assert.deepEqual(h.current().priorityCandidateIds, ten, 'raising the count never deletes stored entries');
 
@@ -576,37 +595,37 @@ test('PANEL-016 (S1, S4): the panel exposes no action rows and no separate routi
   const ids = [...h.rowIds()];
   assert.ok(!ids.some(id => id.startsWith('action:')), String(ids));
   assert.ok(!(ids as string[]).includes('models'), String(ids));
-  assert.deepEqual(ids, ['toggle', 'autoRotate', 'autoSwitch', 'modelCount', 'slot:1', 'slot:2', 'rotation', 'codexQuota', 'retries', 'cooldown', 'poll']);
+  assert.deepEqual(ids, ['toggle', 'autoRotate', 'autoSwitch', 'modelCount', 'slot:1', 'slot:2', 'thresholdsToggle']);
 });
 
 test('PANEL-017 (S6): enabling with uncertain effects asks for an explicit second confirmation', () => {
   const h = harness({ config: { enabled: false }, state: { uncertain: 3, running: false } });
 
-  assert.ok(h.text().includes('[ ] Disabled'), h.text());
+  assert.ok(h.text().includes('[ ] Deshabilitado'), h.text());
   h.component.handleInput('\r');
   assert.deepEqual(h.patches, [], 'the first Enter only arms confirmation');
   assert.deepEqual(h.enabledChanges, []);
-  assert.match(h.text(), /confirm enabling/, h.text());
+  assert.match(h.text(), /Presioná Enter de nuevo para confirmar/, h.text());
 
   // Escape abandons the confirmation without enabling or closing the panel.
   h.component.handleInput('\x1b');
   assert.equal(h.closedCount(), 0);
   assert.deepEqual(h.enabledChanges, []);
-  assert.ok(!/confirm enabling/.test(h.text()), h.text());
+  assert.ok(!/Presioná Enter de nuevo/.test(h.text()), h.text());
 
   // The second Enter persists enabled and acknowledges the uncertain effects.
   h.component.handleInput('\r');
   h.component.handleInput('\r');
   assert.deepEqual(h.patches, [{ enabled: true }]);
   assert.deepEqual(h.enabledChanges, [[true, true]]);
-  assert.ok(h.text().includes('[x] Enabled'), h.text());
+  assert.ok(h.text().includes('[x] Habilitado'), h.text());
 
   // Mouse follows the same two-step contract.
   const click = harness({ config: { enabled: false }, state: { uncertain: 1, running: false } });
-  const y = click.render(100).findIndex(line => line.includes('[ ] Disabled'));
+  const y = click.render(100).findIndex(line => line.includes('[ ] Deshabilitado'));
   click.component.handleMouse(mouseClick(5, y));
   assert.deepEqual(click.patches, []);
-  assert.match(click.text(), /confirm enabling/);
+  assert.match(click.text(), /Presioná Enter de nuevo/);
   click.component.handleMouse(mouseClick(5, y));
   assert.deepEqual(click.patches, [{ enabled: true }]);
   assert.deepEqual(click.enabledChanges, [[true, true]]);
@@ -616,7 +635,7 @@ test('PANEL-017 (S6): enabling with uncertain effects asks for an explicit secon
   plain.component.handleInput('\r');
   assert.deepEqual(plain.patches, [{ enabled: true }]);
   assert.deepEqual(plain.enabledChanges, [[true, false]]);
-  assert.ok(!/confirm enabling/.test(plain.text()), plain.text());
+  assert.ok(!/Presioná Enter de nuevo/.test(plain.text()), plain.text());
 });
 
 test('PANEL-018 (S3): a filter that matches no model reports it instead of a blank picker viewport', () => {
@@ -625,11 +644,11 @@ test('PANEL-018 (S3): a filter that matches no model reports it instead of a bla
   h.component.handleInput('\r');
   for (const character of 'zzz') h.component.handleInput(character);
   const text = h.text();
-  assert.match(text, /no model matches "zzz"/, text);
+  assert.match(text, /ningún modelo coincide con "zzz"/, text);
 
   // Backspace widens the filter again and the message goes away.
   for (let index = 0; index < 3; index++) h.component.handleInput('\x7f');
-  assert.ok(!/no model matches/.test(h.text()), h.text());
+  assert.ok(!/ningún modelo coincide/.test(h.text()), h.text());
   assert.ok(h.text().includes(idMain), h.text());
 });
 
@@ -643,13 +662,13 @@ test('PANEL-019 (S1): effort menu opens after model selection and persists ID pl
 
   selectRow(h, 'slot:1');
   h.component.handleInput('\r');
-  assert.ok(h.text().includes('Assign priority slot 1'));
+  assert.ok(h.text().includes('Asignar slot prioritario 1'));
 
   // Select the effort candidate in model picker
   h.component.handleInput('\r');
-  assert.ok(h.text().includes('Select reasoning effort: slot 1'));
+  assert.ok(h.text().includes('Elegir nivel de razonamiento: slot 1'));
   assert.ok(h.text().includes('cliproxyapi/effort/gpt-6.1-sol'));
-  assert.ok(h.text().includes('Default'));
+  assert.ok(h.text().includes('Por defecto'));
   assert.ok(h.text().includes('low'));
   assert.ok(h.text().includes('medium'));
   assert.ok(h.text().includes('high'));
@@ -689,16 +708,16 @@ test('PANEL-020 (S1): re-selecting same model allows changing effort; Default re
   // Open slot 1 and select the same model
   selectRow(h, 'slot:1');
   h.component.handleInput('\r');
-  assert.ok(h.text().includes('Assign priority slot 1'));
+  assert.ok(h.text().includes('Asignar slot prioritario 1'));
   h.component.handleInput('\r');
 
   // Effort menu opens, prior override ('low') is highlighted (index 1)
-  assert.ok(h.text().includes('Select reasoning effort: slot 1'));
+  assert.ok(h.text().includes('Elegir nivel de razonamiento: slot 1'));
   assert.ok(h.render(100).some(line => line.startsWith('→ low')));
 
   // Move up to Default (index 0) and confirm
   h.component.handleInput('\x1b[A');
-  assert.ok(h.render(100).some(line => line.startsWith('→ Default')));
+  assert.ok(h.render(100).some(line => line.startsWith('→ Por defecto')));
   h.component.handleInput('\r');
 
   // Default removes only that model's override; other overrides survive
@@ -707,7 +726,7 @@ test('PANEL-020 (S1): re-selecting same model allows changing effort; Default re
     priorityCandidateIds: [idMain],
     modelEfforts: { [idSecond]: 'high' },
   });
-  assert.ok(h.text().includes(`1. ${idMain} [Default]`));
+  assert.ok(h.text().includes(`1. ${idMain} [Por defecto]`));
 });
 
 test('PANEL-021 (S1): Escape in effort menu returns to model picker without save; Escape in picker closes', () => {
@@ -715,22 +734,22 @@ test('PANEL-021 (S1): Escape in effort menu returns to model picker without save
 
   selectRow(h, 'slot:1');
   h.component.handleInput('\r');
-  assert.ok(h.text().includes('Assign priority slot 1'));
+  assert.ok(h.text().includes('Asignar slot prioritario 1'));
 
   // Enter effort menu
   h.component.handleInput('\r');
-  assert.ok(h.text().includes('Select reasoning effort: slot 1'));
+  assert.ok(h.text().includes('Elegir nivel de razonamiento: slot 1'));
   assert.equal(h.patches.length, 0);
 
   // Escape returns to model picker
   h.component.handleInput('\x1b');
-  assert.ok(h.text().includes('Assign priority slot 1'));
-  assert.ok(!h.text().includes('Select reasoning effort'));
+  assert.ok(h.text().includes('Asignar slot prioritario 1'));
+  assert.ok(!h.text().includes('Elegir nivel de razonamiento'));
   assert.equal(h.patches.length, 0);
 
   // Escape closes picker (returns to rows view)
   h.component.handleInput('\x1b');
-  assert.ok(!h.text().includes('Assign priority slot'));
+  assert.ok(!h.text().includes('Asignar slot prioritario'));
   assert.equal(h.closedCount(), 0);
   assert.equal(h.patches.length, 0);
 
@@ -751,15 +770,15 @@ test('PANEL-022 (S1): clearing slot drops slot immediately and preserves per-mod
 
   selectRow(h, 'slot:1');
   h.component.handleInput('\r');
-  assert.ok(h.text().includes('Assign priority slot 1'));
+  assert.ok(h.text().includes('Asignar slot prioritario 1'));
 
-  // Move down to 'clear (drop slot 1)' and confirm
+  // Move down to 'vaciar (quitar slot 1)' and confirm
   let guard = 0;
-  while (!h.render(100).some(line => line.startsWith('→ clear')) && guard < 20) {
+  while (!h.render(100).some(line => line.startsWith('→ vaciar')) && guard < 20) {
     h.component.handleInput('\x1b[B');
     guard++;
   }
-  assert.ok(h.render(100).some(line => line.startsWith('→ clear')));
+  assert.ok(h.render(100).some(line => line.startsWith('→ vaciar')));
   h.component.handleInput('\r');
 
   // Clear is immediate, does NOT open effort menu, and leaves modelEfforts untouched
@@ -773,7 +792,7 @@ test('PANEL-023 (S1): unbound panel closes without writing from effort menu', ()
   selectRow(h, 'slot:1');
   h.component.handleInput('\r');
   h.component.handleInput('\r');
-  assert.ok(h.text().includes('Select reasoning effort: slot 1'));
+  assert.ok(h.text().includes('Elegir nivel de razonamiento: slot 1'));
 
   h.setBound(false);
   h.component.handleInput('\r');
@@ -786,11 +805,26 @@ test('PANEL-024 (S1): refused write during effort confirmation reports error and
   selectRow(h, 'slot:1');
   h.component.handleInput('\r');
   h.component.handleInput('\r');
-  assert.ok(h.text().includes('Select reasoning effort: slot 1'));
+  assert.ok(h.text().includes('Elegir nivel de razonamiento: slot 1'));
 
   h.component.handleInput('\r');
   assert.equal(h.patches.length, 0);
   assert.equal(h.errors.length, 1);
-  assert.ok(h.text().includes('Select reasoning effort: slot 1'));
+  assert.ok(h.text().includes('Elegir nivel de razonamiento: slot 1'));
   assert.equal(h.closedCount(), 0);
+});
+
+test('PANEL-025: K/J reorders slots and d clears slot in Orchestrator panel', () => {
+  const h = harness({ config: { modelCount: 3, priorityCandidateIds: [idMain, idSecond] } });
+  selectRow(h, 'slot:2');
+  h.component.handleInput('K');
+  assert.equal(h.component.selectedRowId, 'slot:1');
+  assert.deepEqual(h.current().priorityCandidateIds, [idSecond, idMain]);
+
+  h.component.handleInput('J');
+  assert.equal(h.component.selectedRowId, 'slot:2');
+  assert.deepEqual(h.current().priorityCandidateIds, [idMain, idSecond]);
+
+  h.component.handleInput('d');
+  assert.deepEqual(h.current().priorityCandidateIds, [idMain]);
 });

@@ -37,19 +37,19 @@ function harness(fail = false, error?: string) {
 
 test('both tabs expose independent keyboard and mouse scope selectors with effective paths', () => {
   const h = harness();
-  assert.match(h.text(), /Configuration source.*Existing/);
+  assert.match(h.text(), /Origen de config.*Legado/);
   assert.deepEqual(h.calls, [], 'opening the panel must not write');
   h.selectScope(); h.component.handleInput('\r');
   assert.deepEqual(h.calls, ['supervisor:project']);
-  assert.match(h.text(), /Configuration source.*Project/);
+  assert.match(h.text(), /Origen de config.*Proyecto/);
   assert.match(h.text(), /\/project\/supervisor.json/);
-  assert.match(h.text(), /Model count\s+\[-\] 2/);
+  assert.match(h.text(), /Cantidad de modelos\s+\[-\] 2/);
   h.component.handleInput('\t');
-  assert.match(h.text(), /Configuration source.*Existing/);
+  assert.match(h.text(), /Origen de config.*Legado/);
   h.selectScope(); h.component.handleInput('\x1b[C');
   assert.deepEqual(h.calls, ['supervisor:project', 'subagents:global']);
   assert.match(h.text(), /\/global\/subagents.json/);
-  const y = h.component.render(180).findIndex((line: string) => line.includes('Configuration source'));
+  const y = h.component.render(180).findIndex((line: string) => line.includes('Origen de config'));
   h.component.handleMouse(mouseClick(5, y));
   assert.deepEqual(h.calls, ['supervisor:project', 'subagents:global', 'subagents:project']);
   h.component.handleInput('\t');
@@ -60,7 +60,7 @@ test('both tabs expose independent keyboard and mouse scope selectors with effec
 test('failed scope changes preserve visible origin and report the error', () => {
   const h = harness(true); h.selectScope(); h.component.handleInput('\r');
   assert.deepEqual(h.calls, []);
-  assert.match(h.text(), /Configuration source.*Existing/);
+  assert.match(h.text(), /Origen de config.*Legado/);
   assert.equal(h.errors.length, 1);
 });
 
@@ -68,7 +68,7 @@ test('an invalid tab remains read-only but can explicitly select a valid source'
   const h = harness(false, 'invalid JSON');
   assert.match(h.text(), /invalid JSON/);
   h.selectScope(); h.component.handleInput('\r');
-  assert.match(h.text(), /Configuration source.*Project/);
+  assert.match(h.text(), /Origen de config.*Proyecto/);
   assert.doesNotMatch(h.text(), /invalid JSON/);
   h.component.handleInput('\t'); h.selectScope(); h.component.handleInput('\r');
   assert.deepEqual(h.calls, ['supervisor:project', 'subagents:project']);

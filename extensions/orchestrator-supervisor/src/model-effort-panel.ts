@@ -18,11 +18,6 @@ export interface EffortCapableCandidate {
   supportedEfforts?: ModelEffort[];
 }
 
-/**
- * Resolves the menu options for a candidate model. Prepend 'Default'; if supportedEfforts
- * are present, include them in order. Highlights prior override if it is among the
- * supported efforts, otherwise defaults to 0 ('Default').
- */
 export function resolveEffortMenuOptions(
   candidate: EffortCapableCandidate,
   currentOverride?: ModelEffort,
@@ -39,12 +34,6 @@ export function resolveEffortMenuOptions(
   return { options, initialIndex };
 }
 
-/**
- * Computes the atomic modelEfforts patch for a slot assignment.
- * When Default is selected, only the current model override is removed; if no override
- * was stored, no map is created (absent map remains absent on older documents).
- * When an explicit effort is selected, it is saved under the candidate ID.
- */
 export function computeEffortPatch(
   candidateId: string,
   chosenEffort: EffortMenuOption,
@@ -66,18 +55,14 @@ export function computeEffortPatch(
   };
 }
 
-/**
- * Formats a slot line with its assigned model and effort override or [Default].
- * Empty slot renders as `${slotNumber}. (empty)`.
- */
 export function formatSlotLabel(
   slotNumber: number,
   candidateId: string,
   modelEfforts?: Record<string, ModelEffort>,
 ): string {
-  if (!candidateId) return `${slotNumber}. (empty)`;
-  const effort = modelEfforts?.[candidateId] ?? 'Default';
-  return `${slotNumber}. ${candidateId} [${effort}]`;
+  if (!candidateId) return `${slotNumber}. (vacío)`;
+  const effort = modelEfforts?.[candidateId];
+  return `${slotNumber}. ${candidateId} [${effort ?? 'Por defecto'}]`;
 }
 
 export interface RenderEffortPickerOptions {
@@ -97,9 +82,6 @@ export interface RenderEffortPickerOptions {
   };
 }
 
-/**
- * Renders the second-stage effort picker dialog lines.
- */
 export function renderEffortPicker(options: RenderEffortPickerOptions): string[] {
   const { width, targetSlot, candidateId, options: effortOptions, selectedIndex, style, lib } = options;
   const available = Math.max(1, width);
@@ -110,7 +92,7 @@ export function renderEffortPicker(options: RenderEffortPickerOptions): string[]
   const rule = (): void => { push(style.dim('─'.repeat(available))); };
 
   rule();
-  push(style.bold(style.accent(` Select reasoning effort: slot ${targetSlot}`)));
+  push(style.bold(style.accent(` Elegir nivel de razonamiento: slot ${targetSlot}`)));
   rule();
   push(` > ${candidateId}`);
   rule();
@@ -118,11 +100,12 @@ export function renderEffortPicker(options: RenderEffortPickerOptions): string[]
   for (let i = 0; i < effortOptions.length; i++) {
     const isSelected = i === selectedIndex;
     const marker = isSelected ? '→ ' : '  ';
-    push(`${marker}${effortOptions[i]}`);
+    const label = effortOptions[i] === 'Default' ? 'Por defecto' : effortOptions[i];
+    push(`${marker}${label}`);
   }
 
   rule();
-  push(style.dim(' ↑↓ move · enter assign · esc back'));
+  push(style.dim(' ↑↓/jk mover · enter asignar · esc volver'));
   rule();
 
   return lines;
