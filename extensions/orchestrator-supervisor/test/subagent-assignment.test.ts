@@ -237,3 +237,155 @@ test('ASSIGN-005: unregister removes listeners from pi.events', () => {
   assert.equal(bus.listenerCount('subagents:task:allocate'), 0);
   assert.equal(bus.listenerCount('subagents:task:terminal'), 0);
 });
+
+test('ASSIGN-006: routes per-subagent custom, inherit, and disabled pools by event.agent', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'sup-assign-per-agent-'));
+  const oldRuntime = process.env.PI_SUPERVISOR_RUNTIME_DIR;
+  process.env.PI_SUPERVISOR_RUNTIME_DIR = join(tmp, 'runtime');
+
+  try {
+    updateSubagentConfig(tmp, {
+      enabled: true,
+      modelCount: 2,
+      priorityCandidateIds: ['openai/default-model'],
+      modelEfforts: { 'openai/default-model': 'medium' },
+      subagentPools: {
+        '00-discovery': {
+          mode: 'custom',
+          modelCount: 2,
+          priorityCandidateIds: ['google/gemini-flash'],
+          modelEfforts: { 'google/gemini-flash': 'low' },
+        },
+        '03-verify': {
+          mode: 'disabled',
+          modelCount: 2,
+          priorityCandidateIds: ['google/unused'],
+        },
+      },
+    });
+
+    const bus = createMockEventBus();
+    const calls: string[][] = [];
+    const unsub = registerSubagentAssignment(
+      { events: bus },
+      {
+        acquire: (_cwd, candidates) => {
+          calls.push(candidates);
+          return { token: `tok-${calls.length}`, modelId: candidates[0] };
+        },
+        release: () => {},
+      },
+    );
+
+    const ask = async (agent: string) => {
+      let alloc: any;
+      bus.emit('subagents:task:allocate', {
+        taskId: `task-${agent}`,
+        agent,
+        cwd: tmp,
+        signal: new AbortController().signal,
+        claimModel: (fn: any) => { alloc = fn; },
+      });
+      return alloc(new AbortController().signal);
+    };
+
+    const disc = await ask('00-discovery');
+    assert.deepEqual(disc, { model: { provider: 'google', id: 'gemini-flash' }, effort: 'low' });
+
+    const plan = await ask('01-planning');
+    assert.deepEqual(plan, { model: { provider: 'openai', id: 'default-model' }, effort: 'medium' });
+
+    const verify = await ask('03-verify');
+    assert.equal(verify, undefined, 'disabled subagent falls back to orchestrator model');
+
+    assert.deepEqual(calls, [['google/gemini-flash'], ['openai/default-model']]);
+    unsub();
+  } finally {
+    if (oldRuntime === undefined) delete process.env.PI_SUPERVISOR_RUNTIME_DIR;
+    else process.env.PI_SUPERVISOR_RUNTIME_DIR = oldRuntime;
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('ASSIGN-007: failover rotates through remaining pool models and disables failover when pool has <= 1 model', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'sup-assign-failover-'));
+  const oldRuntime = process.env.PI_SUPERVISOR_RUNTIME_DIR;
+  process.env.PI_SUPERVISOR_RUNTIME_DIR = join(tmp, 'runtime');
+
+  try {
+    updateSubagentConfig(tmp, {
+      enabled: true,
+      modelCount: 3,
+      priorityCandidateIds: ['openai/default-a', 'google/default-b'],
+      subagentPools: {
+        'single-model': {
+          mode: 'custom',
+          modelCount: 2,
+          priorityCandidateIds: ['openai/only-one'],
+        },
+        'multi-model': {
+          mode: 'custom',
+          modelCount: 3,
+          priorityCandidateIds: ['openai/m1', 'google/m2', 'anthropic/m3'],
+          modelEfforts: { 'google/m2': 'medium', 'anthropic/m3': 'high' },
+        },
+      },
+    });
+
+    const bus = createMockEventBus();
+    const unsub = registerSubagentAssignment({ events: bus });
+
+    const allocate = async (taskId: string, agent: string) => {
+      let fn: any;
+      bus.emit('subagents:task:allocate', {
+        taskId,
+        agent,
+        cwd: tmp,
+        signal: new AbortController().signal,
+        claimModel: (a: any) => { fn = a; },
+      });
+      return fn(new AbortController().signal);
+    };
+
+    const failover = async (taskId: string, agent: string, failedModel: { provider: string; id: string }, excludedModels: string[]) => {
+      let fn: any;
+      bus.emit('subagents:task:failover', {
+        taskId,
+        attempt: 1,
+        agent,
+        cwd: tmp,
+        signal: new AbortController().signal,
+        failedModel,
+        excludedModels,
+        errorCategory: 'provider_rate_limit',
+        claimModel: (a: any) => { fn = a; },
+      });
+      return fn?.(new AbortController().signal);
+    };
+
+    // Single-model pool never activates failover
+    const singleFirst = await allocate('task-single', 'single-model');
+    assert.deepEqual(singleFirst, { model: { provider: 'openai', id: 'only-one' } });
+    const singleNext = await failover('task-single', 'single-model', { provider: 'openai', id: 'only-one' }, ['openai/only-one']);
+    assert.equal(singleNext, undefined, 'single-model pool must not activate failover');
+
+    // Multi-model pool switches across remaining models until exhausted
+    const first = await allocate('task-multi', 'multi-model');
+    assert.deepEqual(first, { model: { provider: 'openai', id: 'm1' } });
+
+    const second = await failover('task-multi', 'multi-model', { provider: 'openai', id: 'm1' }, ['openai/m1']);
+    assert.deepEqual(second, { model: { provider: 'google', id: 'm2' }, effort: 'medium' });
+
+    const third = await failover('task-multi', 'multi-model', { provider: 'google', id: 'm2' }, ['openai/m1', 'google/m2']);
+    assert.deepEqual(third, { model: { provider: 'anthropic', id: 'm3' }, effort: 'high' });
+
+    const exhausted = await failover('task-multi', 'multi-model', { provider: 'anthropic', id: 'm3' }, ['openai/m1', 'google/m2', 'anthropic/m3']);
+    assert.equal(exhausted, undefined, 'exhausted pool returns undefined');
+
+    unsub();
+  } finally {
+    if (oldRuntime === undefined) delete process.env.PI_SUPERVISOR_RUNTIME_DIR;
+    else process.env.PI_SUPERVISOR_RUNTIME_DIR = oldRuntime;
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
