@@ -60,6 +60,9 @@ export function completionMessage(task: any): string {
   const content = [
     `Subagent ${label} ${task.status}`,
     `task_id: ${task.id ?? task.task_id ?? 'unknown'}`,
+    `attempt: ${task.attempt ?? 1}`,
+    `model: ${task.model ?? 'unresolved'} · effort: ${task.effort ?? 'unresolved'}`,
+    ...(task.nested_session_path ? [`executor: ${task.nested_session_path}`] : []),
     `Undelivered messages: ${task.undelivered_message_count ?? 0}`,
     '',
     'Read only this final response from the subagent. Do not reread the full execution transcript unless the user explicitly asks for debugging details.',
@@ -99,6 +102,7 @@ export function sendSubagentCompletionMessage(pi: any, task: any, cwd = task?.cw
         effective_mode: task.effective_mode,
         model: task.model,
         effort: task.effort,
+        nested_session_path: task.nested_session_path,
         usage: task.usage,
         result: task.result,
         error: task.error,

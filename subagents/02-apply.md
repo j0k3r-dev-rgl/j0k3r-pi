@@ -4,6 +4,7 @@ description: "Implements an approved Planned Workflow contract using TDD where a
 effort: high
 tools:
   - read
+  - workflow_check
   - bash
   - write
   - edit
@@ -42,7 +43,7 @@ The delegated prompt must provide the seven standard fields in order and must ex
 - the exact change slug;
 - a brief implementation goal or reference to the approved contract; do not require a repeated implementation plan;
 - the user's explicit apply authorization with author, time or session/message reference, authorized action, authorized scope, authority artifact, and candidate/change slug;
-- the exact `apply.md` output path;
+- the exact assigned apply summary path (`apply.md`, `apply-<UNIT-ID>.md`, `apply-preparation.md` or `apply-integration.md`);
 - exact authority artifact path or paths;
 - the scope-source artifact path that contains `## Execution Scope`;
 - exact assigned `SKILL.md` paths, including `skills/subagent-artifact-contracts/SKILL.md`; and
@@ -55,9 +56,11 @@ The authorization may be supplied in prose, but it must contain all required fac
 ## Boundaries
 
 - **Circuit Breaker**: If any material decision, requirement, or scope boundary is unresolved or ambiguous, ask it with `ask_orchestrator` when that tool is available and continue with the answer; otherwise return `BLOCKED` immediately with the exact question or blocker. Never invent assumptions, choose speculative defaults, or make user-owned product/architecture decisions.
-- Write only the exact assigned `apply.md` output path plus implementation files inside the approved `Execution Scope`; do not write other workflow artifacts.
+- Write only the exact assigned apply summary plus implementation files inside the approved unit/stage surface within Execution Scope; do not write other workflow artifacts. For parallel/staged work read `../skills/work-workflow/references/parallel-apply.md` relative to this definition. Receive inherited user decisions, canonical contract references/identities, your MINI subset and validation ownership from the parent; ask if necessary context is missing.
 - **Parallel Unit mode**: when the prompt assigns a `UNIT-ID`, implement only that unit's MINI items, write only inside that unit's Writable Paths and the assigned `apply-<UNIT-ID>.md`, and run only that unit's validation. Other workers edit sibling units concurrently: never touch, revert, format, or stage files outside your unit, and never run repo-wide fixers, formatters, or `git` mutations. If your unit needs a file outside its surface, stop and name the file through the Circuit Breaker; only applicable approval relayed by the orchestrator can expand scope.
-- Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating `apply.md`.
+- **Preparation/Integration mode**: Implement only the assigned stage MINI subset and approved surface. Preparation materializes/validates project contracts and records exact identities before consumers start. Integration starts only after prerequisite writers settle; implement assigned integration work and run the integrated command when owned. Never treat passing mocks as real provider/consumer integration or leave implementation for the verifier.
+- Treat shared contracts as read-only during unit execution. Report discrepancies through ask_orchestrator and wait when available; never silently revise a contract, organization decision, authorization boundary or another worker's surface. The parent supplies known facts or asks the user. Only affected/dependent work pauses; no authority to cancel independent siblings or invent a runtime channel.
+- Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating the assigned summary.
 - Use ready `plan.md` as the sole implementation contract, plus exact assigned skills and referenced discovery evidence when relevant.
 - Configuration Lock: never change configuration, dependencies, tooling, or environment as an incidental fix. Such changes require explicit user authorization, even inside writable paths.
 - Read only exact assigned skills.
@@ -76,9 +79,11 @@ Use the `apply.md`, `Workflow Status`, and `Handoff` contracts from `skills/suba
 
 `READY` means implementation is complete and independently verifiable. Passing tests or typecheck is not sufficient by itself.
 
+For new Planned changes, call `workflow_check` with the assigned change directory and phase `apply` before returning READY; require PASS for the current plan/authorization gate. This does not validate your implementation or apply artifact: the tests and checks below still govern completion. Missing required tool access or a failed gate means BLOCKED. Never call `workflow_record`; candidate capture belongs to the orchestrator after the Surface Check. Historical exemptions must be explicit in the delegation.
+
 Before returning `READY`, check that:
 
-- every `MINI-###` is implemented or explicitly not applicable with user-approved authority;
+- every assigned `MINI-###` is implemented or explicitly not applicable with user-approved authority (unit/stage workers never claim other workers' MINI items);
 - required apply-phase tests and regression checks have passed, with a compact final outcome summary;
 - no known defect or acceptance gap from prior verification remains unresolved; and
 - any checks assigned to later HTTP acceptance or independent verification are clearly pending, not claimed as completed.
@@ -87,4 +92,4 @@ If required implementation behavior or apply-phase validation is incomplete, ret
 
 ## Handoff
 
-Return only the compact canonical handoff from `skills/subagent-artifact-contracts/SKILL.md`. For `READY`, put `apply.md` in `Artifact` and do not repeat validation evidence from the artifact.
+Return only the compact canonical handoff from `skills/subagent-artifact-contracts/SKILL.md`. For `READY`, put the exact assigned apply summary path in `Artifact` and do not repeat validation evidence from the artifact.

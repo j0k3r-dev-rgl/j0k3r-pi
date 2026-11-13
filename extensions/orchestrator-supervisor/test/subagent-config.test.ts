@@ -11,6 +11,7 @@ import {
   getActiveSubagentCandidateIds,
   loadSubagentConfig,
   resolveSubagentConfigPath,
+  resolveSubagentEffectivePool,
   updateSubagentConfig,
   validateSubagentConfig,
 } from '../src/subagent-config.ts';
@@ -438,5 +439,78 @@ test('SUBAGENT-CONFIG-015 (S1, S2): an unsupported effort value is refused befor
     );
     assert.deepEqual(readFileSync(s.path()), before);
     assert.throws(() => validateSubagentConfig({ version: 1, modelEfforts: { 'p/a': 'nope' } }), /unsupported effort/);
+  } finally { s.close(); }
+});
+
+test('SUBAGENT-CONFIG-016: per-subagent pools validate, round-trip, and resolve inherit/custom/disabled modes', () => {
+  const s = scratch();
+  try {
+    const saved = updateSubagentConfig(s.cwd, {
+      enabled: true,
+      modelCount: 2,
+      priorityCandidateIds: ['p/default-1', 'p/default-2'],
+      modelEfforts: { 'p/default-1': 'medium' },
+      subagentPools: {
+        '00-discovery': {
+          mode: 'custom',
+          modelCount: 2,
+          priorityCandidateIds: ['p/disc-1', 'p/disc-2'],
+          modelEfforts: { 'p/disc-1': 'low' },
+        },
+        '01-planning': {
+          mode: 'inherit',
+          modelCount: 5,
+          priorityCandidateIds: ['p/saved-for-later'],
+        },
+        '03-verify': {
+          mode: 'disabled',
+          modelCount: 3,
+          priorityCandidateIds: [],
+        },
+      },
+    });
+
+    const reopened = loadSubagentConfig(s.cwd).config;
+    assert.deepEqual(reopened, saved);
+
+    // Custom uses its own slots and efforts
+    assert.deepEqual(resolveSubagentEffectivePool(reopened, '00-Discovery'), {
+      mode: 'custom',
+      candidateIds: ['p/disc-1', 'p/disc-2'],
+      modelEfforts: { 'p/disc-1': 'low' },
+    });
+
+    // Inherit (explicit or unconfigured) uses the top-level Default pool
+    assert.deepEqual(resolveSubagentEffectivePool(reopened, '01-planning'), {
+      mode: 'inherit',
+      candidateIds: ['p/default-1', 'p/default-2'],
+      modelEfforts: { 'p/default-1': 'medium' },
+    });
+    assert.deepEqual(resolveSubagentEffectivePool(reopened, 'unconfigured-agent'), {
+      mode: 'inherit',
+      candidateIds: ['p/default-1', 'p/default-2'],
+      modelEfforts: { 'p/default-1': 'medium' },
+    });
+
+    // Disabled resolves to empty candidateIds
+    assert.deepEqual(resolveSubagentEffectivePool(reopened, '03-verify'), {
+      mode: 'disabled',
+      candidateIds: [],
+    });
+
+    // Invalid subagentPools entries are refused without mutating bytes
+    const before = readFileSync(s.path());
+    for (const badPools of [
+      'not-object',
+      { '': { mode: 'custom', modelCount: 2, priorityCandidateIds: [] } },
+      { UpperCase: { mode: 'custom', modelCount: 2, priorityCandidateIds: [] } },
+      { '00-discovery': { mode: 'bogus', modelCount: 2, priorityCandidateIds: [] } },
+      { '00-discovery': { mode: 'custom', modelCount: 1, priorityCandidateIds: [] } },
+      { '00-discovery': { mode: 'custom', modelCount: 2, priorityCandidateIds: ['p/a', 'p/a'] } },
+      { '00-discovery': { mode: 'custom', modelCount: 2, priorityCandidateIds: [], modelEfforts: { 'p/a': 'bad' } } },
+    ]) {
+      assert.throws(() => validateSubagentConfig({ version: 1, subagentPools: badPools }), /Malformed subagent configuration|unsupported effort/i);
+    }
+    assert.deepEqual(readFileSync(s.path()), before);
   } finally { s.close(); }
 });

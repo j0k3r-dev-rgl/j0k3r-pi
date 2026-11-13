@@ -57,6 +57,20 @@ export interface SubagentTaskAllocationEvent {
   claimModel: (allocator: SubagentTaskAllocationClaim) => void;
 }
 
+export interface SubagentTaskFailoverEvent {
+  taskId: string;
+  attempt: number;
+  parentSessionId?: string;
+  agent: string;
+  cwd: string;
+  signal: AbortSignal;
+  failedModel?: ModelRef;
+  excludedModels: string[];
+  errorCategory?: SubagentErrorCategory;
+  /** Synchronous registration of an async replacement model allocator */
+  claimModel: (allocator: SubagentTaskAllocationClaim) => void;
+}
+
 export interface SubagentTaskTerminalEvent {
   taskId: string;
   attempt?: number;
@@ -427,5 +441,7 @@ export type SubagentRunner = (input: {
   onQueuedMessageStart?: () => void;
   /** Background only: ask the parent orchestrator and wait for its answer (ask_orchestrator tool). */
   askOrchestrator?: (question: string) => Promise<string>;
+  /** Background only: deliver an informational report; never wait for a parent answer. */
+  reportOrchestrator?: (report: string) => void;
   onActivity?: (activity: { message: string; output?: string; prompt?: string; system_prompt?: string; transcript?: string; usage?: UsageStats; effort?: ThinkingEffort; thread_snapshot?: SubagentThreadSnapshot; interaction_request?: SubagentInteractionRequest; nested_session_path?: string; pi_retry_attempts?: number; live_activity?: SubagentLiveActivityProjection }) => void;
 }) => Promise<{ result: string; model?: string; effort?: ThinkingEffort; fallback_used?: boolean; usage?: UsageStats; error_metadata?: SubagentErrorMetadata; thread_snapshot?: SubagentThreadSnapshot; interaction_request?: SubagentInteractionRequest; system_prompt?: string; nested_session_path?: string }>;

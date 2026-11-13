@@ -113,16 +113,16 @@ test('EFFORT-PANEL-004: computeEffortPatch with Default removes only current mod
   assert.deepEqual(patchFromUndefined, {});
 });
 
-test('EFFORT-PANEL-005: formatSlotLabel displays slot, model and effort or (empty)', () => {
-  assert.equal(formatSlotLabel(1, ''), '1. (empty)');
-  assert.equal(formatSlotLabel(2, 'cliproxyapi/main/gpt-6.1-sol'), '2. cliproxyapi/main/gpt-6.1-sol [Default]');
+test('EFFORT-PANEL-005: formatSlotLabel displays slot, model and effort or (vacío)', () => {
+  assert.equal(formatSlotLabel(1, ''), '1. (vacío)');
+  assert.equal(formatSlotLabel(2, 'cliproxyapi/main/gpt-6.1-sol'), '2. cliproxyapi/main/gpt-6.1-sol [Por defecto]');
   assert.equal(
     formatSlotLabel(3, 'cliproxyapi/main/gpt-6.1-sol', { 'cliproxyapi/main/gpt-6.1-sol': 'medium' }),
     '3. cliproxyapi/main/gpt-6.1-sol [medium]',
   );
   assert.equal(
     formatSlotLabel(4, 'cliproxyapi/other/model', { 'cliproxyapi/main/gpt-6.1-sol': 'medium' }),
-    '4. cliproxyapi/other/model [Default]',
+    '4. cliproxyapi/other/model [Por defecto]',
   );
 });
 
@@ -145,10 +145,10 @@ test('EFFORT-PANEL-006: renderEffortPicker formats title, candidate ID, options 
   assert.ok(lines.some(l => l.includes('slot 2')));
   assert.ok(lines.some(l => l.includes('cliproxyapi/main/gpt-6.1-sol')));
   assert.ok(lines.some(l => l.startsWith('→ medium')));
-  assert.ok(lines.some(l => l.startsWith('  Default')));
+  assert.ok(lines.some(l => l.startsWith('  Por defecto')));
   assert.ok(lines.some(l => l.startsWith('  low')));
   assert.ok(lines.some(l => l.startsWith('  high')));
-  assert.ok(lines.some(l => l.includes('esc back')));
+  assert.ok(lines.some(l => l.includes('esc volver')));
 
   // Width boundary clamping
   for (const width of [20, 40, 80]) {
@@ -204,7 +204,7 @@ test('EFFORT-PANEL-007 (S1): createSupervisorPanel integrates two-stage model an
   // First Enter on candidate in model picker: opens effort menu
   component.handleInput('\r');
   const effortView = (component.render(80) as string[]).join('\n');
-  assert.ok(effortView.includes('Select reasoning effort: slot 1'));
+  assert.ok(effortView.includes('Elegir nivel de razonamiento: slot 1'));
   assert.equal(savedConfig, null, 'no save prior to final effort confirmation');
 
   // Move to 'high' (Default -> low -> medium -> high)
@@ -252,7 +252,8 @@ test('EFFORT-PANEL-008 (S1): createSupervisorDashboard Subagents tab integrates 
   dashboard.handleInput('\t');
   assert.equal(dashboard.activeTab, 'subagents');
 
-  // Navigate to slot 1: toggle -> modelCount -> slot:1
+  // Navigate to slot 1: toggle -> target -> modelCount -> slot:1
+  dashboard.handleInput('\x1b[B');
   dashboard.handleInput('\x1b[B');
   dashboard.handleInput('\x1b[B');
   assert.equal(dashboard.selectedRowId, 'slot:1');
@@ -260,7 +261,7 @@ test('EFFORT-PANEL-008 (S1): createSupervisorDashboard Subagents tab integrates 
   // Open model picker, select candidate -> opens effort menu
   dashboard.handleInput('\r');
   dashboard.handleInput('\r');
-  assert.ok(dashboard.render(80).join('\n').includes('Select reasoning effort: slot 1'));
+  assert.ok(dashboard.render(80).join('\n').includes('Elegir nivel de razonamiento: slot 1'));
 
   // Move down to 'low' and confirm
   dashboard.handleInput('\x1b[B');
@@ -292,16 +293,16 @@ test('EFFORT-PANEL-009 (S1): Escape in effort menu returns to model picker witho
   for (let i = 0; i < 4; i++) component.handleInput('\x1b[B');
   component.handleInput('\r'); // open picker
   component.handleInput('\r'); // open effort menu
-  assert.ok(component.render(80).join('\n').includes('Select reasoning effort: slot 1'));
+  assert.ok(component.render(80).join('\n').includes('Elegir nivel de razonamiento: slot 1'));
 
   // Escape returns to model picker
   component.handleInput('\x1b');
-  assert.ok(component.render(80).join('\n').includes('Assign priority slot 1'));
+  assert.ok(component.render(80).join('\n').includes('Asignar slot prioritario 1'));
   assert.equal(saved, false);
 
   // Escape closes picker
   component.handleInput('\x1b');
-  assert.ok(!component.render(80).join('\n').includes('Assign priority slot'));
+  assert.ok(!component.render(80).join('\n').includes('Asignar slot prioritario'));
   assert.equal(saved, false);
 });
 
@@ -328,7 +329,7 @@ test('EFFORT-PANEL-010 (S1): failed save during effort confirmation reports erro
   component.handleInput('\r'); // confirm effort (fails)
 
   assert.equal(errors.length, 1);
-  assert.ok(component.render(80).join('\n').includes('Select reasoning effort: slot 1'));
+  assert.ok(component.render(80).join('\n').includes('Elegir nivel de razonamiento: slot 1'));
 });
 
 test('EFFORT-PANEL-011 (S1): stale session guard closes dialog without saving from effort menu', () => {
@@ -353,7 +354,7 @@ test('EFFORT-PANEL-011 (S1): stale session guard closes dialog without saving fr
   for (let i = 0; i < 4; i++) component.handleInput('\x1b[B');
   component.handleInput('\r');
   component.handleInput('\r');
-  assert.ok(component.render(80).join('\n').includes('Select reasoning effort: slot 1'));
+  assert.ok(component.render(80).join('\n').includes('Elegir nivel de razonamiento: slot 1'));
 
   bound = false;
   component.handleInput('\r');
@@ -385,7 +386,7 @@ test('EFFORT-PANEL-012 (PRESERVE): unknown capability model exposes Default only
   component.handleInput('\r');
   component.handleInput('\r'); // effort menu
   const lines = component.render(80) as string[];
-  assert.ok(lines.some((l: string) => l.startsWith('→ Default')));
+  assert.ok(lines.some((l: string) => l.startsWith('→ Por defecto')));
   assert.ok(!lines.some((l: string) => l.trim() === 'low' || l.trim() === 'high'));
 
   component.handleInput('\r'); // confirm Default
@@ -393,5 +394,5 @@ test('EFFORT-PANEL-012 (PRESERVE): unknown capability model exposes Default only
     priorityCandidateIds: [candidateWithoutEfforts.id],
   });
   const finalLines = component.render(80) as string[];
-  assert.ok(finalLines.some((l: string) => l.includes(`1. ${candidateWithoutEfforts.id} [Default]`)));
+  assert.ok(finalLines.some((l: string) => l.includes(`1. ${candidateWithoutEfforts.id} [Por defecto]`)));
 });

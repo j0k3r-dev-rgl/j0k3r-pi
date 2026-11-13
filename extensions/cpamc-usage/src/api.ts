@@ -1,16 +1,3 @@
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import {
-    fetchGcpBilling,
-    loadCredentialsFromFile,
-    resolveServiceAccountPath,
-    type BillingMetrics,
-    type BillingSummary,
-} from "./gcp-billing.ts";
-
-export type { BillingMetrics, BillingSummary };
-
 export type Quota = {
     used?: number;
     total?: number | null;
@@ -26,7 +13,6 @@ export type Quota = {
 export type UsagePool = {
     label: string;
     displayName: string | null;
-    currency: string | null;
     used: number;
     available: number | null;
     total: number | null;
@@ -52,7 +38,6 @@ export type AccountUsage = {
     resetRenewalDate?: string | null;
     rateLimitType: string | null;
     pools: UsagePool[];
-    billing?: BillingSummary;
     note?: string;
     error?: string;
 };
@@ -164,189 +149,6 @@ async function executeApiCall(
     return (await response.json()) as ApiCallResponse;
 }
 
-function getOpenCodeGoApiKey(): string | null {
-    if (process.env.OPENCODE_GO_API_KEY?.trim()) return process.env.OPENCODE_GO_API_KEY.trim();
-
-    try {
-        const authPath = join(homedir(), ".pi", "agent", "auth.json");
-        const raw = readFileSync(authPath, "utf8");
-        const parsed = JSON.parse(raw);
-        const cred = parsed?.["opencode-go"];
-        if (cred?.key && typeof cred.key === "string") {
-            return cred.key.trim();
-        }
-    } catch {
-        // ignore
-    }
-    return null;
-}
-
-async function fetchOpenCodeGoQuota(signal?: AbortSignal): Promise<AccountUsage | null> {
-    const key = getOpenCodeGoApiKey();
-    if (!key) return null;
-
-    try {
-        const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-        const res = await fetch("https://opencode.ai/zen/go/v1/usage", {
-            headers: {
-                Authorization: `Bearer ${key}`,
-                Accept: "application/json",
-                "User-Agent": "opencode/1.0",
-            },
-            signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-        });
-
-        if (!res.ok) {
-            // If 401 Unauthorized or 403 Forbidden (no Go subscription or invalid key), treat as non-logged / not available
-            return null;
-        }
-
-        const data = await res.json() as any;
-        const usage = data?.usage;
-        if (!usage) return null;
-
-        const pools: UsagePool[] = [];
-
-        if (usage.rolling) {
-            const used = Number(usage.rolling.percent ?? 0);
-            const remaining = Math.max(0, 100 - used);
-            pools.push({
-                label: "5h Rolling",
-                displayName: "OpenCode · 5h Rolling",
-                currency: null,
-                used,
-                available: remaining,
-                total: 100,
-                unlimited: false,
-                availablePercentage: remaining,
-                resetAt: usage.rolling.resetsAt || null,
-                windowLabel: "5h",
-                modelCount: 0,
-                models: [],
-            });
-        }
-
-        if (usage.weekly) {
-            const used = Number(usage.weekly.percent ?? 0);
-            const remaining = Math.max(0, 100 - used);
-            pools.push({
-                label: "Semanal",
-                displayName: "OpenCode · Semanal",
-                currency: null,
-                used,
-                available: remaining,
-                total: 100,
-                unlimited: false,
-                availablePercentage: remaining,
-                resetAt: usage.weekly.resetsAt || null,
-                windowLabel: "7d",
-                modelCount: 0,
-                models: [],
-            });
-        }
-
-        if (usage.monthly) {
-            const used = Number(usage.monthly.percent ?? 0);
-            const remaining = Math.max(0, 100 - used);
-            pools.push({
-                label: "Mensual",
-                displayName: "OpenCode · Mensual",
-                currency: null,
-                used,
-                available: remaining,
-                total: 100,
-                unlimited: false,
-                availablePercentage: remaining,
-                resetAt: usage.monthly.resetsAt || null,
-                windowLabel: "30d",
-                modelCount: 0,
-                models: [],
-            });
-        }
-
-        return {
-            id: "opencode-go",
-            provider: "opencode",
-            account: "OpenCode Go",
-            authType: "api_key",
-            plan: "Go ($10/mo)",
-            tier: null,
-            limitReached: false,
-            bankedCredits: null,
-            rateLimitType: null,
-            pools,
-        };
-    } catch {
-        return null;
-    }
-}
-
-async function fetchMwapiCredits(signal?: AbortSignal): Promise<AccountUsage[]> {
-    type CompatibilityGroup = {
-        name?: string;
-        disabled?: boolean;
-        "base-url"?: string;
-        "api-key-entries"?: Array<{ "auth-index"?: string }>;
-    };
-    const account = (): AccountUsage => ({
-        id: "mwapi", provider: "mwapi", account: "MWAPI", authType: "api_key",
-        plan: "Créditos USD", tier: null, limitReached: false, bankedCredits: null,
-        rateLimitType: null, pools: [],
-    });
-    let groups: CompatibilityGroup[];
-    try {
-        const config = await callManagement<{ "openai-compatibility"?: CompatibilityGroup[] }>(
-            "/v0/management/openai-compatibility", signal,
-        );
-        groups = config["openai-compatibility"] ?? [];
-    } catch {
-        signal?.throwIfAborted();
-        return [{ ...account(), error: "No se pudo consultar la configuración de créditos MWAPI" }];
-    }
-    const providers = groups.filter((group) =>
-        group.name?.toLowerCase() === "mwapi" && !group.disabled &&
-        group["base-url"]?.replace(/\/+$/, "") === "https://api.mwapi.dev/v1",
-    );
-    return Promise.all(providers.flatMap((provider) => {
-        const entries = provider["api-key-entries"]?.length ? provider["api-key-entries"] : [{}];
-        return entries.map(async (entry, index) => {
-            const result = { ...account(), id: `mwapi-${entry["auth-index"] || index}` };
-            try {
-                const authIndex = entry["auth-index"];
-                if (!authIndex) throw new Error("Missing auth index");
-                // CPAMC resolves the key; Pi neither copies it nor sends it to a configurable origin.
-                const response = await executeApiCall(
-                    authIndex, "POST", "https://api.mwapi.dev/api/v1/usage-check/lookup",
-                    { "Content-Type": "application/json", Accept: "application/json" },
-                    JSON.stringify({ key: "$TOKEN$" }), signal,
-                );
-                const payload = parseJsonBody(response.body);
-                const credits = payload?.data?.pay_as_you_go;
-                const validAmount = (value: unknown): value is number =>
-                    typeof value === "number" && Number.isFinite(value) && value >= 0;
-                if (response.status_code !== 200 || payload?.code !== 0 || credits?.unit !== "USD" ||
-                    !validAmount(credits.quota_limit) || !validAmount(credits.quota_used) ||
-                    !validAmount(credits.quota_remaining)) {
-                    throw new Error("Invalid credits response");
-                }
-                result.limitReached = credits.quota_remaining === 0;
-                result.pools = [{
-                    label: "Créditos", displayName: "Créditos MWAPI", currency: "USD",
-                    used: credits.quota_used, available: credits.quota_remaining,
-                    total: credits.quota_limit, unlimited: false,
-                    availablePercentage: credits.quota_limit > 0
-                        ? Math.max(0, Math.min(100, credits.quota_remaining / credits.quota_limit * 100)) : 0,
-                    resetAt: null, windowLabel: null, modelCount: 0, models: [],
-                }];
-            } catch {
-                signal?.throwIfAborted();
-                result.error = "No se pudieron consultar los créditos MWAPI; saldo desconocido";
-            }
-            return result;
-        });
-    }));
-}
-
 function parseJsonBody(bodyStr?: string): any {
     if (!bodyStr || typeof bodyStr !== "string") return null;
     try {
@@ -399,7 +201,6 @@ async function fetchCodexQuota(auth: AuthFileEntry, signal?: AbortSignal): Promi
             pools.push({
                 label: "5h Window (Primaria)",
                 displayName: "OpenAI · 5h Window",
-                currency: null,
                 used: usedPct,
                 available: remainingPct,
                 total: 100,
@@ -420,7 +221,6 @@ async function fetchCodexQuota(auth: AuthFileEntry, signal?: AbortSignal): Promi
             pools.push({
                 label: "Semanal (Secundaria)",
                 displayName: "OpenAI · Semanal",
-                currency: null,
                 used: usedPct,
                 available: remainingPct,
                 total: 100,
@@ -462,69 +262,155 @@ function formatQuotaWindowLabel(window: string): string {
     return window;
 }
 
+type AntigravityBucket = {
+    modelId?: string;
+    remainingFraction?: number;
+    resetTime?: string;
+};
+
+function buildAntigravityModelPools(
+    buckets: AntigravityBucket[],
+    baseName: string,
+    matcher: (modelId: string) => boolean,
+): UsagePool[] {
+    const matched = buckets.filter((b) => typeof b.modelId === "string" && matcher(b.modelId));
+    if (matched.length === 0) return [];
+
+    const grouped = new Map<string, { remainingPct: number; resetAt: string | null; models: string[] }>();
+    for (const b of matched) {
+        const fraction = Number(b.remainingFraction ?? 1);
+        const remainingPct = Math.max(0, Math.min(100, fraction * 100));
+        const resetAt = b.resetTime || null;
+        const key = `${remainingPct.toFixed(4)}|${resetAt ?? ""}`;
+        const existing = grouped.get(key);
+        if (existing) {
+            existing.models.push(b.modelId!);
+        } else {
+            grouped.set(key, { remainingPct, resetAt, models: [b.modelId!] });
+        }
+    }
+
+    const windowLabel = formatQuotaWindowLabel("5h");
+    const entries = [...grouped.values()];
+    return entries.map((entry) => {
+        const models = [...entry.models].sort();
+        const suffix = entries.length > 1
+            ? ` (${models.slice(0, 2).join(", ")}${models.length > 2 ? ", …" : ""})`
+            : "";
+        return {
+            label: `${baseName}${suffix} (${windowLabel})`,
+            displayName: `${baseName}${suffix} · ${windowLabel}`,
+            used: 100 - entry.remainingPct,
+            available: entry.remainingPct,
+            total: 100,
+            unlimited: false,
+            availablePercentage: entry.remainingPct,
+            resetAt: entry.resetAt,
+            windowLabel,
+            modelCount: models.length,
+            models,
+        };
+    });
+}
+
 async function fetchAntigravityQuota(auth: AuthFileEntry, signal?: AbortSignal): Promise<UsagePool[]> {
     const authIndex = auth.auth_index;
     const projectId = auth.project_id || "aicode-consumers";
     if (!authIndex) return [];
 
-    try {
-        const res = await executeApiCall(
+    const headers = {
+        Authorization: "Bearer $TOKEN$",
+        "Content-Type": "application/json",
+        "User-Agent": "antigravity/cli/1.0.13 (aidev_client; os_type=darwin; arch=arm64)",
+    };
+    const payload = JSON.stringify({ project: projectId });
+
+    const [summaryRes, quotaRes] = await Promise.all([
+        executeApiCall(
             authIndex,
             "POST",
             "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
-            {
-                Authorization: "Bearer $TOKEN$",
-                "Content-Type": "application/json",
-                "User-Agent": "antigravity/cli/1.0.13 (aidev_client; os_type=darwin; arch=arm64)",
-            },
-            JSON.stringify({ project: projectId }),
+            headers,
+            payload,
             signal,
-        );
+        ).catch(() => null),
+        executeApiCall(
+            authIndex,
+            "POST",
+            "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota",
+            headers,
+            payload,
+            signal,
+        ).catch(() => null),
+    ]);
 
-        if (res.status_code !== 200) return [];
-        const parsed = parseJsonBody(res.body);
+    const pools: UsagePool[] = [];
+
+    if (summaryRes && summaryRes.status_code === 200) {
+        const parsed = parseJsonBody(summaryRes.body);
         const groups = parsed?.groups;
-        if (!Array.isArray(groups)) return [];
+        if (Array.isArray(groups)) {
+            for (const g of groups) {
+                const groupName = g.displayName || "Google Models";
+                const buckets = g.buckets;
+                if (!Array.isArray(buckets)) continue;
 
-        const pools: UsagePool[] = [];
-        for (const g of groups) {
-            const groupName = g.displayName || "Google Models";
-            const buckets = g.buckets;
-            if (!Array.isArray(buckets)) continue;
-
-            for (const b of buckets) {
-                const fraction = Number(b.remainingFraction ?? 1);
-                const remainingPct = Math.max(0, Math.min(100, fraction * 100));
-                const usedPct = 100 - remainingPct;
-                const window = b.window || "window";
-                const windowLabel = formatQuotaWindowLabel(window);
-                pools.push({
-                    label: `${groupName} (${windowLabel})`,
-                    displayName: `${groupName} · ${windowLabel}`,
-                    currency: null,
-                    used: usedPct,
-                    available: remainingPct,
-                    total: 100,
-                    unlimited: false,
-                    availablePercentage: remainingPct,
-                    resetAt: b.resetTime || null,
-                    windowLabel,
-                    modelCount: 0,
-                    models: [],
-                });
+                for (const b of buckets) {
+                    const fraction = Number(b.remainingFraction ?? 1);
+                    const remainingPct = Math.max(0, Math.min(100, fraction * 100));
+                    const usedPct = 100 - remainingPct;
+                    const window = b.window || "window";
+                    const windowLabel = formatQuotaWindowLabel(window);
+                    pools.push({
+                        label: `${groupName} (${windowLabel})`,
+                        displayName: `${groupName} · ${windowLabel}`,
+                        used: usedPct,
+                        available: remainingPct,
+                        total: 100,
+                        unlimited: false,
+                        availablePercentage: remainingPct,
+                        resetAt: b.resetTime || null,
+                        windowLabel,
+                        modelCount: 0,
+                        models: [],
+                    });
+                }
             }
         }
-
-        return pools.sort((a, b) => {
-            const modelRankDiff = quotaModelRank(a) - quotaModelRank(b);
-            if (modelRankDiff !== 0) return modelRankDiff;
-            const windowRankDiff = quotaWindowRank(a) - quotaWindowRank(b);
-            if (windowRankDiff !== 0) return windowRankDiff;
-            return poolTitle(a).localeCompare(poolTitle(b));
-        });
-    } catch {
-        return [];
     }
+
+    if (quotaRes && quotaRes.status_code === 200) {
+        const parsed = parseJsonBody(quotaRes.body);
+        const buckets: AntigravityBucket[] = Array.isArray(parsed?.buckets) ? parsed.buckets : [];
+
+        const hasGeminiPool = pools.some((p) => `${p.label} ${p.displayName ?? ""}`.toLowerCase().includes("gemini"));
+        if (!hasGeminiPool) {
+            pools.push(
+                ...buildAntigravityModelPools(buckets, "Gemini Models", (id) => id.toLowerCase().includes("gemini")),
+            );
+        }
+
+        const hasThirdPartyPool = pools.some((p) => {
+            const text = `${p.label} ${p.displayName ?? ""}`.toLowerCase();
+            return text.includes("claude") || text.includes("gpt");
+        });
+        if (!hasThirdPartyPool) {
+            pools.push(
+                ...buildAntigravityModelPools(buckets, "Claude and GPT models", (id) => {
+                    const lower = id.toLowerCase();
+                    return lower.includes("claude") || lower.includes("gpt");
+                }),
+            );
+        }
+    }
+
+    return pools.sort((a, b) => {
+        const modelRankDiff = quotaModelRank(a) - quotaModelRank(b);
+        if (modelRankDiff !== 0) return modelRankDiff;
+        const windowRankDiff = quotaWindowRank(a) - quotaWindowRank(b);
+        if (windowRankDiff !== 0) return windowRankDiff;
+        return poolTitle(a).localeCompare(poolTitle(b));
+    });
 }
 
 export async function fetchUsage(signal?: AbortSignal): Promise<ProviderGroup[]> {
@@ -547,7 +433,6 @@ export async function fetchUsage(signal?: AbortSignal): Promise<ProviderGroup[]>
             let resetCredits: number | null = null;
             let limitReached = f.status === "quota_exhausted";
             let resetRenewalDate: string | null = null;
-            let billing: BillingSummary | undefined;
 
             try {
                 if (provider === "openai" || (f.provider || "").toLowerCase() === "codex") {
@@ -560,26 +445,6 @@ export async function fetchUsage(signal?: AbortSignal): Promise<ProviderGroup[]>
                     }
                 } else if (provider === "antigravity" || provider === "google" || provider === "gemini") {
                     pools = await fetchAntigravityQuota(f, signal);
-                } else if (provider === "vertex") {
-                    const credPath = resolveServiceAccountPath(f.name);
-                    if (credPath) {
-                        const creds = loadCredentialsFromFile(credPath);
-                        billing = await fetchGcpBilling(
-                            creds,
-                            process.env.GCP_BILLING_DATASET || "billing_export",
-                            signal,
-                        );
-                    } else {
-                        billing = {
-                            status: "error",
-                            dataset: "billing_export",
-                            table: null,
-                            totalProject: { grossCost: 0, creditsApplied: 0, netCost: 0, currency: "USD" },
-                            vertexAi: { grossCost: 0, creditsApplied: 0, netCost: 0, currency: "USD" },
-                            error: "Service account credential file not found",
-                            lastUpdated: new Date().toISOString(),
-                        };
-                    }
                 }
             } catch (err: any) {
                 errStr = err?.message || String(err);
@@ -599,32 +464,17 @@ export async function fetchUsage(signal?: AbortSignal): Promise<ProviderGroup[]>
                 resetRenewalDate,
                 rateLimitType: null,
                 pools,
-                billing,
                 error: errStr,
-                note: pools.length === 0 && !billing ? "Sin cuota activa o respuesta pendiente" : undefined,
+                note: pools.length === 0 ? "Sin cuota activa o respuesta pendiente" : undefined,
             };
         }),
     );
-
-    accounts.push(...await fetchMwapiCredits(signal));
 
     const byProvider = new Map<string, AccountUsage[]>();
     for (const entry of accounts) {
         const list = byProvider.get(entry.provider);
         if (list) list.push(entry);
         else byProvider.set(entry.provider, [entry]);
-    }
-
-    // OpenCode Go subscription check
-    try {
-        const opencodeUsage = await fetchOpenCodeGoQuota(signal);
-        if (opencodeUsage) {
-            const list = byProvider.get("opencode");
-            if (list) list.push(opencodeUsage);
-            else byProvider.set("opencode", [opencodeUsage]);
-        }
-    } catch {
-        // ignore
     }
 
     return [...byProvider.entries()]
@@ -690,10 +540,6 @@ export function poolTitle(pool: UsagePool): string {
 }
 
 export function poolAvailable(pool: UsagePool): string {
-    if (pool.currency && pool.available != null) {
-        const total = pool.total != null ? ` de ${pool.total.toFixed(2)} ${pool.currency}` : "";
-        return `${pool.available.toFixed(2)} ${pool.currency} disponibles${total}`;
-    }
     if (pool.unlimited) return "∞ libre";
     return `${formatAmount(pool.availablePercentage)}% libre`;
 }
@@ -714,40 +560,13 @@ export function renderTextReport(groups: ProviderGroup[]): string {
                 flags.push(`${account.resetCredits} reset(s)${renew}`);
             }
             if (account.bankedCredits != null) flags.push(`banked ${account.bankedCredits}`);
-            const poolKind = account.pools.some((pool) => pool.currency) ? "crédito(s)" : "cuota(s)";
-            const header = `${account.account} · plan ${account.plan} · ${account.pools.length} ${poolKind}`;
+            const header = `${account.account} · plan ${account.plan} · ${account.pools.length} cuota(s)`;
             lines.push(`  ${header}${flags.length ? ` · ${flags.join(" · ")}` : ""}`);
             if (account.error) lines.push(`    error: ${account.error}`);
-            if (account.billing) {
-                const b = account.billing;
-                if (b.status === "pending_initial_export") {
-                    lines.push(
-                        `    [GCP Billing Export: Dataset '${b.dataset}' conectado · En espera de generación inicial de tablas por Google Cloud]`,
-                    );
-                    lines.push(
-                        `    Consumo MTD: Costo Bruto $0.00 · Créditos Aplicados $0.00 · Neto a Pagar $0.00`,
-                    );
-                } else if (b.status === "ready") {
-                    const tp = b.totalProject;
-                    const vx = b.vertexAi;
-                    lines.push(
-                        `    [GCP Billing MTD] Total Proyecto: Costo Bruto $${tp.grossCost.toFixed(2)} · Créditos Aplicados $${tp.creditsApplied.toFixed(2)} · Neto a Pagar $${tp.netCost.toFixed(2)} (${tp.currency})`,
-                    );
-                    lines.push(
-                        `    [GCP Billing MTD] Vertex AI / Agent: Costo Bruto $${vx.grossCost.toFixed(2)} · Créditos Aplicados $${vx.creditsApplied.toFixed(2)} · Neto a Pagar $${vx.netCost.toFixed(2)} (${vx.currency})`,
-                    );
-                } else if (b.status === "error") {
-                    lines.push(`    [GCP Billing Export Error: ${b.error || "Unknown error"}]`);
-                }
-            }
             for (const pool of account.pools) {
-                if (pool.currency) {
-                    lines.push(`    ${poolTitle(pool)}: ${poolAvailable(pool)} · ${pool.used.toFixed(2)} ${pool.currency} consumidos`);
-                } else {
-                    lines.push(
-                        `    ${poolTitle(pool)}: ${pool.availablePercentage.toFixed(1)}% libre · [${availabilityBar(pool.availablePercentage, 15)}] · ${formatReset(pool.resetAt)}`,
-                    );
-                }
+                lines.push(
+                    `    ${poolTitle(pool)}: ${pool.availablePercentage.toFixed(1)}% libre · [${availabilityBar(pool.availablePercentage, 15)}] · ${formatReset(pool.resetAt)}`,
+                );
             }
         }
     }

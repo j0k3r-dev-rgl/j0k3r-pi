@@ -1,4 +1,4 @@
-import { getActiveSubagentCandidateIds, loadSubagentConfig } from './subagent-config.ts';
+import { loadSubagentConfig, resolveSubagentEffectivePool } from './subagent-config.ts';
 import { acquireSubagentModel, releaseSubagentModel, type SubagentPoolOwner, type SubagentPoolLeaseRef } from './subagent-pool.ts';
 
 export type AcquireSubagentModel = (cwd: string, candidateIds: string[], owner: SubagentPoolOwner) => SubagentPoolLeaseRef;
@@ -22,6 +22,19 @@ export interface SubagentTaskAllocationEvent {
   agent: string;
   cwd: string;
   signal: AbortSignal;
+  claimModel: (allocator: (signal: AbortSignal) => Promise<SubagentAllocationClaim | undefined>) => void;
+}
+
+export interface SubagentTaskFailoverEvent {
+  taskId: string;
+  attempt: number;
+  parentSessionId?: string;
+  agent: string;
+  cwd: string;
+  signal: AbortSignal;
+  failedModel?: { provider: string; id: string };
+  excludedModels: string[];
+  errorCategory?: string;
   claimModel: (allocator: (signal: AbortSignal) => Promise<SubagentAllocationClaim | undefined>) => void;
 }
 
@@ -82,11 +95,11 @@ export function registerSubagentAssignment(
         const load = loadSubagentConfig(event.cwd);
         if (!load.config.enabled) return undefined;
 
-        const candidates = getActiveSubagentCandidateIds(load.config);
-        if (candidates.length === 0) return undefined;
+        const resolved = resolveSubagentEffectivePool(load.config, event.agent);
+        if (resolved.mode === 'disabled' || resolved.candidateIds.length === 0) return undefined;
 
         const owner: SubagentPoolOwner = { pid, sessionId: event.taskId };
-        const acquired = acquire(event.cwd, candidates, owner);
+        const acquired = acquire(event.cwd, resolved.candidateIds, owner);
         const split = splitCandidateId(acquired.modelId);
         if (!split) {
           try { release(event.cwd, acquired, owner); } catch {}
@@ -112,7 +125,7 @@ export function registerSubagentAssignment(
 
         signal?.addEventListener?.('abort', onAbort, { once: true });
 
-        const effort = load.config.modelEfforts?.[acquired.modelId];
+        const effort = resolved.modelEfforts?.[acquired.modelId];
         return {
           model: { provider: split.provider, id: split.modelId },
           ...(effort ? { effort } : {}),
@@ -124,6 +137,70 @@ export function registerSubagentAssignment(
   });
 
   if (typeof unsubAllocate === 'function') unsubs.push(unsubAllocate);
+
+  const unsubFailover = pi.events.on('subagents:task:failover', (event: SubagentTaskFailoverEvent) => {
+    if (!event || typeof event.claimModel !== 'function') return;
+
+    event.claimModel(async (signal: AbortSignal) => {
+      if (signal?.aborted) return undefined;
+
+      // Release any active lease held by the failed attempt before acquiring a replacement.
+      const prior = activeTaskLeases.get(event.taskId);
+      if (prior) {
+        activeTaskLeases.delete(event.taskId);
+        try { release(prior.cwd, prior.lease, prior.owner); } catch {}
+      }
+
+      try {
+        const load = loadSubagentConfig(event.cwd);
+        if (!load.config.enabled) return undefined;
+
+        const resolved = resolveSubagentEffectivePool(load.config, event.agent);
+        if (resolved.mode === 'disabled' || resolved.candidateIds.length <= 1) return undefined;
+
+        const excluded = new Set(event.excludedModels ?? []);
+        if (event.failedModel) excluded.add(`${event.failedModel.provider}/${event.failedModel.id}`);
+        const remaining = resolved.candidateIds.filter((id) => !excluded.has(id));
+        if (remaining.length === 0) return undefined;
+
+        const owner: SubagentPoolOwner = { pid, sessionId: event.taskId };
+        const acquired = acquire(event.cwd, remaining, owner);
+        const split = splitCandidateId(acquired.modelId);
+        if (!split) {
+          try { release(event.cwd, acquired, owner); } catch {}
+          return undefined;
+        }
+
+        const leaseRecord: ActiveTaskLease = { lease: acquired, owner, cwd: event.cwd };
+        activeTaskLeases.set(event.taskId, leaseRecord);
+
+        const onAbort = () => {
+          const rec = activeTaskLeases.get(event.taskId);
+          if (rec) {
+            activeTaskLeases.delete(event.taskId);
+            try { release(rec.cwd, rec.lease, rec.owner); } catch {}
+          }
+        };
+
+        if (signal?.aborted) {
+          onAbort();
+          return undefined;
+        }
+
+        signal?.addEventListener?.('abort', onAbort, { once: true });
+
+        const effort = resolved.modelEfforts?.[acquired.modelId];
+        return {
+          model: { provider: split.provider, id: split.modelId },
+          ...(effort ? { effort } : {}),
+        };
+      } catch {
+        return undefined;
+      }
+    });
+  });
+
+  if (typeof unsubFailover === 'function') unsubs.push(unsubFailover);
 
   const unsubTerminal = pi.events.on('subagents:task:terminal', (event: SubagentTaskTerminalEvent) => {
     if (!event || !event.taskId) return;

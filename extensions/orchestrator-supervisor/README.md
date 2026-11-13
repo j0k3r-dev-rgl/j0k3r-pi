@@ -25,7 +25,9 @@
   - **Runtime State Display:** Live status, active model, pending/saved checkpoint IDs, and uncertain effect counters.
 - **[Subagents] Tab:**
   - **Subagent Routing Switch:** Master enable/disable for subagent model allocation.
-  - **Model Count Stepper (2–20):** Selects how many candidate slots are active for subagent dispatch.
+  - **Subagent Selector (`Subagent: ◀ Default | <name> ▶`):** Switch between the shared `Default` pool and any discovered subagent (plus saved entries marked `(not discovered)`).
+  - **Per-Subagent Pool Mode (`Pool mode`):** Choose `Inherit Default`, `Custom pool` (independent `Model count` 2–20 and slots/efforts), or `Disabled (orchestrator)`.
+  - **Model Count Stepper (2–20):** Selects how many candidate slots are active for the selected pool (`Default` or custom subagent pool).
   - **Model Slots & Effort Dialog:** Assigns candidate models from the Pi registry with reasoning effort overrides. Pressing `d` clears the highlighted slot without reordering adjacent slots.
 - **Keyboard & Mouse Navigation:**
   - `Tab` / `Shift+Tab`: Switches between `[Orchestrator]` and `[Subagents]` tabs.
@@ -38,8 +40,9 @@
 ---
 
 ### 2. Subagent Model Allocation & Least-Loaded Pool (`src/subagent-pool.ts`, `src/subagent-assignment.ts`)
-- **Event Binding:** Subscribes to `subagents:task:allocate` and `subagents:task:terminal` on `pi.events`.
-- **Claim Model Contract:** Calls `event.claimModel(async (signal) => ...)`. If subagent allocation is disabled or has no candidate slots, returns `undefined` allowing subagents to fall back to the parent orchestrator model and effort.
+- **Event Binding:** Subscribes to `subagents:task:allocate`, `subagents:task:failover`, and `subagents:task:terminal` on `pi.events`.
+- **Claim Model Contract:** Calls `event.claimModel(async (signal) => ...)`. Resolves `event.agent` against `subagentPools` (`custom` pool, `inherit` Default pool, or `disabled`). If subagent allocation is disabled, the agent mode is `disabled`, or the resolved pool has no candidate slots, returns `undefined` allowing subagents to fall back to the parent orchestrator model and effort.
+- **Automatic Model Failover:** On `subagents:task:failover`, releases the failed model's lease and allocates the next least-loaded candidate from the remaining pool models when the resolved pool contains more than 1 model (single-model pools never activate failover).
 - **Least-Loaded Selection:** Allocates models across slots using active lease counting from `subagent-pool.json` with a persistent rotation counter for fair tie-breaking.
 - **Automatic Pruning:** Uses `process.kill(pid, 0)` checking `ESRCH` to safely reap leases orphaned by terminated processes without false positives.
 - **Deterministic Cleanup:** Registers cleanup via `event.registerCleanup` to release leases when tasks reach terminal status (`completed`, `failed`, `cancelled`, `interrupted`) or when the task's `AbortSignal` fires.

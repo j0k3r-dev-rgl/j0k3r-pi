@@ -64,6 +64,7 @@ interface DashboardHarnessOptions {
   subagentConfig?: Partial<SubagentConfig>;
   orchestratorCandidates?: ModelCandidate[];
   subagentCandidates?: ModelCandidate[];
+  subagentNames?: string[];
   subagentError?: string;
   bound?: boolean;
   state?: Partial<SupervisorPanelState>;
@@ -92,7 +93,12 @@ function harness(options: DashboardHarnessOptions = {}) {
   let bound = options.bound ?? true;
 
   const cloneOrchestrator = (): SupervisorConfig => ({ ...orchestratorConfig, priorityCandidateIds: [...orchestratorConfig.priorityCandidateIds] });
-  const cloneSubagent = (): SubagentConfig => ({ ...subagentConfig, priorityCandidateIds: [...subagentConfig.priorityCandidateIds] });
+  const cloneSubagent = (): SubagentConfig => ({
+    ...subagentConfig,
+    priorityCandidateIds: [...subagentConfig.priorityCandidateIds],
+    ...(subagentConfig.subagentPools ? { subagentPools: structuredClone(subagentConfig.subagentPools) } : {}),
+  });
+  const subagentsErrorFromOptions = (opts: DashboardHarnessOptions) => opts.subagentError;
 
   const component = createSupervisorDashboard({
     orchestrator: {
@@ -127,12 +133,14 @@ function harness(options: DashboardHarnessOptions = {}) {
     subagents: {
       config: subagentConfig,
       candidates: options.subagentCandidates ?? piCandidates,
-      error: options.subagentError,
+      agentNames: options.subagentNames,
+      error: subagentsErrorFromOptions(options),
       applyConfig: patch => {
         if (options.failSubagentApply) throw new Error('lock held');
         subagentPatches.push(patch);
         subagentConfig = { ...subagentConfig, ...patch };
         if (patch.priorityCandidateIds) subagentConfig.priorityCandidateIds = [...patch.priorityCandidateIds];
+        if (patch.subagentPools !== undefined) subagentConfig.subagentPools = structuredClone(patch.subagentPools);
         return cloneSubagent();
       },
     },
@@ -178,15 +186,15 @@ function selectPickerEntry(h: Harness, fragment: string): void {
   assert.ok(highlighted(), `picker entry containing "${fragment}" was reachable`);
 }
 
-test('DASH-001 (S1): the dialog shows Orchestrator and Subagents tabs with Orchestrator active first', () => {
+test('DASH-001 (S1): the dialog shows Orquestador and Subagentes tabs with Orquestador active first', () => {
   const h = harness();
   assert.equal(h.component.activeTab, 'orchestrator');
 
   const text = h.text();
-  assert.ok(text.includes('[Orchestrator]'), text);
-  assert.ok(text.includes('[Subagents]'), text);
-  assert.ok(text.includes('Supervisor control panel'), text);
-  assert.ok(!text.includes('Subagent router configuration'), text);
+  assert.ok(text.includes('[ ◆ Orquestador ]'), text);
+  assert.ok(text.includes('◇ Subagentes'), text);
+  assert.ok(text.includes('Panel del Supervisor'), text);
+  assert.ok(!text.includes('Configuración de Subagentes'), text);
 });
 
 test('DASH-002 (S1, S6): Tab and Shift+Tab switch between independent views', () => {
@@ -195,12 +203,12 @@ test('DASH-002 (S1, S6): Tab and Shift+Tab switch between independent views', ()
   h.component.handleInput('\t');
   assert.equal(h.component.activeTab, 'subagents');
   const subagents = h.text();
-  assert.ok(subagents.includes('Subagent router configuration'), subagents);
-  assert.ok(!subagents.includes('Supervisor control panel'), subagents);
+  assert.ok(subagents.includes('Configuración de Subagentes'), subagents);
+  assert.ok(!subagents.includes('Panel del Supervisor'), subagents);
 
   h.component.handleInput('\x1b[Z');
   assert.equal(h.component.activeTab, 'orchestrator');
-  assert.ok(h.text().includes('Supervisor control panel'), h.text());
+  assert.ok(h.text().includes('Panel del Supervisor'), h.text());
 
   // With two tabs both directions toggle between them.
   h.component.handleInput('\t');
@@ -218,13 +226,13 @@ test('DASH-003 (S2): the Subagents enable switch persists through the injected a
   h.component.handleInput('\r');
   assert.deepEqual(h.subagentPatches, [{ enabled: true }]);
   assert.equal(h.subagentConfig().enabled, true);
-  assert.ok(h.text().includes('[x] Enabled'), h.text());
+  assert.ok(h.text().includes('[x] Habilitado'), h.text());
   assert.deepEqual(h.orchestratorPatches, [], 'the Orchestrator document is untouched');
 
   h.component.handleInput('\r');
   assert.deepEqual(h.subagentPatches, [{ enabled: true }, { enabled: false }]);
   assert.equal(h.subagentConfig().enabled, false);
-  assert.ok(h.text().includes('[ ] Disabled'), h.text());
+  assert.ok(h.text().includes('[ ] Deshabilitado'), h.text());
 });
 
 test('DASH-004 (S3, S4): the subagent count steps inside 2..20 and never drops stored entries', () => {
@@ -262,7 +270,7 @@ test('DASH-005 (S4): subagent pickers hide other slots and restore released mode
   h.component.handleInput('\r');
 
   const picker = h.text();
-  assert.ok(picker.includes('Assign subagent slot 2'), picker);
+  assert.ok(picker.includes('Asignar slot de subagente 2'), picker);
   for (const id of [piIds[0], piIds[2], piIds[3]]) {
     assert.ok(!picker.includes(id), 'models owned by other visible or hidden slots are absent: ' + picker);
   }
@@ -272,18 +280,18 @@ test('DASH-005 (S4): subagent pickers hide other slots and restore released mode
 
   // Keeping the current model allows opening effort menu and escaping without writing.
   h.component.handleInput('\r');
-  assert.ok(h.text().includes('Select reasoning effort: slot 2'), h.text());
+  assert.ok(h.text().includes('Elegir nivel de razonamiento: slot 2'), h.text());
   assert.equal(h.subagentPatches.length, 0);
   h.component.handleInput('\x1b'); // Escape back to model picker
-  assert.ok(h.text().includes('Assign subagent slot 2'), h.text());
+  assert.ok(h.text().includes('Asignar slot de subagente 2'), h.text());
   h.component.handleInput('\x1b'); // Escape closes picker
   assert.equal(h.subagentPatches.length, 0);
-  assert.ok(!h.text().includes('Assign subagent slot 2'));
+  assert.ok(!h.text().includes('Asignar slot de subagente 2'));
   selectRow(h, 'slot:2');
   h.component.handleInput('\r');
 
   // Clearing slot 2 drops only that entry and keeps the hidden order.
-  selectPickerEntry(h, 'clear (drop slot 2)');
+  selectPickerEntry(h, 'vaciar (quitar slot 2)');
   h.component.handleInput('\r');
   assert.deepEqual(h.subagentPatches.at(-1), { priorityCandidateIds: [piIds[0], piIds[2], piIds[3]] });
   assert.deepEqual(h.subagentConfig().priorityCandidateIds, [piIds[0], piIds[2], piIds[3]]);
@@ -299,7 +307,7 @@ test('DASH-005 (S4): subagent pickers hide other slots and restore released mode
   h.component.handleInput('\r');
   for (const character of 'grok') h.component.handleInput(character);
   h.component.handleInput('\r');
-  assert.ok(h.text().includes('Select reasoning effort: slot 2'), h.text());
+  assert.ok(h.text().includes('Elegir nivel de razonamiento: slot 2'), h.text());
   h.component.handleInput('\r');
   assert.deepEqual(h.subagentPatches.at(-1), { priorityCandidateIds: [piIds[0], piIds[4], piIds[3]] });
   assert.deepEqual(h.subagentConfig().priorityCandidateIds, [piIds[0], piIds[4], piIds[3]]);
@@ -327,8 +335,8 @@ test('DASH-019: d empties only the highlighted Subagents slot and leaves other p
   assert.deepEqual(h.subagentPatches, [{ priorityCandidateIds: [piIds[0], '', piIds[2], piIds[3]] }]);
   assert.deepEqual(h.subagentConfig().priorityCandidateIds, [piIds[0], '', piIds[2], piIds[3]]);
   assert.equal(h.component.selectedRowId, 'slot:2');
-  assert.match(h.text(), /2\. \(empty\)/);
-  assert.match(h.text(), /d clear/i);
+  assert.match(h.text(), /2\. \(vacío\)/);
+  assert.match(h.text(), /d vaciar/i);
   h.component.handleInput('d');
   assert.equal(h.subagentPatches.length, 1, 'an empty slot is a no-op');
   h.component.handleInput('\r');
@@ -340,7 +348,7 @@ test('DASH-019: d empties only the highlighted Subagents slot and leaves other p
   h.component.handleInput('\x7f');
   selectPickerEntry(h, piIds[4]);
   h.component.handleInput('\r');
-  assert.ok(h.text().includes('Select reasoning effort: slot 2'), h.text());
+  assert.ok(h.text().includes('Elegir nivel de razonamiento: slot 2'), h.text());
   h.component.handleInput('\r');
   assert.deepEqual(h.subagentConfig().priorityCandidateIds, [piIds[0], piIds[4], piIds[2], piIds[3]]);
   assert.deepEqual(h.orchestratorPatches, []);
@@ -356,7 +364,7 @@ test('DASH-020: assignment to a later empty slot pads gaps and d respects save f
   h.component.handleInput('\r');
   selectPickerEntry(h, piIds[1]);
   h.component.handleInput('\r');
-  assert.ok(h.text().includes('Select reasoning effort: slot 4'), h.text());
+  assert.ok(h.text().includes('Elegir nivel de razonamiento: slot 4'), h.text());
   h.component.handleInput('\r');
   assert.deepEqual(h.subagentConfig().priorityCandidateIds, [piIds[0], '', '', piIds[1]]);
   h.setBound(false);
@@ -392,7 +400,7 @@ test('DASH-006 (S5): the subagent picker lists only the provided Pi models and r
 
   for (let index = 0; index < 'gemini'.length; index++) h.component.handleInput('\x7f');
   for (const character of 'zzz') h.component.handleInput(character);
-  assert.match(h.text(), /no model matches "zzz"/, h.text());
+  assert.match(h.text(), /ningún modelo coincide con "zzz"/, h.text());
 });
 
 test('DASH-007 (assignment S2-S4): the Subagents view describes child assignment without claiming live telemetry', () => {
@@ -400,9 +408,9 @@ test('DASH-007 (assignment S2-S4): the Subagents view describes child assignment
   h.component.handleInput('\t');
   const text = h.text();
 
-  assert.match(text, /Configuration saved/, text);
+  assert.match(text, /Guardado/, text);
   assert.match(text, /least-loaded/i, text);
-  assert.match(text, /child assignment/i, text);
+  assert.match(text, /failover automático/i, text);
   assert.doesNotMatch(text, /not connected yet/, text);
 
   // It must not pretend a runtime is active for subagents.
@@ -434,16 +442,16 @@ test('DASH-008 (S6): subagent edits never change Orchestrator patches, rows or s
 test('DASH-009: mouse clicks on tab bar switch views and clicks below route to active child', () => {
   const h = harness();
 
-  // Tab bar occupies the top 3 rows. Clicking the Subagents tab switches to it.
-  const tabLine = h.render().findIndex(line => line.includes('[Subagents]'));
+  // Tab bar occupies the top 3 rows. Clicking the Subagentes tab switches to it.
+  const tabLine = h.render().findIndex(line => line.includes('Subagentes'));
   assert.ok(tabLine >= 0);
-  const subagentX = h.render()[tabLine].indexOf('[Subagents]') + 1;
+  const subagentX = h.render()[tabLine].indexOf('Subagentes') + 1;
   h.component.handleMouse(mouseClick(subagentX, tabLine));
   assert.equal(h.component.activeTab, 'subagents');
 
-  // The Orchestrator tab is clickable too.
-  const orchLine = h.render().findIndex(line => line.includes('[Orchestrator]'));
-  const orchX = h.render()[orchLine].indexOf('[Orchestrator]') + 1;
+  // The Orquestador tab is clickable too.
+  const orchLine = h.render().findIndex(line => line.includes('Orquestador'));
+  const orchX = h.render()[orchLine].indexOf('Orquestador') + 1;
   h.component.handleMouse(mouseClick(orchX, orchLine));
   assert.equal(h.component.activeTab, 'orchestrator');
 });
@@ -467,7 +475,7 @@ test('DASH-010: every line fits the width and clicking any column never throws o
     h.component.handleInput('\r');
     const picker = h.render(width);
     assert.ok(picker.every(line => visibleWidth(line) <= width), `picker w=${width}: ${JSON.stringify(picker)}`);
-    if (width >= 30) assert.ok(picker.some(line => line.includes('Assign subagent slot 1')), picker.join('\n'));
+    if (width >= 30) assert.ok(picker.some(line => line.includes('Asignar slot de subagente 1')), picker.join('\n'));
 
     for (let y = 0; y < picker.length; y++) {
       for (let x = 0; x < width + 3; x++) h.component.handleMouse(mouseClick(x, y));
@@ -491,7 +499,7 @@ test('DASH-011: an unbound dashboard closes without writing, including from an o
   picker.component.handleInput('\t');
   selectRow(picker, 'slot:1');
   picker.component.handleInput('\r');
-  assert.ok(picker.text().includes('Assign subagent slot 1'), picker.text());
+  assert.ok(picker.text().includes('Asignar slot de subagente 1'), picker.text());
   picker.setBound(false);
   picker.component.handleInput('a');
   assert.equal(picker.closedCount(), 1);
@@ -526,14 +534,14 @@ test('DASH-013 (S6): an invalid subagent config stays reachable, shows its error
   h.component.handleInput('\t');
   assert.equal(h.component.activeTab, 'subagents', 'the tab is still reachable');
   const text = h.text();
-  assert.match(text, /configuration error:/, text);
+  assert.match(text, /Error de configuración:/, text);
   assert.ok(text.includes('Malformed subagent configuration'), text);
-  assert.match(text, /edits are disabled/i, text);
-  assert.ok(!/Configuration saved/.test(text), 'nothing claims to be saved while the file is invalid');
+  assert.match(text, /edición deshabilitada/i, text);
+  assert.ok(!/Guardado/.test(text), 'nothing claims to be saved while the file is invalid');
 
   // Enter and mouse both refuse to edit.
   h.component.handleInput('\r');
-  const toggleY = h.render().findIndex(line => line.includes('Enabled') || line.includes('Disabled'));
+  const toggleY = h.render().findIndex(line => line.includes('Habilitado') || line.includes('Deshabilitado'));
   h.component.handleMouse(mouseClick(5, toggleY));
   assert.equal(h.subagentPatches.length, 0, 'no subagent write while the stored file is invalid');
   assert.deepEqual(h.errors, [], 'a refusal caused by invalid state is not an applied-write error');
@@ -550,15 +558,15 @@ test('DASH-014 (S6): mouse clicks step subagent count and assign slots through p
   h.component.handleInput('\t');
 
   const rows = h.render(100);
-  const yCount = rows.findIndex(line => line.includes('Model count'));
+  const yCount = rows.findIndex(line => line.includes('Cantidad de modelos'));
   const plusX = rows[yCount].indexOf('[+]');
   h.component.handleMouse(mouseClick(plusX, yCount));
   assert.deepEqual(h.subagentPatches, [{ modelCount: 4 }]);
 
   const after = h.render(100);
-  const ySlot2 = after.findIndex(line => line.includes('2. (empty)'));
+  const ySlot2 = after.findIndex(line => line.includes('2. (vacío)'));
   h.component.handleMouse(mouseClick(5, ySlot2));
-  assert.ok(h.text().includes('Assign subagent slot 2'));
+  assert.ok(h.text().includes('Asignar slot de subagente 2'));
 });
 
 test('DASH-015: uncertain effect confirmation is scoped to Orchestrator tab and never blocks Subagents', () => {
@@ -577,7 +585,7 @@ test('DASH-015: uncertain effect confirmation is scoped to Orchestrator tab and 
   // First Enter arms the confirmation, the second enables with acknowledgement.
   h.component.handleInput('\r');
   assert.deepEqual(h.orchestratorPatches, []);
-  assert.match(h.text(), /confirm enabling/, h.text());
+  assert.match(h.text(), /Presioná Enter de nuevo para confirmar/, h.text());
   h.component.handleInput('\r');
   assert.deepEqual(h.orchestratorPatches, [{ enabled: true }]);
   assert.deepEqual(h.enabledChanges, [[true, true]]);
@@ -585,10 +593,10 @@ test('DASH-015: uncertain effect confirmation is scoped to Orchestrator tab and 
   // Slot assignment through the picker is unchanged.
   selectRow(h, 'slot:1');
   h.component.handleInput('\r');
-  assert.ok(h.text().includes('Assign priority slot 1'), h.text());
+  assert.ok(h.text().includes('Asignar slot prioritario 1'), h.text());
   for (const character of 'second') h.component.handleInput(character);
   h.component.handleInput('\r');
-  assert.ok(h.text().includes('Select reasoning effort: slot 1'), h.text());
+  assert.ok(h.text().includes('Elegir nivel de razonamiento: slot 1'), h.text());
   h.component.handleInput('\r');
   assert.deepEqual(h.orchestratorPatches.at(-1), { priorityCandidateIds: [orchSecond] });
 });
@@ -606,10 +614,10 @@ test('DASH-016 (S6): the same model may be configured for Orchestrator and Subag
   h.component.handleInput('\r');
   const picker = h.text();
   assert.ok(picker.includes(shared), picker);
-  assert.ok(!picker.includes('(in slot'), 'an Orchestrator entry is not a Subagents duplicate: ' + picker);
+  assert.ok(!picker.includes('(en slot'), 'an Orchestrator entry is not a Subagents duplicate: ' + picker);
 
   h.component.handleInput('\r');
-  assert.ok(h.text().includes('Select reasoning effort: slot 1'), h.text());
+  assert.ok(h.text().includes('Elegir nivel de razonamiento: slot 1'), h.text());
   h.component.handleInput('\r');
   assert.deepEqual(h.subagentPatches.at(-1), { priorityCandidateIds: [shared] });
 });
@@ -623,14 +631,21 @@ test('DASH-017: a refused subagent write reports the failure and keeps the view 
   assert.equal(h.subagentPatches.length, 0);
   assert.equal(h.subagentConfig().enabled, false);
   assert.equal(h.errors.length, 1);
-  assert.match(h.errors[0], /subagent configuration|save/i);
+  assert.match(h.errors[0], /configuración|guardar/i);
   assert.equal(h.text(), before);
   assert.equal(h.closedCount(), 0);
 });
 
 test('DASH-018 (S6): getSubagentRowIds mirrors the rows the Subagents view exposes', () => {
-  assert.deepEqual([...getSubagentRowIds({ enabled: true, modelCount: 2, priorityCandidateIds: [] })], ['toggle', 'modelCount', 'slot:1', 'slot:2']);
-  assert.deepEqual([...getSubagentRowIds({ enabled: false, modelCount: 20, priorityCandidateIds: [] })].slice(0, 3), ['toggle', 'modelCount', 'slot:1']);
+  assert.deepEqual([...getSubagentRowIds({ enabled: true, modelCount: 2, priorityCandidateIds: [] })], ['toggle', 'target', 'modelCount', 'slot:1', 'slot:2']);
+  assert.deepEqual([...getSubagentRowIds({ enabled: false, modelCount: 20, priorityCandidateIds: [] })].slice(0, 4), ['toggle', 'target', 'modelCount', 'slot:1']);
+  assert.deepEqual([...getSubagentRowIds({ enabled: true, modelCount: 3, priorityCandidateIds: [] }, '00-discovery')], ['toggle', 'target', 'agentMode']);
+  assert.deepEqual([...getSubagentRowIds({
+    enabled: true,
+    modelCount: 5,
+    priorityCandidateIds: [],
+    subagentPools: { '00-discovery': { mode: 'custom', modelCount: 2, priorityCandidateIds: [] } },
+  }, '00-discovery')], ['toggle', 'target', 'agentMode', 'copyDefault', 'modelCount', 'slot:1', 'slot:2']);
 });
 
 test('DASH-021 (S1): Subagents effort menu opens after model selection and persists atomically', () => {
@@ -647,13 +662,13 @@ test('DASH-021 (S1): Subagents effort menu opens after model selection and persi
   h.component.handleInput('\t');
   selectRow(h, 'slot:1');
   h.component.handleInput('\r');
-  assert.ok(h.text().includes('Assign subagent slot 1'));
+  assert.ok(h.text().includes('Asignar slot de subagente 1'));
 
   // Select candidate in model picker
   h.component.handleInput('\r');
-  assert.ok(h.text().includes('Select reasoning effort: slot 1'));
+  assert.ok(h.text().includes('Elegir nivel de razonamiento: slot 1'));
   assert.ok(h.text().includes('openai/gpt-5-codex-effort'));
-  assert.ok(h.text().includes('Default'));
+  assert.ok(h.text().includes('Por defecto'));
   assert.ok(h.text().includes('low'));
   assert.ok(h.text().includes('medium'));
   assert.ok(h.text().includes('high'));
@@ -694,12 +709,12 @@ test('DASH-022 (S1): re-selecting same model in Subagents allows changing effort
   h.component.handleInput('\r');
   h.component.handleInput('\r'); // Select same model
 
-  assert.ok(h.text().includes('Select reasoning effort: slot 1'));
+  assert.ok(h.text().includes('Elegir nivel de razonamiento: slot 1'));
   assert.ok(h.render(100).some(line => line.startsWith('→ low')));
 
   // Switch to Default
   h.component.handleInput('\x1b[A');
-  assert.ok(h.render(100).some(line => line.startsWith('→ Default')));
+  assert.ok(h.render(100).some(line => line.startsWith('→ Por defecto')));
   h.component.handleInput('\r');
 
   assert.equal(h.subagentPatches.length, 1);
@@ -707,10 +722,10 @@ test('DASH-022 (S1): re-selecting same model in Subagents allows changing effort
     priorityCandidateIds: [piIds[0]],
     modelEfforts: { [piIds[1]]: 'high' },
   });
-  assert.ok(h.text().includes(`1. ${piIds[0]} [Default]`));
+  assert.ok(h.text().includes(`1. ${piIds[0]} [Por defecto]`));
 });
 
-test('DASH-023 (S1): Subagents slots display saved effort or Default', () => {
+test('DASH-023 (S1): Subagents slots display saved effort or Por defecto', () => {
   const h = harness({
     subagentConfig: {
       modelCount: 3,
@@ -722,8 +737,8 @@ test('DASH-023 (S1): Subagents slots display saved effort or Default', () => {
   h.component.handleInput('\t');
   const text = h.text();
   assert.ok(text.includes(`1. ${piIds[0]} [xhigh]`), text);
-  assert.ok(text.includes(`2. ${piIds[1]} [Default]`), text);
-  assert.ok(text.includes('3. (empty)'), text);
+  assert.ok(text.includes(`2. ${piIds[1]} [Por defecto]`), text);
+  assert.ok(text.includes('3. (vacío)'), text);
 });
 
 test('DASH-024 (S1): clearing Subagents slot via d preserves per-model overrides', () => {
@@ -750,16 +765,16 @@ test('DASH-025 (S1): Subagents effort menu respects escape, stale session and fa
   selectRow(h, 'slot:1');
   h.component.handleInput('\r');
   h.component.handleInput('\r'); // Enter effort menu
-  assert.ok(h.text().includes('Select reasoning effort: slot 1'));
+  assert.ok(h.text().includes('Elegir nivel de razonamiento: slot 1'));
 
   // Escape returns to model picker without save
   h.component.handleInput('\x1b');
-  assert.ok(h.text().includes('Assign subagent slot 1'));
+  assert.ok(h.text().includes('Asignar slot de subagente 1'));
   assert.equal(h.subagentPatches.length, 0);
 
   // Enter effort menu again
   h.component.handleInput('\r');
-  assert.ok(h.text().includes('Select reasoning effort: slot 1'));
+  assert.ok(h.text().includes('Elegir nivel de razonamiento: slot 1'));
 
   // Stale session closes without save
   h.setBound(false);
@@ -776,5 +791,62 @@ test('DASH-025 (S1): Subagents effort menu respects escape, stale session and fa
   failed.component.handleInput('\r');
   assert.equal(failed.subagentPatches.length, 0);
   assert.equal(failed.errors.length, 1);
-  assert.ok(failed.text().includes('Select reasoning effort: slot 1'));
+  assert.ok(failed.text().includes('Elegir nivel de razonamiento: slot 1'));
+});
+
+test('DASH-026: inline subagent selector switches between Default and discovered/undiscovered subagents with custom pools', () => {
+  const h = harness({
+    subagentNames: ['00-discovery', '01-planning'],
+    subagentConfig: {
+      enabled: true,
+      modelCount: 2,
+      priorityCandidateIds: [piIds[0]],
+      subagentPools: {
+        'legacy-agent': { mode: 'custom', modelCount: 2, priorityCandidateIds: [piIds[2]] },
+      },
+    },
+  });
+
+  h.component.handleInput('\t');
+  assert.match(h.text(), /Resumen de pools/);
+  assert.match(h.text(), /00-discovery \[hereda\]/);
+  selectRow(h, 'target');
+  assert.match(h.text(), /Subagente\s+◀ Default ▶/);
+
+  // Step right to 00-discovery (alphabetically first discovered)
+  h.component.handleInput('\x1b[C');
+  assert.match(h.text(), /Subagente\s+◀ 00-discovery ▶/);
+  assert.match(h.text(), /Modo de pool\s+◀ Heredar Default ▶/);
+
+  // Switch 00-discovery mode to Pool propio
+  selectRow(h, 'agentMode');
+  h.component.handleInput('\x1b[C');
+  assert.match(h.text(), /Modo de pool\s+◀ Pool propio ▶/);
+  assert.equal(h.subagentConfig().subagentPools?.['00-discovery']?.mode, 'custom');
+
+  // Copy slots from Default with 'c', then reorder with K/J
+  h.component.handleInput('c');
+  assert.deepEqual(h.subagentConfig().subagentPools?.['00-discovery']?.priorityCandidateIds, [piIds[0]]);
+
+  // Assign slot 1 on 00-discovery without changing Default
+  selectRow(h, 'slot:1');
+  h.component.handleInput('\r');
+  selectPickerEntry(h, piIds[1]);
+  h.component.handleInput('\r');
+  h.component.handleInput('\r');
+  assert.deepEqual(h.subagentConfig().subagentPools?.['00-discovery']?.priorityCandidateIds, [piIds[1]]);
+  assert.deepEqual(h.subagentConfig().priorityCandidateIds, [piIds[0]]);
+
+  // Step right to 01-planning and then legacy-agent (no descubierto)
+  selectRow(h, 'target');
+  h.component.handleInput('\x1b[C');
+  assert.match(h.text(), /01-planning/);
+  h.component.handleInput('\x1b[C');
+  assert.match(h.text(), /legacy-agent \(no descubierto\)/);
+  assert.ok(getSubagentRowIds(h.subagentConfig(), 'legacy-agent', ['00-discovery', '01-planning']).includes('removeEntry'));
+
+  // Clear saved undiscovered entry via removeEntry row
+  selectRow(h, 'removeEntry');
+  h.component.handleInput('\r');
+  assert.equal(h.subagentConfig().subagentPools?.['legacy-agent'], undefined);
 });

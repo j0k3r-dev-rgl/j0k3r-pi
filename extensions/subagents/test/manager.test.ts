@@ -103,6 +103,77 @@ describe('ask_orchestrator: background child questions answered live', () => {
   });
 });
 
+describe('nonblocking reports to the orchestrator', () => {
+  it('reports in the same running attempt and continues without a parent answer', async () => {
+    writeAgent('reporter');
+    const reports: any[] = [];
+    let sendReport: ((report: string) => void) | undefined;
+    let finish!: () => void;
+    let continued = false;
+    const manager = new SubagentManager(async (input) => {
+      sendReport = (input as any).reportOrchestrator;
+      expect(sendReport).toBeTypeOf('function');
+      sendReport!('Read the contract; implementing tests next.');
+      continued = true;
+      await new Promise<void>((resolve) => { finish = resolve; });
+      return { result: 'done' };
+    }, undefined, undefined, undefined, undefined, undefined, (task: any, report: string) => reports.push({ taskId: task.id, report }));
+    const run = await manager.run({ agent: 'reporter', task: 'work', mode: 'background' }, { cwd: tmp, sessionManager: { getSessionId: () => 'owner' } });
+    const id = run.task_ids[0]!;
+    await vi.waitFor(() => expect(continued).toBe(true));
+    expect(reports).toEqual([{ taskId: id, report: 'Read the contract; implementing tests next.' }]);
+    expect(manager.getTask(id)?.status).toBe('running');
+    expect(manager.getTask(id)?.last_activity).not.toContain('awaiting');
+    expect(manager.getTask(id)?.result).toBeUndefined();
+    finish();
+    await vi.waitFor(() => expect(manager.getTask(id)?.status).toBe('completed'));
+    expect(manager.getTask(id)?.result).toBe('done');
+    expect(() => sendReport!('late')).toThrow(/no longer running/i);
+    expect(reports).toHaveLength(1);
+  });
+
+  it('rejects cancelled and stale-attempt callbacks without leaking reports into a later attempt', async () => {
+    writeAgent('reporter');
+    fs.writeFileSync(path.join(tmp, '.pi', 'subagents.json'), JSON.stringify({ enable_continue: true }));
+    let report!: (text: string) => void;
+    const received = vi.fn();
+    let finish!: () => void;
+    const ctx = { cwd: tmp, sessionManager: { getSessionId: () => 'owner' } };
+    const nested = path.join(tmp, 'report-session.jsonl');
+    fs.writeFileSync(nested, '');
+    const manager = new SubagentManager(async (input) => {
+      input.onActivity?.({ message: 'session ready', nested_session_path: nested });
+      if (!report) report = input.reportOrchestrator!;
+      await new Promise<void>((resolve) => { finish = resolve; input.signal.addEventListener('abort', () => resolve(), { once: true }); });
+      return { result: 'done' };
+    }, undefined, undefined, undefined, undefined, undefined, received);
+    const run = await manager.run({ agent: 'reporter', task: 'work', mode: 'background' }, ctx);
+    const id = run.task_ids[0]!;
+    await vi.waitFor(() => expect(report).toBeTypeOf('function'));
+    manager.cancel(id, 'stop');
+    expect(() => report('late after cancel')).toThrow(/no longer running/);
+    await vi.waitFor(() => expect(manager.getTask(id)?.status).toBe('cancelled'));
+    await manager.continueTask({ task_id: id, prompt: 'resume', mode: 'background' }, ctx);
+    await vi.waitFor(() => expect(manager.getTask(id)?.status).toBe('running'));
+    expect(() => report('old attempt')).toThrow(/no longer running/);
+    expect(received).not.toHaveBeenCalled();
+    finish();
+    await vi.waitFor(() => expect(manager.getTask(id)?.status).toBe('completed'));
+  });
+
+  it('does not offer reports to task-mode runs or when no parent handler exists', async () => {
+    writeAgent('reporter');
+    const offered: unknown[] = [];
+    const runner: SubagentRunner = async (input) => { offered.push((input as any).reportOrchestrator); return { result: 'ok' }; };
+    const manager = new SubagentManager(runner, undefined, undefined, undefined, undefined, undefined, () => {});
+    await manager.run({ agent: 'reporter', task: 'work', mode: 'task' }, { cwd: tmp });
+    const noHandler = new SubagentManager(runner);
+    const run = await noHandler.run({ agent: 'reporter', task: 'work', mode: 'background' }, { cwd: tmp });
+    await vi.waitFor(() => expect(noHandler.getTask(run.task_ids[0]!)?.status).toBe('completed'));
+    expect(offered).toEqual([undefined, undefined]);
+  });
+});
+
 describe('per-agent effort from definition frontmatter', () => {
   it('uses definition effort over orchestrator effort', async () => {
     writeAgent('verifier', '# Agent\nhello', 'effort: medium\n');

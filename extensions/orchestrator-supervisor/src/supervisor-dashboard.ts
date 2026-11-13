@@ -8,77 +8,89 @@ import {
   type EffortMenuOption,
 } from './model-effort-panel.ts';
 import { PANEL_VISIBLE_ROWS, createSupervisorPanel, type SupervisorPanelOptions } from './supervisor-panel.ts';
-import { SUBAGENT_MODEL_COUNT_MAX, SUBAGENT_MODEL_COUNT_MIN, type SubagentConfig } from './subagent-config.ts';
+import {
+  getActiveSubagentCandidateIds,
+  SUBAGENT_MODEL_COUNT_DEFAULT,
+  SUBAGENT_MODEL_COUNT_MAX,
+  SUBAGENT_MODEL_COUNT_MIN,
+  type SubagentAgentPoolConfig,
+  type SubagentConfig,
+  type SubagentPoolMode,
+} from './subagent-config.ts';
 import type { ModelCandidate } from './types.ts';
 
-/**
- * Two-tab supervisor dialog.
- *
- * The existing `/supervisor` control panel is reused verbatim as the Orchestrator tab; it
- * keeps its own row ids, safety confirmation and picker behavior. The Subagents tab is an
- * independent configuration view for the subagent router: it toggles the feature, edits the
- * number of slots (2..20) and assigns a distinct model to each slot through the injected
- * `applyConfig`. Execution assignment lives in the child-side adapter, not in this view.
- *
- * Every terminal primitive arrives through `SupervisorPanelOptions.lib`, so this module
- * imports no host virtual module and `npm test` injects stand-ins.
- */
-
-/** The two top-level views. */
 export type DashboardTab = 'orchestrator' | 'subagents';
-
-/**
- * The subagent router configuration this view edits. Type-only re-export of the canonical
- * document in `./subagent-config.ts`, so the UI can never drift from the persisted shape.
- */
 export type { SubagentConfig };
 
-/** The allowed number of subagent routing slots, inclusive; sourced from the config contract. */
 export const SUBAGENT_MODEL_COUNT_RANGE: readonly [number, number] = [SUBAGENT_MODEL_COUNT_MIN, SUBAGENT_MODEL_COUNT_MAX];
+export const SUBAGENT_DEFAULT_TARGET = '__default__';
 
-export type SubagentPanelRowId = 'scope' | 'toggle' | 'modelCount' | `slot:${number}`;
+export type SubagentPanelRowId =
+  | 'scope'
+  | 'toggle'
+  | 'target'
+  | 'agentMode'
+  | 'copyDefault'
+  | 'removeEntry'
+  | 'modelCount'
+  | `slot:${number}`;
 
-/** Every selectable Subagents row, in the order ↑/↓ walks them. */
-export function getSubagentRowIds(config: SubagentConfig): readonly SubagentPanelRowId[] {
-  return [
-    'toggle',
-    'modelCount',
-    ...Array.from({ length: config.modelCount }, (_, index) => `slot:${index + 1}` as SubagentPanelRowId),
-  ];
+export function getSubagentRowIds(
+  config: SubagentConfig,
+  target: string = SUBAGENT_DEFAULT_TARGET,
+  discoveredNames?: readonly string[],
+): readonly SubagentPanelRowId[] {
+  if (target === SUBAGENT_DEFAULT_TARGET) {
+    return [
+      'toggle',
+      'target',
+      'modelCount',
+      ...Array.from({ length: config.modelCount }, (_, index) => `slot:${index + 1}` as SubagentPanelRowId),
+    ];
+  }
+  const entry = config.subagentPools?.[target];
+  const mode: SubagentPoolMode = entry?.mode ?? 'inherit';
+  const isUndiscovered = discoveredNames !== undefined && !discoveredNames.includes(target);
+  const rows: SubagentPanelRowId[] = ['toggle', 'target', 'agentMode'];
+  if (isUndiscovered && entry !== undefined) rows.push('removeEntry');
+  if (mode === 'custom') {
+    rows.push('copyDefault');
+    const count = entry?.modelCount ?? SUBAGENT_MODEL_COUNT_DEFAULT;
+    rows.push(
+      'modelCount',
+      ...Array.from({ length: count }, (_, index) => `slot:${index + 1}` as SubagentPanelRowId),
+    );
+  }
+  return rows;
 }
 
 export interface SupervisorDashboardOptions {
-  /** Options for the existing Orchestrator control panel, reused unchanged. */
   orchestrator: SupervisorPanelOptions;
   subagents: {
-    /** Current effective per-project subagent configuration. */
     config: SubagentConfig;
     scopeControl?: ConfigurationScopeControl<SubagentConfig>;
-    /** The host's Pi registry catalogue for the subagent slot pickers. */
     candidates: ModelCandidate[];
-    /** Set when the stored subagent document could not be trusted; then edits are refused. */
+    agentNames?: string[];
     error?: string;
-    /** Persists a partial change, returns the effective config. Throws when the lock refuses. */
     applyConfig: (patch: Partial<SubagentConfig>) => SubagentConfig;
   };
-  /** Whether to frame the dashboard with unicode box borders (modal mode). */
   framed?: boolean;
 }
 
 const LABEL_WIDTH = 22;
 const VALUE_WIDTH = 8;
-/** marker(2) + gap(1) + `[-]`(3) + gap(1) + value(8) + gap(1) + `[+]`(3). */
 const THRESHOLD_OVERHEAD = 19;
 const TAB_LABELS: ReadonlyArray<{ tab: DashboardTab; label: string }> = [
-  { tab: 'orchestrator', label: 'Orchestrator' },
-  { tab: 'subagents', label: 'Subagents' },
+  { tab: 'orchestrator', label: 'Orquestador' },
+  { tab: 'subagents', label: 'Subagentes' },
 ];
-/** rule + tabs + rule, so a child click is offset by three rows. */
 const TAB_BAR_LINE = 1;
 const TAB_BAR_HEIGHT = 3;
-const SUBAGENT_SAVED_NOTE = ' Configuration saved; least-loaded child assignment when enabled.';
-const SUBAGENT_DISABLED_NOTE = ' edits are disabled until the stored configuration is valid';
-const SUBAGENT_SAVE_ERROR = 'Could not save the subagent configuration; nothing changed.';
+const FRAME_PAD_X = 2;
+const FRAME_PAD_Y = 1;
+const SUBAGENT_SAVED_NOTE = ' Guardado · asignación least-loaded y failover automático entre modelos.';
+const SUBAGENT_DISABLED_NOTE = ' edición deshabilitada hasta que la configuración guardada sea válida';
+const SUBAGENT_SAVE_ERROR = 'No se pudo guardar la configuración de subagentes; no hubo cambios.';
 
 interface PanelHitRow {
   id: SubagentPanelRowId;
@@ -91,7 +103,6 @@ interface PickerEntry {
   kind: 'candidate' | 'clear';
   id?: string;
   label: string;
-  /** Set when another slot already owns this candidate; then it cannot be assigned. */
   usedInSlot?: number;
 }
 
@@ -113,6 +124,7 @@ interface SubagentPanelOptions {
   config: SubagentConfig;
   scopeControl?: ConfigurationScopeControl<SubagentConfig>;
   candidates: ModelCandidate[];
+  agentNames?: string[];
   error?: string;
   applyConfig: (patch: Partial<SubagentConfig>) => SubagentConfig;
   onError: (message: string) => void;
@@ -120,52 +132,107 @@ interface SubagentPanelOptions {
   isBound: () => boolean;
 }
 
-/**
- * Renders and drives the Subagents configuration view. Like the Orchestrator panel it
- * exposes `render`, `invalidate`, `dispose`, `handleInput`, `handleMouse`, a settable
- * `focused` and a read-only `selectedRowId`. A stored-document error makes the view
- * read-only: it still renders and its tab stays reachable, but no edit is applied.
- */
+const POOL_MODES: readonly SubagentPoolMode[] = ['inherit', 'custom', 'disabled'];
+const POOL_MODE_LABELS: Record<SubagentPoolMode, string> = {
+  inherit: 'Heredar Default',
+  custom: 'Pool propio',
+  disabled: 'Deshabilitado (orquestador)',
+};
+
+function safeFg(theme: any, color: string, text: string): string {
+  try { return theme?.fg ? theme.fg(color, text) : text; }
+  catch { return text; }
+}
+
+function cloneSubagentConfigState(source: SubagentConfig): SubagentConfig {
+  const clonedPools: Record<string, SubagentAgentPoolConfig> | undefined = source.subagentPools
+    ? Object.fromEntries(
+      Object.entries(source.subagentPools).map(([name, pool]) => [
+        name,
+        {
+          mode: pool.mode,
+          modelCount: pool.modelCount,
+          priorityCandidateIds: [...pool.priorityCandidateIds],
+          ...(pool.modelEfforts ? { modelEfforts: { ...pool.modelEfforts } } : {}),
+        },
+      ]),
+    )
+    : undefined;
+  return {
+    ...source,
+    priorityCandidateIds: [...(source.priorityCandidateIds ?? [])],
+    modelEfforts: source.modelEfforts ? { ...source.modelEfforts } : undefined,
+    subagentPools: clonedPools,
+  };
+}
+
 function createSubagentPanel(options: SubagentPanelOptions): any {
   const { lib, tui, theme, keybindings, candidates, applyConfig, onError, done, isBound } = options;
   const { truncateToWidth, visibleWidth } = lib;
   const clip = (text: string, width: number): string => truncateToWidth(text, width, '…');
   const style = {
-    accent: (text: string) => theme.fg('accent', text),
-    muted: (text: string) => theme.fg('muted', text),
-    dim: (text: string) => theme.fg('dim', text),
-    warning: (text: string) => theme.fg('warning', text),
-    bold: (text: string) => theme.bold(text),
+    accent: (text: string) => safeFg(theme, 'accent', text),
+    muted: (text: string) => safeFg(theme, 'muted', text),
+    dim: (text: string) => safeFg(theme, 'dim', text),
+    success: (text: string) => safeFg(theme, 'success', text),
+    warning: (text: string) => safeFg(theme, 'warning', text),
+    error: (text: string) => safeFg(theme, 'error', text),
+    bold: (text: string) => (theme?.bold ? theme.bold(text) : text),
   };
 
-  let config: SubagentConfig = {
-    ...options.config,
-    priorityCandidateIds: [...options.config.priorityCandidateIds],
-    modelEfforts: options.config.modelEfforts ? { ...options.config.modelEfforts } : undefined,
-  };
+  const discoveredNames = [...new Set(
+    (options.agentNames ?? []).map(name => name.trim().toLowerCase()).filter(Boolean),
+  )].sort();
+  const discoveredSet = new Set(discoveredNames);
+
+  let config: SubagentConfig = cloneSubagentConfigState(options.config);
+  let activeTarget: string = SUBAGENT_DEFAULT_TARGET;
   let selectedIndex = 0;
   let pickerState: PickerState | null = null;
   let lastWidth = 80;
   let focused = true;
   let error = options.error;
   const disabled = (): boolean => Boolean(error);
-  const scopeEditor = createConfigurationScopeEditor(options.scopeControl, (next, nextError) => {
-    config = {
-      ...next,
-      priorityCandidateIds: [...next.priorityCandidateIds],
-      modelEfforts: next.modelEfforts ? { ...next.modelEfforts } : undefined,
+
+  const targetIds = (): string[] => {
+    const configured = Object.keys(config.subagentPools ?? {});
+    const merged = [...new Set([...discoveredNames, ...configured])].sort();
+    return [SUBAGENT_DEFAULT_TARGET, ...merged];
+  };
+
+  const activePool = (): SubagentAgentPoolConfig => {
+    if (activeTarget === SUBAGENT_DEFAULT_TARGET) {
+      return {
+        mode: 'custom',
+        modelCount: config.modelCount,
+        priorityCandidateIds: config.priorityCandidateIds,
+        modelEfforts: config.modelEfforts,
+      };
+    }
+    return config.subagentPools?.[activeTarget] ?? {
+      mode: 'inherit',
+      modelCount: SUBAGENT_MODEL_COUNT_DEFAULT,
+      priorityCandidateIds: [],
     };
+  };
+
+  const scopeEditor = createConfigurationScopeEditor(options.scopeControl, (next, nextError) => {
+    config = cloneSubagentConfigState(next);
     error = nextError;
     pickerState = null;
+    if (!targetIds().includes(activeTarget)) activeTarget = SUBAGENT_DEFAULT_TARGET;
     selectedIndex = rowIds().indexOf('scope');
   }, onError);
-  const rowIds = (): readonly SubagentPanelRowId[] => scopeEditor.available ? ['scope', ...getSubagentRowIds(config)] : getSubagentRowIds(config);
+  const rowIds = (): readonly SubagentPanelRowId[] => {
+    const base = getSubagentRowIds(config, activeTarget, discoveredNames);
+    return scopeEditor.available ? ['scope', ...base] : base;
+  };
   selectedIndex = scopeEditor.available ? 1 : 0;
 
-  /** The visible slot editors: the active prefix of the saved list, padded with empties. */
   const slots = (): string[] => {
-    const padded = config.priorityCandidateIds.slice(0, config.modelCount);
-    while (padded.length < config.modelCount) padded.push('');
+    const pool = activePool();
+    const padded = pool.priorityCandidateIds.slice(0, pool.modelCount);
+    while (padded.length < pool.modelCount) padded.push('');
     return padded;
   };
 
@@ -182,16 +249,11 @@ function createSubagentPanel(options: SubagentPanelOptions): any {
 
   const marker = (isSelected: boolean): string => (isSelected ? '→ ' : '  ');
 
-  /** Persists through the injected host API and adopts the returned document. Never mocks. */
   const applyPatch = (patch: Partial<SubagentConfig>): boolean => {
     if (disabled()) return false;
     try {
       const next = applyConfig(patch);
-      config = {
-        ...next,
-        priorityCandidateIds: [...(next.priorityCandidateIds ?? [])],
-        modelEfforts: next.modelEfforts ? { ...next.modelEfforts } : undefined,
-      };
+      config = cloneSubagentConfigState(next);
       return true;
     } catch {
       onError(SUBAGENT_SAVE_ERROR);
@@ -199,17 +261,107 @@ function createSubagentPanel(options: SubagentPanelOptions): any {
     }
   };
 
+  const applyActivePoolPatch = (poolPatch: Partial<SubagentAgentPoolConfig>): boolean => {
+    if (activeTarget === SUBAGENT_DEFAULT_TARGET) {
+      const patch: Partial<SubagentConfig> = {};
+      if (poolPatch.modelCount !== undefined) patch.modelCount = poolPatch.modelCount;
+      if (poolPatch.priorityCandidateIds !== undefined) patch.priorityCandidateIds = poolPatch.priorityCandidateIds;
+      if ('modelEfforts' in poolPatch) patch.modelEfforts = poolPatch.modelEfforts;
+      return applyPatch(patch);
+    }
+    const current = activePool();
+    const updatedEntry: SubagentAgentPoolConfig = {
+      mode: poolPatch.mode ?? current.mode,
+      modelCount: poolPatch.modelCount ?? current.modelCount,
+      priorityCandidateIds: poolPatch.priorityCandidateIds ?? [...current.priorityCandidateIds],
+      ...('modelEfforts' in poolPatch
+        ? (poolPatch.modelEfforts ? { modelEfforts: poolPatch.modelEfforts } : {})
+        : (current.modelEfforts ? { modelEfforts: current.modelEfforts } : {})),
+    };
+    const nextPools = { ...(config.subagentPools ?? {}), [activeTarget]: updatedEntry };
+    return applyPatch({ subagentPools: nextPools });
+  };
+
   const flipEnabled = (): void => {
     if (applyPatch({ enabled: !config.enabled })) tui.requestRender?.();
   };
 
+  const stepTarget = (direction: 1 | -1): void => {
+    const ids = targetIds();
+    if (ids.length <= 1) return;
+    const currentIdx = Math.max(0, ids.indexOf(activeTarget));
+    const nextIdx = (currentIdx + direction + ids.length) % ids.length;
+    activeTarget = ids[nextIdx];
+    const nextRows = rowIds();
+    const targetPos = nextRows.indexOf('target');
+    selectedIndex = targetPos >= 0 ? targetPos : clampIndex(selectedIndex, nextRows.length);
+    tui.requestRender?.();
+  };
+
+  const stepAgentMode = (direction: 1 | -1): void => {
+    if (activeTarget === SUBAGENT_DEFAULT_TARGET) return;
+    const current = activePool().mode;
+    const currentIdx = Math.max(0, POOL_MODES.indexOf(current));
+    const nextMode = POOL_MODES[(currentIdx + direction + POOL_MODES.length) % POOL_MODES.length];
+    if (applyActivePoolPatch({ mode: nextMode })) {
+      selectedIndex = clampIndex(selectedIndex, rowIds().length);
+      tui.requestRender?.();
+    }
+  };
+
+  const copyFromDefault = (): void => {
+    if (activeTarget === SUBAGENT_DEFAULT_TARGET || activePool().mode !== 'custom') return;
+    const patch: Partial<SubagentAgentPoolConfig> = {
+      modelCount: config.modelCount,
+      priorityCandidateIds: [...config.priorityCandidateIds],
+      modelEfforts: config.modelEfforts ? { ...config.modelEfforts } : undefined,
+    };
+    if (applyActivePoolPatch(patch)) {
+      selectedIndex = clampIndex(selectedIndex, rowIds().length);
+      tui.requestRender?.();
+    }
+  };
+
+  const removeUndiscoveredEntry = (): void => {
+    if (activeTarget === SUBAGENT_DEFAULT_TARGET || discoveredSet.has(activeTarget)) return;
+    const nextPools = { ...(config.subagentPools ?? {}) };
+    delete nextPools[activeTarget];
+    if (applyPatch({ subagentPools: Object.keys(nextPools).length > 0 ? nextPools : undefined })) {
+      activeTarget = SUBAGENT_DEFAULT_TARGET;
+      const nextRows = rowIds();
+      const targetPos = nextRows.indexOf('target');
+      selectedIndex = targetPos >= 0 ? targetPos : 0;
+      tui.requestRender?.();
+    }
+  };
+
   const stepModelCount = (direction: 1 | -1): void => {
     const [min, max] = SUBAGENT_MODEL_COUNT_RANGE;
-    // Only the count changes: the full saved list is never truncated by a count step.
-    const next = Math.max(min, Math.min(max, config.modelCount + direction));
-    if (next === config.modelCount) return;
-    if (applyPatch({ modelCount: next })) {
+    const pool = activePool();
+    const next = Math.max(min, Math.min(max, pool.modelCount + direction));
+    if (next === pool.modelCount) return;
+    if (applyActivePoolPatch({ modelCount: next })) {
       selectedIndex = clampIndex(selectedIndex, rowIds().length);
+      tui.requestRender?.();
+    }
+  };
+
+  const moveSlot = (slotNumber: number, delta: -1 | 1): void => {
+    const pool = activePool();
+    const target = slotNumber + delta;
+    if (target < 1 || target > pool.modelCount) return;
+    const fromIdx = slotNumber - 1;
+    const toIdx = target - 1;
+    const next = [...pool.priorityCandidateIds];
+    const needed = Math.max(fromIdx, toIdx) + 1;
+    while (next.length < needed) next.push('');
+    const tmp = next[fromIdx];
+    next[fromIdx] = next[toIdx];
+    next[toIdx] = tmp;
+    while (next.length > 0 && next[next.length - 1] === '') next.pop();
+    if (applyActivePoolPatch({ priorityCandidateIds: next })) {
+      const nextPos = rowIds().indexOf(`slot:${target}` as SubagentPanelRowId);
+      if (nextPos >= 0) selectedIndex = nextPos;
       tui.requestRender?.();
     }
   };
@@ -227,24 +379,22 @@ function createSubagentPanel(options: SubagentPanelOptions): any {
     const entries: PickerEntry[] = [];
     if (picker) {
       const tokens = picker.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-      const full = config.priorityCandidateIds;
+      const full = activePool().priorityCandidateIds;
       for (const candidate of candidates) {
         const haystack = `${candidate.id} ${candidate.provider} ${candidate.prefix ?? ''}`.toLowerCase();
         if (!tokens.every(token => haystack.includes(token))) continue;
         const usedAt = full.indexOf(candidate.id);
         const usedInSlot = usedAt >= 0 && usedAt + 1 !== picker.targetSlot ? usedAt + 1 : undefined;
-        // Other slots own these models even when hidden by modelCount. Keep only
-        // unassigned models and the model already assigned to the slot being edited.
         if (usedInSlot !== undefined) continue;
         entries.push({
           kind: 'candidate',
           id: candidate.id,
           usedInSlot,
-          label: usedInSlot === undefined ? candidate.id : `${candidate.id} (in slot ${usedInSlot})`,
+          label: usedInSlot === undefined ? candidate.id : `${candidate.id} (en slot ${usedInSlot})`,
         });
       }
     }
-    entries.push({ kind: 'clear', label: picker ? `clear (drop slot ${picker.targetSlot})` : 'clear' });
+    entries.push({ kind: 'clear', label: picker ? `vaciar (quitar slot ${picker.targetSlot})` : 'vaciar' });
     return entries;
   };
 
@@ -255,18 +405,16 @@ function createSubagentPanel(options: SubagentPanelOptions): any {
     const entry = entries[clampIndex(picker.selected, entries.length)];
     if (!entry) return;
 
-    // Edit against the whole stored list: hidden entries keep their order and are never
-    // silently dropped, and a duplicate anywhere in it is refused.
-    const full = config.priorityCandidateIds;
+    const full = activePool().priorityCandidateIds;
     const index = picker.targetSlot - 1;
 
     if (entry.kind === 'clear') {
       if (index >= full.length) { closePicker(); tui.requestRender?.(); return; }
       const next = [...full.slice(0, index), ...full.slice(index + 1)];
-      if (applyPatch({ priorityCandidateIds: next })) { closePicker(); tui.requestRender?.(); }
+      if (applyActivePoolPatch({ priorityCandidateIds: next })) { closePicker(); tui.requestRender?.(); }
       return;
     }
-    if (entry.usedInSlot !== undefined) return; // Owned by another slot (visible or hidden): refuse.
+    if (entry.usedInSlot !== undefined) return;
 
     const candidate = candidates.find(c => c.id === entry.id) ?? {
       id: entry.id!,
@@ -277,7 +425,7 @@ function createSubagentPanel(options: SubagentPanelOptions): any {
       reasoningEffort: 'high' as const,
     };
 
-    const currentOverride = config.modelEfforts?.[candidate.id];
+    const currentOverride = activePool().modelEfforts?.[candidate.id];
     const { options: effortOptions, initialIndex } = resolveEffortMenuOptions(candidate, currentOverride);
 
     picker.stage = 'effort';
@@ -293,32 +441,32 @@ function createSubagentPanel(options: SubagentPanelOptions): any {
 
     const candidate = picker.selectedCandidate;
     const chosenEffort = picker.effortOptions[clampIndex(picker.effortSelected ?? 0, picker.effortOptions.length)];
-    const full = config.priorityCandidateIds;
+    const pool = activePool();
+    const full = pool.priorityCandidateIds;
     const index = picker.targetSlot - 1;
 
     const next = [...full];
     while (next.length <= index) next.push('');
     next[index] = candidate.id;
 
-    const effortPatch = computeEffortPatch(candidate.id, chosenEffort, config.modelEfforts);
-    const patch: Partial<SubagentConfig> = {
+    const effortPatch = computeEffortPatch(candidate.id, chosenEffort, pool.modelEfforts);
+    const patch: Partial<SubagentAgentPoolConfig> = {
       priorityCandidateIds: next,
-      ...effortPatch,
+      ...('modelEfforts' in effortPatch ? { modelEfforts: effortPatch.modelEfforts } : {}),
     };
 
-    if (applyPatch(patch)) {
+    if (applyActivePoolPatch(patch)) {
       closePicker();
       tui.requestRender?.();
     }
   };
 
-  /** Renders one `[-] value [+]` row and registers its click zones. */
-  const renderStepper = (width: number, push: (text: string) => number, hits: PanelHitRow[]): void => {
+  const renderStepper = (width: number, push: (text: string) => number, hits: PanelHitRow[], count: number): void => {
     const labelWidth = Math.max(4, Math.min(LABEL_WIDTH, width - THRESHOLD_OVERHEAD));
     const isSelected = rowIds()[selectedIndex] === 'modelCount';
-    const label = clip('Model count', labelWidth);
+    const label = clip('Cantidad de modelos', labelWidth);
     const paddedLabel = label + ' '.repeat(Math.max(0, labelWidth - visibleWidth(label)));
-    const value = String(config.modelCount);
+    const value = String(count);
     const paddedValue = value + ' '.repeat(Math.max(0, VALUE_WIDTH - visibleWidth(value)));
     const rawLine = `${marker(isSelected)}${paddedLabel} [-] ${paddedValue} [+]`;
     const limit = visibleWidth(rawLine) > width ? width - 1 : width;
@@ -332,6 +480,55 @@ function createSubagentPanel(options: SubagentPanelOptions): any {
     hits.push(hit);
   };
 
+  const renderCycleRow = (
+    id: 'target' | 'agentMode',
+    rowLabel: string,
+    valueText: string,
+    width: number,
+    push: (text: string) => number,
+    hits: PanelHitRow[],
+  ): void => {
+    const labelWidth = Math.max(4, Math.min(14, width - 10));
+    const isSelected = rowIds()[selectedIndex] === id;
+    const label = clip(rowLabel, labelWidth);
+    const paddedLabel = label + ' '.repeat(Math.max(0, labelWidth - visibleWidth(label)));
+    const prefix = `${marker(isSelected)}${paddedLabel} `;
+    const leftArrow = '◀';
+    const rightArrow = '▶';
+    const rawLine = `${prefix}${leftArrow} ${valueText} ${rightArrow}`;
+    const limit = visibleWidth(rawLine) > width ? width - 1 : width;
+    const y = push(isSelected ? style.accent(rawLine) : rawLine);
+
+    const minusStart = visibleWidth(prefix);
+    const plusStart = visibleWidth(`${prefix}${leftArrow} ${valueText} `);
+    const hit: PanelHitRow = { id, y };
+    if (minusStart + 1 <= limit) hit.minus = [minusStart, minusStart + 1];
+    if (plusStart + 1 <= limit) hit.plus = [plusStart, plusStart + 1];
+    hits.push(hit);
+  };
+
+  const formatTargetDisplay = (target: string): string => {
+    if (target === SUBAGENT_DEFAULT_TARGET) return 'Default';
+    const entry = config.subagentPools?.[target];
+    const modeTag = entry?.mode === 'custom' ? ' [propio]' : entry?.mode === 'disabled' ? ' [off]' : '';
+    const orphanSuffix = !discoveredSet.has(target) ? ' (no descubierto)' : '';
+    return `${target}${orphanSuffix}${modeTag}`;
+  };
+
+  const summaryItems = (): string[] => {
+    const allAgents = targetIds().filter(id => id !== SUBAGENT_DEFAULT_TARGET);
+    if (allAgents.length === 0) return [];
+    return allAgents.map((name) => {
+      const entry = config.subagentPools?.[name];
+      if (entry?.mode === 'custom') {
+        const count = getActiveSubagentCandidateIds(entry).length;
+        return `${name} [propio:${count}]`;
+      }
+      if (entry?.mode === 'disabled') return `${name} [off]`;
+      return `${name} [hereda]`;
+    });
+  };
+
   const renderRows = (width: number): { lines: string[]; hits: PanelHitRow[] } => {
     const available = Math.max(1, width);
     const lines: string[] = [];
@@ -343,44 +540,84 @@ function createSubagentPanel(options: SubagentPanelOptions): any {
     };
     const rule = (): void => { push(style.dim('─'.repeat(available))); };
 
-    rule();
-    push(style.bold(style.accent(' Subagent router configuration')));
+    push(style.bold(style.accent(' ◆ Configuración de Subagentes')));
     rule();
 
     if (scopeEditor.available) {
       const [source, path] = scopeEditor.lines(rowIds()[selectedIndex] === 'scope');
       hits.push({ id: 'scope', y: push(source) });
-      push(path);
+      push(style.dim(path));
     }
     if (disabled()) {
-      push(style.warning(` configuration error: ${error ?? ''}`));
+      push(style.error(` ⚠ Error de configuración: ${error ?? ''}`));
       push(style.dim(SUBAGENT_DISABLED_NOTE));
     }
 
-    push(style.muted(' Switches'));
+    const items = summaryItems();
+    if (items.length > 0) {
+      push(style.muted(' ◆ Resumen de pools'));
+      const defaultCount = getActiveSubagentCandidateIds(config).length;
+      push(style.dim(`   Default [${defaultCount} modelo(s)] · ${items.join(' · ')}`));
+      push('');
+    }
+
+    push(style.muted(' ◆ Interruptores'));
     const toggleId: SubagentPanelRowId = 'toggle';
+    const isToggleSel = rowIds()[selectedIndex] === toggleId;
+    const toggleText = `${marker(isToggleSel)}[${config.enabled ? 'x' : ' '}] ${config.enabled ? 'Habilitado' : 'Deshabilitado'}`;
     hits.push({
       id: toggleId,
-      y: push(`${marker(rowIds()[selectedIndex] === toggleId)}[${config.enabled ? 'x' : ' '}] ${config.enabled ? 'Enabled' : 'Disabled'}`),
+      y: push(isToggleSel ? style.accent(toggleText) : (config.enabled ? style.success(toggleText) : style.dim(toggleText))),
     });
 
     push('');
-    push(style.muted(` Model slots (1-${config.modelCount})`));
-    renderStepper(available, push, hits);
-    const current = slots();
-    for (let slot = 1; slot <= config.modelCount; slot++) {
-      const id: SubagentPanelRowId = `slot:${slot}`;
-      const value = current[slot - 1];
-      const slotText = formatSlotLabel(slot, value, config.modelEfforts);
-      hits.push({ id, y: push(`${marker(rowIds()[selectedIndex] === id)}${slotText}`) });
+    const pool = activePool();
+    const isDefault = activeTarget === SUBAGENT_DEFAULT_TARGET;
+    const isUndiscovered = !isDefault && !discoveredSet.has(activeTarget);
+    push(style.muted(` ◆ Pool de modelos (${isDefault ? 'Default' : activeTarget})`));
+    renderCycleRow('target', 'Subagente', formatTargetDisplay(activeTarget), available, push, hits);
+
+    if (!isDefault) {
+      renderCycleRow('agentMode', 'Modo de pool', POOL_MODE_LABELS[pool.mode], available, push, hits);
+      if (isUndiscovered && config.subagentPools?.[activeTarget] !== undefined) {
+        const isRemSelected = rowIds()[selectedIndex] === 'removeEntry';
+        const remLine = `${marker(isRemSelected)}[Limpiar entrada guardada]`;
+        hits.push({ id: 'removeEntry', y: push(isRemSelected ? style.accent(remLine) : style.warning(remLine)) });
+      }
+    }
+
+    if (isDefault || pool.mode === 'custom') {
+      if (!isDefault) {
+        const isCopySel = rowIds()[selectedIndex] === 'copyDefault';
+        const copyLine = `${marker(isCopySel)}[Copiar slots desde Default] (c)`;
+        hits.push({ id: 'copyDefault', y: push(isCopySel ? style.accent(copyLine) : style.dim(copyLine)) });
+      }
+      push(style.muted(` ◆ Slots de modelos (1-${pool.modelCount})`));
+      renderStepper(available, push, hits, pool.modelCount);
+      const current = slots();
+      for (let slot = 1; slot <= pool.modelCount; slot++) {
+        const id: SubagentPanelRowId = `slot:${slot}`;
+        const value = current[slot - 1];
+        const isSel = rowIds()[selectedIndex] === id;
+        const slotText = `${marker(isSel)}${formatSlotLabel(slot, value, pool.modelEfforts)}`;
+        hits.push({ id, y: push(isSel ? style.accent(slotText) : (value ? slotText : style.dim(slotText))) });
+      }
+    } else if (pool.mode === 'inherit') {
+      const activeDefault = getActiveSubagentCandidateIds(config);
+      push(style.dim(`   Hereda el pool Default (${config.modelCount} slots, ${activeDefault.length} asignado(s))`));
+      for (let slot = 1; slot <= config.modelCount; slot++) {
+        const value = config.priorityCandidateIds[slot - 1] ?? '';
+        push(style.dim(`   ${formatSlotLabel(slot, value, config.modelEfforts)}`));
+      }
+    } else {
+      push(style.dim('   Asignación deshabilitada; este subagente usa el modelo del orquestador.'));
     }
 
     if (!disabled()) push(style.dim(SUBAGENT_SAVED_NOTE));
 
     push('');
     rule();
-    push(style.dim(' ↑↓ move · ←→ adjust · enter select · d clear slot · tab switch panel · esc close'));
-    rule();
+    push(style.dim(' ↑↓/jk mover · ←→/hl ajustar · K/J reordenar · d vaciar · c copiar Default · tab cambiar · esc cerrar'));
 
     return { lines, hits };
   };
@@ -397,14 +634,14 @@ function createSubagentPanel(options: SubagentPanelOptions): any {
     const picker = pickerState as PickerState;
 
     rule();
-    push(style.bold(style.accent(` Assign subagent slot ${picker.targetSlot}`)));
+    push(style.bold(style.accent(` Asignar slot de subagente ${picker.targetSlot}`)));
     rule();
-    push(` > ${picker.query || style.dim('filter by provider or model…')}`);
+    push(` > ${picker.query || style.dim('filtrar por proveedor o modelo…')}`);
     rule();
 
     const entries = pickerEntries();
     if (!entries.some(entry => entry.kind === 'candidate')) {
-      push(style.dim(picker.query ? ` no model matches "${picker.query}"` : ' no models available'));
+      push(style.dim(picker.query ? ` ningún modelo coincide con "${picker.query}"` : ' no hay modelos disponibles'));
     }
     const selected = clampIndex(picker.selected, entries.length);
     const start = windowStart(entries.length, selected, PANEL_VISIBLE_ROWS);
@@ -413,11 +650,11 @@ function createSubagentPanel(options: SubagentPanelOptions): any {
       push(`${marker(index === selected)}${entries[index].label}`);
     }
     if (entries.length > PANEL_VISIBLE_ROWS) {
-      push(style.dim(` ${selected + 1}/${entries.length} · pgUp/pgDn scroll`));
+      push(style.dim(` ${selected + 1}/${entries.length} · pgUp/pgDn desplazar`));
     }
 
     rule();
-    push(style.dim(' type to filter · ↑↓ move · enter assign · esc back'));
+    push(style.dim(' escribir filtrar · ↑↓ mover · enter asignar · esc volver'));
     rule();
     return { lines, hits: [] };
   };
@@ -444,28 +681,51 @@ function createSubagentPanel(options: SubagentPanelOptions): any {
   const handleRowInput = (data: string): void => {
     const rows = rowIds();
     const id = rows[selectedIndex];
-    if (id === 'scope' && (keybindings.matches(data, 'tui.select.confirm') || keybindings.matches(data, 'tui.editor.cursorLeft') || keybindings.matches(data, 'tui.editor.cursorRight'))) {
-      scopeEditor.select(keybindings.matches(data, 'tui.editor.cursorLeft') ? 'project' : keybindings.matches(data, 'tui.editor.cursorRight') ? 'global' : undefined);
+    if (id === 'scope' && (keybindings.matches(data, 'tui.select.confirm') || data === ' ' || keybindings.matches(data, 'tui.editor.cursorLeft') || keybindings.matches(data, 'tui.editor.cursorRight') || data === 'h' || data === 'l')) {
+      const goLeft = keybindings.matches(data, 'tui.editor.cursorLeft') || data === 'h';
+      const goRight = keybindings.matches(data, 'tui.editor.cursorRight') || data === 'l';
+      scopeEditor.select(goLeft ? 'project' : goRight ? 'global' : undefined);
       tui.requestRender?.(); return;
+    }
+    if ((data === 'K' || data === '\x1b[1;2A') && id?.startsWith('slot:')) {
+      moveSlot(Number(id.slice('slot:'.length)), -1);
+      return;
+    }
+    if ((data === 'J' || data === '\x1b[1;2B') && id?.startsWith('slot:')) {
+      moveSlot(Number(id.slice('slot:'.length)), 1);
+      return;
+    }
+    if (data === 'c' && activeTarget !== SUBAGENT_DEFAULT_TARGET && activePool().mode === 'custom') {
+      copyFromDefault();
+      return;
     }
     if (data === 'd' && id?.startsWith('slot:')) {
       const index = Number(id.slice('slot:'.length)) - 1;
-      if (!config.priorityCandidateIds[index]) return;
-      const next = [...config.priorityCandidateIds];
+      const full = activePool().priorityCandidateIds;
+      if (!full[index]) return;
+      const next = [...full];
       next[index] = '';
-      if (applyPatch({ priorityCandidateIds: next })) tui.requestRender?.();
+      if (applyActivePoolPatch({ priorityCandidateIds: next })) tui.requestRender?.();
       return;
     }
-    if (keybindings.matches(data, 'tui.select.up')) selectedIndex = clampIndex(selectedIndex - 1, rows.length);
-    else if (keybindings.matches(data, 'tui.select.down')) selectedIndex = clampIndex(selectedIndex + 1, rows.length);
+    if (keybindings.matches(data, 'tui.select.up') || data === 'k') selectedIndex = clampIndex(selectedIndex - 1, rows.length);
+    else if (keybindings.matches(data, 'tui.select.down') || data === 'j') selectedIndex = clampIndex(selectedIndex + 1, rows.length);
     else if (keybindings.matches(data, 'tui.select.pageUp')) selectedIndex = clampIndex(selectedIndex - PANEL_VISIBLE_ROWS, rows.length);
     else if (keybindings.matches(data, 'tui.select.pageDown')) selectedIndex = clampIndex(selectedIndex + PANEL_VISIBLE_ROWS, rows.length);
-    else if (keybindings.matches(data, 'tui.select.confirm')) {
+    else if (keybindings.matches(data, 'tui.select.confirm') || data === ' ') {
+      if (id === 'target') { stepTarget(1); return; }
       if (disabled()) return;
       if (id === 'toggle') { flipEnabled(); return; }
+      if (id === 'agentMode') { stepAgentMode(1); return; }
+      if (id === 'copyDefault') { copyFromDefault(); return; }
+      if (id === 'removeEntry') { removeUndiscoveredEntry(); return; }
       if (id && id.startsWith('slot:')) { openPicker(Number(id.slice('slot:'.length))); return; }
-    } else if (id === 'modelCount' && keybindings.matches(data, 'tui.editor.cursorLeft')) stepModelCount(-1);
-    else if (id === 'modelCount' && keybindings.matches(data, 'tui.editor.cursorRight')) stepModelCount(1);
+    } else if (id === 'target' && (keybindings.matches(data, 'tui.editor.cursorLeft') || data === 'h')) stepTarget(-1);
+    else if (id === 'target' && (keybindings.matches(data, 'tui.editor.cursorRight') || data === 'l')) stepTarget(1);
+    else if (id === 'agentMode' && (keybindings.matches(data, 'tui.editor.cursorLeft') || data === 'h')) stepAgentMode(-1);
+    else if (id === 'agentMode' && (keybindings.matches(data, 'tui.editor.cursorRight') || data === 'l')) stepAgentMode(1);
+    else if (id === 'modelCount' && (keybindings.matches(data, 'tui.editor.cursorLeft') || data === 'h')) stepModelCount(-1);
+    else if (id === 'modelCount' && (keybindings.matches(data, 'tui.editor.cursorRight') || data === 'l')) stepModelCount(1);
     tui.requestRender?.();
   };
 
@@ -487,8 +747,8 @@ function createSubagentPanel(options: SubagentPanelOptions): any {
         return;
       }
       const total = picker.effortOptions?.length ?? 1;
-      if (keybindings.matches(data, 'tui.select.up')) picker.effortSelected = clampIndex((picker.effortSelected ?? 0) - 1, total);
-      else if (keybindings.matches(data, 'tui.select.down')) picker.effortSelected = clampIndex((picker.effortSelected ?? 0) + 1, total);
+      if (keybindings.matches(data, 'tui.select.up') || data === 'k') picker.effortSelected = clampIndex((picker.effortSelected ?? 0) - 1, total);
+      else if (keybindings.matches(data, 'tui.select.down') || data === 'j') picker.effortSelected = clampIndex((picker.effortSelected ?? 0) + 1, total);
       else if (keybindings.matches(data, 'tui.select.pageUp')) picker.effortSelected = clampIndex((picker.effortSelected ?? 0) - PANEL_VISIBLE_ROWS, total);
       else if (keybindings.matches(data, 'tui.select.pageDown')) picker.effortSelected = clampIndex((picker.effortSelected ?? 0) + PANEL_VISIBLE_ROWS, total);
       tui.requestRender?.();
@@ -532,16 +792,44 @@ function createSubagentPanel(options: SubagentPanelOptions): any {
 
   const handleMouse = (event: any): void => {
     if (!isBound()) { done(); return; }
-    if (pickerState) return; // The picker is keyboard-driven.
-    if (!event || event.type !== 'press' || event.button !== 'left') return;
+    if (!event) return;
+    if (event.type === 'wheel' && event.wheelDelta) {
+      const delta = event.wheelDelta > 0 ? 1 : -1;
+      if (pickerState) {
+        if (pickerState.stage === 'effort') {
+          const total = pickerState.effortOptions?.length ?? 1;
+          pickerState.effortSelected = clampIndex((pickerState.effortSelected ?? 0) + delta, total);
+        } else {
+          pickerState.selected = clampIndex(pickerState.selected + delta, pickerEntries().length);
+        }
+      } else {
+        selectedIndex = clampIndex(selectedIndex + delta, rowIds().length);
+      }
+      tui.requestRender?.();
+      return;
+    }
+    if (pickerState) return;
+    if (event.type !== 'press' || event.button !== 'left') return;
     if (!Number.isFinite(event.x) || !Number.isFinite(event.y)) return;
 
     const hit = build(lastWidth).hits.find(row => row.y === event.y);
     if (!hit) return;
     selectedIndex = Math.max(0, rowIds().indexOf(hit.id));
     if (hit.id === 'scope') { scopeEditor.select(); tui.requestRender?.(); return; }
+    if (hit.id === 'target') {
+      if (hit.minus && event.x >= hit.minus[0] && event.x < hit.minus[1]) { stepTarget(-1); return; }
+      stepTarget(1);
+      return;
+    }
     if (disabled()) return;
     if (hit.id === 'toggle') { flipEnabled(); return; }
+    if (hit.id === 'agentMode') {
+      if (hit.minus && event.x >= hit.minus[0] && event.x < hit.minus[1]) { stepAgentMode(-1); return; }
+      stepAgentMode(1);
+      return;
+    }
+    if (hit.id === 'copyDefault') { copyFromDefault(); return; }
+    if (hit.id === 'removeEntry') { removeUndiscoveredEntry(); return; }
     if (hit.id.startsWith('slot:')) { openPicker(Number(hit.id.slice('slot:'.length))); return; }
     if (hit.id === 'modelCount') {
       if (hit.minus && event.x >= hit.minus[0] && event.x < hit.minus[1]) { stepModelCount(-1); return; }
@@ -575,25 +863,19 @@ function createSubagentPanel(options: SubagentPanelOptions): any {
   return component;
 }
 
-/**
- * The two-tab supervisor dialog. The Orchestrator tab is the existing control panel,
- * reused unchanged; the Subagents tab is the independent subagent configuration view.
- *
- * The returned component exposes the host component surface plus `activeTab`,
- * `selectedRowId` (delegated to the active child) and a read-only `panels` hook used by
- * tests to check focus propagation.
- */
 export function createSupervisorDashboard(options: SupervisorDashboardOptions): any {
   const { orchestrator, subagents, framed } = options;
   const { lib, tui, theme, keybindings, isBound, onError, done } = orchestrator;
   const { truncateToWidth, visibleWidth } = lib;
   const clip = (text: string, width: number): string => truncateToWidth(text, width, '…');
   const style = {
-    accent: (text: string) => theme.fg('accent', text),
-    muted: (text: string) => theme.fg('muted', text),
-    dim: (text: string) => theme.fg('dim', text),
-    border: (text: string) => (theme.fg ? theme.fg('border', text) : text),
-    bold: (text: string) => theme.bold(text),
+    accent: (text: string) => safeFg(theme, 'accent', text),
+    muted: (text: string) => safeFg(theme, 'muted', text),
+    dim: (text: string) => safeFg(theme, 'dim', text),
+    border: (text: string) => safeFg(theme, 'border', text),
+    borderMuted: (text: string) => safeFg(theme, 'borderMuted', text),
+    error: (text: string) => safeFg(theme, 'error', text),
+    bold: (text: string) => (theme?.bold ? theme.bold(text) : text),
   };
 
   const orchestratorPanel = createSupervisorPanel(orchestrator);
@@ -605,6 +887,7 @@ export function createSupervisorDashboard(options: SupervisorDashboardOptions): 
     config: subagents.config,
     scopeControl: subagents.scopeControl,
     candidates: subagents.candidates,
+    agentNames: subagents.agentNames,
     error: subagents.error,
     applyConfig: subagents.applyConfig,
     onError,
@@ -615,11 +898,12 @@ export function createSupervisorDashboard(options: SupervisorDashboardOptions): 
   let activeTab: DashboardTab = 'orchestrator';
   let focused = true;
   let closed = false;
+  let lastWidth = 80;
   let tabHits: Array<{ tab: DashboardTab; y: number; start: number; end: number }> = [];
+  let closeHit: { x1: number; x2: number; y: number } | null = null;
 
   const activePanel = (): any => (activeTab === 'subagents' ? subagentPanel : orchestratorPanel);
 
-  /** Only the active child owns focus, so IME and focus-sensitive children behave. */
   const applyFocus = (): void => {
     orchestratorPanel.focused = focused && activeTab === 'orchestrator';
     subagentPanel.focused = focused && activeTab === 'subagents';
@@ -639,7 +923,6 @@ export function createSupervisorDashboard(options: SupervisorDashboardOptions): 
     tui.requestRender?.();
   };
 
-  /** The tab bar: a rule, the clickable labels, a rule. Records its own hit map. */
   const renderTabBar = (width: number): string[] => {
     const available = Math.max(1, width);
     const lines: string[] = [clip(style.dim('─'.repeat(available)), available)];
@@ -647,9 +930,9 @@ export function createSupervisorDashboard(options: SupervisorDashboardOptions): 
     let plain = '';
     const spans: Array<{ tab: DashboardTab; start: number; end: number }> = [];
     for (const entry of TAB_LABELS) {
-      if (plain.length > 0) plain += ' ';
+      if (plain.length > 0) plain += '  ';
       const start = plain.length;
-      plain += `[${entry.label}]`;
+      plain += entry.tab === activeTab ? `[ ◆ ${entry.label} ]` : `  ◇ ${entry.label}  `;
       spans.push({ tab: entry.tab, start, end: plain.length });
     }
     let styled = '';
@@ -657,12 +940,11 @@ export function createSupervisorDashboard(options: SupervisorDashboardOptions): 
     for (const span of spans) {
       styled += plain.slice(cursor, span.start);
       const raw = plain.slice(span.start, span.end);
-      styled += span.tab === activeTab ? style.accent(style.bold(raw)) : style.muted(raw);
+      styled += span.tab === activeTab ? style.bold(style.accent(raw)) : style.muted(raw);
       cursor = span.end;
     }
     styled += plain.slice(cursor);
 
-    // A clipped line ends in an ellipsis column: never register a zone that includes it.
     const limit = visibleWidth(plain) > available ? available - 1 : available;
     tabHits = spans
       .filter(span => span.start < limit)
@@ -678,24 +960,62 @@ export function createSupervisorDashboard(options: SupervisorDashboardOptions): 
 
   const component: any = {
     render: (width: number): string[] => {
-      if (framed && width >= 10) {
-        const innerW = Math.max(1, width - 2);
+      lastWidth = width;
+      closeHit = null;
+
+      if (framed && width >= 20) {
+        const innerW = Math.max(4, width - 2 - FRAME_PAD_X * 2);
         const innerLines = renderTabBar(innerW);
         innerLines.push(...activePanel().render(innerW));
 
         const pad = (s: string, len: number) => {
-          const vis = visibleWidth(s);
-          return s + ' '.repeat(Math.max(0, len - vis));
+          const clipped = clip(s, len);
+          const vis = visibleWidth(clipped);
+          return clipped + ' '.repeat(Math.max(0, len - vis));
+        };
+        const gutter = ' '.repeat(FRAME_PAD_X);
+        const border = style.border('│');
+        const blank = `${border}${' '.repeat(width - 2)}${border}`;
+        const row = (content: string) => `${border}${gutter}${pad(content, innerW)}${gutter}${border}`;
+
+        const titlePlain = '◆ Supervisor';
+        const titleStyled = style.bold(style.accent(titlePlain));
+        const closePlain = '[✕]';
+        const closeStyled = style.error(closePlain);
+        const prefix = '╭─ ';
+        const suffix = ' ─╮';
+        const availHeader = width - visibleWidth(prefix) - visibleWidth(suffix) - visibleWidth(closePlain) - 2;
+        const fillDashes = Math.max(1, availHeader - visibleWidth(titlePlain));
+        const closeX1 = width - visibleWidth(suffix) - visibleWidth(closePlain);
+        closeHit = { x1: closeX1, x2: closeX1 + visibleWidth(closePlain), y: 0 };
+
+        const top = `${style.border(prefix)}${titleStyled} ${style.borderMuted('─'.repeat(fillDashes))} ${closeStyled}${style.border(suffix)}`;
+        const bottom = style.border(`╰${'─'.repeat(width - 2)}╯`);
+
+        return [
+          clip(top, width),
+          ...Array.from({ length: FRAME_PAD_Y }, () => blank),
+          ...innerLines.map(row),
+          ...Array.from({ length: FRAME_PAD_Y }, () => blank),
+          clip(bottom, width),
+        ];
+      }
+
+      if (framed && width >= 10) {
+        const innerW = Math.max(1, width - 2);
+        const innerLines = renderTabBar(innerW);
+        innerLines.push(...activePanel().render(innerW));
+        const pad = (s: string, len: number) => {
+          const clipped = clip(s, len);
+          const vis = visibleWidth(clipped);
+          return clipped + ' '.repeat(Math.max(0, len - vis));
         };
         const row = (content: string) => style.border('│') + pad(content, innerW) + style.border('│');
-
-        const out: string[] = [];
-        out.push(style.border(`┌${'─'.repeat(innerW)}┐`));
-        for (const line of innerLines) {
-          out.push(row(line));
-        }
-        out.push(style.border(`└${'─'.repeat(innerW)}┘`));
-        return out;
+        return [
+          style.border(`╭${'─'.repeat(innerW)}╮`),
+          ...innerLines.map(row),
+          style.border(`╰${'─'.repeat(innerW)}╯`),
+        ];
       }
 
       const lines = renderTabBar(width);
@@ -728,23 +1048,27 @@ export function createSupervisorDashboard(options: SupervisorDashboardOptions): 
       if (!isBound()) { close(); return; }
       if (!event || !Number.isFinite(event.x) || !Number.isFinite(event.y)) return;
 
-      const yOffset = (framed && lastWidth >= 10) ? 1 : 0;
-      const xOffset = (framed && lastWidth >= 10) ? 1 : 0;
+      if (framed && lastWidth >= 20 && closeHit && event.type === 'press' && event.button === 'left') {
+        if (event.y === closeHit.y && event.x >= closeHit.x1 && event.x < closeHit.x2) {
+          close();
+          return;
+        }
+      }
+
+      const yOffset = framed && lastWidth >= 20 ? 1 + FRAME_PAD_Y : framed && lastWidth >= 10 ? 1 : 0;
+      const xOffset = framed && lastWidth >= 20 ? 1 + FRAME_PAD_X : framed && lastWidth >= 10 ? 1 : 0;
       const adjustedY = event.y - yOffset;
       const adjustedX = event.x - xOffset;
 
-      if (adjustedY < TAB_BAR_HEIGHT) {
+      if (adjustedY < TAB_BAR_HEIGHT && event.type !== 'wheel') {
         if (event.type !== 'press' || event.button !== 'left') return;
         const hit = tabHits.find(entry => entry.y === adjustedY && adjustedX >= entry.start && adjustedX < entry.end);
         if (hit) setActiveTab(hit.tab);
         return;
       }
-      // Child coordinates are relative to the child, so remove the tab bar height.
       activePanel().handleMouse({ ...event, x: adjustedX, y: adjustedY - TAB_BAR_HEIGHT });
     },
   };
-
-  let lastWidth = 80;
 
   Object.defineProperty(component, 'focused', {
     enumerable: true,
@@ -762,7 +1086,6 @@ export function createSupervisorDashboard(options: SupervisorDashboardOptions): 
     configurable: true,
     get: () => activePanel().selectedRowId,
   });
-  // Read-only test hook: the two child components, to check focus propagation.
   Object.defineProperty(component, 'panels', {
     enumerable: false,
     configurable: true,
