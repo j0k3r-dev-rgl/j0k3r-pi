@@ -151,12 +151,22 @@ export function formatAccountLine(account: AccountUsage, isSelected: boolean, is
 }
 
 function poolLines(pool: UsagePool, theme: ModalTheme): string[] {
+    const title = `${fg(theme, "accent", "◆")} ${bold(theme, fg(theme, "syntaxFunction", poolTitle(pool)))}`;
+
+    if (pool.amountText) {
+        const amount = bold(theme, fg(theme, "success", pool.amountText));
+        const note = pool.noteText ? ` · ${fg(theme, "muted", pool.noteText)}` : "";
+        const bar = pool.showBar
+            ? `${renderThemedBar(pool.availablePercentage, 16, theme)} ${bold(theme, fg(theme, "text", `${pool.availablePercentage.toFixed(1)}%`))} · `
+            : "";
+        return [`  ${title}`, `    ${bar}${amount}${note}`];
+    }
+
     const pct = pool.availablePercentage;
     let statusColor = "success";
     if (pct < 20) statusColor = "error";
     else if (pct < 50) statusColor = "warning";
 
-    const title = `${fg(theme, "accent", "◆")} ${bold(theme, fg(theme, "syntaxFunction", poolTitle(pool)))}`;
     const availText = pool.unlimited
         ? fg(theme, "success", "∞ libre")
         : bold(theme, fg(theme, statusColor, `${pct.toFixed(1)}% libre`));

@@ -22,6 +22,12 @@ export type UsagePool = {
     windowLabel: string | null;
     modelCount: number;
     models: string[];
+    /** Monetary providers render an amount instead of a percentage. */
+    amountText?: string;
+    /** Extra context line for monetary providers (burn rate, granted credit, bucket count). */
+    noteText?: string;
+    /** Only draw a 0-100% bar when the provider exposes a real limit. */
+    showBar?: boolean;
 };
 
 export type AccountUsage = {
@@ -73,6 +79,21 @@ type AuthFileEntry = {
 type ListAuthFilesResponse = {
     files?: AuthFileEntry[];
 };
+
+type OpenAiCompatEntry = {
+    name?: string;
+    disabled?: boolean;
+    prefix?: string;
+    "base-url"?: string;
+    "api-key-entries"?: Array<{ "api-key"?: string; "auth-index"?: string }>;
+};
+
+type OpenAiCompatResponse = {
+    "openai-compatibility"?: OpenAiCompatEntry[];
+};
+
+/** OpenAI-compatible providers billed by balance instead of quota windows. */
+const MONETARY_PROVIDERS = new Set(["deepseek", "deeprelay"]);
 
 type ApiCallResponse = {
     status_code?: number;
@@ -413,6 +434,320 @@ async function fetchAntigravityQuota(auth: AuthFileEntry, signal?: AbortSignal):
     });
 }
 
+function formatMoney(currency: string, value: number): string {
+    const code = currency.trim().toUpperCase();
+    const symbol = code === "USD" ? "US$" : code === "CNY" ? "CN¥" : code;
+    return `${symbol} ${value.toFixed(2)}`;
+}
+
+/** Money is rendered as text; a bar needs a real limit to be meaningful. */
+function moneyPool(label: string, displayName: string, amountText: string, noteText?: string): UsagePool {
+    return {
+        label,
+        displayName,
+        used: 0,
+        available: null,
+        total: null,
+        unlimited: false,
+        availablePercentage: 0,
+        resetAt: null,
+        windowLabel: null,
+        modelCount: 0,
+        models: [],
+        amountText,
+        noteText,
+        showBar: false,
+    };
+}
+
+async function readJson(
+    authIndex: string,
+    url: string,
+    signal?: AbortSignal,
+): Promise<{ status: number; json: any }> {
+    const res = await executeApiCall(
+        authIndex,
+        "GET",
+        url,
+        { Authorization: "Bearer $TOKEN$", Accept: "application/json" },
+        undefined,
+        signal,
+    );
+    return { status: res.status_code ?? 0, json: parseJsonBody(res.body) };
+}
+
+/** 2_850_000 -> "2.85M"; keeps token meters readable in narrow panels. */
+function formatTokens(value: number): string {
+    if (!Number.isFinite(value)) return "0";
+    if (Math.abs(value) >= 1e9) return `${(value / 1e9).toFixed(2)}B`;
+    if (Math.abs(value) >= 1e6) return `${(value / 1e6).toFixed(2)}M`;
+    if (Math.abs(value) >= 1e3) return `${(value / 1e3).toFixed(1)}K`;
+    return String(Math.round(value));
+}
+
+/** A real quota meter: percentage is meaningful, reset comes from the billing period. */
+function quotaPool(
+    label: string,
+    displayName: string,
+    used: number,
+    total: number,
+    resetAt: string | null,
+    windowLabel: string,
+    noteText?: string,
+): UsagePool {
+    const clampedUsed = Math.max(0, used);
+    const remaining = Math.max(0, total - clampedUsed);
+    const availablePercentage = total > 0 ? Math.max(0, Math.min(100, (remaining / total) * 100)) : 0;
+    return {
+        label,
+        displayName,
+        used: clampedUsed,
+        available: remaining,
+        total,
+        unlimited: false,
+        availablePercentage,
+        resetAt,
+        windowLabel,
+        modelCount: 0,
+        models: [],
+        amountText: `${formatTokens(clampedUsed)} / ${formatTokens(total)}`,
+        noteText,
+        showBar: true,
+    };
+}
+
+async function fetchDeepSeekPools(authIndex: string, baseUrl: string, signal?: AbortSignal): Promise<UsagePool[]> {
+    const { status, json } = await readJson(authIndex, `${baseUrl}/user/balance`, signal);
+    if (status !== 200 || !Array.isArray(json?.balance_infos)) return [];
+
+    const infos: Array<Record<string, string>> = json.balance_infos;
+    const primary = infos.find((i) => String(i.currency).toUpperCase() === "USD") ?? infos[0];
+    if (!primary) return [];
+
+    const currency = String(primary.currency ?? "USD");
+    const total = Number(primary.total_balance ?? 0);
+    const toppedUp = Number(primary.topped_up_balance ?? 0);
+    const granted = Number(primary.granted_balance ?? 0);
+
+    const notes = [`cargado ${formatMoney(currency, toppedUp)}`];
+    if (granted > 0) notes.push(`regalo ${formatMoney(currency, granted)}`);
+    if (json.is_available === false) notes.push("sin saldo suficiente");
+
+    return [
+        moneyPool(
+            `Saldo ${currency.toUpperCase()}`,
+            `DeepSeek · Saldo ${currency.toUpperCase()}`,
+            formatMoney(currency, total),
+            notes.join(" · "),
+        ),
+    ];
+}
+
+async function fetchDeepRelayPools(
+    authIndex: string,
+    baseUrl: string,
+    signal?: AbortSignal,
+): Promise<{ pools: UsagePool[]; plan: string | null }> {
+    const [subscriptionRes, usageRes, limitRes] = await Promise.all([
+        readJson(authIndex, `${baseUrl}/billing/subscription`, signal).catch(() => null),
+        readJson(authIndex, `${baseUrl}/usage?bucket=day`, signal).catch(() => null),
+        readJson(authIndex, `${baseUrl}/billing/spending-limit`, signal).catch(() => null),
+    ]);
+
+    const pools: UsagePool[] = [];
+    const subscription = subscriptionRes?.status === 200 ? subscriptionRes.json : null;
+
+    // Subscription plan: five server-enforced meters, all with a real cap.
+    if (subscription?.subscribed && subscription.plan && subscription.quota) {
+        const quota = subscription.quota;
+        const usage = subscription.usage ?? {};
+        const periodEnd = subscription.current_period_end ?? usage.period_end ?? null;
+        const price = subscription.plan.price;
+        const priceText = price
+            ? `${formatMoney(price.currency ?? "USD", Number(price.amount_cents ?? 0) / 100)}/${price.interval === "month" ? "mes" : price.interval}`
+            : "plan activo";
+        const statusNote = [
+            priceText,
+            subscription.cancel_at_period_end ? "cancela al vencer" : null,
+            subscription.status && subscription.status !== "active" ? `estado ${subscription.status}` : null,
+        ]
+            .filter(Boolean)
+            .join(" · ");
+
+        pools.push(
+            moneyPool(
+                "Plan",
+                `DeepRelay · Suscripción`,
+                subscription.plan.name ?? "activo",
+                statusNote || undefined,
+            ),
+        );
+
+        pools.push(
+            quotaPool(
+                "Input mensual",
+                "DeepRelay · Input mensual",
+                Number(usage.weighted_input_tokens ?? 0),
+                Number(quota.input_tokens_monthly ?? 0),
+                periodEnd,
+                "Mensual",
+            ),
+            quotaPool(
+                "Output mensual",
+                "DeepRelay · Output mensual",
+                Number(usage.weighted_output_tokens ?? 0),
+                Number(quota.output_tokens_monthly ?? 0),
+                periodEnd,
+                "Mensual",
+            ),
+            quotaPool(
+                "Input semanal",
+                "DeepRelay · Input semanal",
+                Number(usage.weekly_weighted_input_tokens ?? 0),
+                Number(quota.weekly_input_tokens ?? 0),
+                null,
+                "Semanal",
+                "ventana móvil 7d",
+            ),
+            quotaPool(
+                "Output semanal",
+                "DeepRelay · Output semanal",
+                Number(usage.weekly_weighted_output_tokens ?? 0),
+                Number(quota.weekly_output_tokens ?? 0),
+                null,
+                "Semanal",
+                "ventana móvil 7d",
+            ),
+        );
+
+        if (Number(quota.searches_monthly ?? 0) > 0) {
+            pools.push(
+                quotaPool(
+                    "Búsquedas",
+                    "DeepRelay · Búsquedas web",
+                    Number(usage.searches ?? 0),
+                    Number(quota.searches_monthly ?? 0),
+                    periodEnd,
+                    "Mensual",
+                ),
+            );
+        }
+    }
+
+    // Pay-as-you-go balance, used when the plan allowance or the backstop runs out.
+    const balancePayment = subscription?.balance_payment;
+    const paygCents = Number(balancePayment?.spendable_cents ?? balancePayment?.balance_cents ?? NaN);
+    if (Number.isFinite(paygCents)) {
+        const notes = [];
+        if (Number(balancePayment?.free_credit_cents ?? 0) > 0) {
+            notes.push(`gratis ${formatMoney("USD", Number(balancePayment.free_credit_cents) / 100)}`);
+        }
+        if (Number(balancePayment?.pending_deposit_cents ?? 0) > 0) {
+            notes.push(`pendiente ${formatMoney("USD", Number(balancePayment.pending_deposit_cents) / 100)}`);
+        }
+        pools.push(moneyPool("Saldo PAYG", "DeepRelay · Saldo PAYG", formatMoney("USD", paygCents / 100), notes.join(" · ") || undefined));
+    }
+
+    const costCents = Number(subscription?.usage?.cost_micro_cents ?? NaN) / 10000;
+    if (Number.isFinite(costCents)) {
+        pools.push(
+            moneyPool(
+                "Costo del período",
+                "DeepRelay · Costo del período",
+                formatMoney("USD", costCents),
+                "consumo del plan, no del saldo",
+            ),
+        );
+    }
+
+    if (usageRes?.status === 200 && Array.isArray(usageRes.json?.data)) {
+        const buckets: Array<{ cost_cents?: number }> = usageRes.json.data;
+        const bucketCents = buckets.reduce((sum, b) => sum + Number(b.cost_cents ?? 0), 0);
+        const rangeLabel = buckets.length === 0
+            ? "sin consumo (30 días)"
+            : buckets.length === 1
+              ? "1 día"
+              : `${buckets.length} días`;
+        pools.push(
+            moneyPool("Consumo PAYG", "DeepRelay · Consumo PAYG", formatMoney("USD", bucketCents / 100), rangeLabel),
+        );
+    }
+
+    if (limitRes?.status === 200 && limitRes.json) {
+        const limitCents = limitRes.json.monthly_limit_cents ?? (limitRes.json.monthly_limit_dollars != null
+            ? Number(limitRes.json.monthly_limit_dollars) * 100
+            : null);
+        if (typeof limitCents === "number" && limitCents > 0) {
+            const spentCents = Number(limitRes.json.current_month_cents ?? 0);
+            const pool = quotaPool(
+                "Límite mensual",
+                "DeepRelay · Límite mensual PAYG",
+                spentCents,
+                limitCents,
+                null,
+                "Mensual",
+                "solo PAYG",
+            );
+            pool.amountText = `${formatMoney("USD", (limitCents - spentCents) / 100)} de ${formatMoney("USD", limitCents / 100)}`;
+            pools.push(pool);
+        }
+    }
+
+    return { pools, plan: subscription?.plan?.name ?? null };
+}
+
+async function fetchMonetaryAccounts(signal?: AbortSignal): Promise<AccountUsage[]> {
+    const compat = await callManagement<OpenAiCompatResponse>("/v0/management/openai-compatibility", signal)
+        .catch(() => null);
+    const entries = (compat?.["openai-compatibility"] ?? []).filter((entry) => {
+        const name = (entry.name ?? "").toLowerCase();
+        return !entry.disabled && MONETARY_PROVIDERS.has(name);
+    });
+
+    return Promise.all(
+        entries.map(async (entry): Promise<AccountUsage> => {
+            const name = (entry.name ?? "unknown").toLowerCase();
+            const baseUrl = (entry["base-url"] ?? "").replace(/\/+$/, "");
+            const authIndex = entry["api-key-entries"]?.[0]?.["auth-index"];
+            const account = entry.prefix && entry.prefix !== name ? `${name} (${entry.prefix})` : name;
+
+            const base: AccountUsage = {
+                id: `${name}-${entry.prefix ?? "default"}`,
+                provider: name,
+                account,
+                authType: "api-key",
+                plan: "pay-as-you-go",
+                tier: null,
+                limitReached: false,
+                bankedCredits: null,
+                rateLimitType: null,
+                pools: [],
+            };
+
+            if (!authIndex) {
+                return { ...base, note: "sin auth-index en openai-compatibility" };
+            }
+
+            try {
+                if (name === "deeprelay") {
+                    const relay = await fetchDeepRelayPools(authIndex, baseUrl, signal);
+                    if (relay.pools.length === 0) {
+                        return { ...base, note: "saldo y suscripción no disponibles (respuesta vacía o error upstream)" };
+                    }
+                    return { ...base, plan: relay.plan ?? base.plan, pools: relay.pools };
+                }
+                const pools = await fetchDeepSeekPools(authIndex, baseUrl, signal);
+                if (pools.length === 0) {
+                    return { ...base, note: "saldo no disponible (respuesta vacía o error upstream)" };
+                }
+                return { ...base, pools };
+            } catch (err: any) {
+                return { ...base, note: `saldo no disponible: ${err?.message ?? String(err)}` };
+            }
+        }),
+    );
+}
+
 export async function fetchUsage(signal?: AbortSignal): Promise<ProviderGroup[]> {
     const listRes = await callManagement<ListAuthFilesResponse>("/v0/management/auth-files", signal);
     const files = listRes.files || [];
@@ -469,6 +804,8 @@ export async function fetchUsage(signal?: AbortSignal): Promise<ProviderGroup[]>
             };
         }),
     );
+
+    accounts.push(...(await fetchMonetaryAccounts(signal).catch(() => [])));
 
     const byProvider = new Map<string, AccountUsage[]>();
     for (const entry of accounts) {
@@ -564,6 +901,14 @@ export function renderTextReport(groups: ProviderGroup[]): string {
             lines.push(`  ${header}${flags.length ? ` · ${flags.join(" · ")}` : ""}`);
             if (account.error) lines.push(`    error: ${account.error}`);
             for (const pool of account.pools) {
+                if (pool.amountText) {
+                    const note = pool.noteText ? ` · ${pool.noteText}` : "";
+                    const bar = pool.showBar
+                        ? ` [${availabilityBar(pool.availablePercentage, 15)}] ${pool.availablePercentage.toFixed(1)}%`
+                        : "";
+                    lines.push(`    ${poolTitle(pool)}: ${pool.amountText}${bar}${note}`);
+                    continue;
+                }
                 lines.push(
                     `    ${poolTitle(pool)}: ${pool.availablePercentage.toFixed(1)}% libre · [${availabilityBar(pool.availablePercentage, 15)}] · ${formatReset(pool.resetAt)}`,
                 );
