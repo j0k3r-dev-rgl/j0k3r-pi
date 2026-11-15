@@ -31,6 +31,7 @@ const PROVIDER_ID = "cliproxyapi";
 const DEFAULT_BASE_URL = "http://127.0.0.1:8317";
 const DEFAULT_MAX_TOKENS = 16_384;
 const MAX_SAFE_OUTPUT_TOKENS = 65_536;
+const DEEPSEEK_CONTEXT_WINDOW = 370_000;
 
 function buildStrictThinkingLevelMap(levels: string[]): Record<string, string | null> {
     if (!levels || levels.length === 0) {
@@ -68,6 +69,8 @@ function resolveRecommendedContextWindow(modelId: string, reportedContext?: numb
         recommendedCap = 200_000;
     } else if (id.includes("gemini")) {
         recommendedCap = 370_000;
+    } else if (id.includes("deepseek")) {
+        recommendedCap = DEEPSEEK_CONTEXT_WINDOW;
     }
 
     if (typeof reportedContext === "number" && Number.isFinite(reportedContext) && reportedContext > 0) {
@@ -140,6 +143,7 @@ function toPiModelFromCPA(model: CPAModel) {
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
         reasoningEfforts: levels,
+        compat: { supportsDeveloperRole: false },
     };
 }
 
@@ -198,6 +202,7 @@ function toPiModelFromOpenAI(model: FallbackOpenAIModel) {
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
         reasoningEfforts: openAiEfforts,
+        compat: { supportsDeveloperRole: false },
     };
 }
 
