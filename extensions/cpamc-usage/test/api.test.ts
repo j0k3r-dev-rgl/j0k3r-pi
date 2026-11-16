@@ -84,6 +84,140 @@ describe("cpamc-usage Antigravity Gemini & Claude/GPT quotas", () => {
     });
 });
 
+describe("cpamc-usage Antigravity host selection", () => {
+    it("reads daily-cloudcode-pa with the hub client so Gemini quotas are real, not 100%", async () => {
+        const originalFetch = globalThis.fetch;
+        const calls: Array<{ url: string; userAgent: string }> = [];
+        globalThis.fetch = (async (input, init) => {
+            const url = String(input);
+            if (url.endsWith("/v0/management/auth-files")) {
+                return Response.json({
+                    files: [
+                        {
+                            id: "ag-1",
+                            auth_index: "idx-ag-1",
+                            provider: "antigravity",
+                            email: "user@example.org",
+                            project_id: "proj-1",
+                            disabled: false,
+                        },
+                    ],
+                });
+            }
+            if (url.endsWith("/v0/management/api-call")) {
+                const payload = JSON.parse(String(init?.body ?? "{}"));
+                calls.push({ url: payload.url, userAgent: payload.header["User-Agent"] ?? "" });
+                const host = new URL(payload.url).hostname;
+                const isDaily = host.startsWith("daily-cloudcode-pa");
+                if (payload.url.endsWith("retrieveUserQuotaSummary")) {
+                    return Response.json({
+                        status_code: 200,
+                        body: JSON.stringify({
+                            groups: isDaily
+                                ? [
+                                      {
+                                          displayName: "Gemini Models",
+                                          buckets: [
+                                              { window: "weekly", remainingFraction: 0.84346074 },
+                                              { window: "5h", remainingFraction: 0.8113899 },
+                                          ],
+                                      },
+                                  ]
+                                : [],
+                        }),
+                    });
+                }
+                if (payload.url.endsWith("retrieveUserQuota")) {
+                    return Response.json({
+                        status_code: 200,
+                        body: JSON.stringify({
+                            buckets: [
+                                {
+                                    modelId: isDaily ? "gemini-3.8-flash-high" : "gemini-2.5-pro",
+                                    remainingFraction: isDaily ? 0.8113899 : 1,
+                                },
+                            ],
+                        }),
+                    });
+                }
+            }
+            return new Response("Not found", { status: 404 });
+        }) as typeof fetch;
+
+        try {
+            const groups = await fetchUsage();
+            const pools = groups[0].accounts[0].pools;
+            const gemini = pools.filter((p) => `${p.label}`.toLowerCase().includes("gemini"));
+            assert.equal(gemini.length, 2, "daily summary exposes the Gemini 5h and weekly windows");
+            assert.equal(Math.round(gemini[0].availablePercentage), 81);
+            assert.equal(Math.round(gemini[1].availablePercentage), 84);
+            assert.ok(
+                gemini.every((p) => p.availablePercentage < 100),
+                "Gemini quota must not be reported as full",
+            );
+            assert.ok(
+                calls.every((c) => !c.url.includes("//cloudcode-pa")),
+                "the misleading production host must not be queried when daily answers",
+            );
+            assert.ok(
+                calls.some((c) => c.url.includes("daily-cloudcode-pa") && /antigravity\/hub/.test(c.userAgent)),
+                "daily host requires the antigravity hub client identity",
+            );
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    it("falls back to the production host when every daily host fails", async () => {
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (async (input, init) => {
+            const url = String(input);
+            if (url.endsWith("/v0/management/auth-files")) {
+                return Response.json({
+                    files: [
+                        { id: "ag-1", auth_index: "idx-ag-1", provider: "antigravity", email: "user@example.org", disabled: false },
+                    ],
+                });
+            }
+            if (url.endsWith("/v0/management/api-call")) {
+                const payload = JSON.parse(String(init?.body ?? "{}"));
+                if (payload.url.includes("daily-cloudcode-pa")) {
+                    return Response.json({ status_code: 503, body: "unavailable" });
+                }
+                if (payload.url.endsWith("retrieveUserQuotaSummary")) {
+                    return Response.json({
+                        status_code: 200,
+                        body: JSON.stringify({
+                            groups: [
+                                {
+                                    displayName: "Claude and GPT models",
+                                    buckets: [{ window: "5h", remainingFraction: 0.5 }],
+                                },
+                            ],
+                        }),
+                    });
+                }
+                if (payload.url.endsWith("retrieveUserQuota")) {
+                    return Response.json({
+                        status_code: 200,
+                        body: JSON.stringify({ buckets: [{ modelId: "gemini-2.5-pro", remainingFraction: 1 }] }),
+                    });
+                }
+            }
+            return new Response("Not found", { status: 404 });
+        }) as typeof fetch;
+
+        try {
+            const groups = await fetchUsage();
+            const pools = groups[0].accounts[0].pools;
+            assert.ok(pools.length > 0, "production fallback still renders quotas");
+            assert.equal(Math.round(pools[0].availablePercentage), 100);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+});
+
 describe("cpamc-usage monetary providers (DeepSeek, DeepRelay)", () => {
     it("reports DeepSeek balance and DeepRelay balance/usage/spending-limit as amounts, not percentages", async () => {
         const originalFetch = globalThis.fetch;

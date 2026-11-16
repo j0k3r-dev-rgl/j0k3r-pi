@@ -342,28 +342,35 @@ async function fetchAntigravityQuota(auth: AuthFileEntry, signal?: AbortSignal):
     const headers = {
         Authorization: "Bearer $TOKEN$",
         "Content-Type": "application/json",
-        "User-Agent": "antigravity/cli/1.0.13 (aidev_client; os_type=darwin; arch=arm64)",
+        // Matches the upstream management UI: the "hub" client is the identity
+        // that receives real Gemini buckets. The legacy `antigravity/cli` UA
+        // gets Gemini buckets pinned to remainingFraction 1 on every host.
+        "User-Agent": "antigravity/hub/2.23.0 darwin/arm64",
     };
     const payload = JSON.stringify({ project: projectId });
 
-    const [summaryRes, quotaRes] = await Promise.all([
-        executeApiCall(
-            authIndex,
-            "POST",
-            "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
-            headers,
-            payload,
-            signal,
-        ).catch(() => null),
-        executeApiCall(
-            authIndex,
-            "POST",
-            "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota",
-            headers,
-            payload,
-            signal,
-        ).catch(() => null),
-    ]);
+    // Gemini quotas only report real values on the daily host (same order the
+    // upstream control panel tries). Production is the last-resort fallback.
+    const hosts = [
+        "daily-cloudcode-pa.googleapis.com",
+        "daily-cloudcode-pa.sandbox.googleapis.com",
+        "cloudcode-pa.googleapis.com",
+    ];
+
+    const call = (endpoint: string, host: string) =>
+        executeApiCall(authIndex, "POST", `https://${host}/v1internal:${endpoint}`, headers, payload, signal);
+
+    let summaryRes: ApiCallResponse | null = null;
+    let quotaRes: ApiCallResponse | null = null;
+    for (const host of hosts) {
+        const [summary, quota] = await Promise.all([
+            call("retrieveUserQuotaSummary", host).catch(() => null),
+            call("retrieveUserQuota", host).catch(() => null),
+        ]);
+        if (summary?.status_code === 200) summaryRes = summary;
+        if (quota?.status_code === 200) quotaRes = quota;
+        if (summaryRes || quotaRes) break;
+    }
 
     const pools: UsagePool[] = [];
 
