@@ -171,6 +171,8 @@ La extensión funciona independientemente de otras extensiones. Cuando existe un
 
 El supervisor puede seguir observando `subagent_run`, los eventos y SQLite sin depender de las tools eliminadas. El historial, widget y controles manuales usan directamente el manager. Al cerrar la sesión se drenan tareas y recursos; las tareas huérfanas se reconcilian como interrumpidas sin volver a emitir resultados de background.
 
+Si la extensión opcional `pihud` está presente, el widget de subagentes se oculta mientras el HUD de esa sesión está visible y se reinstala al cerrarlo; el HUD es entonces la única lista de ejecuciones activas. Sin `pihud`, o si su puente falla, el widget funciona normalmente.
+
 Después de actualizar el código, ejecuta **`/reload` o reinicia Pi** para retirar las tools viejas de la sesión y registrar el nuevo contrato. Cambiar `enable_continue` se aplica a la siguiente llamada; cambiar atajos requiere recargar.
 
 ## Validación del paquete

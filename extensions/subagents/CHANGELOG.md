@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- Hid the background subagents widget (and its terminal input handling) while the optional `pihud` HUD is visible for the same session, restoring it when the HUD closes so the HUD stays the single list of active executions.
+
 ## 1.5.1
 
 ### Fixed

@@ -66,13 +66,22 @@ export default function subagentsExtension(pi: any): void {
   let removeTerminalInputListener: (() => void) | undefined;
   let removeTaskUpdateListener: (() => void) | undefined;
   let widgetState: ClaudeBackgroundWidgetState | undefined;
+  let widgetInstalled = false;
+  let hudVisible = false;
+  let removeHudPresenceListener: (() => void) | undefined;
   let activePanelCancelSelected: (() => void) | undefined;
   let activePanelRequestRender: (() => void) | undefined;
+
+  const presenceSessionId = (ctx: any): string => currentSessionId(ctx) ?? '';
 
   const installClaudeBackgroundWidget = (ctx: any): boolean => {
     if (typeof ctx?.ui?.setWidget !== 'function') return false;
     const cwd = ctx?.cwd ?? process.cwd();
     const sessionId = currentSessionId(ctx);
+    removeTaskUpdateListener?.();
+    removeTaskUpdateListener = undefined;
+    removeTerminalInputListener?.();
+    removeTerminalInputListener = undefined;
     widgetState = new ClaudeBackgroundWidgetState(
       () => manager.listActiveSessionTasks(cwd, sessionId),
       () => widgetRequestRender?.(),
@@ -105,7 +114,17 @@ export default function subagentsExtension(pi: any): void {
       widgetRequestRender = () => tui?.requestRender?.();
       return new ClaudeBackgroundWidget(widgetState!, theme);
     }, { placement: 'belowEditor' });
+    widgetInstalled = true;
     return true;
+  };
+
+  // The HUD mirrors active subagents, so the Pi widget only owns that space while it is closed.
+  const hideClaudeBackgroundWidget = () => {
+    widgetRequestRender = undefined;
+    removeTerminalInputListener?.();
+    removeTerminalInputListener = undefined;
+    widgetInstalled = false;
+    widgetCtx?.ui?.setWidget?.('subagents-claude-background', undefined);
   };
 
   const clearClaudeBackgroundWidget = () => {
@@ -115,9 +134,60 @@ export default function subagentsExtension(pi: any): void {
     removeTerminalInputListener?.();
     removeTerminalInputListener = undefined;
     widgetState = undefined;
+    widgetInstalled = false;
     widgetInputSuspensions.clear();
     widgetCtx?.ui?.setWidget?.('subagents-claude-background', undefined);
     widgetCtx = undefined;
+  };
+
+  const ownsHudPresence = (event: any): boolean => {
+    if (!widgetCtx || !event) return false;
+    if (typeof event.visible !== 'boolean') return false;
+    if (event.cwd !== (widgetCtx.cwd ?? process.cwd())) return false;
+    return typeof event.sessionId === 'string' && event.sessionId === presenceSessionId(widgetCtx);
+  };
+
+  const applyHudPresence = (visible: boolean, ctx?: any): void => {
+    const target = ctx ?? widgetCtx;
+    if (!target) return;
+    hudVisible = visible;
+    if (visible) {
+      if (widgetInstalled) hideClaudeBackgroundWidget();
+      return;
+    }
+    if (!widgetInstalled) installClaudeBackgroundWidget(target);
+  };
+
+  // Presence queries are synchronous; ignore callbacks retained past this emission.
+  const readHudPresence = (ctx: any): boolean => {
+    if (typeof pi.events?.emit !== 'function') return false;
+    let visible = false;
+    let reading = true;
+    try {
+      pi.events.emit('pihud:presence:read:v1', {
+        cwd: ctx?.cwd ?? process.cwd(),
+        sessionId: presenceSessionId(ctx),
+        respond(value: unknown) {
+          if (reading && typeof value === 'boolean') visible = value;
+        },
+      });
+    } catch { /* Missing or broken optional HUD leaves the normal widget intact. */ }
+    finally { reading = false; }
+    return visible;
+  };
+
+  const bindHudPresence = (): void => {
+    removeHudPresenceListener?.();
+    removeHudPresenceListener = undefined;
+    if (typeof pi.events?.on !== 'function') return;
+    const handler = (event: any) => {
+      if (!ownsHudPresence(event)) return;
+      applyHudPresence(event.visible);
+    };
+    const off = pi.events.on('pihud:presence:v1', handler);
+    removeHudPresenceListener = typeof off === 'function'
+      ? off
+      : () => { pi.events?.off?.('pihud:presence:v1', handler); };
   };
 
   pi.on?.('session_start', async (_event: unknown, ctx: any) => {
@@ -128,6 +198,8 @@ export default function subagentsExtension(pi: any): void {
     await manager.reconcileOrphanedTasks(cwd);
     for (const warning of subagentSourceWarnings(cwd)) ctx?.ui?.notify?.(warning, 'warning');
     widgetCtx = ctx;
+    bindHudPresence();
+    hudVisible = readHudPresence(ctx);
     registerSubagentsPanelOpener(async (taskId?: string) => {
       const currentCtx = widgetCtx ?? ctx;
       if (!currentCtx) return;
@@ -143,6 +215,10 @@ export default function subagentsExtension(pi: any): void {
       });
     });
     if (typeof ctx?.ui?.setWidget !== 'function') return;
+    if (hudVisible) {
+      widgetCtx?.ui?.setWidget?.('subagents-claude-background', undefined);
+      return;
+    }
     if (!installClaudeBackgroundWidget(ctx)) return;
   });
 
@@ -159,6 +235,9 @@ export default function subagentsExtension(pi: any): void {
       await manager.drainOwnerSession(closingSessionId, shutdownReason);
     }
     clearClaudeBackgroundWidget();
+    removeHudPresenceListener?.();
+    removeHudPresenceListener = undefined;
+    hudVisible = false;
     clearSubagentSessionRenderCaches();
   });
 
