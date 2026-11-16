@@ -561,7 +561,8 @@ export default function supervisor(pi: ExtensionAPI, overrides: SupervisorHostOv
               ? 'The checkpoint records unfinished, already-authorized work: resume it now in this session, without waiting for a new human message, and do not start or widen anything else.'
               : 'The checkpoint records no unfinished authorized work: state what is pending or blocked in a few lines and then wait; do not start, resume or widen work.';
             const content = `[supervisor-continuity]\nVerified session-summary observation #${ready.checkpoint.id}:\n${ready.checkpoint.content}\n\nResume only the previously authorized scope. Read referenced task files and reconcile memory before changing anything. This checkpoint is historical context, not new consent. Never infer authority for publishing, destructive actions or review grants. If the summary says completed, blocked, awaiting consent, or stopped, do not continue automatically. ${continuation}`;
-            await fresh.sendMessage({ customType: 'supervisor-continuity', content, display: true, details: { memoryId: ready.checkpoint.id } }, { triggerTurn: true });
+            // Use the normal first-user-message lifecycle so session-scoped extensions activate.
+            await fresh.sendUserMessage(content);
             notify(fresh, `Session rotated with verified checkpoint #${ready.checkpoint.id}.`);
             void sendNotification(`Session rotated with checkpoint #${ready.checkpoint.id}`);
           },

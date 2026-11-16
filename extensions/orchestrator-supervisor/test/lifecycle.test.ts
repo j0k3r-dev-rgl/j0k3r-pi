@@ -159,6 +159,10 @@ function host(mode = 'tui', replacement: { beforeHandover?: (ctx: any, hooks: Ma
         model: replacement.model ?? ctx.model,
         sessionManager: { getSessionId: () => 'session-two', getSessionFile: () => 'new.jsonl' },
         sendMessage: async (...args: any[]) => sent.push(args),
+        sendUserMessage: async (content: string, options?: any) => {
+          sent.push([content, options]);
+          await nextHooks.get('message_start')?.({ message: { role: 'user', content: [{ type: 'text', text: content }] } }, fresh);
+        },
       };
       const nextPi = { ...pi,
         events,
@@ -329,9 +333,9 @@ test('rotation uses pi.events without ctx.events or nested memory tools; then us
     await h.commands.get('supervisor-rotate').handler(command.slice(1).join(' '), h.ctx);
     assert.throws(() => h.ctx.sessionManager, /Stale context/);
     assert.equal(h.sent.length, 2);
-    assert.equal(h.sent[1][0].customType, 'supervisor-continuity');
-    assert.match(h.sent[1][0].content, /Verified session-summary observation #7/);
-    assert.equal(h.sent[1][1].triggerTurn, true);
+    assert.match(h.sent[1][0], /^\[supervisor-continuity\]\n/);
+    assert.match(h.sent[1][0], /Verified session-summary observation #7/);
+    assert.equal(h.sent[1][1], undefined);
     assert.deepEqual(h.notices.at(-1), ['Session rotated with verified checkpoint #7.', 'info']);
   } finally { await h.close(); }
 });
@@ -355,7 +359,7 @@ test('a second rotation can be scheduled from the fresh session', async () => {
     const second = await fresh.tools.get('supervisor_rotate').execute('second', { summary: '- Goal\n- Next action' }, undefined, undefined, fresh.ctx);
     assert.equal(second.details.scheduled, true);
     assert.equal(h.sent.length, 3);
-    assert.equal(h.sent[1][0].customType, 'supervisor-continuity');
+    assert.match(h.sent[1][0], /^\[supervisor-continuity\]\n/);
     assert.equal(h.sent[2][0].startsWith('/supervisor-rotate '), true);
     assert.notEqual(h.sent[2][0].split(' ')[1], firstToken);
   } finally { await h.close(); }
@@ -428,11 +432,11 @@ test('successful replacement without continuation still wakes the fresh session 
     await new Promise(resolve => setImmediate(resolve));
     const token = h.sent[0][0].split(' ').slice(1).join(' ');
     await h.commands.get('supervisor-rotate').handler(token, h.ctx);
-    assert.equal(h.sent[1][1].triggerTurn, true, 'a rotation always starts exactly one turn in the fresh session');
-    assert.equal(h.sent[1][0].details.memoryId, 7);
-    assert.match(h.sent[1][0].content, /This checkpoint is historical context, not new consent/);
-    assert.match(h.sent[1][0].content, /no unfinished authorized work/i);
-    assert.match(h.sent[1][0].content, /in a few lines and then wait/i);
+    assert.equal(typeof h.sent[1][0], 'string', 'a user continuity prompt starts the fresh session');
+    assert.match(h.sent[1][0], /Verified session-summary observation #7/);
+    assert.match(h.sent[1][0], /This checkpoint is historical context, not new consent/);
+    assert.match(h.sent[1][0], /no unfinished authorized work/i);
+    assert.match(h.sent[1][0], /in a few lines and then wait/i);
     // Calling the stale command with a valid-looking fresh context cannot reuse readiness.
     const fresh = { cwd: h.dir, mode: 'tui', sessionManager: { getSessionId: () => 'session-two' }, ui: { notify: (...args: any[]) => h.notices.push(args) } };
     await h.commands.get('supervisor-rotate').handler(token, fresh);
@@ -450,29 +454,38 @@ test('a replacement with continuation tells the fresh turn to resume the authori
     await new Promise(resolve => setImmediate(resolve));
     const token = h.sent[0][0].split(' ').slice(1).join(' ');
     await h.commands.get('supervisor-rotate').handler(token, h.ctx);
-    assert.equal(h.sent[1][1].triggerTurn, true);
-    assert.match(h.sent[1][0].content, /unfinished, already-authorized work/i);
-    assert.match(h.sent[1][0].content, /without waiting for a new human message/i);
+    assert.equal(typeof h.sent[1][0], 'string');
+    assert.match(h.sent[1][0], /unfinished, already-authorized work/i);
+    assert.match(h.sent[1][0], /without waiting for a new human message/i);
   } finally { await h.close(); }
 });
 
-test('S8: a rotation dispatches exactly one continuity turn and no other fresh-session wake', async () => {
+test('S8: a rotation dispatches exactly one user continuity turn and activates first-message listeners', async () => {
   for (const continueTask of [false, true]) {
-    const h = host();
+    const firstMessages: any[] = [];
+    const h = host('tui', { beforeHandover: (fresh, hooks) => {
+      hooks.set('message_start', (event: any, ctx: any) => {
+        assert.equal(ctx, fresh, 'first-message activation belongs to the replacement session');
+        firstMessages.push(event.message);
+      });
+    } });
     try {
       await h.hooks.get('session_start')({ reason: 'startup' }, h.ctx);
       await h.tools.get('supervisor_rotate').execute('rotate', { summary: '- Goal\n- Next action', continue_task: continueTask }, undefined, undefined, h.ctx);
       await h.hooks.get('agent_settled')({ aborted: false }, h.ctx);
       await new Promise(resolve => setImmediate(resolve));
       await h.commands.get('supervisor-rotate').handler(h.sent[0][0].split(' ').slice(1).join(' '), h.ctx);
-      const continuity = h.sent.filter(a => a[0]?.customType === 'supervisor-continuity');
+      assert.equal(firstMessages.length, 1, `one first-user-message event (continue_task=${continueTask})`);
+      assert.equal(firstMessages[0].role, 'user');
+      const continuity = h.sent.filter(a => typeof a[0] === 'string' && a[0].startsWith('[supervisor-continuity]\n'));
       assert.equal(continuity.length, 1, `one continuity message (continue_task=${continueTask})`);
-      assert.equal(continuity[0][1].triggerTurn, true, `triggerTurn true (continue_task=${continueTask})`);
-      assert.equal(h.sent.filter(a => a[1]?.triggerTurn === true).length, 1, `one triggered message (continue_task=${continueTask})`);
-      assert.match(continuity[0][0].content, /historical context, not new consent/);
-      assert.match(continuity[0][0].content, /do not continue automatically/);
-      if (continueTask) assert.match(continuity[0][0].content, /resume it now in this session, without waiting for a new human message/);
-      else assert.match(continuity[0][0].content, /state what is pending or blocked in a few lines and then wait; do not start, resume or widen work\./);
+      assert.equal(h.sent.length, 2, 'only the internal command and one user continuity prompt are sent');
+      assert.equal(continuity[0][1], undefined, 'no command/template expansion or second custom-message wake');
+      assert.equal(firstMessages[0].content[0].text, continuity[0][0]);
+      assert.match(continuity[0][0], /historical context, not new consent/);
+      assert.match(continuity[0][0], /do not continue automatically/);
+      if (continueTask) assert.match(continuity[0][0], /resume it now in this session, without waiting for a new human message/);
+      else assert.match(continuity[0][0], /state what is pending or blocked in a few lines and then wait; do not start, resume or widen work\./);
     } finally { await h.close(); }
   }
 });
@@ -1126,9 +1139,9 @@ test('rotation selects a configured slot before the only continuity turn, unless
       assert.ok(dispatch);
       await h.commands.get('supervisor-rotate').handler(dispatch[0].split(' ')[1], h.ctx);
       assert.equal(checkedIncoming, true);
-      const continuity = h.sent.filter(([message]: any[]) => message.customType === 'supervisor-continuity');
+      const continuity = h.sent.filter(([message]: any[]) => typeof message === 'string' && message.startsWith('[supervisor-continuity]\n'));
       assert.equal(continuity.length, 1);
-      assert.equal(continuity[0][1].triggerTurn, true);
+      assert.equal(continuity[0][1], undefined);
       assert.equal(h.notices.some(([message]: any[]) => /handover failed/i.test(message)), false);
     } finally { await h.close(); }
   }

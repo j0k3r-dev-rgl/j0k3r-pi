@@ -66,7 +66,7 @@
 - **Whitelisted Tools:** `memory_*`, `mem_*`, and `supervisor_rotate` tools are never blocked by context ceilings.
 - **Checkpoint Request:** When context reaches $\ge 90\%$, the supervisor injects a structured checkpoint prompt instructing the model to call `supervisor_rotate` with a concise 150–250-word continuity summary.
 - **Verified Preflight:** Saves the summary via `memory:supervisor:checkpoint:v1` and verifies readback before initiating rotation.
-- **Session Handover:** Issues an internal `/supervisor-rotate <token>` command, opens a fresh session with `ctx.newSession()`, and injects the continuity checkpoint into the new session.
+- **Session Handover:** Issues an internal `/supervisor-rotate <token>` command, opens a fresh session with `ctx.newSession()`, and sends the continuity checkpoint once through the replacement context's `sendUserMessage()`. This starts the normal first-user-message lifecycle (including memory activation), without command/template expansion or a second custom-message turn. The checkpoint remains explicitly historical context, not new consent; `continue_task` determines whether to resume already-authorized work or report and wait.
 
 ---
 
