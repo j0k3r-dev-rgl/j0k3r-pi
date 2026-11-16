@@ -46,6 +46,15 @@ function compareTasksByCreationDesc(a: SubagentTask, b: SubagentTask): number {
   return compareBinaryTextDesc(a.created_at, b.created_at)
     || compareBinaryTextDesc(a.id, b.id);
 }
+
+/** Active work stays visible above finished work; ordering inside each group is unchanged. */
+const ACTIVE_TASK_STATUSES = new Set<SubagentTask['status']>(['queued', 'running']);
+
+function compareTasksActiveFirst(a: SubagentTask, b: SubagentTask): number {
+  const aActive = ACTIVE_TASK_STATUSES.has(a.status) ? 0 : 1;
+  const bActive = ACTIVE_TASK_STATUSES.has(b.status) ? 0 : 1;
+  return aActive - bActive || compareTasksByCreationDesc(a, b);
+}
 function subagentAuditLog(cwd: string | undefined, event: string, data: Record<string, unknown>): void {
   writeSubagentsDebugLog(cwd, event, data);
 }
@@ -491,17 +500,17 @@ export class SubagentManager {
   }
 
   listTasks(cwd?: string) {
-    const active = [...this.tasks.values()].sort(compareTasksByCreationDesc);
+    const active = [...this.tasks.values()].sort(compareTasksActiveFirst);
     if (!cwd) return active;
     const activeIds = new Set(active.map((task) => task.id));
     const persisted = this.history.listTasks(cwd).filter((task) => !activeIds.has(task.id));
-    return [...active, ...persisted].sort(compareTasksByCreationDesc);
+    return [...active, ...persisted].sort(compareTasksActiveFirst);
   }
 
   listActiveSessionTasks(cwd?: string, sessionId?: string) {
     return [...this.tasks.values()]
       .filter((task) => (!cwd || this.taskCwds.get(task.id) === cwd) && (!sessionId || task.session_id === sessionId))
-      .sort(compareTasksByCreationDesc);
+      .sort(compareTasksActiveFirst);
   }
 
   listSessionTasks(cwd?: string, sessionId?: string) {
@@ -509,7 +518,7 @@ export class SubagentManager {
     if (!cwd || !sessionId) return active;
     const activeIds = new Set(active.map((task) => task.id));
     const persisted = this.cachedPersistedSessionTasks(cwd, sessionId).filter((task) => !activeIds.has(task.id));
-    return [...active, ...persisted].sort(compareTasksByCreationDesc);
+    return [...active, ...persisted].sort(compareTasksActiveFirst);
   }
 
   onTaskUpdate(listener: () => void): () => void {

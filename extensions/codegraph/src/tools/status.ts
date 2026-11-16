@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { getStatus, resolveProjectPath } from "../core.js";
-import { renderStatusCall, renderStatusResult } from "../render/index.js";
+import { COMPACT_TOOL_RENDERING, renderStatusCall, renderStatusResult } from "../render/index.js";
 import type { CodeGraphStatusDetails } from "../types.js";
 
 export function registerStatusTool(pi: ExtensionAPI) {
@@ -29,5 +29,6 @@ export function registerStatusTool(pi: ExtensionAPI) {
 		renderCall: renderStatusCall,
 		renderResult: renderStatusResult,
 		renderShell: "self",
+		...COMPACT_TOOL_RENDERING,
 	});
 }

@@ -3,24 +3,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { extractPdf, sha256Hex, type PdfOcrRunner, type PdfParser } from '../src/pdf.js';
-import pdfReviewExtension from '../index.js';
-
-type Tool = {
-  name: string;
-  description: string;
-  parameters: { type: string; [key: string]: unknown };
-  execute: (...args: unknown[]) => Promise<unknown> | unknown;
-};
-
-function createMockPi() {
-  const tools: Tool[] = [];
-  return {
-    tools,
-    registerTool(tool: Tool) {
-      tools.push(tool);
-    },
-  };
-}
 
 async function tempPdf(name = 'sample.pdf', content = 'fake pdf bytes') {
   const dir = join(tmpdir(), `pi-pdf-review-${Date.now()}-${Math.random().toString(16).slice(2)}`);
@@ -180,10 +162,11 @@ describe('pdf extraction', () => {
 
 describe('pdf-review extension tool', () => {
   it('registers pdf_extract and returns structured success details', async () => {
-    const pi = createMockPi();
-    pdfReviewExtension(pi as any);
+    const { registerPdfReviewTools } = await import('../src/tools.js');
+    const tools: any[] = [];
+    registerPdfReviewTools({ registerTool: (tool: any) => tools.push(tool) });
 
-    const tool = pi.tools.find((entry) => entry.name === 'pdf_extract');
+    const tool = tools.find((entry) => entry.name === 'pdf_extract');
     expect(tool?.description).toMatch(/extract text/i);
     expect(tool?.parameters.type).toBe('object');
   });

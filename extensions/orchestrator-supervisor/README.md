@@ -39,6 +39,16 @@
 
 ---
 
+### Optional read-only HUD snapshot
+
+`pihud:sup:read:v1` returns runtime state and the effective orchestrator/subagent
+configuration to the matching trusted TUI cwd/session. It reuses the same
+`panelState` as `/supervisor` and the canonical configuration readers, including
+thresholds, pool slots, efforts and per-agent overrides. It does not start the
+runtime, discover quotas or edit configuration. The HUD shows a scrollable
+read-only view; configuration changes remain in `/supervisor`. No imports or
+dependencies on the HUD extension are needed; the listener is removed at shutdown.
+
 ### 2. Subagent Model Allocation & Least-Loaded Pool (`src/subagent-pool.ts`, `src/subagent-assignment.ts`)
 - **Event Binding:** Subscribes to `subagents:task:allocate`, `subagents:task:failover`, and `subagents:task:terminal` on `pi.events`.
 - **Claim Model Contract:** Calls `event.claimModel(async (signal) => ...)`. Resolves `event.agent` against `subagentPools` (`custom` pool, `inherit` Default pool, or `disabled`). If subagent allocation is disabled, the agent mode is `disabled`, or the resolved pool has no candidate slots, returns `undefined` allowing subagents to fall back to the parent orchestrator model and effort.

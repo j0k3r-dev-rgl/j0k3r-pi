@@ -4,7 +4,7 @@ import { renderSubagentCompletionMessage, sendSubagentCompletionMessage, sendSub
 import { registerSubagentTools, triggerClaudeBackgroundHandoff } from '../tools.js';
 import { sendSubagentReportMessage, renderSubagentReportMessage } from '../render/report-message.js';
 import { ClaudeBackgroundWidget, ClaudeBackgroundWidgetState } from '../ui/background-widget.js';
-import { preloadPiComponentsForSubagentRendering, registerSubagentExternalToolDefinition } from '../thread-view.js';
+import { clearSubagentSessionRenderCaches, preloadPiComponentsForSubagentRendering, registerSubagentExternalToolDefinition } from '../thread-view.js';
 import { registerSubagentsPanelOpener, showSubagentsPanel } from '../ui/panel-overlay.js';
 
 function currentSessionId(ctx: any): string | undefined {
@@ -159,6 +159,7 @@ export default function subagentsExtension(pi: any): void {
       await manager.drainOwnerSession(closingSessionId, shutdownReason);
     }
     clearClaudeBackgroundWidget();
+    clearSubagentSessionRenderCaches();
   });
 
   const historyPanelShortcut = readSubagentsConfig(process.cwd()).history_panel_shortcut ?? 'ctrl+,';

@@ -2,8 +2,8 @@ import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import utilsExtension from '../index.js';
 import { captureScreenshot, listScreenshotWindows, type ScreenshotCommandRunner } from '../src/screenshot.js';
+import { registerUtilsTools } from './helpers-enabled.js';
 
 type Tool = {
   name: string;
@@ -13,15 +13,6 @@ type Tool = {
   execute: (...args: unknown[]) => Promise<unknown> | unknown;
 };
 
-function createMockPi() {
-  const tools: Tool[] = [];
-  return {
-    tools,
-    registerTool(tool: Tool) {
-      tools.push(tool);
-    },
-  };
-}
 
 const TINY_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
@@ -291,11 +282,10 @@ describe('captureScreenshot', () => {
 });
 
 describe('screenshot tool registration', () => {
-  it('registers screenshot with Linux/headless/dependency guidance', () => {
-    const pi = createMockPi();
-    utilsExtension(pi as any);
+  it('registers screenshot with Linux/headless/dependency guidance', async () => {
+    const tools = await registerUtilsTools();
 
-    const tool = pi.tools.find((entry) => entry.name === 'screenshot');
+    const tool = tools.find((entry) => entry.name === 'screenshot');
     expect(tool?.description).toMatch(/linux/i);
     expect(tool?.parameters.type).toBe('object');
     expect(JSON.stringify(tool?.parameters)).toContain('outputPath');
@@ -308,9 +298,8 @@ describe('screenshot tool registration', () => {
   });
 
   it('captures and returns the screenshot image inline in one tool call', async () => {
-    const pi = createMockPi();
-    utilsExtension(pi as any);
-    const tool = pi.tools.find((entry) => entry.name === 'screenshot');
+    const tools = await registerUtilsTools();
+    const tool = tools.find((entry) => entry.name === 'screenshot');
     const file = await tempOutput('inline.png');
 
     const result: any = await tool?.execute('tool-call-1', {
@@ -334,9 +323,8 @@ describe('screenshot tool registration', () => {
   });
 
   it('lists Wayland windows through the screenshot action without returning image content', async () => {
-    const pi = createMockPi();
-    utilsExtension(pi as any);
-    const tool = pi.tools.find((entry) => entry.name === 'screenshot');
+    const tools = await registerUtilsTools();
+    const tool = tools.find((entry) => entry.name === 'screenshot');
     const file = await tempOutput('tool-list.png');
 
     const result: any = await tool?.execute('tool-call-1', {
@@ -359,9 +347,8 @@ describe('screenshot tool registration', () => {
   });
 
   it('returns actionable missing dependency failures from the tool wrapper', async () => {
-    const pi = createMockPi();
-    utilsExtension(pi as any);
-    const tool = pi.tools.find((entry) => entry.name === 'screenshot');
+    const tools = await registerUtilsTools();
+    const tool = tools.find((entry) => entry.name === 'screenshot');
     const file = await tempOutput('tool.png');
 
     const result = await tool?.execute('tool-call-1', {

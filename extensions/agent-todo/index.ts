@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { createAgentTodoHud } from './src/hud.js';
 
 import { createAgentTodoProvider, cleanupAgentTodoProvider, publishAgentTodoProvider } from './src/provider.js';
 import { reconstructAgentTodoProjection } from './src/session.js';
@@ -14,6 +15,7 @@ export default function agentTodoExtension(pi: any): void {
     };
     provider?: any;
     widgetCollapsed: boolean;
+    hud?: ReturnType<typeof createAgentTodoHud>;
   } = {
     projection: { active_todo: null, current_todo: null },
     deps: {
@@ -25,6 +27,9 @@ export default function agentTodoExtension(pi: any): void {
     widgetCollapsed: true,
   };
   runtime.provider = createAgentTodoProvider(() => runtime.projection);
+  runtime.hud = createAgentTodoHud(pi, () => runtime.projection, ctx => {
+    syncAgentTodoWidget(ctx, runtime.projection, { collapsed: runtime.widgetCollapsed, hidden: runtime.hud?.isVisible(), shortcut: 'ctrl+space' });
+  });
 
   publishAgentTodoProvider(runtime.provider, { pi });
   registerAgentTodoTool(pi, runtime);
@@ -32,7 +37,8 @@ export default function agentTodoExtension(pi: any): void {
   const rebuild = (ctx: any) => {
     runtime.projection = reconstructAgentTodoProjection(ctx?.sessionManager?.getBranch?.() ?? []);
     publishAgentTodoProvider(runtime.provider, { pi, ctx });
-    syncAgentTodoWidget(ctx, runtime.projection, { collapsed: runtime.widgetCollapsed, shortcut: 'ctrl+space' });
+    runtime.hud?.bind(ctx, true);
+    syncAgentTodoWidget(ctx, runtime.projection, { collapsed: runtime.widgetCollapsed, hidden: runtime.hud?.isVisible(), shortcut: 'ctrl+space' });
   };
 
   pi.on?.('session_start', async (_event: unknown, ctx: any) => {
@@ -46,6 +52,8 @@ export default function agentTodoExtension(pi: any): void {
   pi.registerShortcut?.('ctrl+space', {
     description: 'Toggle compact Agent Todo widget above the editor',
     handler: async (ctx: any) => {
+      runtime.hud?.bind(ctx);
+      if (runtime.hud?.isVisible()) return;
       runtime.widgetCollapsed = !runtime.widgetCollapsed;
       syncAgentTodoWidget(ctx, runtime.projection, { collapsed: runtime.widgetCollapsed, shortcut: 'ctrl+space' });
       ctx?.ui?.notify?.(`Agent Todo widget ${runtime.widgetCollapsed ? 'collapsed' : 'expanded'}.`, 'info');
@@ -54,6 +62,7 @@ export default function agentTodoExtension(pi: any): void {
 
   pi.on?.('session_shutdown', async (_event: unknown, ctx: any) => {
     syncAgentTodoWidget(ctx, { active_todo: null, current_todo: null });
+    runtime.hud?.dispose();
     cleanupAgentTodoProvider(runtime.provider, { pi, ctx });
   });
 }

@@ -61,18 +61,12 @@ test("MINI-001: Styling Primitives and ANSI Frame Utilities", async () => {
   assert.equal(render.pad("hello", 10), "hello     ");
   assert.equal(render.visibleWidth(render.pad(`${render.LIME}ok${render.RESET}`, 6)), 6);
 
-  // Frame helpers
-  const top = render.cardTopBorder("git-sync", "main", 40, render.CYAN);
-  assert.match(top, /^.*╭.*git-sync.*main.*╮.*$/);
-  assert.equal(render.visibleWidth(top), 42); // 40 inner + 2 border chars
-
-  const line = render.boxLine("test line", 40, render.CYAN);
-  assert.match(line, /^.*│.*test line.*│.*$/);
-  assert.equal(render.visibleWidth(line), 42);
-
-  const bottom = render.cardBottomBorder(40, render.CYAN);
-  assert.match(bottom, /^.*╰.*╯.*$/);
-  assert.equal(render.visibleWidth(bottom), 42);
+  // Frame helpers removed under compact unboxed contract; check CJK/combining/OSC width & zero-width handling
+  assert.equal(render.visibleWidth("漢字"), 4);
+  assert.equal(render.visibleWidth("e\u0301"), 1);
+  assert.equal(render.visibleWidth("\x1b]8;;https://example.com/long\x07link\x1b]8;;\x07"), 4);
+  assert.ok(render.visibleWidth(render.fit("漢字abc", 3)) <= 3);
+  assert.equal(render.fit("hello", 0), "");
 
   // Status badges
   assert.match(render.formatSyncStatusBadge("UP-TO-DATE"), /UP-TO-DATE/);
@@ -92,7 +86,8 @@ test("MINI-001: Styling Primitives and ANSI Frame Utilities", async () => {
 });
 
 test("MINI-002: Message Renderer - Collapsed Mode", async () => {
-  const { createGitSyncMessageRenderer } = await import("../src/render.ts");
+  const render = await import("../src/render.ts");
+  const { createGitSyncMessageRenderer } = render;
 
   const diagnostic = {
     timestamp: Date.now(),
@@ -128,22 +123,32 @@ test("MINI-002: Message Renderer - Collapsed Mode", async () => {
 
   const lines = renderer.render(80);
   assert.equal(lines.length, 1, "Collapsed mode must render exactly 1 line");
+  assert.ok(render.stripAnsi(lines[0]).startsWith(" "), "1-char left margin required");
+  assert.ok(!render.stripAnsi(lines[0]).startsWith("  "), "no doubled margin");
 
-  const line = lines[0];
+  const line = render.stripAnsi(lines[0]);
   assert.match(line, /main/);
   assert.match(line, /UP-TO-DATE/);
   assert.match(line, /clean/);
-  assert.match(line, /ctrl\+o expand/);
+  assert.doesNotMatch(line, /to expand|to collapse|ctrl\+o|click or/i);
+  assert.doesNotMatch(line, /[╭╮╰╯│┌┐└┘]/);
 
-  // Narrow width truncation
+  // Narrow width truncation without hints
   const narrowLines = renderer.render(35);
   assert.equal(narrowLines.length, 1);
-  assert.ok(narrowLines[0].length > 0);
-  assert.match(narrowLines[0], /ctrl\+o/);
+  assert.ok(render.visibleWidth(narrowLines[0]) <= 35);
+  assert.ok(render.stripAnsi(narrowLines[0]).startsWith(" "));
+  assert.doesNotMatch(render.stripAnsi(narrowLines[0]), /to expand|ctrl\+o|click or/i);
+
+  // Width <= 0 emits no cells; width === 1 emits single blank margin row
+  assert.deepEqual(renderer.render(0), []);
+  assert.deepEqual(renderer.render(-10), []);
+  assert.deepEqual(renderer.render(1), [" "]);
 });
 
 test("MINI-002: Message Renderer - Expanded Mode (Up-to-Date / Clean)", async () => {
-  const { createGitSyncMessageRenderer } = await import("../src/render.ts");
+  const render = await import("../src/render.ts");
+  const { createGitSyncMessageRenderer } = render;
 
   const diagnostic = {
     timestamp: Date.now(),
@@ -178,14 +183,16 @@ test("MINI-002: Message Renderer - Expanded Mode (Up-to-Date / Clean)", async ()
   );
 
   const lines = renderer.render(80);
-  assert.ok(lines.length > 5, "Expanded mode must render a multi-line card");
+  assert.ok(lines.length >= 2, "Expanded mode must render unboxed multi-line report");
 
-  const fullText = lines.join("\n");
+  const fullText = render.stripAnsi(lines.join("\n"));
   assert.match(fullText, /git-sync/);
   assert.match(fullText, /main/);
   assert.match(fullText, /UP-TO-DATE/);
   assert.doesNotMatch(fullText, /Safe to proceed|MANDATORY DECISION GATE|Policy:/);
-  assert.match(fullText, /ctrl\+o collapse/);
+  assert.doesNotMatch(fullText, /[╭╮╰╯│┌┐└┘]/);
+  assert.doesNotMatch(fullText, /to expand|to collapse|ctrl\+o|click or/i);
+  assert.doesNotMatch(lines.join("\n"), /\x1b\[(?:4[0-7]|10[0-7]|48;)/);
 });
 
 test("MINI-002: Message Renderer - Expanded Mode (Behind, Dirty, Worktrees, Commits, Decision Gate)", async () => {
@@ -269,19 +276,118 @@ test("MINI-002: Message Renderer - Fallback Mode without structured details", as
   const collapsedLines = rendererErrorCollapsed.render(80);
   assert.equal(collapsedLines.length, 1);
   assert.match(collapsedLines[0], /failed to inspect repository/);
+  assert.doesNotMatch(collapsedLines[0], /to expand|ctrl\+o|click or/i);
 
   const rendererErrorExpanded = createGitSyncMessageRenderer(
     {
       customType: "git-sync-awareness",
-      content: "⚠️ Git sync awareness failed to inspect repository: network down",
+      content: "⚠️ Git sync awareness failed to inspect repository: network down\nsecond diagnostic line",
       display: true,
     },
     { expanded: true }
   );
 
   const expandedLines = rendererErrorExpanded.render(80);
-  assert.ok(expandedLines.length >= 3);
-  assert.match(expandedLines.join("\n"), /failed to inspect repository/);
+  assert.ok(expandedLines.length >= 2);
+  const expandedPlain = expandedLines.join("\n");
+  assert.match(expandedPlain, /failed to inspect repository/);
+  assert.match(expandedPlain, /second diagnostic line/);
+  assert.doesNotMatch(expandedPlain, /[╭╮╰╯│┌┐└┘]/);
+  assert.doesNotMatch(expandedPlain, /to expand|to collapse|ctrl\+o|click or/i);
+});
+
+test("MINI-005: Unbounded entries, home-relative worktrees, width matrix, and literal data preservation", async () => {
+  const render = await import("../src/render.ts");
+  const { createGitSyncMessageRenderer } = render;
+  const home = process.env.HOME || "/home/testuser";
+
+  const diagnostic = {
+    timestamp: Date.now(),
+    fetchSuccess: true,
+    currentBranch: {
+      branch: "feature/unicode-漢字-👨‍👩‍👧",
+      upstream: "origin/feature/unicode",
+      syncStatus: "BEHIND",
+      ahead: 0,
+      behind: 7,
+      incomingCommits: Array.from({ length: 7 }, (_, i) => `c${i + 1} commit message ${i + 1}`),
+    },
+    otherLocalBranches: [],
+    remoteBranches: Array.from({ length: 7 }, (_, i) => `origin/branch-${i + 1}`),
+    remoteOnlyBranches: ["origin/branch-7"],
+    activeCollaboratorBranches: Array.from({ length: 6 }, (_, i) => `origin/collab-${i + 1}`),
+    workingTree: {
+      isClean: false,
+      modifiedCount: 6,
+      untrackedCount: 0,
+      stagedCount: 0,
+      summaryLines: Array.from({ length: 6 }, (_, i) => ` M file-${i + 1}.ts`),
+    },
+    worktree: {
+      isMainWorktree: false,
+      currentWorktreePath: `${home}/work/wt`,
+      mainWorktreePath: `${home}/work/main`,
+      worktrees: [
+        { path: `${home}/work/main`, head: "1111111", branch: "main", isCurrent: false, isMain: true },
+        { path: `${home}/work/wt`, head: "2222222", branch: "feature/unicode", isCurrent: true, isMain: false },
+      ],
+    },
+    isBranchPolicyCompliant: true,
+    requiresDecision: true,
+    formattedReport: "Behind",
+  };
+
+  const renderer = createGitSyncMessageRenderer(
+    { customType: "git-sync-awareness", content: "Behind", details: diagnostic },
+    { expanded: true }
+  );
+
+  for (const width of [0, 1, 2, 10, 23, 24, 40, 80, 120]) {
+    const lines = renderer.render(width);
+    if (width <= 0) {
+      assert.deepEqual(lines, []);
+    } else if (width === 1) {
+      assert.deepEqual(lines, [" "]);
+    } else {
+      for (const line of lines) {
+        assert.ok(render.visibleWidth(line) <= width, `width ${width} exceeded: ${render.visibleWidth(line)} (${JSON.stringify(line)})`);
+        const plain = render.stripAnsi(line);
+        if (width === 2 && !plain.startsWith(" ")) {
+          assert.equal(render.visibleWidth(plain), 2, `width 2 unmargined line must be intact wide grapheme: ${JSON.stringify(plain)}`);
+        } else {
+          assert.ok(plain.startsWith(" "), `width ${width}: 1-char left margin missing`);
+        }
+      }
+    }
+  }
+
+  const expanded2 = render.stripAnsi(renderer.render(2).join("\n")).split("\n");
+  assert.ok(expanded2.includes("漢") && expanded2.includes("字") && expanded2.includes("👨‍👩‍👧"), "width 2 expanded git-sync-awareness must retain wide graphemes intact");
+  const fallbackWide2 = render.stripAnsi(
+    createGitSyncMessageRenderer({ customType: "git-sync-awareness", content: "A漢B👨‍👩‍👧e\u0301" }, { expanded: true }).render(2).join("\n")
+  ).split("\n");
+  assert.ok(fallbackWide2.includes(" A") && fallbackWide2.includes("漢") && fallbackWide2.includes(" B") && fallbackWide2.includes("👨‍👩‍👧") && fallbackWide2.includes(" e\u0301"));
+
+  const expanded80 = render.stripAnsi(renderer.render(80).join("\n"));
+  // All entries reachable (no .slice(0, 4) or .slice(0, 5) truncation)
+  assert.match(expanded80, /c7 commit message 7/);
+  assert.match(expanded80, /file-6\.ts/);
+  assert.match(expanded80, /collab-6/);
+  assert.match(expanded80, /origin\/branch-7/);
+  // Home-relative display without mutating original diagnostic
+  assert.match(expanded80, /~\/work\/wt/);
+  assert.equal(diagnostic.worktree.currentWorktreePath, `${home}/work/wt`);
+
+  // Literal box characters and hint words in fallback content stay data
+  const literalMsg = {
+    customType: "git-sync-awareness",
+    content: "╭─ literal ─╮\nctrl+o to expand is literal data",
+  };
+  const litExpanded = render.stripAnsi(
+    createGitSyncMessageRenderer(literalMsg, { expanded: true }).render(80).join("\n")
+  );
+  assert.match(litExpanded, /╭─ literal ─╮/);
+  assert.match(litExpanded, /ctrl\+o to expand is literal data/);
 });
 
 test("MINI-003: Extension Registration and Details Attachment", async () => {

@@ -1,239 +1,244 @@
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
+import { type BashToolDetails, type Theme, type ToolRenderResultOptions, formatSize } from "@earendil-works/pi-coding-agent";
+import { type Component, visibleWidth } from "@earendil-works/pi-tui";
+import { AMBER, DIM, ORANGE, electric, formatDuration } from "./borders.js";
 import {
-	type BashToolDetails,
-	type Theme,
-	type ToolRenderResultOptions,
-	truncateToVisualLines,
-} from "@earendil-works/pi-coding-agent";
-import type { Component } from "@earendil-works/pi-tui";
-import { visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import {
-	AMBER,
-	DIM,
-	ORANGE,
-	RED,
-	electric,
-	formatDuration,
-	toolHint,
-} from "./borders.js";
-import {
-	ToolCardCallComponent,
-	ToolCardResultComponent,
-	type ToolCardState,
-	type ToolRenderContext,
-} from "./ToolCard.js";
-
-const BASH_PREVIEW_LINES = 5;
+	COMPACT_LEFT_MARGIN_KEY,
+	COMPACT_LEFT_MARGIN_VALUE,
+	COMPACT_TOOL_RENDERING_KEY,
+	COMPACT_TOOL_RENDERING_VERSION,
+	CompactToolRow,
+	type CompactRowState,
+	compactHeader,
+	completedStatus,
+	expandedLines,
+	failedStatus,
+	firstLine,
+	resultText,
+	runningStatus,
+} from "./compact.js";
 
 export interface BashArgs {
 	command?: string;
 	timeout?: number;
 }
 
-function extractText(result: AgentToolResult<BashToolDetails | undefined>): string {
-	if (!result?.content || !Array.isArray(result.content)) return "";
-	return result.content
-		.filter((c: any) => c.type === "text" && typeof c.text === "string")
-		.map((c: any) => c.text)
-		.join("\n");
+interface ShellState extends CompactRowState {
+	startedAt?: number;
+	endedAt?: number;
+	interval?: ReturnType<typeof setInterval>;
+	isError?: boolean;
 }
 
-export function getBashBorderColor(state: ToolCardState): string {
-	if (state.isError) {
-		return RED;
-	}
-	return ORANGE;
+/** Collapsed command text for non-bash shell tools (`PS>`): a single clipped line. */
+function commandText(command: string | undefined, prompt: string): string {
+	const single = (command ?? "").replace(/\s+/g, " ").trim();
+	if (!single) return `${electric(ORANGE, prompt)} ${electric(DIM, "...")}`;
+	return `${electric(ORANGE, prompt)} ${electric(ORANGE, single)}`;
 }
 
-export function formatBashCommandLine(
-	command: string | undefined,
-	timeout: number | undefined,
-	innerContentWidth: number,
-): string[] {
-	const rawCmd = command ?? "";
-	if (!rawCmd.trim()) {
-		return [electric(DIM, "$ ...")];
-	}
+const GRAPHEME_SEGMENTER = new Intl.Segmenter("en", { granularity: "grapheme" });
 
-	const timeoutSuffix = timeout ? electric(DIM, ` (timeout ${timeout}s)`) : "";
-	const rawLines = rawCmd.split(/\r?\n/);
-	const resultLines: string[] = [];
+/**
+ * Exact grapheme-boundary soft wrapper for a single bash command line: preserves all leading,
+ * internal, and trailing spaces, tabs (expanded visually to 3 spaces matching pi-tui without
+ * mutating command data), standalone CR characters, quotes, backslashes, and literal `\n`, with
+ * zero trimming or synthetic continuation indentation. At total width 2, an intact 2-column
+ * grapheme uses its own unmargined 2-column chunk rather than being deleted.
+ */
+function wrapExactCommandLine(rawLine: string, width: number, totalWidth = width + 1): string[] {
+	const visual = rawLine.includes("\t") ? rawLine.replace(/\t/g, "   ") : rawLine;
+	if (visual === "") return [""];
+	if (visibleWidth(visual) <= width) return [visual];
 
-	for (let i = 0; i < rawLines.length; i++) {
-		const isFirst = i === 0;
-		const isLast = i === rawLines.length - 1;
-		const lineContent = rawLines[i];
-		const prefix = isFirst ? `${electric(ORANGE, "$")} ` : "  ";
-		const suffix = isLast ? timeoutSuffix : "";
-		const fullLine = `${prefix}${electric(ORANGE, lineContent)}${suffix}`;
-
-		if (innerContentWidth > 0 && visibleWidth(fullLine) > innerContentWidth) {
-			const wrapped = wrapTextWithAnsi(fullLine, innerContentWidth);
-			resultLines.push(...wrapped);
+	const allowWidth2Wide = totalWidth === 2;
+	const out: string[] = [];
+	let current = "";
+	let currentWidth = 0;
+	let chunkLimit = width;
+	for (const { segment } of GRAPHEME_SEGMENTER.segment(visual)) {
+		const gw = visibleWidth(segment);
+		if (gw === 0) {
+			current += segment;
+			continue;
+		}
+		if (gw > width) {
+			if (!allowWidth2Wide || gw > totalWidth) continue;
+			if (currentWidth > 0) {
+				out.push(current);
+				current = "";
+				currentWidth = 0;
+			}
+			chunkLimit = totalWidth;
+			current += segment;
+			currentWidth = gw;
+			continue;
+		}
+		if (currentWidth + gw > chunkLimit && currentWidth > 0) {
+			out.push(current);
+			current = segment;
+			currentWidth = gw;
+			chunkLimit = width;
 		} else {
-			resultLines.push(fullLine);
+			current += segment;
+			currentWidth += gw;
 		}
 	}
-
-	return resultLines;
+	if (current !== "" || out.length === 0) out.push(current);
+	return out;
 }
 
-export const bashRenderers = {
-	renderCall(args: BashArgs, _theme: Theme, context: ToolRenderContext<ToolCardState, BashArgs>): Component {
-		const state = context.state;
-		if (state.startedAt === undefined) {
-			state.startedAt = Date.now();
+/**
+ * Full command block for `bash` (`$`): renders the authored command verbatim — preserving exact
+ * leading/trailing spaces, tabs (visual display only), real newlines, standalone CR and CRLF
+ * characters, consecutive blank lines, quotes, backslashes, and literal `\n` — in the existing
+ * ORANGE foreground, soft-wrapping long lines ANSI-aware at `width` (or total width 2 for intact
+ * wide graphemes) with no trimming, collapsing, or ellipsis.
+ */
+function commandLines(command: string | undefined, width: number, totalWidth = width + 1): string[] {
+	if (width <= 0 || typeof command !== "string" || command.length === 0) return [];
+	const lines: string[] = [];
+	for (const rawLine of command.split("\n")) {
+		for (const chunk of wrapExactCommandLine(rawLine, width, totalWidth)) {
+			lines.push(chunk === "" ? "" : electric(ORANGE, chunk));
 		}
+	}
+	return lines;
+}
 
-		// Si ya finalizó la ejecución, nos aseguramos de que ningún timer siga vivo
-		if (state.hasResult || state.endedAt !== undefined) {
-			if (state.interval) {
-				clearInterval(state.interval);
-				state.interval = undefined;
-			}
-		} else if (context.executionStarted && !state.interval) {
-			state.interval = setInterval(() => context.invalidate(), 1000);
-			state.interval.unref?.();
+function timeoutText(timeout: number | undefined): string | undefined {
+	return timeout ? electric(DIM, `(timeout ${timeout}s)`) : undefined;
+}
+
+/**
+ * Row clock for the shell tools only: long-running commands whose elapsed time is worth a redraw.
+ * The interval is cleared as soon as the row settles, on error, and never when already settled.
+ */
+function maintainShellTimer(context: any, state: ShellState, isPartial: boolean): void {
+	state.startedAt ??= Date.now();
+	if (!isPartial || context.isError) {
+		state.endedAt ??= Date.now();
+		if (state.interval) {
+			clearInterval(state.interval);
+			state.interval = undefined;
 		}
+		return;
+	}
+	if (state.endedAt !== undefined || state.interval) return;
+	state.interval = setInterval(() => context.invalidate(), 1000);
+	state.interval.unref?.();
+}
 
-		return new ToolCardCallComponent(
-			"bash",
-			() => undefined,
-			() => {
-				const end = state.endedAt ?? Date.now();
-				const start = state.startedAt ?? end;
-				const elapsed = formatDuration(Math.max(0, end - start));
-				if (state.hasResult || state.endedAt !== undefined) {
-					return `${electric(ORANGE, "●")} ${electric(DIM, `Completed (${elapsed})`)}`;
-				}
-				return `${electric(ORANGE, "●")} ${electric(DIM, `Running... (${elapsed})`)}`;
-			},
-			getBashBorderColor,
-			state,
-			(_width: number, innerWidth: number) => {
-				const contentWidth = Math.max(0, innerWidth - 2);
-				const effectiveTimeout = args?.timeout ?? 120;
-				return formatBashCommandLine(args?.command, effectiveTimeout, contentWidth);
-			},
-		);
-	},
+function elapsedText(state: ShellState, isRunning: boolean): string {
+	const start = state.startedAt ?? Date.now();
+	const end = state.endedAt ?? start;
+	const elapsed = formatDuration(Math.max(0, end - start));
+	return isRunning ? `Running... (${elapsed})` : `Took ${elapsed}`;
+}
 
-	renderResult(
-		result: AgentToolResult<BashToolDetails | undefined>,
-		options: ToolRenderResultOptions,
-		_theme: Theme,
-		context: ToolRenderContext<ToolCardState, BashArgs>,
-	): Component {
-		const state = context.state;
-		state.hasResult = true;
-		state.isPartial = options.isPartial;
-		state.expanded = options.expanded;
-		state.startedAt ??= Date.now();
+function isShellFailure(output: string, isError: boolean): boolean {
+	return (
+		isError ||
+		output.includes("Command exited with code") ||
+		output.includes("Command aborted") ||
+		output.includes("Command timed out")
+	);
+}
 
-		const output = extractText(result).trim();
-		const hasErrorCode =
-			output.includes("Command exited with code") ||
-			output.includes("Command aborted") ||
-			output.includes("Command timed out");
-		state.isError = context.isError || hasErrorCode;
-
-		// Si terminó la ejecución o hubo error, congelar el tiempo y detener timer
-		if (!options.isPartial || state.isError) {
-			state.endedAt ??= Date.now();
-			state.isPartial = false;
-			if (state.interval) {
-				clearInterval(state.interval);
-				state.interval = undefined;
-			}
-		} else if (!state.interval && state.endedAt === undefined) {
-			state.interval = setInterval(() => context.invalidate(), 1000);
-			state.interval.unref?.();
+function outputWarnings(result: AgentToolResult<BashToolDetails | undefined>): string[] {
+	const warnings: string[] = [];
+	const truncation = result?.details?.truncation;
+	const fullOutputPath = result?.details?.fullOutputPath;
+	if (fullOutputPath) warnings.push(`Full output: ${fullOutputPath}`);
+	if (truncation?.truncated) {
+		if (truncation.truncatedBy === "lines") {
+			warnings.push(`Truncated: showing ${truncation.outputLines} of ${truncation.totalLines} lines`);
+		} else {
+			warnings.push(`Truncated: ${truncation.outputLines} lines shown (${formatSize(truncation.maxBytes)} limit)`);
 		}
+	}
+	return warnings;
+}
 
-		return new ToolCardResultComponent(
-			(_width: number, innerWidth: number) => {
-				const contentWidth = Math.max(0, innerWidth - 2);
-				const lines: string[] = [];
+/**
+ * bash (`$`) and powershell (`PS>`) share the one compact shell presentation. The bash execution
+ * wrapper that applies the theme's default timeout lives in `src/tools/index.ts` and is untouched.
+ */
+export function createShellRenderers(prompt: string) {
+	const multilineCommand = prompt === "$";
 
-				const effectiveTimeout = context.args?.timeout ?? 120;
-				const cmdLines = formatBashCommandLine(context.args?.command, effectiveTimeout, contentWidth);
-				lines.push(...cmdLines);
+	return {
+		[COMPACT_TOOL_RENDERING_KEY]: COMPACT_TOOL_RENDERING_VERSION,
+		[COMPACT_LEFT_MARGIN_KEY]: COMPACT_LEFT_MARGIN_VALUE,
+		renderShell: "self" as const,
 
-				const start = state.startedAt ?? Date.now();
-				const end = state.endedAt ?? (options.isPartial ? Date.now() : start);
-				const durationMs = Math.max(0, end - start);
-				const durationStr = formatDuration(durationMs);
-				const timingLabel = options.isPartial && state.endedAt === undefined ? "Elapsed" : "Took";
+		renderCall(args: BashArgs, _theme: Theme, context: any): Component {
+			const state: ShellState = context.state ?? {};
+			maintainShellTimer(context, state, true);
+			return new CompactToolRow(
+				() =>
+					compactHeader([
+						multilineCommand
+							? args?.command
+								? electric(ORANGE, prompt)
+								: `${electric(ORANGE, prompt)} ${electric(DIM, "...")}`
+							: commandText(args?.command, prompt),
+						timeoutText(args?.timeout),
+						runningStatus(ORANGE, elapsedText(state, true)),
+					]),
+				{
+					state,
+					isCallSlot: true,
+					body: multilineCommand ? (width, totalWidth) => commandLines(args?.command, width, totalWidth) : undefined,
+				},
+			);
+		},
 
-				const isRunning = options.isPartial && state.endedAt === undefined;
+		renderResult(
+			result: AgentToolResult<BashToolDetails | undefined>,
+			options: ToolRenderResultOptions,
+			_theme: Theme,
+			context: any,
+		): Component {
+			const state: ShellState = context.state ?? {};
+			state.hasResult = true;
+			const output = resultText(result);
+			const trimmed = output.trim();
+			const isCancelled = (result?.details as any)?.cancelled === true;
+			state.isError = isShellFailure(trimmed, Boolean(context.isError) || isCancelled);
+			maintainShellTimer(context, state, options.isPartial);
+			const isRunning = options.isPartial && state.endedAt === undefined;
 
-				if (!output) {
-					if (isRunning) {
-						lines.push(`${electric(ORANGE, "●")} ${electric(DIM, `Running... (${durationStr})`)}`);
-					} else {
-						lines.push(electric(DIM, `(no output) · Took ${durationStr}`));
-					}
-					return lines;
-				}
+			return new CompactToolRow(
+				() =>
+					compactHeader([
+						multilineCommand
+							? context.args?.command
+								? electric(ORANGE, prompt)
+								: `${electric(ORANGE, prompt)} ${electric(DIM, "...")}`
+							: commandText(context.args?.command, prompt),
+						timeoutText(context.args?.timeout),
+						state.isError
+							? failedStatus(firstLine(trimmed) || (isCancelled ? "cancelled" : "failed"))
+							: isRunning
+								? runningStatus(ORANGE, elapsedText(state, true))
+								: completedStatus(ORANGE, trimmed === "" ? `no output · ${elapsedText(state, false)}` : elapsedText(state, false)),
+					]),
+				{
+					state,
+					isCallSlot: false,
+					body: (width, totalWidth) => {
+						const cmd = multilineCommand ? commandLines(context.args?.command, width, totalWidth) : [];
+						if (!options.expanded) return cmd;
+						const lines = trimmed === "" ? [electric(DIM, "(no output)")] : expandedLines(output, width, totalWidth);
+						for (const warning of outputWarnings(result)) lines.push(electric(AMBER, `[${warning}]`));
+						return [...cmd, ...lines];
+					},
+				},
+			);
+		},
+	};
+}
 
-				// Línea divisoria tenue entre el comando y el resultado
-				lines.push(electric(DIM, "─".repeat(contentWidth)));
-
-				const truncation = result.details?.truncation;
-				const fullOutputPath = result.details?.fullOutputPath;
-
-				if (options.expanded) {
-					// Expanded view: full output
-					lines.push(...output.split("\n"));
-
-					if (truncation?.truncated || fullOutputPath) {
-						const warnings: string[] = [];
-						if (fullOutputPath) warnings.push(`Full output: ${fullOutputPath}`);
-						if (truncation?.truncated) {
-							if (truncation.truncatedBy === "lines") {
-								warnings.push(`Truncated: showing ${truncation.outputLines} of ${truncation.totalLines} lines`);
-							} else {
-								warnings.push(`Truncated: ${truncation.outputLines} lines shown`);
-							}
-						}
-						lines.push(electric(AMBER, `[${warnings.join(". ")}]`));
-					}
-
-					const statusLine = isRunning
-						? `${electric(ORANGE, "●")} ${electric(DIM, `Running... (${durationStr})`)} · ${toolHint("to collapse")}`
-						: `${electric(DIM, `Took ${durationStr}`)} · ${toolHint("to collapse")}`;
-					lines.push(statusLine);
-				} else {
-					// Collapsed view: last BASH_PREVIEW_LINES lines with visual truncate
-					const preview = truncateToVisualLines(output, BASH_PREVIEW_LINES, contentWidth);
-					if (preview.skippedCount > 0) {
-						lines.push(
-							`${electric(DIM, `... (${preview.skippedCount} earlier lines,`)} ${toolHint("to expand")}${electric(DIM, ")")}`,
-						);
-					}
-					lines.push(...preview.visualLines);
-
-					if (truncation?.truncated || fullOutputPath) {
-						const warnings: string[] = [];
-						if (truncation?.truncated) {
-							warnings.push(`Truncated (${truncation.outputLines}/${truncation.totalLines} lines)`);
-						}
-						if (warnings.length > 0) {
-							lines.push(electric(AMBER, `[${warnings.join(". ")}]`));
-						}
-					}
-
-					const statusLine = isRunning
-						? `${electric(ORANGE, "●")} ${electric(DIM, `Running... (${durationStr})`)} · ${toolHint("to expand")}`
-						: `${electric(DIM, `Took ${durationStr}`)} · ${toolHint("to expand")}`;
-					lines.push(statusLine);
-				}
-
-				return lines;
-			},
-			getBashBorderColor,
-			state,
-			options.expanded, // wrap in expanded mode
-		);
-	},
-};
+export const bashRenderers = createShellRenderers("$");
+export const powershellRenderers = createShellRenderers("PS>");

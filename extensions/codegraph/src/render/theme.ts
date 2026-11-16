@@ -1,221 +1,59 @@
-import { keyHint } from "@earendil-works/pi-coding-agent";
-import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
 export const RESET = "\x1b[0m";
 export const PINK = "\x1b[1;38;2;255;45;247m";
 export const RED = "\x1b[1;38;2;255;77;109m";
+export const LIME = "\x1b[1;38;2;102;255;102m";
+export const AMBER = "\x1b[1;38;2;255;184;77m";
 export const DIM = "\x1b[2m";
+
+/** Short inline row separator; not a card frame. */
+export const ROW_SEPARATOR = " ─ ";
 
 export function electric(color: string, text: string): string {
 	return `${color}${text}${RESET}`;
-}
-
-export function toolHint(action: string): string {
-	return electric(DIM, keyHint("app.tools.expand", action));
 }
 
 export function fit(text: string, width: number): string {
 	return truncateToWidth(text, Math.max(0, width), "");
 }
 
-export function pad(text: string, width: number): string {
-	if (width <= 0) return "";
-	const vis = visibleWidth(text);
-	if (vis === width) return text;
-	if (vis < width) return text + " ".repeat(width - vis);
-	const fitted = fit(text, width);
-	const visFitted = visibleWidth(fitted);
-	return visFitted < width ? fitted + " ".repeat(width - visFitted) : fitted;
+export function visible(text: string): number {
+	return visibleWidth(text);
 }
 
-export function boxLine(content: string, innerWidth: number, borderColor: string = PINK): string {
-	const innerContentWidth = Math.max(0, innerWidth - 2);
-	return `${electric(borderColor, "│")} ${pad(content, innerContentWidth)} ${electric(borderColor, "│")}`;
+/**
+ * One compact inline line joining non-empty parts. Returns no cells for a
+ * non-positive width so narrow or zero-width viewports stay safe.
+ */
+export function rowLine(parts: Array<string | undefined | null>, width: number): string[] {
+	if (width <= 0) return [];
+	const line = parts
+	  .filter((part): part is string => Boolean(part && part.trim()))
+	  .map((part) => part.replace(/[\r\n]+/g, ' '))
+	  .join(ROW_SEPARATOR);
+	return [fit(line, width)];
 }
 
-export function cardTopBorder(
-	toolName: string,
-	actionOrTarget: string | undefined,
-	innerWidth: number,
-	borderColor: string = PINK,
-	titleColor: string = PINK,
-): string {
-	const cleanAction = actionOrTarget ? actionOrTarget.replace(/[\r\n]+/g, " ").trim() : undefined;
-	let label = cleanAction ? `${toolName} [${cleanAction}]` : toolName;
-
-	const maxTitleWidth = Math.max(4, innerWidth - 4);
-	if (visibleWidth(label) + 2 > maxTitleWidth && cleanAction) {
-		const maxActionWidth = Math.max(3, maxTitleWidth - visibleWidth(toolName) - 5);
-		const truncatedAction = fit(cleanAction, maxActionWidth);
-		label = `${toolName} [${truncatedAction}]`;
-	}
-
-	let titleText = ` ${label} `;
-	if (visibleWidth(titleText) > innerWidth) {
-		titleText = ` ${fit(label, Math.max(1, innerWidth - 2))} `;
-	}
-
-	const rest = Math.max(0, innerWidth - visibleWidth(titleText));
-	const leftDash = Math.min(2, rest);
-	const rightDash = Math.max(0, rest - leftDash);
-	return `${electric(borderColor, "╭")}${electric(borderColor, "─".repeat(leftDash))}${electric(titleColor, titleText)}${electric(borderColor, "─".repeat(rightDash))}${electric(borderColor, "╮")}`;
-}
-
-export function cardBottomBorder(innerWidth: number, borderColor: string = PINK): string {
-	return `${electric(borderColor, "╰")}${electric(borderColor, "─".repeat(innerWidth))}${electric(borderColor, "╯")}`;
-}
-
-export function frameContent(
-	lines: string[],
-	innerWidth: number,
-	borderColor: string = PINK,
-	wrap = false,
-): string[] {
-	const innerContentWidth = Math.max(0, innerWidth - 2);
-	const framed: string[] = [];
-	for (const rawLine of lines) {
-		const subLines = rawLine.includes("\n") ? rawLine.split(/\r?\n/) : [rawLine];
-		for (const sub of subLines) {
-			if (wrap && innerContentWidth > 0 && visibleWidth(sub) > innerContentWidth) {
-				const wrapped = wrapTextWithAnsi(sub, innerContentWidth);
-				for (const segment of wrapped) {
-					framed.push(boxLine(segment, innerWidth, borderColor));
-				}
-			} else {
-				framed.push(boxLine(sub, innerWidth, borderColor));
-			}
+/** Wrap expanded content losslessly; blank lines are preserved as empty rows. */
+export function textLines(text: string, width: number): string[] {
+	if (width <= 0) return [];
+	const out: string[] = [];
+	for (const raw of text.split(/\r?\n/)) {
+		if (raw === "") {
+			out.push("");
+			continue;
 		}
+		const segments = wrapTextWithAnsi(raw, width);
+		if (segments.length === 0) out.push("");
+		else out.push(...segments.map((segment) => fit(segment, width)));
 	}
-	return framed;
+	return out;
 }
 
-export interface CodeGraphCardState {
-	startedAt?: number;
-	endedAt?: number;
+export interface CodeGraphRowState {
 	hasResult?: boolean;
-	isPartial?: boolean;
 	isError?: boolean;
+	isPartial?: boolean;
 	expanded?: boolean;
-	borderColor?: string;
-}
-
-export class CodeGraphCardCallComponent implements Component {
-	private readonly toolName: string;
-	private readonly getAction: () => string | undefined;
-	private readonly getPendingStatus: () => string;
-	private readonly getBorderColor: (state: CodeGraphCardState) => string;
-	private readonly state: CodeGraphCardState;
-	private readonly getBodyLines?: (width: number, innerWidth: number) => string[];
-	private cachedWidth?: number;
-	private cachedBorderColor?: string;
-	private cachedTopBorder?: string[];
-
-	constructor(
-		toolName: string,
-		getAction: () => string | undefined,
-		getPendingStatus: () => string,
-		getBorderColor: (state: CodeGraphCardState) => string,
-		state: CodeGraphCardState,
-		getBodyLines?: (width: number, innerWidth: number) => string[],
-	) {
-		this.toolName = toolName;
-		this.getAction = getAction;
-		this.getPendingStatus = getPendingStatus;
-		this.getBorderColor = getBorderColor;
-		this.state = state;
-		this.getBodyLines = getBodyLines;
-	}
-
-	render(width: number): string[] {
-		if (width <= 0) return [];
-		const action = this.getAction();
-		if (width < 24) {
-			return [fit(`${this.toolName} ${action ?? ""}`.trim(), width)];
-		}
-		const innerWidth = Math.max(0, width - 2);
-		const borderColor = this.getBorderColor(this.state);
-
-		if (this.state.hasResult) {
-			if (
-				this.cachedWidth === innerWidth &&
-				this.cachedBorderColor === borderColor &&
-				this.cachedTopBorder
-			) {
-				return this.cachedTopBorder;
-			}
-			const topBorder = cardTopBorder(this.toolName, action, innerWidth, borderColor, borderColor);
-			this.cachedWidth = innerWidth;
-			this.cachedBorderColor = borderColor;
-			this.cachedTopBorder = [topBorder];
-			return this.cachedTopBorder;
-		}
-
-		const topBorder = cardTopBorder(this.toolName, action, innerWidth, borderColor, borderColor);
-		const bodyLines = this.getBodyLines ? this.getBodyLines(width, innerWidth) : [];
-		const statusLine = this.getPendingStatus();
-		const framed = frameContent([...bodyLines, statusLine], innerWidth, borderColor, true);
-
-		return [
-			topBorder,
-			...framed,
-			cardBottomBorder(innerWidth, borderColor),
-		];
-	}
-
-	invalidate(): void {
-		this.cachedWidth = undefined;
-		this.cachedBorderColor = undefined;
-		this.cachedTopBorder = undefined;
-	}
-}
-
-export class CodeGraphCardResultComponent implements Component {
-	private readonly getBodyLines: (width: number, innerWidth: number) => string[];
-	private readonly getBorderColor: (state: CodeGraphCardState) => string;
-	private readonly state: CodeGraphCardState;
-	private readonly wrap: boolean;
-	private cachedWidth?: number;
-	private cachedLines?: string[];
-
-	constructor(
-		getBodyLines: (width: number, innerWidth: number) => string[],
-		getBorderColor: (state: CodeGraphCardState) => string,
-		state: CodeGraphCardState,
-		wrap = false,
-	) {
-		this.getBodyLines = getBodyLines;
-		this.getBorderColor = getBorderColor;
-		this.state = state;
-		this.wrap = wrap;
-	}
-
-	render(width: number): string[] {
-		if (width <= 0 || width < 24) {
-			return [];
-		}
-
-		if (!this.state.isPartial && this.cachedWidth === width && this.cachedLines !== undefined) {
-			return this.cachedLines;
-		}
-
-		const innerWidth = Math.max(0, width - 2);
-		const borderColor = this.getBorderColor(this.state);
-		const bodyLines = this.getBodyLines(width, innerWidth);
-		const framed = frameContent(bodyLines, innerWidth, borderColor, this.wrap);
-		const bottom = cardBottomBorder(innerWidth, borderColor);
-		const lines = [...framed, bottom];
-
-		if (!this.state.isPartial) {
-			this.cachedWidth = width;
-			this.cachedLines = lines;
-		}
-
-		return lines;
-	}
-
-	invalidate(): void {
-		this.cachedWidth = undefined;
-		this.cachedLines = undefined;
-	}
 }

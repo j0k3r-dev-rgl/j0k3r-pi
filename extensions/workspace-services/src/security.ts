@@ -12,6 +12,7 @@ export const MAX_ENV_FILE_BYTES = 256 * 1024;
 export const MAX_ENV_ENTRIES = 512;
 export const MAX_ENV_KEY_CHARS = 128;
 export const MAX_ENV_VALUE_CHARS = 16 * 1024;
+export const MAX_DIAGNOSTIC_BYTES = 200 * 1024;
 
 export interface PinnedDirectoryHandle {
   handle: FileHandle;
@@ -325,6 +326,44 @@ export function redactStructured<T>(value: T, secrets: string[]): T {
     else output[key] = redactStructured(inner, secrets);
   }
   return output as T;
+}
+
+export function sliceUtf8BufferTail(buffer: Buffer, maxBytes: number): Buffer {
+  if (maxBytes <= 0) return Buffer.alloc(0);
+  if (buffer.length <= maxBytes) return buffer;
+  let start = buffer.length - maxBytes;
+  // Advance past any UTF-8 continuation bytes (10xxxxxx) so we start on a valid codepoint boundary
+  while (start < buffer.length && (buffer[start]! & 0b1100_0000) === 0b1000_0000) {
+    start += 1;
+  }
+  return buffer.subarray(start);
+}
+
+export function sliceUtf8BufferHead(buffer: Buffer, maxBytes: number): Buffer {
+  if (maxBytes <= 0) return Buffer.alloc(0);
+  if (buffer.length <= maxBytes) return buffer;
+  let end = maxBytes;
+  // Back up if end lands in the middle of a multi-byte UTF-8 sequence
+  while (end > 0 && (buffer[end]! & 0b1100_0000) === 0b1000_0000) {
+    end -= 1;
+  }
+  return buffer.subarray(0, end);
+}
+
+export function boundUtf8Tail(text: string, maxBytes: number): { text: string; truncated: boolean } {
+  const buf = Buffer.from(text, 'utf8');
+  if (buf.length <= maxBytes) return { text, truncated: false };
+  return { text: sliceUtf8BufferTail(buf, maxBytes).toString('utf8'), truncated: true };
+}
+
+export function boundDiagnosticText(text: string, secrets: string[] = [], maxBytes = MAX_DIAGNOSTIC_BYTES): string {
+  const redacted = redactText(text, secrets);
+  const suffix = ' ... [diagnostic truncated]';
+  const buf = Buffer.from(redacted, 'utf8');
+  if (buf.length <= maxBytes) return redacted;
+  const suffixBytes = Buffer.byteLength(suffix, 'utf8');
+  const headBudget = Math.max(0, maxBytes - suffixBytes);
+  return sliceUtf8BufferHead(buf, headBudget).toString('utf8') + suffix;
 }
 
 export async function assertRegularFile(path: string, label: string): Promise<void> {

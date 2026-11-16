@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Type } from 'typebox';
 import { checkYtDlpRuntime, YT_DLP_INSTALL_HINT } from './runtime.js';
-import { renderYoutubeToolCall, renderYoutubeToolResult } from './render.js';
+import { COMPACT_TOOL_RENDERING, renderYoutubeToolCall, renderYoutubeToolResult } from './render.js';
 import { YoutubeResearchClient } from './client.js';
 import {
   validateSearchFilters,
@@ -1228,6 +1228,7 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
     ],
     parameters: searchParameters,
     renderShell: 'self' as const,
+    ...COMPACT_TOOL_RENDERING,
     renderCall: (args: any, theme: any, context?: any) => renderYoutubeToolCall('youtube_search', args, theme, context),
     renderResult: (result: any, options: any, theme: any, context?: any) => renderYoutubeToolResult('youtube_search', result, options, theme, context),
     async execute(_id: string, params: YoutubeSearchInput, signal?: AbortSignal) {
@@ -1252,6 +1253,7 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
     ],
     parameters: videoParameters,
     renderShell: 'self' as const,
+    ...COMPACT_TOOL_RENDERING,
     renderCall: (args: any, theme: any, context?: any) => renderYoutubeToolCall('youtube_video_get', args, theme, context),
     renderResult: (result: any, options: any, theme: any, context?: any) => renderYoutubeToolResult('youtube_video_get', result, options, theme, context),
     async execute(_id: string, params: VideoRefInput, signal?: AbortSignal) {
@@ -1276,6 +1278,7 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
     ],
     parameters: transcriptParameters,
     renderShell: 'self' as const,
+    ...COMPACT_TOOL_RENDERING,
     renderCall: (args: any, theme: any, context?: any) => renderYoutubeToolCall('youtube_transcript_get', args, theme, context),
     renderResult: (result: any, options: any, theme: any, context?: any) => renderYoutubeToolResult('youtube_transcript_get', result, options, theme, context),
     async execute(_id: string, params: YoutubeTranscriptInput, signal?: AbortSignal) {
@@ -1299,6 +1302,7 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
     ],
     parameters: channelSearchParameters,
     renderShell: 'self' as const,
+    ...COMPACT_TOOL_RENDERING,
     renderCall: (args: any, theme: any, context?: any) => renderYoutubeToolCall('youtube_channel_search', args, theme, context),
     renderResult: (result: any, options: any, theme: any, context?: any) => renderYoutubeToolResult('youtube_channel_search', result, options, theme, context),
     async execute(_id: string, params: YoutubeChannelSearchInput, signal?: AbortSignal) {
@@ -1322,6 +1326,7 @@ export function registerYoutubeResearchTools(pi: any, deps: RegisterYoutubeResea
     ],
     parameters: playlistParameters,
     renderShell: 'self' as const,
+    ...COMPACT_TOOL_RENDERING,
     renderCall: (args: any, theme: any, context?: any) => renderYoutubeToolCall('youtube_playlist_get', args, theme, context),
     renderResult: (result: any, options: any, theme: any, context?: any) => renderYoutubeToolResult('youtube_playlist_get', result, options, theme, context),
     async execute(_id: string, params: PlaylistRefInput, signal?: AbortSignal) {

@@ -8,11 +8,28 @@ Status: **MINI-001–MINI-006 completed and validated; user message history enab
 
 1. Run `/reload` or restart Pi after updating this checkout. No external memory package or extra entry in `settings.json` is required.
 2. Verify the ten `memory_*` tools are present. In the TUI, `memory · 10 tools` reports registration, not database readiness or E5 health.
-3. Send a user message to activate the session and initialize `~/.memory/memories.db` on demand. Loading, session selection and reload alone never open storage or call E5.
+3. Send a user message to activate the session and initialize `~/.memory/memories.db` on demand. Loading and session selection alone never initialize storage. The optional human-only HUD bridge can read existing storage and probe E5 health in a trusted TUI session without activating a memory session.
 
 The extension is global to this agent directory and uses Pi's native resource controls (`pi config`), not `.pi/extensions.json` opt-in flags. Project identity configuration is read only from trusted `.pi/memory.json`; otherwise the existing remote/folder fallback applies. No prior database is imported or deleted automatically.
 
 Semantic indexing/search uses E5 at `http://127.0.0.1:8000`. If unavailable, saved text remains pending and hybrid/semantic search falls back visibly to FTS5; `memory_search` with `mode: fts5` avoids E5 entirely. Use `memory_save` for both new records and same-topic updates within approved scope. Session summaries remain explicit-user-request only.
+
+## Optional human-only HUD bridge
+
+`pihud:mem:read:v1` serves the matching trusted TUI cwd/session with active
+project memory IDs and titles only, excluding global, foreign and deleted
+records. Bodies and types are not selected or transported: this is a compact HUD
+preview, one title row per memory, designed for projects with hundreds of records.
+No expansion or detail events are implemented yet. It opens existing SQLite read-only, never creates storage, activates
+sessions, indexes text or sends model messages. The snapshot header contains
+project, total memories, indexed/pending/failed counts and E5 status.
+
+Health uses the existing `E5Client.health()` asynchronously on TUI session start
+and every 30 seconds, with its normal deadline. States are checking, ready
+(with the reported model), not-ready, incompatible and unavailable. Timers and
+in-flight health I/O stop on shutdown. The HUD keeps the header fixed above its
+scrollable list. Its private cache may contain this content; do not share it.
+No dependency on the HUD extension is required.
 
 ## Public Supervisor Checkpoint Bridge (MINI-005)
 

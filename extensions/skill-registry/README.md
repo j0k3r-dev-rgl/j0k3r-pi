@@ -88,7 +88,7 @@ Behavior:
   - no `SKILL.md` content is included,
   - read only selected `SKILL.md` files before applying their instructions; candidates are not mandatory loads.
 - A missing or stale cache does not block live routing or require a refresh. Reserve cache writes for authorized maintenance.
-- Interactive TUI rendering is compact by default: the detailed routing result is kept for the agent in tool content/details, but the visible tool row shows only a summary until the user expands tool output with Pi's native tool-expand keybinding (default `ctrl+o`).
+- Interactive TUI rendering is one compact inline row without card frames or generated expansion hints: the detailed routing result stays in tool content/details, and Pi's native `app.tools.expand` action reveals every match, reason, guidance and warning.
 
 Response shape includes:
 
@@ -301,7 +301,7 @@ Comportamiento:
   - no incluye contenido de `SKILL.md`,
   - lee solo los `SKILL.md` seleccionados antes de aplicar sus instrucciones; los candidatos no son cargas obligatorias.
 - Una caché faltante o desactualizada no bloquea el routing vivo ni requiere refrescarla. Reserva las escrituras de caché para mantenimiento autorizado.
-- El render TUI interactivo es compacto por defecto: el resultado detallado queda en content/details de la tool para el agente, pero la fila visible muestra solo un resumen hasta que el usuario expande el output con el keybinding nativo de Pi (default `ctrl+o`).
+- El render TUI interactivo es una sola fila inline compacta, sin marcos de tarjeta ni indicaciones de expansión generadas: el resultado detallado de routing queda en content/details de la tool y la acción nativa `app.tools.expand` de Pi revela cada match, razón, guía y advertencia.
 
 La forma de respuesta incluye:
 

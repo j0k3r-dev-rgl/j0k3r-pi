@@ -92,6 +92,23 @@ ctrl+space
 
 The shortcut only toggles the above-chat widget. It does not collapse or modify Sidebar extension rendering because the sidebar reads provider data independently.
 
+### Optional HUD integration
+
+The independent `pihud:todo:read:v1` event bridge serves only active title and step
+text/status, never body or full tool results. Requests must match the current cwd
+and session ID in trusted TUI mode. With no active todo, it replies `{ lines: [] }`.
+The payload is `{ lines: [], todo: { title, steps: [{ text, status }] } }` when active.
+No sibling imports, dependencies, model messages, configuration or background timers
+are added. Listeners are removed on shutdown/reload.
+
+`pihud:presence:v1` plus its synchronous `pihud:presence:read:v1` query hide the Pi
+widget while the owned HUD is open. Closing/losing the HUD restores the widget with
+its original collapse state. Tool updates remain hidden and `ctrl+space` does not
+change that state while the HUD is visible. Without HUD, behavior is unchanged.
+HUD Main has a separate click-to-fold card showing title/progress and optional
+steps; its state is independent from the Pi widget. HUD transport uses a private
+local cache; the binary excludes this data from one-shot text/JSON output.
+
 ### Provider contract
 
 The provider name is `agent-todo.activeTodo`. At runtime the compatible provider is exposed through `pi.agentTodo`, `ctx.agentTodo`, and `globalThis.__PI_AGENT_TODO_PROVIDER__` rather than through a generic provider registry.
@@ -240,6 +257,23 @@ ctrl+space
 ```
 
 El atajo solo alterna el widget arriba del chat. No colapsa ni modifica el render de Sidebar porque la sidebar lee datos de provider de forma independiente.
+
+### Integración opcional con HUD
+
+El puente independiente `pihud:todo:read:v1` entrega solo título y texto/estado de
+pasos activos, nunca cuerpo ni resultados completos. Solo responde en TUI confiable
+a consultas síncronas con cwd e ID de sesión actuales. Sin todo devuelve
+`{ lines: [] }`; activo: `{ lines: [], todo: { title, steps: [{ text, status }] } }`.
+No añade imports entre extensiones, dependencias, mensajes al modelo, configuración
+ni temporizadores. Los listeners se eliminan al cerrar/recargar.
+
+La presencia `pihud:presence:v1` y consulta `pihud:presence:read:v1` ocultan el widget
+de Pi mientras el HUD propio está abierto. Al cerrar el HUD, incluso externamente,
+vuelve con su plegado original. Actualizar el todo no vuelve a mostrarlo y
+`ctrl+space` no cambia ese estado mientras esté en el HUD. Sin HUD, funciona igual
+que antes. La tarjeta TODO de Main permite plegar/expandir por clic de forma
+independiente, conservando título/progreso. El transporte usa una caché local privada;
+el binario excluye estos datos de sus salidas de una sola lectura en texto/JSON.
 
 ### Contrato de provider
 

@@ -2,6 +2,7 @@ import type { AgentTodo, AgentTodoProjection, AgentTodoStep } from './types.js';
 
 export type AgentTodoWidgetOptions = {
   collapsed?: boolean;
+  hidden?: boolean;
   shortcut?: string;
 };
 
@@ -101,7 +102,7 @@ export function renderAgentTodoWidgetLines(todo: AgentTodo, options: AgentTodoWi
 
 export function syncAgentTodoWidget(ctx: any, projection: AgentTodoProjection, options: AgentTodoWidgetOptions = {}): void {
   if (typeof ctx?.ui?.setWidget !== 'function') return;
-  if (!projection.active_todo) {
+  if (options.hidden || !projection.active_todo) {
     ctx.ui.setWidget('agent-todo', undefined);
     return;
   }

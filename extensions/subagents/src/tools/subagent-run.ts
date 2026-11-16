@@ -54,6 +54,8 @@ export function createSubagentRunTool(manager: SubagentManager, pi: any) {
       mode: Type.Optional(Type.Union([Type.Literal('task'), Type.Literal('background')])),
     }),
     renderShell: 'self',
+    compactToolRenderingVersion: 1,
+    compactLeftMargin: 1,
     async execute(_id: string, params: any, _signal: any, onUpdate: any, ctx: any) {
       const action = params?.action ?? 'run';
       const cwd = ctx?.cwd ?? process.cwd();

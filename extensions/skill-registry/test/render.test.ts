@@ -1,16 +1,15 @@
-import { describe, expect, it, vi } from 'vitest';
-import skillRegistryExtension from '../index.js';
+import { describe, expect, it } from 'vitest';
 import {
-  CYAN,
-  DIM,
-  LIME,
+  COMPACT_TOOL_RENDERING,
   RED,
-  RESET,
   extractSkillRegistryAction,
   renderSkillRegistryCall,
   renderSkillRegistryResult,
   visibleWidth,
 } from '../src/render.js';
+import { registerSkillRegistryTools } from '../src/tools.js';
+
+const FRAME = /[╭╮╰╯│]/;
 
 const mockTheme = {
   fg: (_token: string, text: string) => text,
@@ -19,27 +18,18 @@ const mockTheme = {
 };
 
 describe('skill-registry renderers', () => {
-  it('registers tools with renderShell: "self", renderCall, and renderResult', () => {
+  it('registers the compact marker, self shell, and both safe slots on every tool', () => {
+    expect(COMPACT_TOOL_RENDERING.compactToolRenderingVersion).toBe(1);
     const tools: any[] = [];
-    const pi = {
-      registerTool: vi.fn((tool: any) => tools.push(tool)),
-      registerCommand: vi.fn(),
-    };
+    registerSkillRegistryTools({ registerTool: (tool: any) => tools.push(tool) });
 
-    skillRegistryExtension(pi);
-
-    const generateTool = tools.find((t) => t.name === 'skill_registry_generate');
-    const resolveTool = tools.find((t) => t.name === 'skill_registry_resolve');
-
-    expect(generateTool).toBeDefined();
-    expect(generateTool.renderShell).toBe('self');
-    expect(typeof generateTool.renderCall).toBe('function');
-    expect(typeof generateTool.renderResult).toBe('function');
-
-    expect(resolveTool).toBeDefined();
-    expect(resolveTool.renderShell).toBe('self');
-    expect(typeof resolveTool.renderCall).toBe('function');
-    expect(typeof resolveTool.renderResult).toBe('function');
+    expect(tools.map((tool) => tool.name)).toEqual(['skill_registry_generate', 'skill_registry_resolve']);
+    for (const tool of tools) {
+      expect(tool.renderShell, `${tool.name} renderShell`).toBe('self');
+      expect(tool.compactToolRenderingVersion, `${tool.name} marker`).toBe(1);
+      expect(typeof tool.renderCall).toBe('function');
+      expect(typeof tool.renderResult).toBe('function');
+    }
   });
 
   it('extracts correct action badges for generate and resolve tools', () => {
@@ -53,36 +43,26 @@ describe('skill-registry renderers', () => {
     expect(extractSkillRegistryAction('skill_registry_resolve', { intent: 'find auth' })).toBe('intent: find auth');
   });
 
-  it('renders pending call card with rounded corners and consistent line widths', () => {
+  it('renders the pending call as one compact inline row', () => {
     const context = { state: {} };
-    const callComponent = renderSkillRegistryCall('skill_registry_generate', { write: true }, mockTheme, context);
-    const lines = callComponent.render(80);
+    const lines = renderSkillRegistryCall('skill_registry_generate', { write: true }, mockTheme, context).render(80);
 
-    expect(lines).toHaveLength(3);
-    expect(lines[0]).toContain('╭');
-    expect(lines[0]).toContain('╮');
-    expect(lines[0]).toContain('skill_registry_generate [generate]');
-    expect(lines[1]).toContain('│');
-    expect(lines[1]).toContain('Pending: Generating skill registry...');
-    expect(lines[2]).toContain('╰');
-    expect(lines[2]).toContain('╯');
-
-    for (const line of lines) {
-      expect(visibleWidth(line)).toBe(80);
-      expect(line).not.toMatch(/\x1b\[4[0-7]m/);
-    }
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('skill_registry_generate');
+    expect(lines[0]).toContain('generate');
+    expect(lines[0]).toContain('running');
+    expect(lines[0]).toContain('─');
+    expect(lines[0]).not.toMatch(FRAME);
+    expect(lines[0]).not.toMatch(/ctrl\+o|to expand/i);
+    expect(visibleWidth(lines[0])).toBeLessThanOrEqual(80);
   });
 
   it('coordinates two-phase slot assembly via context.state without duplicate borders', () => {
     const context: any = { state: {} };
 
-    // Phase 1: Call is pending
     const pendingLines = renderSkillRegistryCall('skill_registry_resolve', { intent: 'search' }, mockTheme, context).render(80);
-    expect(pendingLines).toHaveLength(3);
-    expect(pendingLines[0]).toContain('╭');
-    expect(pendingLines[2]).toContain('╰');
+    expect(pendingLines).toHaveLength(1);
 
-    // Result arrives and sets state
     const resultComponent = renderSkillRegistryResult(
       'skill_registry_resolve',
       {
@@ -100,30 +80,15 @@ describe('skill-registry renderers', () => {
     );
 
     expect(context.state.hasResult).toBe(true);
-    expect(context.state.borderColor).toBe(LIME);
 
-    // Phase 2: Call re-renders as top border only
     const resolvedCall = renderSkillRegistryCall('skill_registry_resolve', { intent: 'search' }, mockTheme, context).render(80);
-    expect(resolvedCall).toHaveLength(1);
-    expect(resolvedCall[0]).toContain('╭');
-    expect(resolvedCall[0]).toContain('╮');
-    expect(resolvedCall[0]).toContain(LIME);
+    expect(resolvedCall).toEqual([]);
 
-    // Slot 2: Result renders framed content + bottom border
     const resultLines = resultComponent.render(80);
-    expect(resultLines.length).toBeGreaterThanOrEqual(2);
-    expect(resultLines[resultLines.length - 1]).toContain('╰');
-    expect(resultLines[resultLines.length - 1]).toContain('╯');
-
-    const assembled = [...resolvedCall, ...resultLines];
-    const tops = assembled.filter((l) => l.includes('╭'));
-    const bottoms = assembled.filter((l) => l.includes('╰'));
-    expect(tops).toHaveLength(1);
-    expect(bottoms).toHaveLength(1);
-
-    for (const line of assembled) {
-      expect(visibleWidth(line)).toBe(80);
-    }
+    expect(resultLines).toHaveLength(1);
+    expect(resultLines[0]).toContain('skill_registry_resolve');
+    expect(resultLines[0]).toContain('1 direct');
+    expect(resultLines[0]).not.toMatch(FRAME);
   });
 
   it('renders skill_registry_generate collapsed and expanded views', () => {
@@ -135,17 +100,18 @@ describe('skill-registry renderers', () => {
       },
     };
 
-    // Collapsed
-    const collapsedLines = renderSkillRegistryResult('skill_registry_generate', result, { expanded: false }, mockTheme).render(80);
+    const collapsedLines = renderSkillRegistryResult('skill_registry_generate', result, { expanded: false }, mockTheme, { state: {} }).render(120);
     const collapsedText = collapsedLines.join('\n');
-    expect(collapsedText).toContain('✓ 5 skill(s), 1 warning(s) · json updated, markdown unchanged');
-    expect(collapsedText).toContain('ctrl+o expand');
+    expect(collapsedLines).toHaveLength(1);
+    expect(collapsedText).toContain('5 skill(s), 1 warning(s)');
+    expect(collapsedText).toContain('json updated, markdown unchanged');
+    expect(collapsedText).not.toMatch(/ctrl\+o|to expand/i);
+    expect(collapsedText).not.toMatch(FRAME);
 
-    // Expanded
-    const expandedLines = renderSkillRegistryResult('skill_registry_generate', result, { expanded: true }, mockTheme).render(80);
+    const expandedLines = renderSkillRegistryResult('skill_registry_generate', result, { expanded: true }, mockTheme, { state: {} }).render(120);
     const expandedText = expandedLines.join('\n');
-    expect(expandedText).toContain('✓ 5 skill(s), 1 warning(s) · json updated, markdown unchanged');
-    expect(expandedText).toContain('ctrl+o collapse');
+    expect(expandedLines[0]).toBe(collapsedLines[0]);
+    expect(expandedText).not.toMatch(/ctrl\+o|to collapse/i);
     expect(expandedText).toContain('Summary of skills generated');
   });
 
@@ -179,13 +145,15 @@ describe('skill-registry renderers', () => {
       },
     };
 
-    // Collapsed
-    const collapsed = renderSkillRegistryResult('skill_registry_resolve', result, { expanded: false }, mockTheme).render(80).join('\n');
-    expect(collapsed).toContain('✓ skill registry: 1 direct, 1 related, cache valid, 1 warn');
-    expect(collapsed).toContain('ctrl+o expand');
+    const collapsedLines = renderSkillRegistryResult('skill_registry_resolve', result, { expanded: false }, mockTheme, { state: {} }).render(120);
+    const collapsed = collapsedLines.join('\n');
+    expect(collapsedLines).toHaveLength(1);
+    expect(collapsed).toContain('1 direct, 1 related');
+    expect(collapsed).toContain('cache valid');
+    expect(collapsed).toContain('1 warn');
+    expect(collapsed).not.toMatch(/ctrl\+o|to expand/i);
 
-    // Expanded
-    const expanded = renderSkillRegistryResult('skill_registry_resolve', result, { expanded: true }, mockTheme).render(80).join('\n');
+    const expanded = renderSkillRegistryResult('skill_registry_resolve', result, { expanded: true }, mockTheme, { state: {} }).render(120).join('\n');
     expect(expanded).toContain('test-skill');
     expect(expanded).toContain('skills/test/SKILL.md');
     expect(expanded).toContain('primary');
@@ -194,10 +162,11 @@ describe('skill-registry renderers', () => {
     expect(expanded).toContain('related-skill');
     expect(expanded).toContain('Guidance rule 1');
     expect(expanded).toContain('Warn A');
-    expect(expanded).toContain('ctrl+o collapse');
+    expect(expanded).toContain('Resolve summary');
+    expect(expanded).not.toMatch(/ctrl\+o|to collapse/i);
   });
 
-  it('renders electric red border and error message on failure', () => {
+  it('marks failures in one red inline row and keeps returned text on expansion', () => {
     const context: any = { state: {} };
     const errResult = {
       isError: true,
@@ -206,20 +175,37 @@ describe('skill-registry renderers', () => {
     };
 
     const lines = renderSkillRegistryResult('skill_registry_generate', errResult, { expanded: false }, mockTheme, context).render(80);
-    expect(context.state.borderColor).toBe(RED);
-    expect(lines[lines.length - 1]).toContain(RED);
-    expect(lines.join('\n')).toContain('Error: Failed to parse skill YAML');
+    expect(context.state.isError).toBe(true);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('Failed to parse skill YAML');
+    expect(lines[0]).not.toMatch(FRAME);
+
+    const redTheme = { ...mockTheme, fg: (name: string, text: string) => (name === 'error' ? `${RED}${text}\x1b[0m` : text) };
+    expect(renderSkillRegistryResult('skill_registry_generate', errResult, { expanded: false }, redTheme, { state: {} }).render(80)[0]).toContain(RED);
+
+    const expanded = renderSkillRegistryResult('skill_registry_generate', errResult, { expanded: true }, mockTheme, { state: {} }).render(80);
+    expect(expanded.every((l) => l.startsWith(' '))).toBe(true);
+    expect(expanded.slice(1)).toContain(' Error details');
   });
 
-  it('safeguards against narrow width (< 24 columns) without crashing', () => {
+  it('stays width-safe at narrow widths and emits no cells at zero width', () => {
     const callLines = renderSkillRegistryCall('skill_registry_generate', { write: true }, mockTheme).render(15);
     expect(callLines).toHaveLength(1);
-    expect(callLines[0]).not.toContain('╭');
+    expect(visibleWidth(callLines[0])).toBeLessThanOrEqual(15);
+    expect(callLines[0]).not.toMatch(FRAME);
 
-    const resultLines = renderSkillRegistryResult('skill_registry_generate', {
-      details: { registry: { skill_count: 2, warnings: [] }, write_result: null },
-    }, { expanded: false }, mockTheme).render(15);
-    expect(resultLines.length).toBeGreaterThan(0);
-    expect(resultLines[resultLines.length - 1]).not.toContain('╰');
+    for (const width of [1, 2, 10, 23]) {
+      const resultLines = renderSkillRegistryResult('skill_registry_resolve', {
+        details: {
+          matches: [{ score: 90, priority: 1, name: 'skill-a', path: 'skills/a/SKILL.md' }],
+          registry_status: { cache: 'fresh', source: 'global', live_hash: 'abc123456789' },
+        },
+        content: [{ type: 'text', text: 'resolve body line\nsecond line' }],
+      }, { expanded: true }, mockTheme, { state: {} }).render(width);
+      expect(resultLines.length).toBeGreaterThan(0);
+      for (const line of resultLines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+    }
+
+    expect(renderSkillRegistryResult('skill_registry_generate', { details: {} }, { expanded: false }, mockTheme, { state: {} }).render(0)).toEqual([]);
   });
 });

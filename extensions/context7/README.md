@@ -15,7 +15,7 @@ Native Pi extension for fetching up-to-date library and framework documentation 
 - Optional user-local TTL cache for repeated queries.
 - Secret redaction in tool content, structured details, and formatted errors.
 - Output truncation with explicit metadata and a recoverable redacted artifact to protect LLM context without silent data loss.
-- Native Pi tool rendering that is collapsed by default and shows the complete current result when expanded.
+- Native Pi tool rendering as one compact inline row (`identity ─ summary`) without card frames or expansion hints; Pi's native expansion shows the complete current result.
 - Offline unit-testable client/tool design using injectable clients.
 
 ### Extension location
@@ -208,7 +208,7 @@ All tool outputs are designed to be safe for LLM context:
 - `txt` documentation output is truncated by `max_chars`; JSON snippet content is bounded per snippet and may exceed `max_chars` in total;
 - search descriptions are capped;
 - when local bounding removes content, the complete redacted output is written under the operating-system temp directory with private directory/file modes and the tool result provides its path for `read`;
-- the TUI renderer is collapsed by default, uses Pi's configured expand keybinding, and changes presentation only—the current model-facing result remains available when expanded;
+- the TUI renderer is one compact inline row without a card frame or generated expansion hint, and changes presentation only—Pi's configured expand action keeps the current model-facing result available;
 - errors are formatted with actionable messages;
 - upstream `401`, `403`, `404`, `429`, and `5xx` failures get user-actionable wording.
 
@@ -272,7 +272,7 @@ The test suite is designed to run without live Context7 network access or a real
 - `extensions/context7/src/tools.ts` — tool schemas and output shaping.
 - `extensions/context7/src/cache.ts` — cache location and safety behavior.
 - `extensions/context7/src/security.ts` — redaction and safe output helpers.
-- `extensions/context7/src/render/index.ts` — native collapsed/expanded tool rendering.
+- `extensions/context7/src/render/index.ts` — compact inline tool rendering.
 - `extensions/context7/src/core/output-artifact.ts` — private recoverable artifacts for locally bounded output.
 
 ## Español
@@ -288,7 +288,7 @@ Extensión nativa de Pi para obtener documentación actualizada de librerías y 
 - Caché TTL opcional local de usuario para queries repetidas.
 - Redacción de secretos en contenido de tools, detalles estructurados y errores formateados.
 - Truncamiento de salida con metadata explícita y artefacto redactado recuperable para proteger el contexto LLM sin pérdida silenciosa.
-- Renderizado nativo de tools de Pi, colapsado por defecto y con el resultado actual completo al expandir.
+- Renderizado nativo de tools de Pi como una sola fila inline compacta (`identidad ─ resumen`), sin marcos de tarjeta ni indicaciones de expansión; la expansión nativa de Pi muestra el resultado actual completo.
 - Diseño de cliente/tools testeable offline con clientes inyectables.
 
 ### Ubicación de la extensión
@@ -481,7 +481,7 @@ Todas las salidas de tools están diseñadas para ser seguras para contexto LLM:
 - la salida de documentación `txt` se trunca por `max_chars`; el contenido JSON de snippets está acotado por snippet y puede superar `max_chars` en total;
 - las descripciones de búsqueda se acotan;
 - cuando el acotado local omite contenido, la salida completa redactada se escribe en el directorio temporal del sistema operativo con modos privados y el resultado devuelve su ruta para usar `read`;
-- el renderer TUI está colapsado por defecto, usa el keybinding configurado de Pi y cambia solo la presentación: el resultado actual para el modelo permanece disponible al expandir;
+- el renderer TUI es una sola fila inline compacta, sin marco de tarjeta ni indicación de expansión generada, y cambia solo la presentación: la acción de expansión configurada de Pi mantiene disponible el resultado actual para el modelo;
 - los errores se formatean con mensajes accionables;
 - fallos upstream `401`, `403`, `404`, `429` y `5xx` reciben wording accionable para el usuario.
 
@@ -545,5 +545,5 @@ La suite de tests está diseñada para correr sin acceso live a Context7 ni API 
 - `extensions/context7/src/tools.ts` — schemas de tools y shaping de salida.
 - `extensions/context7/src/cache.ts` — ubicación de caché y comportamiento de seguridad.
 - `extensions/context7/src/security.ts` — helpers de redacción y salida segura.
-- `extensions/context7/src/render/index.ts` — renderizado nativo colapsado/expandido de tools.
+- `extensions/context7/src/render/index.ts` — renderizado de tools inline compacto.
 - `extensions/context7/src/core/output-artifact.ts` — artefactos privados recuperables para salida acotada localmente.

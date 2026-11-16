@@ -1,9 +1,24 @@
 import test from "node:test";
-import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { register } from "node:module";
+import { registerHooks, stripTypeScriptTypes } from "node:module";
+import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { registerHudBridge } from "../src/hud.ts";
+
+// Test-harness-only correction: this extension's sources use TypeScript parameter properties, which
+// Node's strip-only TypeScript mode rejects. Transform mode keeps the same sources loadable under
+// `node --test` without touching manifests, tsconfig or production code.
+registerHooks({
+  load(url, context, nextLoad) {
+    const result = nextLoad(url, context);
+    if (!url.startsWith("file:") || !url.endsWith(".ts") || result.source === undefined) return result;
+    const source = typeof result.source === "string" ? result.source : Buffer.from(result.source).toString("utf8");
+    return { ...result, format: "module", source: stripTypeScriptTypes(source, { mode: "transform", sourceUrl: url }) };
+  },
+});
 
 const loaderCode = `
 import { existsSync } from "node:fs";
@@ -84,8 +99,50 @@ const {
   resolveViaPackageManager,
 } = await import("../index.ts");
 
-const { selectQuotaAccount, selectModelPools, fetchModelQuota, formatQuota, QUOTA_REFRESH_MS } = await import("../src/quota.ts");
+const { selectQuotaAccount, selectModelPools, fetchModelQuota, formatQuota, formatHudQuota, QUOTA_REFRESH_MS } = await import("../src/quota.ts");
 const { J0k3rThemeFooter } = await import("../src/J0k3rThemeFooter.ts");
+
+test("HUD main bridge binds trusted session reads and restores presence on shutdown", () => {
+  const events = new EventEmitter();
+  const handlers = new Map();
+  const visibility = [];
+  const pi = { on: (name, handler) => handlers.set(name, handler), events: {
+    emit: events.emit.bind(events),
+    on(name, handler) { events.on(name, handler); return () => events.off(name, handler); },
+  } };
+  const ctx = { mode: 'tui', cwd: '/repo', isProjectTrusted: () => true, sessionManager: { getSessionId: () => 'one' } };
+  const value = { dir: '~/repo', repo: 'repo', branch: 'main', modelQuota: 'quota 5h 70%' };
+  events.on('pihud:presence:read:v1', request => request.respond(true));
+  registerHudBridge(pi, () => value, visible => visibility.push(visible));
+  handlers.get('session_start')({}, ctx);
+  assert.deepEqual(visibility, [true]);
+  const results = [];
+  const query = { cwd: '/repo', sessionId: 'one', respond: value => results.push(value) };
+  events.emit('pihud:main:read:v1', { ...query, cwd: '/other' });
+  events.emit('pihud:main:read:v1', { ...query, sessionId: 'other' });
+  ctx.isProjectTrusted = () => false;
+  events.emit('pihud:main:read:v1', query);
+  assert.equal(results.length, 0);
+  ctx.isProjectTrusted = () => true;
+  events.emit('pihud:main:read:v1', query);
+  assert.deepEqual(results, [{ lines: [], ...value }]);
+  events.emit('pihud:presence:v1', { ...query, sessionId: 'other', visible: false });
+  assert.deepEqual(visibility, [true]);
+  events.emit('pihud:presence:v1', { ...query, visible: false });
+  assert.deepEqual(visibility, [true, false]);
+  handlers.get('session_shutdown')();
+  assert.equal(visibility.at(-1), false);
+  assert.equal(events.listenerCount('pihud:main:read:v1'), 0);
+  assert.equal(events.listenerCount('pihud:presence:v1'), 0);
+});
+
+test('HUD model quota preserves provider units without changing normal footer formatting', () => {
+  const money = [{ label: 'Saldo USD', amountText: '$9.25', availablePercentage: 0, resetAt: null }];
+  assert.equal(formatHudQuota(money), 'Saldo USD $9.25');
+  const relay = [{ label: 'Plan', amountText: 'Pro', availablePercentage: 0 }, { label: 'Input mensual', amountText: '4M / 10M', showBar: true, availablePercentage: 60 }];
+  assert.equal(formatHudQuota(relay), 'in mes ━━── 4M/10M');
+  assert.equal(formatHudQuota([{ label: 'Quota', windowLabel: '5h', availablePercentage: 70 }]), formatQuota([{ label: 'Quota', windowLabel: '5h', availablePercentage: 70 }]));
+});
 
 test("quota account is chosen only for an exact unique prefixed model", () => {
   const accounts = [
@@ -166,6 +223,35 @@ test("quota appears above memory status only when it fits without displacing the
   assert.match(wide[1], /memory · 9 tools/);
   const narrow = footer.render(48);
   assert.doesNotMatch(narrow.join("\n"), /quota/);
+});
+
+test("footer publishes its exact token-speed status without changing the rendered metric", () => {
+  const theme = { bold: (s) => s, fg: (_color, s) => s };
+  const ctx = {
+    cwd: "/tmp/example", model: { provider: "mock", id: "model", contextWindow: 272000 },
+    sessionManager: { getLeafId: () => null, getBranch: () => [] },
+    getContextUsage: () => ({ tokens: 17548, contextWindow: 272000, percent: 6.45147 }),
+  };
+  let status = "⚡ TPS: 57.6 tok/s";
+  const published = [];
+  const footer = new J0k3rThemeFooter({ requestRender() {} }, theme,
+    { getExtensionStatuses: () => new Map([["tokenSpeed", status]]) }, ctx, () => "high",
+    undefined, (value) => published.push(value));
+  assert.match(footer.render(160)[1], /57\.6 tok\/s/);
+  assert.deepEqual(published, [status]);
+  footer.render(160);
+  assert.equal(published.length, 1, "unchanged renders must not flood the event bus");
+  status = "⚡ TPS: 42.0 tok/s";
+  footer.render(160);
+  assert.equal(published.at(-1), status);
+  footer.setHudVisible(true);
+  status = 'TPS: 61.0 tok/s';
+  assert.deepEqual(footer.render(160), []);
+  assert.equal(published.at(-1), status, 'hidden footer must still publish TPS');
+  footer.setQuota('quota 5h 72%');
+  assert.equal(footer.getHudSnapshot().modelQuota, 'quota 5h 72%');
+  footer.setHudVisible(false);
+  assert.equal(footer.render(160).length, 2, 'footer must restore after HUD close');
 });
 
 test("footer does not invent a memory status when no extension publishes one", () => {

@@ -10,7 +10,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { isNotIndexedOutput, resolveProjectPath, trackTempDir } from "../core.js";
-import { renderImpactCall, renderImpactResult } from "../render/index.js";
+import { COMPACT_TOOL_RENDERING, renderImpactCall, renderImpactResult } from "../render/index.js";
 import type { CodeGraphImpactDetails } from "../types.js";
 
 export function registerImpactTool(pi: ExtensionAPI) {
@@ -77,5 +77,6 @@ export function registerImpactTool(pi: ExtensionAPI) {
 		renderCall: renderImpactCall,
 		renderResult: renderImpactResult,
 		renderShell: "self",
+		...COMPACT_TOOL_RENDERING,
 	});
 }

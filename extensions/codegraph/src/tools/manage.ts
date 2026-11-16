@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { actionImpact, formatCommand, getStatus, manageArgs, resolveProjectPath } from "../core.js";
-import { renderManageCall, renderManageResult } from "../render/index.js";
+import { COMPACT_TOOL_RENDERING, renderManageCall, renderManageResult } from "../render/index.js";
 import type { CodeGraphAction, CodeGraphManageDetails } from "../types.js";
 
 const ACTIONS = ["init", "sync", "reindex", "unlock", "uninit"] as const;
@@ -78,5 +78,6 @@ export function registerManageTool(pi: ExtensionAPI) {
 		renderCall: renderManageCall,
 		renderResult: renderManageResult,
 		renderShell: "self",
+		...COMPACT_TOOL_RENDERING,
 	});
 }

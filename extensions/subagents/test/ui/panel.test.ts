@@ -119,7 +119,7 @@ describe('subagents panel and extension ui', () => {
           { type: 'tool', tool_call_id: 'done', name: 'read', status: 'completed', result: { content: [{ type: 'text', text: 'finished output' }], isError: false } },
           { type: 'tool', tool_call_id: 'live', name: 'read', status: 'running' },
         ] } };
-      const definition = { renderResult() {} };
+      const definition = { renderShell: 'self', compactToolRenderingVersion: 1, renderCall() {}, renderResult() {} };
       const panel = new SubagentsHistoryPanel([task], { fg: (_n: string, text: string) => text }, () => {}, () => false,
         (text) => stripAnsi(text).length, (text, w) => text.slice(0, w), { cwd: tmp, tui: { requestRender() {} }, getToolDefinition: () => definition }, 42);
       expect(panel.render(120).join('\n')).toContain('card-live:1');
@@ -194,7 +194,7 @@ describe('subagents panel and extension ui', () => {
     const source = path.join(tmp, 'resolver-chain.cjs');
     fs.writeFileSync(source, `exports.registerToolRenderers = function(pi) {
       pi.registerToolRenderer((_name, next) => next());
-      pi.registerToolRenderer((name, next) => name === 'chain_tool' ? { renderShell: 'self', renderResult() {} } : next());
+      pi.registerToolRenderer((name, next) => name === 'chain_tool' ? { renderShell: 'self', compactToolRenderingVersion: 1, renderCall() {}, renderResult() {} } : next());
     };`);
     try {
       expect(resolveSubagentExternalToolDefinitionFromInfo('async_tool', { sourceInfo: { path: asyncSource } })).toBeUndefined();
@@ -217,8 +217,13 @@ describe('subagents panel and extension ui', () => {
         cwd: tmp, tui: {}, visibleWidth: (text) => text.length, truncateToWidth: (text, w) => text.slice(0, w), getToolDefinition: () => metadata,
       });
       expect(native).not.toHaveBeenCalled();
-      expect(lines.join('\n')).toContain('safe output');
+      // Collapsed unmarked rows stay compact; returned text remains reachable when expanded.
+      expect(lines.join('\n')).toContain('synthetic_api');
       expect(lines.join('\n')).not.toContain('generic green box');
+      const expanded = renderThreadBody({ version: 1, source: 'events', items: [{ type: 'tool', name: 'synthetic_api', status: 'completed', result: { content: [{ type: 'text', text: 'safe output' }], isError: false } }] }, {
+        cwd: tmp, tui: {}, toolOutputExpanded: true, visibleWidth: (text) => text.length, truncateToWidth: (text, w) => text.slice(0, w), getToolDefinition: () => metadata,
+      });
+      expect(expanded.join('\n')).toContain('safe output');
     } finally { resetPiComponentCacheForTests(); }
   });
   it.each([60, 120])('expands only the clicked tool/thinking at width %s and preserves state across refresh and navigation', (width) => {
@@ -248,7 +253,7 @@ describe('subagents panel and extension ui', () => {
       const tasks = [makeTask('first'), makeTask('second')];
       const close = vi.fn();
       const panel = new SubagentsHistoryPanel(tasks, { fg: (_n: string, t: string) => t }, close, () => false, (text) => stripAnsi(text).length,
-        (text, w) => text.slice(0, w), { cwd: tmp, tui: { requestRender() {} }, getToolDefinition: () => ({ name: 'read', renderResult: () => undefined }) }, 40);
+        (text, w) => text.slice(0, w), { cwd: tmp, tui: { requestRender() {} }, getToolDefinition: () => ({ name: 'read', renderShell: 'self', compactToolRenderingVersion: 1, renderCall: () => undefined, renderResult: () => undefined }) }, 40);
       const click = (needle: string) => {
         const lines = panel.render(width);
         const row = lines.findIndex((line) => line.includes(needle));
@@ -381,6 +386,7 @@ describe('subagents panel and extension ui', () => {
         description: 'memory save',
         parameters: {},
         renderShell: 'self',
+        compactToolRenderingVersion: 1,
         renderCall: (args: any) => ({ render: () => [`memory-call:${args.title}`], invalidate: () => undefined }),
         renderResult: (result: any) => ({ render: () => [`memory-result:${result.details?.status}`], invalidate: () => undefined }),
       });
@@ -395,7 +401,7 @@ describe('subagents panel and extension ui', () => {
       } as any;
       const panel = new SubagentsHistoryPanel([task], { fg: (_name: string, text: string) => text }, () => undefined, () => false, (text) => text.length, (text, width) => text.length > width ? text.slice(0, width) : text, { cwd: tmp, tui: { requestRender() {} } });
       const rendered = panel.render(160).join('\n');
-      expect(rendered).toContain('captured:memory-call:Fix render:memory-result:saved');
+      expect(rendered).toContain('captured: memory-call:Fix render: memory-result:saved');
       expect(rendered).not.toContain('memory_save completed');
     } finally {
       resetPiComponentCacheForTests();
@@ -416,7 +422,7 @@ describe('subagents panel and extension ui', () => {
           setExpanded(expanded: boolean) { this.expanded = expanded; }
           render() { return [`native-tool:${this.name}:${this.expanded}:${this.args.path}:${this.result?.content?.[0]?.text ?? ''}`]; }
         },
-        createReadToolDefinition: () => ({ name: 'read' }),
+        createReadToolDefinition: () => ({ name: 'read', renderShell: 'self', compactToolRenderingVersion: 1, renderCall() {}, renderResult() {} }),
       });
       const task: SubagentTask = {
         id: 'subtask_injected_native_component',
@@ -452,7 +458,7 @@ describe('subagents panel and extension ui', () => {
         setExpanded(expanded) { this.expanded = expanded; }
         render() { return ['bundle-native:' + this.name + ':' + this.args.path + ':' + this.result.content[0].text]; }
       }
-      export function createReadToolDefinition() { return { name: 'read' }; }
+      export function createReadToolDefinition() { return { name: 'read', renderShell: 'self', compactToolRenderingVersion: 1, renderCall() {}, renderResult() {} }; }
     `);
     const shimDir = path.join(tmp, 'bin-panel-esm-bundle');
     fs.mkdirSync(shimDir);
@@ -548,7 +554,7 @@ describe('subagents panel and extension ui', () => {
     fs.writeFileSync(path.join(packageRoot, 'index.cjs'), `
       let constructions = 0;
       exports.__constructions = () => constructions;
-      exports.createBashToolDefinition = (cwd) => ({ name: 'bash', cwd, kind: 'native-bash' });
+      exports.createBashToolDefinition = (cwd) => ({ name: 'bash', cwd, kind: 'native-bash', renderShell: 'self', compactToolRenderingVersion: 1, renderCall() {}, renderResult() {} });
       exports.ToolExecutionComponent = class {
         constructor(name, id, args) {
           constructions += 1;
@@ -748,7 +754,7 @@ describe('subagents panel and extension ui', () => {
     fs.mkdirSync(shimDir);
     fs.symlinkSync(path.join(packageRoot, 'dist', 'cli.js'), path.join(shimDir, 'pi'));
     fs.writeFileSync(path.join(packageRoot, 'index.cjs'), `
-      exports.createReadToolDefinition = (cwd) => ({ name: 'read', cwd });
+      exports.createReadToolDefinition = (cwd) => ({ name: 'read', cwd, renderShell: 'self', compactToolRenderingVersion: 1, renderCall() {}, renderResult() {} });
       exports.ToolExecutionComponent = class {
         constructor() {}
         markExecutionStarted() {}
@@ -812,7 +818,7 @@ describe('subagents panel and extension ui', () => {
     fs.mkdirSync(shimDir);
     fs.symlinkSync(path.join(packageRoot, 'dist', 'cli.js'), path.join(shimDir, 'pi'));
     fs.writeFileSync(path.join(packageRoot, 'index.cjs'), `
-      exports.createReadToolDefinition = (cwd) => ({ name: 'read', cwd });
+      exports.createReadToolDefinition = (cwd) => ({ name: 'read', cwd, renderShell: 'self', compactToolRenderingVersion: 1, renderCall() {}, renderResult() {} });
       exports.ToolExecutionComponent = class {
         constructor() {}
         markExecutionStarted() {}
@@ -856,14 +862,14 @@ describe('subagents panel and extension ui', () => {
     fs.mkdirSync(shimDir);
     fs.symlinkSync(path.join(packageRoot, 'dist', 'cli.js'), path.join(shimDir, 'pi'));
     fs.writeFileSync(path.join(packageRoot, 'index.cjs'), `
-      exports.createBashToolDefinition = (cwd) => ({ name: 'bash', cwd, kind: 'native-bash' });
+      exports.createBashToolDefinition = (cwd) => ({ name: 'bash', cwd, kind: 'native-bash', renderShell: 'self', compactToolRenderingVersion: 1, renderCall() {}, renderResult() {} });
       exports.ToolExecutionComponent = class {
         constructor(name, id, args) { this.command = args.command; }
         markExecutionStarted() {}
         setArgsComplete() {}
         updateResult(result) { this.output = result.preview || ''; }
         setExpanded() {}
-        render() { return ['go test results:\r\n' + this.output]; }
+        render() { return ['go test results (' + this.command + '):\\r\\n' + this.output]; }
       };
     `);
     const oldArgv1 = process.argv[1];
@@ -929,7 +935,7 @@ describe('subagents panel and extension ui', () => {
     fs.mkdirSync(shimDir);
     fs.symlinkSync(path.join(packageRoot, 'dist', 'cli.js'), path.join(shimDir, 'pi'));
     fs.writeFileSync(path.join(packageRoot, 'index.cjs'), `
-      exports.createBashToolDefinition = (cwd) => ({ name: 'bash', cwd, kind: 'native-bash' });
+      exports.createBashToolDefinition = (cwd) => ({ name: 'bash', cwd, kind: 'native-bash', renderShell: 'self', compactToolRenderingVersion: 1, renderCall() {}, renderResult() {} });
       exports.ToolExecutionComponent = class {
         constructor(name, id, args) { this.command = args.command; this.expanded = false; }
         markExecutionStarted() {}
@@ -975,7 +981,7 @@ describe('subagents panel and extension ui', () => {
     fs.mkdirSync(shimDir);
     fs.symlinkSync(path.join(packageRoot, 'dist', 'cli.js'), path.join(shimDir, 'pi'));
     fs.writeFileSync(path.join(packageRoot, 'index.cjs'), `
-      exports.createBashToolDefinition = (cwd) => ({ name: 'bash', cwd, kind: 'native-bash' });
+      exports.createBashToolDefinition = (cwd) => ({ name: 'bash', cwd, kind: 'native-bash', renderShell: 'self', compactToolRenderingVersion: 1, renderCall() {}, renderResult() {} });
       exports.ToolExecutionComponent = class {
         constructor(name, id, args) { this.command = args.command; this.expanded = false; }
         markExecutionStarted() {}
@@ -1023,7 +1029,8 @@ describe('subagents panel and extension ui', () => {
 
     const header = panel.render(180)[0];
 
-    expect(header).toContain('ctrl+o expand');
+    expect(header).not.toContain('ctrl+o expand');
+    expect(header).not.toContain('to expand');
     expect(header).toContain('ctrl+t thinking');
   });
 
@@ -1867,8 +1874,8 @@ describe('subagents panel and extension ui', () => {
     expect(rendered).toContain('FG(mdHeading:delegated task)');
     expect(rendered).toContain('FG(mdHeading:execution)');
 
-    // Tool lines use electric border indicators without toolPendingBg
-    expect(rendered).toContain('FG(accent:│ )');
+    // Detail-pane tool lines stay unboxed without │ borders or toolPendingBg
+    expect(rendered).not.toContain('FG(accent:│ )');
     expect(rendered).toContain('FG(toolTitle:read src/ui/theme.ts)');
     expect(rendered).not.toContain('toolPendingBg');
     expect(rendered).not.toContain('BG(');
@@ -2741,6 +2748,409 @@ describe('subagents panel and extension ui', () => {
           expect(mobileHeaderSection).not.toContain(promptString);
         }
       }
+    });
+  });
+
+  describe('concurrent freshness and bounded reuse (MINI-007)', () => {
+    const mkThreadTask = (id: string, items: any[], status: SubagentTask['status'] = 'running', extra: Partial<SubagentTask> = {}): SubagentTask => ({
+      id,
+      agent: id,
+      mode: 'background',
+      effective_mode: 'background',
+      status,
+      task: `task ${id}`,
+      created_at: '2026-01-01T00:00:01.000Z',
+      last_activity_at: '2026-01-01T00:00:01.000Z',
+      attempt: 1,
+      thread_snapshot: { version: 1, source: 'events', created_at: '2026-01-01T00:00:01.000Z', updated_at: '2026-01-01T00:00:01.000Z', items },
+      ...extra,
+    } as SubagentTask);
+
+    const bodyItems = (label: string, count = 4, { liveTool = false } = {}) => {
+      const items: any[] = [{ type: 'user', id: `${label}-user`, label: 'delegated_task', text: `task ${label}` }];
+      for (let index = 0; index < count; index += 1) {
+        items.push({ type: 'assistant', id: `${label}-a${index}`, message: { role: 'assistant', content: [{ type: 'text', text: `${label} step ${index}` }] } });
+        const isLast = index === count - 1;
+        items.push({
+          type: 'tool',
+          id: `${label}-t${index}`,
+          tool_call_id: `${label}-tc${index}`,
+          name: 'read',
+          status: liveTool && isLast ? 'running' : 'completed',
+          arguments: { path: `src/${label}-${index}.ts` },
+          result: liveTool && isLast ? undefined : { content: [{ type: 'text', text: `${label} content ${index}` }], isError: false },
+        });
+      }
+      return items;
+    };
+
+    function countingPanel(tasks: SubagentTask[], selectedId: string, hydration: { reads: number }, counters: { constructed: number; rendered: number }) {
+      setPiComponentProviderForSubagentRendering({
+        getMarkdownTheme: () => ({}),
+        AssistantMessageComponent: class {
+          constructor(private message: any) { counters.constructed += 1; }
+          invalidate() {}
+          render(width: number) { counters.rendered += 1; return [`asst:${width}:${this.message.content.map((part: any) => part.text ?? '').join('')}`]; }
+        },
+        UserMessageComponent: class {
+          constructor(private text: string) { counters.constructed += 1; }
+          invalidate() {}
+          render(width: number) { counters.rendered += 1; return [`user:${width}`]; }
+        },
+        ToolExecutionComponent: class {
+          private result: any;
+          private expanded = false;
+          constructor(private name: string, private id: string, private args: any) { counters.constructed += 1; }
+          markExecutionStarted() {}
+          setArgsComplete() {}
+          updateResult(result: any) { this.result = result; }
+          setExpanded(expanded: boolean) { this.expanded = expanded; }
+          invalidate() {}
+          render() { counters.rendered += 1; return [`tool:${this.name}:${this.args?.path ?? ''}:${this.result?.content?.[0]?.text ?? ''}`]; }
+        },
+        createReadToolDefinition: (cwd: string) => ({ name: 'read', cwd, renderShell: 'self', compactToolRenderingVersion: 1, renderCall() {}, renderResult() {} }),
+      });
+      return new SubagentsHistoryPanel(
+        () => tasks,
+        { fg: (_name: string, text: string) => text, bold: (text: string) => text },
+        () => undefined,
+        () => false,
+        (text) => stripAnsi(text).length,
+        (text, width) => text.length > width ? text.slice(0, width) : text,
+        { cwd: tmp, tui: { requestRender() {} } },
+        42,
+        (id) => { hydration.reads += 1; return tasks.find((task) => task.id === id); },
+        selectedId,
+        () => undefined,
+        'x',
+        {},
+      );
+    }
+
+    it('hydrates and renders only the selected thread when two and three tasks are active', () => {
+      for (const activeCount of [2, 3]) {
+        resetPiComponentCacheForTests();
+        const hydration = { reads: 0 };
+        const counters = { constructed: 0, rendered: 0 };
+        const tasks = Array.from({ length: activeCount }, (_unused, index) => mkThreadTask(`active-${index}`, bodyItems(`active-${index}`)));
+        tasks.push(mkThreadTask('done-0', bodyItems('done-0'), 'completed'));
+        const panel = countingPanel(tasks, tasks[0]!.id, hydration, counters);
+
+        const rendered = stripAnsi(panel.render(120).join('\n'));
+        // Only the selected body appears; unselected threads contribute list metadata only.
+        expect(rendered).toContain('active-0 step 0');
+        expect(rendered).not.toContain('active-1 step 0');
+        expect(rendered).not.toContain('done-0 step 0');
+        // No hydration read was needed: the tasks already carry their snapshots.
+        expect(hydration.reads).toBe(0);
+        // Only the selected thread's items were constructed.
+        expect(counters.constructed).toBe(bodyItems('active-0').length);
+        resetPiComponentCacheForTests();
+      }
+    });
+
+    it('adds zero hydration reads and zero reconstruction for unchanged frames and unrelated task updates', () => {
+      resetPiComponentCacheForTests();
+      const hydration = { reads: 0 };
+      const counters = { constructed: 0, rendered: 0 };
+      const selected = mkThreadTask('sel', bodyItems('sel'));
+      const other = mkThreadTask('other', bodyItems('other'));
+      const panel = countingPanel([selected, other], selected.id, hydration, counters);
+
+      panel.render(120);
+      const afterCold = { ...counters };
+
+      // Repeated identical frames.
+      counters.constructed = 0;
+      counters.rendered = 0;
+      for (let index = 0; index < 5; index += 1) panel.render(120);
+      expect(counters.constructed).toBe(0);
+      expect(counters.rendered).toBe(0);
+
+      // Unrelated task tick: a metadata-only update on a task that is not selected.
+      for (let index = 0; index < 5; index += 1) {
+        other.last_activity_at = new Date(Date.parse('2026-01-02T00:00:00.000Z') + index * 1000).toISOString();
+        panel.render(120);
+      }
+      expect(counters.constructed).toBe(0);
+      expect(counters.rendered).toBe(0);
+      expect(hydration.reads).toBe(0);
+      expect(afterCold.constructed).toBeGreaterThan(0);
+
+      // A selected-thread change must still refresh only what changed.
+      counters.constructed = 0;
+      counters.rendered = 0;
+      selected.thread_snapshot!.items.push({ type: 'assistant', id: 'live', message: { role: 'assistant', content: [{ type: 'text', text: 'live chunk' }] } });
+      expect(stripAnsi(panel.render(120).join('\n'))).toContain('live chunk');
+      // One new item constructed; unchanged terminal items were reused.
+      expect(counters.constructed).toBe(1);
+      resetPiComponentCacheForTests();
+    });
+
+    it('keeps active/async output fresh while unchanged terminal items are reused', () => {
+      resetPiComponentCacheForTests();
+      const hydration = { reads: 0 };
+      const counters = { constructed: 0, rendered: 0 };
+      const task = mkThreadTask('live', bodyItems('live', 4, { liveTool: true }));
+      const panel = countingPanel([task], task.id, hydration, counters);
+
+      // A running tool renders on every frame so loaders/async images stay live.
+      counters.rendered = 0;
+      panel.render(120);
+      const firstFrameRenders = counters.rendered;
+      counters.rendered = 0;
+      panel.render(120);
+      expect(firstFrameRenders).toBeGreaterThan(0);
+      expect(counters.rendered).toBeGreaterThan(0);
+      // Terminal assistant rows in the same thread are reused, not re-rendered.
+      expect(counters.rendered).toBeLessThan(firstFrameRenders);
+
+      // The live tool completes: its result becomes visible.
+      const items = task.thread_snapshot!.items;
+      const liveItem = items[items.length - 1] as any;
+      liveItem.status = 'completed';
+      liveItem.result = { content: [{ type: 'text', text: 'live tool finished' }], isError: false };
+      expect(stripAnsi(panel.render(120).join('\n'))).toContain('live tool finished');
+      resetPiComponentCacheForTests();
+    });
+
+    it('invalidates same-length and equal-timestamp in-place edits across visible body inputs', () => {
+      resetPiComponentCacheForTests();
+      const hydration = { reads: 0 };
+      const counters = { constructed: 0, rendered: 0 };
+      const task = mkThreadTask('signal', [
+        { type: 'user', id: 'u', label: 'delegated_task', text: 'task' },
+        { type: 'assistant', id: 'a', message: { role: 'assistant', content: [{ type: 'text', text: 'assistant step AAA' }] } },
+        { type: 'tool', id: 't', tool_call_id: 'tc', name: 'read', status: 'completed', arguments: { path: 'src/module-AAA.ts' }, result: { content: [{ type: 'text', text: 'content AAA' }], isError: false } },
+      ], 'failed', { error: 'failure text AAA' });
+      const panel = countingPanel([task], task.id, hydration, counters);
+      panel.handleInput('\u000f'); // expand rows so returned text is visible
+      expect(stripAnsi(panel.render(120).join('\n'))).toContain('failure text AAA');
+
+      const [user, assistant, tool] = task.thread_snapshot!.items as any[];
+      user.text = 'task';
+      assistant.message.content[0].text = 'assistant step BBB';
+      tool.arguments.path = 'src/module-BBB.ts';
+      tool.result.content[0].text = 'content BBB';
+      task.error = 'failure text BBB';
+
+      const rendered = stripAnsi(panel.render(120).join('\n'));
+      expect(rendered).toContain('assistant step BBB');
+      expect(rendered).toContain('module-BBB');
+      expect(rendered).toContain('content BBB');
+      expect(rendered).toContain('failure text BBB');
+      expect(rendered).not.toContain('failure text AAA');
+      resetPiComponentCacheForTests();
+    });
+
+    it('binds selection, scroll and cancellation to task id when indexes move after reordering', () => {
+      resetPiComponentCacheForTests();
+      const hydration = { reads: 0 };
+      const counters = { constructed: 0, rendered: 0 };
+      const now = '2026-01-01T00:00:01.000Z';
+      // Pre-reorder list: the terminal task sits first because it is the newest by creation time.
+      let tasks: SubagentTask[] = [
+        mkThreadTask('finished-newest', bodyItems('finished-newest', 30), 'completed', { created_at: '2026-01-01T00:00:05.000Z', last_activity_at: now }),
+        mkThreadTask('active-oldest', bodyItems('active-oldest', 30), 'running', { created_at: '2026-01-01T00:00:01.000Z', last_activity_at: now }),
+      ];
+      const cancelled: string[] = [];
+      const panel = new SubagentsHistoryPanel(
+        () => tasks,
+        { fg: (_n: string, t: string) => t, bold: (t: string) => t },
+        () => undefined,
+        (data, key) => (key === 'detailCancel' ? data === 'x' : createSubagentsPanelKeyMatcher()(data, key)),
+        (t) => stripAnsi(t).length,
+        (t, w) => t.length > w ? t.slice(0, w) : t,
+        { cwd: tmp, tui: { requestRender() {} } },
+        20,
+        (id) => { hydration.reads += 1; return tasks.find((task) => task.id === id); },
+        'finished-newest',
+        (id) => { cancelled.push(id); tasks.find((task) => task.id === id)!.status = 'cancelled'; },
+        'x',
+        {},
+      );
+
+      panel.render(120);
+      expect(panel.getRenderDebugState().selectedStatus).toBe('completed');
+
+      // Move the viewer off the tail so scroll position becomes meaningful.
+      panel.handleInput('\u001b[5~'); // pageUp
+      expect(panel.getRenderDebugState().followTail).toBe(false);
+      const scrolled = panel.getRenderDebugState().scrollOffset;
+      expect(scrolled).toBeGreaterThan(0);
+
+      // Active-first reordering moves that same task down a slot; identity must not drift.
+      tasks = [tasks[1]!, tasks[0]!];
+      panel.render(120);
+      expect(panel.getRenderDebugState().selectedIndex).toBe(1);
+      expect(panel.getRenderDebugState().selectedStatus).toBe('completed');
+      // A terminal task is not cancellable, so the detail shortcut must not cancel the active sibling.
+      panel.handleInput('x');
+      expect(cancelled).toEqual([]);
+
+      // Selecting the active task by click, then reordering again, still cancels the displayed id.
+      panel.render(120);
+      const activeRow = panel.render(120).findIndex((line) => line.includes('active-oldest'));
+      panel.handleMouse({ type: 'click', row: activeRow, col: 1 });
+      expect(panel.getRenderDebugState().selectedStatus).toBe('running');
+      panel.handleInput('x');
+      expect(cancelled).toEqual(['active-oldest']);
+      resetPiComponentCacheForTests();
+    });
+
+    it('cancels and navigates by selectedTaskId even when tasks reorder between render and input (MINI-006)', () => {
+      const now = '2026-01-01T00:00:01.000Z';
+      let tasks: SubagentTask[] = [
+        mkThreadTask('active-a', bodyItems('a', 2), 'running', { created_at: '2026-01-01T00:00:03.000Z', last_activity_at: now }),
+        mkThreadTask('active-b', bodyItems('b', 2), 'running', { created_at: '2026-01-01T00:00:02.000Z', last_activity_at: now }),
+        mkThreadTask('active-c', bodyItems('c', 2), 'running', { created_at: '2026-01-01T00:00:01.000Z', last_activity_at: now }),
+      ];
+      const cancelled: string[] = [];
+      const panel = new SubagentsHistoryPanel(
+        () => tasks,
+        { fg: (_n: string, t: string) => t, bold: (t: string) => t },
+        () => undefined,
+        (data, key) => (key === 'detailCancel' ? data === 'x' : createSubagentsPanelKeyMatcher()(data, key)),
+        (t) => stripAnsi(t).length,
+        (t, w) => t.length > w ? t.slice(0, w) : t,
+        { cwd: tmp, tui: { requestRender() {} } },
+        24,
+        undefined,
+        'active-b',
+        (id) => { cancelled.push(id); },
+        'x',
+        {},
+      );
+      panel.render(120);
+      expect(panel.getRenderDebugState().selectedIndex).toBe(1);
+
+      // Simulate active-a finishing and list reordering BEFORE the next render runs:
+      // active-b moves from index 1 -> 0, active-c moves from index 2 -> 1.
+      tasks = [
+        tasks[1]!,
+        tasks[2]!,
+        { ...tasks[0]!, status: 'completed' },
+      ];
+      panel.handleInput('x');
+      expect(cancelled).toEqual(['active-b']);
+
+      // Reorder again and press 'right' before render: must move from active-b (0) -> active-c (1), not stale 1 -> 2.
+      panel.handleInput('\u001b[C'); // right
+      const rendered = stripAnsi(panel.render(120).join('\n'));
+      expect(rendered).toContain('agent: active-c');
+    });
+
+    it('re-hydrates summary tasks on same-length metadata edits without reading unrelated tasks and cleans up panel overlay timers (MINI-007)', async () => {
+      resetPiComponentCacheForTests();
+      const summaryA: SubagentTask = {
+        id: 'sum-a',
+        agent: 'sum-a',
+        mode: 'background',
+        status: 'completed',
+        task: 'summary a',
+        created_at: '2026-01-01T00:00:02.000Z',
+        last_activity_at: '2026-01-01T00:00:02.000Z',
+        last_activity: 'step AAA',
+      };
+      const summaryB: SubagentTask = {
+        id: 'sum-b',
+        agent: 'sum-b',
+        mode: 'background',
+        status: 'running',
+        task: 'summary b',
+        created_at: '2026-01-01T00:00:01.000Z',
+        last_activity_at: '2026-01-01T00:00:01.000Z',
+        last_activity: 'step 111',
+      };
+      let reads = 0;
+      const panel = new SubagentsHistoryPanel(
+        () => [summaryA, summaryB],
+        { fg: (_n: string, t: string) => t, bold: (t: string) => t },
+        () => undefined,
+        () => false,
+        (t) => stripAnsi(t).length,
+        (t, w) => t.length > w ? t.slice(0, w) : t,
+        { cwd: tmp },
+        24,
+        (id) => {
+          reads += 1;
+          const base = id === 'sum-a' ? summaryA : summaryB;
+          return { ...base, result: `hydrated:${base.last_activity}` };
+        },
+        'sum-a',
+      );
+
+      expect(stripAnsi(panel.render(120).join('\n'))).toContain('hydrated:step AAA');
+      expect(reads).toBe(1);
+
+      // Unrelated summaryB tick adds zero hydration reads.
+      summaryB.last_activity = 'step 222';
+      summaryB.last_activity_at = '2026-01-01T00:00:09.000Z';
+      panel.render(120);
+      expect(reads).toBe(1);
+
+      // Equal-length/equal-timestamp edit on selected summaryA invalidates hydration immediately.
+      summaryA.last_activity = 'step BBB';
+      expect(stripAnsi(panel.render(120).join('\n'))).toContain('hydrated:step BBB');
+      expect(reads).toBe(2);
+
+      // Overlay timer cleanup on close and abnormal rejection.
+      const { showSubagentsPanel } = await import('../../src/ui/panel-overlay.js');
+      const setIntervalSpy = vi.spyOn(global, 'setInterval');
+      const clearIntervalSpy = vi.spyOn(global, 'clearInterval');
+      try {
+        await expect(showSubagentsPanel({
+          ctx: {
+            cwd: tmp,
+            ui: {
+              custom: async (factory: any) => {
+                factory({ mode: 'fullscreen', requestRender() {} }, { fg: (_n: string, t: string) => t }, { matches: () => false }, () => {});
+                throw new Error('simulated host UI abort');
+              },
+            },
+          },
+          pi: {},
+          manager: new SubagentManager(async () => ({ result: 'ok' })),
+          setWidgetInputSuspended: () => {},
+          setActivePanelCancelSelected: () => {},
+          setActivePanelRequestRender: () => {},
+        })).rejects.toThrow('simulated host UI abort');
+        expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+        expect(clearIntervalSpy).toHaveBeenCalled();
+      } finally {
+        setIntervalSpy.mockRestore();
+        clearIntervalSpy.mockRestore();
+      }
+    });
+
+    it('prunes removed items and keeps the cache bounded across close/reopen and task switching', () => {
+      resetPiComponentCacheForTests();
+      const hydration = { reads: 0 };
+      const counters = { constructed: 0, rendered: 0 };
+      const first = mkThreadTask('first', bodyItems('first'));
+      const second = mkThreadTask('second', bodyItems('second'));
+      const tasks = [first, second];
+      const panel = countingPanel(tasks, first.id, hydration, counters);
+      panel.render(120);
+
+      // Removing items prunes their cache entries instead of retaining stale rows.
+      first.thread_snapshot!.items = first.thread_snapshot!.items.slice(0, 3);
+      const rendered = stripAnsi(panel.render(120).join('\n'));
+      expect(rendered).toContain('first step 0');
+      expect(rendered).not.toContain('first step 3');
+
+      // Switching tasks and back reuses the selected bounded thread without cross-session output.
+      panel.handleMouse({ type: 'click', row: panel.render(120).findIndex((line) => line.includes('second')) });
+      const switched = stripAnsi(panel.render(120).join('\n'));
+      expect(switched).toContain('second step 0');
+      expect(switched).not.toContain('first step 0');
+
+      // Explicit invalidation (close/reopen or host invalidate) drops everything without throwing.
+      panel.invalidate();
+      expect(() => panel.render(120)).not.toThrow();
+      expect(stripAnsi(panel.render(120).join('\n'))).toContain('second step 0');
+      expect(hydration.reads).toBe(0);
+      resetPiComponentCacheForTests();
     });
   });
 

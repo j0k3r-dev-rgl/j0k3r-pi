@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
@@ -14,6 +14,24 @@ function createMockPi() {
       tools.push(tool);
     },
   };
+}
+
+/**
+ * `context7/index.ts` reads `.pi/extensions.json` from the process cwd. Tests run
+ * from the package directory, so provide an isolated fixture project instead of
+ * changing production enabling behavior.
+ */
+async function withEnabledExtension<T>(runner: () => T | Promise<T>): Promise<T> {
+  const root = await mkdtemp(join(tmpdir(), 'context7-enabled-'));
+  const previousCwd = process.cwd();
+  await mkdir(join(root, '.pi'), { recursive: true });
+  await writeFile(join(root, '.pi', 'extensions.json'), JSON.stringify({ context7: true }), 'utf8');
+  process.chdir(root);
+  try {
+    return await runner();
+  } finally {
+    process.chdir(previousCwd);
+  }
 }
 
 function baseConfig(overrides: Partial<Context7RuntimeConfig> = {}): Context7RuntimeConfig {
@@ -55,10 +73,10 @@ const reactCandidate: LibraryCandidate = {
 };
 
 describe('context7 tool registration', () => {
-  it('registers the four public Context7 tools with object schemas', () => {
+  it('registers the four public Context7 tools with object schemas', async () => {
     const pi = createMockPi();
 
-    context7Extension(pi);
+    await withEnabledExtension(() => context7Extension(pi));
 
     expect(pi.tools.map((tool) => tool.name)).toEqual(CONTEXT7_TOOL_NAMES);
     for (const tool of pi.tools) {
@@ -70,10 +88,10 @@ describe('context7 tool registration', () => {
     }
   });
 
-  it('registers expected parameter fields for foundation schemas', () => {
+  it('registers expected parameter fields for foundation schemas', async () => {
     const pi = createMockPi();
 
-    context7Extension(pi);
+    await withEnabledExtension(() => context7Extension(pi));
 
     const byName = Object.fromEntries(pi.tools.map((tool) => [tool.name, tool]));
     expect(Object.keys(byName.context7_status.parameters.properties ?? {})).toEqual([]);
@@ -85,7 +103,7 @@ describe('context7 tool registration', () => {
   it('executes context7_status without exposing an API key value', async () => {
     const pi = createMockPi();
     const cwd = await mkdtemp(join(tmpdir(), 'context7-tools-status-'));
-    context7Extension(pi);
+    await withEnabledExtension(() => context7Extension(pi));
     const statusTool = pi.tools.find((tool) => tool.name === 'context7_status');
 
     const result = await statusTool.execute('tool-call', {}, undefined, undefined, {

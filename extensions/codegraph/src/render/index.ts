@@ -1,3 +1,4 @@
+import type { Component } from "@earendil-works/pi-tui";
 import type {
 	CodeGraphExploreDetails,
 	CodeGraphImpactDetails,
@@ -7,13 +8,19 @@ import type {
 	CodeGraphSyncDetails,
 } from "../types.js";
 import {
-	CodeGraphCardCallComponent,
-	CodeGraphCardResultComponent,
-	type CodeGraphCardState,
+	AMBER,
+	DIM,
+	LIME,
 	PINK,
 	RED,
-	toolHint,
+	type CodeGraphRowState,
+	electric,
+	rowLine,
+	textLines,
 } from "./theme.js";
+
+/** Presentation-only marker: declares compact, unboxed, single-row compliance with 1-col margin. */
+export const COMPACT_TOOL_RENDERING = { compactToolRenderingVersion: 1, compactLeftMargin: 1 } as const;
 
 function resultText(result: { content: Array<{ type: string; text?: string }> }): string {
 	return result.content
@@ -22,9 +29,73 @@ function resultText(result: { content: Array<{ type: string; text?: string }> })
 		.join("\n");
 }
 
-export function getCodeGraphBorderColor(state: CodeGraphCardState): string {
+export function getCodeGraphStatusColor(state: CodeGraphRowState): string {
 	if (state.isError) return RED;
+	if (state.isPartial) return DIM;
 	return PINK;
+}
+
+function title(name: string): string {
+	return electric(PINK, name);
+}
+
+function status(parts: Array<string | undefined>, color: string): string | undefined {
+	const body = parts.filter((part): part is string => Boolean(part && part.trim())).join(" · ");
+	return body ? electric(color, body) : undefined;
+}
+
+function metadata(parts: Array<string | undefined>): string | undefined {
+	const body = parts.filter((part): part is string => Boolean(part && part.trim())).join(" · ");
+	return body ? electric(DIM, body) : undefined;
+}
+
+/** A single inline row that hides itself once the result row is painted. */
+function inlineRow(getParts: () => Array<string | undefined>, state: CodeGraphRowState): Component & { compactLeftMargin: number } {
+	return {
+		compactLeftMargin: 1,
+		invalidate() {},
+		render(width: number): string[] {
+			if (state.hasResult) return [];
+			const safeWidth = Number.isFinite(width) ? Math.floor(width) : 0;
+			if (safeWidth <= 0) return [];
+			if (safeWidth === 1) return [" "];
+			return rowLine(getParts(), safeWidth - 1).map((line) => ` ${line}`);
+		},
+	};
+}
+
+function expandedRow(
+	getSummary: () => Array<string | undefined>,
+	getBody: () => string[],
+	state: CodeGraphRowState,
+): Component & { compactLeftMargin: number } {
+	state.hasResult = true;
+	return {
+		compactLeftMargin: 1,
+		invalidate() {},
+		render(width: number): string[] {
+			const safeWidth = Number.isFinite(width) ? Math.floor(width) : 0;
+			if (safeWidth <= 0) return [];
+			if (safeWidth === 1) return [" "];
+			const innerWidth = safeWidth - 1;
+			const head = rowLine(getSummary(), innerWidth).map((line) => ` ${line}`);
+			if (!state.expanded) return head;
+			const body: string[] = [];
+			for (const line of getBody()) {
+				if (line === "") {
+					body.push(" ");
+					continue;
+				}
+				for (const wrapped of textLines(line, innerWidth)) body.push(` ${wrapped}`);
+			}
+			return [...head, ...body];
+		},
+	};
+}
+
+function contentBody(result: any, fallback: string): string[] {
+	const text = resultText(result);
+	return text ? text.split("\n") : [fallback];
 }
 
 export function renderExploreCall(
@@ -32,258 +103,137 @@ export function renderExploreCall(
 	_theme: any,
 	context: any,
 ) {
-	const state: CodeGraphCardState = (context.state ??= {});
+	const state: CodeGraphRowState = (context.state ??= {});
 	const target = `${args.query}${args.path ? ` in ${args.path}` : ""}`;
-	return new CodeGraphCardCallComponent(
-		"codegraph_explore",
-		() => target,
-		() => "● Exploring CodeGraph index…",
-		getCodeGraphBorderColor,
-		state,
-	);
+	return inlineRow(() => [title("codegraph_explore"), target, electric(DIM, "exploring…")], state);
 }
 
 export function renderExploreResult(result: any, options: any, _theme: any, context: any) {
-	const state: CodeGraphCardState = (context.state ??= {});
-	state.hasResult = true;
+	const state: CodeGraphRowState = (context.state ??= {});
 	state.isError = Boolean(context.isError);
 	state.isPartial = Boolean(options.isPartial);
 	state.expanded = Boolean(options.expanded);
 
-	const content = resultText(result);
 	const details = result.details as CodeGraphExploreDetails | undefined;
 
-	return new CodeGraphCardResultComponent(
-		(_width, _innerWidth) => {
-			const lines: string[] = [];
-			if (options.isPartial) {
-				lines.push("● Exploring CodeGraph index…");
-				return lines;
-			}
-			if (context.isError) {
-				lines.push(content || "CodeGraph failed.");
-				return lines;
-			}
-			if (details?.notIndexed) {
-				const hint = toolHint("to expand");
-				if (!options.expanded) {
-					lines.push(`⚠ CodeGraph: not indexed · ${hint}`);
-				} else {
-					lines.push(content || "CodeGraph index not found.");
-					lines.push(toolHint("to collapse"));
-				}
-				return lines;
-			}
-			if (!options.expanded) {
-				const suffix = details?.truncated ? " (full output saved)" : "";
-				const hint = toolHint("to expand");
-				if (details?.lowConfidence) {
-					lines.push(`⚠ Low-confidence CodeGraph exploration${suffix} · ${hint}`);
-				} else {
-					lines.push(`✓ CodeGraph exploration complete${suffix} · ${hint}`);
-				}
-			} else {
-				if (content) {
-					lines.push(...content.split("\n"));
-				} else {
-					lines.push("CodeGraph returned no output.");
-				}
-				if (details?.truncated && details?.fullOutputPath) {
-					lines.push(`[Full output saved to: ${details.fullOutputPath}]`);
-				}
-				lines.push(toolHint("to collapse"));
+	return expandedRow(
+		() => {
+			if (state.isPartial) return [title("codegraph_explore"), electric(DIM, "exploring…")];
+			if (state.isError) return [title("codegraph_explore"), status(["error"], RED)];
+			if (details?.notIndexed) return [title("codegraph_explore"), electric(RED, "not indexed")];
+			return [
+				title("codegraph_explore"),
+				details?.lowConfidence ? electric(AMBER, "low confidence") : status(["complete"], LIME),
+				details?.truncated ? electric(DIM, "full output saved") : undefined,
+			];
+		},
+		() => {
+			if (state.isPartial) return [];
+			const lines = contentBody(result, state.isError ? "CodeGraph failed." : "CodeGraph returned no output.");
+			if (state.expanded) {
+				const meta = metadata([
+					details?.truncated && details?.fullOutputPath ? `full output: ${details.fullOutputPath}` : undefined,
+				]);
+				if (meta) lines.push(meta);
 			}
 			return lines;
 		},
-		getCodeGraphBorderColor,
 		state,
-		true,
 	);
 }
 
 export function renderStatusCall(args: { path?: string }, _theme: any, context: any) {
-	const state: CodeGraphCardState = (context.state ??= {});
-	return new CodeGraphCardCallComponent(
-		"codegraph_status",
-		() => args.path || "current project",
-		() => "● Checking CodeGraph status…",
-		getCodeGraphBorderColor,
+	const state: CodeGraphRowState = (context.state ??= {});
+	return inlineRow(
+		() => [title("codegraph_status"), args.path || "current project", electric(DIM, "checking…")],
 		state,
 	);
 }
 
 export function renderStatusResult(result: any, options: any, _theme: any, context: any) {
-	const state: CodeGraphCardState = (context.state ??= {});
-	state.hasResult = true;
+	const state: CodeGraphRowState = (context.state ??= {});
 	state.isError = Boolean(context.isError);
 	state.isPartial = Boolean(options.isPartial);
 	state.expanded = Boolean(options.expanded);
 
-	const content = resultText(result);
 	const details = result.details as CodeGraphStatusDetails | undefined;
 
-	return new CodeGraphCardResultComponent(
-		(_width, _innerWidth) => {
-			const lines: string[] = [];
-			if (options.isPartial) {
-				lines.push("● Checking CodeGraph status…");
-				return lines;
-			}
-			if (context.isError) {
-				lines.push(content || "CodeGraph status failed.");
-				return lines;
-			}
-			if (!options.expanded) {
-				const isIndexed = Boolean(details?.status?.initialized);
-				const statusText = isIndexed ? "CodeGraph: indexed" : "CodeGraph: not indexed";
-				const hint = toolHint("to expand");
-				lines.push(`${statusText} · ${hint}`);
-			} else {
-				if (content) {
-					lines.push(...content.split("\n"));
-				}
-				lines.push(toolHint("to collapse"));
-			}
-			return lines;
+	return expandedRow(
+		() => {
+			if (state.isPartial) return [title("codegraph_status"), electric(DIM, "checking…")];
+			if (state.isError) return [title("codegraph_status"), status(["error"], RED)];
+			const indexed = Boolean(details?.status?.initialized);
+			return [
+				title("codegraph_status"),
+				electric(indexed ? LIME : RED, indexed ? "indexed" : "not indexed"),
+				details?.status?.version ? electric(DIM, `v${details.status.version}`) : undefined,
+			];
 		},
-		getCodeGraphBorderColor,
+		() => (state.isPartial ? [] : contentBody(result, "CodeGraph status unavailable.")),
 		state,
-		true,
 	);
 }
 
 export function renderManageCall(args: { action: string; path?: string }, _theme: any, context: any) {
-	const state: CodeGraphCardState = (context.state ??= {});
-	return new CodeGraphCardCallComponent(
-		"codegraph_manage",
-		() => `${args.action} ${args.path || "current project"}`,
-		() => `● Running CodeGraph ${args.action}…`,
-		getCodeGraphBorderColor,
-		state,
-	);
+	const state: CodeGraphRowState = (context.state ??= {});
+	const target = `${args.action} ${args.path || "current project"}`;
+	return inlineRow(() => [title("codegraph_manage"), target, electric(DIM, "running…")], state);
 }
 
 export function renderManageResult(result: any, options: any, _theme: any, context: any) {
-	const state: CodeGraphCardState = (context.state ??= {});
-	state.hasResult = true;
+	const state: CodeGraphRowState = (context.state ??= {});
 	state.isError = Boolean(context.isError);
 	state.isPartial = Boolean(options.isPartial);
 	state.expanded = Boolean(options.expanded);
 
-	const content = resultText(result);
 	const details = result.details as CodeGraphManageDetails | undefined;
 	const action = details?.action || "operation";
 
-	return new CodeGraphCardResultComponent(
-		(_width, _innerWidth) => {
-			const lines: string[] = [];
-			if (options.isPartial) {
-				lines.push(`● Running CodeGraph ${action}…`);
-				return lines;
-			}
-			if (context.isError) {
-				lines.push(content || `CodeGraph ${action} failed.`);
-				return lines;
-			}
+	return expandedRow(
+		() => {
+			if (state.isPartial) return [title("codegraph_manage"), action, electric(DIM, "running…")];
+			if (state.isError) return [title("codegraph_manage"), action, status(["error"], RED)];
 			if (details && !details.executed) {
-				if (!options.expanded) {
-					const hint = toolHint("to expand");
-					lines.push(`⚠ CodeGraph ${action}: not executed · ${hint}`);
-				} else {
-					lines.push(content);
-					lines.push(toolHint("to collapse"));
-				}
-				return lines;
+				return [title("codegraph_manage"), action, electric(RED, "not executed")];
 			}
-			if (!options.expanded) {
-				const hint = toolHint("to expand");
-				lines.push(`✓ CodeGraph ${action} complete · ${hint}`);
-			} else {
-				if (content) {
-					lines.push(...content.split("\n"));
-				}
-				lines.push(toolHint("to collapse"));
-			}
-			return lines;
+			return [title("codegraph_manage"), action, status(["done"], LIME)];
 		},
-		getCodeGraphBorderColor,
+		() => (state.isPartial ? [] : contentBody(result, `CodeGraph ${action} returned no output.`)),
 		state,
-		true,
 	);
 }
 
 export function renderSyncCall(args: { path?: string }, _theme: any, context: any) {
-	const state: CodeGraphCardState = (context.state ??= {});
-	return new CodeGraphCardCallComponent(
-		"codegraph_sync",
-		() => args.path || "current project",
-		() => "● Syncing CodeGraph index…",
-		getCodeGraphBorderColor,
+	const state: CodeGraphRowState = (context.state ??= {});
+	return inlineRow(
+		() => [title("codegraph_sync"), args.path || "current project", electric(DIM, "syncing…")],
 		state,
 	);
 }
 
 export function renderSyncResult(result: any, options: any, _theme: any, context: any) {
-	const state: CodeGraphCardState = (context.state ??= {});
-	state.hasResult = true;
+	const state: CodeGraphRowState = (context.state ??= {});
 	state.isError = Boolean(context.isError);
 	state.isPartial = Boolean(options.isPartial);
 	state.expanded = Boolean(options.expanded);
 
-	const content = resultText(result);
 	const details = result.details as CodeGraphSyncDetails | undefined;
 
-	return new CodeGraphCardResultComponent(
-		(_width, _innerWidth) => {
-			const lines: string[] = [];
-			if (options.isPartial) {
-				lines.push("● Syncing CodeGraph index…");
-				return lines;
-			}
-			if (context.isError) {
-				lines.push(content || "CodeGraph sync failed.");
-				return lines;
-			}
-			if (details?.notIndexed) {
-				const hint = toolHint("to expand");
-				if (!options.expanded) {
-					lines.push(`⚠ CodeGraph: not indexed · ${hint}`);
-				} else {
-					lines.push(content || "CodeGraph index not found.");
-					lines.push(toolHint("to collapse"));
-				}
-				return lines;
-			}
-			if (details?.lockHeld) {
-				const hint = toolHint("to expand");
-				if (!options.expanded) {
-					lines.push(`⚠ CodeGraph: index locked · ${hint}`);
-				} else {
-					lines.push(content || "CodeGraph index is locked by another process.");
-					lines.push(toolHint("to collapse"));
-				}
-				return lines;
-			}
-			if (!options.expanded) {
-				const cachedSuffix = details?.cached ? " (cached)" : "";
-				const hint = toolHint("to expand");
-				lines.push(`✓ CodeGraph sync complete${cachedSuffix} · ${hint}`);
-			} else {
-				if (content) {
-					lines.push(...content.split("\n"));
-				} else {
-					lines.push("CodeGraph sync completed.");
-				}
-				if (details?.durationMs !== undefined) {
-					lines.push(`Duration: ${details.durationMs}ms`);
-				}
-				lines.push(toolHint("to collapse"));
-			}
-			return lines;
+	return expandedRow(
+		() => {
+			if (state.isPartial) return [title("codegraph_sync"), electric(DIM, "syncing…")];
+			if (state.isError) return [title("codegraph_sync"), status(["error"], RED)];
+			if (details?.notIndexed) return [title("codegraph_sync"), electric(RED, "not indexed")];
+			if (details?.lockHeld) return [title("codegraph_sync"), electric(AMBER, "index locked")];
+			return [
+				title("codegraph_sync"),
+				status(["synced"], LIME),
+				details?.cached ? electric(DIM, "cached") : undefined,
+				typeof details?.durationMs === "number" ? electric(DIM, `${details.durationMs}ms`) : undefined,
+			];
 		},
-		getCodeGraphBorderColor,
+		() => (state.isPartial ? [] : contentBody(result, "CodeGraph sync completed.")),
 		state,
-		true,
 	);
 }
 
@@ -292,64 +242,32 @@ export function renderNodeCall(
 	_theme: any,
 	context: any,
 ) {
-	const state: CodeGraphCardState = (context.state ??= {});
+	const state: CodeGraphRowState = (context.state ??= {});
 	const target = `${args.name}${args.file ? ` (${args.file})` : ""}${args.path ? ` in ${args.path}` : ""}`;
-	return new CodeGraphCardCallComponent(
-		"codegraph_node",
-		() => target,
-		() => "● Inspecting CodeGraph node…",
-		getCodeGraphBorderColor,
-		state,
-	);
+	return inlineRow(() => [title("codegraph_node"), target, electric(DIM, "inspecting…")], state);
 }
 
 export function renderNodeResult(result: any, options: any, _theme: any, context: any) {
-	const state: CodeGraphCardState = (context.state ??= {});
-	state.hasResult = true;
+	const state: CodeGraphRowState = (context.state ??= {});
 	state.isError = Boolean(context.isError);
 	state.isPartial = Boolean(options.isPartial);
 	state.expanded = Boolean(options.expanded);
 
-	const content = resultText(result);
 	const details = result.details as CodeGraphNodeDetails | undefined;
 
-	return new CodeGraphCardResultComponent(
-		(_width, _innerWidth) => {
-			const lines: string[] = [];
-			if (options.isPartial) {
-				lines.push("● Inspecting CodeGraph node…");
-				return lines;
-			}
-			if (context.isError) {
-				lines.push(content || "CodeGraph node inspection failed.");
-				return lines;
-			}
-			if (details?.notIndexed) {
-				const hint = toolHint("to expand");
-				if (!options.expanded) {
-					lines.push(`⚠ CodeGraph: not indexed · ${hint}`);
-				} else {
-					lines.push(content || "CodeGraph index not found.");
-					lines.push(toolHint("to collapse"));
-				}
-				return lines;
-			}
-			if (!options.expanded) {
-				const hint = toolHint("to expand");
-				lines.push(`✓ CodeGraph node complete · ${hint}`);
-			} else {
-				if (content) {
-					lines.push(...content.split("\n"));
-				} else {
-					lines.push("CodeGraph returned no output.");
-				}
-				lines.push(toolHint("to collapse"));
-			}
-			return lines;
+	return expandedRow(
+		() => {
+			if (state.isPartial) return [title("codegraph_node"), electric(DIM, "inspecting…")];
+			if (state.isError) return [title("codegraph_node"), status(["error"], RED)];
+			if (details?.notIndexed) return [title("codegraph_node"), electric(RED, "not indexed")];
+			return [
+				title("codegraph_node"),
+				status(["complete"], LIME),
+				details?.truncated ? electric(DIM, "full output saved") : undefined,
+			];
 		},
-		getCodeGraphBorderColor,
+		() => (state.isPartial ? [] : contentBody(result, "CodeGraph returned no output.")),
 		state,
-		true,
 	);
 }
 
@@ -358,64 +276,31 @@ export function renderImpactCall(
 	_theme: any,
 	context: any,
 ) {
-	const state: CodeGraphCardState = (context.state ??= {});
+	const state: CodeGraphRowState = (context.state ??= {});
 	const target = `${args.symbol}${args.depth ? ` (depth ${args.depth})` : ""}${args.path ? ` in ${args.path}` : ""}`;
-	return new CodeGraphCardCallComponent(
-		"codegraph_impact",
-		() => target,
-		() => "● Analyzing CodeGraph impact…",
-		getCodeGraphBorderColor,
-		state,
-	);
+	return inlineRow(() => [title("codegraph_impact"), target, electric(DIM, "analyzing…")], state);
 }
 
 export function renderImpactResult(result: any, options: any, _theme: any, context: any) {
-	const state: CodeGraphCardState = (context.state ??= {});
-	state.hasResult = true;
+	const state: CodeGraphRowState = (context.state ??= {});
 	state.isError = Boolean(context.isError);
 	state.isPartial = Boolean(options.isPartial);
 	state.expanded = Boolean(options.expanded);
 
-	const content = resultText(result);
 	const details = result.details as CodeGraphImpactDetails | undefined;
 
-	return new CodeGraphCardResultComponent(
-		(_width, _innerWidth) => {
-			const lines: string[] = [];
-			if (options.isPartial) {
-				lines.push("● Analyzing CodeGraph impact…");
-				return lines;
-			}
-			if (context.isError) {
-				lines.push(content || "CodeGraph impact failed.");
-				return lines;
-			}
-			if (details?.notIndexed) {
-				const hint = toolHint("to expand");
-				if (!options.expanded) {
-					lines.push(`⚠ CodeGraph: not indexed · ${hint}`);
-				} else {
-					lines.push(content || "CodeGraph index not found.");
-					lines.push(toolHint("to collapse"));
-				}
-				return lines;
-			}
-			if (!options.expanded) {
-				const hint = toolHint("to expand");
-				lines.push(`✓ CodeGraph impact complete · ${hint}`);
-			} else {
-				if (content) {
-					lines.push(...content.split("\n"));
-				} else {
-					lines.push("CodeGraph returned no output.");
-				}
-				lines.push(toolHint("to collapse"));
-			}
-			return lines;
+	return expandedRow(
+		() => {
+			if (state.isPartial) return [title("codegraph_impact"), electric(DIM, "analyzing…")];
+			if (state.isError) return [title("codegraph_impact"), status(["error"], RED)];
+			if (details?.notIndexed) return [title("codegraph_impact"), electric(RED, "not indexed")];
+			return [
+				title("codegraph_impact"),
+				status(["complete"], LIME),
+				details?.truncated ? electric(DIM, "full output saved") : undefined,
+			];
 		},
-		getCodeGraphBorderColor,
+		() => (state.isPartial ? [] : contentBody(result, "CodeGraph returned no output.")),
 		state,
-		true,
 	);
 }
-

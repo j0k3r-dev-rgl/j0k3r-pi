@@ -1,16 +1,15 @@
-import { describe, expect, it, vi } from 'vitest';
-import pdfReviewExtension from '../index.js';
+import { describe, expect, it } from 'vitest';
 import {
-  CYAN,
-  DIM,
-  LIME,
+  COMPACT_TOOL_RENDERING,
   RED,
-  RESET,
   extractPdfBadge,
   renderPdfExtractCall,
   renderPdfExtractResult,
   visibleWidth,
 } from '../src/render.js';
+import { registerPdfReviewTools } from '../src/tools.js';
+
+const FRAME = /[╭╮╰╯│]/;
 
 const mockTheme = {
   fg: (_token: string, text: string) => text,
@@ -19,17 +18,15 @@ const mockTheme = {
 };
 
 describe('pdf-review renderers', () => {
-  it('registers pdf_extract with renderShell: "self", renderCall, and renderResult', () => {
+  it('registers pdf_extract with the compact marker, self shell, and both safe slots', () => {
+    expect(COMPACT_TOOL_RENDERING.compactToolRenderingVersion).toBe(1);
     const tools: any[] = [];
-    const pi = {
-      registerTool: vi.fn((tool: any) => tools.push(tool)),
-    };
+    registerPdfReviewTools({ registerTool: (tool: any) => tools.push(tool) });
 
-    pdfReviewExtension(pi);
-
-    const tool = tools.find((t) => t.name === 'pdf_extract');
+    const tool = tools.find((entry) => entry.name === 'pdf_extract');
     expect(tool).toBeDefined();
     expect(tool.renderShell).toBe('self');
+    expect(tool.compactToolRenderingVersion).toBe(1);
     expect(typeof tool.renderCall).toBe('function');
     expect(typeof tool.renderResult).toBe('function');
   });
@@ -39,36 +36,26 @@ describe('pdf-review renderers', () => {
     expect(extractPdfBadge({ path: 'docs/spec.pdf' })).toBe('pdf_extract [spec.pdf]');
   });
 
-  it('renders pending call card with rounded corners and consistent line widths', () => {
+  it('renders the pending call as one compact inline row', () => {
     const context = { state: {} };
-    const call = renderPdfExtractCall({ path: 'paper.pdf' }, mockTheme, context);
-    const lines = call.render(80);
+    const lines = renderPdfExtractCall({ path: 'paper.pdf' }, mockTheme, context).render(80);
 
-    expect(lines).toHaveLength(3);
-    expect(lines[0]).toContain('╭');
-    expect(lines[0]).toContain('╮');
-    expect(lines[0]).toContain('pdf_extract [paper.pdf]');
-    expect(lines[1]).toContain('│');
-    expect(lines[1]).toContain('Pending: Extracting PDF...');
-    expect(lines[2]).toContain('╰');
-    expect(lines[2]).toContain('╯');
-
-    for (const line of lines) {
-      expect(visibleWidth(line)).toBe(80);
-      expect(line).not.toMatch(/\x1b\[4[0-7]m/);
-    }
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('pdf_extract');
+    expect(lines[0]).toContain('paper.pdf');
+    expect(lines[0]).toContain('running');
+    expect(lines[0]).toContain('─');
+    expect(lines[0]).not.toMatch(FRAME);
+    expect(lines[0]).not.toMatch(/ctrl\+o|to expand/i);
+    expect(visibleWidth(lines[0])).toBeLessThanOrEqual(80);
   });
 
-  it('coordinates two-phase slot assembly via context.state', () => {
+  it('coordinates two-phase slot assembly via context.state without borders', () => {
     const context: any = { state: {} };
 
-    // Phase 1: Pending call
     const pendingLines = renderPdfExtractCall({ path: 'paper.pdf' }, mockTheme, context).render(80);
-    expect(pendingLines).toHaveLength(3);
-    expect(pendingLines[0]).toContain('╭');
-    expect(pendingLines[2]).toContain('╰');
+    expect(pendingLines).toHaveLength(1);
 
-    // Result arrives
     const resultComp = renderPdfExtractResult(
       {
         details: {
@@ -92,35 +79,28 @@ describe('pdf-review renderers', () => {
     );
 
     expect(context.state.hasResult).toBe(true);
-    expect(context.state.borderColor).toBe(LIME);
 
-    // Phase 2: Call re-renders as top border only
     const resolvedCall = renderPdfExtractCall({ path: 'paper.pdf' }, mockTheme, context).render(80);
-    expect(resolvedCall).toHaveLength(1);
-    expect(resolvedCall[0]).toContain('╭');
-    expect(resolvedCall[0]).toContain(LIME);
+    expect(resolvedCall).toEqual([]);
 
-    // Result renders framed lines + bottom border
     const resultLines = resultComp.render(80);
-    expect(resultLines[resultLines.length - 1]).toContain('╰');
-
-    const assembled = [...resolvedCall, ...resultLines];
-    const tops = assembled.filter((l) => l.includes('╭'));
-    const bottoms = assembled.filter((l) => l.includes('╰'));
-    expect(tops).toHaveLength(1);
-    expect(bottoms).toHaveLength(1);
-
-    for (const line of assembled) {
-      expect(visibleWidth(line)).toBe(80);
-    }
+    expect(resultLines).toHaveLength(1);
+    expect(resultLines[0]).toContain('pdf_extract');
+    expect(resultLines[0]).toContain('3 pages');
+    expect(resultLines[0]).not.toMatch(FRAME);
   });
 
-  it('renders collapsed and expanded views with full metadata and OCR status', () => {
+  it('renders compact identity and keeps full metadata, page ranges and every text block on expansion', () => {
     const result = {
       details: {
         status: 'success',
         data: {
-          file: { path: '/tmp/report.pdf', sha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', sizeBytes: 204800, mimeType: 'application/pdf' },
+          file: {
+            path: '/tmp/report.pdf',
+            sha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+            sizeBytes: 204800,
+            mimeType: 'application/pdf',
+          },
           pageCount: 12,
           text: 'Annual summary report 2026...\nDetailed financials follow.',
           textCharCount: 5400,
@@ -131,13 +111,18 @@ describe('pdf-review renderers', () => {
           truncated: { text: true, pages: false, images: false },
         },
       },
+      content: [{ type: 'text', text: 'pdf_extract: /tmp/report.pdf\nAnnual summary report 2026...\nDetailed financials follow.' }],
     };
 
-    const collapsed = renderPdfExtractResult(result, { expanded: false }, mockTheme).render(80).join('\n');
-    expect(collapsed).toContain('✓ report.pdf · 12 pages · 5400 chars [ocr]');
-    expect(collapsed).toContain('ctrl+o expand');
+    const collapsedLines = renderPdfExtractResult(result, { expanded: false }, mockTheme, { state: {} }).render(120);
+    expect(collapsedLines).toHaveLength(1);
+    expect(collapsedLines[0]).toContain('report.pdf');
+    expect(collapsedLines[0]).toContain('12 pages');
+    expect(collapsedLines[0]).toContain('5400 chars');
+    expect(collapsedLines[0]).toContain('[ocr]');
+    expect(collapsedLines[0]).not.toMatch(/ctrl\+o|to expand/i);
 
-    const expanded = renderPdfExtractResult(result, { expanded: true }, mockTheme).render(80).join('\n');
+    const expanded = renderPdfExtractResult(result, { expanded: true }, mockTheme, { state: {} }).render(120).join('\n');
     expect(expanded).toContain('file: /tmp/report.pdf');
     expect(expanded).toContain('sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
     expect(expanded).toContain('file size: 200.0 KiB');
@@ -147,12 +132,23 @@ describe('pdf-review renderers', () => {
     expect(expanded).toContain('ocr: provider=ocrmypdf language=eng (5400 chars)');
     expect(expanded).toContain('rendered pages: 1');
     expect(expanded).toContain('TEXT_EXTRACTION_EMPTY: No text layer found');
-    expect(expanded).toContain('text preview:');
+    // The returned text block is reachable in full, without a renderer-level preview slice.
     expect(expanded).toContain('Annual summary report 2026...');
-    expect(expanded).toContain('ctrl+o collapse');
+    expect(expanded).toContain('Detailed financials follow.');
+    expect(expanded).not.toMatch(/ctrl\+o|to collapse/i);
   });
 
-  it('renders electric red border and error message on failure', () => {
+  it('keeps long extracted text reachable beyond the old 500-character preview', () => {
+    const longText = `${'X'.repeat(900)}TAIL_MARKER`;
+    const result = {
+      details: { status: 'success', data: { file: { path: 'big.pdf' }, pageCount: 1, textCharCount: longText.length, textSource: 'pdf-text-layer' } },
+      content: [{ type: 'text', text: longText }],
+    };
+    const expanded = renderPdfExtractResult(result, { expanded: true }, mockTheme, { state: {} }).render(120).join('\n');
+    expect(expanded).toContain('TAIL_MARKER');
+  });
+
+  it('marks failures in one red inline row and keeps returned text on expansion', () => {
     const context: any = { state: {} };
     const errResult = {
       isError: true,
@@ -160,35 +156,47 @@ describe('pdf-review renderers', () => {
         status: 'failure',
         error: { code: 'validation_error', message: 'File is not a valid PDF' },
       },
+      content: [{ type: 'text', text: 'pdf_extract failed: File is not a valid PDF' }],
     };
 
     const lines = renderPdfExtractResult(errResult, { expanded: false }, mockTheme, context).render(80);
-    expect(context.state.borderColor).toBe(RED);
-    expect(lines[lines.length - 1]).toContain(RED);
-    expect(lines.join('\n')).toContain('Error: File is not a valid PDF');
+    expect(context.state.isError).toBe(true);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('error');
+    expect(lines[0]).toContain('File is not a valid PDF');
+    expect(lines[0]).not.toMatch(FRAME);
+
+    const redTheme = { ...mockTheme, fg: (name: string, text: string) => (name === 'error' ? `${RED}${text}\x1b[0m` : text) };
+    expect(renderPdfExtractResult(errResult, { expanded: false }, redTheme, { state: {} }).render(80)[0]).toContain(RED);
+
+    const expanded = renderPdfExtractResult(errResult, { expanded: true }, mockTheme, { state: {} }).render(80);
+    expect(expanded.every((l) => l.startsWith(' '))).toBe(true);
+    expect(expanded.slice(1)).toContain(' pdf_extract failed: File is not a valid PDF');
   });
 
-  it('safeguards against narrow width (< 24 columns)', () => {
+  it('stays width-safe at narrow widths and emits no cells at zero width', () => {
     const callLines = renderPdfExtractCall({ path: 'doc.pdf' }, mockTheme).render(16);
     expect(callLines).toHaveLength(1);
-    expect(callLines[0]).not.toContain('╭');
+    expect(visibleWidth(callLines[0])).toBeLessThanOrEqual(16);
+    expect(callLines[0]).not.toMatch(FRAME);
 
-    const resultLines = renderPdfExtractResult(
-      {
-        details: {
-          status: 'success',
-          data: {
-            file: { path: 'doc.pdf' },
-            pageCount: 1,
-            textCharCount: 10,
-            textSource: 'pdf-text-layer',
+    for (const width of [1, 2, 10, 23]) {
+      const resultLines = renderPdfExtractResult(
+        {
+          details: {
+            status: 'success',
+            data: { file: { path: 'doc.pdf' }, pageCount: 1, textCharCount: 10, textSource: 'pdf-text-layer' },
           },
+          content: [{ type: 'text', text: 'extracted body line\nsecond line' }],
         },
-      },
-      { expanded: false },
-      mockTheme,
-    ).render(16);
-    expect(resultLines.length).toBeGreaterThan(0);
-    expect(resultLines[resultLines.length - 1]).not.toContain('╰');
+        { expanded: true },
+        mockTheme,
+        { state: {} },
+      ).render(width);
+      expect(resultLines.length).toBeGreaterThan(0);
+      for (const line of resultLines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+    }
+
+    expect(renderPdfExtractResult({ details: { status: 'success', data: {} } }, { expanded: false }, mockTheme, { state: {} }).render(0)).toEqual([]);
   });
 });

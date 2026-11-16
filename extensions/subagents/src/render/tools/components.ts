@@ -1,8 +1,8 @@
-import { truncateToWidth, visibleWidth, wrapLineToWidth } from '../text-width.js';
-import { BOX_CHARS, CYAN, electricBorder, padToWidth, themeFg } from '../completion-message.js';
+import { formatMarginedLine, truncateToWidth, visibleWidth, wrapLineToWidth } from '../text-width.js';
 
 export function emptyComponent() {
   return {
+    compactLeftMargin: 1,
     invalidate() {},
     render(_width?: number): string[] {
       return [];
@@ -10,66 +10,53 @@ export function emptyComponent() {
   };
 }
 
-export interface BoxedComponentOptions {
-  title?: string;
-  theme?: any;
-  borderFn?: (text: string) => string;
-  wrapped?: boolean;
-  onClick?: () => void;
+export interface CompactCallState {
+  hasResult?: boolean;
 }
 
-export function boxedComponent(linesOrText: string | string[], options?: BoxedComponentOptions) {
+export interface InlineComponentOptions {
+  /** Single compact header line; clipped to the supplied width. */
+  header: string;
+  /** Lines emitted only when the row is expanded. */
+  body?: string[];
+  expanded?: boolean;
+  /** Shared Pi `context.state` so the call slot suppresses itself once a result exists. */
+  state?: CompactCallState;
+  isCallSlot?: boolean;
+}
+
+/**
+ * Owner-local component for the compact tool row.
+ *
+ * Native `Text` cannot clip one header line to the viewport width while still wrapping the expanded
+ * body, so this component owns exactly that: one clipped header line plus fully wrapped expansion
+ * lines, prefixed with exactly 1 leading blank column (`width - 1` content width; `width <= 0` -> `[]`;
+ * `width === 1` -> `[' ']`). It emits no frame, background fill, extra blank row or expansion hint,
+ * and it deliberately implements neither `handleMouse` nor `handleInput`, so Pi keeps ownership of
+ * expansion keys and click routing.
+ */
+export function inlineComponent(options: InlineComponentOptions) {
+  const body = options.expanded === true ? (options.body ?? []) : [];
   return {
+    compactLeftMargin: 1,
     invalidate() {},
-    handleMouse(event: any) {
-      if (!options?.onClick) return undefined;
-      const isLeft = event?.button === 'left' || event?.button === undefined;
-      if (event?.type === 'press' && isLeft) {
-        return { handled: true };
-      }
-      if (event?.type === 'release' && isLeft) {
-        return { handled: true };
-      }
-      if (event?.type === 'click' || (!event?.type && isLeft)) {
-        options.onClick();
-        return { handled: true };
-      }
-      return undefined;
-    },
     render(width: number): string[] {
-      const borderFn = options?.borderFn ?? ((text: string) => {
-        if (options?.theme) return themeFg(options.theme, 'accent', text, CYAN);
-        return electricBorder(text);
-      });
-      const rawLines = Array.isArray(linesOrText)
-        ? linesOrText.flatMap((l) => l.split('\n'))
-        : linesOrText.split('\n');
-      const safeWidth = Math.max(1, Math.floor(width || 1));
-      if (safeWidth < 10) {
-        const all = options?.title ? [options.title, ...rawLines] : rawLines;
-        return all.map((l) => truncateToWidth(l, safeWidth, '…'));
+      const safeWidth = Number.isFinite(width) ? Math.floor(width) : 0;
+      if (safeWidth <= 0) return [];
+      if (options.isCallSlot && options.state?.hasResult) return [];
+      if (safeWidth === 1) return [' '];
+      const innerWidth = safeWidth - 1;
+      const rawHeader = options.header.split('\n')[0] ?? '';
+      const headerClipped = visibleWidth(rawHeader) <= innerWidth
+        ? rawHeader
+        : truncateToWidth(rawHeader, innerWidth, innerWidth <= 2 ? '' : '…');
+      const lines: string[] = [` ${visibleWidth(headerClipped) <= innerWidth ? headerClipped : truncateToWidth(headerClipped, innerWidth, '')}`];
+      for (const rawLine of body.flatMap((line) => line.split('\n'))) {
+        for (const wrapped of wrapLineToWidth(rawLine, innerWidth, safeWidth)) {
+          lines.push(formatMarginedLine(wrapped, safeWidth));
+        }
       }
-      const innerWidth = safeWidth - 2;
-      const contentWidth = Math.max(1, innerWidth - 2);
-
-      let top: string;
-      if (options?.title) {
-        const maxTitleWidth = Math.max(0, innerWidth - 4);
-        const clippedTitle = truncateToWidth(options.title, maxTitleWidth, '…');
-        const titleVisWidth = visibleWidth(clippedTitle);
-        const filler = Math.max(0, innerWidth - titleVisWidth - 3);
-        top = `${borderFn(BOX_CHARS.topLeft + BOX_CHARS.horizontal)} ${clippedTitle} ${borderFn(BOX_CHARS.horizontal.repeat(filler))}${borderFn(BOX_CHARS.topRight)}`;
-      } else {
-        top = `${borderFn(BOX_CHARS.topLeft)}${borderFn(BOX_CHARS.horizontal.repeat(innerWidth))}${borderFn(BOX_CHARS.topRight)}`;
-      }
-
-      const formattedLines = options?.wrapped
-        ? rawLines.flatMap((l) => wrapLineToWidth(l, contentWidth))
-        : rawLines.map((l) => truncateToWidth(l, contentWidth, '…'));
-      const middle = formattedLines.map((l) => `${borderFn(BOX_CHARS.vertical)} ${padToWidth(l, contentWidth)} ${borderFn(BOX_CHARS.vertical)}`);
-      const bottom = `${borderFn(BOX_CHARS.bottomLeft)}${borderFn(BOX_CHARS.horizontal.repeat(innerWidth))}${borderFn(BOX_CHARS.bottomRight)}`;
-
-      return [top, ...middle, bottom];
+      return lines;
     },
   };
 }

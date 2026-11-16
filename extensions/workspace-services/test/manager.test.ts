@@ -1,12 +1,12 @@
 import { mkdtempSync } from 'node:fs';
-import { mkdir, readdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import type { Writable } from 'node:stream';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
-import { getServiceLogs, getServicesStatus, listServices, restartService, startService, stopService } from '../src/core/manager.js';
+import { describe, expect, it, vi } from 'vitest';
+import { getServiceLogs, getServicesStatus, hostProcessAdapter, listServices, restartService, startService, stopService } from '../src/core/manager.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runnerPath = join(__dirname, '../src/core/service-runner.mjs');
@@ -226,5 +226,248 @@ describe('workspace service manager', () => {
     await expect(startService(cwd, 'svc')).rejects.toThrow(/exited immediately/);
     const rawState = JSON.parse(await readFile(join(cwd, '.pi', 'workspace-services', 'state.json'), 'utf8'));
     expect(rawState.services.svc).toBeUndefined();
+  });
+});
+
+describe('contracts:mock manager tool contracts', () => {
+  async function syntheticWorkspace(envFile = false): Promise<string> {
+    const cwd = mkdtempSync(join(tmpdir(), 'pi-ws-mock-'));
+    await mkdir(join(cwd, '.pi'), { recursive: true });
+    await mkdir(join(cwd, 'svc'), { recursive: true });
+    await writeFile(join(cwd, '.pi', 'workspace-services.json'), JSON.stringify({
+      services: {
+        svc: { type: 'node', path: 'svc', command: 'node app.js', env_file: envFile },
+      },
+    }), 'utf8');
+    return cwd;
+  }
+
+  it('paginates a 300-line synthetic host log cleanly without overlap, skip, or infinite offset loop', async () => {
+    const cwd = await syntheticWorkspace();
+    try {
+      const logDir = join(cwd, '.pi', 'workspace-services', 'logs');
+      await mkdir(logDir, { recursive: true });
+      await writeFile(join(logDir, 'svc.log'), Array.from({ length: 300 }, (_, i) => `L${i + 1}`).join('\n') + '\n', 'utf8');
+
+      const page1 = await getServiceLogs(cwd, 'svc', { lines: 100, offset: 0 });
+      expect(page1.ok).toBe(true);
+      expect(page1.status).toBe('ok');
+      expect((page1.data as any).text.split('\n')[0]).toBe('L201');
+      expect((page1.data as any).text.split('\n').at(-1)).toBe('L300');
+      expect(page1.truncation).toMatchObject({ returned: 100, total: 300, hasMore: true });
+      expect(page1.truncation?.continuation).toContain('offset=100');
+
+      const page2 = await getServiceLogs(cwd, 'svc', { lines: 100, offset: 100 });
+      expect((page2.data as any).text.split('\n')[0]).toBe('L101');
+      expect((page2.data as any).text.split('\n').at(-1)).toBe('L200');
+      expect(page2.truncation).toMatchObject({ returned: 100, total: 300, hasMore: true });
+      expect(page2.truncation?.continuation).toContain('offset=200');
+
+      const page3 = await getServiceLogs(cwd, 'svc', { lines: 100, offset: 200 });
+      expect((page3.data as any).text.split('\n')[0]).toBe('L1');
+      expect((page3.data as any).text.split('\n').at(-1)).toBe('L100');
+      expect(page3.truncation).toMatchObject({ returned: 100, total: 300, hasMore: false });
+      expect(page3.truncation?.continuation).toBeUndefined();
+
+      const outOfRange = await getServiceLogs(cwd, 'svc', { lines: 100, offset: 500 });
+      expect(outOfRange.truncation).toMatchObject({ returned: 0, total: 300, hasMore: false });
+      expect(outOfRange.truncation?.continuation).toBeUndefined();
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('includes blank lines in counts/offsets, omits global total on byte-truncated files, and enforces post-redaction byte bounds', async () => {
+    const cwd = await syntheticWorkspace(true);
+    try {
+      await writeFile(join(cwd, 'svc', '.env'), 'SECRET=synth-secret-val\n', 'utf8');
+      const logDir = join(cwd, '.pi', 'workspace-services', 'logs');
+      await mkdir(logDir, { recursive: true });
+
+      // Blank lines count consistently
+      await writeFile(join(logDir, 'svc.log'), 'a\n\nb\n', 'utf8');
+      const blankRes = await getServiceLogs(cwd, 'svc', { lines: 10 });
+      expect(blankRes.truncation?.returned).toBe(3);
+      expect((blankRes.data as any).lines).toBe(3);
+      expect((blankRes.data as any).text).toBe('a\n\nb');
+
+      // Byte-truncated file (> maxBytes) omits global total and suggests max_bytes when below cap
+      const largeContent = Array.from({ length: 100 }, (_, i) => `row-${i}-${'z'.repeat(20)}`).join('\n') + '\n';
+      await writeFile(join(logDir, 'svc.log'), largeContent, 'utf8');
+      const truncRes = await getServiceLogs(cwd, 'svc', { lines: 100, maxBytes: 1024 });
+      expect(truncRes.truncation?.total).toBeUndefined();
+      expect((truncRes.data as any).inspectedWindowLines).toBeGreaterThan(0);
+      expect(truncRes.truncation?.hasMore).toBe(true);
+      expect(truncRes.truncation?.continuation).toContain('max_bytes=');
+
+      // Post-redaction expansion stays <= maxBytes and redacts known secrets
+      await writeFile(join(cwd, 'svc', '.env'), 'SECRET=ab\n', 'utf8');
+      await writeFile(join(logDir, 'svc.log'), Array.from({ length: 120 }, () => 'val=ab').join('\n') + '\n', 'utf8');
+      const redactedRes = await getServiceLogs(cwd, 'svc', { lines: 200, maxBytes: 1024 });
+      const text = String((redactedRes.data as any).text);
+      expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(1024);
+      expect(text).not.toContain('val=ab');
+      expect(text).toContain('val=[REDACTED]');
+
+      // UTF-8 oversized single line (> maxBytes) returns valid UTF-8 tail <= maxBytes
+      await writeFile(join(logDir, 'svc.log'), '🚀'.repeat(600), 'utf8');
+      const bigSingle = await getServiceLogs(cwd, 'svc', { lines: 10, maxBytes: 1024 });
+      const bigText = String((bigSingle.data as any).text);
+      expect(Buffer.byteLength(bigText, 'utf8')).toBeLessThanOrEqual(1024);
+      expect(bigText).not.toContain('\uFFFD');
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('supports until ranges, respects lines with until, handles missing log files as status=ok, and stops at max offset/byte limits', async () => {
+    const cwd = await syntheticWorkspace();
+    try {
+      const missing = await getServiceLogs(cwd, 'svc');
+      expect(missing.ok).toBe(true);
+      expect(missing.status).toBe('ok');
+      expect(missing.truncation).toMatchObject({ returned: 0, total: 0, hasMore: false });
+
+      const logDir = join(cwd, '.pi', 'workspace-services', 'logs');
+      await mkdir(logDir, { recursive: true });
+      await writeFile(join(logDir, 'svc.log'), Array.from({ length: 300 }, (_, i) => `U${i + 1}`).join('\n') + '\n', 'utf8');
+
+      const untilRange = await getServiceLogs(cwd, 'svc', { offset: 100, until: 200 });
+      expect(untilRange.truncation?.returned).toBe(100);
+      expect((untilRange.data as any).text.split('\n')[0]).toBe('U101');
+      expect((untilRange.data as any).text.split('\n').at(-1)).toBe('U200');
+
+      const emptyRange = await getServiceLogs(cwd, 'svc', { offset: 100, until: 100 });
+      expect(emptyRange.truncation).toMatchObject({ returned: 0, hasMore: false });
+
+      // Max offset reach
+      await writeFile(join(logDir, 'svc.log'), Array.from({ length: 2200 }, (_, i) => `L${i + 1}`).join('\n') + '\n', 'utf8');
+      const atMaxOffset = await getServiceLogs(cwd, 'svc', { lines: 100, offset: 2000 });
+      expect(atMaxOffset.truncation?.hasMore).toBe(false);
+      expect(atMaxOffset.truncation?.continuation).toBeUndefined();
+      expect((atMaxOffset.data as any).limitReached).toBeTruthy();
+
+      // Max byte reach (204800)
+      await writeFile(join(logDir, 'svc.log'), Array.from({ length: 2500 }, (_, i) => `BIG-${i}-${'m'.repeat(100)}`).join('\n') + '\n', 'utf8');
+      const atMaxBytes = await getServiceLogs(cwd, 'svc', { lines: 2000, maxBytes: 204800 });
+      expect(atMaxBytes.truncation?.total).toBeUndefined();
+      expect(atMaxBytes.truncation?.hasMore).toBe(false);
+      expect((atMaxBytes.data as any).limitReached).toContain('204800');
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps listServices and getServicesStatus metadata-only without reading .env contents', async () => {
+    const cwd = await syntheticWorkspace(true);
+    try {
+      // No .env file present even though env_file: true -> metadata-only reads must succeed
+      const listed = await listServices(cwd);
+      expect(listed.services[0]).toMatchObject({ name: 'svc', env_file: true, env_file_present: false });
+      const status = await getServicesStatus(cwd);
+      expect(status.services[0]).toMatchObject({ name: 'svc', env_file: true, status: 'stopped' });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('prepares runtime dirs and idempotent .gitignore during restart on fresh workspace, and blocks unsafe spawn on failed identity check', async () => {
+    const cwd = await syntheticWorkspace(true);
+    try {
+      await writeFile(join(cwd, 'svc', '.env'), 'SECRET=top-secret-val\n', 'utf8');
+      const spawnSpy = vi.spyOn(hostProcessAdapter, 'spawnRunner').mockImplementation(async (_cfg, service, truncateLog) => {
+        // Real restart must have ensured logsDir and truncated/prepared log before spawning
+        if (truncateLog) await writeFile(service.logPath, 'fresh-header\n', 'utf8');
+        return 43210;
+      });
+      const captureSpy = vi.spyOn(hostProcessAdapter, 'captureManagedIdentity').mockResolvedValue({
+        pid: 43210,
+        processGroupId: 43210,
+        sessionId: 43210,
+        bootId: 'boot-1',
+        startTimeTicks: '100',
+        cmdlineSha256: 'a'.repeat(64),
+        cwdRelative: 'svc',
+        cwdDevice: '1',
+        cwdInode: '1',
+        serviceCommandSha256: 'b'.repeat(64),
+      });
+      const validateSpy = vi.spyOn(hostProcessAdapter, 'validateManagedIdentity').mockResolvedValue({
+        ok: false,
+        reason: 'identity mismatch (command line)',
+      });
+      const absentSpy = vi.spyOn(hostProcessAdapter, 'confirmGroupAbsent').mockResolvedValue(true);
+      const killSpy = vi.spyOn(hostProcessAdapter, 'kill').mockImplementation(() => true as any);
+
+      try {
+        const res1 = await restartService(cwd, 'svc');
+        expect(res1.ok).toBe(true);
+        expect(res1.status).toBe('started');
+        expect(spawnSpy).toHaveBeenCalledTimes(1);
+
+        // Repeat restart: .gitignore entry present exactly once, no ENOENT
+        validateSpy.mockResolvedValueOnce({
+          ok: true,
+          identity: {
+            pid: 43210,
+            processGroupId: 43210,
+            sessionId: 43210,
+            bootId: 'boot-1',
+            startTimeTicks: '100',
+            cmdlineSha256: 'a'.repeat(64),
+            cwdRelative: 'svc',
+            cwdDevice: '1',
+            cwdInode: '1',
+            serviceCommandSha256: 'b'.repeat(64),
+          },
+        });
+        const res2 = await restartService(cwd, 'svc');
+        expect(res2.ok).toBe(true);
+        const gitignore = await readFile(join(cwd, '.gitignore'), 'utf8');
+        expect(gitignore.match(/\.pi\/workspace-services\//g)).toHaveLength(1);
+
+        // Failed identity check must prevent replacement spawn and leave log untouched
+        await writeFile(join(cwd, '.pi', 'workspace-services', 'logs', 'svc.log'), 'KEEP_THIS_LOG\n', 'utf8');
+        validateSpy.mockResolvedValueOnce({ ok: false, reason: 'identity mismatch (command line) with top-secret-val' });
+        const spawnCountBefore = spawnSpy.mock.calls.length;
+        const mismatchRes = await restartService(cwd, 'svc');
+        expect(mismatchRes.ok).toBe(false);
+        expect(mismatchRes.status).toBe('identity_mismatch');
+        expect(JSON.stringify(mismatchRes)).not.toContain('top-secret-val');
+        expect(spawnSpy).toHaveBeenCalledTimes(spawnCountBefore);
+        expect(await readFile(join(cwd, '.pi', 'workspace-services', 'logs', 'svc.log'), 'utf8')).toBe('KEEP_THIS_LOG\n');
+
+        // Failed group-absence check must prevent replacement spawn and leave log untouched
+        validateSpy.mockResolvedValueOnce({
+          ok: true,
+          identity: {
+            pid: 43210,
+            processGroupId: 43210,
+            sessionId: 43210,
+            bootId: 'boot-1',
+            startTimeTicks: '100',
+            cmdlineSha256: 'a'.repeat(64),
+            cwdRelative: 'svc',
+            cwdDevice: '1',
+            cwdInode: '1',
+            serviceCommandSha256: 'b'.repeat(64),
+          },
+        });
+        absentSpy.mockResolvedValueOnce(false).mockResolvedValueOnce(false);
+        const timeoutRes = await restartService(cwd, 'svc');
+        expect(timeoutRes.ok).toBe(false);
+        expect(timeoutRes.status).toBe('timeout');
+        expect(spawnSpy).toHaveBeenCalledTimes(spawnCountBefore);
+        expect(await readFile(join(cwd, '.pi', 'workspace-services', 'logs', 'svc.log'), 'utf8')).toBe('KEEP_THIS_LOG\n');
+      } finally {
+        spawnSpy.mockRestore();
+        captureSpy.mockRestore();
+        validateSpy.mockRestore();
+        absentSpy.mockRestore();
+        killSpy.mockRestore();
+      }
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
   });
 });

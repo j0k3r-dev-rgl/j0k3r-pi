@@ -22,8 +22,7 @@ describe('completion message render', () => {
     expect(unknown).not.toContain('executor: undefined');
   });
 
-  it('preserves continuation identity in notification details and uses the configured expansion hint', async () => {
-    const { setExpandKeybindingProviderForTests, resetExpandKeybindingProviderForTests } = await import('../../src/render/tools/expansion-hint.js');
+  it('preserves continuation identity in notification details without emitting generated expansion hints', async () => {
     const sendMessage = vi.fn();
     sendSubagentCompletionMessage({ sendMessage }, {
       id: 'continued-id', agent: 'analyst', display_name: 'Follow-up audit', attempt: 2,
@@ -34,14 +33,12 @@ describe('completion message render', () => {
     let renderer: any;
     extension({ registerTool: () => undefined, registerCommand: () => undefined, registerShortcut: () => undefined,
       registerMessageRenderer: (name: string, value: any) => { if (name === 'subagent-completion') renderer = value; } });
-    try {
-      setExpandKeybindingProviderForTests(() => 'ctrl+e');
-      const text = env.stripAnsi(renderer(message, { expanded: false }, { fg: (_n: string, t: string) => t }).render(120).join('\n'));
-      expect(text).toContain('Follow-up audit');
-      expect(text).toContain('attempt: 2');
-      expect(text).toContain('ctrl+e to expand');
-      expect(text).not.toContain('ctrl+o to expand');
-    } finally { resetExpandKeybindingProviderForTests(); }
+    const lines = renderer(message, { expanded: false, keyHint: () => 'ctrl+e to expand' }, { fg: (_n: string, t: string) => t }).render(120);
+    expect(lines).toHaveLength(1);
+    const text = env.stripAnsi(lines.join('\n'));
+    expect(text).toContain('Follow-up audit');
+    expect(text).toContain('attempt: 2');
+    expect(text).not.toMatch(/to expand|to collapse|ctrl\+o|ctrl\+e|app\.tools\.expand/i);
   });
   it('suppresses continuation guidance in failed and cancelled completion messages when continuation is disabled', () => {
     for (const status of ['failed', 'cancelled', 'interrupted', 'stopping']) {
@@ -116,9 +113,11 @@ describe('completion message render', () => {
       },
     };
 
-    const collapsed = env.stripAnsi(renderer(message, { expanded: false }, { fg: (_name: string, text: string) => text }).render(120).join('\n'));
+    const collapsedLines = renderer(message, { expanded: false }, { fg: (_name: string, text: string) => text }).render(120);
+    expect(collapsedLines).toHaveLength(1);
+    const collapsed = env.stripAnsi(collapsedLines.join('\n'));
     expect(collapsed).toContain('[subagent] analyst · completed');
-    expect(collapsed).toContain('ctrl+o to expand');
+    expect(collapsed).not.toMatch(/to expand|to collapse|ctrl\+o|app\.tools\.expand/i);
     expect(collapsed).not.toContain('to=functions.memory_get');
     expect(collapsed).not.toContain('subtask_background_1');
 
@@ -126,7 +125,7 @@ describe('completion message render', () => {
     expect(expanded).toContain('background final response to=functions.memory_get');
   });
 
-  it('renders completion messages framed with boxed borders and no background padding rows', () => {
+  it('renders completion messages as a single unboxed inline row with unique header metadata and no hints', () => {
     let renderer: any;
     extension({
       registerTool: () => undefined,
@@ -139,21 +138,43 @@ describe('completion message render', () => {
       content: 'compact visible content',
       details: {
         full_result: 'done',
-        task: { id: 'subtask_spaced', agent: 'discovery', status: 'completed' },
+        task: {
+          id: 'subtask_spaced',
+          agent: 'discovery',
+          status: 'completed',
+          model: 'cliproxy/model-a',
+          effort: 'high',
+          attempt: 2,
+        },
       },
     };
 
     const lines = renderer(message, { expanded: false }, {
       fg: (_name: string, text: string) => text,
       bg: (_name: string, text: string) => text,
-    }).render(80);
+    }).render(120);
 
-    expect(lines[0]).toMatch(/^┌─+ 󰣇 \[subagent\] discovery · completed ─+┐$/);
-    expect(lines[1]).toContain('subagent: discovery');
-    expect(lines).toContainEqual(expect.stringContaining('ctrl+o to expand'));
-    expect(lines.at(-1)).toMatch(/^└─+┘$/);
-    expect(lines[0]).not.toBe(' '.repeat(80));
-    expect(lines.at(-1)).not.toBe(' '.repeat(80));
+    expect(lines).toHaveLength(1);
+    const plain = env.stripAnsi(lines[0]!);
+    expect(plain).toContain('󰣇 [subagent] discovery · completed');
+    expect(plain).toContain('model: cliproxy/model-a');
+    expect(plain).toContain('effort: high');
+    expect(plain).toContain('attempt: 2');
+    expect(plain).not.toMatch(/[┌┐└┘╭╮╰╯│]/);
+    expect(plain).not.toMatch(/to expand|to collapse|ctrl\+o|app\.tools\.expand/i);
+
+    const expandedLines = renderer(message, { expanded: true }, {
+      fg: (_name: string, text: string) => text,
+      bg: (_name: string, text: string) => text,
+    }).render(120);
+    const expandedPlain = env.stripAnsi(expandedLines.join('\n'));
+    expect(expandedPlain).not.toMatch(/[┌┐└┘╭╮╰╯│]/);
+    expect(expandedPlain).not.toMatch(/to expand|to collapse|ctrl\+o|app\.tools\.expand/i);
+    expect(expandedPlain.match(/\[subagent\]/g)).toHaveLength(1);
+    expect(expandedPlain.match(/model:/g)).toHaveLength(1);
+    expect(expandedPlain.match(/effort:/g)).toHaveLength(1);
+    expect(expandedPlain.match(/attempt:/g)).toHaveLength(1);
+    expect(expandedPlain.match(/subagent:/g)).toBeNull();
   });
 
   it('reads the task cwd configuration at notification time for background completion guidance', async () => {
@@ -202,7 +223,7 @@ describe('completion message render', () => {
     expect(text).not.toContain('response sent to the orchestrator');
   });
 
-  it('renders background completion messages with boxed borders and no background fills', () => {
+  it('renders background completion messages with foreground palette only and no borders or background fills', () => {
     let renderer: any;
     extension({
       registerTool: () => undefined,
@@ -226,11 +247,81 @@ describe('completion message render', () => {
     const rendered = renderer(message, { expanded: false }, theme).render(90).join('\n');
     expect(rendered).not.toContain('BG(');
     expect(rendered).not.toContain('customMessageBg');
-    expect(rendered).toContain('FG(accent:┌)');
-    expect(rendered).toContain('FG(accent:│)');
+    expect(rendered).not.toMatch(/[┌┐└┘╭╮╰╯│]/);
     expect(rendered).toContain('FG(customMessageLabel:');
     expect(rendered).toContain('[subagent] discovery · completed');
-    expect(rendered).toContain('FG(accent:└)');
+  });
+
+	it('enforces width safety, 1-char left margin, missing-details fallback, literal data preservation and state coverage on subagent-completion', async () => {
+    const { renderSubagentCompletionMessage } = await import('../../src/render/completion-message.js');
+    const { visibleWidth } = await import('@earendil-works/pi-tui');
+    const theme = { fg: (_n: string, t: string) => t };
+
+    // Width <= 0 emits zero cells; width === 1 emits single blank margin row
+    const baseMsg = {
+      customType: 'subagent-completion',
+      content: 'legacy fallback line\n\nsecond line',
+      details: {
+        full_result: '╭─ literal box ─╮\nctrl+o to expand is literal text\n漢字 combining é 👨‍👩‍👧',
+        task: { id: 'subtask_matrix', agent: 'discovery', status: 'completed', model: 'm/1', effort: 'high' },
+      },
+    };
+    expect(renderSubagentCompletionMessage(baseMsg, { expanded: false }, theme).render(0)).toEqual([]);
+    expect(renderSubagentCompletionMessage(baseMsg, { expanded: true }, theme).render(-5)).toEqual([]);
+    expect(renderSubagentCompletionMessage(baseMsg, { expanded: false }, theme).render(1)).toEqual([' ']);
+    expect(renderSubagentCompletionMessage(baseMsg, { expanded: true }, theme).render(1)).toEqual([' ']);
+
+    for (const width of [1, 2, 10, 23, 24, 40, 80, 120]) {
+      const collapsed = renderSubagentCompletionMessage(baseMsg, { expanded: false }, theme).render(width);
+      expect(collapsed).toHaveLength(1);
+      expect(visibleWidth(collapsed[0]!)).toBeLessThanOrEqual(width);
+      expect(env.stripAnsi(collapsed[0]!).startsWith(' ')).toBe(true);
+      if (width >= 4) expect(env.stripAnsi(collapsed[0]!).startsWith('  ')).toBe(false);
+
+      const expanded = renderSubagentCompletionMessage(baseMsg, { expanded: true }, theme).render(width);
+      for (const line of expanded) {
+        expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+        const plain = env.stripAnsi(line);
+        if (width === 2 && !plain.startsWith(' ')) {
+          expect(visibleWidth(plain)).toBe(2);
+        } else {
+          expect(plain.startsWith(' ')).toBe(true);
+        }
+      }
+      if (width === 2) {
+        const plainExp2 = expanded.map((l) => env.stripAnsi(l));
+        expect(plainExp2).toContain('漢');
+        expect(plainExp2).toContain('字');
+        expect(plainExp2).toContain('👨‍👩‍👧');
+      }
+    }
+
+    // Literal box chars & hint words preserved in expanded response
+    const expanded80 = env.stripAnsi(renderSubagentCompletionMessage(baseMsg, { expanded: true }, theme).render(80).join('\n'));
+    expect(expanded80).toContain('╭─ literal box ─╮');
+    expect(expanded80).toContain('ctrl+o to expand is literal text');
+
+    // Missing / empty details fallback uses safe content without throwing
+    const legacyMsg = { customType: 'subagent-completion', content: 'Legacy completion message body' };
+    const legacyCollapsed = renderSubagentCompletionMessage(legacyMsg, { expanded: false }, theme).render(80);
+    expect(legacyCollapsed).toHaveLength(1);
+    expect(env.stripAnsi(legacyCollapsed[0]!)).toContain('[subagent]');
+    const legacyExpanded = env.stripAnsi(renderSubagentCompletionMessage(legacyMsg, { expanded: true }, theme).render(80).join('\n'));
+    expect(legacyExpanded).toContain('Legacy completion message body');
+
+    // Error/cancelled/interrupted statuses
+    for (const status of ['failed', 'cancelled', 'interrupted']) {
+      const msg = {
+        customType: 'subagent-completion',
+        content: `Task ${status}`,
+        details: { task: { id: `id_${status}`, agent: 'analyst', status, error: `reason ${status}` } },
+      };
+      const col = renderSubagentCompletionMessage(msg, { expanded: false }, theme).render(80);
+      expect(col).toHaveLength(1);
+      expect(env.stripAnsi(col[0]!)).toContain(status);
+      const exp = env.stripAnsi(renderSubagentCompletionMessage(msg, { expanded: true }, theme).render(80).join('\n'));
+      expect(exp).toContain(`reason ${status}`);
+    }
   });
 
   it('wraps expanded background completion responses instead of truncating them', () => {

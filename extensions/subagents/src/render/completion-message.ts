@@ -1,7 +1,6 @@
 import { safeErrorMetadataDetails } from '../error-metadata.js';
-import { appendSubagentResumeGuidance, formatTaskLabel } from './tools/formatting.js';
-import { wrapLineToWidth } from './text-width.js';
-import { resolveExpandHint } from './tools/expansion-hint.js';
+import { appendSubagentResumeGuidance, formatTaskLabel, formatUsage } from './tools/formatting.js';
+import { needsWidth2MarginOmission, wrapLineToWidth } from './text-width.js';
 import { ARCH_ICON, BOX_CHARS, CYAN, LIME, RED, electricBorder, padToWidth, themeAccent, themeBg, themeBold, themeDim, themeError, themeFg, themeStatus, themeSuccess, themeTitle, themeWarning, truncateToWidth, visibleWidth } from '../ui/theme.js';
 
 function formatErrorMetadataLines(task: any): string[] {
@@ -141,90 +140,128 @@ export function sendSubagentQuestionMessage(pi: any, task: any, question: string
   });
 }
 
+function fallbackMessageContent(message: any): string {
+  if (typeof message?.content === 'string') return message.content;
+  if (Array.isArray(message?.content)) {
+    return message.content
+      .filter((part: any) => part?.type === 'text' && typeof part.text === 'string')
+      .map((part: any) => part.text)
+      .join('\n');
+  }
+  return '';
+}
+
+function fitToWidth(text: string, width: number, ellipsis = '…'): string {
+  if (width <= 0) return '';
+  if (visibleWidth(text) <= width) return text;
+  const clipped = truncateToWidth(text, width, width <= 2 ? '' : ellipsis);
+  return visibleWidth(clipped) <= width ? clipped : truncateToWidth(clipped, width, '');
+}
+
 export function renderSubagentCompletionMessage(message: any, options: any, theme: any) {
-  const details = message.details ?? {};
-  const task = details.task ?? details;
-  const status = task.status ?? 'completed';
+  const details = (message?.details && typeof message.details === 'object') ? message.details : {};
+  const hasExplicitTask = Boolean(
+    (details.task && typeof details.task === 'object')
+    || typeof details.full_result === 'string'
+    || typeof details.result === 'string'
+    || typeof details.error === 'string',
+  );
+  const task = (details.task && typeof details.task === 'object') ? details.task : details;
+  const status = typeof task.status === 'string' && task.status.trim() ? task.status : 'completed';
   const failed = status === 'failed' || status === 'cancelled' || status === 'interrupted';
   const expanded = Boolean(options?.expanded);
   const rawResponse = task.result ?? (task.error ? undefined : details.full_result);
   const hasResp = typeof rawResponse === 'string' && rawResponse.trim().length > 0;
   const responseText = hasResp ? rawResponse : '';
+  const fallbackText = !hasExplicitTask ? fallbackMessageContent(message).trim() : '';
+
   const archPrefix = themeFg(theme, 'accent', ARCH_ICON, CYAN);
   const taskLabel = formatTaskLabel(task);
   const titleLabel = themeFg(theme, failed ? 'error' : 'customMessageLabel', `[subagent] ${taskLabel} · ${status}`, failed ? RED : CYAN);
-  const title = `${archPrefix} ${titleLabel}`.trim();
-  const sections: Array<{ text: string; style?: 'label' | 'status' | 'dim' | 'body' | 'heading' }> = [];
-  if (!expanded) {
-    sections.push(
-      { text: `subagent: ${task.agent ?? 'subagent'} · model: ${task.model ?? 'default/current'} · effort: ${task.effort ?? 'default/current'} · status: ${status}`, style: 'dim' },
-      ...(task.attempt > 1 ? [{ text: `attempt: ${task.attempt}`, style: 'dim' as const }] : []),
-      { text: resolveExpandHint('to expand', options), style: 'dim' },
-    );
-  } else {
-    sections.push(
-      { text: `subagent: ${task.agent ?? 'subagent'} · model: ${task.model ?? 'default/current'} · effort: ${task.effort ?? 'default/current'} · status: ${status}`, style: 'dim' },
-    );
-    if (task.attempt) {
-      sections.push({ text: `attempt: ${task.attempt}`, style: 'dim' });
+  const metaParts = [
+    ...(task.model ? [`model: ${task.model}`] : []),
+    ...(task.effort ? [`effort: ${task.effort}`] : []),
+    ...(task.attempt && task.attempt > 1 ? [`attempt: ${task.attempt}`] : []),
+  ];
+  const metaSuffix = metaParts.length ? ` ${themeDim(theme, `─ ${metaParts.join(' · ')}`)}` : '';
+  const header = `${archPrefix} ${titleLabel}${metaSuffix}`.trim();
+
+  const bodyEntries: Array<{ text: string; style: 'dim' | 'body' | 'heading' }> = [];
+  if (expanded) {
+    if (task.agent && task.display_name && String(task.display_name).trim() !== String(task.agent).trim()) {
+      bodyEntries.push({ text: `agent: ${task.agent}`, style: 'dim' });
+    }
+    const usage = task.usage ? formatUsage(task) : '';
+    if (usage) {
+      bodyEntries.push({ text: `usage: ${usage}`, style: 'dim' });
     }
     if (hasResp && responseText) {
-      sections.push(
-        { text: BOX_CHARS.horizontal.repeat(24), style: 'dim' },
+      bodyEntries.push(
+        { text: '__DIVIDER__', style: 'dim' },
         { text: 'response sent to the orchestrator', style: 'heading' },
-        ...String(responseText).split('\n').map((line) => ({ text: line, style: 'body' as const })),
+        ...String(responseText).replace(/\r/g, '').split('\n').map((line) => ({ text: line, style: 'body' as const })),
       );
     } else if (failed && task.error) {
-      sections.push(
-        { text: BOX_CHARS.horizontal.repeat(24), style: 'dim' },
+      bodyEntries.push(
+        { text: '__DIVIDER__', style: 'dim' },
         { text: 'error', style: 'heading' },
-        ...String(task.error).split('\n').map((line) => ({ text: line, style: 'body' as const })),
+        ...String(task.error).replace(/\r/g, '').split('\n').map((line) => ({ text: line, style: 'body' as const })),
       );
       const errorDetails = formatErrorMetadataLines(task);
       if (errorDetails.length) {
-        sections.push(
+        bodyEntries.push(
           { text: '', style: 'dim' },
           { text: 'error details', style: 'heading' },
           ...errorDetails.map((line) => ({ text: line, style: 'body' as const })),
         );
       }
+    } else if (fallbackText) {
+      bodyEntries.push(
+        { text: '__DIVIDER__', style: 'dim' },
+        ...fallbackText.replace(/\r/g, '').split('\n').map((line) => ({ text: line, style: 'body' as const })),
+      );
     }
   }
-  const color = (section: { text: string; style?: 'label' | 'status' | 'dim' | 'body' | 'heading' }, text: string) => {
-    if (section.style === 'label') return themeFg(theme, failed ? 'error' : 'customMessageLabel', text, failed ? RED : CYAN);
-    if (section.style === 'status') return themeFg(theme, failed ? 'error' : 'success', text, failed ? RED : LIME);
-    if (section.style === 'dim') return themeDim(theme, text);
-    if (section.style === 'heading') return themeTitle(theme, text);
-    if (section.style === 'body') return themeFg(theme, 'customMessageText', text);
+
+  const styleLine = (style: 'dim' | 'body' | 'heading', text: string) => {
+    if (text === '') return '';
+    if (style === 'dim') return themeDim(theme, text);
+    if (style === 'heading') return themeTitle(theme, text);
+    if (style === 'body') return themeFg(theme, 'customMessageText', text);
     return text;
   };
+
   return {
     invalidate() {},
-    render(width: number) {
-      const safeWidth = Math.max(1, Math.floor(width || 1));
-      if (safeWidth < 10) {
-        return [title, ...sections.flatMap((s) => wrapLineToWidth(s.text, safeWidth))].map((l) => truncateToWidth(l, safeWidth, '…'));
+    render(width: number): string[] {
+      const safeWidth = Number.isFinite(width) ? Math.floor(width) : 0;
+      if (safeWidth <= 0) return [];
+      if (safeWidth === 1) return [' '];
+
+      const innerWidth = safeWidth - 1;
+      const headerLine = ` ${fitToWidth(header, innerWidth)}`;
+      if (!expanded) return [headerLine];
+
+      const lines = [headerLine];
+      for (const entry of bodyEntries) {
+        if (entry.text === '__DIVIDER__') {
+          lines.push(` ${styleLine('dim', BOX_CHARS.horizontal.repeat(Math.min(24, innerWidth)))}`);
+          continue;
+        }
+        if (entry.text === '') {
+          lines.push(' ');
+          continue;
+        }
+        for (const wrapped of wrapLineToWidth(entry.text, innerWidth, safeWidth)) {
+          if (needsWidth2MarginOmission(wrapped, safeWidth)) {
+            lines.push(styleLine(entry.style, wrapped));
+            continue;
+          }
+          const fitted = visibleWidth(wrapped) <= innerWidth ? wrapped : truncateToWidth(wrapped, innerWidth, '');
+          lines.push(` ${styleLine(entry.style, fitted)}`);
+        }
       }
-      const innerWidth = safeWidth - 2;
-      const contentWidth = Math.max(1, innerWidth - 2);
-      const borderFn = (t: string) => themeFg(theme, 'accent', t, CYAN);
-
-      const maxTitleWidth = Math.max(0, innerWidth - 4);
-      const clippedTitle = truncateToWidth(title, maxTitleWidth, '…');
-      const titleVisWidth = visibleWidth(clippedTitle);
-      const filler = Math.max(0, innerWidth - titleVisWidth - 3);
-      const top = `${borderFn(BOX_CHARS.topLeft)}${borderFn(BOX_CHARS.horizontal)} ${clippedTitle} ${borderFn(BOX_CHARS.horizontal.repeat(filler))}${borderFn(BOX_CHARS.topRight)}`;
-      const middle = sections.flatMap((section) =>
-        wrapLineToWidth(section.text, contentWidth).map((line) => {
-          const styled = color(section, line);
-          const lineVisWidth = visibleWidth(line);
-          const rightPadding = ' '.repeat(Math.max(0, contentWidth - lineVisWidth));
-          return `${borderFn(BOX_CHARS.vertical)} ${styled}${rightPadding} ${borderFn(BOX_CHARS.vertical)}`;
-        }),
-      );
-      const bottom = `${borderFn(BOX_CHARS.bottomLeft)}${borderFn(BOX_CHARS.horizontal.repeat(innerWidth))}${borderFn(BOX_CHARS.bottomRight)}`;
-
-      return [top, ...middle, bottom];
+      return lines;
     },
   };
 }

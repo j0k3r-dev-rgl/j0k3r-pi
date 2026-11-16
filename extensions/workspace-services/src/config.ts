@@ -1,6 +1,6 @@
 import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { findComposeFile, discoverComposeServices } from './core/docker-compose.js';
+import { discoverComposeServicesDetailed, findComposeFile } from './core/docker-compose.js';
 import {
   MAX_ENV_ENTRIES,
   MAX_ENV_FILE_BYTES,
@@ -79,6 +79,7 @@ function buildEmptyConfig(cwd: string, workspaceRealRoot: string): WorkspaceServ
   const runtimeDir = join(workspaceRoot, RUNTIME_RELATIVE_DIR);
   return {
     exists: false,
+    jsonExists: false,
     workspaceRoot,
     workspaceRealRoot,
     configPath: join(workspaceRoot, CONFIG_RELATIVE_PATH),
@@ -93,7 +94,8 @@ function buildEmptyConfig(cwd: string, workspaceRealRoot: string): WorkspaceServ
   };
 }
 
-export async function loadWorkspaceServicesConfig(cwd: string): Promise<WorkspaceServicesConfig> {
+export async function loadWorkspaceServicesConfig(cwd: string, options: { signal?: AbortSignal } = {}): Promise<WorkspaceServicesConfig> {
+  if (options.signal?.aborted) throw new Error('Operation aborted');
   const securityContext = await createWorkspaceSecurityContext(cwd);
   const base = buildEmptyConfig(cwd, securityContext.workspaceRealRoot);
   const jsonExists = await pathExists(base.configPath);
@@ -102,6 +104,7 @@ export async function loadWorkspaceServicesConfig(cwd: string): Promise<Workspac
   if (!jsonExists && !composeFile) return base;
 
   const services: Record<string, WorkspaceServiceDefinition> = {};
+  let composeDiscoveryError: string | undefined;
 
   if (jsonExists) {
     const configDir = await pinRelativeWorkspaceDirectory(base.workspaceRealRoot, '.pi', 'Workspace Services config directory');
@@ -147,9 +150,12 @@ export async function loadWorkspaceServicesConfig(cwd: string): Promise<Workspac
   }
 
   if (composeFile) {
-    const composeServices = await discoverComposeServices(base.workspaceRoot, composeFile);
+    const discovery = await discoverComposeServicesDetailed(base.workspaceRoot, composeFile, options.signal);
+    if (!discovery.ok) {
+      composeDiscoveryError = discovery.error ?? 'Docker Compose service discovery failed.';
+    }
     const relComposePath = relative(base.workspaceRoot, composeFile) || basename(composeFile);
-    for (const name of composeServices) {
+    for (const name of discovery.services) {
       if (!SERVICE_NAME_PATTERN.test(name)) continue;
       // If service already configured in workspace-services.json, explicit JSON config takes precedence
       if (services[name]) continue;
@@ -167,7 +173,14 @@ export async function loadWorkspaceServicesConfig(cwd: string): Promise<Workspac
     }
   }
 
-  return { ...base, exists: true, composeFile: composeFile ?? undefined, services };
+  return {
+    ...base,
+    exists: true,
+    jsonExists,
+    composeFile: composeFile ?? undefined,
+    ...(composeDiscoveryError ? { composeDiscoveryError } : {}),
+    services,
+  };
 }
 
 export async function ensureRuntimeDirs(config: WorkspaceServicesConfig): Promise<void> {

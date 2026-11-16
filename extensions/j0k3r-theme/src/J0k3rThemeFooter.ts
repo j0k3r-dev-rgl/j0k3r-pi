@@ -181,6 +181,17 @@ export class J0k3rThemeFooter implements Component {
 		output: string;
 	};
 	private quota?: string;
+	private hudQuota?: string;
+	private publishedTokenSpeed?: string;
+    private hudVisible = false;
+
+    setHudVisible(visible: boolean): void {
+      this.hudVisible = visible;
+      this.tui.requestRender();
+    }
+    getHudSnapshot() {
+      return { dir: this.gitInfo?.dir ?? this.ctx.cwd, repo: this.gitInfo?.repoName ?? '', branch: this.gitInfo?.branch ?? '', modelQuota: this.hudQuota ?? this.quota ?? '' };
+    }
 
 	constructor(
 		private readonly tui: TUI,
@@ -189,6 +200,7 @@ export class J0k3rThemeFooter implements Component {
 		private readonly ctx: ExtensionContext,
 		private readonly getThinkingLevel: () => string,
 		private gitInfo?: RepoGitInfo,
+		private readonly publishTokenSpeed?: (status: string) => void,
 	) {}
 
 	setGitInfo(gitInfo: RepoGitInfo): void {
@@ -196,8 +208,9 @@ export class J0k3rThemeFooter implements Component {
 		this.cachedTopLine = undefined;
 	}
 
-	setQuota(quota?: string): void {
+	setQuota(quota?: string, hudQuota?: string): void {
 		this.quota = quota;
+		this.hudQuota = hudQuota;
 		this.tui.requestRender();
 	}
 
@@ -361,6 +374,10 @@ export class J0k3rThemeFooter implements Component {
 		const rawModel = this.ctx.model ? `${this.ctx.model.provider}/${this.ctx.model.id}` : "no-model";
 		const effort = this.getThinkingLevel();
 		const tokenSpeed = getTokenSpeedStatus(this.footerData);
+		if (tokenSpeed !== this.publishedTokenSpeed) {
+			this.publishedTokenSpeed = tokenSpeed;
+			this.publishTokenSpeed?.(tokenSpeed);
+		}
 		const memoryStatus = getExtensionStatus(this.footerData);
 
 		const usedTokens = context?.tokens ?? 0;
@@ -464,6 +481,12 @@ export class J0k3rThemeFooter implements Component {
 
 	render(width: number): string[] {
 		if (width <= 0) return [];
+        if (this.hudVisible) {
+          // Keep TPS publication alive without occupying any terminal rows.
+          const tokenSpeed = getTokenSpeedStatus(this.footerData);
+          if (tokenSpeed !== this.publishedTokenSpeed) { this.publishedTokenSpeed = tokenSpeed; this.publishTokenSpeed?.(tokenSpeed); }
+          return [];
+        }
 		const top = this.renderTopLine(width);
 		const quota = this.quota ? electric(VIOLET, this.quota) : "";
 		const gap = width - visibleWidth(top) - visibleWidth(quota);

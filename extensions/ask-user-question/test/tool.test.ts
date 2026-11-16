@@ -105,19 +105,25 @@ describe("standalone question tool", () => {
     expect(result.details.answers).toHaveLength(6);
     const sharedContext = { state: {} as Record<string, any> };
     const call = definition.renderCall!(input, theme, sharedContext as any);
+    // Render the call row before the result paints, since the result hides it.
+    expect(call.render(200).join("\n")).toContain("6. Q6");
     const collapsed = definition.renderResult!(result, { expanded: false, isPartial: false }, theme, sharedContext as any);
     const expanded = definition.renderResult!(result, { expanded: true, isPartial: false }, theme, sharedContext as any);
-    expect(call.render(200).join("\n")).toContain("6. Q6");
     expect(collapsed.render(200).join("\n")).toContain("6 answers");
     const expandedText = expanded.render(200).join("\n");
     for (let index = 0; index < 6; index++) {
       expect(result.details.answers[index]).toMatchObject({ questionIndex: index, answer: "Option 5", preview: `Preview ${index + 1}/5` });
-      expect(expandedText).toContain(`Decision ${index + 1}:`);
+      expect(expandedText).toContain(`Decision ${index + 1}`);
       expect(expandedText).toContain(`Preview ${index + 1}/5`);
     }
     for (const width of [1, 8, 24, 40, 80, 100, 120]) {
-      for (const component of [call, collapsed, expanded]) {
+      for (const component of [collapsed, expanded]) {
         for (const line of component.render(width)) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      }
+    }
+    for (const width of [1, 8, 24, 40, 80, 100, 120]) {
+      for (const line of definition.renderCall!(input, theme, { state: {} } as any).render(width)) {
+        expect(visibleWidth(line)).toBeLessThanOrEqual(width);
       }
     }
   });
@@ -212,11 +218,12 @@ describe("standalone question tool", () => {
 });
 
 describe("native tool result rendering", () => {
-  it("declares renderShell as 'self'", () => {
+  it("declares renderShell as 'self' and the compact marker", () => {
     expect(tool().renderShell).toBe("self");
+    expect((tool() as any).compactToolRenderingVersion).toBe(1);
   });
 
-  it("assembles the card in two phases across call and result using context.state", async () => {
+  it("assembles one compact inline row across call and result using context.state", async () => {
     const definition = tool();
     const { ctx } = context();
     const result = await execute(definition, ctx);
@@ -224,21 +231,19 @@ describe("native tool result rendering", () => {
 
     const callComponent = definition.renderCall!(params, theme, sharedContext as any);
     const callPendingLines = callComponent.render(80);
-    expect(callPendingLines).toHaveLength(3);
-    expect(callPendingLines[0]).toMatch(/╭/);
-    expect(callPendingLines[1]).toMatch(/│/);
-    expect(callPendingLines[2]).toMatch(/╰/);
+    expect(callPendingLines).toHaveLength(1);
+    expect(callPendingLines[0]).toContain("ask_user_question");
+    expect(callPendingLines[0]).toContain("─");
+    expect(callPendingLines[0]).not.toMatch(/[╭╮╰╯│]/);
 
     const resultComponent = definition.renderResult!(result, { expanded: false, isPartial: false }, theme, sharedContext as any);
     const resultLines = resultComponent.render(80);
     expect(sharedContext.state.hasResult).toBe(true);
-    expect(resultLines.some((l) => l.includes("│"))).toBe(true);
-    expect(resultLines[resultLines.length - 1]).toMatch(/╰/);
+    expect(resultLines).toHaveLength(1);
+    expect(resultLines[0]).not.toMatch(/[╭╮╰╯│]/);
 
-    const callCompletedLines = callComponent.render(80);
-    expect(callCompletedLines).toHaveLength(1);
-    expect(callCompletedLines[0]).toMatch(/╭/);
-    expect(callCompletedLines[0]).not.toMatch(/╰/);
+    // The call slot disappears entirely once the result row exists: no second status row.
+    expect(callComponent.render(80)).toEqual([]);
   });
 
   it("falls back to question prompt when header is omitted in renderCall", () => {
@@ -249,23 +254,24 @@ describe("native tool result rendering", () => {
     expect(lines.join("\n")).not.toMatch(/1\.\s+·/);
   });
 
-  it("keeps collapsed summary short, exposes expansion, shows borders and answers without preview", async () => {
+  it("keeps one compact answer row without expansion hints and shows previews only on expansion", async () => {
     const definition = tool();
     const { ctx } = context();
     const result = await execute(definition, ctx);
     const sharedContext = { state: {} as Record<string, any> };
     definition.renderCall!(params, theme, sharedContext as any);
-    const collapsed = definition.renderResult!(result, { expanded: false, isPartial: false }, theme, sharedContext as any).render(100).join("\n");
+    const collapsedLines = definition.renderResult!(result, { expanded: false, isPartial: false }, theme, sharedContext as any).render(100);
+    const collapsed = collapsedLines.join("\n");
     const expanded = definition.renderResult!(result, { expanded: true, isPartial: false }, theme, sharedContext as any).render(100).join("\n");
-    expect(collapsed).toMatch(/│/);
-    expect(collapsed).toMatch(/╰/);
+    expect(collapsedLines).toHaveLength(1);
+    expect(collapsed).not.toMatch(/[╭╮╰╯│]/);
     expect(collapsed).toMatch(/1 answer/);
     expect(collapsed).toContain("Scope");
     expect(collapsed).toContain("Minimal");
-    expect(collapsed).toMatch(/expand/i);
+    expect(collapsed).not.toMatch(/expand|ctrl\+o/i);
     expect(collapsed).not.toContain("Keep all selected detail.");
     expect(expanded).toContain("Keep all selected detail.");
-    expect(expanded).toMatch(/collapse/i);
+    expect(expanded).not.toMatch(/collapse|ctrl\+o/i);
   });
 
   it("preserves multi-select and custom answers in collapsed and expanded views with collapse hint", () => {
@@ -289,25 +295,32 @@ describe("native tool result rendering", () => {
         ],
       },
     };
-    const collapsed = definition.renderResult!(multiCustomResult, { expanded: false, isPartial: false }, theme, {} as any).render(100).join("\n");
+    const collapsed = definition.renderResult!(multiCustomResult, { expanded: false, isPartial: false }, theme, {} as any).render(120).join("\n");
     expect(collapsed).toContain("(custom) Bespoke");
     expect(collapsed).toContain("selected: Minimal");
     expect(collapsed).not.toContain("selected preview:");
 
-    const expanded = definition.renderResult!(multiCustomResult, { expanded: true, isPartial: false }, theme, {} as any).render(100).join("\n");
+    const expanded = definition.renderResult!(multiCustomResult, { expanded: true, isPartial: false }, theme, {} as any).render(120).join("\n");
     expect(expanded).toContain("(custom) Bespoke");
     expect(expanded).toContain("selected: Minimal");
     expect(expanded).toContain("selected preview: Keep detail.");
-    expect(expanded).toMatch(/collapse/i);
+    expect(expanded).not.toMatch(/collapse|ctrl\+o/i);
   });
 
   it("renders streaming, cancellation, failures and empty results deliberately", () => {
     const render = (result: any, partial = false) => tool().renderResult!(result,
       { expanded: false, isPartial: partial }, theme, {} as any).render(80).join("\n");
-    expect(render({ content: [], details: {} }, true)).toMatch(/Waiting/);
-    expect(render({ content: [{ type: "text", text: "Cancelled" }], details: { cancelled: true } })).toMatch(/Cancelled/);
+    expect(render({ content: [], details: {} }, true)).toMatch(/waiting/i);
+    expect(render({ content: [{ type: "text", text: "Cancelled" }], details: { cancelled: true } })).toMatch(/cancelled/i);
     expect(render({ content: [{ type: "text", text: "Error: TUI unavailable" }], details: {} })).toContain("TUI unavailable");
-    expect(render({ content: [], details: {} })).toMatch(/No answers/);
+    expect(render({ content: [], details: {} })).toMatch(/no answers/i);
+    for (const result of [
+      { content: [], details: {} },
+      { content: [{ type: "text", text: "Cancelled" }], details: { cancelled: true } },
+      { content: [], details: {} },
+    ]) {
+      expect(render(result).split("\n")).toHaveLength(1);
+    }
   });
 
   it("compacts native validation errors but preserves every line on expansion", () => {
@@ -318,20 +331,21 @@ describe("native tool result rendering", () => {
     const original = JSON.stringify(result);
     const sharedContext = { state: {} as Record<string, any>, isError: true };
     const call = definition.renderCall!(params, theme, sharedContext as any);
+    expect(call.render(80)).toHaveLength(1);
     const collapsed = definition.renderResult!(result, { expanded: false, isPartial: false }, theme, sharedContext as any);
     for (const width of [1, 2, 8, 24, 40, 80, 120]) {
       const lines = collapsed.render(width);
-      expect(lines.length).toBeLessThanOrEqual(3);
+      expect(lines).toHaveLength(1);
       for (const line of [...call.render(width), ...lines]) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
       expect(lines.join("\n")).not.toContain("Received arguments");
       expect(lines.join("\n")).not.toContain("full diagnostic payload");
     }
-    expect(collapsed.render(120).join("\n")).toContain('Validation failed for tool "ask_user_question"');
-    expect(collapsed.render(120).join("\n")).toMatch(/expand/);
-    expect(call.render(80)).toHaveLength(1);
-    const expanded = definition.renderResult!(result, { expanded: true, isPartial: false }, theme, sharedContext as any).render(120).join("\n");
+    expect(collapsed.render(200).join("\n")).toContain('Validation failed for tool "ask_user_question"');
+    expect(collapsed.render(200).join("\n")).not.toMatch(/expand|ctrl\+o/i);
+    expect(call.render(80)).toEqual([]);
+    const expanded = definition.renderResult!(result, { expanded: true, isPartial: false }, theme, sharedContext as any).render(200).join("\n");
     for (const line of body.split("\n").filter(Boolean)) expect(expanded).toContain(line);
-    expect(expanded).toMatch(/collapse/);
+    expect(expanded).not.toMatch(/collapse|ctrl\+o/i);
     expect(JSON.stringify(result)).toBe(original);
   });
 
@@ -341,12 +355,12 @@ describe("native tool result rendering", () => {
       const result = { content: [{ type: "text" as const, text: body }], details: undefined, isError: true };
       for (const width of [1, 8, 24, 40, 80]) {
         const lines = definition.renderResult!(result, { expanded: false, isPartial: false }, theme, {} as any).render(width);
-        expect(lines.length).toBeLessThanOrEqual(3);
+        expect(lines).toHaveLength(1);
         for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
       }
       if (!body) {
         const expanded = definition.renderResult!(result, { expanded: true, isPartial: false }, theme, {} as any).render(80).join("\n");
-        expect(expanded).toContain("Error: tool execution failed");
+        expect(expanded.toLowerCase()).toContain("tool execution failed");
       }
     }
   });

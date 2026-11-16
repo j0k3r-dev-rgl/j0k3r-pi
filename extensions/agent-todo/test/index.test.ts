@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import agentTodoExtension from '../index.js';
+import { EventEmitter } from 'node:events';
 
 afterEach(() => {
   delete (globalThis as Record<string, unknown>).__PI_AGENT_TODO_PROVIDER__;
@@ -11,17 +12,111 @@ function createHarness() {
   const commands: Array<{ name: string; def: any }> = [];
   const handlers = new Map<string, Function>();
   const shortcuts: Array<{ key: string; def: any }> = [];
+  const events = new EventEmitter();
   const pi: any = {
+    events: {
+      on(name: string, handler: (...args: any[]) => void) { events.on(name, handler); return () => events.off(name, handler); },
+      emit: events.emit.bind(events),
+    },
     registerTool: (tool: any) => tools.push(tool),
     registerCommand: (name: string, def: any) => commands.push({ name, def }),
     registerShortcut: (key: string, def: any) => shortcuts.push({ key, def }),
     on: (event: string, handler: Function) => handlers.set(event, handler),
   };
   agentTodoExtension(pi);
-  return { pi, tools, commands, handlers, shortcuts };
+  return { pi, tools, commands, handlers, shortcuts, events };
 }
 
 describe('agentTodoExtension', () => {
+  it('serves only the trusted current-session active title/steps and cleans up its bridge', async () => {
+    const { events, tools, handlers } = createHarness();
+    const ctx: any = {
+      mode: 'tui', cwd: '/repo', isProjectTrusted: () => true,
+      sessionManager: { getSessionId: () => 'one', getBranch: () => [] },
+      ui: { setWidget: vi.fn() },
+    };
+    const read = (overrides = {}) => {
+      const respond = vi.fn();
+      events.emit('pihud:todo:read:v1', { cwd: '/repo', sessionId: 'one', respond, ...overrides });
+      return respond;
+    };
+    await handlers.get('session_start')?.({}, ctx);
+    expect(read()).toHaveBeenCalledWith({ lines: [] });
+    await tools[0].execute('1', { action: 'create', title: 'Ship', body: 'PRIVATE BODY', steps: ['Tests', 'Code'] }, undefined, undefined, ctx);
+    const reply = read();
+    expect(reply).toHaveBeenCalledWith({ lines: [], todo: { title: 'Ship', steps: [{ text: 'Tests', status: 'open' }, { text: 'Code', status: 'open' }] } });
+    expect(JSON.stringify(reply.mock.calls)).not.toContain('PRIVATE BODY');
+    expect(read({ sessionId: 'other' })).not.toHaveBeenCalled();
+    expect(read({ cwd: '/other' })).not.toHaveBeenCalled();
+    ctx.isProjectTrusted = () => false;
+    expect(read()).not.toHaveBeenCalled();
+    ctx.isProjectTrusted = () => true;
+    ctx.mode = 'rpc';
+    expect(read()).not.toHaveBeenCalled();
+    ctx.mode = 'tui';
+    await tools[0].execute('2', { action: 'complete_all' }, undefined, undefined, ctx);
+    expect(read()).toHaveBeenCalledWith({ lines: [] });
+    await handlers.get('session_shutdown')?.({}, ctx);
+    expect(events.listenerCount('pihud:todo:read:v1')).toBe(0);
+    expect(events.listenerCount('pihud:presence:v1')).toBe(0);
+  });
+
+  it('hides on owned HUD presence through tool updates and restores the original collapse state', async () => {
+    const { events, tools, handlers, shortcuts } = createHarness();
+    const setWidget = vi.fn();
+    const ctx: any = {
+      mode: 'tui', cwd: '/repo', isProjectTrusted: () => true,
+      sessionManager: { getSessionId: () => 'one', getBranch: () => [] },
+      ui: { setWidget, notify: vi.fn() },
+    };
+    const presence = (visible: boolean, sessionId = 'one', cwd = '/repo') => events.emit('pihud:presence:v1', { cwd, sessionId, visible });
+    await handlers.get('session_start')?.({}, ctx);
+    await tools[0].execute('1', { action: 'create', title: 'Ship', steps: ['Tests', 'Code'] }, undefined, undefined, ctx);
+    await shortcuts[0].def.handler(ctx);
+    expect(setWidget.mock.calls.at(-1)?.[1].join('\n')).toContain('Tests');
+    presence(true, 'other');
+    presence(true, 'one', '/other');
+    expect(setWidget.mock.calls.at(-1)?.[1]).toBeDefined();
+    presence(true);
+    expect(setWidget).toHaveBeenLastCalledWith('agent-todo', undefined);
+    await tools[0].execute('2', { action: 'complete_step', step_id: '1' }, undefined, undefined, ctx);
+    expect(setWidget).toHaveBeenLastCalledWith('agent-todo', undefined);
+    await shortcuts[0].def.handler(ctx);
+    expect(setWidget).toHaveBeenLastCalledWith('agent-todo', undefined);
+    presence(false);
+    expect(setWidget.mock.calls.at(-1)?.[1].join('\n')).toContain('ctrl+space to collapse');
+    expect(setWidget.mock.calls.at(-1)?.[1].join('\n')).toContain('1/2');
+    await shortcuts[0].def.handler(ctx);
+    presence(true);
+    presence(false);
+    expect(setWidget.mock.calls.at(-1)?.[1].join('\n')).toContain('ctrl+space to expand');
+    presence(true);
+    ctx.sessionManager.getSessionId = () => 'two';
+    await handlers.get('session_tree')?.({}, ctx);
+    await tools[0].execute('3', { action: 'create', title: 'New branch' }, undefined, undefined, ctx);
+    expect(setWidget.mock.calls.at(-1)?.[1]).toBeDefined();
+    presence(true);
+    expect(setWidget.mock.calls.at(-1)?.[1]).toBeDefined();
+  });
+
+  it('queries existing HUD presence on bind, without accepting delayed replies or untrusted presence', async () => {
+    const { events, tools, handlers } = createHarness();
+    let delayed: any;
+    events.on('pihud:presence:read:v1', query => { delayed = query; query.respond(true); });
+    const setWidget = vi.fn();
+    const ctx: any = { mode: 'tui', cwd: '/repo', isProjectTrusted: () => true,
+      sessionManager: { getSessionId: () => 'one', getBranch: () => [] }, ui: { setWidget } };
+    await handlers.get('session_start')?.({}, ctx);
+    await tools[0].execute('1', { action: 'create', title: 'Ship' }, undefined, undefined, ctx);
+    expect(setWidget).toHaveBeenLastCalledWith('agent-todo', undefined);
+    events.emit('pihud:presence:v1', { cwd: '/repo', sessionId: 'one', visible: false });
+    delayed.respond(true);
+    expect(setWidget.mock.calls.at(-1)?.[1]).toBeDefined();
+    ctx.isProjectTrusted = () => false;
+    events.emit('pihud:presence:v1', { cwd: '/repo', sessionId: 'one', visible: true });
+    expect(setWidget.mock.calls.at(-1)?.[1]).toBeDefined();
+  });
+
   it('registers lifecycle handlers, exposes the provider, and avoids manual commands', async () => {
     const { pi, tools, commands, handlers, shortcuts } = createHarness();
 

@@ -10,8 +10,10 @@ import {
 import { ARCH_WORKING_INDICATOR, J0k3rThemeEditor } from "./src/J0k3rThemeEditor.js";
 import { J0k3rThemeFooter, type RepoGitInfo } from "./src/J0k3rThemeFooter.js";
 import { J0k3rThemeHeader, type J0k3rThemeHeaderData, type WelcomeBannerStyle } from "./src/J0k3rThemeHeader.js";
-import { fetchModelQuota, QUOTA_REFRESH_MS } from "./src/quota.js";
+import { fetchModelQuota, formatHudQuota, QUOTA_REFRESH_MS } from "./src/quota.js";
+import { registerHudBridge } from "./src/hud.js";
 import { registerNativeToolOverrides } from "./src/tools/index.js";
+import { registerCompactToolRenderer } from "./src/render/resolver.js";
 
 const extensionDir = dirname(fileURLToPath(import.meta.url));
 const globalAgentDir = dirname(dirname(extensionDir));
@@ -418,6 +420,7 @@ export function saveWelcomeBannerSetting(style: WelcomeBannerStyle): void {
 
 export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 	registerNativeToolOverrides(pi);
+	registerCompactToolRenderer(pi);
 
 	pi.registerMarkdownTransformer((markdown, context) => {
 		if (context.messageType === "user") {
@@ -431,6 +434,11 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 
 	let activeHeader: J0k3rThemeHeader | undefined;
 	let activeFooter: J0k3rThemeFooter | undefined;
+    let hudVisible = false;
+    registerHudBridge(pi, () => activeFooter?.getHudSnapshot() ?? {}, visible => {
+      hudVisible = visible;
+      activeFooter?.setHudVisible(visible);
+    });
 	let activeGitWatcher: FSWatcher | undefined;
 	let gitDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 	let triggerGitRefresh: ((cwd: string) => void) | undefined;
@@ -441,6 +449,7 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 	let oniAnimTimer: ReturnType<typeof setInterval> | undefined;
 	let currentBannerStyle: WelcomeBannerStyle = "default";
 	let quota: string | undefined;
+	let hudQuota: string | undefined;
 	let quotaModelKey = "";
 	let quotaRequest = 0;
 	let quotaUpdatedAt = 0;
@@ -455,16 +464,19 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 		quotaModelKey = key;
 		if (modelChanged) {
 			quota = undefined;
+			hudQuota = undefined;
 			activeFooter?.setQuota();
 		}
 		if (provider !== "cliproxyapi") return;
 		quotaLoading = true;
-		void fetchModelQuota(provider, modelId)
+		void fetchModelQuota(provider, modelId, undefined, pools => {
+			if (request === quotaRequest) hudQuota = formatHudQuota(pools);
+		})
 			.then((value) => {
 				if (request !== quotaRequest) return;
 				quota = value;
 				quotaUpdatedAt = Date.now();
-				activeFooter?.setQuota(value);
+				activeFooter?.setQuota(value, hudQuota);
 			})
 			.catch(() => {
 				if (request !== quotaRequest) return;
@@ -818,8 +830,10 @@ export default function j0k3rThemeExtension(pi: ExtensionAPI): void {
 		}
 		ctx.ui.setEditorComponent((tui, theme, keybindings) => new J0k3rThemeEditor(tui, theme, keybindings));
 		ctx.ui.setFooter((tui, theme, footerData) => {
-			activeFooter = new J0k3rThemeFooter(tui, theme, footerData, ctx, () => pi.getThinkingLevel(), footerGitInfo);
-			activeFooter.setQuota(quota);
+			activeFooter = new J0k3rThemeFooter(tui, theme, footerData, ctx, () => pi.getThinkingLevel(), footerGitInfo,
+				(status) => pi.events.emit("j0k3r-theme:token-speed", status));
+			activeFooter.setQuota(quota, hudQuota);
+            activeFooter.setHudVisible(hudVisible);
 			requestUIRender = () => tui.requestRender();
 			return activeFooter;
 		});

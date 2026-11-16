@@ -1,9 +1,4 @@
-import type {
-  GitSyncDiagnostic,
-  SyncStatus,
-  WorkingTreeStatus,
-  WorktreeDiagnostic,
-} from './types.js';
+import type { GitSyncDiagnostic, SyncStatus } from './types.js';
 
 // ANSI Styling Constants matching j0k3r-theme neon aesthetic
 export const CYAN = '\x1b[1;38;2;0;229;255m';
@@ -16,48 +11,100 @@ export const DIM = '\x1b[2m';
 export const BOLD = '\x1b[1m';
 export const RESET = '\x1b[0m';
 
+const GRAPHEME_SEGMENTER = new Intl.Segmenter('en', { granularity: 'grapheme' });
+const ANSI_TOKEN_RE = /(\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[ -/]*[@-~])/g;
+const NON_PRINTING_GRAPHEME_RE = /^[\p{Mn}\p{Me}\p{Cf}\p{Cc}]+$/u;
+const EMOJI_GRAPHEME_RE = /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u200D|\uFE0F/u;
+
+function isWideCodePoint(cp: number): boolean {
+  return (
+    (cp >= 0x1100 && cp <= 0x115f) ||
+    cp === 0x2329 ||
+    cp === 0x232a ||
+    (cp >= 0x2e80 && cp <= 0x303e) ||
+    (cp >= 0x3041 && cp <= 0x33ff) ||
+    (cp >= 0x3400 && cp <= 0x4dbf) ||
+    (cp >= 0x4e00 && cp <= 0x9fff) ||
+    (cp >= 0xa000 && cp <= 0xa4cf) ||
+    (cp >= 0xa960 && cp <= 0xa97f) ||
+    (cp >= 0xac00 && cp <= 0xd7ff) ||
+    (cp >= 0xf900 && cp <= 0xfaff) ||
+    (cp >= 0xfe10 && cp <= 0xfe19) ||
+    (cp >= 0xfe30 && cp <= 0xfe6f) ||
+    (cp >= 0xff01 && cp <= 0xff60) ||
+    (cp >= 0xffe0 && cp <= 0xffe6) ||
+    (cp >= 0x1f300 && cp <= 0x1faff) ||
+    (cp >= 0x20000 && cp <= 0x3fffd)
+  );
+}
+
+function graphemeWidth(grapheme: string): number {
+  if (!grapheme || NON_PRINTING_GRAPHEME_RE.test(grapheme)) return 0;
+  if (grapheme.length > 1 && EMOJI_GRAPHEME_RE.test(grapheme)) return 2;
+  const cp = grapheme.codePointAt(0);
+  if (cp === undefined) return 0;
+  if (cp < 0x20 || (cp >= 0x7f && cp <= 0x9f)) return 0;
+  if (isWideCodePoint(cp) || EMOJI_GRAPHEME_RE.test(grapheme)) return 2;
+  return 1;
+}
+
 /**
- * Remove ANSI escape sequences from a string.
+ * Remove ANSI CSI and OSC escape sequences from a string.
  */
 export function stripAnsi(str: string): string {
-  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+  return String(str ?? '').replace(ANSI_TOKEN_RE, '');
 }
 
 /**
- * Calculate the visible column width of a string ignoring ANSI codes.
+ * Calculate the visible terminal column width of a string ignoring ANSI/OSC sequences.
  */
 export function visibleWidth(str: string): number {
-  return stripAnsi(str).length;
+  const plain = stripAnsi(str);
+  if (!plain) return 0;
+  let width = 0;
+  for (const { segment } of GRAPHEME_SEGMENTER.segment(plain)) {
+    width += graphemeWidth(segment);
+  }
+  return width;
 }
 
 /**
- * Truncate a string to a specified visible width while preserving ANSI sequences.
+ * Display-only home abbreviation on separator-bounded home prefixes.
+ */
+function abbreviateHome(value: string, home: string = process.env.HOME ?? ''): string {
+  if (!value || !home || home === '/') return value;
+  if (value !== home && !value.startsWith(`${home}/`)) return value;
+  return value === home ? '~' : `~${value.slice(home.length)}`;
+}
+
+/**
+ * Truncate a string to a specified visible width while preserving ANSI/OSC sequences.
  */
 export function fit(text: string, width: number): string {
-  if (width <= 0) return '';
-  if (visibleWidth(text) <= width) return text;
+  if (!Number.isFinite(width) || width <= 0) return '';
+  const safeWidth = Math.floor(width);
+  if (visibleWidth(text) <= safeWidth) return text;
 
-  const ansiRegex = /(\x1b\[[0-9;]*[a-zA-Z])/g;
-  const parts = text.split(ansiRegex);
+  const parts = text.split(ANSI_TOKEN_RE);
   let result = '';
   let currentWidth = 0;
   let hasAnsi = false;
 
   for (const part of parts) {
     if (!part) continue;
-    if (part.startsWith('\x1b[')) {
+    if (part.startsWith('\x1b[') || part.startsWith('\x1b]')) {
       result += part;
       hasAnsi = true;
-    } else {
-      const remaining = width - currentWidth;
-      if (part.length <= remaining) {
-        result += part;
-        currentWidth += part.length;
-      } else {
-        result += part.slice(0, remaining);
-        currentWidth += remaining;
-        break;
+      continue;
+    }
+    for (const { segment } of GRAPHEME_SEGMENTER.segment(part)) {
+      const gw = graphemeWidth(segment);
+      if (currentWidth + gw > safeWidth) {
+        if (hasAnsi && !result.endsWith(RESET)) result += RESET;
+        return result;
       }
+      result += segment;
+      currentWidth += gw;
     }
   }
 
@@ -71,62 +118,107 @@ export function fit(text: string, width: number): string {
  * Pad a string to a specific visible width, truncating if necessary.
  */
 export function pad(text: string, width: number): string {
-  if (width <= 0) return '';
+  if (!Number.isFinite(width) || width <= 0) return '';
+  const safeWidth = Math.floor(width);
   const len = visibleWidth(text);
-  if (len === width) return text;
-  if (len < width) return text + ' '.repeat(width - len);
-  return fit(text, width);
+  if (len === safeWidth) return text;
+  if (len < safeWidth) return text + ' '.repeat(safeWidth - len);
+  return fit(text, safeWidth);
 }
 
 /**
- * Render a single boxed row enclosed by vertical Unicode borders.
+ * Wrap one line to fit strictly within `width` visible columns (or `totalWidth === 2` for an
+ * intact 2-column grapheme without the left margin) while preserving ANSI SGR styling.
  */
-export function boxLine(content: string, innerWidth: number, borderColor = CYAN): string {
-  const safeInner = Math.max(10, innerWidth);
-  const contentWidth = Math.max(0, safeInner - 2);
-  const paddedContent = pad(content, contentWidth);
-  return `${borderColor}│${RESET} ${paddedContent} ${borderColor}│${RESET}`;
+function wrapAnsiLine(line: string, width: number, totalWidth = width + 1): string[] {
+  if (!Number.isFinite(width) || width <= 0) return [];
+  const safeWidth = Math.floor(width);
+  const allowWidth2Wide = totalWidth === 2;
+  if (line === '') return [' '];
+  if (visibleWidth(line) <= safeWidth) return [` ${line}`];
+
+  const out: string[] = [];
+  let current = '';
+  let currentWidth = 0;
+  let chunkLimit = safeWidth;
+  let chunkHasMargin = true;
+  let activeSgr = '';
+
+  const flush = () => {
+    const terminated = activeSgr && !current.endsWith(RESET) ? `${current}${RESET}` : current;
+    if (chunkHasMargin) {
+      const fitted = visibleWidth(terminated) <= safeWidth ? terminated : fit(terminated, safeWidth);
+      out.push(` ${fitted}`);
+    } else {
+      out.push(visibleWidth(terminated) <= totalWidth ? terminated : fit(terminated, totalWidth));
+    }
+    current = activeSgr;
+    currentWidth = 0;
+    chunkLimit = safeWidth;
+    chunkHasMargin = true;
+  };
+
+  for (const part of line.split(ANSI_TOKEN_RE)) {
+    if (!part) continue;
+    if (part.startsWith('\x1b[')) {
+      current += part;
+      activeSgr = part === RESET ? '' : `${activeSgr}${part}`;
+      continue;
+    }
+    if (part.startsWith('\x1b]')) {
+      current += part;
+      continue;
+    }
+    for (const { segment } of GRAPHEME_SEGMENTER.segment(part)) {
+      const gw = graphemeWidth(segment);
+      if (gw === 0) {
+        current += segment;
+        continue;
+      }
+      if (gw > safeWidth) {
+        if (!allowWidth2Wide || gw > totalWidth) continue;
+        if (currentWidth > 0) flush();
+        chunkLimit = totalWidth;
+        chunkHasMargin = false;
+        current += segment;
+        currentWidth = gw;
+        continue;
+      }
+      if (currentWidth + gw > chunkLimit && currentWidth > 0) {
+        flush();
+      }
+      current += segment;
+      currentWidth += gw;
+    }
+  }
+
+  if (current !== activeSgr || out.length === 0) {
+    flush();
+  }
+
+  return out;
 }
 
-/**
- * Render the rounded top border of a card with optional title and subtitle.
- */
-export function cardTopBorder(
-  title: string,
-  subtitle: string,
-  innerWidth: number,
-  borderColor = CYAN
-): string {
-  const safeInner = Math.max(10, innerWidth);
-  const prefix = `${borderColor}╭─${RESET}`;
-  let titleSub = '';
-  if (title) {
-    titleSub += ` ${BOLD}${title}${RESET}`;
+function wrapLines(rawLines: string[], width: number, totalWidth = width + 1): string[] {
+  if (!Number.isFinite(width) || width <= 0) return [];
+  const out: string[] = [];
+  for (const line of rawLines) {
+    for (const part of String(line).split('\n')) {
+      out.push(...wrapAnsiLine(part, width, totalWidth));
+    }
   }
-  if (subtitle) {
-    titleSub += ` ${DIM}${subtitle}${RESET}`;
-  }
-  if (titleSub) {
-    titleSub += ' ';
-  }
-
-  let midWidth = visibleWidth(titleSub);
-  if (midWidth > safeInner - 3) {
-    titleSub = fit(titleSub, Math.max(0, safeInner - 3));
-    midWidth = visibleWidth(titleSub);
-  }
-
-  const dashesCount = Math.max(1, (safeInner + 2) - 2 - midWidth - 1);
-  const dashes = `${borderColor}${'─'.repeat(dashesCount)}╮${RESET}`;
-  return `${prefix}${titleSub}${dashes}`;
+  return out;
 }
 
-/**
- * Render the rounded bottom border of a card.
- */
-export function cardBottomBorder(innerWidth: number, borderColor = CYAN): string {
-  const safeInner = Math.max(10, innerWidth);
-  return `${borderColor}╰${'─'.repeat(safeInner)}╯${RESET}`;
+function extractMessageContent(message: any): string {
+  if (typeof message?.content === 'string') return message.content;
+  if (Array.isArray(message?.content)) {
+    return message.content
+      .filter((part: any) => part?.type === 'text' && typeof part.text === 'string')
+      .map((part: any) => part.text)
+      .join('\n');
+  }
+  return '';
 }
 
 /**
@@ -206,12 +298,16 @@ export interface GitSyncMessageRenderer {
 
 /**
  * Message renderer factory for git-sync-awareness.
+ *
+ * Compact, transparent, unboxed and hint-free: single inline status row when collapsed,
+ * complete unboxed wrapping when expanded, and native `options.expanded` coherence across
+ * host rebuilds alongside existing click support.
  */
 export function createGitSyncMessageRenderer(
   message: any,
   options: { expanded?: boolean } = {}
 ): GitSyncMessageRenderer {
-  let isExpanded = options.expanded === true;
+  let isExpanded = options?.expanded === true;
 
   return {
     handleMouse(event: any) {
@@ -220,28 +316,28 @@ export function createGitSyncMessageRenderer(
       return { handled: true, render: true };
     },
     render(width: number): string[] {
-      const targetWidth = width > 0 ? width : 80;
+      const targetWidth = Number.isFinite(width) ? Math.floor(width) : 80;
+      if (targetWidth <= 0) return [];
+      if (targetWidth === 1) return [' '];
+      const innerWidth = targetWidth - 1;
+
       const diagnostic: GitSyncDiagnostic | undefined = message?.details;
 
       // Fallback mode if structured diagnostic is absent
       if (!diagnostic || !diagnostic.currentBranch) {
-        const rawContent = String(message?.content || 'No git diagnostic report available');
+        const rawContent = extractMessageContent(message) || 'No git diagnostic report available';
         if (!isExpanded) {
           const firstLine = rawContent.split('\n')[0] || '';
-          return [fit(`${RED}●${RESET} ${firstLine} ${DIM}(click or ctrl+o expand)${RESET}`, targetWidth)];
+          return [` ${fit(`${RED}●${RESET} ${firstLine}`, innerWidth)}`];
         }
-        const innerWidth = Math.max(10, targetWidth - 2);
-        const lines: string[] = [];
-        lines.push(cardTopBorder('git-sync', 'notice', innerWidth, AMBER));
-        for (const line of rawContent.split('\n')) {
-          lines.push(boxLine(line, innerWidth, AMBER));
-        }
-        lines.push(cardBottomBorder(innerWidth, AMBER));
-        lines.push(`${DIM}(click or ctrl+o collapse)${RESET}`);
-        return lines;
+        return wrapLines(
+          [`${AMBER}git-sync${RESET} ${DIM}─ notice${RESET}`, ...rawContent.split('\n')],
+          innerWidth,
+          targetWidth
+        );
       }
 
-      // Collapsed mode: single line status
+      // Collapsed mode: single inline status row without generated hints
       if (!isExpanded) {
         let dot = `${LIME}●${RESET}`;
         if (diagnostic.requiresDecision) {
@@ -259,27 +355,16 @@ export function createGitSyncMessageRenderer(
           diagnostic.currentBranch.behind
         );
         const wtBadge = formatWorkingTreeBadge(diagnostic.workingTree);
-        const hint = `${DIM}(click or ctrl+o expand)${RESET}`;
-
-        if (targetWidth < 40) {
-          const shortHint = `${DIM}(ctrl+o)${RESET}`;
-          const shortBranch = fit(diagnostic.currentBranch.branch, 8);
-          return [fit(`${dot} ${shortBranch} ${syncBadge} ${shortHint}`, targetWidth)];
-        }
-
-        const fullLine = `${dot} ${branch}  ${syncBadge}  ${wtBadge}  ${hint}`;
-        return [fit(fullLine, targetWidth)];
+        const sep = `${DIM}─${RESET}`;
+        return [` ${fit(`${dot} ${branch} ${sep} ${syncBadge} ${sep} ${wtBadge}`, innerWidth)}`];
       }
 
-      // Expanded mode: multi-line rounded card
-      const innerWidth = Math.max(20, targetWidth - 2);
-      const cardBorderColor = diagnostic.requiresDecision ? RED : CYAN;
+      // Expanded mode: complete unboxed, background-free sections without preview limits
+      const accentColor = diagnostic.requiresDecision ? RED : CYAN;
       const lines: string[] = [];
 
-      // Top Border
-      lines.push(cardTopBorder('git-sync', diagnostic.currentBranch.branch, innerWidth, cardBorderColor));
+      lines.push(`${accentColor}git-sync${RESET} ${DIM}─${RESET} ${BOLD}${diagnostic.currentBranch.branch}${RESET}`);
 
-      // Branch and Upstream Status
       const upstreamText = diagnostic.currentBranch.upstream
         ? `${CYAN}${diagnostic.currentBranch.upstream}${RESET}`
         : `${DIM}none${RESET}`;
@@ -289,74 +374,31 @@ export function createGitSyncMessageRenderer(
         diagnostic.currentBranch.behind
       );
       lines.push(
-        boxLine(
-          `Branch: ${BOLD}${diagnostic.currentBranch.branch}${RESET}  Upstream: ${upstreamText}  Status: ${syncBadge}`,
-          innerWidth,
-          cardBorderColor
-        )
+        `Branch: ${BOLD}${diagnostic.currentBranch.branch}${RESET}  Upstream: ${upstreamText}  Status: ${syncBadge}`
       );
 
-      // Incoming Remote Commits
       if (
         diagnostic.currentBranch.incomingCommits &&
         diagnostic.currentBranch.incomingCommits.length > 0
       ) {
-        lines.push(boxLine('', innerWidth, cardBorderColor));
-        lines.push(
-          boxLine(
-            `${PINK}${BOLD}Incoming Remote Commits (${diagnostic.currentBranch.incomingCommits.length}):${RESET}`,
-            innerWidth,
-            cardBorderColor
-          )
-        );
-        for (const commit of diagnostic.currentBranch.incomingCommits.slice(0, 5)) {
-          lines.push(boxLine(`  ${DIM}↓${RESET} ${commit}`, innerWidth, cardBorderColor));
-        }
-        if (diagnostic.currentBranch.incomingCommits.length > 5) {
-          lines.push(
-            boxLine(
-              `  ${DIM}... +${diagnostic.currentBranch.incomingCommits.length - 5} more remote commits${RESET}`,
-              innerWidth,
-              cardBorderColor
-            )
-          );
+        lines.push('');
+        lines.push(`${PINK}${BOLD}Incoming Remote Commits (${diagnostic.currentBranch.incomingCommits.length}):${RESET}`);
+        for (const commit of diagnostic.currentBranch.incomingCommits) {
+          lines.push(`  ${DIM}↓${RESET} ${commit}`);
         }
       }
 
-      // Working Tree Breakdown
-      lines.push(boxLine('', innerWidth, cardBorderColor));
-      lines.push(
-        boxLine(
-          `Working Tree: ${formatWorkingTreeBadge(diagnostic.workingTree)}`,
-          innerWidth,
-          cardBorderColor
-        )
-      );
+      lines.push('');
+      lines.push(`Working Tree: ${formatWorkingTreeBadge(diagnostic.workingTree)}`);
       if (!diagnostic.workingTree.isClean && diagnostic.workingTree.summaryLines?.length > 0) {
-        for (const sLine of diagnostic.workingTree.summaryLines.slice(0, 4)) {
-          lines.push(boxLine(`  ${DIM}${sLine}${RESET}`, innerWidth, cardBorderColor));
-        }
-        if (diagnostic.workingTree.summaryLines.length > 4) {
-          lines.push(
-            boxLine(
-              `  ${DIM}... +${diagnostic.workingTree.summaryLines.length - 4} more changed files${RESET}`,
-              innerWidth,
-              cardBorderColor
-            )
-          );
+        for (const sLine of diagnostic.workingTree.summaryLines) {
+          lines.push(`  ${DIM}${sLine}${RESET}`);
         }
       }
 
-      // Active Worktrees
       if (diagnostic.worktree && diagnostic.worktree.worktrees.length > 1) {
-        lines.push(boxLine('', innerWidth, cardBorderColor));
-        lines.push(
-          boxLine(
-            `${VIOLET}${BOLD}Active Worktrees (${diagnostic.worktree.worktrees.length}):${RESET}`,
-            innerWidth,
-            cardBorderColor
-          )
-        );
+        lines.push('');
+        lines.push(`${VIOLET}${BOLD}Active Worktrees (${diagnostic.worktree.worktrees.length}):${RESET}`);
         for (const wt of diagnostic.worktree.worktrees) {
           const tags: string[] = [];
           if (wt.isCurrent) tags.push(`${LIME}(current)${RESET}`);
@@ -366,26 +408,14 @@ export function createGitSyncMessageRenderer(
 
           const tagStr = tags.length > 0 ? ` ${tags.join(' ')}` : '';
           const headAbbr = wt.head ? ` [HEAD ${wt.head.slice(0, 7)}]` : '';
-          lines.push(
-            boxLine(
-              `  • ${wt.path}: branch ${BOLD}${wt.branch || 'detached'}${RESET}${headAbbr}${tagStr}`,
-              innerWidth,
-              cardBorderColor
-            )
-          );
+          const displayPath = abbreviateHome(wt.path);
+          lines.push(`  • ${displayPath}: branch ${BOLD}${wt.branch || 'detached'}${RESET}${headAbbr}${tagStr}`);
         }
       }
 
-      // Other Local Branches
       if (diagnostic.otherLocalBranches && diagnostic.otherLocalBranches.length > 0) {
-        lines.push(boxLine('', innerWidth, cardBorderColor));
-        lines.push(
-          boxLine(
-            `${CYAN}${BOLD}Other Local Branches (${diagnostic.otherLocalBranches.length}):${RESET}`,
-            innerWidth,
-            cardBorderColor
-          )
-        );
+        lines.push('');
+        lines.push(`${CYAN}${BOLD}Other Local Branches (${diagnostic.otherLocalBranches.length}):${RESET}`);
         for (const b of diagnostic.otherLocalBranches) {
           const badge = formatSyncStatusBadge(b.syncStatus, b.ahead, b.behind);
           let extra = '';
@@ -404,45 +434,25 @@ export function createGitSyncMessageRenderer(
             }
             extra = ` ${DIM}(${relDesc})${RESET}`;
           }
-          lines.push(
-            boxLine(
-              `  • ${BOLD}${b.branch}${RESET}: ${badge}${extra}`,
-              innerWidth,
-              cardBorderColor
-            )
-          );
+          lines.push(`  • ${BOLD}${b.branch}${RESET}: ${badge}${extra}`);
         }
       }
 
-      // Collaborator Branches (unmerged into main)
       if (
         diagnostic.activeCollaboratorBranches &&
         diagnostic.activeCollaboratorBranches.length > 0
       ) {
-        lines.push(boxLine('', innerWidth, cardBorderColor));
-        lines.push(
-          boxLine(
-            `${CYAN}${BOLD}Collaborator Branches (${diagnostic.activeCollaboratorBranches.length}):${RESET}`,
-            innerWidth,
-            cardBorderColor
-          )
-        );
-        for (const cBranch of diagnostic.activeCollaboratorBranches.slice(0, 4)) {
-          lines.push(boxLine(`  • ${cBranch}`, innerWidth, cardBorderColor));
+        lines.push('');
+        lines.push(`${CYAN}${BOLD}Collaborator Branches (${diagnostic.activeCollaboratorBranches.length}):${RESET}`);
+        for (const cBranch of diagnostic.activeCollaboratorBranches) {
+          lines.push(`  • ${cBranch}`);
         }
       }
 
-      // Remote Branches (origin)
       if (diagnostic.remoteBranches && diagnostic.remoteBranches.length > 0) {
-        lines.push(boxLine('', innerWidth, cardBorderColor));
-        lines.push(
-          boxLine(
-            `${VIOLET}${BOLD}Remote Branches (${diagnostic.remoteBranches.length}):${RESET}`,
-            innerWidth,
-            cardBorderColor
-          )
-        );
-        for (const remote of diagnostic.remoteBranches.slice(0, 5)) {
+        lines.push('');
+        lines.push(`${VIOLET}${BOLD}Remote Branches (${diagnostic.remoteBranches.length}):${RESET}`);
+        for (const remote of diagnostic.remoteBranches) {
           const local = [diagnostic.currentBranch, ...(diagnostic.otherLocalBranches || [])].find(
             (b) => b.upstream === remote
           );
@@ -451,32 +461,11 @@ export function createGitSyncMessageRenderer(
             : (diagnostic.remoteOnlyBranches || []).includes(remote)
               ? `${AMBER}remote-only${RESET}`
               : `${DIM}tracking${RESET}`;
-          lines.push(
-            boxLine(
-              `  • ${remote}: ${relation}`,
-              innerWidth,
-              cardBorderColor
-            )
-          );
-        }
-        if (diagnostic.remoteBranches.length > 5) {
-          lines.push(
-            boxLine(
-              `  ${DIM}... +${diagnostic.remoteBranches.length - 5} more remote branches${RESET}`,
-              innerWidth,
-              cardBorderColor
-            )
-          );
+          lines.push(`  • ${remote}: ${relation}`);
         }
       }
 
-      // Bottom Border
-      lines.push(cardBottomBorder(innerWidth, cardBorderColor));
-
-      // Key hint footer
-      lines.push(`${DIM}(click or ctrl+o collapse)${RESET}`);
-
-      return lines;
+      return wrapLines(lines, innerWidth, targetWidth);
     },
     invalidate(): void {
       // Invalidation hook for Pi TUI

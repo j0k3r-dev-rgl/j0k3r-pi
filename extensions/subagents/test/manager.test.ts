@@ -2116,4 +2116,79 @@ describe('manager and history integration', () => {
     expect(cancelledTask.model_source).toBe('unresolved');
   });
 
+  it('lists active tasks before terminal tasks while preserving creation-desc and binary id-desc inside each group (MINI-006)', () => {
+    const manager = new SubagentManager(async () => ({ result: 'done' }));
+    const put = (task: Partial<SubagentTask> & { id: string; created_at: string; status: SubagentTask['status'] }) => {
+      (manager as any).tasks.set(task.id, { agent: 'analyst', mode: 'task', task: 'x', ...task } as SubagentTask);
+    };
+    // Terminal tasks interleaved with active ones by creation time.
+    put({ id: 'task-active-old', status: 'running', created_at: '2026-01-01T00:00:01.000Z' });
+    put({ id: 'task-done-new', status: 'completed', created_at: '2026-01-01T00:00:05.000Z' });
+    put({ id: 'task-queued-mid', status: 'queued', created_at: '2026-01-01T00:00:03.000Z' });
+    put({ id: 'task-failed-mid', status: 'failed', created_at: '2026-01-01T00:00:04.000Z' });
+    put({ id: 'task-done-old', status: 'completed', created_at: '2026-01-01T00:00:02.000Z' });
+    put({ id: 'task-cancelled-old', status: 'cancelled', created_at: '2026-01-01T00:00:00.000Z' });
+
+    expect(manager.listTasks().map((task) => task.id)).toEqual([
+      // active group: creation DESC (queued-mid newer than active-old); no invented running-vs-queued priority
+      'task-queued-mid',
+      'task-active-old',
+      // terminal group: creation DESC
+      'task-done-new',
+      'task-failed-mid',
+      'task-done-old',
+      'task-cancelled-old',
+    ]);
+    // Scope-filtered list keeps the same active-first ordering.
+    expect(manager.listActiveSessionTasks()).toHaveLength(6);
+    expect(manager.listActiveSessionTasks().map((task) => task.id).slice(0, 2)).toEqual(['task-queued-mid', 'task-active-old']);
+  });
+
+  it('keeps binary id-desc tie ordering inside each status group (MINI-006)', () => {
+    const manager = new SubagentManager(async () => ({ result: 'done' }));
+    const created = '2026-01-01T00:00:00.000Z';
+    for (const id of ['task_active_a', 'task_active_b', 'task_done_a', 'task_done_b']) {
+      (manager as any).tasks.set(id, {
+        id, agent: 'analyst', mode: 'task', task: 'x', created_at: created,
+        status: id.includes('active') ? 'running' : 'completed',
+      } as SubagentTask);
+    }
+    // Buffer.compare desc: 'task_active_b' > 'task_active_a', same for the done pair.
+    expect(manager.listTasks().map((task) => task.id)).toEqual([
+      'task_active_b', 'task_active_a', 'task_done_b', 'task_done_a',
+    ]);
+  });
+
+  it('moves the surviving active task ahead of finished ones when the first two tasks end (MINI-006)', async () => {
+    writeAgent('slow');
+    const manager = new SubagentManager(async ({ definition, task }) => {
+      if (task === 'hold') await new Promise((resolve) => setTimeout(resolve, 300));
+      return { result: `${definition.name} done` };
+    });
+    const ctx = { cwd: tmp, ui: { notify: () => undefined } };
+    const make = (task: string) => ({ agent: 'slow', task, mode: 'background' as const });
+    // The first two finish on their own; the third is held so it is still active afterwards.
+    const first = await manager.run(make('quick'), ctx);
+    const second = await manager.run(make('quick'), ctx);
+    const third = await manager.run(make('hold'), ctx);
+    const [firstId, secondId, thirdId] = [first.task_ids[0]!, second.task_ids[0]!, third.task_ids[0]!];
+
+    // All three active: creation DESC puts the newest task first.
+    expect(manager.listTasks().filter((task) => [firstId, secondId, thirdId].includes(task.id)).map((task) => task.id))
+      .toEqual([thirdId, secondId, firstId]);
+
+    await vi.waitFor(() => {
+      expect(manager.getTask(firstId)?.status).toBe('completed');
+      expect(manager.getTask(secondId)?.status).toBe('completed');
+    }, { timeout: 5000, interval: 25 });
+    expect(manager.getTask(thirdId)?.status).toBe('running');
+
+    // The still-active third task must stay ahead of every finished entry.
+    const order = manager.listTasks().map((task) => task.id);
+    expect(order.slice(0, 1)).toEqual([thirdId]);
+    expect(order.slice(1)).toEqual(expect.arrayContaining([firstId, secondId]));
+
+    await manager.cancel(thirdId, 'test cleanup');
+  });
+
 });

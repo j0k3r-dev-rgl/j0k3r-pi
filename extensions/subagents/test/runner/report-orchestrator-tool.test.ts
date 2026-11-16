@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createReportOrchestratorTool } from '../../src/runner/report-orchestrator-tool.js';
+import { visibleWidth } from '../../src/render/text-width.js';
+
+const plain = (lines: string[]) => lines.join('\n');
 
 describe('report_orchestrator tool', () => {
   it('acknowledges transport without waiting for any parent answer', async () => {
@@ -28,15 +31,48 @@ describe('report_orchestrator tool', () => {
     expect(failed.content[0].text).not.toContain('internal transport detail');
   });
 
-  it('supports native collapsed/expanded, partial and failed tool results', async () => {
-    const tool = createReportOrchestratorTool(() => {});
-    const result = await tool.execute('report', { report: 'progress' });
+  it('declares the compact presentation contract and renders one unboxed inline row', async () => {
+    const tool: any = createReportOrchestratorTool(() => {});
+    expect(tool.renderShell).toBe('self');
+    expect(tool.compactToolRenderingVersion).toBe(1);
+
     const theme = { fg: (_name: string, text: string) => text };
-    const keyHint = vi.fn(() => 'configured key to expand');
-    expect(tool.renderResult(result, { expanded: false }, theme, { keyHint }).render(80).join('\n')).toContain('Report sent');
-    expect(keyHint).toHaveBeenCalledWith('app.tools.expand', 'to expand');
-    expect(tool.renderResult(result, { expanded: true }, theme, { keyHint }).render(80).join('\n')).toContain('Continue');
-    expect(tool.renderResult({}, { isPartial: true }, theme, { keyHint }).render(80).join('\n')).toContain('Sending');
-    expect(tool.renderResult({ details: { sent: false } }, {}, theme, { keyHint }).render(80).join('\n')).toContain('not delivered');
+    const result = await tool.execute('report', { report: 'progress' });
+
+    const collapsed = plain(tool.renderResult(result, { expanded: false }, theme).render(80));
+    expect(collapsed).toContain('report_orchestrator');
+    expect(collapsed).toContain('sent');
+    expect(collapsed).not.toContain('Continue working');
+    expect(collapsed).not.toMatch(/[╭╮╰╯│┌┐└┘]/);
+    expect(collapsed).not.toMatch(/to expand|app\.tools\.expand|ctrl\+o/i);
+
+    const expanded = plain(tool.renderResult(result, { expanded: true }, theme).render(80));
+    expect(expanded).toContain('Continue');
+
+    const partial = plain(tool.renderResult({}, { isPartial: true }, theme).render(80));
+    expect(partial).toContain('sending');
+
+    const failed = plain(tool.renderResult({ details: { sent: false } }, {}, theme).render(80));
+    expect(failed).toContain('not delivered');
+
+    const call = plain(tool.renderCall({ report: 'progress summary' }, theme).render(80));
+    expect(call).toContain('report_orchestrator');
+    expect(call).toContain('progress summary');
+    expect(call).not.toMatch(/[╭╮╰╯│┌┐└┘]/);
+  });
+
+  it('never emits expansion guidance in either state and stays width safe', async () => {
+    const tool: any = createReportOrchestratorTool(() => {});
+    const theme = { fg: (_name: string, text: string) => text };
+    const result = await tool.execute('report', { report: 'progress' });
+    for (const expanded of [false, true]) {
+      for (const width of [0, 1, 2, 10, 23, 24, 80]) {
+        const lines = tool.renderResult(result, { expanded }, theme).render(width);
+        const joined = plain(lines);
+        expect(joined).not.toMatch(/to expand|ctrl\+o/i);
+        if (width <= 0) expect(lines).toEqual([]);
+        for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(Math.max(0, width));
+      }
+    }
   });
 });

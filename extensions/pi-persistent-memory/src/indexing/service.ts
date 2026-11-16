@@ -2,8 +2,6 @@ import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { withDatabase } from '../storage/db.ts';
 import {
-  createMemory,
-  replaceMemory,
   saveMemoryAtomic,
   publishValidatedChunks,
   markPendingReason,
@@ -171,7 +169,7 @@ export async function saveAndIndexMemory(
       withDatabase(dbPath, (db) => {
         markPendingReason(db, capturedId, capturedVersion, sanitizedReason);
       });
-    } catch {}
+    } catch { }
 
     return {
       memory: committedMemory!,
@@ -483,7 +481,7 @@ export async function reindexMemories(
         withDatabase(dbPath, (db) => {
           markPendingReason(db, mem.id, mem.content_version, sanitizedReason);
         });
-      } catch {}
+      } catch { }
 
       outcomes.push({ id: mem.id, status: 'failed', reason: sanitizedReason });
 

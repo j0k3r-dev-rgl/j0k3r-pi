@@ -24,7 +24,7 @@ The extension never uses a shell: arguments are passed directly through `pi.exec
 
 ## Output
 
-Explore output is limited to Pi's standard 50KB/2000-line budget. Oversized full output is saved under a temporary `pi-codegraph-*` directory and the retrieval path is returned. Status, sync, and management results include structured `details`; successful management operations always finish by reading and returning status. Collapsed tool cards use Pi's configured `app.tools.expand` keybinding hint.
+Explore output is limited to Pi's standard 50KB/2000-line budget. Oversized full output is saved under a temporary `pi-codegraph-*` directory and the retrieval path is returned. Status, sync, and management results include structured `details`; successful management operations always finish by reading and returning status. Each tool row is one compact inline row (`identity ─ status ─ counts/target`) with no card frame and no generated expansion instructions; Pi's own `app.tools.expand` action and fullscreen click reveal every returned text block, full-output path and duration metadata.
 
 ## Agent instructions
 

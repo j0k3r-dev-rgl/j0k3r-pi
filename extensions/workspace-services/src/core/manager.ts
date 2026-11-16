@@ -5,13 +5,13 @@ import type { Writable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import { ensureRuntimeDirs, ensureRuntimeGitignore, loadServiceEnv, loadWorkspaceServicesConfig } from '../config.js';
 import {
-  getComposeServiceLogs,
+  getComposeServiceLogsDetailed,
   getComposeServicesStatus,
   restartComposeService,
   startComposeService,
   stopComposeService,
 } from './docker-compose.js';
-import { pathExists, redactText } from '../security.js';
+import { boundDiagnosticText, pathExists, redactStructured, redactText, sliceUtf8BufferTail } from '../security.js';
 import type {
   ManagedProcessIdentityV1,
   RuntimeServiceStateV1,
@@ -41,6 +41,11 @@ export interface ListServicesResult {
   runtimeDir: string;
   logsDir: string;
   exists: boolean;
+  jsonExists: boolean;
+  composeFile?: string;
+  partial?: boolean;
+  warnings?: string[];
+  nextAction?: string;
   services: ServiceListEntry[];
 }
 
@@ -50,6 +55,11 @@ export interface ServicesStatusResult {
   logsDir: string;
   statePath: string;
   exists: boolean;
+  jsonExists: boolean;
+  composeFile?: string;
+  partial?: boolean;
+  warnings?: string[];
+  nextAction?: string;
   services: ServiceStatus[];
 }
 
@@ -143,7 +153,13 @@ async function readTail(path: string, maxBytes: number): Promise<{ text: string;
     const offset = Math.max(0, totalBytes - bytesToRead);
     const buffer = Buffer.alloc(bytesToRead);
     const { bytesRead } = await handle.read(buffer, 0, bytesToRead, offset);
-    let text = buffer.subarray(0, bytesRead).toString('utf8');
+    let start = 0;
+    if (offset > 0) {
+      while (start < bytesRead && (buffer[start]! & 0b1100_0000) === 0b1000_0000) {
+        start += 1;
+      }
+    }
+    let text = buffer.subarray(start, bytesRead).toString('utf8');
     if (offset > 0) {
       const idx = text.indexOf('\n');
       if (idx >= 0) text = text.slice(idx + 1);
@@ -152,6 +168,49 @@ async function readTail(path: string, maxBytes: number): Promise<{ text: string;
   } finally {
     await handle.close();
   }
+}
+
+function boundLogTail(lines: string[], maxBytes: number): { lines: string[]; text: string; byteTruncated: boolean } {
+  if (lines.length === 0) return { lines: [], text: '', byteTruncated: false };
+  const joined = lines.join('\n');
+  if (Buffer.byteLength(joined, 'utf8') <= maxBytes) {
+    return { lines, text: joined, byteTruncated: false };
+  }
+  const kept = [...lines];
+  while (kept.length > 1 && Buffer.byteLength(kept.join('\n'), 'utf8') > maxBytes) {
+    kept.shift();
+  }
+  if (kept.length === 1 && Buffer.byteLength(kept[0]!, 'utf8') > maxBytes) {
+    const sliced = sliceUtf8BufferTail(Buffer.from(kept[0]!, 'utf8'), maxBytes).toString('utf8');
+    const resultLines = sliced.length > 0 ? [sliced] : [];
+    return { lines: resultLines, text: sliced, byteTruncated: true };
+  }
+  return { lines: kept, text: kept.join('\n'), byteTruncated: true };
+}
+
+function isAbortError(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true;
+  return error instanceof Error && (error.message === 'Operation aborted' || error.name === 'AbortError');
+}
+
+async function knownSecretsBestEffort(service: WorkspaceServiceDefinition, config: WorkspaceServicesConfig): Promise<string[]> {
+  if (!service.envFile) return [];
+  try {
+    const envValues = await loadServiceEnv(service, config.workspaceRealRoot);
+    return Object.values(envValues).filter((value) => value.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+async function knownStackSecretsBestEffort(config: WorkspaceServicesConfig): Promise<string[]> {
+  const secretSet = new Set<string>();
+  for (const service of Object.values(config.services)) {
+    if (!service.envFile) continue;
+    const values = await knownSecretsBestEffort(service, config);
+    for (const value of values) secretSet.add(value);
+  }
+  return [...secretSet];
 }
 
 function writeRunnerPayload(
@@ -255,44 +314,133 @@ async function spawnRunner(config: WorkspaceServicesConfig, service: WorkspaceSe
     try { process.kill(-child.pid, 'SIGKILL'); } catch { try { process.kill(child.pid, 'SIGKILL'); } catch { /* ignore */ } }
     throw error;
   }
-  if (!(await processStillRunning(child.pid))) throw new Error(`Service "${service.name}" exited immediately. Check logs at ${service.logPath}.`);
+  if (!(await hostProcessAdapter.processStillRunning(child.pid))) throw new Error(`Service "${service.name}" exited immediately. Check logs at ${service.logPath}.`);
   return child.pid;
 }
 
+export const hostProcessAdapter = {
+  spawnRunner,
+  captureManagedIdentity,
+  validateManagedIdentity,
+  confirmGroupAbsent,
+  processStillRunning,
+  kill: (pid: number, sig: NodeJS.Signals) => process.kill(pid, sig),
+};
+
 async function stopValidatedIdentity(identity: ManagedProcessIdentityV1, timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
   try {
-    process.kill(-identity.processGroupId, 'SIGTERM');
+    hostProcessAdapter.kill(-identity.processGroupId, 'SIGTERM');
   } catch {
     try {
-      process.kill(identity.pid, 'SIGTERM');
+      hostProcessAdapter.kill(identity.pid, 'SIGTERM');
     } catch {
       return true;
     }
   }
-  if (await confirmGroupAbsent(identity, timeoutMs, signal)) return true;
+  if (await hostProcessAdapter.confirmGroupAbsent(identity, timeoutMs, signal)) return true;
   try {
-    process.kill(-identity.processGroupId, 'SIGKILL');
+    hostProcessAdapter.kill(-identity.processGroupId, 'SIGKILL');
   } catch {
     try {
-      process.kill(identity.pid, 'SIGKILL');
+      hostProcessAdapter.kill(identity.pid, 'SIGKILL');
     } catch {
       // ignore
     }
   }
-  return confirmGroupAbsent(identity, 1000, signal);
+  return hostProcessAdapter.confirmGroupAbsent(identity, 1000, signal);
 }
 
-export async function listServices(cwd: string): Promise<ListServicesResult> {
-  const config = await loadWorkspaceServicesConfig(cwd);
+export async function listServices(cwd: string, signal?: AbortSignal): Promise<ListServicesResult> {
+  const config = await loadWorkspaceServicesConfig(cwd, { signal });
   const services = await Promise.all(
     Object.values(config.services).map(async (service) => serviceListEntry(service, await pathExists(service.envFilePath))),
   );
-  return { configPath: config.configPath, runtimeDir: config.runtimeDir, logsDir: config.logsDir, exists: config.exists, services: services.sort((a, b) => a.name.localeCompare(b.name)) };
+  const warnings = config.composeDiscoveryError ? [config.composeDiscoveryError] : undefined;
+  const partial = Boolean(config.composeDiscoveryError);
+  return {
+    configPath: config.configPath,
+    runtimeDir: config.runtimeDir,
+    logsDir: config.logsDir,
+    exists: config.exists,
+    jsonExists: Boolean(config.jsonExists),
+    ...(config.composeFile ? { composeFile: config.composeFile } : {}),
+    ...(partial ? {
+      partial: true,
+      warnings,
+      nextAction: 'Ensure Docker daemon is running and the Compose configuration is valid, then retry.',
+    } : {}),
+    services: services.sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
+function mapComposeStatus(
+  service: WorkspaceServiceDefinition,
+  matched: Awaited<ReturnType<typeof getComposeServicesStatus>>[number] | undefined,
+  observationFailed: boolean,
+): ServiceStatus {
+  if (observationFailed) {
+    return {
+      name: service.name,
+      type: service.type,
+      path: service.relativePath,
+      command: service.command,
+      env_file: service.envFile,
+      status: 'unknown',
+      log_path: service.logPath,
+    };
+  }
+  if (!matched) {
+    return {
+      name: service.name,
+      type: service.type,
+      path: service.relativePath,
+      command: service.command,
+      env_file: service.envFile,
+      status: 'stopped',
+      log_path: service.logPath,
+    };
+  }
+  const normalized = matched.state === 'running'
+    ? 'running'
+    : matched.state === 'exited' || matched.state === 'dead'
+      ? 'stopped'
+      : 'unknown';
+  return {
+    name: service.name,
+    type: service.type,
+    path: service.relativePath,
+    command: service.command,
+    env_file: service.envFile,
+    status: normalized,
+    compose_state: matched.state || 'unknown',
+    container_id: matched.id,
+    health: matched.health,
+    exit_code: matched.exitCode,
+    ports: matched.ports,
+    log_path: service.logPath,
+  };
 }
 
 export async function getServicesStatus(cwd: string, signal?: AbortSignal): Promise<ServicesStatusResult> {
-  const config = await loadWorkspaceServicesConfig(cwd);
-  if (!config.exists) return { configPath: config.configPath, runtimeDir: config.runtimeDir, logsDir: config.logsDir, statePath: config.statePath, exists: false, services: [] };
+  const config = await loadWorkspaceServicesConfig(cwd, { signal });
+  if (!config.exists) {
+    return {
+      configPath: config.configPath,
+      runtimeDir: config.runtimeDir,
+      logsDir: config.logsDir,
+      statePath: config.statePath,
+      exists: false,
+      jsonExists: false,
+      services: [],
+    };
+  }
+
+  const warnings: string[] = [];
+  let partial = false;
+  if (config.composeDiscoveryError) {
+    partial = true;
+    warnings.push(config.composeDiscoveryError);
+  }
 
   const composeServices = Object.values(config.services).filter((s) => s.type === 'compose');
   const hostServices = Object.values(config.services).filter((s) => s.type !== 'compose');
@@ -302,7 +450,17 @@ export async function getServicesStatus(cwd: string, signal?: AbortSignal): Prom
     const composeFiles = [...new Set(composeServices.map((s) => s.composeFile).filter(Boolean))];
     if (composeFiles.length === 0) composeFiles.push(undefined as any);
     for (const compFile of composeFiles) {
-      const containers = await getComposeServicesStatus(config.workspaceRoot, compFile).catch(() => []);
+      let containers: Awaited<ReturnType<typeof getComposeServicesStatus>> = [];
+      let observationFailed = false;
+      try {
+        containers = await getComposeServicesStatus(config.workspaceRoot, compFile, undefined, signal);
+      } catch (error) {
+        if (isAbortError(error, signal)) throw error;
+        observationFailed = true;
+        partial = true;
+        const msg = boundDiagnosticText(error instanceof Error ? error.message : String(error));
+        if (!warnings.includes(msg)) warnings.push(msg);
+      }
       const containerMap = new Map<string, typeof containers[0]>();
       for (const c of containers) {
         containerMap.set(c.service, c);
@@ -310,34 +468,16 @@ export async function getServicesStatus(cwd: string, signal?: AbortSignal): Prom
       }
       for (const service of composeServices.filter((s) => s.composeFile === compFile || (!s.composeFile && !compFile))) {
         const matched = containerMap.get(service.name);
-        if (matched) {
-          composeStatuses.push({
-            name: service.name,
-            type: service.type,
-            path: service.relativePath,
-            command: service.command,
-            env_file: service.envFile,
-            status: matched.state === 'running' ? 'running' : 'stopped',
-            container_id: matched.id,
-            health: matched.health,
-            exit_code: matched.exitCode,
-            ports: matched.ports,
-            log_path: service.logPath,
-          });
-        } else {
-          composeStatuses.push({
-            name: service.name,
-            type: service.type,
-            path: service.relativePath,
-            command: service.command,
-            env_file: service.envFile,
-            status: 'stopped',
-            log_path: service.logPath,
-          });
-        }
+        composeStatuses.push(mapComposeStatus(service, matched, observationFailed));
       }
     }
   }
+
+  const partialFields = partial ? {
+    partial: true,
+    warnings,
+    nextAction: 'Ensure Docker daemon is running and the Compose configuration is valid, then retry.',
+  } : {};
 
   if (hostServices.length === 0) {
     return {
@@ -346,6 +486,9 @@ export async function getServicesStatus(cwd: string, signal?: AbortSignal): Prom
       logsDir: config.logsDir,
       statePath: config.statePath,
       exists: true,
+      jsonExists: Boolean(config.jsonExists),
+      ...(config.composeFile ? { composeFile: config.composeFile } : {}),
+      ...partialFields,
       services: composeStatuses.sort((a, b) => a.name.localeCompare(b.name)),
     };
   }
@@ -362,7 +505,7 @@ export async function getServicesStatus(cwd: string, signal?: AbortSignal): Prom
         statuses.push(toServiceStatus(service, runtime));
         continue;
       }
-      const validation = await validateManagedIdentity(config, runtime.identity, service.command);
+      const validation = await hostProcessAdapter.validateManagedIdentity(config, runtime.identity, service.command);
       if (!validation.ok) {
         delete next.services[service.name];
         statuses.push(staleOrMismatchStatus(service, runtime, validation.reason));
@@ -374,30 +517,65 @@ export async function getServicesStatus(cwd: string, signal?: AbortSignal): Prom
     }
     if (changed) await commitRuntimeState(config, opened.state, next);
     const allStatuses = [...statuses, ...composeStatuses].sort((a, b) => a.name.localeCompare(b.name));
-    return { configPath: config.configPath, runtimeDir: config.runtimeDir, logsDir: config.logsDir, statePath: config.statePath, exists: true, services: allStatuses };
+    return {
+      configPath: config.configPath,
+      runtimeDir: config.runtimeDir,
+      logsDir: config.logsDir,
+      statePath: config.statePath,
+      exists: true,
+      jsonExists: Boolean(config.jsonExists),
+      ...(config.composeFile ? { composeFile: config.composeFile } : {}),
+      ...partialFields,
+      services: allStatuses,
+    };
   });
 }
 
 export async function startService(cwd: string, serviceName: string, options: StartOptions = {}): Promise<WorkspaceServiceOutcome> {
-  const config = await loadWorkspaceServicesConfig(cwd);
+  if (options.signal?.aborted) {
+    return {
+      ok: false,
+      status: 'cancelled',
+      summary: `${serviceName} start was cancelled before completion.`,
+      nextAction: 'Retry the start request when ready.',
+      data: { service: serviceName },
+    };
+  }
+  const config = await loadWorkspaceServicesConfig(cwd, { signal: options.signal }).catch((error) => {
+    if (isAbortError(error, options.signal)) return null;
+    throw error;
+  });
+  if (!config) {
+    return {
+      ok: false,
+      status: 'cancelled',
+      summary: `${serviceName} start was cancelled before completion.`,
+      nextAction: 'Retry the start request when ready.',
+      data: { service: serviceName },
+    };
+  }
 
   if (serviceName === 'all' || serviceName === 'compose') {
     const composeFile = config.composeFile;
     if (!composeFile) throw new Error('No Docker Compose file found. Set compose_file in .pi/workspace-services.json to a project-relative file path, or place a standard Compose file in the workspace root.');
-    return await startComposeService(config.workspaceRoot, 'all', {
+    const secrets = await knownStackSecretsBestEffort(config);
+    return redactStructured(await startComposeService(config.workspaceRoot, 'all', {
       composeFile,
       timeoutMs: options.timeoutMs,
       signal: options.signal,
-    });
+      secrets,
+    }), secrets);
   }
 
   const service = getService(config, serviceName);
   if (service.type === 'compose') {
-    return await startComposeService(config.workspaceRoot, service.name, {
+    const secrets = await knownSecretsBestEffort(service, config);
+    return redactStructured(await startComposeService(config.workspaceRoot, service.name, {
       composeFile: service.composeFile,
       timeoutMs: options.timeoutMs,
       signal: options.signal,
-    });
+      secrets,
+    }), secrets);
   }
 
   const timeoutMs = clampInteger(options.timeoutMs, DEFAULT_START_TIMEOUT_MS, 100, 300_000);
@@ -441,7 +619,7 @@ export async function startService(cwd: string, serviceName: string, options: St
         const next = { ...opened.state, services: { ...opened.state.services } };
         const runtime = next.services[service.name];
         if (runtime?.identity) {
-          const validation = await validateManagedIdentity(config, runtime.identity, service.command);
+          const validation = await hostProcessAdapter.validateManagedIdentity(config, runtime.identity, service.command);
           if (validation.ok) {
             return {
               ok: true,
@@ -459,7 +637,7 @@ export async function startService(cwd: string, serviceName: string, options: St
 
         let pid: number;
         try {
-          pid = await spawnRunner(config, service, options.truncateLog ?? false, timeoutController.signal);
+          pid = await hostProcessAdapter.spawnRunner(config, service, options.truncateLog ?? false, timeoutController.signal);
           spawnedPid = pid;
         } catch (spawnError) {
           delete starting.services[service.name];
@@ -469,9 +647,9 @@ export async function startService(cwd: string, serviceName: string, options: St
 
         let identity: ManagedProcessIdentityV1;
         try {
-          identity = await captureManagedIdentity(config, pid, service.command);
+          identity = await hostProcessAdapter.captureManagedIdentity(config, pid, service.command);
         } catch (captureError) {
-          try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ } }
+          try { hostProcessAdapter.kill(-pid, 'SIGKILL'); } catch { try { hostProcessAdapter.kill(pid, 'SIGKILL'); } catch { /* ignore */ } }
           delete starting.services[service.name];
           await commitRuntimeState(config, starting, starting).catch(() => undefined);
           throw captureError;
@@ -481,7 +659,7 @@ export async function startService(cwd: string, serviceName: string, options: St
         await commitRuntimeState(config, starting, starting);
 
         if (timedOut) {
-          try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ } }
+          try { hostProcessAdapter.kill(-pid, 'SIGKILL'); } catch { try { hostProcessAdapter.kill(pid, 'SIGKILL'); } catch { /* ignore */ } }
           delete starting.services[service.name];
           await commitRuntimeState(config, starting, starting).catch(() => undefined);
           return {
@@ -512,25 +690,29 @@ export async function startService(cwd: string, serviceName: string, options: St
     );
   } catch (error) {
     if (spawnedPid) {
-      try { process.kill(-spawnedPid, 'SIGKILL'); } catch { try { process.kill(spawnedPid, 'SIGKILL'); } catch { /* ignore */ } }
+      try { hostProcessAdapter.kill(-spawnedPid, 'SIGKILL'); } catch { try { hostProcessAdapter.kill(spawnedPid, 'SIGKILL'); } catch { /* ignore */ } }
     }
+    const secrets = await knownSecretsBestEffort(service, config);
     if (timedOut || (error instanceof Error && error.message.includes('timed out'))) {
-      return {
+      return redactStructured({
         ok: false,
         status: 'timeout',
         summary: `${service.name} start timed out after ${timeoutMs}ms.`,
         nextAction: `Check logs at ${service.logPath} or verify service configuration.`,
         data: { service: service.name, timeoutMs },
-      };
+      }, secrets);
     }
     if (error instanceof Error && (error.message === 'Operation aborted' || error.name === 'AbortError' || options.signal?.aborted)) {
-      return {
+      return redactStructured({
         ok: false,
         status: 'cancelled',
         summary: `${service.name} start was cancelled before completion.`,
         nextAction: 'Retry the start request when ready.',
         data: { service: service.name },
-      };
+      }, secrets);
+    }
+    if (secrets.length > 0 && error instanceof Error) {
+      throw new Error(redactText(error.message, secrets));
     }
     throw error;
   } finally {
@@ -542,25 +724,50 @@ export async function startService(cwd: string, serviceName: string, options: St
 }
 
 export async function stopService(cwd: string, serviceName: string, options: StopOptions = {}): Promise<WorkspaceServiceOutcome> {
-  const config = await loadWorkspaceServicesConfig(cwd);
+  if (options.signal?.aborted) {
+    return {
+      ok: false,
+      status: 'cancelled',
+      summary: `${serviceName} stop was cancelled before completion.`,
+      nextAction: 'Retry the stop request when ready.',
+      data: { service: serviceName },
+    };
+  }
+  const config = await loadWorkspaceServicesConfig(cwd, { signal: options.signal }).catch((error) => {
+    if (isAbortError(error, options.signal)) return null;
+    throw error;
+  });
+  if (!config) {
+    return {
+      ok: false,
+      status: 'cancelled',
+      summary: `${serviceName} stop was cancelled before completion.`,
+      nextAction: 'Retry the stop request when ready.',
+      data: { service: serviceName },
+    };
+  }
 
   if (serviceName === 'all' || serviceName === 'compose') {
     const composeFile = config.composeFile;
     if (!composeFile) throw new Error('No Docker Compose file found. Set compose_file in .pi/workspace-services.json to a project-relative file path, or place a standard Compose file in the workspace root.');
-    return await stopComposeService(config.workspaceRoot, 'all', {
+    const secrets = await knownStackSecretsBestEffort(config);
+    return redactStructured(await stopComposeService(config.workspaceRoot, 'all', {
       composeFile,
       timeoutMs: options.timeoutMs,
       signal: options.signal,
-    });
+      secrets,
+    }), secrets);
   }
 
   const service = getService(config, serviceName);
   if (service.type === 'compose') {
-    return await stopComposeService(config.workspaceRoot, service.name, {
+    const secrets = await knownSecretsBestEffort(service, config);
+    return redactStructured(await stopComposeService(config.workspaceRoot, service.name, {
       composeFile: service.composeFile,
       timeoutMs: options.timeoutMs,
       signal: options.signal,
-    });
+      secrets,
+    }), secrets);
   }
 
   const timeoutMs = clampInteger(options.timeoutMs, DEFAULT_STOP_TIMEOUT_MS, 500, 30000);
@@ -577,18 +784,19 @@ export async function stopService(cwd: string, serviceName: string, options: Sto
       }
       return { ok: true, status: 'not_running', summary: `${service.name} is not running.`, data: { service: service.name } };
     }
-    const validation = await validateManagedIdentity(config, runtime.identity, service.command);
+    const validation = await hostProcessAdapter.validateManagedIdentity(config, runtime.identity, service.command);
     if (!validation.ok) {
       runtime.phase = 'recovery_required';
       runtime.updatedAt = new Date().toISOString();
       await commitRuntimeState(config, opened.state, next);
-      return {
+      const secrets = await knownSecretsBestEffort(service, config);
+      return redactStructured({
         ok: false,
         status: 'identity_mismatch',
         summary: `${service.name} identity mismatch prevented signaling.`,
         nextAction: 'Inspect status and reconcile the runtime state before retrying.',
         data: { service: service.name, pid: runtime.identity.pid, reason: validation.reason },
-      };
+      }, secrets);
     }
     next.services[service.name] = { ...runtime, phase: 'stopping', identity: validation.identity, updatedAt: new Date().toISOString() };
     const stopping = await commitRuntimeState(config, opened.state, next);
@@ -611,28 +819,56 @@ export async function stopService(cwd: string, serviceName: string, options: Sto
 }
 
 export async function restartService(cwd: string, serviceName: string, options: StopOptions = {}): Promise<WorkspaceServiceOutcome> {
-  const config = await loadWorkspaceServicesConfig(cwd);
+  if (options.signal?.aborted) {
+    return {
+      ok: false,
+      status: 'cancelled',
+      summary: `${serviceName} restart was cancelled before completion.`,
+      nextAction: 'Retry the restart request when ready.',
+      data: { service: serviceName },
+    };
+  }
+  const config = await loadWorkspaceServicesConfig(cwd, { signal: options.signal }).catch((error) => {
+    if (isAbortError(error, options.signal)) return null;
+    throw error;
+  });
+  if (!config) {
+    return {
+      ok: false,
+      status: 'cancelled',
+      summary: `${serviceName} restart was cancelled before completion.`,
+      nextAction: 'Retry the restart request when ready.',
+      data: { service: serviceName },
+    };
+  }
 
   if (serviceName === 'all' || serviceName === 'compose') {
     const composeFile = config.composeFile;
     if (!composeFile) throw new Error('No Docker Compose file found. Set compose_file in .pi/workspace-services.json to a project-relative file path, or place a standard Compose file in the workspace root.');
-    return await restartComposeService(config.workspaceRoot, 'all', {
+    const secrets = await knownStackSecretsBestEffort(config);
+    return redactStructured(await restartComposeService(config.workspaceRoot, 'all', {
       composeFile,
       timeoutMs: options.timeoutMs,
       signal: options.signal,
-    });
+      secrets,
+    }), secrets);
   }
 
   const service = getService(config, serviceName);
   if (service.type === 'compose') {
-    return await restartComposeService(config.workspaceRoot, service.name, {
+    const secrets = await knownSecretsBestEffort(service, config);
+    return redactStructured(await restartComposeService(config.workspaceRoot, service.name, {
       composeFile: service.composeFile,
       timeoutMs: options.timeoutMs,
       signal: options.signal,
-    });
+      secrets,
+    }), secrets);
   }
 
   const timeoutMs = clampInteger(options.timeoutMs, DEFAULT_STOP_TIMEOUT_MS, 500, 30000);
+  if (!(await pathExists(service.cwd))) throw new Error(`Service "${service.name}" path does not exist: ${service.cwd}`);
+  await ensureRuntimeDirs(config);
+  await ensureRuntimeGitignore(config.workspaceRoot);
 
   try {
     return await withLifecycleTransaction(config.statePath, { signal: options.signal, deadlineMs: DEFAULT_TRANSACTION_DEADLINE_MS, ownerPath: config.ownerPath }, async () => {
@@ -641,11 +877,12 @@ export async function restartService(cwd: string, serviceName: string, options: 
     const next = { ...opened.state, services: { ...opened.state.services } };
     const runtime = next.services[service.name];
     if (runtime?.identity) {
-      const validation = await validateManagedIdentity(config, runtime.identity, service.command);
+      const validation = await hostProcessAdapter.validateManagedIdentity(config, runtime.identity, service.command);
       if (!validation.ok) {
         runtime.phase = 'recovery_required';
         await commitRuntimeState(config, opened.state, next);
-        return { ok: false, status: 'identity_mismatch', summary: `${service.name} identity mismatch prevented restart.`, nextAction: 'Reconcile the runtime state before retrying.', data: { service: service.name, pid: runtime.identity.pid, reason: validation.reason } };
+        const secrets = await knownSecretsBestEffort(service, config);
+        return redactStructured({ ok: false, status: 'identity_mismatch', summary: `${service.name} identity mismatch prevented restart.`, nextAction: 'Reconcile the runtime state before retrying.', data: { service: service.name, pid: runtime.identity.pid, reason: validation.reason } }, secrets);
       }
       next.services[service.name] = { ...runtime, phase: 'stopping', identity: validation.identity, updatedAt: new Date().toISOString() };
       const stopping = await commitRuntimeState(config, opened.state, next);
@@ -665,7 +902,7 @@ export async function restartService(cwd: string, serviceName: string, options: 
     const starting = await commitRuntimeState(config, refreshed.state, pending);
     let pid: number;
     try {
-      pid = await spawnRunner(config, service, true, options.signal);
+      pid = await hostProcessAdapter.spawnRunner(config, service, true, options.signal);
     } catch (spawnError) {
       delete starting.services[service.name];
       await commitRuntimeState(config, starting, starting).catch(() => undefined);
@@ -673,9 +910,9 @@ export async function restartService(cwd: string, serviceName: string, options: 
     }
     let identity: ManagedProcessIdentityV1;
     try {
-      identity = await captureManagedIdentity(config, pid, service.command);
+      identity = await hostProcessAdapter.captureManagedIdentity(config, pid, service.command);
     } catch (captureError) {
-      try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ } }
+      try { hostProcessAdapter.kill(-pid, 'SIGKILL'); } catch { try { hostProcessAdapter.kill(pid, 'SIGKILL'); } catch { /* ignore */ } }
       delete starting.services[service.name];
       await commitRuntimeState(config, starting, starting).catch(() => undefined);
       throw captureError;
@@ -694,14 +931,18 @@ export async function restartService(cwd: string, serviceName: string, options: 
     return { ok: true, status: 'started', summary: `${service.name} restarted.`, data: { service: service.name, pid, logPath: service.logPath, startedAt: starting.services[service.name].startedAt } };
   });
   } catch (error) {
-    if (error instanceof Error && error.message === 'Operation aborted') {
-      return {
+    const secrets = await knownSecretsBestEffort(service, config);
+    if (isAbortError(error, options.signal)) {
+      return redactStructured({
         ok: false,
         status: 'cancelled',
         summary: `${service.name} restart was cancelled before completion.`,
         nextAction: 'Retry the restart request when ready.',
         data: { service: service.name },
-      };
+      }, secrets);
+    }
+    if (secrets.length > 0 && error instanceof Error) {
+      throw new Error(redactText(error.message, secrets));
     }
     throw error;
   }
@@ -712,43 +953,87 @@ export async function getServiceLogs(cwd: string, serviceName: string, options: 
   const service = getService(config, serviceName);
 
   if (service.type === 'compose') {
-    await ensureRuntimeDirs(config);
-    const lines = clampInteger(options.lines, DEFAULT_LOG_LINES, 1, MAX_LOG_LINES);
-    try {
-      const text = await getComposeServiceLogs(config.workspaceRoot, service.name, {
-        lines,
-        composeFile: service.composeFile,
-      });
-      await writeFile(service.logPath, text, 'utf8').catch(() => undefined);
-      const splitLines = text.split(/\r?\n/).filter(Boolean);
-      return {
-        ok: true,
-        status: 'running',
-        summary: `Retrieved bounded logs for ${service.name}.`,
-        data: {
-          service: service.name,
-          logPath: service.logPath,
-          text,
-          lines: splitLines.length,
-          offset: 0,
-          until: undefined,
-          bytesRead: Buffer.byteLength(text, 'utf8'),
-          totalBytes: Buffer.byteLength(text, 'utf8'),
-        },
-        truncation: {
-          returned: splitLines.length,
-          total: splitLines.length,
-          hasMore: false,
-        },
-      };
-    } catch (error: any) {
+    const unsupported: string[] = [];
+    if (options.offset !== undefined) unsupported.push('offset');
+    if (options.until !== undefined) unsupported.push('until');
+    if (unsupported.length > 0) {
       return {
         ok: false,
         status: 'failed',
-        summary: `Failed to retrieve logs for ${service.name}: ${error.message}`,
-        nextAction: 'Ensure Docker daemon is running and compose service exists.',
-        data: { service: service.name, logPath: service.logPath, text: '' },
+        summary: `Compose logs for ${service.name} only support a bounded recent window; ${unsupported.join(' and ')} ${unsupported.length > 1 ? 'are' : 'is'} unsupported.`,
+        nextAction: `Retry workspace_service_logs for ${service.name} without offset or until (use lines up to ${MAX_LOG_LINES} and max_bytes up to ${MAX_LOG_BYTES}).`,
+        data: { service: service.name, scope: 'recent-window-only', unsupportedArguments: unsupported },
       };
+    }
+
+    const lines = clampInteger(options.lines, DEFAULT_LOG_LINES, 1, MAX_LOG_LINES);
+    const maxBytes = clampInteger(options.maxBytes, DEFAULT_LOG_BYTES, 1024, MAX_LOG_BYTES);
+    await ensureRuntimeDirs(config);
+    const secrets = service.envFile
+      ? Object.values(await loadServiceEnv(service, config.workspaceRealRoot)).filter((value) => value.length > 0)
+      : [];
+
+    try {
+      const captured = await getComposeServiceLogsDetailed(config.workspaceRoot, service.name, {
+        lines,
+        maxBytes,
+        composeFile: service.composeFile,
+      });
+      const rawLines = captured.text.split(/\r?\n/);
+      if (rawLines.at(-1) === '') rawLines.pop();
+      const lineTruncated = rawLines.length > lines;
+      const slicedLines = lineTruncated ? rawLines.slice(rawLines.length - lines) : rawLines;
+      const redactedLines = slicedLines.map((line) => redactText(line, secrets));
+      const bounded = boundLogTail(redactedLines, maxBytes);
+      await writeFile(service.logPath, bounded.text, 'utf8').catch(() => undefined);
+      const bytesReturned = Buffer.byteLength(bounded.text, 'utf8');
+      const anyTruncated = captured.captureTruncated || lineTruncated || bounded.byteTruncated;
+
+      let nextAction: string | undefined;
+      let limitReached: string | undefined;
+      if (anyTruncated) {
+        if (lines < MAX_LOG_LINES || maxBytes < MAX_LOG_BYTES) {
+          const nextLines = Math.min(MAX_LOG_LINES, Math.max(lines, Math.min(MAX_LOG_LINES, lines * 2)));
+          const nextBytes = Math.min(MAX_LOG_BYTES, Math.max(maxBytes, Math.min(MAX_LOG_BYTES, maxBytes * 2)));
+          nextAction = `Recent Compose logs were bounded (lines=${lines}, max_bytes=${maxBytes}). Increase lines (up to ${MAX_LOG_LINES}, e.g. ${nextLines}) or max_bytes (up to ${MAX_LOG_BYTES}, e.g. ${nextBytes}) if a larger recent window is needed.`;
+        } else {
+          limitReached = `Maximum Compose log retrieval bounds reached (${MAX_LOG_LINES} lines / ${MAX_LOG_BYTES} bytes); older history is not paginated by this tool.`;
+        }
+      }
+
+      return redactStructured({
+        ok: true,
+        status: 'ok',
+        summary: `Retrieved ${bounded.lines.length} recent log line(s) for ${service.name}.`,
+        ...(nextAction ? { nextAction } : {}),
+        data: {
+          service: service.name,
+          logPath: service.logPath,
+          scope: 'recent-window-only',
+          text: bounded.text,
+          lines: bounded.lines.length,
+          maxLines: lines,
+          maxBytes,
+          bytesReturned,
+          lineTruncated,
+          byteTruncated: bounded.byteTruncated,
+          captureTruncated: captured.captureTruncated,
+          ...(limitReached ? { limitReached } : {}),
+        },
+        truncation: {
+          returned: bounded.lines.length,
+          hasMore: false,
+        },
+      }, secrets);
+    } catch (error: any) {
+      const msg = boundDiagnosticText(error instanceof Error ? error.message : String(error), secrets);
+      return redactStructured({
+        ok: false,
+        status: 'failed',
+        summary: `Failed to retrieve logs for ${service.name}: ${msg}`,
+        nextAction: 'Ensure Docker daemon is running and compose service exists.',
+        data: { service: service.name, logPath: service.logPath, text: '', error: msg },
+      }, secrets);
     }
   }
 
@@ -756,32 +1041,105 @@ export async function getServiceLogs(cwd: string, serviceName: string, options: 
   const maxBytes = clampInteger(options.maxBytes, DEFAULT_LOG_BYTES, 1024, MAX_LOG_BYTES);
   const offset = clampInteger(options.offset, 0, 0, MAX_LOG_LINES);
   const until = typeof options.until === 'number' && Number.isFinite(options.until)
-    ? clampInteger(options.until, offset + lines, offset + 1, offset + MAX_LOG_LINES)
+    ? clampInteger(options.until, offset + lines, offset, offset + MAX_LOG_LINES)
     : undefined;
   if (!(await pathExists(service.logPath))) {
-    return { ok: true, status: 'not_running', summary: `No log file found for ${service.name}.`, data: { service: service.name, logPath: service.logPath, text: '' }, truncation: { returned: 0, total: 0, hasMore: false } };
+    return {
+      ok: true,
+      status: 'ok',
+      summary: `No log file found for ${service.name} yet.`,
+      data: {
+        service: service.name,
+        logPath: service.logPath,
+        text: '',
+        lines: 0,
+        offset,
+        until,
+        bytesReturned: 0,
+        bytesRead: 0,
+        totalBytes: 0,
+        liveConsistency: true,
+      },
+      truncation: { returned: 0, total: 0, hasMore: false },
+    };
   }
   const secrets = Object.values(await loadServiceEnv(service, config.workspaceRealRoot)).filter((value) => value.length > 0);
   const tail = await readTail(service.logPath, maxBytes);
   const allLines = tail.text.split(/\r?\n/);
   if (allLines.at(-1) === '') allLines.pop();
+
   const windowEnd = Math.max(0, allLines.length - offset);
-  const windowStart = Math.max(0, until === undefined ? windowEnd - lines : allLines.length - until);
+  const requestedSpan = until !== undefined
+    ? Math.max(0, Math.min(until - offset, options.lines !== undefined ? lines : MAX_LOG_LINES))
+    : lines;
+  const windowStart = Math.max(0, windowEnd - requestedSpan);
   const selectedLines = allLines.slice(windowStart, windowEnd);
-  const text = redactText(selectedLines.join('\n'), secrets);
-  const hasMore = tail.truncated || windowStart > 0 || offset > 0;
-  return {
+  const redactedLines = selectedLines.map((line) => redactText(line, secrets));
+  const bounded = boundLogTail(redactedLines, maxBytes);
+  const returned = bounded.lines.length;
+  const bytesReturned = Buffer.byteLength(bounded.text, 'utf8');
+  const fullFileInspected = !tail.truncated;
+
+  let hasMore = false;
+  let continuation: string | undefined;
+  let limitReached: string | undefined;
+
+  if (returned > 0) {
+    if (windowStart > 0 && offset < MAX_LOG_LINES) {
+      const nextOffset = Math.min(MAX_LOG_LINES, offset + returned);
+      const nextWindowEnd = Math.max(0, allLines.length - nextOffset);
+      const nextWindowStart = Math.max(0, nextWindowEnd - lines);
+      if (nextOffset > offset && nextWindowStart < windowStart) {
+        hasMore = true;
+        continuation = `Call workspace_service_logs with service=${service.name}, lines=${lines}, and offset=${nextOffset} for older logs.`;
+      } else {
+        limitReached = `Maximum supported offset (${MAX_LOG_LINES}) reached; older lines exist but no further pagination is available through this tool.`;
+      }
+    } else if (windowStart > 0 && offset >= MAX_LOG_LINES) {
+      limitReached = `Maximum supported offset (${MAX_LOG_LINES}) reached; older lines exist but no further pagination is available through this tool.`;
+    } else if (windowStart === 0 && tail.truncated) {
+      if (maxBytes < MAX_LOG_BYTES) {
+        const nextBytes = Math.min(MAX_LOG_BYTES, maxBytes * 2);
+        hasMore = true;
+        continuation = `Call workspace_service_logs with service=${service.name}, lines=${lines}, offset=${offset}, and max_bytes=${nextBytes} to inspect older bytes (up to ${MAX_LOG_BYTES}).`;
+      } else {
+        limitReached = `Older log bytes exist beyond the maximum ${MAX_LOG_BYTES}-byte inspection window; no further retrieval is available through this tool.`;
+      }
+    }
+  } else if (tail.truncated) {
+    limitReached = maxBytes < MAX_LOG_BYTES
+      ? `Only the newest ${tail.bytesRead} of ${tail.totalBytes} bytes were inspected (max_bytes=${maxBytes}, max ${MAX_LOG_BYTES}); no lines matched this offset within the inspected window.`
+      : `Only the newest ${tail.bytesRead} of ${tail.totalBytes} bytes can be inspected at maximum max_bytes=${MAX_LOG_BYTES}; no further retrieval is available through this tool.`;
+  }
+
+  return redactStructured({
     ok: true,
-    status: 'running',
-    summary: `Retrieved bounded logs for ${service.name}.`,
-    data: { service: service.name, logPath: service.logPath, text, lines: selectedLines.filter(Boolean).length, offset, until, bytesRead: tail.bytesRead, totalBytes: tail.totalBytes },
-    truncation: {
-      returned: selectedLines.filter(Boolean).length,
-      total: allLines.filter(Boolean).length,
-      hasMore,
-      continuation: hasMore ? `Call workspace_service_logs with service=${service.name}, lines=${lines}, and offset=${offset + selectedLines.length} for older logs; increase max_bytes if older lines are outside the bounded read.` : undefined,
+    status: 'ok',
+    summary: `Retrieved ${returned} log line(s) for ${service.name}.`,
+    ...(continuation ? { nextAction: continuation } : {}),
+    data: {
+      service: service.name,
+      logPath: service.logPath,
+      text: bounded.text,
+      lines: returned,
+      offset,
+      until,
+      bytesReturned,
+      bytesRead: tail.bytesRead,
+      totalBytes: tail.totalBytes,
+      byteTruncated: bounded.byteTruncated,
+      inspectedWindowLines: allLines.length,
+      fullFileInspected,
+      liveConsistency: true,
+      ...(limitReached ? { limitReached } : {}),
     },
-  };
+    truncation: {
+      returned,
+      ...(fullFileInspected ? { total: allLines.length } : {}),
+      hasMore,
+      ...(continuation ? { continuation } : {}),
+    },
+  }, secrets);
 }
 
 export async function readConfigText(cwd: string): Promise<string | undefined> {

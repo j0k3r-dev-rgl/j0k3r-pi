@@ -124,7 +124,7 @@ describe('skill registry extension', () => {
     });
   });
 
-  it('renders resolver results compactly until native tool expansion is enabled', async () => {
+  it('renders resolver results as one compact inline row until native tool expansion is enabled', async () => {
     const tools: any[] = [];
     const pi = {
       registerTool: vi.fn((tool: any) => tools.push(tool)),
@@ -144,15 +144,15 @@ describe('skill registry extension', () => {
         bold: (text: string) => text,
       };
 
-      const collapsed = resolveTool.renderResult(result, { expanded: false, isPartial: false }, theme, {}).render(120).join('\n');
-      expect(collapsed).toContain('skill registry');
+      const collapsed = resolveTool.renderResult(result, { expanded: false, isPartial: false }, theme, { state: {} }).render(120).join('\n');
+      expect(collapsed).toContain('skill_registry_resolve');
       expect(collapsed).toContain('direct');
-      expect(collapsed).toMatch(/Ctrl\+O|ctrl\+o/i);
-      expect(collapsed.split('\n').length).toBeLessThan(5);
+      expect(collapsed).not.toMatch(/Ctrl\+O|ctrl\+o|to expand/i);
+      expect(collapsed.split('\n')).toHaveLength(1);
       expect(collapsed).not.toContain('.pi/skills/basic/SKILL.md');
       expect(collapsed).not.toContain('reasons:');
 
-      const expanded = resolveTool.renderResult(result, { expanded: true, isPartial: false }, theme, {}).render(120).join('\n');
+      const expanded = resolveTool.renderResult(result, { expanded: true, isPartial: false }, theme, { state: {} }).render(120).join('\n');
       expect(expanded).toContain('.pi/skills/basic/SKILL.md');
       expect(expanded).toContain('reasons:');
       expect(expanded).toContain('Read .pi/skills/basic/SKILL.md before acting');

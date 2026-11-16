@@ -1,5 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { fetchUsage, renderTextReport, type ProviderGroup } from "./src/api.ts";
+import { fetchUsage, renderTextReport } from "./src/api.ts";
+import { createUsageCache } from "./src/cache.ts";
+import { quotaHudAccounts } from './src/hud.ts';
 import { UsageModal } from "./src/modal.ts";
 
 /**
@@ -10,23 +12,26 @@ import { UsageModal } from "./src/modal.ts";
  * never sees account emails, plans or quotas.
  */
 
-type Cache = {
-    groups: ProviderGroup[];
-    fetchedAt: number;
-};
-
-let cache: Cache | null = null;
-let open = false;
-
-/** Data is fetched when the modal opens and reused while it stays open. */
-async function loadUsage(force: boolean, signal?: AbortSignal): Promise<ProviderGroup[]> {
-    if (!force && cache) return cache.groups;
-    const groups = await fetchUsage(signal);
-    cache = { groups, fetchedAt: Date.now() };
-    return groups;
-}
-
 export default function cpamcUsage(pi: ExtensionAPI) {
+    const cache = createUsageCache(fetchUsage);
+    let open = false;
+    let context: any;
+    pi.on('session_start', (_event, ctx) => {
+        context = ctx;
+        if (ctx.mode === 'tui') cache.start();
+    });
+    const unsubscribe = pi.events.on('pihud:quota:read:v1', (request: any) => {
+        if (!context || context.mode !== 'tui' || !context.isProjectTrusted?.() || !request || request.cwd !== context.cwd ||
+            request.sessionId !== context.sessionManager.getSessionId() || typeof request.respond !== 'function') return;
+        const snapshot = cache.snapshot();
+        request.respond({
+            lines: [],
+            accounts: snapshot.groups ? quotaHudAccounts(snapshot.groups) : [],
+            updatedAt: snapshot.updatedAt,
+            error: snapshot.error,
+        });
+    });
+    pi.on('session_shutdown', () => { cache.stop(); context = undefined; unsubscribe(); });
     pi.registerCommand("usage", {
         description: "Show CLIProxyAPI subscriptions and quota limits in a floating panel (user-only: never sent to the model)",
         handler: async (args, ctx) => {
@@ -34,7 +39,7 @@ export default function cpamcUsage(pi: ExtensionAPI) {
 
             if (wantsText || !ctx.hasUI || ctx.mode !== "tui") {
                 try {
-                    const groups = await loadUsage(true, ctx.signal);
+                    const groups = await cache.load(false, ctx.signal);
                     if (ctx.hasUI) ctx.ui.notify(renderTextReport(groups), "info");
                 } catch (error) {
                     const message = error instanceof Error ? error.message : String(error);
@@ -51,10 +56,6 @@ export default function cpamcUsage(pi: ExtensionAPI) {
             }
             open = true;
 
-            // Opening the modal always refreshes: the cache only avoids refetching
-            // while the user navigates between providers and accounts.
-            cache = null;
-
             let modal: UsageModal | null = null;
             try {
                 await ctx.ui.custom(
@@ -63,7 +64,7 @@ export default function cpamcUsage(pi: ExtensionAPI) {
                             theme: theme as never,
                             tui,
                             done,
-                            load: (force) => loadUsage(force, ctx.signal),
+                            load: (force) => cache.load(force, ctx.signal),
                         });
                         return modal as never;
                     },

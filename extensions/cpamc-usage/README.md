@@ -15,4 +15,17 @@ Command: `/usage`
 - Displays interactive TUI modal with tabs for providers, account lists, and progress bars.
 - Supports headless text report via `/usage --text`.
 
+## Background cache and HUD
+
+In TUI sessions, quotas preload asynchronously at session start and refresh every
+30 seconds, even when the panel is closed. `/usage` reuses that cache; its explicit
+refresh still forces a fetch. Concurrent requests share one promise. A failed
+refresh retains the previous snapshot. Shutdown cancels the timer and owned I/O.
+
+Optional `pihud:quota:read:v1` event requests return the cached text report,
+update timestamp and a generic refresh error only to the matching TUI cwd/session.
+No messages or tool results are injected into model context; no sibling imports
+or dependencies are required. The HUD may persist this human-only snapshot in
+its private cache; do not share that cache.
+
 Validation: `node --test test/*.test.ts` from this extension directory.

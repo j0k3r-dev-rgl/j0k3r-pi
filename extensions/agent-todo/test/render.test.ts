@@ -1,15 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  BOLD,
   CYAN,
-  DIM,
   LIME,
   RED,
-  RESET,
-  boxLine,
-  cardBottomBorder,
-  cardTopBorder,
   renderAgentTodoCall,
   renderAgentTodoResult,
   stripAnsi,
@@ -35,151 +29,61 @@ const activeTodoFixture = {
   updated_at: '2026-06-10T00:00:00.000Z',
 };
 
-describe('agent todo tool renderers', () => {
-  it('renders concise call and compact result summaries without raw json or full step lists', () => {
-    const call = renderAgentTodoCall({ action: 'create', title: 'Ship feature' }, theme).render(80).join('\n');
-    expect(call).toContain('agent_todo');
-    expect(call).toContain('create');
-    expect(call).toContain('Ship feature');
+function assertUnboxedAndNoHints(lines: string[]): void {
+  const joined = lines.join('\n');
+  expect(joined).not.toMatch(/[╭╮╰╯│]/);
+  expect(joined).not.toMatch(/\x1b\[(?:4[0-7]|48;|10[0-7]|7m)/);
+  expect(stripAnsi(joined)).not.toMatch(/\b(to expand|to collapse|ctrl\+o|app\.tools\.expand)\b/i);
+}
 
-    const result = renderAgentTodoResult({
-      details: {
-        agent_todo: {
-          version: 1,
-          action: 'create',
-          ok: true,
-          state: {
-            active_todo: activeTodoFixture,
-            current_todo: null,
-          },
-        },
-      },
-      content: [{ type: 'text', text: 'Created agent todo: Ship feature.' }],
-    }, { isPartial: false }, theme).render(80).join('\n');
-
-    expect(result).toContain('Ship feature');
-    expect(result).toContain('1/3 complete');
-    expect(result).not.toContain('[x] 1. Write tests');
-    expect(result).not.toContain('[ ] 2. Implement');
-    expect(result).not.toContain('{');
-    expect(result).not.toContain('"version"');
-  });
-
-  it('keeps completed todo results compact', () => {
-    const result = renderAgentTodoResult({
-      details: {
-        agent_todo: {
-          version: 1,
-          action: 'complete_all',
-          ok: true,
-          state: {
-            active_todo: null,
-            current_todo: {
-              id: 'todo-1',
-              title: 'Ship feature',
-              status: 'completed',
-              steps: [
-                { id: '1', text: 'One', status: 'completed' },
-                { id: '2', text: 'Two', status: 'completed' },
-              ],
-              created_at: '2026-06-10T00:00:00.000Z',
-              updated_at: '2026-06-10T00:00:00.000Z',
-              completed_at: '2026-06-10T00:00:00.000Z',
-            },
-          },
-        },
-      },
-      content: [{ type: 'text', text: 'Completed all remaining steps for Ship feature.' }],
-    }, { isPartial: false }, theme).render(80).join('\n');
-
-    expect(result).toContain('completed');
-    expect(result).toContain('Ship feature');
-    expect(result).toContain('2/2');
-    expect(result).not.toContain('[x]');
-  });
-
-  it('renders hollow card framing with rounded corners and consistent line widths without background fill', () => {
+describe('agent todo compact tool renderers', () => {
+  it('renders single inline pending call row with separator and no card borders or hints', () => {
     const context = { state: {} };
     const callLines = renderAgentTodoCall({ action: 'create', title: 'Ship feature' }, theme, context).render(80);
 
-    expect(callLines).toHaveLength(3);
-    // Top border with rounded corners
-    expect(callLines[0]).toContain('╭');
-    expect(callLines[0]).toContain('╮');
-    expect(callLines[0]).toContain('agent_todo [create]');
-    // Box line with vertical borders
-    expect(callLines[1]).toContain('│');
-    expect(callLines[1]).toContain('Pending: Ship feature');
-    // Bottom border with rounded corners
-    expect(callLines[2]).toContain('╰');
-    expect(callLines[2]).toContain('╯');
-
-    // Verify each line visible width exactly matches 80
-    for (const line of callLines) {
-      expect(visibleWidth(line)).toBe(80);
-      // No background fill escapes
-      expect(line).not.toMatch(/\x1b\[4[0-7]m/);
-      expect(line).not.toMatch(/\x1b\[48;/);
-      expect(line).not.toMatch(/\x1b\[7m/);
-    }
+    expect(callLines).toHaveLength(1);
+    expect(stripAnsi(callLines[0])).toContain('agent_todo');
+    expect(stripAnsi(callLines[0])).toContain('create');
+    expect(stripAnsi(callLines[0])).toContain('───');
+    expect(stripAnsi(callLines[0])).toContain('Ship feature');
+    expect(visibleWidth(callLines[0])).toBeLessThanOrEqual(80);
+    assertUnboxedAndNoHints(callLines);
   });
 
-  it('implements two-phase slot coordination between call and result via context.state', () => {
-    const context: any = { state: {} };
+  it('coordinates call and result into a single combined inline row via context.state', () => {
+    const context: any = { state: {}, args: { action: 'create', title: 'Ship feature' } };
+    const callComp = renderAgentTodoCall({ action: 'create', title: 'Ship feature' }, theme, context);
+    expect(callComp.render(80)).toHaveLength(1);
 
-    // Phase 1: Pending call before result arrives
-    const pendingCall = renderAgentTodoCall({ action: 'create', title: 'Ship feature' }, theme, context).render(80);
-    expect(pendingCall).toHaveLength(3);
-    expect(pendingCall[0]).toContain('╭');
-    expect(pendingCall[1]).toContain('●');
-    expect(pendingCall[2]).toContain('╰');
-
-    // Tool execution completes: renderResult is called
-    const resultComponent = renderAgentTodoResult({
+    const resultComp = renderAgentTodoResult({
       details: {
         agent_todo: {
           version: 1,
           action: 'create',
           ok: true,
-          state: {
-            active_todo: activeTodoFixture,
-            current_todo: null,
-          },
+          state: { active_todo: activeTodoFixture, current_todo: null },
         },
       },
-      content: [{ type: 'text', text: 'Created todo' }],
-    }, { expanded: false }, theme, context);
+      content: [{ type: 'text', text: 'Created agent todo: Ship feature.' }],
+    }, { expanded: false, isPartial: false }, theme, context);
 
     expect(context.state.hasResult).toBe(true);
+    expect(callComp.render(80)).toEqual([]);
 
-    // Phase 2: Call re-renders with result present -> only Slot 1 top border
-    const resolvedCall = renderAgentTodoCall({ action: 'create', title: 'Ship feature' }, theme, context).render(80);
-    expect(resolvedCall).toHaveLength(1);
-    expect(resolvedCall[0]).toContain('╭');
-    expect(resolvedCall[0]).toContain('╮');
-
-    // Slot 2: Result renders framed content + bottom border
-    const resultLines = resultComponent.render(80);
-    expect(resultLines.length).toBeGreaterThanOrEqual(2);
-    expect(resultLines[resultLines.length - 1]).toContain('╰');
-    expect(resultLines[resultLines.length - 1]).toContain('╯');
-
-    // Seamless assembled card has exactly 1 top border and 1 bottom border
-    const assembledCard = [...resolvedCall, ...resultLines];
-    const topBorders = assembledCard.filter((line) => line.includes('╭'));
-    const bottomBorders = assembledCard.filter((line) => line.includes('╰'));
-    expect(topBorders).toHaveLength(1);
-    expect(bottomBorders).toHaveLength(1);
-
-    for (const line of assembledCard) {
-      expect(visibleWidth(line)).toBe(80);
-    }
+    const resultLines = resultComp.render(80);
+    expect(resultLines).toHaveLength(1);
+    const plain = stripAnsi(resultLines[0]);
+    expect(plain).toContain('agent_todo [create]');
+    expect(plain).toContain('───');
+    expect(plain).toContain('Ship feature · 1/3 complete · 2 open');
+    expect(plain).not.toContain('[x] 1. Write tests');
+    expect(plain).not.toContain('"version"');
+    assertUnboxedAndNoHints(resultLines);
   });
 
-  it('applies dynamic border colors for active (cyan), completed (lime), and error (red) states', () => {
-    // 1. Active todo: CYAN
+  it('applies palette colors for active (CYAN), completed (LIME), and error (RED)', () => {
     const activeCtx: any = { state: {} };
-    const activeResult = renderAgentTodoResult({
+    const activeLines = renderAgentTodoResult({
       details: {
         agent_todo: {
           version: 1,
@@ -190,13 +94,11 @@ describe('agent todo tool renderers', () => {
       },
       content: [{ type: 'text', text: 'ok' }],
     }, { expanded: false }, theme, activeCtx).render(80);
-
     expect(activeCtx.state.borderColor).toBe(CYAN);
-    expect(activeResult[activeResult.length - 1]).toContain(CYAN);
+    expect(activeLines.join('\n')).toContain(CYAN);
 
-    // 2. Completed todo: LIME
     const completeCtx: any = { state: {} };
-    const completeResult = renderAgentTodoResult({
+    const completeLines = renderAgentTodoResult({
       details: {
         agent_todo: {
           version: 1,
@@ -217,13 +119,12 @@ describe('agent todo tool renderers', () => {
       },
       content: [{ type: 'text', text: 'ok' }],
     }, { expanded: false }, theme, completeCtx).render(80);
-
     expect(completeCtx.state.borderColor).toBe(LIME);
-    expect(completeResult[completeResult.length - 1]).toContain(LIME);
+    expect(completeLines.join('\n')).toContain(LIME);
+    expect(stripAnsi(completeLines.join('\n'))).toContain('completed · Done task · 1/1 complete');
 
-    // 3. Error result: RED
     const errorCtx: any = { state: {} };
-    const errorResult = renderAgentTodoResult({
+    const errorLines = renderAgentTodoResult({
       details: {
         agent_todo: {
           version: 1,
@@ -235,44 +136,24 @@ describe('agent todo tool renderers', () => {
       },
       content: [{ type: 'text', text: 'failed' }],
     }, { expanded: false }, theme, errorCtx).render(80);
-
     expect(errorCtx.state.borderColor).toBe(RED);
-    expect(errorResult[errorResult.length - 1]).toContain(RED);
-    expect(errorResult.join('\n')).toContain('Error: Title already exists');
+    expect(errorLines.join('\n')).toContain(RED);
+    expect(stripAnsi(errorLines.join('\n'))).toContain('Error: Title already exists');
   });
 
-  it('formats top border action badges with target context', () => {
-    const call1 = renderAgentTodoCall({ action: 'complete_step', step_id: 'step-2' }, theme).render(80)[0];
+  it('formats action badges with step_id and range targets', () => {
+    const call1 = stripAnsi(renderAgentTodoCall({ action: 'complete_step', step_id: 'step-2' }, theme).render(80)[0]);
     expect(call1).toContain('agent_todo [complete_step step-2]');
 
-    const call2 = renderAgentTodoCall({ action: 'complete_range', range: '2-4' }, theme).render(80)[0];
+    const call2 = stripAnsi(renderAgentTodoCall({ action: 'complete_range', range: '2-4' }, theme).render(80)[0]);
     expect(call2).toContain('agent_todo [complete_range 2-4]');
 
-    const call3 = renderAgentTodoCall({ action: 'show' }, theme).render(80)[0];
+    const call3 = stripAnsi(renderAgentTodoCall({ action: 'show' }, theme).render(80)[0]);
     expect(call3).toContain('agent_todo [show]');
   });
 
-  it('renders collapsed mode with summary and expand hint', () => {
-    const result = renderAgentTodoResult({
-      details: {
-        agent_todo: {
-          version: 1,
-          action: 'create',
-          ok: true,
-          state: { active_todo: activeTodoFixture, current_todo: null },
-        },
-      },
-      content: [{ type: 'text', text: 'Created' }],
-    }, { expanded: false }, theme).render(80).join('\n');
-
-    expect(result).toContain('Ship feature · 1/3 complete · 2 open');
-    expect(result).toContain('ctrl+o expand');
-    expect(result).not.toContain('✓');
-    expect(result).not.toContain('○');
-  });
-
-  it('renders expanded mode with checklist bullets (✓ completed, ○ open) and collapse hint', () => {
-    const result = renderAgentTodoResult({
+  it('renders expanded checklist and all returned content blocks in order without truncation', () => {
+    const lines = renderAgentTodoResult({
       details: {
         agent_todo: {
           version: 1,
@@ -281,26 +162,31 @@ describe('agent todo tool renderers', () => {
           state: { active_todo: activeTodoFixture, current_todo: null },
         },
       },
-      content: [{ type: 'text', text: 'Showing todo' }],
-    }, { expanded: true }, theme).render(80).join('\n');
+      content: [
+        { type: 'text', text: 'First returned block' },
+        { type: 'text', text: 'Second block with literal ╭box╮ and to expand' },
+      ],
+    }, { expanded: true }, theme, { args: { action: 'show' }, state: {} }).render(80);
 
-    expect(result).toContain('Ship feature');
-    expect(result).toContain('[active]');
-    // Completed step bullet
-    expect(result).toContain('✓');
-    expect(result).toContain('Write tests');
-    expect(stripAnsi(result)).toContain('✓ Write tests');
-    // Open step bullet
-    expect(result).toContain('○');
-    expect(result).toContain('Implement');
-    expect(stripAnsi(result)).toContain('○ Implement');
-    expect(stripAnsi(result)).toContain('○ Validate');
-    // Collapse hint
-    expect(result).toContain('ctrl+o collapse');
+    const plain = stripAnsi(lines.join('\n'));
+    expect(plain).toContain('Ship feature [active]');
+    expect(plain).toContain('✓ Write tests');
+    expect(plain).toContain('○ Implement');
+    expect(plain).toContain('○ Validate');
+    expect(plain).toContain('First returned block');
+    expect(plain).toContain('Second block with literal ╭box╮ and to expand');
+    expect(plain).not.toMatch(/ctrl\+o/i);
   });
 
-  it('handles special states inside framed card (cleared, error with active, empty)', () => {
-    // Cleared state
+  it('handles partial, cleared, and empty states cleanly in one inline row', () => {
+    const partial = renderAgentTodoResult({
+      details: undefined as any,
+      content: [{ type: 'text', text: 'working' }],
+    }, { expanded: false, isPartial: true }, theme, { args: { action: 'show' }, state: {} }).render(80);
+    expect(partial).toHaveLength(1);
+    expect(stripAnsi(partial[0])).toContain('running…');
+    assertUnboxedAndNoHints(partial);
+
     const cleared = renderAgentTodoResult({
       details: {
         agent_todo: {
@@ -321,14 +207,11 @@ describe('agent todo tool renderers', () => {
         },
       },
       content: [{ type: 'text', text: 'Cleared active agent todo.' }],
-    }, { expanded: false }, theme).render(80).join('\n');
+    }, { expanded: false }, theme).render(80);
+    expect(cleared).toHaveLength(1);
+    expect(stripAnsi(cleared[0])).toContain('cleared · Old task');
+    assertUnboxedAndNoHints(cleared);
 
-    expect(cleared).toContain('cleared');
-    expect(cleared).toContain('Old task');
-    expect(cleared).toContain('│');
-    expect(cleared).toContain('╰');
-
-    // Empty state
     const empty = renderAgentTodoResult({
       details: {
         agent_todo: {
@@ -339,37 +222,39 @@ describe('agent todo tool renderers', () => {
         },
       },
       content: [{ type: 'text', text: 'No active agent todo.' }],
-    }, { expanded: false }, theme).render(80).join('\n');
-
-    expect(empty).toContain('No active agent todo.');
-    expect(empty).toContain('│');
-    expect(empty).toContain('╰');
+    }, { expanded: false }, theme).render(80);
+    expect(empty).toHaveLength(1);
+    expect(stripAnsi(empty[0])).toContain('No active agent todo.');
+    assertUnboxedAndNoHints(empty);
   });
 
-  it('falls back gracefully to plain text without crashing when terminal width is narrow (< 24)', () => {
-    const call = renderAgentTodoCall({ action: 'create', title: 'Ship feature' }, theme).render(20);
-    expect(call).toHaveLength(1);
-    expect(call[0]).not.toContain('╭');
-    expect(call[0]).toContain('agent_todo');
-    expect(visibleWidth(call[0])).toBeLessThanOrEqual(20);
+  it('enforces width 0 empty output and positive width bounds with CJK, emoji, combining, and OSC 8', () => {
+    const wideTodo = {
+      ...activeTodoFixture,
+      title: '漢字🚀 café\u0301 \x1b]8;;https://example.com\x07link\x1b]8;;\x07',
+      steps: [{ id: 's1', text: '漢字🚀 café\u0301 very long step text without breaks 1234567890', status: 'open' as const }],
+    };
+    const callComp = renderAgentTodoCall({ action: 'create', title: wideTodo.title }, theme);
+    const resComp = renderAgentTodoResult({
+      details: { agent_todo: { version: 1, action: 'create', ok: true, state: { active_todo: wideTodo, current_todo: null } } },
+      content: [{ type: 'text', text: wideTodo.steps[0].text }],
+    }, { expanded: true }, theme);
 
-    const result = renderAgentTodoResult({
-      details: {
-        agent_todo: {
-          version: 1,
-          action: 'create',
-          ok: true,
-          state: { active_todo: activeTodoFixture, current_todo: null },
-        },
-      },
-      content: [{ type: 'text', text: 'ok' }],
-    }, { expanded: false }, theme).render(20);
+    expect(callComp.render(0)).toEqual([]);
+    expect(resComp.render(0)).toEqual([]);
 
-    expect(result.length).toBeGreaterThanOrEqual(1);
-    for (const line of result) {
-      expect(line).not.toContain('│');
-      expect(line).not.toContain('╰');
-      expect(visibleWidth(line)).toBeLessThanOrEqual(20);
+    for (const width of [1, 2, 10, 23, 24, 40, 80, 120]) {
+      for (const line of callComp.render(width)) {
+        expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      }
+      for (const line of resComp.render(width)) {
+        expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      }
     }
+  });
+
+  it('never throws on malformed args, result, or context', () => {
+    expect(() => renderAgentTodoCall(null, undefined, undefined).render(80)).not.toThrow();
+    expect(() => renderAgentTodoResult(null as any, undefined, undefined, undefined).render(80)).not.toThrow();
   });
 });

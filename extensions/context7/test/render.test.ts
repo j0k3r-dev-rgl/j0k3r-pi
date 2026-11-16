@@ -1,11 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { visibleWidth } from '@earendil-works/pi-tui';
 import {
-  cardBottomBorder,
-  cardTopBorder,
   CYAN,
   LIME,
   RED,
+  context7ToolRenderers,
   renderContext7ToolCall,
   renderContext7ToolResult,
 } from '../src/render/index.js';
@@ -36,22 +35,28 @@ function result(content: string, details: Record<string, unknown>) {
   return { content: [{ type: 'text' as const, text: content }], details };
 }
 
-describe('Context7 hollow card tool rendering', () => {
-  it('renders tool calls as compact card headers with action badges', () => {
+describe('Context7 compact inline tool rendering', () => {
+  const FRAME = /[╭╮╰╯│]/;
+
+  it('renders one compact inline call row with the action badge', () => {
     const query = `focused-${'query-'.repeat(80)}`;
-    const output = rendered(renderContext7ToolCall('context7_get_context', {
+    const component = renderContext7ToolCall('context7_get_context', {
       libraryId: '/facebook/react',
       query,
       type: 'json',
-    }, theme));
+    }, theme);
+    const lines = component.render(160);
+    const output = lines.join('\n');
 
+    expect(lines).toHaveLength(1);
     expect(output).toContain('context7_get_context');
     expect(output).toContain('/facebook/react');
     expect(output).toContain('focused-');
     expect(output).not.toContain(query);
-    expect(output).toContain('╭');
-    expect(output).toContain('╰');
-    expect(output).toContain('│');
+    expect(output).toContain(CYAN);
+    expect(output).toContain('─');
+    expect(output).not.toMatch(FRAME);
+    expect(output).not.toMatch(/to expand|ctrl\+o/i);
   });
 
   it('keeps documentation compact while collapsed and shows all current content when expanded', () => {
@@ -73,20 +78,22 @@ describe('Context7 hollow card tool rendering', () => {
     const collapsed = rendered(renderContext7ToolResult('context7_get_context', toolResult, { expanded: false }, theme));
     const expanded = rendered(renderContext7ToolResult('context7_get_context', toolResult, { expanded: true }, theme));
 
+    expect(collapsed.split('\n')).toHaveLength(1);
     expect(collapsed).toContain('/facebook/react');
     expect(collapsed).toContain('hooks');
     expect(collapsed).toContain('1 snippet');
     expect(collapsed).toContain('cache hit');
-    expect(collapsed).toMatch(/expand/i);
+    expect(collapsed).not.toMatch(/to expand|ctrl\+o/i);
+    expect(collapsed).not.toMatch(FRAME);
     expect(collapsed).not.toContain('FULL DOCUMENTATION');
 
     expect(expanded).toContain('/facebook/react');
-    expect(expanded).toMatch(/collapse/i);
+    expect(expanded).not.toMatch(/to collapse|ctrl\+o/i);
+    expect(expanded).not.toMatch(FRAME);
     expect(expanded).toContain('FULL DOCUMENTATION');
     expect(expanded).toContain('line two');
     expect(expanded).toContain('line three');
-    expect(expanded).toContain('│');
-    expect(expanded).toContain('╰');
+    expect(expanded).toBe(`${collapsed}\n FULL DOCUMENTATION\n line two\n line three`);
   });
 
   it.each([
@@ -127,7 +134,8 @@ describe('Context7 hollow card tool rendering', () => {
 
     for (const fragment of expected) expect(output).toContain(fragment);
     expect(output).not.toContain('SHOULD STAY HIDDEN');
-    expect(output).toMatch(/expand/i);
+    expect(output).not.toMatch(/to expand|ctrl\+o/i);
+    expect(output).not.toMatch(FRAME);
   });
 
   it('renders partial execution distinctly and keeps every line within the supplied width', () => {
@@ -137,11 +145,12 @@ describe('Context7 hollow card tool rendering', () => {
     }, theme);
     const lines = component.render(40);
 
+    expect(lines).toHaveLength(1);
     expect(lines.join('\n')).toMatch(/searching|running/i);
     expect(lines.every((line) => visibleWidth(line) <= 40)).toBe(true);
   });
 
-  it('coordinates two-phase slot assembly via context.state', () => {
+  it('coordinates two-phase slot assembly via context.state without a second row', () => {
     const context: any = { state: {} };
     const callComponent = renderContext7ToolCall('context7_get_context', {
       libraryId: '/facebook/react',
@@ -149,29 +158,27 @@ describe('Context7 hollow card tool rendering', () => {
     }, theme, context);
 
     const callLines = callComponent.render(80);
-    expect(callLines).toHaveLength(3);
-    expect(callLines[0]).toContain('╭');
-    expect(callLines[0]).toContain('context7_get_context [/facebook/react · hooks]');
-    expect(callLines[1]).toContain('Pending: /facebook/react · hooks');
-    expect(callLines[2]).toContain('╰');
+    expect(callLines).toHaveLength(1);
+    expect(callLines[0]).toContain('context7_get_context');
+    expect(callLines[0]).toContain('/facebook/react · hooks');
 
     const resultComponent = renderContext7ToolResult('context7_get_context', result('docs', {
       request: { libraryId: '/facebook/react', query: 'hooks' },
     }), { expanded: false }, theme, context);
 
     expect(context.state.hasResult).toBe(true);
-    expect(context.state.borderColor).toBe(LIME);
+    expect(context.state.isError).toBe(false);
 
     const callLinesAfterResult = callComponent.render(80);
-    expect(callLinesAfterResult).toHaveLength(1);
-    expect(callLinesAfterResult[0]).toContain('╭');
-    expect(callLinesAfterResult[0]).toContain(LIME);
+    expect(callLinesAfterResult).toEqual([]);
 
     const resultLines = resultComponent.render(80);
-    expect(resultLines[resultLines.length - 1]).toContain('╰');
+    expect(resultLines).toHaveLength(1);
+    expect(resultLines[0]).toContain(LIME);
+    expect(resultLines[0]).not.toMatch(FRAME);
   });
 
-  it('uses electric red border on error', () => {
+  it('shows one red inline error row and loses nothing when expanded', () => {
     const context: any = { state: {} };
     const toolResult = {
       isError: true,
@@ -180,14 +187,27 @@ describe('Context7 hollow card tool rendering', () => {
     };
 
     const resultComponent = renderContext7ToolResult('context7_get_context', toolResult, { expanded: false }, theme, context);
-    expect(context.state.borderColor).toBe(RED);
+    expect(context.state.isError).toBe(true);
 
     const lines = resultComponent.render(80);
+    expect(lines).toHaveLength(1);
     expect(lines[0]).toContain(RED);
-    expect(lines.some((l) => l.includes('Error: Rate limit'))).toBe(true);
+    expect(lines[0]).toContain('Rate limit');
+    expect(lines[0]).not.toMatch(FRAME);
+
+    const expanded = renderContext7ToolResult(
+      'context7_get_context',
+      toolResult,
+      { expanded: true },
+      theme,
+      { state: {} },
+    ).render(80);
+    expect(expanded[0]).toContain('Rate limit');
+    expect(expanded[0].startsWith(' ')).toBe(true);
+    expect(expanded.slice(1)).toContain(' API rate limit exceeded');
   });
 
-  it('registers renderShell self, renderCall, and renderResult on all 4 Context7 tools', () => {
+  it('registers the compact marker, renderShell self, and both safe slots on all 4 Context7 tools', () => {
     const tools: any[] = [];
     registerContext7Tools({ registerTool: (t: any) => tools.push(t) });
 
@@ -200,8 +220,10 @@ describe('Context7 hollow card tool rendering', () => {
 
     for (const tool of tools) {
       expect(tool.renderShell, `${tool.name} renderShell`).toBe('self');
+      expect(tool.compactToolRenderingVersion, `${tool.name} marker`).toBe(1);
       expect(tool.renderCall, `${tool.name} renderCall`).toBeTypeOf('function');
       expect(tool.renderResult, `${tool.name} renderResult`).toBeTypeOf('function');
     }
+    expect(context7ToolRenderers('context7_status').compactToolRenderingVersion).toBe(1);
   });
 });

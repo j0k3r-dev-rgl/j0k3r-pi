@@ -150,31 +150,29 @@ test("MINI-002: isExtensionEnabled and codegraphExtension opt-in guard", async (
   }
 });
 
-test("MINI-003: Local theme primitives and ANSI tokens in theme.ts", async () => {
+test("MINI-004: compact row primitives keep the pink palette without card frames", async () => {
   const theme = await import("../src/render/theme.ts");
   assert.equal(theme.PINK, "\x1b[1;38;2;255;45;247m");
   assert.equal(theme.RED, "\x1b[1;38;2;255;77;109m");
+  assert.equal(theme.ROW_SEPARATOR, " ─ ");
 
-  const top = theme.cardTopBorder("codegraph_explore", "query", 40, theme.PINK, theme.PINK);
-  assert.ok(top.includes("╭"));
-  assert.ok(top.includes("╮"));
-  assert.ok(top.includes("codegraph_explore [query]"));
-  assert.ok(top.includes(theme.PINK));
+  const row = theme.rowLine([theme.electric(theme.PINK, "codegraph_explore"), "query", theme.electric(theme.DIM, "complete")], 60);
+  assert.equal(row.length, 1);
+  assert.ok(row[0].includes("codegraph_explore"));
+  assert.ok(row[0].includes("query"));
+  assert.ok(row[0].includes(theme.PINK));
+  assert.ok(row[0].includes("\u2500"));
+  assert.ok(!/[\u256d\u256e\u2570\u256f\u2502]/.test(row[0]), "no card frame characters");
+  assert.equal(theme.rowLine(["x"], 0).length, 0, "width 0 emits no cells");
 
-  const bottom = theme.cardBottomBorder(40, theme.PINK);
-  assert.ok(bottom.includes("╰"));
-  assert.ok(bottom.includes("╯"));
-  assert.ok(bottom.includes(theme.PINK));
+  for (const width of [1, 2, 10, 23, 60]) {
+    for (const line of theme.rowLine([theme.PINK + "codegraph_explore" + theme.RESET, "a very long target path"], width)) {
+      assert.ok(theme.visible(line) <= width, `line fits width ${width}`);
+    }
+  }
 
-  const lines = theme.frameContent(["test content line"], 40, theme.PINK);
-  assert.equal(lines.length, 1);
-  assert.ok(lines[0].includes("│"));
-  assert.ok(lines[0].includes("test content line"));
-
-  const hint = theme.toolHint("to expand");
-  assert.ok(hint.includes("Alt+X"));
-  assert.ok(hint.includes("to expand"));
-  assert.ok(!hint.includes("Ctrl+O"));
+  const wrapped = theme.textLines("first\n\nthird", 40);
+  assert.deepEqual(wrapped, ["first", "", "third"], "blank lines preserved in expanded output");
 });
 
 test("MINI-004: All tools register renderShell: 'self'", async () => {
@@ -191,91 +189,125 @@ test("MINI-004: All tools register renderShell: 'self'", async () => {
   }
 });
 
-test("MINI-004: Tool call and result rendering with local pink card components", async () => {
-  const {
-    renderExploreCall,
-    renderExploreResult,
-    renderStatusCall,
-    renderStatusResult,
-    renderManageCall,
-    renderManageResult,
-  } = await import("../src/render/index.ts");
-  const { PINK, RED } = await import("../src/render/theme.ts");
+test("MINI-004: every codegraph tool renders one compact unboxed inline row", async () => {
+  const render = await import("../src/render/index.ts");
+  const { PINK, RED, LIME, visible } = await import("../src/render/theme.ts");
+  const FRAME = /[\u256d\u256e\u2570\u256f\u2502]/;
 
-  // 1. Explore Call
-  const ctxExplore = { state: {} };
-  const callComp = renderExploreCall({ query: "myFunc", path: "src" }, {}, ctxExplore);
-  assert.ok(callComp);
-  const callRender = callComp.render(60);
-  assert.ok(callRender[0].includes("codegraph_explore [myFunc in src]"));
-  assert.ok(callRender[0].includes(PINK));
-  assert.ok(callRender.some((l) => l.includes("Exploring CodeGraph index…")));
+  const cases = [
+    { name: "codegraph_explore", call: render.renderExploreCall, result: render.renderExploreResult,
+      args: { query: "myFunc", path: "src" },
+      result2: { content: [{ type: "text", text: "# Architecture Details\nSymbol: myFunc" }], details: { path: "src", query: "myFunc" } },
+      expectCall: ["codegraph_explore", "myFunc in src"], expectCollapsed: ["complete"], expectExpanded: ["Architecture Details"] },
+    { name: "codegraph_status", call: render.renderStatusCall, result: render.renderStatusResult,
+      args: { path: "my-project" },
+      result2: { content: [{ type: "text", text: "{\"initialized\":true}" }], details: { path: "my-project", status: { initialized: true } } },
+      expectCall: ["codegraph_status", "my-project"], expectCollapsed: ["indexed"], expectExpanded: ["initialized"] },
+    { name: "codegraph_manage", call: render.renderManageCall, result: render.renderManageResult,
+      args: { action: "sync", path: "my-project" },
+      result2: { content: [{ type: "text", text: "Synced" }], details: { action: "sync", path: "my-project", executed: true } },
+      expectCall: ["codegraph_manage", "sync my-project"], expectCollapsed: ["sync", "done"], expectExpanded: ["Synced"] },
+    { name: "codegraph_sync", call: render.renderSyncCall, result: render.renderSyncResult,
+      args: { path: "/project/test" },
+      result2: { content: [{ type: "text", text: "Synced 5 files" }], details: { path: "/project/test", executed: true, durationMs: 42 } },
+      expectCall: ["codegraph_sync", "/project/test"], expectCollapsed: ["synced", "42ms"], expectExpanded: ["Synced 5 files"] },
+    { name: "codegraph_node", call: render.renderNodeCall, result: render.renderNodeResult,
+      args: { name: "myFunc", path: "src" },
+      result2: { content: [{ type: "text", text: "**myFunc** (function)" }], details: { path: "src", name: "myFunc" } },
+      expectCall: ["codegraph_node", "myFunc in src"], expectCollapsed: ["complete"], expectExpanded: ["**myFunc** (function)"] },
+    { name: "codegraph_impact", call: render.renderImpactCall, result: render.renderImpactResult,
+      args: { symbol: "myFunc", path: "src", depth: 2 },
+      result2: { content: [{ type: "text", text: "3 affected symbols" }], details: { path: "src", symbol: "myFunc", depth: 2 } },
+      expectCall: ["codegraph_impact", "myFunc (depth 2) in src"], expectCollapsed: ["complete"], expectExpanded: ["3 affected symbols"] },
+  ];
 
-  // 2. Explore Result (collapsed)
-  const resultCollapsed = renderExploreResult(
-    { content: [{ type: "text", text: "Found 2 files" }], details: { path: "src", query: "myFunc" } },
-    { expanded: false, isPartial: false },
-    {},
-    ctxExplore,
-  );
-  const collapsedRender = resultCollapsed.render(60);
-  assert.ok(collapsedRender.some((l) => l.includes("✓ CodeGraph exploration complete")));
-  assert.ok(collapsedRender.some((l) => l.includes("Alt+X") && l.includes("to expand")));
-  assert.ok(collapsedRender.every((l) => !l.includes(RED)));
+  for (const entry of cases) {
+    const ctx = { state: {} };
+    const callLines = entry.call(entry.args, {}, ctx).render(80);
+    assert.equal(callLines.length, 1, `${entry.name} call is exactly one row`);
+    for (const token of entry.expectCall) assert.ok(callLines[0].includes(token), `${entry.name} call shows ${token}`);
+    assert.ok(callLines[0].includes(PINK), `${entry.name} call preserves the pink palette`);
+    assert.ok(!FRAME.test(callLines[0]), `${entry.name} call has no card frame`);
+    assert.ok(!/to expand|ctrl\+o/i.test(callLines[0]), `${entry.name} call has no expansion hint`);
 
-  // 3. Explore Result (error)
-  const ctxErr = { state: {}, isError: true };
-  const resultErr = renderExploreResult(
+    const collapsed = entry.result(entry.result2, { expanded: false, isPartial: false }, {}, ctx).render(80);
+    assert.equal(collapsed.length, 1, `${entry.name} collapsed result is exactly one row`);
+    for (const token of entry.expectCollapsed) assert.ok(collapsed[0].includes(token), `${entry.name} collapsed shows ${token}`);
+    assert.ok(!FRAME.test(collapsed[0]), `${entry.name} collapsed has no card frame`);
+    assert.ok(!/to expand|ctrl\+o/i.test(collapsed[0]), `${entry.name} collapsed has no expansion hint`);
+    assert.ok(/\u2500/.test(collapsed[0]), `${entry.name} collapsed uses a short inline separator`);
+
+    const expanded = entry.result(entry.result2, { expanded: true, isPartial: false }, {}, ctx).render(80);
+    assert.equal(expanded[0], collapsed[0], `${entry.name} expanded keeps the same single header row`);
+    for (const token of entry.expectExpanded) {
+      assert.ok(expanded.slice(1).some((line) => line.includes(token)), `${entry.name} expanded keeps ${token}`);
+    }
+    assert.ok(expanded.every((line) => !FRAME.test(line)), `${entry.name} expanded has no card frame`);
+    assert.ok(!/to collapse|ctrl\+o/i.test(expanded.join("\n")), `${entry.name} expanded has no expansion hint`);
+
+    const afterCall = entry.call(entry.args, {}, ctx).render(80);
+    assert.deepEqual(afterCall, [], `${entry.name} call row disappears once the result row exists`);
+  }
+
+  // Failure state stays one compact row and uses the existing red identity.
+  const errCtx = { state: {}, isError: true };
+  const errLines = render.renderExploreResult(
     { content: [{ type: "text", text: "Index error" }] },
     { expanded: false, isPartial: false },
     {},
-    ctxErr,
-  );
-  const errRender = resultErr.render(60);
-  assert.ok(errRender.some((l) => l.includes("Index error")));
-  assert.ok(errRender[0].includes(RED));
+    errCtx,
+  ).render(80);
+  assert.equal(errLines.length, 1);
+  assert.ok(errLines[0].includes(RED));
+  assert.ok(!errLines[0].includes(LIME));
 
-  // 4. Explore Result (expanded)
-  const ctxExpanded = { state: {} };
-  const resultExpanded = renderExploreResult(
-    { content: [{ type: "text", text: "# Architecture Details\nSymbol: myFunc" }], details: { path: "src", query: "myFunc" } },
+  // Partial/streaming state stays one compact running row.
+  const partialCtx = { state: {} };
+  const partial = render.renderSyncResult(
+    { content: [], details: undefined },
+    { expanded: false, isPartial: true },
+    {},
+    partialCtx,
+  ).render(80);
+  assert.equal(partial.length, 1);
+  assert.ok(partial[0].includes("codegraph_sync"));
+
+  // Narrow widths stay inside the supplied width and emit no cells at zero width.
+  for (const width of [1, 2, 10, 23]) {
+    const lines = render.renderExploreResult(
+      { content: [{ type: "text", text: "Found 2 files" }], details: { path: "src", query: "myFunc" } },
+      { expanded: true, isPartial: false },
+      {},
+      { state: {} },
+    ).render(width);
+    for (const line of lines) assert.ok(visible(line) <= width, `expanded line fits width ${width}`);
+  }
+  assert.deepEqual(render.renderExploreCall({ query: "q" }, {}, { state: {} }).render(0), []);
+});
+
+test("MINI-004: codegraph expanded output keeps every returned text block and continuation path", async () => {
+  const { renderExploreResult } = await import("../src/render/index.ts");
+  const multiline = "line one\n\nline three\nline four";
+  const ctx = { state: {} };
+  const lines = renderExploreResult(
+    { content: [{ type: "text", text: multiline }], details: { path: "src", query: "q" } },
     { expanded: true, isPartial: false },
     {},
-    ctxExpanded,
-  );
-  const expRender = resultExpanded.render(60);
-  assert.ok(expRender.some((l) => l.includes("Architecture Details")));
-  assert.ok(expRender.some((l) => l.includes("Alt+X") && l.includes("to collapse")));
+    ctx,
+  ).render(120);
+  assert.deepEqual(lines.slice(1), [" line one", " ", " line three", " line four"]);
+  assert.ok(lines[0].startsWith(" "));
 
-  // 5. Status Call & Result
-  const ctxStatus = { state: {} };
-  const statusCallComp = renderStatusCall({ path: "my-project" }, {}, ctxStatus);
-  const statusCallRender = statusCallComp.render(60);
-  assert.ok(statusCallRender[0].includes("codegraph_status [my-project]"));
-
-  const statusResultComp = renderStatusResult(
-    { content: [{ type: "text", text: "{}" }], details: { path: "my-project", status: { initialized: true } } },
-    { expanded: false, isPartial: false },
+  const truncated = renderExploreResult(
+    {
+      content: [{ type: "text", text: "bounded output" }],
+      details: { path: "src", query: "q", truncated: true, fullOutputPath: "/tmp/pi-codegraph-x/output.md" },
+    },
+    { expanded: true, isPartial: false },
     {},
-    ctxStatus,
-  );
-  const statusResultRender = statusResultComp.render(60);
-  assert.ok(statusResultRender.some((l) => l.includes("CodeGraph: indexed")));
-
-  // 6. Manage Call & Result
-  const ctxManage = { state: {} };
-  const manageCallComp = renderManageCall({ action: "sync", path: "my-project" }, {}, ctxManage);
-  const manageCallRender = manageCallComp.render(60);
-  assert.ok(manageCallRender[0].includes("codegraph_manage [sync my-project]"));
-
-  const manageResultComp = renderManageResult(
-    { content: [{ type: "text", text: "Synced" }], details: { action: "sync", path: "my-project", executed: true } },
-    { expanded: false, isPartial: false },
-    {},
-    ctxManage,
-  );
-  const manageResultRender = manageResultComp.render(60);
-  assert.ok(manageResultRender.some((l) => l.includes("✓ CodeGraph sync complete")));
+    { state: {} },
+  ).render(120);
+  assert.ok(truncated.some((line) => line.includes("/tmp/pi-codegraph-x/output.md")));
 });
 
 test("MINI-001: codegraph_sync tool execution states, concurrency, and debounce", async () => {
@@ -358,83 +390,86 @@ test("MINI-001: codegraph_sync tool execution states, concurrency, and debounce"
   assert.ok(resCancelled.content[0].text.includes("cancelled"));
 });
 
-test("MINI-002: codegraph_sync pink card call and result rendering", async () => {
+test("MINI-004: codegraph_sync states stay in one inline row", async () => {
   const { renderSyncCall, renderSyncResult } = await import("../src/render/index.ts");
-  const { PINK, RED } = await import("../src/render/theme.ts");
+  const { PINK, RED, visible } = await import("../src/render/theme.ts");
+  const FRAME = /[\u256d\u256e\u2570\u256f\u2502]/;
 
-  // 1. Call rendering
   const ctxSync = { state: {} };
-  const callComp = renderSyncCall({ path: "/project/test" }, {}, ctxSync);
-  const callRender = callComp.render(60);
-  assert.ok(callRender[0].includes("codegraph_sync [/project/test]"));
+  const callRender = renderSyncCall({ path: "/project/test" }, {}, ctxSync).render(60);
+  assert.equal(callRender.length, 1);
+  assert.ok(callRender[0].includes("codegraph_sync"));
+  assert.ok(callRender[0].includes("/project/test"));
   assert.ok(callRender[0].includes(PINK));
-  assert.ok(callRender.some((l) => l.includes("Syncing CodeGraph index…")));
+  assert.ok(!FRAME.test(callRender[0]));
 
-  // 2. Result rendering - Collapsed success
-  const resSuccess = renderSyncResult(
+  const collapsed = renderSyncResult(
     { content: [{ type: "text", text: "Synced 5 files" }], details: { path: "/project/test", executed: true } },
     { expanded: false, isPartial: false },
     {},
     ctxSync,
-  );
-  const collapsedRender = resSuccess.render(60);
-  assert.ok(collapsedRender.some((l) => l.includes("✓ CodeGraph sync complete")));
-  assert.ok(collapsedRender.some((l) => l.includes("Alt+X") && l.includes("to expand")));
-  assert.ok(collapsedRender.every((l) => !l.includes(RED)));
+  ).render(60);
+  assert.equal(collapsed.length, 1);
+  assert.ok(collapsed[0].includes("synced"));
+  assert.ok(!collapsed[0].includes(RED));
+  assert.ok(!/to expand|ctrl\+o/i.test(collapsed[0]));
 
-  // 3. Result rendering - Collapsed cached
-  const resCached = renderSyncResult(
+  const cached = renderSyncResult(
     { content: [{ type: "text", text: "Synced 5 files" }], details: { path: "/project/test", executed: true, cached: true } },
     { expanded: false, isPartial: false },
     {},
-    ctxSync,
-  );
-  const cachedRender = resCached.render(60);
-  assert.ok(cachedRender.some((l) => l.includes("✓ CodeGraph sync complete (cached)")));
+    { state: {} },
+  ).render(60);
+  assert.ok(cached[0].includes("cached"));
 
-  // 4. Result rendering - Expanded success
-  const resExpanded = renderSyncResult(
+  const expanded = renderSyncResult(
     { content: [{ type: "text", text: "Synced 5 files" }], details: { path: "/project/test", executed: true, durationMs: 42 } },
     { expanded: true, isPartial: false },
     {},
-    ctxSync,
-  );
-  const expRender = resExpanded.render(60);
-  assert.ok(expRender.some((l) => l.includes("Synced 5 files")));
-  assert.ok(expRender.some((l) => l.includes("Duration: 42ms")));
-  assert.ok(expRender.some((l) => l.includes("Alt+X") && l.includes("to collapse")));
+    { state: {} },
+  ).render(60);
+  assert.ok(expanded[0].includes("42ms"), "duration stays in the compact status row");
+  assert.deepEqual(expanded.slice(1), [" Synced 5 files"], "expanded output is the returned text with 1-col left margin, unwrapped when it fits");
+  assert.ok(!/to collapse|ctrl\+o/i.test(expanded.join("\n")));
 
-  // 5. Result rendering - Not indexed
-  const resNotIndexed = renderSyncResult(
-    { content: [{ type: "text", text: "Not indexed" }], details: { path: "/project/test", executed: false, notIndexed: true } },
-    { expanded: false, isPartial: false },
-    {},
-    ctxSync,
-  );
-  const notIndexedRender = resNotIndexed.render(60);
-  assert.ok(notIndexedRender.some((l) => l.includes("⚠ CodeGraph: not indexed")));
+  for (const [result, token] of [
+    [{ content: [{ type: "text", text: "Not indexed" }], details: { path: "/p", executed: false, notIndexed: true } }, "not indexed"],
+    [{ content: [{ type: "text", text: "Lock held" }], details: { path: "/p", executed: false, lockHeld: true } }, "index locked"],
+  ]) {
+    const lines = renderSyncResult(result, { expanded: false, isPartial: false }, {}, { state: {} }).render(60);
+    assert.equal(lines.length, 1);
+    assert.ok(lines[0].includes(token));
+    assert.ok(!FRAME.test(lines[0]));
+  }
 
-  // 6. Result rendering - Lock held
-  const resLockHeld = renderSyncResult(
-    { content: [{ type: "text", text: "Lock held" }], details: { path: "/project/test", executed: false, lockHeld: true } },
-    { expanded: false, isPartial: false },
-    {},
-    ctxSync,
-  );
-  const lockHeldRender = resLockHeld.render(60);
-  assert.ok(lockHeldRender.some((l) => l.includes("⚠ CodeGraph: index locked")));
-
-  // 7. Result rendering - Error (red border)
-  const ctxErr = { state: {}, isError: true };
-  const resErr = renderSyncResult(
+  const errRender = renderSyncResult(
     { content: [{ type: "text", text: "Sync failed unexpectedly" }] },
     { expanded: false, isPartial: false },
     {},
-    ctxErr,
-  );
-  const errRender = resErr.render(60);
-  assert.ok(errRender.some((l) => l.includes("Sync failed unexpectedly")));
+    { state: {}, isError: true },
+  ).render(60);
+  assert.equal(errRender.length, 1);
+  assert.ok(errRender[0].includes("error"));
   assert.ok(errRender[0].includes(RED));
+
+  const errExpanded = renderSyncResult(
+    { content: [{ type: "text", text: "Sync failed unexpectedly" }] },
+    { expanded: true, isPartial: false },
+    {},
+    { state: {}, isError: true },
+  ).render(60);
+  assert.ok(errExpanded.slice(1).some((l) => l.includes("Sync failed unexpectedly")), "expanded errors keep the returned text");
+
+  for (const width of [1, 2, 10, 23, 60]) {
+    const lines = renderSyncResult(
+      { content: [{ type: "text", text: "Synced 5 files\nsecond line" }], details: { path: "/project/test", executed: true } },
+      { expanded: true, isPartial: false },
+      {},
+      { state: {} },
+    ).render(width);
+    for (const line of lines) assert.ok(visible(line) <= width, `line fits width ${width}`);
+  }
+  assert.deepEqual(renderSyncResult({ content: [], details: undefined }, { expanded: true, isPartial: false }, {}, { state: {} }).render(0), []);
 });
 
 test("codegraph status, explore, and manage execution contracts", async () => {
@@ -465,14 +500,15 @@ test("codegraph status, explore, and manage execution contracts", async () => {
   const exploreResult = await explore.execute("explore", { query: "missingIdentifier", maxFiles: 3 }, undefined, undefined, { cwd: "/workspace" });
   assert.ok(exploreResult.content[0].text.includes("Low-confidence CodeGraph result"));
   assert.equal(exploreResult.details.lowConfidence, true);
-  const lowConfidenceCard = explore.renderResult(
+  const lowConfidenceRow = explore.renderResult(
     exploreResult,
     { expanded: false, isPartial: false },
     {},
     { state: {}, isError: false },
   ).render(80);
-  assert.ok(lowConfidenceCard.some((line) => line.includes("Low-confidence CodeGraph exploration")));
-  assert.ok(lowConfidenceCard.every((line) => !line.includes("✓ CodeGraph exploration complete")));
+  assert.equal(lowConfidenceRow.length, 1);
+  assert.ok(lowConfidenceRow[0].includes("low confidence"));
+  assert.ok(!lowConfidenceRow[0].includes("complete"));
 
   const manage = registered.find((tool) => tool.name === "codegraph_manage");
   const blocked = await manage.execute("manage", { action: "reindex", path: "/workspace" }, undefined, undefined, { cwd: "/workspace", mode: "json" });
@@ -721,9 +757,12 @@ test("TOOLS: codegraph_node and codegraph_impact execution contracts", async () 
 
   // 3. Node call & result rendering
   const nodeCallRender = nodeTool.renderCall({ name: "myFunc", path: "src" }, {}, { state: {} }).render(60);
-  assert.ok(nodeCallRender[0].includes("codegraph_node [myFunc in src]"));
+  assert.equal(nodeCallRender.length, 1);
+  assert.ok(nodeCallRender[0].includes("codegraph_node"));
+  assert.ok(nodeCallRender[0].includes("myFunc in src"));
   const nodeResultRender = nodeTool.renderResult(nodeRes, { expanded: false }, {}, { state: {} }).render(60);
-  assert.ok(nodeResultRender.some((l) => l.includes("✓ CodeGraph node complete")));
+  assert.equal(nodeResultRender.length, 1);
+  assert.ok(nodeResultRender[0].includes("complete"));
 
   // 4. Execute codegraph_impact
   const impactRes = await impactTool.execute(
@@ -766,9 +805,12 @@ test("TOOLS: codegraph_node and codegraph_impact execution contracts", async () 
 
   // 6. Impact call & result rendering
   const impactCallRender = impactTool.renderCall({ symbol: "myFunc", path: "src", depth: 2 }, {}, { state: {} }).render(60);
-  assert.ok(impactCallRender[0].includes("codegraph_impact [myFunc (depth 2) in src]"));
+  assert.equal(impactCallRender.length, 1);
+  assert.ok(impactCallRender[0].includes("codegraph_impact"));
+  assert.ok(impactCallRender[0].includes("myFunc (depth 2) in src"));
   const impactResultRender = impactTool.renderResult(impactRes, { expanded: false }, {}, { state: {} }).render(60);
-  assert.ok(impactResultRender.some((l) => l.includes("✓ CodeGraph impact complete")));
+  assert.equal(impactResultRender.length, 1);
+  assert.ok(impactResultRender[0].includes("complete"));
 });
 
 test("BUG-FIX: codegraph_explore strips source code and formats suggestions on low-confidence results", async () => {

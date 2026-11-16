@@ -64,7 +64,25 @@ export function formatQuota(
 	}).join(" · ")}`;
 }
 
-export async function fetchModelQuota(provider: string, modelId: string, signal?: AbortSignal): Promise<string | undefined> {
+export function formatHudQuota(pools: AccountUsage['pools']): string | undefined {
+	const meters = pools.filter(pool => pool.label !== 'Plan');
+	if (!meters.some(pool => pool.amountText)) return formatQuota(meters);
+	return meters.map(pool => {
+		const label = pool.label.replace(/^Input/i, 'in').replace(/^Output/i, 'out').replace(/mensual/i, 'mes').replace(/semanal/i, 'sem');
+		if (!pool.amountText) return formatQuota([pool])?.replace(/^quota /, '') ?? '';
+		if (pool.showBar && /^(Input|Output) /i.test(pool.label)) {
+			const filled = Math.round(Math.max(0, Math.min(100, pool.availablePercentage)) * 4 / 100);
+			const minutes = pool.resetAt ? Math.max(0, Math.ceil((Date.parse(pool.resetAt) - Date.now()) / 60_000)) : NaN;
+			const reset = !Number.isFinite(minutes) ? '' : minutes >= 1440
+				? `${Math.floor(minutes / 1440)}d${String(Math.floor(minutes % 1440 / 60)).padStart(2, '0')}h`
+				: `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+			return `${label} ${'━'.repeat(filled)}${'─'.repeat(4 - filled)} ${pool.amountText.replaceAll(' ', '')}${reset ? ' ' + reset : ''}`;
+		}
+		return `${label} ${pool.amountText}`;
+	}).filter(Boolean).join(' · ') || undefined;
+}
+
+export async function fetchModelQuota(provider: string, modelId: string, signal?: AbortSignal, onPools?: (pools: AccountUsage['pools']) => void): Promise<string | undefined> {
 	if (provider !== "cliproxyapi") return undefined;
 	const combinedSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS);
 	const groups = await fetchUsage(combinedSignal);
@@ -85,5 +103,7 @@ export async function fetchModelQuota(provider: string, modelId: string, signal?
 	}));
 	const account = selectQuotaAccount(provider, modelId, accounts, modelsByAccount);
 
-	return formatQuota(selectModelPools(modelId, account?.pools ?? []));
+	const pools = selectModelPools(modelId, account?.pools ?? []);
+	onPools?.(pools);
+	return formatQuota(pools);
 }

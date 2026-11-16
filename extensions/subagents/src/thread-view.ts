@@ -2,8 +2,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { writeSubagentsDebugLog } from './debug.js';
-import { visibleWidth as terminalVisibleWidth, wrapLineToWidth } from './render/text-width.js';
+import { isSubagentsDebugEnabled, writeSubagentsDebugLog } from './debug.js';
+import {
+  formatMarginedLine,
+  truncateToWidth as terminalTruncateToWidth,
+  visibleWidth as terminalVisibleWidth,
+  wrapAnsiForWidth2,
+  wrapLineToWidth,
+} from './render/text-width.js';
+import { contentRevision } from './render/content-revision.js';
+import { ORANGE, electric } from './ui/theme.js';
 
 import type {
   SubagentAssistantItem,
@@ -165,14 +173,33 @@ export function boundThreadSnapshot(value: unknown, options: BoundOptions = {}):
 }
 
 function payloadText(payload: SubagentToolResultPayload): string {
-  return payload.preview || payload.content.map((part) => part.text || part.data || '').filter(Boolean).join('\n');
+  const contentText = payload.content
+    .map((part) => {
+      if (part.text) return part.text;
+      if (part.type === 'image') return `[image: ${part.mimeType ?? 'image'}]`;
+      return part.data || '';
+    })
+    .filter(Boolean)
+    .join('\n');
+  return contentText || payload.preview || '';
 }
 
-function jsonPreview(value: unknown, limit = 240): string {
-  if (value === undefined) return '';
-  let text: string;
-  try { text = JSON.stringify(value); } catch { text = String(value); }
-  return boundText(text, limit) ?? '';
+function summarizeUnknownArgs(args: unknown, maxEntries = 3, maxValue = 60): string {
+  if (args === undefined || args === null) return '';
+  if (typeof args !== 'object') return boundText(String(args).replace(/\s+/g, ' ').trim(), maxValue) ?? '';
+  if (Array.isArray(args)) return `[${args.length} items]`;
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === 'string') {
+      const clean = value.replace(/\s+/g, ' ').trim();
+      if (clean) parts.push(`${key}=${boundText(clean, maxValue) ?? ''}`);
+    } else if (typeof value === 'number' || typeof value === 'boolean') {
+      parts.push(`${key}=${value}`);
+    }
+    if (parts.length >= maxEntries) break;
+  }
+  return parts.join(' · ');
 }
 
 function runningPiEntrypoint(): string | undefined {
@@ -205,6 +232,7 @@ export function setPiComponentProviderForSubagentRendering(provider: Record<stri
   piComponents = provider;
   builtInToolDefinitionCache.clear();
   toolComponentCacheByTask.clear();
+  bumpSubagentToolRendererGeneration();
 }
 
 export function resetPiComponentCacheForTests(): void {
@@ -216,16 +244,34 @@ export function resetPiComponentCacheForTests(): void {
   externalToolRenderersBySource.clear();
   runtimeToolDefinitionsByTask.clear();
   toolComponentCacheByTask.clear();
+  bumpSubagentToolRendererGeneration();
 }
 
 export function registerSubagentExternalToolDefinition(name: string | undefined, definition: unknown): void {
   if (!name || !definition) return;
   externalToolDefinitions.set(name, definition);
   toolComponentCacheByTask.clear();
+  bumpSubagentToolRendererGeneration();
 }
 
 function hasToolRenderer(definition: unknown): boolean {
   return isRecord(definition) && (typeof definition.renderCall === 'function' || typeof definition.renderResult === 'function' || definition.renderShell === 'self');
+}
+
+/**
+ * Opt-in presentation marker from the pinned owner contract
+ * (`extensions/subagents/README.md`, "Compact Tool Rendering & Panel Contracts (v1)").
+ * Presentation metadata only: a marked definition may keep its specialized rendering, while an
+ * unmarked one is rendered through the local compact fallback.
+ */
+export const COMPACT_TOOL_RENDERING_VERSION = 1;
+
+export function isCompactCompliantDefinition(definition: unknown): boolean {
+  return isRecord(definition)
+    && definition.compactToolRenderingVersion === COMPACT_TOOL_RENDERING_VERSION
+    && definition.renderShell === 'self'
+    && typeof definition.renderCall === 'function'
+    && typeof definition.renderResult === 'function';
 }
 
 function sourcePathFromToolInfo(info: unknown): string | undefined {
@@ -415,7 +461,17 @@ export async function preloadPiComponentsForSubagentRendering(): Promise<boolean
   return false;
 }
 
+// Debug logging is opt-in per workspace and each write re-reads the config from disk. Doing that
+// twice per rendered row made replay cost grow with item count even with debug disabled. The flag is
+// therefore resolved at most once per thread frame.
+let frameDebugEnabled: boolean | undefined;
+
 function debugLog(context: Pick<SubagentThreadRenderContext, 'cwd'> | undefined, scope: string, data: unknown): void {
+  if (frameDebugEnabled === false) return;
+  if (frameDebugEnabled === undefined) {
+    try { frameDebugEnabled = isSubagentsDebugEnabled(context?.cwd ?? process.cwd()); } catch { frameDebugEnabled = false; }
+    if (!frameDebugEnabled) return;
+  }
   writeSubagentsDebugLog(context?.cwd, scope, data);
 }
 
@@ -528,11 +584,25 @@ function renderAttemptItem(item: SubagentAttemptItem, context: SubagentThreadRen
   return [context.theme?.fg?.('accent', context.theme?.bold?.(text) ?? text) ?? text];
 }
 
+const MAX_CACHED_TASKS = 50;
+const MAX_RUNTIME_DEF_TASKS = 100;
 const builtInToolDefinitionCache = new Map<string, unknown>();
 const externalToolDefinitions = new Map<string, unknown>();
 const externalToolSourcesLoaded = new Set<string>();
 const runtimeToolDefinitionsByTask = new Map<string, Map<string, unknown>>();
 const toolComponentCacheByTask = new Map<string, Map<string, unknown>>();
+const safeCompliantDefinitionCache = new WeakMap<object, Record<string, any>>();
+
+export function clearSubagentSessionRenderCaches(taskId?: string): void {
+  if (taskId) {
+    toolComponentCacheByTask.delete(taskId);
+    runtimeToolDefinitionsByTask.delete(taskId);
+    return;
+  }
+  toolComponentCacheByTask.clear();
+  runtimeToolDefinitionsByTask.clear();
+  bumpSubagentToolRendererGeneration();
+}
 
 export function registerSubagentRuntimeToolDefinition(taskId: string | undefined, name: string | undefined, definition: unknown): void {
   if (!taskId || !name || !definition) return;
@@ -540,8 +610,17 @@ export function registerSubagentRuntimeToolDefinition(taskId: string | undefined
   if (!byName) {
     byName = new Map<string, unknown>();
     runtimeToolDefinitionsByTask.set(taskId, byName);
+    if (runtimeToolDefinitionsByTask.size > MAX_RUNTIME_DEF_TASKS) {
+      const oldest = runtimeToolDefinitionsByTask.keys().next().value;
+      if (oldest !== undefined) runtimeToolDefinitionsByTask.delete(oldest);
+    }
+  } else {
+    runtimeToolDefinitionsByTask.delete(taskId);
+    runtimeToolDefinitionsByTask.set(taskId, byName);
   }
+  const previous = byName.get(name);
   byName.set(name, definition);
+  if (previous !== definition) bumpSubagentToolRendererGeneration();
 }
 
 export function runtimeToolDefinition(taskId: string | undefined, name: string): unknown {
@@ -555,6 +634,7 @@ function builtInToolDefinition(name: string, cwd: string): unknown {
   const factoryByName: Record<string, string> = {
     read: 'createReadToolDefinition',
     bash: 'createBashToolDefinition',
+    powershell: 'createPowerShellToolDefinition',
     edit: 'createEditToolDefinition',
     write: 'createWriteToolDefinition',
     grep: 'createGrepToolDefinition',
@@ -612,10 +692,15 @@ function toolArgumentSummary(name: string, args: unknown): string {
   const input = isRecord(args) ? args : {};
   if (name === 'read') return pathRangeSummary(input);
   if (name === 'edit' || name === 'write') return argString(input.path ?? input.file_path ?? input.file);
-  if (name === 'bash') return argString(input.command).split('\n')[0] ?? '';
+  if (name === 'bash' || name === 'powershell') return argString(input.command).split('\n')[0] ?? '';
+  if (name === 'subagent_run') {
+    return [argString(input.action ?? 'run'), argString(input.display_name ?? input.agent ?? input.task_id)].filter(Boolean).join(' · ');
+  }
+  if (name === 'ask_orchestrator') return boundText(argString(input.question), 80) ?? '';
+  if (name === 'report_orchestrator') return boundText(argString(input.report), 80) ?? '';
   if (name.startsWith('memory_')) return memoryArgumentSummary(name, input);
   if (['grep', 'find', 'ls'].includes(name)) return [argString(input.pattern ?? input.query ?? input.name), argString(input.path ?? input.cwd)].filter(Boolean).join(' · ');
-  return jsonPreview(args);
+  return summarizeUnknownArgs(args);
 }
 
 function isActiveToolStatus(status: SubagentToolItem['status']): boolean {
@@ -630,13 +715,147 @@ function cachedToolComponent(item: SubagentToolItem, context: SubagentThreadRend
   if (!taskCache) {
     taskCache = new Map<string, unknown>();
     toolComponentCacheByTask.set(context.taskId!, taskCache);
+    if (toolComponentCacheByTask.size > MAX_CACHED_TASKS) {
+      const oldest = toolComponentCacheByTask.keys().next().value;
+      if (oldest !== undefined) toolComponentCacheByTask.delete(oldest);
+    }
+  } else {
+    toolComponentCacheByTask.delete(context.taskId!);
+    toolComponentCacheByTask.set(context.taskId!, taskCache);
   }
   let component = taskCache.get(cacheId!);
   if (!component) {
     component = new componentCtor(item.name, cacheId ?? item.name, item.arguments, { showImages: context.showImages, imageWidthCells: context.imageWidthCells }, toolDefinition, context.tui, context.cwd);
     taskCache.set(cacheId!, component);
+    if (taskCache.size > DEFAULT_MAX_ITEMS) {
+      const oldest = taskCache.keys().next().value;
+      if (oldest !== undefined) taskCache.delete(oldest);
+    }
   }
   return component;
+}
+
+/**
+ * Wrap a compact-compliant definition so throwing `renderCall`/`renderResult` callbacks (or throwing
+ * `.render()` methods) cannot fall through into Pi `ToolExecutionComponent.createResultFallback()`,
+ * which emits `(N more lines, ctrl+o to expand)` hints.
+ */
+function safeCompliantDefinition(definition: Record<string, any>): Record<string, any> {
+  const existing = safeCompliantDefinitionCache.get(definition);
+  if (existing) return existing;
+  const defHasMargin = isRecord(definition) && definition.compactLeftMargin === 1;
+
+  const compactFallbackComponent = (linesProvider: (width: number) => string[]) => ({
+    compactLeftMargin: 1,
+    invalidate() {},
+    render(width: number): string[] {
+      if (!Number.isFinite(width) || width <= 0) return [];
+      return linesProvider(width);
+    },
+  });
+
+  const renderWithOnceMargin = (comp: any, width: number, fallback: (w: number) => string[]): string[] => {
+    const safeWidth = Number.isFinite(width) ? Math.floor(width) : 0;
+    if (safeWidth <= 0) return [];
+    const hasMargin = defHasMargin || comp?.compactLeftMargin === 1;
+    if (hasMargin) {
+      const out = comp.render(safeWidth);
+      return Array.isArray(out) ? out : fallback(safeWidth);
+    }
+    if (safeWidth === 1) {
+      const probe = comp.render(2);
+      if (!Array.isArray(probe)) return fallback(safeWidth);
+      return probe.length > 0 ? [' '] : [];
+    }
+    const innerWidth = safeWidth - 1;
+    const out = comp.render(innerWidth);
+    if (!Array.isArray(out)) return fallback(safeWidth);
+    return out.map((line) => formatMarginedLine(String(line), safeWidth, terminalVisibleWidth, terminalTruncateToWidth));
+  };
+
+  const wrapped: Record<string, any> = {
+    ...definition,
+    renderShell: 'self',
+    compactToolRenderingVersion: COMPACT_TOOL_RENDERING_VERSION,
+    compactLeftMargin: 1,
+    renderCall(args: any, theme: any, ctx: any) {
+      const fallback = (width: number) => {
+        const safeWidth = Number.isFinite(width) ? Math.floor(width) : 0;
+        if (safeWidth <= 0) return [];
+        if (ctx?.state?.hasResult) return [];
+        if (safeWidth === 1) return [' '];
+        const innerWidth = safeWidth - 1;
+        const name = definition.name || 'tool';
+        if (name === 'bash') {
+          const cmd = isRecord(args) && typeof args.command === 'string' ? args.command : undefined;
+          const header = `${electric(ORANGE, 'bash')} ${ctx?.executionStarted ? 'running' : 'preparing'}`;
+          return [` ${terminalTruncateToWidth(header, innerWidth)}`, ...orangeCommandLines(cmd, innerWidth, safeWidth).map((l) => formatMarginedLine(l, safeWidth, terminalVisibleWidth, terminalTruncateToWidth))];
+        }
+        const summary = toolArgumentSummary(name, args);
+        const line = `${name} ${ctx?.executionStarted ? 'running' : 'preparing'}${summary ? ` ─ ${summary}` : ''}`;
+        return [` ${terminalTruncateToWidth(line, innerWidth)}`];
+      };
+      try {
+        const comp = definition.renderCall(args, theme, ctx);
+        if (!comp || typeof comp.render !== 'function') return comp;
+        return {
+          compactLeftMargin: 1,
+          invalidate() { try { comp.invalidate?.(); } catch {} },
+          render(width: number): string[] {
+            if (!Number.isFinite(width) || width <= 0) return [];
+            try {
+              return renderWithOnceMargin(comp, width, fallback);
+            } catch {
+              return fallback(width);
+            }
+          },
+        };
+      } catch {
+        return compactFallbackComponent(fallback);
+      }
+    },
+    renderResult(result: any, opts: any, theme: any, ctx: any) {
+      const fallback = (width: number) => {
+        const name = definition.name || 'tool';
+        const item: SubagentToolItem = {
+          type: 'tool',
+          name,
+          arguments: ctx?.args,
+          status: result?.isError || ctx?.isError ? 'failed' : opts?.isPartial ? 'partial' : 'completed',
+          result: result && Array.isArray(result.content)
+            ? { content: result.content, details: result.details, isError: Boolean(result.isError ?? ctx?.isError) }
+            : undefined,
+        };
+        return compactToolRow(item, {
+          cwd: ctx?.cwd ?? process.cwd(),
+          visibleWidth: terminalVisibleWidth,
+          truncateToWidth: terminalTruncateToWidth,
+          toolOutputExpanded: Boolean(opts?.expanded),
+          renderWidth: width,
+        }, width);
+      };
+      try {
+        const comp = definition.renderResult(result, opts, theme, ctx);
+        if (!comp || typeof comp.render !== 'function') return comp;
+        return {
+          compactLeftMargin: 1,
+          invalidate() { try { comp.invalidate?.(); } catch {} },
+          render(width: number): string[] {
+            if (!Number.isFinite(width) || width <= 0) return [];
+            try {
+              return renderWithOnceMargin(comp, width, fallback);
+            } catch {
+              return fallback(width);
+            }
+          },
+        };
+      } catch {
+        return compactFallbackComponent(fallback);
+      }
+    },
+  };
+  safeCompliantDefinitionCache.set(definition, wrapped);
+  return wrapped;
 }
 
 function renderToolItem(item: SubagentToolItem, context: SubagentThreadRenderContext, width: number, cached?: ThreadRenderEntry): string[] {
@@ -646,7 +865,11 @@ function renderToolItem(item: SubagentToolItem, context: SubagentThreadRenderCon
     runtimeToolDefinition(context.taskId, item.name),
   ], context.cwd);
   const componentCtor = loadPiComponents()?.ToolExecutionComponent;
-  if (typeof componentCtor === 'function' && context.tui && toolDefinition) {
+  // Only marked (compact-compliant) owner definitions delegate to the native component. Unmarked
+  // definitions would re-enter Pi's default Box/background shell and expansion hint, so replay applies
+  // this extension's own compact policy locally and never executes their rendering callbacks.
+  if (typeof componentCtor === 'function' && context.tui && isCompactCompliantDefinition(toolDefinition)) {
+    const safeDefinition = safeCompliantDefinition(toolDefinition as Record<string, any>);
     try {
       const componentSignature = JSON.stringify([item.name, item.arguments, context.showImages, context.imageWidthCells]);
       if (cached && (cached.componentSignature !== componentSignature || cached.toolDefinition !== toolDefinition || (!item.result && cached.hasResult))) {
@@ -655,8 +878,8 @@ function renderToolItem(item: SubagentToolItem, context: SubagentThreadRenderCon
         cached.expanded = undefined;
       }
       const component = cached
-        ? (cached.component ?? new componentCtor(item.name, item.tool_call_id ?? item.id ?? item.name, item.arguments, { showImages: context.showImages, imageWidthCells: context.imageWidthCells }, toolDefinition, context.tui, context.cwd))
-        : cachedToolComponent(item, context, componentCtor, toolDefinition);
+        ? (cached.component ?? new componentCtor(item.name, item.tool_call_id ?? item.id ?? item.name, item.arguments, { showImages: context.showImages, imageWidthCells: context.imageWidthCells }, safeDefinition, context.tui, context.cwd))
+        : cachedToolComponent(item, context, componentCtor, safeDefinition);
       if (!cached?.component) {
         component.markExecutionStarted?.();
         component.setArgsComplete?.();
@@ -680,16 +903,163 @@ function renderToolItem(item: SubagentToolItem, context: SubagentThreadRenderCon
   } else {
     debugLog(context, 'tool_component_unavailable_fallback', { name: item.name, status: item.status, hasComponentCtor: typeof componentCtor === 'function', hasToolDefinition: Boolean(toolDefinition), hasTui: Boolean(context.tui) });
   }
-  const result = item.result ? payloadText(item.result) : '';
-  const args = toolArgumentSummary(item.name, item.arguments);
-  const state = item.result?.isError ? 'failed' : item.status;
-  const resultLines = result.split('\n');
-  const visibleResult = context.toolOutputExpanded ? resultLines : resultLines.slice(0, 10);
-  const fallback = [`${item.name} ${state}${args ? ` · ${args}` : ''}`, ...(result ? visibleResult : []),
-    !context.toolOutputExpanded && resultLines.length > 10 ? '(click to expand)' : '',
-  ].filter(Boolean);
+  const fallback = compactToolRow(item, context, width);
   debugLog(context, 'tool_fallback_rendered', { name: item.name, status: item.status, fallbackPreview: fallback.join('\n').slice(0, 1000) });
   return fallback;
+}
+
+const CMD_GRAPHEME_SEGMENTER = new Intl.Segmenter('en', { granularity: 'grapheme' });
+
+function wrapExactCommandLine(rawLine: string, width: number, totalWidth = width + 1): string[] {
+  const visual = rawLine.includes('\t') ? rawLine.replace(/\t/g, '   ') : rawLine;
+  if (visual === '') return [''];
+  if (terminalVisibleWidth(visual) <= width) return [visual];
+  const allowWidth2Wide = totalWidth === 2;
+  const out: string[] = [];
+  let current = '';
+  let currentWidth = 0;
+  let chunkLimit = width;
+  for (const { segment } of CMD_GRAPHEME_SEGMENTER.segment(visual)) {
+    const gw = terminalVisibleWidth(segment);
+    if (gw === 0) {
+      current += segment;
+      continue;
+    }
+    if (gw > width) {
+      if (!allowWidth2Wide || gw > totalWidth) continue;
+      if (currentWidth > 0) {
+        out.push(current);
+        current = '';
+        currentWidth = 0;
+      }
+      chunkLimit = totalWidth;
+      current += segment;
+      currentWidth = gw;
+      continue;
+    }
+    if (currentWidth + gw > chunkLimit && currentWidth > 0) {
+      out.push(current);
+      current = segment;
+      currentWidth = gw;
+      chunkLimit = width;
+    } else {
+      current += segment;
+      currentWidth += gw;
+    }
+  }
+  if (current !== '' || out.length === 0) out.push(current);
+  return out;
+}
+
+/**
+ * Wrap a bash command verbatim preserving leading/trailing spaces, tabs (3-col visual width),
+ * real newlines, standalone CR and CRLF characters, consecutive blank lines, quotes, and literal
+ * `\n` in the existing ORANGE foreground, without trimming, whitespace collapsing, or ellipsis.
+ */
+function orangeCommandLines(command: string | undefined, width: number, totalWidth = width + 1): string[] {
+  if (width <= 0 || typeof command !== 'string' || command.length === 0) return [];
+  const lines: string[] = [];
+  for (const rawLine of command.split('\n')) {
+    for (const chunk of wrapExactCommandLine(rawLine, width, totalWidth)) {
+      lines.push(chunk === '' ? '' : electric(ORANGE, chunk));
+    }
+  }
+  return lines;
+}
+
+function wrapBodyLineForWidth(rawLine: string, innerWidth: number, safeWidth: number): string[] {
+  if (safeWidth === 2 && terminalVisibleWidth(rawLine) > innerWidth) {
+    return wrapAnsiForWidth2(rawLine, terminalVisibleWidth);
+  }
+  return wrapLineToWidth(rawLine, innerWidth, safeWidth);
+}
+
+/**
+ * Local compact fallback for replay rows: one inline identity/state/target row, 1-column left
+ * margin (`width - 1`, `width <= 0 -> []`, `width === 1 -> [' ']`, omitting margin only where
+ * necessary at total width 2 to fit an intact wide grapheme), no frame, no background fill
+ * and no generated expansion instruction. For `bash` specifically (per MINI-009), the full command
+ * is rendered verbatim with real newlines and blank lines in ORANGE and soft-wrapped to `width - 1`
+ * (or width 2 for intact wide graphemes) in both collapsed and expanded views.
+ */
+function compactToolRow(item: SubagentToolItem, context: SubagentThreadRenderContext, width = DEFAULT_RENDER_WIDTH): string[] {
+  const safeWidth = Number.isFinite(width) ? Math.floor(width) : 0;
+  if (safeWidth <= 0) return [];
+  if (safeWidth === 1) return [' '];
+  const innerWidth = safeWidth - 1;
+  const details = item.result && isRecord(item.result.details) ? item.result.details : undefined;
+  const state = details?.cancelled === true ? 'cancelled' : (item.result?.isError ? 'failed' : item.status);
+  if (item.name === 'bash') {
+    const command = isRecord(item.arguments) && typeof item.arguments.command === 'string' ? item.arguments.command : undefined;
+    const header = safeTruncate(context, `${electric(ORANGE, 'bash')} ${state}`, innerWidth);
+    const lines = [` ${header}`, ...orangeCommandLines(command, innerWidth, safeWidth).map((l) => formatMarginedLine(l, safeWidth, terminalVisibleWidth, terminalTruncateToWidth))];
+    if (!context.toolOutputExpanded) return lines;
+    if (item.result) {
+      const text = payloadText(item.result);
+      if (text) {
+        for (const rawLine of text.split('\n')) {
+          for (const wrapped of wrapBodyLineForWidth(rawLine, innerWidth, safeWidth)) {
+            lines.push(formatMarginedLine(wrapped, safeWidth, terminalVisibleWidth, terminalTruncateToWidth));
+          }
+        }
+      }
+      const diff = typeof details?.diff === 'string' ? details.diff : undefined;
+      if (diff?.trim()) {
+        lines.push(` ${safeTruncate(context, 'diff:', innerWidth)}`);
+        for (const rawLine of diff.split('\n')) {
+          for (const wrapped of wrapBodyLineForWidth(rawLine, innerWidth, safeWidth)) {
+            lines.push(formatMarginedLine(wrapped, safeWidth, terminalVisibleWidth, terminalTruncateToWidth));
+          }
+        }
+      }
+    }
+    return lines;
+  }
+  const args = toolArgumentSummary(item.name, item.arguments);
+  const header = `${item.name} ${state}${args ? ` ─ ${args}` : ''}`.trim();
+  const lines = [` ${safeTruncate(context, header, innerWidth)}`];
+  if (!context.toolOutputExpanded) return lines;
+  if (item.result) {
+    const text = payloadText(item.result);
+    if (text) {
+      for (const rawLine of text.split('\n')) {
+        for (const wrapped of wrapBodyLineForWidth(rawLine, innerWidth, safeWidth)) {
+          lines.push(formatMarginedLine(wrapped, safeWidth, terminalVisibleWidth, terminalTruncateToWidth));
+        }
+      }
+    }
+    const diff = typeof details?.diff === 'string' ? details.diff : undefined;
+    if (diff?.trim()) {
+      lines.push(` ${safeTruncate(context, 'diff:', innerWidth)}`);
+      for (const rawLine of diff.split('\n')) {
+        for (const wrapped of wrapBodyLineForWidth(rawLine, innerWidth, safeWidth)) {
+          lines.push(formatMarginedLine(wrapped, safeWidth, terminalVisibleWidth, terminalTruncateToWidth));
+        }
+      }
+    }
+  }
+  return lines;
+}
+
+/** Orphan `tool_result` entries (no matching call row) use the same compact policy and 1-col margin. */
+function compactToolResultRow(item: SubagentToolResultItem, context: SubagentThreadRenderContext, width = DEFAULT_RENDER_WIDTH): string[] {
+  const safeWidth = Number.isFinite(width) ? Math.floor(width) : 0;
+  if (safeWidth <= 0) return [];
+  if (safeWidth === 1) return [' '];
+  const innerWidth = safeWidth - 1;
+  const state = item.result.isError ? 'failed' : 'completed';
+  const header = `tool result${item.name ? ` ${item.name}` : ''} ─ ${state}`;
+  const lines = [` ${safeTruncate(context, header, innerWidth)}`];
+  if (!context.toolOutputExpanded) return lines;
+  const text = payloadText(item.result);
+  if (text) {
+    for (const rawLine of text.split('\n')) {
+      for (const wrapped of wrapBodyLineForWidth(rawLine, innerWidth, safeWidth)) {
+        lines.push(formatMarginedLine(wrapped, safeWidth, terminalVisibleWidth, terminalTruncateToWidth));
+      }
+    }
+  }
+  return lines;
 }
 
 function renderBashItem(item: SubagentBashItem, context: SubagentThreadRenderContext, width: number, cached?: ThreadRenderEntry): string[] {
@@ -734,7 +1104,7 @@ function renderItem(item: SubagentThreadItem, context: SubagentThreadRenderConte
     case 'assistant': return renderAssistantItem(item, context, width, cached);
     case 'user': return renderUserItem(item, context, width, cached);
     case 'tool': return renderToolItem(item, context, width, cached);
-    case 'tool_result': return [`tool result${item.name ? ` ${item.name}` : ''}${item.result.isError ? ' failed' : ''}`, payloadText(item.result)].filter(Boolean);
+    case 'tool_result': return compactToolResultRow(item, context, width);
     case 'bash': return renderBashItem(item, context, width, cached);
     case 'custom': return renderCustomItem(item, context, width);
     case 'status': return [`${item.severity ?? 'info'}: ${item.text}`];
@@ -822,24 +1192,49 @@ type ThreadRenderEntry = {
   resultSignature?: string;
   hasResult?: boolean;
   expanded?: boolean;
+  /** Content revision of this item that produced `lines`; reused while it still matches. */
+  itemRevision?: string;
   width?: number;
   lines?: string[];
 };
+
+type ThreadRenderCacheState = {
+  contentStable: boolean;
+  contextKey: string;
+  rendererGeneration: number;
+};
+
+// Bumped whenever the set of renderable tool definitions can change, so per-item cache entries
+// invalidate on renderer changes without re-resolving every definition to compare identities.
+let toolRendererGeneration = 0;
 
 // Owned by one panel, not by the task history. Retain only the selected bounded thread.
 export class SubagentThreadRenderCache {
   private entries = new Map<string, ThreadRenderEntry>();
   private identity: unknown[] = [];
+  private revision: string | undefined;
+  private state: ThreadRenderCacheState = { contentStable: false, contextKey: '', rendererGeneration: -1 };
 
   clear(): void {
     this.entries.clear();
     this.identity = [];
+    this.revision = undefined;
+    this.state = { contentStable: false, contextKey: '', rendererGeneration: -1 };
   }
 
-  begin(context: SubagentThreadRenderContext): void {
+  /**
+   * Start a frame. `revision` describes the whole rendered item content; when it is unchanged since
+   * the previous frame plus the same width/expansion/renderer inputs, unchanged terminal items can
+   * reuse their lines without re-encoding or re-rendering anything.
+   */
+  begin(context: SubagentThreadRenderContext, revision: string, contextKey: string): ThreadRenderCacheState {
     const identity = [context.taskId, context.cwd, context.theme, context.tui, loadPiComponents(), context.showImages, context.imageWidthCells];
     if (identity.some((value, index) => value !== this.identity[index])) this.clear();
     this.identity = identity;
+    const contentStable = this.revision === revision;
+    this.revision = revision;
+    this.state = { contentStable, contextKey, rendererGeneration: toolRendererGeneration };
+    return this.state;
   }
 
   entry(key: string): ThreadRenderEntry {
@@ -854,16 +1249,41 @@ export class SubagentThreadRenderCache {
   prune(keys: Set<string>): void {
     for (const key of this.entries.keys()) if (!keys.has(key)) this.entries.delete(key);
   }
+
+  get size(): number {
+    return this.entries.size;
+  }
+}
+
+export function getSubagentToolRendererGeneration(): number {
+  return toolRendererGeneration;
+}
+
+export function bumpSubagentToolRendererGeneration(): void {
+  toolRendererGeneration += 1;
 }
 
 export function renderThreadBody(snapshot: unknown, context: SubagentThreadRenderContext, cache?: SubagentThreadRenderCache): string[] {
   if (!isRenderableSnapshotRoot(snapshot)) { cache?.clear(); return []; }
+  if (context.renderWidth !== undefined && context.renderWidth <= 0) return [];
   const width = Math.max(1, Math.floor(context.renderWidth ?? DEFAULT_RENDER_WIDTH));
   const lines: string[] = [];
   const renderedKeys = new Set<string>();
-  cache?.begin(context);
+  const items = normalizeAttemptItems(snapshot.items as SubagentThreadItem[]).slice(0, DEFAULT_MAX_ITEMS);
+  frameDebugEnabled = undefined;
+  // One content revision per frame when a cache is active.
+  const revision = cache ? contentRevision(items) : '';
+  const contextKey = [
+    width,
+    context.toolOutputExpanded ? 'tool-expanded' : 'tool-collapsed',
+    context.hideThinkingBlock ? 'thinking-hidden' : 'thinking-visible',
+    context.showImages ? 'images' : 'no-images',
+    context.imageWidthCells ?? '',
+    context.cwd,
+  ].join('|');
+  const cacheState = cache?.begin(context, revision, contextKey);
   let attempt = 1;
-  for (const [index, rawItem] of normalizeAttemptItems(snapshot.items as SubagentThreadItem[]).slice(0, DEFAULT_MAX_ITEMS).entries()) {
+  for (const [index, rawItem] of items.entries()) {
     try {
       if (!isThreadItem(rawItem)) {
         lines.push(safeTruncate(context, malformedItemText(rawItem), width));
@@ -888,28 +1308,47 @@ export function renderThreadBody(snapshot: unknown, context: SubagentThreadRende
         const isLiveTool = (displayItem.type === 'tool' && (displayItem.status === 'running' || displayItem.status === 'partial' || displayItem.status === 'pending'))
           || (displayItem.type === 'bash' && displayItem.status === 'running');
         const reusableLines = !isLiveTool && displayItem.type !== 'custom';
-        const signature = JSON.stringify([
-          displayItem,
-          displayItem.type === 'assistant' && displayItem.message.content.some((part) => part.type === 'thinking') ? itemContext.hideThinkingBlock : undefined,
-          nativeTool ? itemContext.toolOutputExpanded : undefined,
-        ]);
+        // Per-item state can move independently of the whole-thread revision (an individually
+        // toggled row), so the item's own identity participates; the item content itself is already
+        // covered by the shared frame revision.
+        const signature = [
+          displayItem.type === 'assistant' && displayItem.message.content.some((part) => part.type === 'thinking') ? String(itemContext.hideThinkingBlock) : '',
+          nativeTool ? String(itemContext.toolOutputExpanded) : '',
+        ].join('|');
         const toolName = displayItem.type === 'bash' ? 'bash' : (displayItem.type === 'tool' ? displayItem.name : undefined);
+        const stableFrame = Boolean(cacheState?.contentStable) && cacheState?.contextKey === contextKey;
+        // Always resolve so a renderer change invalidates this row; the lookup is a few map reads,
+        // while the work avoided below is the per-item content encoding and re-render.
         const currentDef = nativeTool && toolName ? renderableToolDefinition(toolName, [
           itemContext.getToolDefinition?.(toolName),
           externalToolDefinitions.get(toolName),
           runtimeToolDefinition(itemContext.taskId, toolName),
         ], itemContext.cwd) : undefined;
-        if (cached && (cached.signature !== signature || (nativeTool && cached.toolDefinition !== currentDef))) {
+        // Unchanged frames reuse previously rendered lines with no per-item encoding at all. A
+        // changed frame encodes each item once to learn which rows actually changed, then reuses the
+        // rest: only genuinely changed terminal items are re-rendered.
+        const canReuseByFrame = stableFrame && Boolean(cached?.lines) && cached!.width === width;
+        const itemRevision = !cache ? '' : canReuseByFrame ? cached!.itemRevision : contentRevision(displayItem);
+        const staleContent = !canReuseByFrame && Boolean(cached) && cached!.itemRevision !== itemRevision;
+        const rendererChanged = Boolean(cached) && nativeTool && cached!.toolDefinition !== currentDef;
+        if (cached && (staleContent || rendererChanged || cached.signature !== signature)) {
           cached.lines = undefined;
-          if (!nativeTool || cached.toolDefinition !== currentDef) cached.component = undefined;
+          // Native tool components receive new arguments/results through their own setters, so they
+          // stay reusable. Message components bind their content in the constructor, so changed
+          // content must rebuild them instead of re-rendering stale data.
+          if (!nativeTool || rendererChanged) cached.component = undefined;
           cached.signature = signature;
         }
-        // Active tools still render on each frame: native loaders and asynchronous image updates stay live.
+        if (cached) cached.toolDefinition = currentDef;
+        // Active tools still render on each frame: native loaders and asynchronous image updates stay
+        // live. Terminal items reuse their rendered lines while their content revision matches.
         const rendered = reusableLines && cached?.lines && cached.width === width
+          && (canReuseByFrame || cached.itemRevision === itemRevision)
           ? cached.lines
           : truncateLines(itemContext, renderItem(displayItem, itemContext, width, cached), width);
         if (cached && reusableLines) {
           cached.width = width;
+          cached.itemRevision = itemRevision;
           cached.lines = rendered;
         }
         lines.push(...rendered);

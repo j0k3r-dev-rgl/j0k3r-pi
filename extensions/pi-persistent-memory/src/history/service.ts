@@ -3,7 +3,6 @@ import { initSchema } from '../storage/schema.ts';
 import {
   getUserMessage,
   searchUserMessages,
-  type UserMessageRecord,
 } from '../storage/history-store.ts';
 import {
   encodeHistoryCursor,
@@ -209,11 +208,11 @@ export function getHistoryDetail(
 
     const trialNextCursor = trialHasMore
       ? encodeHistoryCursor({
-          op: 'history_get',
-          project_key: projectKey,
-          id: record.id,
-          byte_offset: trialNextOffset,
-        })
+        op: 'history_get',
+        project_key: projectKey,
+        id: record.id,
+        byte_offset: trialNextOffset,
+      })
       : null;
 
     const trialData: HistoryGetResult = {
@@ -247,11 +246,11 @@ export function getHistoryDetail(
   const hasMore = nextByteOffset < totalBytes;
   const nextCursor = hasMore
     ? encodeHistoryCursor({
-        op: 'history_get',
-        project_key: projectKey,
-        id: record.id,
-        byte_offset: nextByteOffset,
-      })
+      op: 'history_get',
+      project_key: projectKey,
+      id: record.id,
+      byte_offset: nextByteOffset,
+    })
     : null;
 
   // Final safety check against MAX_TOOL_RESULT_BYTES
@@ -288,11 +287,11 @@ export function getHistoryDetail(
   const finalHasMore = finalNextOffset < totalBytes;
   const finalNextCursor = finalHasMore
     ? encodeHistoryCursor({
-        op: 'history_get',
-        project_key: projectKey,
-        id: record.id,
-        byte_offset: finalNextOffset,
-      })
+      op: 'history_get',
+      project_key: projectKey,
+      id: record.id,
+      byte_offset: finalNextOffset,
+    })
     : null;
 
   return {

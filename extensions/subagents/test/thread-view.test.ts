@@ -201,7 +201,7 @@ describe('thread view and render', () => {
       const item = { type: 'tool', tool_call_id: 'call', name: 'read', status: 'partial', arguments: { path: 'one' }, result: { content: [{ type: 'text', text: 'output' }], isError: false } };
       const snapshot = { version: 1, source: 'events', items: [item] };
       const cache = new SubagentThreadRenderCache();
-      let definition = { renderResult() {} };
+      let definition: any = { renderShell: 'self', compactToolRenderingVersion: 1, renderCall() {}, renderResult() {} };
       const context = { cwd: tmp, taskId: 'one', tui: {}, visibleWidth, truncateToWidth: (text: string, width: number) => text.slice(0, width), getToolDefinition: () => definition };
       const render = () => renderThreadBody(snapshot, context, cache).join('\n');
       render(); render();
@@ -216,7 +216,7 @@ describe('thread view and render', () => {
       item.arguments.path = 'two';
       expect(render()).toContain('two');
       expect(constructed).toHaveBeenCalledTimes(2);
-      definition = { renderResult() {} };
+      definition = { renderShell: 'self', compactToolRenderingVersion: 1, renderCall() {}, renderResult() {} };
       render();
       expect(constructed).toHaveBeenCalledTimes(3);
       delete (item as any).result;
@@ -410,7 +410,7 @@ describe('thread view and render', () => {
   });
 
   it('resolves registered extension tool definitions from pi/context arrays and maps', () => {
-    const memoryTool = { name: 'memory_search', label: 'Memory Search', renderResult: () => undefined };
+    const memoryTool = { name: 'memory_search', label: 'Memory Search', renderShell: 'self', compactToolRenderingVersion: 1, renderCall: () => undefined, renderResult: () => undefined };
     const readTool = { name: 'read', label: 'Read' };
 
     expect(resolveRegisteredToolDefinition({}, { tools: [memoryTool] }, 'memory_search')).toBe(memoryTool);
@@ -496,7 +496,7 @@ describe('thread view and render', () => {
       } as any, {
         cwd: tmp,
         tui: { requestRender() {} },
-        getToolDefinition: (name: string) => name === 'memory_search' ? { name, label: 'Memory Search', renderResult: () => undefined } : undefined,
+        getToolDefinition: (name: string) => name === 'memory_search' ? { name, label: 'Memory Search', renderShell: 'self', compactToolRenderingVersion: 1, renderCall: () => undefined, renderResult: () => undefined } : undefined,
         renderWidth: 180,
         visibleWidth: (text: string) => text.length,
         truncateToWidth: (text: string, width: number) => text.length > width ? text.slice(0, width) : text,
@@ -532,7 +532,7 @@ describe('thread view and render', () => {
     const oldArgv1 = process.argv[1];
     process.argv[1] = path.join(shimDir, 'pi');
     try {
-      registerSubagentRuntimeToolDefinition('task-runtime-tools', 'find_symbol', { name: 'find_symbol', label: 'Find Symbol', renderResult: () => undefined });
+      registerSubagentRuntimeToolDefinition('task-runtime-tools', 'find_symbol', { name: 'find_symbol', label: 'Find Symbol', renderShell: 'self', compactToolRenderingVersion: 1, renderCall: () => undefined, renderResult: () => undefined });
       const lines = renderThreadBody({
         version: 1,
         source: 'events',
@@ -554,7 +554,7 @@ describe('thread view and render', () => {
     }
   });
 
-  it('renders built-in tool rows with Pi ToolExecutionComponent from exported per-tool definitions', () => {
+  it('keeps unmarked built-in definitions on the local compact fallback and caches the definition lookup', () => {
     resetPiComponentCacheForTests();
     const packageRoot = path.join(tmp, 'fake-pi-tools-package');
     fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true });
@@ -579,39 +579,47 @@ describe('thread view and render', () => {
     const oldArgv1 = process.argv[1];
     process.argv[1] = path.join(shimDir, 'pi');
     try {
-      const lines = renderThreadBody({
-        version: 1,
-        source: 'events',
-        items: [{ type: 'tool', name: 'read', status: 'completed', arguments: { path: 'AGENTS.md' }, result: { content: [{ type: 'text', text: 'file result' }], isError: false } }],
-      } as any, {
+      const context = {
         cwd: tmp,
         tui: { requestRender() {} },
         renderWidth: 200,
         visibleWidth: (text: string) => text.length,
         truncateToWidth: (text: string, width: number) => text.length > width ? text.slice(0, width) : text,
-      } as any);
+      } as any;
+      const lines = renderThreadBody({
+        version: 1,
+        source: 'events',
+        items: [{ type: 'tool', name: 'read', status: 'completed', arguments: { path: 'AGENTS.md' }, result: { content: [{ type: 'text', text: 'file result' }], isError: false } }],
+      } as any, context);
 
-      expect(lines.join('\n')).toContain(`pi-tool:200:read:${tmp}:AGENTS.md:file result`);
-      expect(lines.join('\n')).not.toContain('read completed ·');
+      // Unmarked built-ins would re-enter Pi's default boxed/hinted shell, so replay uses the local
+      // compact policy instead and never executes the unmarked renderer.
+      const joined = lines.join('\n');
+      expect(joined).toContain('read completed');
+      expect(joined).toContain('AGENTS.md');
+      expect(joined).not.toContain('pi-tool:');
+      expect(joined).not.toMatch(/to expand|\(click to expand\)/);
+
+      const expanded = renderThreadBody({
+        version: 1,
+        source: 'events',
+        items: [{ type: 'tool', name: 'read', status: 'completed', arguments: { path: 'AGENTS.md' }, result: { content: [{ type: 'text', text: 'file result' }], isError: false } }],
+      } as any, { ...context, toolOutputExpanded: true });
+      expect(expanded.join('\n')).toContain('file result');
 
       const second = renderThreadBody({
         version: 1,
         source: 'events',
         items: [{ type: 'tool', name: 'read', status: 'completed', arguments: { path: 'README.md' }, result: { content: [{ type: 'text', text: 'second result' }], isError: false } }],
-      } as any, {
-        cwd: tmp,
-        tui: { requestRender() {} },
-        renderWidth: 200,
-        visibleWidth: (text: string) => text.length,
-        truncateToWidth: (text: string, width: number) => text.length > width ? text.slice(0, width) : text,
-      } as any);
-      expect(second.join('\n')).toContain('README.md:second result');
+      } as any, context);
+      expect(second.join('\n')).toContain('README.md');
       expect(require(packageRoot).__readDefinitionCalls()).toBe(1);
     } finally {
       process.argv[1] = oldArgv1;
       resetPiComponentCacheForTests();
     }
   });
+
 
   it('does not render assistant toolCall parts as raw requested text when tool rows exist', () => {
     const snapshot = {
@@ -631,8 +639,10 @@ describe('thread view and render', () => {
     expect(text).toContain('Summary after reading files.');
     expect(text).toContain('read');
     expect(text).toContain('AGENTS.md');
-    expect(text).toContain('# Agent Guide');
     expect(text).not.toContain('tool read requested');
+    // Collapsed rows stay compact; the returned text stays available when expanded.
+    const expanded = renderText(snapshot as any, { toolOutputExpanded: true });
+    expect(expanded).toContain('# Agent Guide');
   });
 
   it('filters assistant toolCall parts before using Pi assistant components to avoid duplicate raw JSON', () => {
@@ -646,7 +656,7 @@ describe('thread view and render', () => {
     fs.symlinkSync(path.join(packageRoot, 'dist', 'cli.js'), path.join(shimDir, 'pi'));
     fs.writeFileSync(path.join(packageRoot, 'index.cjs'), `
       exports.getMarkdownTheme = () => ({});
-      exports.createReadToolDefinition = () => ({ name: 'read' });
+      exports.createReadToolDefinition = () => ({ name: 'read', renderShell: 'self', compactToolRenderingVersion: 1, renderCall() {}, renderResult() {} });
       exports.AssistantMessageComponent = class {
         constructor(message) { this.message = message; }
         render() { return this.message.content.map((part) => part.type === 'toolCall' ? 'raw-tool-json:' + JSON.stringify(part.arguments) : 'assistant-text:' + part.text); }
@@ -696,8 +706,14 @@ describe('thread view and render', () => {
 
     expect(text).toContain('memory_search completed');
     expect(text).toContain('subagent memory tools render');
-    expect(text).toContain('Found 3 memory result(s).');
     expect(text).not.toContain('{"query"');
+    expect(renderText({
+      version: 1,
+      source: 'events',
+      items: [
+        { type: 'tool', name: 'memory_search', status: 'completed', arguments: { query: 'subagent memory tools render', limit: 3, scopes: ['project', 'general', 'global'], compact: true }, result: { content: [{ type: 'text', text: 'Found 3 memory result(s).' }], isError: false } },
+      ],
+    } as any, { toolOutputExpanded: true })).toContain('Found 3 memory result(s).');
     expect(text).not.toContain('"scopes"');
   });
 
@@ -718,22 +734,28 @@ describe('thread view and render', () => {
     };
 
     const text = renderText(snapshot as any);
+    const expanded = renderText(snapshot as any, { toolOutputExpanded: true });
 
+    // Collapsed rows: compact identity/state/target identity, never a card frame.
     expect(text).toContain('assistant explains the plan');
     expect(text).toContain('memory_search');
     expect(text).toContain('thread view');
     expect(text).toContain('bash');
     expect(text).toContain('npm test -- --run');
-    expect(text).toContain('vitest passed');
     expect(text).toContain('edit');
     expect(text).toContain('src/thread-view.ts');
     expect(text).toContain('read');
     expect(text).toContain('README.md');
     expect(text).toContain('custom_tool');
     expect(text).toContain('failed');
-    expect(text).toContain('custom failure text');
     expect(text).toContain('custom fallback text');
     expect(text).toContain('renderer-safe error row');
+    expect(text).not.toMatch(/[╭╮╰╯│┌┐└┘]/);
+    expect(text).not.toMatch(/to expand|\(click to expand\)/);
+
+    // Expanded rows: every returned snapshot text block remains reachable.
+    expect(expanded).toContain('vitest passed');
+    expect(expanded).toContain('custom failure text');
   });
 
   it('bounds malformed thread items and continues rendering later rows', () => {
@@ -759,12 +781,12 @@ describe('thread view and render', () => {
     expect(text).toContain('after malformed still visible');
   });
 
-  it('uses bounded body widths for long rendered rows', () => {
+  it('uses bounded body widths for long non-bash rendered rows', () => {
     const widths: number[] = [];
     const text = renderText({
       version: 1,
       source: 'events',
-      items: [{ type: 'bash', command: `node ${'x'.repeat(180)}`, output: 'done', status: 'completed', exitCode: 0 }],
+      items: [{ type: 'tool', name: 'custom_long_tool', status: 'completed', arguments: { target: `path/${'x'.repeat(180)}` } }],
     } as any, {
       truncateToWidth: (line, width) => {
         widths.push(width);
@@ -774,6 +796,109 @@ describe('thread view and render', () => {
 
     expect(Math.max(...widths)).toBeLessThanOrEqual(100);
     expect(text).toContain('…');
+  });
+
+  it('renders nested replay bash rows and fallback with full multiline orange commands, 1-col left margin, and no clipping', () => {
+    const longLine = 'echo ' + 'z'.repeat(70);
+    const cmd = `printf 'a\\nb'\n\n# ╭─ box ─╮ ctrl+o to expand\n${longLine}`;
+    const snapshot = {
+      version: 1,
+      source: 'events',
+      items: [
+        { type: 'tool', id: 'b1', tool_call_id: 'bc1', name: 'bash', status: 'running', arguments: { command: cmd } },
+        { type: 'bash', id: 'b2', command: 'step 1\n\nstep 2', output: 'out 1\nout 2', status: 'cancelled', cancelled: true },
+        { type: 'tool', id: 'p1', tool_call_id: 'pc1', name: 'powershell', status: 'completed', arguments: { command: 'Write-Output 1\nWrite-Output 2' } },
+      ],
+    };
+
+    const collapsedLines = renderThreadBody(snapshot as any, { cwd: tmp, renderWidth: 28, visibleWidth: (s) => stripAnsi(s).length, truncateToWidth: (s, w) => s.slice(0, w) });
+    for (const line of collapsedLines) expect(stripAnsi(line).startsWith(' ')).toBe(true);
+    const collapsedPlain = stripAnsi(collapsedLines.join('\n'));
+    expect(collapsedLines.some((l) => l.includes('\x1b[1;38;2;255;140;0m'))).toBe(true);
+    expect(collapsedPlain).toContain("printf 'a\\nb'");
+    expect(collapsedPlain).toContain('# ╭─ box ─╮');
+    expect(collapsedLines.map((l) => stripAnsi(l).slice(1)).join('')).toContain('z'.repeat(70));
+    expect(collapsedPlain).toContain('step 1');
+    expect(collapsedPlain).toContain('step 2');
+    expect(collapsedPlain).toContain('bash cancelled');
+    expect(collapsedPlain).not.toContain('…');
+    expect(collapsedLines.some((l) => stripAnsi(l) === ' ')).toBe(true);
+    for (const line of collapsedLines) expect(stripAnsi(line).length).toBeLessThanOrEqual(28);
+    // Powershell stays single-line collapsed (clipped at innerWidth 27)
+    expect(collapsedPlain).toContain('powershell completed ─ Writ');
+    expect(collapsedPlain).not.toContain('Write-Output 2');
+
+    // Width <= 0 emits empty array; width === 1 emits [' '] per tool row without overflow
+    expect(renderThreadBody(snapshot as any, { cwd: tmp, renderWidth: 0, visibleWidth: (s) => stripAnsi(s).length, truncateToWidth: (s, w) => s.slice(0, w) })).toEqual([]);
+    const w1Lines = renderThreadBody(snapshot as any, { cwd: tmp, renderWidth: 1, visibleWidth: (s) => stripAnsi(s).length, truncateToWidth: (s, w) => s.slice(0, w) });
+    expect(w1Lines.every((l) => l === ' ')).toBe(true);
+
+    // Expanded keeps output
+    const expandedPlain = stripAnsi(renderThreadBody(snapshot as any, { cwd: tmp, renderWidth: 40, toolOutputExpanded: true, visibleWidth: (s) => stripAnsi(s).length, truncateToWidth: (s, w) => s.slice(0, w) }).join('\n'));
+    expect(expandedPlain).toContain('out 1');
+    expect(expandedPlain).toContain('out 2');
+
+    // Exact whitespace/newline/tab/quote/backslash preservation across soft-wrap in replay fallback
+    const exactCmd = `\n    lead_${'k'.repeat(30)}   \n\tquote "a'b" \\\\ 'x\\ny'\n\n  end   `;
+    const wsSnapshot = {
+      version: 1,
+      source: 'events',
+      items: [{ type: 'tool', id: 'b-ws', tool_call_id: 'bc-ws', name: 'bash', status: 'completed', arguments: { command: exactCmd } }],
+    };
+    const wsLines = renderThreadBody(wsSnapshot as any, { cwd: tmp, renderWidth: 20, visibleWidth: (s) => stripAnsi(s).length, truncateToWidth: (s, w) => s.slice(0, w) });
+    for (const l of wsLines) {
+      expect(stripAnsi(l).length).toBeLessThanOrEqual(20);
+      expect(stripAnsi(l).startsWith(' ')).toBe(true);
+    }
+    const wsUnmargined = wsLines.map((l) => stripAnsi(l).slice(1));
+    expect(wsUnmargined[1]).toBe('');
+    expect(wsUnmargined[2]?.startsWith('    lead_')).toBe(true);
+    expect(wsUnmargined.slice(2, 5).join('')).toBe(`    lead_${'k'.repeat(30)}   `);
+    expect(wsUnmargined.slice(5, 7).join('')).toBe(`   quote "a'b" \\\\ 'x\\ny'`);
+    expect(wsUnmargined[7]).toBe('');
+    expect(wsUnmargined[8]).toBe('  end   ');
+  });
+
+  it('retains authored CR/CRLF verbatim in nested bash replay and preserves wide graphemes with width-2 margin exception', () => {
+    const crCmd = 'A\r\nB\rC\r\n\r\nD\r';
+    const crSnapshot = {
+      version: 1,
+      source: 'events',
+      items: [{ type: 'tool', id: 'b-cr', tool_call_id: 'bc-cr', name: 'bash', status: 'completed', arguments: { command: crCmd } }],
+    };
+    const crLines80 = renderThreadBody(crSnapshot as any, { cwd: tmp, renderWidth: 80, visibleWidth, truncateToWidth: (s, w) => s.slice(0, w) });
+    const recovered80 = crLines80.slice(1).map((l) => stripAnsi(l).slice(1)).join('\n');
+    expect(recovered80).toBe(crCmd);
+
+    const crLines4 = renderThreadBody(crSnapshot as any, { cwd: tmp, renderWidth: 4, visibleWidth, truncateToWidth: (s, w) => s.slice(0, w) });
+    for (const l of crLines4) expect(stripAnsi(l).startsWith(' ')).toBe(true);
+    expect(crLines4.slice(1).map((l) => stripAnsi(l).slice(1)).join('')).toBe(crCmd.replace(/\n/g, ''));
+
+    // Width 2: A漢B👨‍👩‍👧é keeps wide graphemes intact without margin while narrow graphemes retain 1-col margin
+    const wideInput = 'A漢B👨‍👩‍👧e\u0301';
+    const wideSnap = {
+      version: 1,
+      source: 'events',
+      items: [
+        { type: 'tool', id: 'b-w2', tool_call_id: 'bc-w2', name: 'bash', status: 'completed', arguments: { command: wideInput }, result: { content: [{ type: 'text', text: 'Z漢W' }], isError: false } },
+      ],
+    };
+    const wideLines2 = renderThreadBody(wideSnap as any, { cwd: tmp, renderWidth: 2, toolOutputExpanded: true, visibleWidth, truncateToWidth: (s, w) => s.slice(0, w) });
+    for (const l of wideLines2) expect(visibleWidth(l)).toBeLessThanOrEqual(2);
+    const widePlain2 = wideLines2.map(stripAnsi);
+    expect(widePlain2).toContain('漢');
+    expect(widePlain2).toContain('👨‍👩‍👧');
+    expect(widePlain2).toContain(' A');
+    expect(widePlain2).toContain(' B');
+    expect(widePlain2).toContain(' e\u0301');
+    expect(widePlain2).toContain(' Z');
+    expect(widePlain2).toContain(' W');
+    // At width 3, every line keeps 1-col margin
+    const wideLines3 = renderThreadBody(wideSnap as any, { cwd: tmp, renderWidth: 3, toolOutputExpanded: true, visibleWidth, truncateToWidth: (s, w) => s.slice(0, w) });
+    for (const l of wideLines3) {
+      expect(visibleWidth(l)).toBeLessThanOrEqual(3);
+      expect(stripAnsi(l).startsWith(' ')).toBe(true);
+    }
   });
 
   it('wraps long thinking narrative across multiple lines without ellipsis truncation while preserving framed tool rows (MINI-003)', () => {

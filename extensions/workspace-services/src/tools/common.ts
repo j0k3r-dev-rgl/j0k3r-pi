@@ -16,9 +16,9 @@ export const STOP_PARAMETERS = Type.Object({
 export const LOGS_PARAMETERS = Type.Object({
   service: Type.String({ description: 'Configured service name from .pi/workspace-services.json or detected compose service.' }),
   lines: Type.Optional(Type.Number({ description: 'Maximum log lines to return. Default 100, max 2000.' })),
-  offset: Type.Optional(Type.Number({ description: 'Number of newest log lines to skip before returning logs. Default 0; use 100 for the previous page.' })),
-  until: Type.Optional(Type.Number({ description: 'Oldest line offset from the newest log line for range reads. Example: offset=100, until=200 returns the previous 100-line window.' })),
-  max_bytes: Type.Optional(Type.Number({ description: 'Maximum log bytes to inspect. Default 51200, max 204800.' })),
+  offset: Type.Optional(Type.Number({ description: 'Host services only (unsupported for Compose services; omit for Compose). Number of newest log lines to skip before returning logs (0..2000). Default 0; use 100 for the previous page.' })),
+  until: Type.Optional(Type.Number({ description: 'Host services only (unsupported for Compose services; omit for Compose). Oldest line offset from the newest log line for range reads. Example: offset=100, until=200 returns the previous 100-line window.' })),
+  max_bytes: Type.Optional(Type.Number({ description: 'Maximum log bytes to inspect/return. Default 51200, max 204800.' })),
 }, { additionalProperties: false });
 
 export function serviceName(params: Record<string, unknown>): string {
@@ -31,7 +31,7 @@ export function timeoutMs(params: Record<string, unknown>): number | undefined {
 }
 
 export function textResult(outcome: WorkspaceServiceOutcome, text: string) {
-  return { content: [{ type: 'text' as const, text }], details: outcome };
+  return { content: [{ type: 'text' as const, text }], details: outcome, isError: !outcome.ok };
 }
 
 export function trustFailure(): WorkspaceServiceOutcome {

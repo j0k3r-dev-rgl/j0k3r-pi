@@ -10,6 +10,8 @@ import { isSupervisorEnabled, loadSupervisorConfig, updateSupervisorConfig, sele
 import { assertWorkSettled, verifiedCheckpoint, defaultSubagentTaskRegistry } from './src/bridge.ts';
 import { type SupervisorPanelState } from './src/supervisor-panel.ts';
 import { createSupervisorDashboard } from './src/supervisor-dashboard.ts';
+import { registerSupervisorHud } from './src/hud.ts';
+import { supervisorRotateRenderers } from './src/render.ts';
 import { loadSubagentConfig, updateSubagentConfig, selectSubagentConfigScope } from './src/subagent-config.ts';
 import { discoverSubagents } from './src/subagent-discovery.ts';
 import { resolveConfigurationLocation } from './src/configuration-scope.ts';
@@ -350,6 +352,8 @@ export default function supervisor(pi: ExtensionAPI, overrides: SupervisorHostOv
     };
   };
 
+  registerSupervisorHud(pi, panelState);
+
   async function openSupervisorPanel(ctx: any): Promise<void> {
     if (ctx.mode !== 'tui' || (ctx.isProjectTrusted && !ctx.isProjectTrusted())) return;
     const loaded = loadSupervisorConfig(ctx.cwd);
@@ -598,6 +602,7 @@ export default function supervisor(pi: ExtensionAPI, overrides: SupervisorHostOv
       continue_task: { type: 'boolean', description: 'Continue only unfinished work already authorized. Default false.' },
     } } as never,
     reachesTools: () => ['memory_save', 'memory_get', 'supervisor_rotate', 'subagent_run'],
+    ...supervisorRotateRenderers(),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const r = bound(ctx);
       if (!r) throw new Error('Supervisor inactive; requires an interactive parent session');

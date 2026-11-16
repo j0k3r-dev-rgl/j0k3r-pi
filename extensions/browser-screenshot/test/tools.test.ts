@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -15,6 +15,29 @@ const cleanup: string[] = [];
 afterEach(async () => {
   await Promise.all(cleanup.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
+
+/**
+ * `browser-screenshot/index.ts` reads `.pi/extensions.json` from the process cwd.
+ * Tests run from the package directory, so run them inside an isolated fixture
+ * project instead of changing production enabling behavior.
+ */
+async function enableExtension(cwd: string): Promise<void> {
+  await mkdir(join(cwd, '.pi'), { recursive: true });
+  await writeFile(join(cwd, '.pi', 'extensions.json'), JSON.stringify({ 'browser-screenshot': true }), 'utf8');
+}
+
+async function withEnabledCwd<T>(runner: (cwd: string) => Promise<T>): Promise<T> {
+  const cwd = await mkdtemp(join(tmpdir(), 'browser-screenshot-enabled-'));
+  cleanup.push(cwd);
+  await enableExtension(cwd);
+  const previous = process.cwd();
+  process.chdir(cwd);
+  try {
+    return await runner(cwd);
+  } finally {
+    process.chdir(previous);
+  }
+}
 
 type Tool = {
   name: string;
@@ -45,7 +68,7 @@ function createFetch(map: Record<string, unknown>) {
 describe('tool registration', () => {
   it('navigates an existing target and returns a screenshot handoff id', async () => {
     const pi = createMockPi();
-    browserScreenshotExtension(pi as any);
+    await withEnabledCwd(async () => browserScreenshotExtension(pi as any));
     const tool = pi.tools.find((entry) => entry.name === 'go_to_page');
     const result: any = await tool?.execute('call-nav', {
       url: 'https://example.test/next',
@@ -58,9 +81,9 @@ describe('tool registration', () => {
     expect(JSON.stringify(result.content)).toContain('browser_page_screenshot');
     expect(JSON.stringify(result.content)).not.toContain('ws://page-1');
   });
-  it('registers the required browser screenshot tools with a strict go_to_page schema', () => {
+  it('registers the required browser screenshot tools with a strict go_to_page schema', async () => {
     const pi = createMockPi();
-    browserScreenshotExtension(pi as any);
+    await withEnabledCwd(async () => browserScreenshotExtension(pi as any));
     expect(pi.tools.map((tool) => tool.name)).toEqual([
       'browser_cdp_status',
       'browser_tabs_list',
@@ -80,7 +103,7 @@ describe('tool registration', () => {
 
   it('returns bounded tab output without websocket urls', async () => {
     const pi = createMockPi();
-    browserScreenshotExtension(pi as any);
+    await withEnabledCwd(async () => browserScreenshotExtension(pi as any));
     const tool = pi.tools.find((entry) => entry.name === 'browser_tabs_list');
 
     const result: any = await tool?.execute('call-1', {
@@ -101,7 +124,7 @@ describe('tool registration', () => {
     const dir = await mkdtemp(join(tmpdir(), 'pi-browser-tool-'));
     cleanup.push(dir);
     const pi = createMockPi();
-    browserScreenshotExtension(pi as any);
+    await withEnabledCwd(async () => browserScreenshotExtension(pi as any));
     const tool = pi.tools.find((entry) => entry.name === 'browser_page_screenshot');
 
     const result: any = await tool?.execute('call-2', {

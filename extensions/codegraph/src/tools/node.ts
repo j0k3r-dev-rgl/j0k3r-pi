@@ -10,7 +10,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { isNotIndexedOutput, resolveProjectPath, trackTempDir } from "../core.js";
-import { renderNodeCall, renderNodeResult } from "../render/index.js";
+import { COMPACT_TOOL_RENDERING, renderNodeCall, renderNodeResult } from "../render/index.js";
 import type { CodeGraphNodeDetails } from "../types.js";
 
 export function registerNodeTool(pi: ExtensionAPI) {
@@ -92,5 +92,6 @@ export function registerNodeTool(pi: ExtensionAPI) {
 		renderCall: renderNodeCall,
 		renderResult: renderNodeResult,
 		renderShell: "self",
+		...COMPACT_TOOL_RENDERING,
 	});
 }

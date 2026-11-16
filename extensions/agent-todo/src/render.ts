@@ -7,110 +7,180 @@ export const RED = '\x1b[1;38;2;255;77;109m';
 export const DIM = '\x1b[2m';
 export const BOLD = '\x1b[1m';
 
-const ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]/g;
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+const ZERO_WIDTH_RE = /^(?:\p{Default_Ignorable_Code_Point}|\p{Control}|\p{Mark}|\p{Surrogate})+$/u;
+const WIDE_CHAR_RE = /[\u1100-\u115f\u231a-\u231b\u2329-\u232a\u23e9-\u23ec\u23f0\u23f3\u25fd-\u25fe\u2614-\u2615\u2648-\u2653\u267f\u2693\u26a1\u26aa-\u26ab\u26bd-\u26be\u26c4-\u26c5\u26ce\u26d4\u26ea\u26f2-\u26f3\u26f5\u26fa\u26fd\u2705\u270a-\u270b\u2728\u274c\u274e\u2753-\u2755\u2757\u2795-\u2797\u27b0\u27bf\u2b1b-\u2b1c\u2b50\u2b55\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe10-\ufe19\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6]|\p{Extended_Pictographic}/u;
+
+function matchEscapeAt(str: string, index: number): string | undefined {
+  if (str[index] !== '\x1b') return undefined;
+  const next = str[index + 1];
+  if (next === '[') {
+    const m = str.slice(index).match(/^\x1b\[[0-?]*[ -/]*[@-~]/);
+    return m?.[0];
+  }
+  if (next === ']' || next === '_') {
+    const rest = str.slice(index + 2);
+    const bel = rest.indexOf('\x07');
+    const st = rest.indexOf('\x1b\\');
+    if (bel !== -1 && (st === -1 || bel < st)) return str.slice(index, index + 2 + bel + 1);
+    if (st !== -1) return str.slice(index, index + 2 + st + 2);
+  }
+  return undefined;
+}
 
 export function stripAnsi(str: string): string {
-  return str.replace(ANSI_REGEX, '');
+  if (!str.includes('\x1b')) return str;
+  let out = '';
+  let i = 0;
+  while (i < str.length) {
+    const seq = matchEscapeAt(str, i);
+    if (seq) {
+      i += seq.length;
+      continue;
+    }
+    out += str[i];
+    i++;
+  }
+  return out;
+}
+
+function graphemeWidth(segment: string): number {
+  if (segment === '\t') return 3;
+  if (segment.length === 1) {
+    const code = segment.charCodeAt(0);
+    if (code >= 0x20 && code <= 0x7e) return 1;
+  }
+  if (ZERO_WIDTH_RE.test(segment)) return 0;
+  return WIDE_CHAR_RE.test(segment) ? 2 : 1;
 }
 
 export function visibleWidth(str: string): number {
-  return stripAnsi(str).length;
+  if (!str) return 0;
+  const clean = stripAnsi(str);
+  let width = 0;
+  for (const { segment } of graphemeSegmenter.segment(clean)) {
+    width += graphemeWidth(segment);
+  }
+  return width;
 }
 
-export function truncateWithAnsi(str: string, maxWidth: number): string {
+export function truncateWithAnsi(str: string, maxWidth: number, ellipsis = ''): string {
   if (maxWidth <= 0) return '';
   if (visibleWidth(str) <= maxWidth) return str;
 
+  const ell = visibleWidth(ellipsis) < maxWidth ? ellipsis : '';
+  const targetWidth = Math.max(0, maxWidth - visibleWidth(ell));
   let visible = 0;
   let result = '';
-  const ansiTokenRegex = /^\x1b\[[0-9;]*[a-zA-Z]/;
+  let activeOsc8 = false;
   let i = 0;
 
-  while (i < str.length && visible < maxWidth) {
-    const match = str.slice(i).match(ansiTokenRegex);
-    if (match) {
-      result += match[0];
-      i += match[0].length;
-    } else {
-      result += str[i];
-      visible++;
-      i++;
+  while (i < str.length) {
+    const seq = matchEscapeAt(str, i);
+    if (seq) {
+      result += seq;
+      if (seq.startsWith('\x1b]8;')) {
+        const oscMatch = seq.match(/^\x1b\]8;[^;]*;([^\x07\x1b]*)(?:\x07|\x1b\\)$/);
+        if (oscMatch) activeOsc8 = Boolean(oscMatch[1]);
+      }
+      i += seq.length;
+      continue;
     }
+    let end = i + 1;
+    while (end < str.length && !matchEscapeAt(str, end)) end++;
+    let overflowed = false;
+    for (const { segment } of graphemeSegmenter.segment(str.slice(i, end))) {
+      const w = graphemeWidth(segment);
+      if (visible + w > targetWidth) {
+        overflowed = true;
+        break;
+      }
+      result += segment;
+      visible += w;
+    }
+    if (overflowed) break;
+    i = end;
   }
 
-  result += RESET;
+  if (activeOsc8) result += '\x1b]8;;\x07';
+  result += `${RESET}${ell}${ell ? RESET : ''}`;
   return result;
 }
 
 export function fit(text: string, width: number): string {
-  return truncateWithAnsi(text, Math.max(0, width));
-}
-
-export function pad(text: string, width: number): string {
   if (width <= 0) return '';
-  const vis = visibleWidth(text);
-  if (vis === width) return text;
-  if (vis < width) return text + ' '.repeat(width - vis);
-  const fitted = fit(text, width);
-  const visFitted = visibleWidth(fitted);
-  return visFitted < width ? fitted + ' '.repeat(width - visFitted) : fitted;
+  return truncateWithAnsi(text, width, width >= 4 ? '…' : '');
 }
 
-export function boxLine(content: string, innerWidth: number, borderColor: string = CYAN): string {
-  const innerContentWidth = Math.max(0, innerWidth - 2);
-  return `${borderColor}│${RESET} ${pad(content, innerContentWidth)} ${borderColor}│${RESET}`;
-}
+function wrapLineToWidth(line: string, width: number): string[] {
+  if (width <= 0) return [];
+  const normalized = line.replace(/\t/g, '   ');
+  if (!normalized) return [''];
+  if (visibleWidth(normalized) <= width) return [normalized];
 
-export function cardTopBorder(
-  toolName: string,
-  actionOrTarget: string | undefined,
-  innerWidth: number,
-  borderColor: string = CYAN,
-  titleColor: string = borderColor,
-): string {
-  const cleanAction = actionOrTarget ? actionOrTarget.replace(/[\r\n]+/g, ' ').trim() : undefined;
-  let label = cleanAction ? `${toolName} [${cleanAction}]` : toolName;
+  const out: string[] = [];
+  let current = '';
+  let currentWidth = 0;
+  let activeOsc8 = false;
+  let i = 0;
 
-  const maxTitleWidth = Math.max(4, innerWidth - 4);
-  if (visibleWidth(label) + 2 > maxTitleWidth && cleanAction) {
-    const maxActionWidth = Math.max(3, maxTitleWidth - visibleWidth(toolName) - 5);
-    const truncatedAction = fit(cleanAction, maxActionWidth);
-    label = `${toolName} [${truncatedAction}]`;
+  while (i < normalized.length) {
+    const seq = matchEscapeAt(normalized, i);
+    if (seq) {
+      current += seq;
+      if (seq.startsWith('\x1b]8;')) {
+        const oscMatch = seq.match(/^\x1b\]8;[^;]*;([^\x07\x1b]*)(?:\x07|\x1b\\)$/);
+        if (oscMatch) activeOsc8 = Boolean(oscMatch[1]);
+      }
+      i += seq.length;
+      continue;
+    }
+    let end = i + 1;
+    while (end < normalized.length && !matchEscapeAt(normalized, end)) end++;
+    for (const { segment } of graphemeSegmenter.segment(normalized.slice(i, end))) {
+      const w = graphemeWidth(segment);
+      if (w > width) {
+        if (current) {
+          out.push(activeOsc8 ? `${current}\x1b]8;;\x07${RESET}` : current);
+          current = '';
+          currentWidth = 0;
+        }
+        continue;
+      }
+      if (currentWidth + w > width && currentWidth > 0) {
+        out.push(activeOsc8 ? `${current}\x1b]8;;\x07${RESET}` : current);
+        current = segment;
+        currentWidth = w;
+      } else {
+        current += segment;
+        currentWidth += w;
+      }
+    }
+    i = end;
   }
 
-  let titleText = ` ${label} `;
-  if (visibleWidth(titleText) > innerWidth) {
-    titleText = ` ${fit(label, Math.max(1, innerWidth - 2))} `;
+  if (current || out.length === 0) {
+    out.push(activeOsc8 ? `${current}\x1b]8;;\x07` : current);
   }
-
-  const rest = Math.max(0, innerWidth - visibleWidth(titleText));
-  const leftDash = Math.min(2, rest);
-  const rightDash = Math.max(0, rest - leftDash);
-  return `${borderColor}╭${'─'.repeat(leftDash)}${RESET}${titleColor}${titleText}${RESET}${borderColor}${'─'.repeat(rightDash)}╮${RESET}`;
+  return out.map((item) => (visibleWidth(item) > width ? truncateWithAnsi(item, width, '') : item));
 }
 
-export function cardBottomBorder(innerWidth: number, borderColor: string = CYAN): string {
-  return `${borderColor}╰${'─'.repeat(Math.max(0, innerWidth))}╯${RESET}`;
-}
-
-export function frameContent(
-  lines: string[],
-  innerWidth: number,
-  borderColor: string = CYAN,
-): string[] {
-  const framed: string[] = [];
-  for (const rawLine of lines) {
-    const subLines = rawLine.includes('\n') ? rawLine.split(/\r?\n/) : [rawLine];
+function wrapLines(lines: string[], width: number): string[] {
+  if (width <= 0) return [];
+  const result: string[] = [];
+  for (const raw of lines) {
+    const subLines = raw.split(/\r\n|\r|\n/);
     for (const sub of subLines) {
-      framed.push(boxLine(sub, innerWidth, borderColor));
+      result.push(...wrapLineToWidth(sub, width));
     }
   }
-  return framed;
+  return result;
 }
 
 function progress(todo: AgentTodo): { label: string; completed: number; total: number; open: number } {
-  const completed = todo.steps.filter((step) => step.status === 'completed').length;
-  const total = todo.steps.length;
+  const steps = Array.isArray(todo.steps) ? todo.steps : [];
+  const completed = steps.filter((step) => step.status === 'completed').length;
+  const total = steps.length;
   return { label: `${completed}/${total}`, completed, total, open: total - completed };
 }
 
@@ -119,15 +189,8 @@ function compactTodoSummary(todo: AgentTodo): string {
   return `${todo.title} · ${stats.label} complete · ${stats.open} open`;
 }
 
-function getKeyHint(theme: any, action: 'expand' | 'collapse'): string {
-  const key = theme?.keybinding?.('app.tools.expand') ?? 'ctrl+o';
-  return `${DIM}${key} ${action}${RESET}`;
-}
-
-function getResultBorderColor(details: any, isError?: boolean): string {
-  if (isError || details?.ok === false) {
-    return RED;
-  }
+function getResultColor(details: any, isError?: boolean): string {
+  if (isError || details?.ok === false) return RED;
   if (
     details?.action === 'complete_all' ||
     details?.state?.current_todo?.status === 'completed' ||
@@ -138,65 +201,73 @@ function getResultBorderColor(details: any, isError?: boolean): string {
   return CYAN;
 }
 
-export function renderAgentTodoCall(args: any, theme: any, context?: any) {
-  let cachedBorderWidth: number | undefined;
-  let cachedBorderColor: string | undefined;
-  let cachedTopBorder: string[] | undefined;
+function actionBadgeFor(args: any, details?: any): string {
+  const rawAction = typeof args?.action === 'string' && args.action.trim()
+    ? args.action.trim()
+    : typeof details?.action === 'string' && details.action.trim()
+      ? details.action.trim()
+      : 'show';
+  let badge = rawAction;
+  if (typeof args?.step_id === 'string' && args.step_id.trim()) {
+    badge += ` ${args.step_id.trim()}`;
+  } else if (typeof args?.range === 'string' && args.range.trim()) {
+    badge += ` ${args.range.trim()}`;
+  }
+  return badge.replace(/[\r\n]+/g, ' ').trim();
+}
+
+function inlineText(value: unknown): string {
+  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
+}
+
+function extractTextBlocks(result: any): string[] {
+  if (!result || !Array.isArray(result.content)) return [];
+  return result.content
+    .filter((block: any) => block?.type === 'text' && typeof block.text === 'string')
+    .map((block: any) => block.text as string);
+}
+
+export function renderAgentTodoCall(args: any, _theme?: any, context?: any) {
+  let cachedWidth: number | undefined;
+  let cachedColor: string | undefined;
+  let cachedLine: string[] | undefined;
 
   return {
+    compactLeftMargin: 1 as const,
     invalidate() {
-      cachedBorderWidth = undefined;
-      cachedBorderColor = undefined;
-      cachedTopBorder = undefined;
+      cachedWidth = undefined;
+      cachedColor = undefined;
+      cachedLine = undefined;
     },
     render(width: number): string[] {
-      if (width <= 0) return [];
-      const action = typeof args?.action === 'string' && args.action.trim() ? args.action.trim() : 'show';
-      let actionBadge = action;
-      if (typeof args?.step_id === 'string' && args.step_id.trim()) {
-        actionBadge += ` ${args.step_id.trim()}`;
-      } else if (typeof args?.range === 'string' && args.range.trim()) {
-        actionBadge += ` ${args.range.trim()}`;
-      }
+      const safeWidth = Number.isFinite(width) ? Math.floor(width) : 0;
+      try {
+        if (safeWidth <= 0) return [];
+        if (context?.state?.hasResult) return [];
+        if (safeWidth === 1) return [' '];
+        const innerWidth = safeWidth - 1;
 
-      if (width < 24) {
-        return [fit(`agent_todo [${actionBadge}]`, width)];
-      }
-
-      const innerWidth = Math.max(0, width - 2);
-      const state = context?.state;
-      const isError = Boolean(context?.isError);
-      const borderColor = state?.borderColor ?? (isError ? RED : CYAN);
-
-      if (state?.hasResult) {
-        if (
-          cachedBorderWidth === innerWidth &&
-          cachedBorderColor === borderColor &&
-          cachedTopBorder
-        ) {
-          return cachedTopBorder;
+        const badge = actionBadgeFor(args);
+        const color = context?.isError ? RED : CYAN;
+        if (cachedWidth === safeWidth && cachedColor === color && cachedLine) {
+          return cachedLine;
         }
-        const topBorder = cardTopBorder('agent_todo', actionBadge, innerWidth, borderColor, borderColor);
-        cachedBorderWidth = innerWidth;
-        cachedBorderColor = borderColor;
-        cachedTopBorder = [topBorder];
-        return cachedTopBorder;
+
+        const pendingDetail = typeof args?.title === 'string' && args.title.trim()
+          ? inlineText(args.title)
+          : typeof args?.step_id === 'string' && args.step_id.trim()
+            ? inlineText(args.step_id)
+            : 'pending…';
+
+        const row = `${color}agent_todo${RESET} ${DIM}[${badge}]${RESET} ${DIM}───${RESET} ${color}●${RESET} ${pendingDetail}`;
+        cachedWidth = safeWidth;
+        cachedColor = color;
+        cachedLine = [` ${fit(row, innerWidth)}`];
+        return cachedLine;
+      } catch {
+        if (safeWidth <= 0) return [];
+        return safeWidth === 1 ? [' '] : [` ${fit('agent_todo', safeWidth - 1)}`];
       }
-
-      const topBorder = cardTopBorder('agent_todo', actionBadge, innerWidth, borderColor, borderColor);
-      const pendingDetail = typeof args?.title === 'string' && args.title.trim()
-        ? `Pending: ${args.title.trim()}`
-        : typeof args?.step_id === 'string' && args.step_id.trim()
-          ? `Pending: ${args.step_id.trim()}`
-          : 'Pending...';
-
-      const pendingLine = `${CYAN}●${RESET} ${pendingDetail}`;
-
-      return [
-        topBorder,
-        boxLine(pendingLine, innerWidth, borderColor),
-        cardBottomBorder(innerWidth, borderColor),
-      ];
     },
   };
 }
@@ -204,98 +275,124 @@ export function renderAgentTodoCall(args: any, theme: any, context?: any) {
 export function renderAgentTodoResult(
   result: AgentTodoToolResult,
   options: { expanded?: boolean; isPartial?: boolean } = {},
-  theme: any,
+  _theme?: any,
   context?: any,
 ) {
-  const details = result?.details?.agent_todo;
-  const isError = Boolean(context?.isError || details?.ok === false);
-  const borderColor = getResultBorderColor(details, isError);
-
-  if (context?.state) {
-    context.state.hasResult = true;
-    context.state.borderColor = borderColor;
+  let borderColor = CYAN;
+  let isError = false;
+  try {
+    const details = result?.details?.agent_todo;
+    isError = Boolean(context?.isError || (result as any)?.isError || details?.ok === false);
+    borderColor = getResultColor(details, isError);
+    if (context?.state) {
+      context.state.hasResult = true;
+      context.state.borderColor = borderColor;
+    }
+  } catch {
+    if (context?.state) {
+      context.state.hasResult = true;
+      context.state.borderColor = RED;
+    }
   }
 
   let cachedWidth: number | undefined;
   let cachedLines: string[] | undefined;
 
   return {
+    compactLeftMargin: 1 as const,
     invalidate() {
       cachedWidth = undefined;
       cachedLines = undefined;
     },
     render(width: number): string[] {
-      if (width <= 0) return [];
-      if (!options?.isPartial && cachedWidth === width && cachedLines !== undefined) {
-        return cachedLines;
-      }
-
-      const isExpanded = options?.expanded === true;
-      const keyHint = getKeyHint(theme, isExpanded ? 'collapse' : 'expand');
-      const bodyLines: string[] = [];
-
-      if (!details) {
-        bodyLines.push(result?.content?.[0]?.text ?? 'agent todo');
-      } else if (details.ok === false) {
-        const errorMsg = `Error: ${details.error?.message ?? 'agent todo failed'}`;
-        bodyLines.push(`${RED}${errorMsg}${RESET}`);
-        const active = details.state?.active_todo;
-        if (active) {
-          bodyLines.push(compactTodoSummary(active));
+      const safeWidth = Number.isFinite(width) ? Math.floor(width) : 0;
+      try {
+        if (safeWidth <= 0) return [];
+        if (safeWidth === 1) return [' '];
+        const innerWidth = safeWidth - 1;
+        if (!options?.isPartial && cachedWidth === safeWidth && cachedLines !== undefined) {
+          return cachedLines;
         }
-      } else {
-        const active = details.state?.active_todo;
-        const current = details.state?.current_todo;
 
-        if (active) {
-          if (!isExpanded) {
-            bodyLines.push(compactTodoSummary(active));
-            bodyLines.push(keyHint);
+        const details = result?.details?.agent_todo;
+        const badge = actionBadgeFor(context?.args, details);
+        const textBlocks = extractTextBlocks(result);
+        const joinedText = textBlocks.join('\n');
+        const isExpanded = options?.expanded === true;
+
+        let summaryText = '';
+        if (options?.isPartial) {
+          summaryText = `${CYAN}●${RESET} running…`;
+        } else if (!details) {
+          const fallback = inlineText(joinedText) || (isError ? 'agent todo failed' : 'agent todo');
+          summaryText = isError ? `${RED}✗ Error: ${fallback}${RESET}` : fallback;
+        } else if (details.ok === false) {
+          const errText = inlineText(details.error?.message ?? joinedText) || 'agent todo failed';
+          const active = details.state?.active_todo;
+          summaryText = `${RED}✗ Error: ${errText}${RESET}${active ? ` · ${compactTodoSummary(active)}` : ''}`;
+        } else {
+          const active = details.state?.active_todo;
+          const current = details.state?.current_todo;
+          if (active) {
+            summaryText = compactTodoSummary(active);
+          } else if (current?.status === 'completed') {
+            const stats = progress(current);
+            summaryText = `${LIME}✓ completed${RESET} · ${current.title} · ${stats.label} complete`;
+          } else if (current?.status === 'cleared') {
+            summaryText = `${DIM}cleared${RESET} · ${current.title}`;
           } else {
-            bodyLines.push(`${BOLD}${active.title}${RESET} ${DIM}[${active.status}]${RESET}`);
-            for (const step of active.steps) {
+            summaryText = inlineText(joinedText) || 'No active agent todo.';
+          }
+        }
+
+        const header = ` ${fit(`${borderColor}agent_todo${RESET} ${DIM}[${badge}]${RESET} ${DIM}───${RESET} ${summaryText}`, innerWidth)}`;
+        if (!isExpanded || options?.isPartial) {
+          const out = [header];
+          if (!options?.isPartial) {
+            cachedWidth = safeWidth;
+            cachedLines = out;
+          }
+          return out;
+        }
+
+        const bodyLines: string[] = [];
+        if (details?.ok === false) {
+          const errText = details.error?.message ?? (joinedText || 'agent todo failed');
+          bodyLines.push(`${RED}Error: ${errText}${RESET}`);
+          if (details.state?.active_todo) {
+            bodyLines.push(compactTodoSummary(details.state.active_todo));
+          }
+        } else if (details) {
+          const active = details.state?.active_todo;
+          const current = details.state?.current_todo;
+          const target = active ?? (current?.status === 'completed' ? current : undefined);
+          if (target) {
+            bodyLines.push(`${BOLD}${target.title}${RESET} ${DIM}[${target.status}]${RESET}`);
+            if (target.body) bodyLines.push(target.body);
+            for (const step of target.steps ?? []) {
               if (step.status === 'completed') {
                 bodyLines.push(`  ${LIME}✓${RESET} ${step.text}`);
               } else {
                 bodyLines.push(`  ${CYAN}○${RESET} ${step.text}`);
               }
             }
-            bodyLines.push(keyHint);
           }
-        } else if (current?.status === 'completed') {
-          const stats = progress(current);
-          if (!isExpanded) {
-            bodyLines.push(`${LIME}completed${RESET} · ${current.title} · ${stats.label} complete`);
-            bodyLines.push(keyHint);
-          } else {
-            bodyLines.push(`${BOLD}${current.title}${RESET} ${DIM}[completed]${RESET}`);
-            for (const step of current.steps) {
-              bodyLines.push(`  ${LIME}✓${RESET} ${step.text}`);
-            }
-            bodyLines.push(keyHint);
-          }
-        } else if (current?.status === 'cleared') {
-          bodyLines.push(`${DIM}cleared${RESET} · ${current.title}`);
-        } else {
-          bodyLines.push(result?.content?.[0]?.text ?? 'No active agent todo.');
         }
+
+        for (const block of textBlocks) {
+          if (block.length > 0) {
+            bodyLines.push(block);
+          }
+        }
+
+        const out = [header, ...wrapLines(bodyLines, innerWidth).map((line) => ` ${line}`)];
+        cachedWidth = safeWidth;
+        cachedLines = out;
+        return out;
+      } catch {
+        if (safeWidth <= 0) return [];
+        return safeWidth === 1 ? [' '] : [` ${fit('agent_todo', safeWidth - 1)}`];
       }
-
-      if (width < 24) {
-        return bodyLines.map((line) => fit(stripAnsi(line), width));
-      }
-
-      const innerWidth = Math.max(0, width - 2);
-      const framed = frameContent(bodyLines, innerWidth, borderColor);
-      const bottomBorder = cardBottomBorder(innerWidth, borderColor);
-      const finalLines = [...framed, bottomBorder];
-
-      if (!options?.isPartial) {
-        cachedWidth = width;
-        cachedLines = finalLines;
-      }
-
-      return finalLines;
     },
   };
 }

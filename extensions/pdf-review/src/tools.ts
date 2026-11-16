@@ -1,6 +1,6 @@
 import { Type } from 'typebox';
 import { extractPdf, type PdfExtractInput, type PdfExtractResult } from './pdf.js';
-import { renderPdfExtractCall, renderPdfExtractResult } from './render.js';
+import { COMPACT_TOOL_RENDERING, renderPdfExtractCall, renderPdfExtractResult } from './render.js';
 
 type ToolResponse<T> =
   | { status: 'success'; data: T; warnings?: unknown[] }
@@ -46,6 +46,7 @@ export function registerPdfReviewTools(pi: any): void {
     ],
     parameters: pdfExtractParameters,
     renderShell: 'self',
+    ...COMPACT_TOOL_RENDERING,
     renderCall(args: any, theme: any, context: any) {
       return renderPdfExtractCall(args, theme, context);
     },

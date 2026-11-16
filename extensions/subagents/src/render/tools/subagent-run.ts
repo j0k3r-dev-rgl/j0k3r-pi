@@ -1,128 +1,207 @@
 import { readSubagentsConfig } from '../config.js';
 import type { SubagentTask } from '../types.js';
-import { boxedComponent, emptyComponent } from './components.js';
+import { emptyComponent, inlineComponent } from './components.js';
 import { clip, formatTaskLabel, formatUsage, hasAgentResponse, taskResponseText } from './formatting.js';
-import { resolveExpandHint } from './expansion-hint.js';
 import { progressText } from './progress.js';
 import { taskFromDetails } from '../result-details.js';
-import { ARCH_ICON, themeAccent, themeBold, themeDim, themeError, themeStatus, themeSuccess, themeTitle, themeWarning } from '../completion-message.js';
-import { openSubagentsPanel } from '../panel-opener.js';
+import { ARCH_ICON, themeAccent, themeDim, themeError, themeStatus, themeSuccess, themeTitle, themeWarning } from '../completion-message.js';
 
-export function renderSubagentRunCall(_args: any, _theme: any) {
-  return emptyComponent();
+/**
+ * Compact inline presentation for `subagent_run`.
+ *
+ * Contract (see extensions/subagents/README.md "Compact Tool Rendering & Panel Contracts (v1)"):
+ * one inline row with identity/state/attempt, no enclosing card frame, no background fill and no
+ * generated expansion hint. Pi keeps ownership of `app.tools.expand` and of click routing, so this
+ * renderer never intercepts mouse input to open the history panel.
+ */
+
+const SEPARATOR = ' ─ ';
+
+function compactHome(text: string | undefined): string {
+  if (!text) return '';
+  const home = process.env.HOME;
+  let out = text;
+  if (home && home !== '/') {
+    out = out.replace(new RegExp(`(^|[\\s=:(\\[])${escapeRegExp(home)}(?=$|[/\\s:'"\`)\\]])`, 'g'), '$1~');
+  }
+  return out;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function safeThemeCall<T>(fn: () => T, fallback: T): T {
+  try { return fn(); } catch { return fallback; }
+}
+
+function separator(theme: any): string {
+  return safeThemeCall(() => themeDim(theme, SEPARATOR), SEPARATOR);
+}
+
+function segments(theme: any, parts: Array<string | undefined>): string {
+  return parts.filter((part): part is string => Boolean(part && part.trim())).join(separator(theme));
 }
 
 function formatRenderedModel(task?: SubagentTask): string {
-  if (task?.model) return task.model;
+  if (task?.model) return compactHome(task.model);
   if (task?.status === 'queued' || task?.model_source === 'unresolved' || !task?.model) return 'pending';
   return 'default/current';
 }
 
-function createSubagentRunBoxedComponent(result: any, { expanded, isPartial }: any, theme: any, context?: any, task?: SubagentTask) {
-  const archPrefix = themeAccent(theme, ARCH_ICON);
-  if (result?.details?.action === 'message') {
-    const details = result.details;
-    const status = details.status ?? (result.isError ? 'rejected' : 'queued');
-    const acknowledgement = result.content?.filter((part: any) => part.type === 'text').map((part: any) => part.text).join('\n') ?? details.message ?? '';
-    const lines = [
-      `status: ${status === 'rejected' ? themeError(theme, status) : themeSuccess(theme, status)}`,
-      details.pending_message_count !== undefined ? `pending messages: ${details.pending_message_count}` : undefined,
-      expanded !== false && details.reason ? `reason: ${details.reason}` : undefined,
-      expanded === false && status === 'rejected' ? clip(acknowledgement, 160) : undefined,
-      expanded === false ? resolveExpandHint('to expand', context) : acknowledgement,
-    ].filter(Boolean) as string[];
-    return boxedComponent(lines, {
-      title: `${archPrefix} ${themeTitle(theme, `subagent message · ${formatTaskLabel(task)} · ${status}`)}`,
-      theme, wrapped: true,
-      onClick: task?.id ? () => openSubagentsPanel(task.id) : undefined,
-    });
-  }
-  const isBg = task?.mode === 'background' || task?.effective_mode === 'background' || result?.details?.mode === 'background';
-  const bgSuffix = isBg ? ' (background)' : '';
+function statusLabel(task: SubagentTask | undefined, theme: any, fallback: string): string {
+  if (!task) return safeThemeCall(() => themeStatus(theme, fallback), fallback);
+  const value = task.status ?? fallback;
+  return safeThemeCall(() => themeStatus(theme, value), value);
+}
 
-  if (isPartial) {
-    const frame = result?.details?.frame ?? 0;
-    const raw = task
-      ? progressText([task], frame, { backgroundable: Boolean(result?.details?.backgroundable), backgroundShortcut: result?.details?.backgroundShortcut })
-      : progressText([], frame, { backgroundable: Boolean(result?.details?.backgroundable), backgroundShortcut: result?.details?.backgroundShortcut });
-    const lines = raw.split('\n');
-    const activityCount = task?.live_activity?.trail?.length ?? 0;
-    const activityStartIndex = 2;
-    const currentActivityIndex = activityCount ? activityStartIndex + activityCount - 1 : -1;
-    const styled = lines.map((line: string, index: number) => {
-      if (index === 0) return themeWarning(theme, line);
-      if (index === currentActivityIndex) return themeBold(theme, themeAccent(theme, line));
-      return themeDim(theme, line);
-    }).filter(Boolean) as string[];
-    const agentOrName = task?.display_name || task?.agent || 'subagent';
-    const title = `${archPrefix} ${themeTitle(theme, `subagent · ${agentOrName} · running${bgSuffix}`)}`;
-    return boxedComponent(styled, {
-      title,
-      theme,
-      wrapped: true,
-      onClick: task?.id ? () => openSubagentsPanel(task.id) : undefined,
-    });
-  }
+export function renderSubagentRunCall(_args: any, _theme: any, _context?: any) {
+  // Pi composes the call slot and then the result slot; this row is fully described by the result
+  // slot, so the call slot stays empty and a run never renders two rows.
+  return emptyComponent();
+}
+
+function messageRow(result: any, { expanded, isPartial }: any, theme: any) {
+  const details = result?.details ?? {};
+  const status = details.status ?? (result?.isError ? 'rejected' : 'queued');
+  const styledStatus = status === 'rejected' ? themeError(theme, status) : themeSuccess(theme, status);
+  const acknowledgement = (result?.content ?? [])
+    .filter((part: any) => part.type === 'text')
+    .map((part: any) => part.text)
+    .join('\n');
+  // Raw task IDs stay out of the visible row; the task label is the human identity.
+  const header = `${themeAccent(theme, ARCH_ICON)} ${segments(theme, [
+    themeTitle(theme, 'subagent message'),
+    themeAccent(theme, formatTaskLabel(details.task ?? { agent: 'subagent', task: '' })),
+    styledStatus,
+    details.pending_message_count !== undefined ? themeDim(theme, `pending ${details.pending_message_count}`) : undefined,
+  ])}`;
+  const body = isPartial
+    ? [themeDim(theme, 'sending…')]
+    : [
+      ...(details.pending_message_count !== undefined ? [themeDim(theme, `pending messages: ${details.pending_message_count}`)] : []),
+      ...(details.reason ? [themeDim(theme, `reason: ${details.reason}`)] : []),
+      ...(acknowledgement ? acknowledgement.split('\n') : []),
+    ];
+  return inlineComponent({ header, body, expanded: expanded === true });
+}
+
+function partialRow(result: any, { expanded }: any, theme: any, task?: SubagentTask) {
+  const frame = result?.details?.frame ?? 0;
+  const spinner = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'][Math.abs(Math.floor(frame)) % 10];
+  const bgShortcut = result?.details?.backgroundShortcut ?? 'ctrl+h';
+  const backgroundable = Boolean(result?.details?.backgroundable);
+  const options = {
+    backgroundable,
+    backgroundShortcut: bgShortcut,
+  };
+  const progress = progressText(task ? [task] : [], frame, options).split('\n');
+  const agentOrName = task?.display_name || task?.agent || 'subagent';
+  const currentActivity = task?.live_activity?.current?.label
+    ?? task?.live_activity?.trail?.[task.live_activity.trail.length - 1]?.label
+    ?? task?.last_activity;
+  const isBg = task?.mode === 'background' || task?.effective_mode === 'background' || result?.details?.mode === 'background';
+  const header = `${themeAccent(theme, ARCH_ICON)} ${segments(theme, [
+    themeTitle(theme, `${spinner} subagent · ${agentOrName}`),
+    themeWarning(theme, task?.status ?? 'running'),
+    isBg ? themeDim(theme, 'background') : undefined,
+    currentActivity ? clip(currentActivity, 48) : undefined,
+    backgroundable ? themeDim(theme, `${bgShortcut} to send to background`) : undefined,
+    themeDim(theme, `model: ${formatRenderedModel(task)}`),
+    themeDim(theme, `effort: ${task?.effort ?? 'default/current'}`),
+    themeDim(theme, `attempt: ${task?.attempt ?? 1}`),
+  ])}`;
+
+  if (expanded !== true) return inlineComponent({ header, body: [], expanded: false });
+
+  // Expanded partial: full live activity trail without duplicating the header status/model row.
+  const trailLines = progress
+    .slice(2)
+    .map((line) => (line.startsWith('↳') ? themeDim(theme, line) : line));
+  return inlineComponent({ header, body: trailLines, expanded: true });
+}
+
+function terminalRow(result: any, { expanded }: any, theme: any, context: any, task?: SubagentTask) {
   const failed = Boolean(result?.isError || task?.status === 'failed' || task?.status === 'cancelled' || task?.status === 'interrupted');
   const isRunning = task?.status === 'running' || task?.status === 'queued';
-  const status = task ? themeStatus(theme, task.status ?? (failed ? 'failed' : 'done')) : (failed ? themeError(theme, 'failed') : themeSuccess(theme, 'done'));
-  const taskLabel = formatTaskLabel(task);
+  const isBg = task?.mode === 'background' || task?.effective_mode === 'background' || result?.details?.mode === 'background';
   const hasResp = hasAgentResponse(task, result);
   const responseText = taskResponseText(task, result);
+  const usage = task ? formatUsage(task) : '';
+  // One row is clipped to the viewport, so ordering is priority: identity, state, model, then the
+  // secondary effort/attempt/background/usage metadata. The prompt snippet and full agent label stay
+  // in the expanded body instead of crowding every live frame.
+  const label = task?.display_name?.trim() || task?.agent || 'subagent';
+  const identity = hasResp && !isRunning ? `subagent result · ${label}` : `subagent · ${label}`;
 
-  let title: string;
-  if (isRunning) {
-    const agentOrName = task?.display_name || task?.agent || 'subagent';
-    title = `${archPrefix} ${themeTitle(theme, `subagent · ${agentOrName} · ${task?.status ?? 'running'}${bgSuffix}`)}`;
-  } else if (hasResp) {
-    title = `${archPrefix} ${themeTitle(theme, `subagent result · ${taskLabel}`)}`;
-  } else {
-    title = `${archPrefix} ${themeTitle(theme, `subagent · ${taskLabel}`)}`;
+  // A custom display name replaces the agent in the identity label, so the agent stays explicit.
+  const agentSegment = task && label !== task.agent ? themeDim(theme, `agent: ${task.agent}`) : undefined;
+  // A failure without a resolved task (pre-launch rejection) still needs its reason visible in the
+  // collapsed row; that text is the only information the row has.
+  const preLaunchFailure = !task && failed
+    ? clip((result?.content ?? []).filter((part: any) => part?.type === 'text').map((part: any) => part.text).join(' '), 96)
+    : '';
+
+  const header = `${themeAccent(theme, ARCH_ICON)} ${segments(theme, [
+    themeTitle(theme, identity),
+    agentSegment,
+    task ? `status: ${statusLabel(task, theme, failed ? 'failed' : 'done')}` : (failed ? themeError(theme, 'failed') : themeSuccess(theme, 'done')),
+    preLaunchFailure || undefined,
+    isBg ? themeDim(theme, 'background') : undefined,
+    task ? themeDim(theme, `model: ${formatRenderedModel(task)}`) : undefined,
+    task ? themeDim(theme, `effort: ${task.effort ?? 'default/current'}`) : undefined,
+    task ? themeDim(theme, `attempt: ${task.attempt ?? 1}`) : undefined,
+    usage ? themeDim(theme, `usage: ${usage}`) : undefined,
+  ])}`;
+
+  if (expanded !== true) return inlineComponent({ header, body: [], expanded: false });
+
+  const body: string[] = [];
+  if (task) {
+    body.push(themeDim(theme, `task_id: ${task.id}`));
+    body.push(themeDim(theme, `agent: ${task.agent} · mode: ${task.effective_mode ?? task.mode ?? 'task'}${isBg ? ' (background)' : ''}`));
+    const taskLabel = formatTaskLabel(task);
+    if (taskLabel !== label) body.push(themeDim(theme, `task: ${taskLabel}`));
   }
+  body.push(themeDim(theme, `history: ${resolveHistoryRoute(task, result, context)}`));
+  if (hasResp && responseText) {
+    body.push(themeTitle(theme, 'Subagent response'), ...responseText.split('\n'));
+  } else if (failed) {
+    const errorText = task?.error
+      ?? (result?.content ?? []).filter((part: any) => part.type === 'text').map((part: any) => part.text).join('\n');
+    if (errorText) body.push(themeError(theme, 'Subagent error'), ...errorText.split('\n'));
+  } else if (!task) {
+    const text = (result?.content ?? []).filter((part: any) => part.type === 'text').map((part: any) => part.text).join('\n');
+    if (text) body.push(...text.split('\n'));
+  }
+  return inlineComponent({ header, body, expanded: true });
+}
 
-  const historyShortcut = readSubagentsConfig(task?.cwd ?? result?.details?.cwd ?? context?.cwd ?? process.cwd()).history_panel_shortcut ?? 'ctrl+,';
-  const detailsHint = `(click to view execution) · (${historyShortcut} or /subagents for details)`;
-  const usage = task ? formatUsage(task as SubagentTask) : '';
-  const renderedModel = formatRenderedModel(task);
+/** Expanded rows still surface the existing manual history route; no tool-row click hijack. */
+function resolveHistoryRoute(task: SubagentTask | undefined, result: any, context: any): string {
+  const shortcut = readSubagentsConfig(task?.cwd ?? result?.details?.cwd ?? context?.cwd ?? process.cwd()).history_panel_shortcut ?? 'ctrl+,';
+  return `${shortcut} or /subagents`;
+}
 
-  if (expanded === false) {
-    const expandHint = resolveExpandHint('to expand', context);
-    const metaLines = task
-      ? [
-        `subagent: ${themeAccent(theme, task.agent)} · model: ${renderedModel} · effort: ${themeAccent(theme, task.effort ?? 'default/current')} · status: ${status}${(task.attempt ?? 1) > 1 ? ` · attempt: ${task.attempt}` : ''}`,
-        usage ? themeDim(theme, `usage: ${usage}`) : undefined,
-        themeDim(theme, `${detailsHint} · ${expandHint}`),
-      ].filter(Boolean) as string[]
-      : [status, ...(failed ? (result?.content ?? []).filter((part: any) => part.type === 'text').map((part: any) => clip(part.text, 240)) : []), themeDim(theme, `${detailsHint} · ${expandHint}`)];
-    return boxedComponent(metaLines, {
-      title,
-      theme,
-      wrapped: true,
-      onClick: task?.id ? () => openSubagentsPanel(task.id) : undefined,
+export function createSubagentRunComponent(
+  result: any,
+  options: any,
+  theme: any,
+  context?: any,
+  task?: SubagentTask,
+) {
+  try {
+    if (result?.details?.action === 'message') return messageRow(result, options ?? {}, theme);
+    if (options?.isPartial) return partialRow(result, options ?? {}, theme, task);
+    return terminalRow(result, options ?? {}, theme, context, task);
+  } catch {
+    const text = (result?.content ?? []).filter((part: any) => part?.type === 'text').map((part: any) => part.text).join('\n');
+    return inlineComponent({
+      header: `${ARCH_ICON} subagent_run ─ ${result?.isError ? 'failed' : options?.isPartial ? 'running' : 'done'}`,
+      body: text ? text.split('\n') : [],
+      expanded: options?.expanded === true,
     });
   }
-
-  const metaLines = task
-    ? [
-      `subagent: ${themeAccent(theme, task.agent)} · status: ${status} · attempt: ${themeAccent(theme, String(task.attempt ?? 1))} · effort: ${themeAccent(theme, task.effort ?? 'default/current')}`,
-      themeDim(theme, `model: ${renderedModel}`),
-      usage ? themeDim(theme, `usage: ${usage}`) : undefined,
-      themeDim(theme, detailsHint),
-    ].filter(Boolean) as string[]
-    : [status, themeDim(theme, detailsHint)];
-  const contentLines = [...metaLines];
-  if (hasResp && responseText) {
-    contentLines.push(themeTitle(theme, 'Subagent response'), ...responseText.split('\n'));
-  } else if (failed) {
-    const errorText = task?.error ?? (result?.content ?? []).filter((part: any) => part.type === 'text').map((part: any) => part.text).join('\n');
-    contentLines.push(themeError(theme, 'Subagent error'), ...errorText.split('\n'));
-  }
-  return boxedComponent(contentLines, {
-    title,
-    theme,
-    wrapped: true,
-    onClick: task?.id ? () => openSubagentsPanel(task.id) : undefined,
-  });
 }
 
 export function renderSubagentRunResult(
@@ -134,6 +213,10 @@ export function renderSubagentRunResult(
   managerOrEmitter?: { onTaskUpdate?: (listener: () => void) => () => void },
   pi?: any,
 ) {
+  if (context?.state && typeof context.state === 'object') {
+    context.state.hasResult = true;
+  }
+
   let cachedInnerComp: any = undefined;
   let cachedTaskSignature = '';
 
@@ -160,24 +243,27 @@ export function renderSubagentRunResult(
   const buildComponent = () => {
     const task = getResolvedTask();
     const sig = `${task?.id}|${task?.status}|${task?.model}|${task?.effort}|${task?.attempt}|${Boolean(options?.expanded)}|${Boolean(options?.isPartial)}|${result?.details?.frame ?? 0}`;
-    if (cachedInnerComp && cachedTaskSignature === sig) {
-      return cachedInnerComp;
-    }
+    if (cachedInnerComp && cachedTaskSignature === sig) return cachedInnerComp;
     cachedTaskSignature = sig;
-    cachedInnerComp = createSubagentRunBoxedComponent(result, options, theme, context, task);
+    cachedInnerComp = createSubagentRunComponent(result, options, theme, context, task);
     return cachedInnerComp;
   };
 
   const comp = {
+    compactLeftMargin: 1,
     invalidate() {
       cachedInnerComp = undefined;
       cachedTaskSignature = '';
     },
-    handleMouse(event: any) {
-      return buildComponent().handleMouse(event);
-    },
     render(width: number): string[] {
-      return buildComponent().render(width);
+      const safeWidth = Number.isFinite(width) ? Math.floor(width) : 0;
+      if (safeWidth <= 0) return [];
+      try {
+        return buildComponent().render(safeWidth);
+      } catch {
+        if (safeWidth === 1) return [' '];
+        return [` ${ARCH_ICON} subagent_run`.slice(0, safeWidth)];
+      }
     },
     dispose() {
       cleanup?.();
@@ -209,6 +295,8 @@ export function renderSubagentRunResult(
     let unsubscribeListener: (() => void) | undefined;
     let unregisterShutdown: (() => void) | undefined;
     let abortListener: (() => void) | undefined;
+    let renderThrottleTimer: ReturnType<typeof setTimeout> | undefined;
+    let pendingRender = false;
 
     cleanup = () => {
       if (cleanedUp) return;
@@ -218,9 +306,7 @@ export function renderSubagentRunResult(
         renderThrottleTimer = undefined;
       }
       pendingRender = false;
-      if (context?.state?.cleanup === cleanup) {
-        context.state.cleanup = undefined;
-      }
+      if (context?.state?.cleanup === cleanup) context.state.cleanup = undefined;
       if (abortListener && context?.signal) {
         try { context.signal.removeEventListener('abort', abortListener); } catch {}
         abortListener = undefined;
@@ -235,9 +321,7 @@ export function renderSubagentRunResult(
       }
     };
 
-    if (context?.state) {
-      context.state.cleanup = cleanup;
-    }
+    if (context?.state) context.state.cleanup = cleanup;
 
     if (context?.signal) {
       if (context.signal.aborted) {
@@ -250,14 +334,9 @@ export function renderSubagentRunResult(
 
     if (pi && typeof pi.on === 'function') {
       try {
-        unregisterShutdown = pi.on('session_shutdown', () => {
-          cleanup?.();
-        });
+        unregisterShutdown = pi.on('session_shutdown', () => { cleanup?.(); });
       } catch {}
     }
-
-    let renderThrottleTimer: ReturnType<typeof setTimeout> | undefined;
-    let pendingRender = false;
 
     const doRender = () => {
       comp.invalidate();

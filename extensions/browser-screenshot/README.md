@@ -27,4 +27,4 @@ Then:
 {"targetId":"<target id returned by go_to_page>"}
 ```
 
-The extension returns bounded summaries and never exposes credentials, raw CDP payloads, or `webSocketDebuggerUrl`. Local/private HTTP(S) destinations remain allowed because navigation controls an existing user browser; no new private-network policy is introduced. Default screenshots are saved under `.pi/browser-screenshots/` in the current workspace. Pi's default tool rendering remains in use.
+The extension returns bounded summaries and never exposes credentials, raw CDP payloads, or `webSocketDebuggerUrl`. Local/private HTTP(S) destinations remain allowed because navigation controls an existing user browser; no new private-network policy is introduced. Default screenshots are saved under `.pi/browser-screenshots/` in the current workspace. Tool rows use one compact inline identity/summary row without card frames or expansion hints; Pi's native expansion reveals CDP details, tab lists, navigation timing and screenshot metadata, and inline images keep Pi's native image handling.

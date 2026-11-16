@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { Type } from 'typebox';
 import { captureBrowserPageScreenshot, getBrowserCdpStatus, listBrowserPageTargets, navigateBrowserPage, type CdpTransportFactory, type FetchLike } from './cdp.js';
 import { ensureDefaultScreenshotGitIgnored, modelCanAcceptImages, normalizeMaxInlineBytes } from './config.js';
-import { renderBrowserCall, renderBrowserResult } from './render.js';
+import { COMPACT_TOOL_RENDERING, renderBrowserCall, renderBrowserResult } from './render.js';
 import type { BrowserGoToPageResult, BrowserPageScreenshotResult, BrowserTabsListResult, PiToolResult, ToolExecutionContext, ToolContent } from './types.js';
 
 interface BrowserToolOverrides {
@@ -74,6 +74,7 @@ export function registerBrowserScreenshotTools(pi: any): void {
     ],
     parameters: statusParameters,
     renderShell: 'self',
+    ...COMPACT_TOOL_RENDERING,
     renderCall(args: any, theme: any, context: any) {
       return renderBrowserCall('browser_cdp_status', args, theme, context);
     },
@@ -100,6 +101,7 @@ export function registerBrowserScreenshotTools(pi: any): void {
     ],
     parameters: listParameters,
     renderShell: 'self',
+    ...COMPACT_TOOL_RENDERING,
     renderCall(args: any, theme: any, context: any) {
       return renderBrowserCall('browser_tabs_list', args, theme, context);
     },
@@ -141,6 +143,7 @@ export function registerBrowserScreenshotTools(pi: any): void {
     ],
     parameters: goToPageParameters,
     renderShell: 'self',
+    ...COMPACT_TOOL_RENDERING,
     renderCall(args: any, theme: any, context: any) {
       return renderBrowserCall('go_to_page', args, theme, context);
     },
@@ -165,6 +168,7 @@ export function registerBrowserScreenshotTools(pi: any): void {
     ],
     parameters: screenshotParameters,
     renderShell: 'self',
+    ...COMPACT_TOOL_RENDERING,
     renderCall(args: any, theme: any, context: any) {
       return renderBrowserCall('browser_page_screenshot', args, theme, context);
     },

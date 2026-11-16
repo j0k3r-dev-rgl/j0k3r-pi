@@ -3,8 +3,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import utilsExtension from '../index.js';
 import { convertMarkdownToAudio, markdownToPlainText, type CommandRunner } from '../src/markdown-to-audio.js';
+import { registerUtilsTools } from './helpers-enabled.js';
 
 type Tool = {
   name: string;
@@ -13,15 +13,6 @@ type Tool = {
   execute: (...args: unknown[]) => Promise<unknown> | unknown;
 };
 
-function createMockPi() {
-  const tools: Tool[] = [];
-  return {
-    tools,
-    registerTool(tool: Tool) {
-      tools.push(tool);
-    },
-  };
-}
 
 async function tempMarkdown(name = 'note.md', content = '# Hola\n\nEsto es **importante**. [Link](https://example.test).') {
   const dir = join(tmpdir(), `pi-utils-${Date.now()}-${Math.random().toString(16).slice(2)}`);
@@ -250,9 +241,8 @@ describe('convertMarkdownToAudio', () => {
 
 describe('utils extension tool', () => {
   it('forwards concise progress events through tool onUpdate', async () => {
-    const pi = createMockPi();
-    utilsExtension(pi as any);
-    const tool = pi.tools.find((entry) => entry.name === 'markdown_to_audio');
+    const tools = await registerUtilsTools();
+    const tool = tools.find((entry) => entry.name === 'markdown_to_audio');
     const file = await tempMarkdown('tool-progress.md', '# Hola\n\nTexto corto.');
     const updates: unknown[] = [];
     const statuses: Array<string | undefined> = [];
@@ -281,11 +271,10 @@ describe('utils extension tool', () => {
     expect(statuses.at(-1)).toBeUndefined();
   });
 
-  it('registers markdown_to_audio', () => {
-    const pi = createMockPi();
-    utilsExtension(pi as any);
+  it('registers markdown_to_audio', async () => {
+    const tools = await registerUtilsTools();
 
-    const tool = pi.tools.find((entry) => entry.name === 'markdown_to_audio');
+    const tool = tools.find((entry) => entry.name === 'markdown_to_audio');
     expect(tool?.description).toMatch(/markdown/i);
     expect(tool?.parameters.type).toBe('object');
     expect(JSON.stringify(tool?.parameters)).toContain('sentenceSilence');

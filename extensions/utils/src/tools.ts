@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { Type } from 'typebox';
 import { convertMarkdownToAudio, type MarkdownToAudioEngine, type MarkdownToAudioProgressEvent, type MarkdownToAudioResult, type MarkdownToAudioVoiceQuality } from './markdown-to-audio.js';
-import { renderMarkdownToAudioCall, renderMarkdownToAudioResult, renderScreenshotCall, renderScreenshotResult } from './render.js';
+import { COMPACT_TOOL_RENDERING, renderMarkdownToAudioCall, renderMarkdownToAudioResult, renderScreenshotCall, renderScreenshotResult } from './render.js';
 import { executeScreenshotAction, ScreenshotError, summarizeScreenshotResult, summarizeWindowListResult, type OsReleaseReader, type ScreenshotAction, type ScreenshotCaptureTarget, type ScreenshotCommandFinder, type ScreenshotCommandRunner, type ScreenshotResult, type ScreenshotToolResult, type ScreenshotWindowMatchMode } from './screenshot.js';
 
 type ToolContent = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
@@ -94,6 +94,7 @@ export function registerUtilsTools(pi: any): void {
     ],
     parameters: screenshotParameters,
     renderShell: 'self',
+    ...COMPACT_TOOL_RENDERING,
     renderCall(args: any, theme: any, context: any) {
       return renderScreenshotCall(args, theme, context);
     },
@@ -141,6 +142,7 @@ export function registerUtilsTools(pi: any): void {
     ],
     parameters: markdownToAudioParameters,
     renderShell: 'self',
+    ...COMPACT_TOOL_RENDERING,
     renderCall(args: any, theme: any, context: any) {
       return renderMarkdownToAudioCall(args, theme, context);
     },

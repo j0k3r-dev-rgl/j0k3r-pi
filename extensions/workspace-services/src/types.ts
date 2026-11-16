@@ -19,8 +19,10 @@ export interface WorkspacePathSecurityContext {
 
 export interface WorkspaceServicesConfig extends WorkspacePathSecurityContext {
   exists: boolean;
+  jsonExists?: boolean;
   configPath: string;
   composeFile?: string;
+  composeDiscoveryError?: string;
   runtimeDir: string;
   logsDir: string;
   statePath: string;
@@ -62,6 +64,8 @@ export interface RuntimeStateV1 {
 }
 
 export type WorkspaceServiceStatus =
+  | 'ok'
+  | 'partial'
   | 'started'
   | 'already_running'
   | 'stopped'
@@ -88,6 +92,7 @@ export interface WorkspaceServiceOutcome<T = Record<string, unknown>> {
   status: WorkspaceServiceStatus;
   summary: string;
   nextAction?: string;
+  warnings?: string[];
   data: T;
   truncation?: WorkspaceServiceTruncation;
 }
@@ -98,7 +103,8 @@ export interface ServiceStatus {
   path: string;
   command: string;
   env_file: boolean;
-  status: 'running' | 'stopped' | 'stale' | 'identity_mismatch' | 'recovery_required';
+  status: 'running' | 'stopped' | 'stale' | 'identity_mismatch' | 'recovery_required' | 'unknown';
+  compose_state?: string;
   pid?: number;
   container_id?: string;
   health?: string;
@@ -121,4 +127,5 @@ export interface ServiceListEntry {
 export interface ToolTextResult {
   content: Array<{ type: 'text'; text: string }>;
   details: WorkspaceServiceOutcome;
+  isError?: boolean;
 }

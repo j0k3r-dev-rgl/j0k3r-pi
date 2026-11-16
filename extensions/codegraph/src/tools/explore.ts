@@ -10,7 +10,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { DEFAULT_MAX_FILES, MAX_FILES_LIMIT, isNotIndexedOutput, resolveProjectPath, trackTempDir } from "../core.js";
-import { renderExploreCall, renderExploreResult } from "../render/index.js";
+import { COMPACT_TOOL_RENDERING, renderExploreCall, renderExploreResult } from "../render/index.js";
 import type { CodeGraphExploreDetails } from "../types.js";
 
 function isIdentifierLike(query: string): boolean {
@@ -112,5 +112,6 @@ export function registerExploreTool(pi: ExtensionAPI) {
 		renderCall: renderExploreCall,
 		renderResult: renderExploreResult,
 		renderShell: "self",
+		...COMPACT_TOOL_RENDERING,
 	});
 }

@@ -16,6 +16,7 @@ export const MAX_REQUEST_BYTES = 1_048_576; // 1 MiB
 export const MAX_RESPONSE_BYTES = 4_194_304; // 4 MiB internal safety ceiling
 export const MAX_CHUNKS = 256;
 export const MAX_INPUT_STRINGS = 64;
+export const BASE_URL = process.env.BASE_URL_EMBEDING || 'http://127.0.0.1:8000';
 
 export class E5ClientError extends Error {
   readonly category: ErrorCategory;
@@ -41,7 +42,7 @@ export class E5Client {
   readonly timeoutMs: number;
   readonly healthTimeoutMs: number;
 
-  constructor(baseUrl: string = 'http://127.0.0.1:8000', options?: E5ClientOptions) {
+  constructor(baseUrl: string = BASE_URL, options?: E5ClientOptions) {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
     this.timeoutMs = options?.timeoutMs ?? DEFAULT_EMBED_TIMEOUT_MS;
     this.healthTimeoutMs = options?.healthTimeoutMs ?? DEFAULT_HEALTH_TIMEOUT_MS;

@@ -4,7 +4,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { SubagentManager } from '../../src/manager.js';
 import { registerSubagentTools } from '../../src/tools.js';
 import { resetExpandKeybindingProviderForTests, setExpandKeybindingProviderForTests } from '../../src/render/tools/expansion-hint.js';
-import { boxedComponent } from '../../src/render/tools/components.js';
+import { inlineComponent } from '../../src/render/tools/components.js';
+import { visibleWidth } from '../../src/render/text-width.js';
+import { ARCH_ICON } from '../../src/ui/theme.js';
 import { taskFromDetails } from '../../src/tools/result-details.js';
 import { backgroundLaunchContent } from '../../src/render/tools/formatting.js';
 import type { SubagentTask } from '../../src/types.js';
@@ -30,101 +32,105 @@ describe('tool render helpers', () => {
     expect(unresolved).not.toContain('default/current');
   });
 
-  it('boxedComponent captures press and executes onClick strictly once on click (MINI-003)', () => {
-    let clicked = 0;
-    const comp = boxedComponent('hello world', {
-      onClick: () => { clicked++; },
+  it('inlineComponent clips only the header, wraps expanded body and never intercepts input', () => {
+    const comp: any = inlineComponent({
+      header: 'a very long compact header that must be clipped to the viewport width',
+      body: ['expanded body line with enough words to require wrapping at narrow width'],
+      expanded: true,
     });
+    expect(comp.handleMouse).toBeUndefined();
+    expect(comp.handleInput).toBeUndefined();
 
-    // Press acknowledges gesture without triggering action
-    const press = comp.handleMouse({ type: 'press', button: 'left' });
-    expect(press).toEqual({ handled: true });
-    expect(clicked).toBe(0);
+    const narrow = comp.render(24);
+    expect(visibleWidth(narrow[0]!)).toBeLessThanOrEqual(24);
+    expect(narrow.length).toBeGreaterThan(1);
+    for (const line of narrow) expect(visibleWidth(line)).toBeLessThanOrEqual(24);
+    expect(narrow.join('\n')).toContain('expanded body line');
 
-    // Release does not trigger action
-    const release = comp.handleMouse({ type: 'release', button: 'left' });
-    expect(release).toEqual({ handled: true });
-    expect(clicked).toBe(0);
+    const collapsed = inlineComponent({ header: 'header only', body: ['hidden body'], expanded: false }).render(40);
+    expect(collapsed).toEqual([' header only']);
 
-    // Click triggers onClick exactly once
-    const click = comp.handleMouse({ type: 'click', button: 'left' });
-    expect(click).toEqual({ handled: true });
-    expect(clicked).toBe(1);
+    expect(inlineComponent({ header: 'x', expanded: true }).render(0)).toEqual([]);
+    expect(inlineComponent({ header: 'x', expanded: true }).render(1)).toEqual([' ']);
 
-    // Legacy click (no event.type, left button) also triggers once
-    comp.handleMouse({ button: 'left' });
-    expect(clicked).toBe(2);
+    const wide2 = inlineComponent({ header: 'h', body: ['A漢B👨‍👩‍👧e\u0301'], expanded: true }).render(2);
+    for (const line of wide2) expect(visibleWidth(line)).toBeLessThanOrEqual(2);
+    expect(wide2).toContain(' A');
+    expect(wide2).toContain('漢');
+    expect(wide2).toContain(' B');
+    expect(wide2).toContain('👨‍👩‍👧');
+    expect(wide2).toContain(' e\u0301');
   });
 
-  it('renderSubagentRunResult gates response text on expanded: true and renders expand hint when collapsed (MINI-004)', () => {
-    setExpandKeybindingProviderForTests(() => 'ctrl+o');
-    try {
-      const manager = new SubagentManager(env.mockRunner());
-      let runTool: any;
-      registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
+  it('gates response text on expanded: true and never renders a generated expansion hint', () => {
+    const manager = new SubagentManager(env.mockRunner());
+    let runTool: any;
+    registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
 
-      const multiLineResponse = 'First line of output\nSecond line of detailed response\nFinal conclusion.';
-      const dummyResult = {
-        content: [{ type: 'text', text: multiLineResponse }],
-        details: {
-          task: {
-            id: 'task-123',
-            agent: 'analyst',
-            status: 'completed',
-            attempt: 1,
-            model: 'mock/model',
-            effort: 'medium',
-            result: multiLineResponse,
-          },
+    const multiLineResponse = 'First line of output\nSecond line of detailed response\nFinal conclusion.';
+    const dummyResult = {
+      content: [{ type: 'text', text: multiLineResponse }],
+      details: {
+        task: {
+          id: 'task-123',
+          agent: 'analyst',
+          status: 'completed',
+          attempt: 1,
+          model: 'mock/model',
+          effort: 'medium',
+          result: multiLineResponse,
         },
-      };
+      },
+    };
 
-      // Collapsed: expanded = false
-      const collapsedComp = runTool.renderResult(dummyResult, { expanded: false, isPartial: false }, { fg: (_n: string, t: string) => t });
-      const collapsedText = collapsedComp.render(120).join('\n');
-      expect(collapsedText).not.toContain('First line of output');
-      expect(collapsedText).not.toContain('Subagent response');
-      expect(collapsedText).toContain('ctrl+o to expand');
+    const collapsedText = runTool.renderResult(dummyResult, { expanded: false, isPartial: false }, { fg: (_n: string, t: string) => t }).render(120).join('\n');
+    expect(collapsedText).not.toContain('First line of output');
+    expect(collapsedText).not.toContain('Subagent response');
+    expect(collapsedText).not.toMatch(/to expand|app\.tools\.expand|ctrl\+o/i);
 
-      // Expanded: expanded = true
-      const expandedComp = runTool.renderResult(dummyResult, { expanded: true, isPartial: false }, { fg: (_n: string, t: string) => t });
-      const expandedText = expandedComp.render(120).join('\n');
-      expect(expandedText).toContain('First line of output');
-      expect(expandedText).toContain('Second line of detailed response');
-      expect(expandedText).toContain('Subagent response');
-    } finally {
-      resetExpandKeybindingProviderForTests();
-    }
+    const expandedText = runTool.renderResult(dummyResult, { expanded: true, isPartial: false }, { fg: (_n: string, t: string) => t }).render(120).join('\n');
+    expect(expandedText).toContain('First line of output');
+    expect(expandedText).toContain('Second line of detailed response');
+    expect(expandedText).toContain('Subagent response');
+    expect(expandedText).not.toMatch(/to expand|app\.tools\.expand|ctrl\+o/i);
   });
 
-  it('renders agent, model, and effort as explicit labels in tool results', async () => {
+  it('renders agent, model, and effort as explicit labels in expanded tool results', async () => {
     env.writeAgent('analyst');
     const manager = new SubagentManager(async () => ({ result: 'clear render', model: 'mock/model', effort: 'high', fallback_used: false }));
     let runTool: any;
     registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
+    const theme = { fg: (_name: string, text: string) => text };
     const result = await runTool.execute('1', { agent: 'analyst', task: 'render clearly', mode: 'task' }, undefined, undefined, { cwd: env.tmp });
-    const rendered = runTool.renderResult(result, { isPartial: false }, { fg: (_name: string, text: string) => text }).render(200).join('\n');
-    expect(rendered).toContain('agent: analyst');
-    expect(rendered).toContain('model: mock/model');
-    expect(rendered).toContain('effort: high');
+
+    const collapsed = runTool.renderResult(result, { isPartial: false, expanded: false }, theme).render(200).join('\n');
+    expect(collapsed).toContain('analyst');
+    expect(collapsed).toContain('status: completed');
+    expect(collapsed).toContain('model: mock/model');
+    expect(collapsed).toContain('effort: high');
+
+    const expanded = runTool.renderResult(result, { isPartial: false, expanded: true }, theme).render(200).join('\n');
+    expect(expanded).toContain('agent: analyst');
+    expect(expanded).toContain('effort: high');
+    expect(expanded).toContain('model: mock/model');
   });
 
-  it('renders a dim history shortcut and command hint in expanded subagent results and returns empty tool call lines to avoid separate outer text', () => {
+  it('exposes the manual history route only in expanded output and returns empty tool call lines', () => {
     const manager = new SubagentManager(env.mockRunner());
     let runTool: any;
-    const dim = vi.fn((_name: string, text: string) => text);
     registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
 
-    const callLines = runTool.renderCall({ agent: 'analyst', mode: 'task' }, { fg: dim, bold: (text: string) => text }).render(200);
+    const callLines = runTool.renderCall({ agent: 'analyst', mode: 'task' }, { fg: (_n: string, t: string) => t, bold: (text: string) => text }).render(200);
     expect(callLines).toHaveLength(0);
 
     const dummyResult = { details: { task: { id: '1', agent: 'analyst', status: 'completed', attempt: 1, model: 'mock/model', effort: 'medium' } } };
-    const expanded = runTool.renderResult(dummyResult, { expanded: true, isPartial: false }, { fg: dim, bold: (text: string) => text }).render(200).join('\n');
-    expect(expanded).toContain('(ctrl+, or /subagents for details)');
-    expect(dim).toHaveBeenCalledWith('dim', '(click to view execution) · (ctrl+, or /subagents for details)');
+    const collapsed = runTool.renderResult(dummyResult, { expanded: false, isPartial: false }, { fg: (_n: string, t: string) => t, bold: (text: string) => text }).render(200).join('\n');
+    expect(collapsed).not.toContain('/subagents');
+    const expanded = runTool.renderResult(dummyResult, { expanded: true, isPartial: false }, { fg: (_n: string, t: string) => t, bold: (text: string) => text }).render(200).join('\n');
+    expect(expanded).toContain('ctrl+, or /subagents');
   });
 
-  it('renders the effective subagent_run mode in execution title and returns empty tool call lines', () => {
+  it('renders the effective subagent_run mode inline and returns empty tool call lines', () => {
     fs.writeFileSync(path.join(env.tmp, '.pi', 'subagents.json'), JSON.stringify({ default_mode: 'background' }));
     env.writeAgent('analyst');
     const previousCwd = process.cwd();
@@ -144,7 +150,8 @@ describe('tool render helpers', () => {
         },
       };
       const renderedBg = runTool.renderResult(bgResult, { expanded: false, isPartial: false }, { fg: (_name: string, text: string) => text, bold: (text: string) => text }).render(200).join('\n');
-      expect(renderedBg).toContain('running (background)');
+      expect(renderedBg).toContain('running');
+      expect(renderedBg).toContain('background');
 
       const taskResult = {
         details: {
@@ -153,33 +160,33 @@ describe('tool render helpers', () => {
         },
       };
       const renderedTask = runTool.renderResult(taskResult, { expanded: false, isPartial: false }, { fg: (_name: string, text: string) => text, bold: (text: string) => text }).render(200).join('\n');
-      expect(renderedTask).toContain('subagent · analyst · running');
-      expect(renderedTask).not.toContain('running (background)');
+      expect(renderedTask).toContain('subagent · analyst');
+      expect(renderedTask).not.toContain('background');
     } finally {
       process.chdir(previousCwd);
     }
   });
 
-  it('renders the configured history shortcut in expanded subagent results', () => {
+  it('renders the configured history shortcut only in expanded subagent results', () => {
     fs.writeFileSync(path.join(env.tmp, '.pi', 'subagents.json'), JSON.stringify({ history_panel_shortcut: 'ctrl+p' }));
     const previousCwd = process.cwd();
     process.chdir(env.tmp);
     try {
       const manager = new SubagentManager(env.mockRunner());
       let runTool: any;
-      const dim = vi.fn((_name: string, text: string) => text);
       registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
 
       const dummyResult = { details: { task: { id: '1', agent: 'analyst', status: 'completed', attempt: 1, model: 'mock/model', effort: 'medium' } } };
-      const rendered = runTool.renderResult(dummyResult, { expanded: true, isPartial: false }, { fg: dim, bold: (text: string) => text }).render(200).join('\n');
-      expect(rendered).toContain('(ctrl+p or /subagents for details)');
-      expect(dim).toHaveBeenCalledWith('dim', '(click to view execution) · (ctrl+p or /subagents for details)');
+      const collapsed = runTool.renderResult(dummyResult, { expanded: false, isPartial: false }, { fg: (_n: string, t: string) => t, bold: (text: string) => text }).render(200).join('\n');
+      expect(collapsed).not.toContain('ctrl+p');
+      const expanded = runTool.renderResult(dummyResult, { expanded: true, isPartial: false }, { fg: (_n: string, t: string) => t, bold: (text: string) => text }).render(200).join('\n');
+      expect(expanded).toContain('ctrl+p or /subagents');
     } finally {
       process.chdir(previousCwd);
     }
   });
 
-  it('keeps ansi-styled subagent_run title hints visible when visual width fits', () => {
+  it('keeps ansi-styled subagent_run rows width safe without replacement characters', () => {
     const manager = new SubagentManager(env.mockRunner());
     let runTool: any;
     const theme = {
@@ -189,19 +196,20 @@ describe('tool render helpers', () => {
     registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
 
     const dummyResult = { details: { task: { id: '1', agent: 'discovery', status: 'completed', attempt: 1, model: 'mock/model', effort: 'medium' } } };
-    const rendered = runTool.renderResult(dummyResult, { expanded: true, isPartial: false }, theme).render(80).join('\n');
-    const plain = env.stripAnsi(rendered);
-    expect(plain).toContain('(ctrl+, or /subagents for details)');
-    expect(plain).not.toContain('�');
+    const lines = runTool.renderResult(dummyResult, { expanded: true, isPartial: false }, theme).render(80);
+    const plainLines = lines.map(env.stripAnsi);
+    expect(plainLines.join('\n')).not.toContain('\ufffd');
+    for (const line of plainLines) expect(visibleWidth(line)).toBeLessThanOrEqual(80);
+    expect(plainLines.join('\n')).not.toMatch(/to expand|ctrl\+o/i);
   });
 
-  it('renders current-last foreground activity without clipping complete tool names', () => {
+  it('renders live activity inline without a card frame and keeps complete tool names', () => {
     const manager = new SubagentManager(env.mockRunner());
     let runTool: any;
     registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
     const longToolName = 'workspace_graph_status_with_a_very_long_public_name';
 
-    const rendered = runTool.renderResult({
+    const lines = runTool.renderResult({
       details: {
         frame: 0,
         tasks: [{
@@ -221,19 +229,45 @@ describe('tool render helpers', () => {
           },
         }],
       },
-    }, { isPartial: true }, { fg: (_name: string, text: string) => text, bold: (text: string) => text }).render(30);
-    const plain = rendered.map(env.stripAnsi);
-    const bodyContent = plain.slice(1, -1).map((line: string) => line.replace(/^[┌│└]\s*|\s*[┐│┘]$/g, '').trim()).join(' ');
-    const unwrappedWord = plain.map((line: string) => line.replace(/^[┌│└]\s*|\s*[┐│┘]$/g, '')).filter((line: string) => line.includes('_')).join('');
+    }, { isPartial: true }, { fg: (_name: string, text: string) => text, bold: (text: string) => text }).render(40);
+    const plain = lines.map(env.stripAnsi).join('\n');
 
-    expect(bodyContent).toContain('thinking');
-    expect(bodyContent).toContain('streaming response');
-    expect(unwrappedWord).toContain(longToolName);
-    expect(bodyContent).not.toContain('…');
-    expect(plain.every((line: string) => [...line].length <= 30)).toBe(true);
-    expect(plain.some((line: string) => line.includes('┌'))).toBe(true);
-    expect(plain.some((line: string) => line.includes('│'))).toBe(true);
-    expect(plain.some((line: string) => line.includes('└'))).toBe(true);
+    // Collapsed: exactly one compact inline row (identity/status/current activity), no card frame.
+    expect(lines).toHaveLength(1);
+    expect(plain).toContain('analyst');
+    expect(plain).toContain('running');
+    expect(plain).not.toMatch(/[╭╮╰╯│┌┐└┘]/);
+    expect(plain).not.toMatch(/to expand|ctrl\+o/i);
+    for (const line of lines.map(env.stripAnsi)) expect(visibleWidth(line)).toBeLessThanOrEqual(40);
+
+    // Expanded: the full live activity trail remains reachable, wrapping instead of clipping.
+    const expandedLines = runTool.renderResult({
+      details: {
+        frame: 0,
+        tasks: [{
+          agent: 'analyst',
+          status: 'running',
+          attempt: 1,
+          effort: 'high',
+          model: 'mock/model',
+          last_activity: `running tool: ${longToolName}`,
+          live_activity: {
+            trail: [
+              { kind: 'thinking', label: 'thinking' },
+              { kind: 'streaming_response', label: 'streaming response' },
+              { kind: 'tool_running', label: `running tool: ${longToolName}`, tool_names: [longToolName] },
+            ],
+            current: { kind: 'tool_running', label: `running tool: ${longToolName}`, tool_names: [longToolName] },
+          },
+        }],
+      },
+    }, { isPartial: true, expanded: true }, { fg: (_name: string, text: string) => text, bold: (text: string) => text }).render(40);
+    const expandedPlain = expandedLines.map(env.stripAnsi);
+    expect(expandedPlain.join('\n')).toContain('thinking');
+    expect(expandedPlain.join('\n')).toContain('streaming response');
+    expect(expandedPlain.join('\n').replace(/\s+/g, '')).toContain(longToolName);
+    expect(expandedPlain.join('\n')).not.toMatch(/[╭╮╰╯│┌┐└┘]/);
+    for (const line of expandedPlain) expect(visibleWidth(line)).toBeLessThanOrEqual(40);
   });
 
   it('renders the effective continuation mode from explicit override, previous task state, and config fallback', async () => {
@@ -291,7 +325,7 @@ describe('tool render helpers', () => {
     expect(rendered).toContain('ctrl+h to send to background');
   });
 
-  it('renders completed subagent_run results as always-expanded width-safe summaries with click hint', () => {
+  it('renders completed subagent_run results as compact unboxed width-safe summaries', () => {
     const manager = new SubagentManager(env.mockRunner());
     let runTool: any;
     const theme = {
@@ -320,48 +354,42 @@ describe('tool render helpers', () => {
     }, { isPartial: false }, theme).render(60);
     const plain = renderedLines.map(env.stripAnsi);
 
-    expect(plain.join('\n')).toContain('subagent: sdd-verify');
-    expect(plain.join('\n')).toContain('click to view execution');
-    expect(plain.join('\n')).not.toContain('ctrl+o to expand');
-    expect(plain.join('\n')).not.toContain('id: subtask_');
-    expect(plain.every((line: string) => [...line].length <= 60)).toBe(true);
+    expect(plain.join('\n')).toContain('sdd-verify');
+    expect(plain.join('\n')).not.toMatch(/[╭╮╰╯│┌┐└┘]/);
+    expect(plain.join('\n')).not.toMatch(/to expand|ctrl\+o|click to view/i);
+    expect(plain.join('\n')).not.toContain('subtask_sdd-verify_');
+    expect(plain.every((line: string) => visibleWidth(line) <= 60)).toBe(true);
   });
 
-  it('renders tool calls, progress, and results with boxed frames and zero background fills', async () => {
+  it('renders tool calls, progress and results without card frames or background fills', async () => {
     env.writeAgent('analyst');
     const manager = new SubagentManager(async () => ({ result: 'completed response', model: 'mock/model', effort: 'high', fallback_used: false }));
     let runTool: any;
     registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
 
-    // Call rendering (empty, zero lines, zero background fills to avoid duplicate stacked cards or text outside frame)
-    const callLines = runTool.renderCall({ agent: 'analyst', mode: 'task' }, { fg: (_name: string, text: string) => text, bold: (text: string) => text }).render(80);
+    const theme = { fg: (_name: string, text: string) => text, bold: (text: string) => text };
+    const callLines = runTool.renderCall({ agent: 'analyst', mode: 'task' }, theme).render(80);
     expect(callLines).toHaveLength(0);
-    expect(callLines.join('\n')).not.toContain('\x1b[4');
 
-    // Result rendering (single framed box with integrated title)
     const result = await runTool.execute('1', { agent: 'analyst', task: 'render cleanly', mode: 'task' }, undefined, undefined, { cwd: env.tmp });
-    const resultLines = runTool.renderResult(result, { isPartial: false }, { fg: (_name: string, text: string) => text, bold: (text: string) => text }).render(80);
-    expect(resultLines[0]).toContain('┌─');
-    expect(resultLines[0]).toContain('┐');
-    expect(resultLines[0]).toContain('󰣇');
-    expect(resultLines.some((l: string) => l.includes('│'))).toBe(true);
-    expect(resultLines.at(-1)).toContain('└');
-    expect(resultLines.at(-1)).toContain('┘');
-    expect(resultLines.join('\n')).not.toContain('\x1b[4');
+    for (const expanded of [false, true]) {
+      const resultLines = runTool.renderResult(result, { expanded, isPartial: false }, theme).render(80);
+      const joined = resultLines.join('\n');
+      expect(joined).toContain(ARCH_ICON);
+      expect(joined).toMatch(/[\u2500]/);
+      expect(joined).not.toMatch(/[╭╮╰╯│┌┐└┘]/);
+      expect(joined).not.toContain('\x1b[4');
+      expect(joined).not.toMatch(/to expand|ctrl\+o|click to view/i);
+    }
 
-    // Shared result renderer (single framed box with integrated title)
     const { renderSubagentRunResult } = await import('../../src/render/tools/subagent-run.js');
-    const directLines = renderSubagentRunResult(result, { expanded: false }, { fg: (_name: string, text: string) => text }).render(80);
-    expect(directLines[0]).toContain('┌─');
-    expect(directLines[0]).toContain('┐');
-    expect(directLines[0]).toContain('󰣇');
-    expect(directLines.some((l: string) => l.includes('│'))).toBe(true);
-    expect(directLines.at(-1)).toContain('└');
-    expect(directLines.at(-1)).toContain('┘');
+    const directLines = renderSubagentRunResult(result, { expanded: false }, theme).render(80);
+    expect(directLines.join('\n')).toContain(ARCH_ICON);
+    expect(directLines.join('\n')).not.toMatch(/[╭╮╰╯│┌┐└┘]/);
     expect(directLines.join('\n')).not.toContain('\x1b[4');
   });
 
-  it('renders active subagent running state as a single framed box with integrated top-border title and Arch icon', () => {
+  it('renders active subagent running state as one compact inline row with the Arch icon', () => {
     let runTool: any;
     registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, new SubagentManager(env.mockRunner()));
 
@@ -380,14 +408,16 @@ describe('tool render helpers', () => {
     };
 
     const lines = runTool.renderResult(activePartial, { isPartial: true }, { fg: (_name: string, text: string) => text, bold: (text: string) => text }).render(80);
-    expect(lines[0]).toMatch(/^┌─+ .+subagent · sdd-verify · running ─+┐$/);
-    expect(lines[0]).toContain('󰣇');
-    expect(lines.some((l: string) => l.includes('│'))).toBe(true);
-    expect(lines.at(-1)).toMatch(/^└─+┘$/);
-    expect(lines.join('\n')).not.toContain('\x1b[4');
+    const joined = lines.join('\n');
+    expect(lines[0]).toContain('sdd-verify');
+    expect(lines[0]).toContain('running');
+    expect(joined).toContain(ARCH_ICON);
+    expect(joined).not.toMatch(/[╭╮╰╯│┌┐└┘]/);
+    expect(joined).not.toContain('\x1b[4');
+    expect(joined).not.toMatch(/to expand|ctrl\+o/i);
   });
 
-  it('renders background running execution state as a single framed box with (background) integrated in top-border title', async () => {
+  it('renders background running execution state as one compact inline row marked background', async () => {
     env.writeAgent('sdd-verify');
     const manager = new SubagentManager(env.mockRunner());
     let runTool: any;
@@ -409,22 +439,22 @@ describe('tool render helpers', () => {
       },
     };
 
-    // Call rendering produces 0 lines (no text outside the frame)
-    const callLines = runTool.renderCall({ agent: 'sdd-verify', mode: 'background' }, { fg: (_name: string, text: string) => text, bold: (text: string) => text }).render(80);
+    const theme = { fg: (_name: string, text: string) => text, bold: (text: string) => text };
+    const callLines = runTool.renderCall({ agent: 'sdd-verify', mode: 'background' }, theme).render(80);
     expect(callLines).toHaveLength(0);
-    expect(callLines.join('\n')).toBe('');
 
-    const lines = runTool.renderResult(bgResult, { expanded: false, isPartial: false }, { fg: (_name: string, text: string) => text, bold: (text: string) => text }).render(80);
-    expect(lines[0]).toMatch(/^┌─+ .+subagent · sdd-verify · running \(background\) ─+┐$/);
-    expect(lines[0]).toContain('󰣇');
-    expect(lines[1]).toContain('subagent: sdd-verify');
-    expect(lines[1]).toContain('status: running');
-    expect(lines.join('\n')).toContain('click to view execution');
-    expect(lines.at(-1)).toMatch(/^└─+┘$/);
-    expect(lines.join('\n')).not.toContain('\x1b[4');
+    const lines = runTool.renderResult(bgResult, { expanded: false, isPartial: false }, theme).render(80);
+    const joined = lines.join('\n');
+    expect(lines[0]).toContain('sdd-verify');
+    expect(lines[0]).toContain('running');
+    expect(lines[0]).toContain('background');
+    expect(joined).toContain(ARCH_ICON);
+    expect(joined).not.toMatch(/[╭╮╰╯│┌┐└┘]/);
+    expect(joined).not.toMatch(/to expand|ctrl\+o|click to view/i);
+    expect(joined).not.toContain('\x1b[4');
   });
 
-  it('produces one transparent single frame for background running execution with all info inside and zero project-owned background escapes', async () => {
+  it('produces one transparent compact row for background execution with no background escapes', async () => {
     env.writeAgent('sdd-verify');
     const manager = new SubagentManager(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -432,6 +462,7 @@ describe('tool render helpers', () => {
     });
     let runTool: any;
     registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
+    const theme = { fg: (_name: string, text: string) => text, bold: (text: string) => text };
 
     const result = await runTool.execute('1', {
       agent: 'sdd-verify',
@@ -439,68 +470,51 @@ describe('tool render helpers', () => {
       mode: 'background',
     }, undefined, undefined, { cwd: env.tmp });
 
-    // 1. Tool call produces zero lines outside the frame
-    const callLines = runTool.renderCall({ agent: 'sdd-verify', mode: 'background' }, { fg: (_name: string, text: string) => text, bold: (text: string) => text }).render(120);
+    const callLines = runTool.renderCall({ agent: 'sdd-verify', mode: 'background' }, theme).render(120);
     expect(callLines).toHaveLength(0);
-    expect(callLines.join('\n')).toBe('');
 
-    // 2. Result is one single framed card with integrated title
-    const resultLines = runTool.renderResult(result, { expanded: false, isPartial: false }, { fg: (_name: string, text: string) => text, bold: (text: string) => text }).render(120);
-    expect(resultLines[0]).toContain('┌─');
-    expect(resultLines[0]).toContain('┐');
-    expect(resultLines[0]).toContain('󰣇');
-    expect(resultLines[0]).toContain('subagent · sdd-verify · running (background)');
-
-    // Interior lines:
-    expect(resultLines[1]).toContain('subagent: sdd-verify');
-    expect(resultLines[1]).toContain('status: running');
-    expect(resultLines.join('\n')).toContain('click to view execution');
-    expect(resultLines.at(-1)).toContain('└');
-    expect(resultLines.at(-1)).toContain('┘');
-
-    // 3. No project-owned background fills or ANSI background color escapes
+    const resultLines = runTool.renderResult(result, { expanded: false, isPartial: false }, theme).render(120);
     const renderedFull = resultLines.join('\n');
+    expect(resultLines[0]).toContain(ARCH_ICON);
+    expect(resultLines[0]).toContain('sdd-verify');
+    expect(resultLines[0]).toContain('background');
+    expect(renderedFull).not.toMatch(/[╭╮╰╯│┌┐└┘]/);
     expect(renderedFull).not.toContain('\x1b[4');
+    expect(renderedFull).not.toMatch(/to expand|ctrl\+o|click to view/i);
 
-    // 4. Raw task IDs remain hidden in visible UI and preserved in structured details
     const rawTaskId = result.details.task_ids[0];
     expect(rawTaskId).toMatch(/^subtask_sdd-verify_/);
     expect(env.stripAnsi(renderedFull)).not.toContain(rawTaskId);
-    expect(env.stripAnsi(renderedFull)).not.toContain('id: subtask_');
   });
 
-  it('renders friendly display_name in titles and hides raw task IDs from visible output', async () => {
+  it('renders friendly display_name and hides raw task IDs from collapsed output', async () => {
     env.writeAgent('analyst');
     const manager = new SubagentManager(async () => ({ result: 'audited codebase', model: 'mock/model', fallback_used: false }));
     let runTool: any;
     registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
+    const theme = { fg: (_name: string, text: string) => text };
 
-    // 1. With display_name
     const withNameResult = await runTool.execute('1', {
       agent: 'analyst',
       task: 'audit security',
       display_name: 'Security Audit Pass',
       mode: 'task',
     }, undefined, undefined, { cwd: env.tmp });
-    const renderedWithName = env.stripAnsi(runTool.renderResult(withNameResult, { expanded: false }, { fg: (_name: string, text: string) => text }).render(120).join('\n'));
+    const renderedWithName = env.stripAnsi(runTool.renderResult(withNameResult, { expanded: false }, theme).render(120).join('\n'));
     expect(renderedWithName).toContain('Security Audit Pass');
-    expect(renderedWithName).toContain('subagent: analyst');
-    expect(renderedWithName).toContain('click to view execution');
-    expect(renderedWithName).not.toContain('id: subtask_');
     expect(renderedWithName).not.toContain('subtask_analyst_');
 
-    // 2. Without display_name (deterministic fallback)
     const withoutNameResult = await runTool.execute('2', {
       agent: 'analyst',
       task: 'inspect dependencies',
       mode: 'task',
     }, undefined, undefined, { cwd: env.tmp });
-    const renderedWithoutName = env.stripAnsi(runTool.renderResult(withoutNameResult, { expanded: false }, { fg: (_name: string, text: string) => text }).render(120).join('\n'));
-    expect(renderedWithoutName).toContain('analyst · inspect dependencies');
-    expect(renderedWithoutName).toContain('subagent: analyst');
-    expect(renderedWithoutName).toContain('click to view execution');
-    expect(renderedWithoutName).not.toContain('id: subtask_');
+    const renderedWithoutName = env.stripAnsi(runTool.renderResult(withoutNameResult, { expanded: false }, theme).render(120).join('\n'));
+    expect(renderedWithoutName).toContain('analyst');
     expect(renderedWithoutName).not.toContain('subtask_analyst_');
+    // The prompt snippet stays available without crowding the live row.
+    const expandedWithoutName = env.stripAnsi(runTool.renderResult(withoutNameResult, { expanded: true }, theme).render(120).join('\n'));
+    expect(expandedWithoutName).toContain('inspect dependencies');
   });
 
   it('renders result and response sections only when actual non-whitespace response text exists', async () => {
@@ -610,7 +624,7 @@ describe('tool render helpers', () => {
     }
   });
 
-  it('renders subagent_run operations with boxed layout, ARCH_ICON and width safety in collapsed and expanded states', () => {
+  it('renders subagent_run operations as compact unboxed rows with width safety in every state', () => {
     fs.writeFileSync(path.join(env.tmp, '.pi', 'subagents.json'), JSON.stringify({ enable_continue: true }));
     const registered: Record<string, any> = {};
     const manager = new SubagentManager(env.mockRunner());
@@ -637,31 +651,24 @@ describe('tool render helpers', () => {
       const name = result.details.action;
       const tool = registered.subagent_run;
 
-      // Collapsed
-      const collapsedLines = tool.renderResult(result, { expanded: false, isPartial: false }, theme).render(80);
-      expect(collapsedLines[0], `${name} collapsed top border`).toContain('┌─');
-      expect(collapsedLines[0], `${name} collapsed top border`).toContain('┐');
-      expect(collapsedLines[0], `${name} collapsed ARCH_ICON`).toContain('󰣇');
-      expect(collapsedLines.some((l: string) => l.includes('│')), `${name} collapsed vertical border`).toBe(true);
-      expect(collapsedLines.at(-1), `${name} collapsed bottom border`).toContain('└');
-      expect(collapsedLines.at(-1), `${name} collapsed bottom border`).toContain('┘');
+      for (const expanded of [false, true]) {
+        const lines = tool.renderResult(result, { expanded, isPartial: false }, theme).render(80);
+        const joined = lines.join('\n');
+        expect(joined, `${name} has the Arch identity`).toContain(ARCH_ICON);
+        expect(joined, `${name} has no card frame`).not.toMatch(/[╭╮╰╯│┌┐└┘]/);
+        expect(joined, `${name} has no expansion hint`).not.toMatch(/to expand|ctrl\+o/i);
+        expect(joined, `${name} has no background fill`).not.toContain('\x1b[4');
+      }
 
-      // Expanded
-      const expandedLines = tool.renderResult(result, { expanded: true, isPartial: false }, theme).render(80);
-      expect(expandedLines[0], `${name} expanded top border`).toContain('┌─');
-      expect(expandedLines[0], `${name} expanded top border`).toContain('┐');
-      expect(expandedLines[0], `${name} expanded ARCH_ICON`).toContain('󰣇');
-      expect(expandedLines.some((l: string) => l.includes('│')), `${name} expanded vertical border`).toBe(true);
-      expect(expandedLines.at(-1), `${name} expanded bottom border`).toContain('└');
-      expect(expandedLines.at(-1), `${name} expanded bottom border`).toContain('┘');
-
-      // Narrow width safety
-      const narrowLines = tool.renderResult(result, { expanded: false, isPartial: false }, theme).render(35);
-      expect(narrowLines.every((l: string) => [...env.stripAnsi(l)].length <= 35), `${name} width safe at 35`).toBe(true);
+      for (const width of [0, 1, 2, 10, 23, 24, 40, 80, 120]) {
+        const lines = tool.renderResult(result, { expanded: false, isPartial: false }, theme).render(width);
+        if (width <= 0) expect(lines, `${name} width 0`).toEqual([]);
+        else for (const line of lines) expect(visibleWidth(line), `${name} width ${width}`).toBeLessThanOrEqual(width);
+      }
     }
   });
 
-  it('dynamically adapts expansion hints when app.tools.expand keybinding changes and falls back to ctrl+o', () => {
+  it('renders no expansion guidance regardless of the configured app.tools.expand keybinding', () => {
     fs.writeFileSync(path.join(env.tmp, '.pi', 'subagents.json'), JSON.stringify({ enable_continue: true }));
     const registered: Record<string, any> = {};
     const manager = new SubagentManager(env.mockRunner());
@@ -677,36 +684,26 @@ describe('tool render helpers', () => {
       effort: 'high',
       result: 'kb response',
     };
-
-    const toolResults: Record<string, any> = {
-      subagent_run: { details: { task: sampleTask } },
-    };
+    const result = { details: { task: sampleTask } };
 
     try {
-      // 1. Configure custom keybinding 'ctrl+e'
       setExpandKeybindingProviderForTests((kb) => (kb === 'app.tools.expand' ? 'ctrl+e' : undefined));
-
-      for (const [name, result] of Object.entries(toolResults)) {
-        const tool = registered[name];
-        const collapsedText = tool.renderResult(result, { expanded: false }, theme).render(100).join('\n');
-        expect(collapsedText, `${name} should use custom keybinding ctrl+e`).toContain('ctrl+e to expand');
-        expect(collapsedText, `${name} should NOT contain hardcoded ctrl+o`).not.toContain('ctrl+o to expand');
+      for (const expanded of [false, true]) {
+        const text = registered.subagent_run.renderResult(result, { expanded }, theme).render(100).join('\n');
+        expect(text).not.toMatch(/to expand|ctrl\+e|ctrl\+o/i);
       }
 
-      // 2. Reset provider -> should fall back to 'ctrl+o'
       resetExpandKeybindingProviderForTests();
-
-      for (const [name, result] of Object.entries(toolResults)) {
-        const tool = registered[name];
-        const collapsedText = tool.renderResult(result, { expanded: false }, theme).render(100).join('\n');
-        expect(collapsedText, `${name} should fall back to ctrl+o`).toContain('ctrl+o to expand');
+      for (const expanded of [false, true]) {
+        const text = registered.subagent_run.renderResult(result, { expanded }, theme).render(100).join('\n');
+        expect(text).not.toMatch(/to expand|ctrl\+o/i);
       }
     } finally {
       resetExpandKeybindingProviderForTests();
     }
   });
 
-  it('renders live-message rejection and queue acknowledgements without task IDs or response confusion', () => {
+  it('renders live-message rejection and queue acknowledgements without raw task IDs', () => {
     let tool: any;
     const manager = new SubagentManager(env.mockRunner());
     registerSubagentTools({ registerTool: (value: any) => { tool = value; } }, manager, env.tmp);
@@ -717,18 +714,21 @@ describe('tool render helpers', () => {
         content: [{ type: 'text', text: `${status}: acknowledgement` }],
         details: { action: 'message', status, task_id: 'private-id', reason: status === 'rejected' ? 'unsupported_runtime' : undefined, pending_message_count: 2 },
       };
-      const collapsed = tool.renderResult(result, { expanded: false }, theme).render(80).join('\n');
-      expect(collapsed).toContain(`subagent message · subagent · ${status}`);
-      expect(collapsed).toContain('ctrl+o to expand');
+      const collapsed = tool.renderResult(result, { expanded: false }, theme).render(120).join('\n');
+      expect(collapsed).toContain('subagent message');
+      expect(collapsed).toContain(status);
       expect(collapsed).not.toContain('private-id');
-      const expanded = tool.renderResult(result, { expanded: true }, theme).render(80).join('\n');
+      expect(collapsed).not.toContain('acknowledgement');
+      expect(collapsed).not.toMatch(/to expand|ctrl\+o/i);
+
+      const expanded = tool.renderResult(result, { expanded: true }, theme).render(120).join('\n');
       expect(expanded).toContain(`${status}: acknowledgement`);
-      expect(expanded).toContain('pending messages: 2');
+      expect(expanded).toContain('pending 2');
       expect(expanded).not.toContain('Subagent response');
     }
   });
 
-  it('triggers registered panel opener when subagent run result component receives a mouse click', async () => {
+  it('never steals click/expansion from the tool row: no panel opener hijack and no mouse handler', async () => {
     const { registerSubagentsPanelOpener, resetSubagentsPanelOpenerStateForTests } = await import('../../src/ui/panel-overlay.js');
     const openedTasks: string[] = [];
     registerSubagentsPanelOpener((taskId?: string) => {
@@ -751,20 +751,17 @@ describe('tool render helpers', () => {
         },
       };
 
-      const component = runTool.renderResult(taskResult, { expanded: false, isPartial: false }, { fg: (_n: string, t: string) => t });
-      expect(typeof component.handleMouse).toBe('function');
-
-      const mouseResult = component.handleMouse({ type: 'click', button: 'left' });
-      expect(mouseResult).toEqual({ handled: true });
-      expect(openedTasks).toEqual(['subtask_click_test_123']);
-
-      // Partial component also responds to click
+      const theme = { fg: (_n: string, t: string) => t };
+      for (const isPartial of [false, true]) {
+        const component: any = runTool.renderResult(taskResult, { expanded: false, isPartial }, theme);
+        // Pi must keep ownership of click-to-expand and app.tools.expand for these rows.
+        expect(component.handleMouse).toBeUndefined();
+        expect(component.handleInput).toBeUndefined();
+        component.render(80);
+        component.invalidate();
+      }
+      expect(openedTasks).toEqual([]);
       resetSubagentsPanelOpenerStateForTests();
-      const partialComponent = runTool.renderResult(taskResult, { expanded: false, isPartial: true }, { fg: (_n: string, t: string) => t });
-      expect(typeof partialComponent.handleMouse).toBe('function');
-      const partialMouseResult = partialComponent.handleMouse({ type: 'click', button: 'left' });
-      expect(partialMouseResult).toEqual({ handled: true });
-      expect(openedTasks).toEqual(['subtask_click_test_123', 'subtask_click_test_123']);
     } finally {
       registerSubagentsPanelOpener(undefined);
     }

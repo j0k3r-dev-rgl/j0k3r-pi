@@ -7,23 +7,60 @@ import { pathToFileURL } from 'node:url';
 
 // Only Pi's documented host packages are used; no sibling extension resolution.
 const host = process.env.PI_WORKFLOW_TEST_HOST;
-test('Pi loads both tools and native rendering preserves expanded content', { skip: !host }, async () => {
+test('Pi loads both tools and compact rendering preserves expanded content without hints or cards', { skip: !host }, async () => {
   const { loadExtensions } = await import(pathToFileURL(`${host}/dist/core/extensions/loader.js`).href);
+  const { ToolExecutionComponent, initTheme } = await import(pathToFileURL(`${host}/dist/modes/interactive/components/tool-execution.js`).href).catch(() => import(pathToFileURL(`${host}/dist/index.js`).href));
+  const { visibleWidth } = await import(pathToFileURL(`${host}/node_modules/@earendil-works/pi-tui/dist/index.js`).href);
+  if (typeof initTheme === 'function') initTheme();
   const entry = new URL('../index.ts', import.meta.url).pathname;
   const loaded = await loadExtensions([entry], process.cwd());
   assert.deepEqual(loaded.errors, []);
   assert.deepEqual([...loaded.extensions[0].tools.keys()], ['workflow_check', 'workflow_record']);
   const theme = { fg: (_color, text) => text, bold: (text) => text };
-  const context = { args: { phase: 'plan' }, keyHint: (key, text) => `${key} ${text}` };
+  const home = process.env.HOME || '';
+  const siblingPrefixPath = home ? `${home}-other/change` : '/tmp/other/change';
+  const context = { args: { phase: 'plan', change_dir: siblingPrefixPath }, keyHint: (key, text) => `${key} ${text}`, state: {} };
   for (const registered of loaded.extensions[0].tools.values()) {
     const tool = registered.definition;
-    const result = { content: [{ type: 'text', text: 'Full diagnostic\nSecond line 漢字' }], details: { status: 'BLOCKED', phase: 'plan' } };
-    const collapsed = tool.renderResult(result, { expanded: false, isPartial: false }, theme, context).render(30);
-    assert.match(collapsed.join('\n'), /BLOCKED/);
-    assert.match(collapsed.join('\n'), /app.tools.expand/);
-    const expanded = tool.renderResult(result, { expanded: true, isPartial: false }, theme, context).render(30);
+    assert.equal(tool.compactToolRenderingVersion, 1);
+    assert.equal(tool.renderShell, 'self');
+    const result = { content: [{ type: 'text', text: 'Full diagnostic\nSecond line 漢字\nLiteral ╭box╮ to expand' }], details: { status: 'BLOCKED', phase: 'plan', contract_count: 3 } };
+    const callComp = tool.renderCall(context.args, theme, { ...context, state: {} });
+    assert.equal(callComp.render(0).length, 0);
+    const pending = callComp.render(80);
+    assert.equal(pending.length, 1);
+    assert.match(pending[0], /───/);
+    if (home) assert.match(pending[0], /-other\/change/);
+
+    const rowState = {};
+    const coordCall = tool.renderCall(context.args, theme, { ...context, state: rowState });
+    const coordResult = tool.renderResult(result, { expanded: false, isPartial: false }, theme, { ...context, state: rowState });
+    assert.deepEqual(coordCall.render(80), []);
+    const collapsed = coordResult.render(80);
+    assert.equal(collapsed.length, 1);
+    assert.match(collapsed[0], /BLOCKED/);
+    assert.match(collapsed[0], /───/);
+    assert.doesNotMatch(collapsed.join('\n'), /app\.tools\.expand|to expand|ctrl\+o|[╭╮╰╯│]/);
+
+    const expanded = tool.renderResult(result, { expanded: true, isPartial: false }, theme, { ...context, state: {} }).render(30);
     assert.match(expanded.join('\n'), /Second line 漢字/);
-    assert.match(tool.renderResult(result, { expanded: false, isPartial: true }, theme, context).render(30).join('\n'), /Checking/);
+    assert.match(expanded.join('\n'), /Literal ╭box╮ to expand/);
+    for (const width of [0, 1, 2, 10, 23, 24, 40, 80]) {
+      for (const line of tool.renderResult(result, { expanded: true, isPartial: false }, theme, { ...context, state: {} }).render(width)) {
+        assert.ok(visibleWidth(line) <= width, `width ${width}`);
+      }
+      assert.equal(tool.renderResult(result, { expanded: false, isPartial: false }, theme, { ...context, state: {} }).render(width).length, width <= 0 ? 0 : 1);
+    }
+
+    const partial = tool.renderResult(result, { expanded: false, isPartial: true }, theme, { ...context, state: {} }).render(80);
+    assert.equal(partial.length, 1);
+    assert.match(partial[0], /Checking/);
+    if (home) {
+      const homeRow = tool.renderCall({ phase: 'plan', change_dir: `${home}/openspec/changes/x` }, theme, { state: {} }).render(80)[0];
+      assert.match(homeRow, /~\/openspec\/changes\/x/);
+    }
+    assert.doesNotThrow(() => tool.renderCall(null, undefined, undefined).render(80));
+    assert.doesNotThrow(() => tool.renderResult(null, undefined, undefined, undefined).render(80));
   }
 });
 
@@ -39,7 +76,7 @@ test('Pi reload refreshes workflow engine exports after an in-process update', {
   const originalEngine = readFileSync(engine, 'utf8');
   // Simulate a previously loaded release that had no receipt export.
   writeFileSync(engine, originalEngine.replace('export function recordWorkflow(', 'function recordWorkflow('));
-  writeFileSync(entry, originalEntry.replace('  pi.registerTool({ ...createWorkflowRecordTool(withFileMutationQueue), renderCall, renderResult });', ''));
+  writeFileSync(entry, originalEntry.replace(/^\s*pi\.registerTool\(\{ \.\.\.createWorkflowRecordTool\(withFileMutationQueue\).*\}\);\s*$/m, ''));
   const initial = await loadExtensions([entry], root);
   assert.deepEqual(initial.errors, []);
   await initial.extensions[0].tools.get('workflow_check').definition.execute('before', { change_dir: root, phase: 'plan' }, undefined, undefined, { cwd: root });

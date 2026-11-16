@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { isNotIndexedOutput, resolveProjectPath } from "../core.js";
-import { renderSyncCall, renderSyncResult } from "../render/index.js";
+import { COMPACT_TOOL_RENDERING, renderSyncCall, renderSyncResult } from "../render/index.js";
 import type { CodeGraphSyncDetails } from "../types.js";
 
 type SyncResultPayload = {
@@ -150,5 +150,6 @@ export function registerSyncTool(pi: ExtensionAPI) {
 		renderCall: renderSyncCall,
 		renderResult: renderSyncResult,
 		renderShell: "self",
+		...COMPACT_TOOL_RENDERING,
 	});
 }

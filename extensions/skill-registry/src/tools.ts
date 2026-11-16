@@ -1,6 +1,6 @@
 import { Type } from 'typebox';
 import { generateSkillRegistry, writeSkillRegistry } from './registry.js';
-import { renderSkillRegistryCall, renderSkillRegistryResult } from './render.js';
+import { COMPACT_TOOL_RENDERING, renderSkillRegistryCall, renderSkillRegistryResult } from './render.js';
 import { resolveSkillRegistry, type ResolveMatchReason, type ResolveSkillRegistryResult } from './resolve.js';
 
 function formatResultLines(result: ResolveSkillRegistryResult): string[] {
@@ -107,6 +107,7 @@ export function registerSkillRegistryTools(pi: any): void {
       write: Type.Optional(Type.Boolean({ description: 'Whether to write .pi/skill-registry.json and .pi/skill-registry.md. Defaults to true.' })),
     }),
     renderShell: 'self',
+    ...COMPACT_TOOL_RENDERING,
     renderCall(args: any, theme: any, context: any) {
       return renderSkillRegistryCall('skill_registry_generate', args, theme, context);
     },
@@ -144,6 +145,7 @@ export function registerSkillRegistryTools(pi: any): void {
       max_results: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: 'Maximum number of direct matches. Defaults to 10.' })),
     }),
     renderShell: 'self',
+    ...COMPACT_TOOL_RENDERING,
     renderCall(args: any, theme: any, context: any) {
       return renderSkillRegistryCall('skill_registry_resolve', args, theme, context);
     },

@@ -3,7 +3,7 @@ import { answersText } from "../core/answers.ts";
 import { QuestionParamsSchema } from "../core/schema.ts";
 import { validateQuestionnaire } from "../core/validate.ts";
 import { QuestionnaireInteraction } from "../render/interaction.ts";
-import { renderQuestionCall, renderQuestionResult } from "../render/index.ts";
+import { COMPACT_TOOL_RENDERING, renderQuestionCall, renderQuestionResult } from "../render/index.ts";
 import { QuestionnaireView, type QuestionnaireResult } from "../render/questionnaire-view.ts";
 import type { QuestionnaireDetails } from "../types.ts";
 
@@ -134,6 +134,7 @@ export function registerQuestionTool(pi: ExtensionAPI): void {
       return { content: [{ type: "text", text: answersText(selection.answers) }], details: { answers: selection.answers } };
     },
     renderShell: "self",
+    ...COMPACT_TOOL_RENDERING,
     renderCall: renderQuestionCall,
     renderResult: renderQuestionResult,
   };

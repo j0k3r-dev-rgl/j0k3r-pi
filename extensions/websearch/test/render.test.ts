@@ -1,15 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { registerWebsearchTools, WEBSEARCH_TOOL_NAMES } from '../src/tools.js';
 import {
-  cardBottomBorder,
-  cardTopBorder,
-  CYAN,
-  LIME,
   RED,
   renderWebsearchToolCall,
   renderWebsearchToolResult,
   toolActionBadge,
-  visibleWidth,
 } from '../src/render/index.js';
 import { createMockPi, execute } from './helpers.js';
 
@@ -34,14 +29,17 @@ function renderLines(tool: { renderResult?: (...args: any[]) => { render(width: 
   return tool.renderResult!(result, { expanded, isPartial: false }, theme, {}).render(100).join('\n');
 }
 
+const FRAME = /[╭╮╰╯│]/;
+
 describe('websearch TUI rendering', () => {
-  it('registers renderShell self, renderCall, and renderResult for every public tool', () => {
+  it('registers the compact marker plus renderShell self and both safe slots for every public tool', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: {}, fetch: vi.fn<typeof fetch>() });
 
     expect(pi.tools.map((tool) => tool.name)).toEqual(WEBSEARCH_TOOL_NAMES);
     for (const tool of pi.tools) {
       expect(tool.renderShell, `${tool.name} renderShell`).toBe('self');
+      expect(tool.compactToolRenderingVersion, `${tool.name} marker`).toBe(1);
       expect(tool.renderCall, `${tool.name} renderCall`).toBeTypeOf('function');
       expect(tool.renderResult, `${tool.name} renderResult`).toBeTypeOf('function');
     }
@@ -61,16 +59,15 @@ describe('websearch TUI rendering', () => {
     expect(toolActionBadge('academic_paper', { doi: '10.1234/5678' })).toBe('10.1234/5678');
   });
 
-  it('coordinates two-phase slot assembly via context.state', () => {
+  it('coordinates two-phase slot assembly via context.state without a duplicate row', () => {
     const context: any = { state: {} };
     const callComponent = renderWebsearchToolCall('web_search', { query: 'vitest mocks' }, theme, context);
     const callLines = callComponent.render(80);
 
-    expect(callLines).toHaveLength(3);
-    expect(callLines[0]).toContain('╭');
-    expect(callLines[0]).toContain('web_search [vitest mocks]');
-    expect(callLines[1]).toContain('Pending: vitest mocks');
-    expect(callLines[2]).toContain('╰');
+    expect(callLines).toHaveLength(1);
+    expect(callLines[0]).toContain('web_search');
+    expect(callLines[0]).toContain('vitest mocks');
+    expect(callLines[0]).not.toMatch(FRAME);
 
     const result = {
       details: {
@@ -82,41 +79,38 @@ describe('websearch TUI rendering', () => {
     const resultComponent = renderWebsearchToolResult('web_search', result, { expanded: false }, theme, context);
 
     expect(context.state.hasResult).toBe(true);
-    expect(context.state.borderColor).toBe(LIME);
+    expect(context.state.isError).toBe(false);
 
     const callLinesAfterResult = callComponent.render(80);
-    expect(callLinesAfterResult).toHaveLength(1);
-    expect(callLinesAfterResult[0]).toContain('╭');
-    expect(callLinesAfterResult[0]).toContain(LIME);
+    expect(callLinesAfterResult).toEqual([]);
 
     const resultLines = resultComponent.render(80);
-    expect(resultLines[resultLines.length - 1]).toContain('╰');
+    expect(resultLines).toHaveLength(1);
+    expect(resultLines[0]).toContain('web_search');
+    expect(resultLines[0]).toContain('1 result');
+    expect(resultLines[0]).not.toMatch(FRAME);
   });
 
-  it.each([false, true])('reuses shared-state cached results with expanded=%s and updates on toggle', (expanded) => {
-    const context = { state: {} };
+  it.each([false, true])('keeps expanded=%s output stable and lossless without expansion hints', (expanded) => {
     const result = {
       details: { status: 'success', data: { title: 'Cached detail' } },
       content: [{ type: 'text', text: fullIssueBody }],
     };
-    const component = renderWebsearchToolResult('discussion_get', result, { expanded }, theme, context);
+    const component = renderWebsearchToolResult('discussion_get', result, { expanded }, theme, { state: {} });
     const lines = component.render(80);
 
-    expect(component.render(80)).toBe(lines);
-    const recreated = renderWebsearchToolResult('discussion_get', result, { expanded }, theme, context);
-    expect(recreated.render(80)).toBe(lines);
-    expect(lines.join('\n')).toContain(expanded ? 'ctrl+o collapse' : 'ctrl+o expand');
+    expect(component.render(80)).toEqual(lines);
+    expect(lines.join('\n')).not.toMatch(/ctrl\+o|to expand|to collapse/i);
     expect(lines.join('\n').includes('WEBSEARCH_RENDER_FULL_BODY_END')).toBe(expanded);
 
-    const toggled = renderWebsearchToolResult('discussion_get', result, { expanded: !expanded }, theme, context);
+    const toggled = renderWebsearchToolResult('discussion_get', result, { expanded: !expanded }, theme, { state: {} });
     const toggledLines = toggled.render(80);
     expect(toggledLines).not.toBe(lines);
-    expect(toggledLines.join('\n')).toContain(expanded ? 'ctrl+o expand' : 'ctrl+o collapse');
     expect(toggledLines.join('\n').includes('WEBSEARCH_RENDER_FULL_BODY_END')).toBe(!expanded);
-    expect(toggled.render(80)).toBe(toggledLines);
+    expect(toggled.render(80)).toEqual(toggledLines);
   });
 
-  it('uses electric red border on failure', () => {
+  it('shows one red inline error row and keeps returned text when expanded', () => {
     const context: any = { state: {} };
     const result = {
       isError: true,
@@ -124,12 +118,19 @@ describe('websearch TUI rendering', () => {
       content: [{ type: 'text', text: 'failed' }],
     };
 
-    const resultComponent = renderWebsearchToolResult('web_search', result, { expanded: false }, theme, context);
-    expect(context.state.borderColor).toBe(RED);
+    const redTheme = { ...theme, fg: (name: string, text: string) => (name === 'error' ? `${RED}${text}\x1b[0m` : text) };
+    const resultComponent = renderWebsearchToolResult('web_search', result, { expanded: false }, redTheme, context);
+    expect(context.state.isError).toBe(true);
 
     const lines = resultComponent.render(80);
+    expect(lines).toHaveLength(1);
     expect(lines[0]).toContain(RED);
-    expect(lines.some((l) => l.includes('Error: Network timeout'))).toBe(true);
+    expect(lines[0]).toContain('Network timeout');
+    expect(lines[0]).not.toMatch(FRAME);
+
+    const expandedLines = renderWebsearchToolResult('web_search', result, { expanded: true }, theme, { state: {} }).render(80);
+    expect(expandedLines.every((l) => l.startsWith(' '))).toBe(true);
+    expect(expandedLines.slice(1)).toContain(' failed');
   });
 
   it('keeps compact search result lines within the requested visible width for CJK titles', () => {
@@ -218,10 +219,13 @@ describe('websearch TUI rendering', () => {
 
     expect(compact).toContain('discussion_get');
     expect(compact).toContain('Long issue detail');
-    expect(compact).toContain('ctrl+o expand');
+    expect(compact).not.toMatch(/ctrl\+o|to expand/i);
     expect(compact).not.toContain('WEBSEARCH_RENDER_FULL_BODY_END');
+    expect(compact.split('\n')).toHaveLength(1);
     expect(expanded).toContain('discussion_get');
-    expect(expanded).toContain('ctrl+o collapse');
+    expect(expanded).not.toMatch(/ctrl\+o|to collapse/i);
     expect(expanded).toContain('WEBSEARCH_RENDER_FULL_BODY_END');
+    // Expansion prefix is the identical single header row.
+    expect(expanded.split('\n')[0]).toBe(compact);
   });
 });

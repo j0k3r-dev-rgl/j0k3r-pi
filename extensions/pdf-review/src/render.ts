@@ -1,4 +1,5 @@
 export type Component = {
+  compactLeftMargin?: number;
   render(width: number): string[];
   invalidate(): void;
 };
@@ -9,6 +10,18 @@ export interface PdfRenderOptions {
 }
 
 export const RESET = '\x1b[0m';
+/** Short inline row separator; not a card frame. */
+export const ROW_SEPARATOR = ' ─ ';
+/** Presentation-only marker: declares compact, unboxed, single-row compliance with 1-col margin. */
+export const COMPACT_TOOL_RENDERING = { compactToolRenderingVersion: 1, compactLeftMargin: 1 } as const;
+
+export interface PdfRowState {
+  hasResult?: boolean;
+  isError?: boolean;
+  isPartial?: boolean;
+  expanded?: boolean;
+  badge?: string;
+}
 export const CYAN = '\x1b[1;38;2;0;229;255m';
 export const LIME = '\x1b[1;38;2;102;255;102m';
 export const RED = '\x1b[1;38;2;255;77;109m';
@@ -80,125 +93,89 @@ export function pad(text: string, width: number): string {
   return visFitted < width ? fitted + ' '.repeat(width - visFitted) : fitted;
 }
 
-export function boxLine(content: string, innerWidth: number, borderColor: string = CYAN): string {
-  const innerContentWidth = Math.max(0, innerWidth - 2);
-  return `${borderColor}│${RESET} ${pad(content, innerContentWidth)} ${borderColor}│${RESET}`;
+/** One compact inline row, composed of non-empty parts and clipped to width. */
+export function rowLine(parts: Array<string | undefined | null>, width: number): string[] {
+  if (width <= 0) return [];
+  const line = parts
+    .filter((part): part is string => Boolean(part && part.trim()))
+    .map((part) => part.replace(/[\r\n]+/g, ' '))
+    .join(ROW_SEPARATOR);
+  return [fit(line, width)];
 }
 
-export function cardTopBorder(
-  toolName: string,
-  actionOrTarget: string | undefined,
-  innerWidth: number,
-  borderColor: string = CYAN,
-  titleColor: string = borderColor,
-): string {
-  const cleanAction = actionOrTarget ? actionOrTarget.replace(/[\r\n]+/g, ' ').trim() : undefined;
-  let label = cleanAction ? `${toolName} [${cleanAction}]` : toolName;
-
-  const maxTitleWidth = Math.max(4, innerWidth - 4);
-  if (visibleWidth(label) + 2 > maxTitleWidth && cleanAction) {
-    const maxActionWidth = Math.max(3, maxTitleWidth - visibleWidth(toolName) - 5);
-    const truncatedAction = fit(cleanAction, maxActionWidth);
-    label = `${toolName} [${truncatedAction}]`;
-  }
-
-  let titleText = ` ${label} `;
-  if (visibleWidth(titleText) > innerWidth) {
-    titleText = ` ${fit(label, Math.max(1, innerWidth - 2))} `;
-  }
-
-  const rest = Math.max(0, innerWidth - visibleWidth(titleText));
-  const leftDash = Math.min(2, rest);
-  const rightDash = Math.max(0, rest - leftDash);
-  return `${borderColor}╭${'─'.repeat(leftDash)}${RESET}${titleColor}${titleText}${RESET}${borderColor}${'─'.repeat(rightDash)}╮${RESET}`;
-}
-
-export function cardBottomBorder(innerWidth: number, borderColor: string = CYAN): string {
-  return `${borderColor}╰${'─'.repeat(Math.max(0, innerWidth))}╯${RESET}`;
-}
-
-export function frameContent(
-  lines: string[],
-  innerWidth: number,
-  borderColor: string = CYAN,
-): string[] {
-  const framed: string[] = [];
-  for (const rawLine of lines) {
-    const subLines = rawLine.includes('\n') ? rawLine.split(/\r?\n/) : [rawLine];
-    for (const sub of subLines) {
-      framed.push(boxLine(sub, innerWidth, borderColor));
-    }
-  }
-  return framed;
-}
-
-export function wrapLineToWidth(text: string, width: number): string[] {
-  if (width <= 0) return [''];
-  if (!text) return [''];
-  if (visibleWidth(text) <= width) return [text];
-
-  const words = text.split(/\s+/).filter(Boolean);
-  if (words.length === 0) return [''];
-
-  const lines: string[] = [];
+/**
+ * Hard-wrap one over-long token in linear time. Re-measuring the whole remainder
+ * per chunk made pathological single-line payloads quadratic.
+ */
+function hardChunks(text: string, width: number): string[] {
+  const out: string[] = [];
   let current = '';
-
-  for (const word of words) {
-    if (visibleWidth(word) > width) {
-      if (current) {
-        lines.push(current);
-        current = '';
+  let currentWidth = 0;
+  let index = 0;
+  while (index < text.length) {
+    if (text[index] === '\x1b') {
+      const match = text.slice(index).match(/^\x1b\[[0-9;]*[a-zA-Z]/);
+      if (match) {
+        current += match[0];
+        index += match[0].length;
+        continue;
       }
-      let rem = word;
-      while (visibleWidth(rem) > width) {
-        const chunk = fit(rem, width);
-        lines.push(chunk);
-        const chunkStripped = stripAnsi(chunk);
-        let remIdx = 0;
-        let strippedCount = 0;
-        while (remIdx < rem.length && strippedCount < chunkStripped.length) {
-          const m = rem.slice(remIdx).match(/^\x1b\[[0-9;]*[a-zA-Z]/);
-          if (m) {
-            remIdx += m[0].length;
-          } else {
-            remIdx++;
-            strippedCount++;
-          }
-        }
-        const nextRem = rem.slice(remIdx);
-        if (nextRem.length === rem.length) {
-          rem = rem.slice(1);
-        } else {
-          rem = nextRem;
-        }
-      }
-      if (rem) {
-        current = rem;
-      }
-      continue;
     }
-
-    if (!current) {
-      current = word;
-      continue;
+    const char = text[index];
+    const w = charWidth(char);
+    if (currentWidth > 0 && currentWidth + w > width) {
+      out.push(current);
+      current = '';
+      currentWidth = 0;
     }
-
-    const candidate = `${current} ${word}`;
-    if (visibleWidth(candidate) <= width) {
-      current = candidate;
-    } else {
-      lines.push(current);
-      current = word;
+    if (w <= width) {
+      current += char;
+      currentWidth += w;
     }
+    index += 1;
   }
-
-  if (current) lines.push(current);
-  return lines;
+  if (current || out.length === 0) out.push(current);
+  return out;
 }
 
-export function getKeyHint(theme: any, action: 'expand' | 'collapse'): string {
-  const key = theme?.keybinding?.('app.tools.expand') ?? 'ctrl+o';
-  return `${DIM}${key} ${action}${RESET}`;
+/** Wrap expanded content losslessly, preserving blank-line meaning. */
+export function expandedLines(text: string, width: number): string[] {
+  if (width <= 0) return [];
+  const out: string[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    if (raw === '') {
+      out.push('');
+      continue;
+    }
+    if (visibleWidth(raw) <= width) {
+      out.push(raw);
+      continue;
+    }
+    const words = raw.split(/\s+/).filter(Boolean);
+    let current = '';
+    for (const word of words) {
+      if (visibleWidth(word) > width) {
+        if (current) {
+          out.push(current);
+          current = '';
+        }
+        out.push(...hardChunks(word, width));
+        continue;
+      }
+      if (!current) {
+        current = word;
+        continue;
+      }
+      const candidate = `${current} ${word}`;
+      if (visibleWidth(candidate) <= width) current = candidate;
+      else {
+        out.push(current);
+        current = word;
+      }
+    }
+    if (current) out.push(current);
+  }
+  return out;
 }
 
 export function formatBytes(bytes: number): string {
@@ -216,53 +193,19 @@ export function extractPdfBadge(args: any): string {
   return 'pdf_extract';
 }
 
-export function renderPdfExtractCall(args: any, _theme?: any, context?: any): Component {
-  let cachedBorderWidth: number | undefined;
-  let cachedBorderColor: string | undefined;
-  let cachedTopBorder: string[] | undefined;
-
+export function renderPdfExtractCall(args: any, theme?: any, context?: any): Component {
+  const state: PdfRowState = context ? (context.state ??= {}) : {};
+  const badge = extractPdfBadge(args);
+  if (context?.state) context.state.badge = badge;
   return {
-    invalidate() {
-      cachedBorderWidth = undefined;
-      cachedBorderColor = undefined;
-      cachedTopBorder = undefined;
-    },
+    compactLeftMargin: 1,
+    invalidate() {},
     render(width: number): string[] {
-      if (width <= 0) return [];
-      const badge = extractPdfBadge(args);
-
-      if (width < 24) {
-        return [fit(`${badge}`, width)];
-      }
-
-      const innerWidth = Math.max(0, width - 2);
-      const state = context?.state;
-      const isError = Boolean(context?.isError);
-      const borderColor = state?.borderColor ?? (isError ? RED : CYAN);
-
-      if (state?.hasResult) {
-        if (
-          cachedBorderWidth === innerWidth &&
-          cachedBorderColor === borderColor &&
-          cachedTopBorder
-        ) {
-          return cachedTopBorder;
-        }
-        const topBorder = cardTopBorder('pdf_extract', badge, innerWidth, borderColor, borderColor);
-        cachedBorderWidth = innerWidth;
-        cachedBorderColor = borderColor;
-        cachedTopBorder = [topBorder];
-        return cachedTopBorder;
-      }
-
-      const topBorder = cardTopBorder('pdf_extract', badge, innerWidth, borderColor, borderColor);
-      const pendingLine = `${CYAN}●${RESET} Pending: Extracting PDF...`;
-
-      return [
-        topBorder,
-        boxLine(pendingLine, innerWidth, borderColor),
-        cardBottomBorder(innerWidth, borderColor),
-      ];
+      if (state.hasResult) return [];
+      const safeWidth = Number.isFinite(width) ? Math.floor(width) : 0;
+      if (safeWidth <= 0) return [];
+      if (safeWidth === 1) return [' '];
+      return rowLine([theme?.fg?.('toolTitle', 'pdf_extract') ?? 'pdf_extract', badge, `${DIM}running…${RESET}`], safeWidth - 1).map((line) => ` ${line}`);
     },
   };
 }
@@ -312,15 +255,6 @@ function buildPdfExpandedLines(data: any): string[] {
     }
   }
 
-  if (typeof data?.text === 'string' && data.text.trim()) {
-    lines.push('', 'text preview:');
-    const preview = data.text.slice(0, 500).trim();
-    lines.push(...preview.split('\n'));
-    if (data.text.length > 500) {
-      lines.push('…');
-    }
-  }
-
   return lines;
 }
 
@@ -330,85 +264,58 @@ export function renderPdfExtractResult(
   theme?: any,
   context?: any,
 ): Component {
+  const state: PdfRowState = context ? (context.state ??= {}) : {};
   const isError = Boolean(
     context?.isError ||
       result?.isError ||
       result?.details?.status === 'failure' ||
       result?.details?.error,
   );
-  const borderColor = isError ? RED : LIME;
-
-  if (context?.state) {
-    context.state.hasResult = true;
-    context.state.borderColor = borderColor;
-  }
-
-  let cachedWidth: number | undefined;
-  let cachedLines: string[] | undefined;
+  state.hasResult = true;
+  state.isError = isError;
+  state.isPartial = Boolean(options?.isPartial);
+  state.expanded = Boolean(options?.expanded);
+  const data = result?.details?.data ?? result?.details;
 
   return {
-    invalidate() {
-      cachedWidth = undefined;
-      cachedLines = undefined;
-    },
+    compactLeftMargin: 1,
+    invalidate() {},
     render(width: number): string[] {
-      if (width <= 0) return [];
-      if (!options?.isPartial && cachedWidth === width && cachedLines !== undefined) {
-        return cachedLines;
-      }
+      const safeWidth = Number.isFinite(width) ? Math.floor(width) : 0;
+      if (safeWidth <= 0) return [];
+      if (safeWidth === 1) return [' '];
+      const innerWidth = safeWidth - 1;
 
-      const isExpanded = Boolean(options?.expanded);
-      const hint = getKeyHint(theme, isExpanded ? 'collapse' : 'expand');
-      const bodyLines: string[] = [];
-
-      if (options?.isPartial) {
-        bodyLines.push('Extracting PDF…');
+      let head: Array<string | undefined>;
+      if (state.isPartial) {
+        head = [theme?.fg?.('toolTitle', 'pdf_extract') ?? 'pdf_extract', state.badge, `${DIM}running…${RESET}`];
       } else if (isError) {
         const errorMsg =
           result?.details?.error?.message ??
           result?.details?.error ??
           result?.content?.[0]?.text ??
           'pdf extraction failed';
-        bodyLines.push(`${RED}Error: ${stripAnsi(String(errorMsg))}${RESET}`);
-        bodyLines.push(hint);
+        head = [theme?.fg?.('error', 'pdf_extract') ?? 'pdf_extract', `error · ${fit(stripAnsi(String(errorMsg)), 140)}`];
       } else {
-        const data = result?.details?.data ?? result?.details;
-        const summary = buildPdfSummary(data);
-        bodyLines.push(summary);
-        bodyLines.push(hint);
-
-        if (isExpanded) {
-          const detailLines = buildPdfExpandedLines(data);
-          if (detailLines.length > 0) {
-            bodyLines.push('');
-            bodyLines.push(...detailLines);
-          }
-        }
+        head = [theme?.fg?.('toolTitle', 'pdf_extract') ?? 'pdf_extract', buildPdfSummary(data)];
       }
 
-      if (width < 24) {
-        return bodyLines.map((line) => fit(stripAnsi(line), width));
-      }
+      const lines = rowLine(head, innerWidth).map((line) => ` ${line}`);
+      if (!state.expanded || state.isPartial) return lines;
 
-      const innerWidth = Math.max(0, width - 2);
-      const innerContentWidth = Math.max(0, innerWidth - 2);
-      const wrappedBodyLines: string[] = [];
-      for (const rawLine of bodyLines) {
-        for (const sub of rawLine.split(/\r?\n/)) {
-          wrappedBodyLines.push(...wrapLineToWidth(sub, innerContentWidth));
-        }
-      }
-
-      const framed = frameContent(wrappedBodyLines, innerWidth, borderColor);
-      const bottomBorder = cardBottomBorder(innerWidth, borderColor);
-      const finalLines = [...framed, bottomBorder];
-
-      if (!options?.isPartial) {
-        cachedWidth = width;
-        cachedLines = finalLines;
-      }
-
-      return finalLines;
+      // Metadata first, then every returned text block verbatim: no renderer-side
+      // preview slicing, so all extracted text and page ranges stay reachable.
+      const meta = isError ? [] : buildPdfExpandedLines(data);
+      const body = (result?.content ?? [])
+        .filter((part: any) => part?.type === 'text' && typeof part.text === 'string')
+        .flatMap((part: any) => expandedLines(part.text, innerWidth));
+      const detailLines = [
+        ...meta.flatMap((line) => (line === '' ? [''] : expandedLines(line, innerWidth))),
+        ...(meta.length > 0 && body.length > 0 ? [''] : []),
+        ...body,
+      ];
+      if (detailLines.length === 0) return lines;
+      return [...lines, ...detailLines.map((line) => ` ${line}`)];
     },
   };
 }

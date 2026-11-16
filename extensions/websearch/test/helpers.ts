@@ -4,6 +4,7 @@ export type Tool = {
   parameters: { type: string; [key: string]: unknown };
   execute: (...args: unknown[]) => Promise<unknown> | unknown;
   renderShell?: string;
+  compactToolRenderingVersion?: number;
   renderCall?: (...args: any[]) => any;
   renderResult?: (...args: any[]) => { render(width: number): string[] };
 };

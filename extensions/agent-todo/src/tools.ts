@@ -26,11 +26,13 @@ export function registerAgentTodoTool(pi: any, runtime: any): void {
       end_step_id: Type.Optional(Type.String()),
       range: Type.Optional(Type.String({ description: 'Inclusive numeric range for complete_range, for example 2-4.' })),
     }),
-    renderShell: 'self',
+    compactToolRenderingVersion: 1 as const,
+    renderShell: 'self' as const,
     async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
       const result = applyAgentTodoAction(runtime.projection, params, runtime.deps);
       if (!result.isError) runtime.projection = result.nextState;
-      syncAgentTodoWidget(ctx, runtime.projection, { collapsed: runtime.widgetCollapsed === true, shortcut: 'ctrl+space' });
+      runtime.hud?.bind(ctx);
+      syncAgentTodoWidget(ctx, runtime.projection, { collapsed: runtime.widgetCollapsed === true, hidden: runtime.hud?.isVisible(), shortcut: 'ctrl+space' });
       return result;
     },
     renderCall(args: any, theme: any, context?: any) {

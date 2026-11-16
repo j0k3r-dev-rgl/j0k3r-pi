@@ -1,4 +1,5 @@
-import { isValidThreadSnapshot, renderThreadBody, SubagentThreadRenderCache } from '../thread-view.js';
+import { getSubagentToolRendererGeneration, isValidThreadSnapshot, renderThreadBody, SubagentThreadRenderCache } from '../thread-view.js';
+import { contentRevision } from '../render/content-revision.js';
 import type { SubagentTask, SubagentThreadRenderContext, SubagentThreadRenderTarget, SubagentThreadSnapshot, UsageStats } from '../types.js';
 import { formatTaskLabel } from '../render/tools/formatting.js';
 import { visibleWidth as terminalVisibleWidth, wrapLineToWidth } from '../render/text-width.js';
@@ -213,6 +214,38 @@ export class SubagentsHistoryPanel {
     this.bodyCache.clear();
     this.hydratedTasks.clear();
     this.rowTaskMap.clear();
+    this.sidebarRowTaskMap.clear();
+    this.detailRowTaskMap.clear();
+    this.detailRowTargetMap.clear();
+  }
+
+  private reconcileSelection(tasks: SubagentTask[]): number {
+    if (!tasks.length) {
+      this.selected = 0;
+      this.selectedTaskId = undefined;
+      return -1;
+    }
+    if (this.selectedTaskId) {
+      const idx = tasks.findIndex((entry) => entry.id === this.selectedTaskId);
+      if (idx >= 0) {
+        this.selected = idx;
+        return idx;
+      }
+    }
+    this.selected = Math.min(Math.max(0, this.selected), tasks.length - 1);
+    this.selectedTaskId = tasks[this.selected]?.id;
+    return this.selected;
+  }
+
+  private pruneRemovedTaskCaches(tasks: SubagentTask[]): void {
+    const activeIds = new Set(tasks.map((task) => task.id));
+    for (const id of this.hydratedTasks.keys()) {
+      if (!activeIds.has(id)) this.hydratedTasks.delete(id);
+    }
+    for (const key of this.expansionOverrides.keys()) {
+      const taskId = key.split(':')[1];
+      if (taskId && !activeIds.has(taskId)) this.expansionOverrides.delete(key);
+    }
   }
 
   handleMouse(event: {
@@ -291,10 +324,10 @@ export class SubagentsHistoryPanel {
       const tasks = this.tasks();
       const targetIndex = tasks.findIndex((t) => t.id === targetTaskId);
       if (targetIndex >= 0) {
-        const changed = this.selected !== targetIndex;
+        const changed = this.selectedTaskId !== targetTaskId;
+        this.selected = targetIndex;
+        this.selectedTaskId = targetTaskId;
         if (changed) {
-          this.selected = targetIndex;
-          this.selectedTaskId = tasks[targetIndex]?.id;
           this.scroll = 0;
           this.followTail = true;
           return { handled: true, focus: true, render: true };
@@ -316,6 +349,7 @@ export class SubagentsHistoryPanel {
 
   handleInput(data: string): void {
     const tasks = this.tasks();
+    this.reconcileSelection(tasks);
     if (this.matchesKey(data, 'escape') || this.matchesKey(data, 'ctrl+c') || this.matchesKey(data, 'q')) {
       this.done();
       return;
@@ -348,17 +382,27 @@ export class SubagentsHistoryPanel {
       this.handleMouse({ type: 'click', row: mouseClick.row, col: mouseClick.col });
       return;
     }
-    if (this.matchesKey(data, 'right')) {
-      this.selected = Math.min(tasks.length - 1, this.selected + 1);
-      this.selectedTaskId = tasks[this.selected]?.id;
-      this.scroll = 0;
-      this.followTail = true;
+    if (this.matchesKey(data, 'right') && tasks.length > 0) {
+      const next = Math.min(tasks.length - 1, this.selected + 1);
+      const nextId = tasks[next]?.id;
+      const changed = nextId !== this.selectedTaskId;
+      this.selected = next;
+      this.selectedTaskId = nextId;
+      if (changed) {
+        this.scroll = 0;
+        this.followTail = true;
+      }
     }
-    if (this.matchesKey(data, 'left')) {
-      this.selected = Math.max(0, this.selected - 1);
-      this.selectedTaskId = tasks[this.selected]?.id;
-      this.scroll = 0;
-      this.followTail = true;
+    if (this.matchesKey(data, 'left') && tasks.length > 0) {
+      const next = Math.max(0, this.selected - 1);
+      const nextId = tasks[next]?.id;
+      const changed = nextId !== this.selectedTaskId;
+      this.selected = next;
+      this.selectedTaskId = nextId;
+      if (changed) {
+        this.scroll = 0;
+        this.followTail = true;
+      }
     }
     if (this.matchesKey(data, 'down')) {
       this.scroll += 1;
@@ -427,7 +471,8 @@ export class SubagentsHistoryPanel {
     clickableRowCount?: number;
   } {
     const tasks = this.tasks();
-    const task = tasks[this.selected];
+    const idx = this.reconcileSelection(tasks);
+    const task = idx >= 0 ? tasks[idx] : undefined;
     return {
       taskCount: tasks.length,
       selectedIndex: task ? this.selected : -1,
@@ -468,18 +513,8 @@ export class SubagentsHistoryPanel {
     const rightWidth = isSplit ? Math.max(16, w - sidebarWidth - 7) : Math.max(4, w - 4);
 
     const tasks = this.tasks();
-    if (this.selectedTaskId) {
-      const initialIndex = tasks.findIndex((entry) => entry.id === this.selectedTaskId);
-      if (initialIndex >= 0) {
-        this.selected = initialIndex;
-      } else {
-        this.selected = Math.min(this.selected, Math.max(0, tasks.length - 1));
-        this.selectedTaskId = tasks[this.selected]?.id;
-      }
-    } else {
-      this.selected = Math.min(this.selected, Math.max(0, tasks.length - 1));
-      this.selectedTaskId = tasks[this.selected]?.id;
-    }
+    this.reconcileSelection(tasks);
+    this.pruneRemovedTaskCaches(tasks);
 
     const archPrefix = themeFg(th, 'accent', ARCH_ICON, CYAN);
     const closeBtnText = w < 50 ? '[✕]' : '[✕ Cerrar]';
@@ -579,7 +614,7 @@ export class SubagentsHistoryPanel {
       // Right Top Segment: ─ badge ─...─ closeBtn ─╮
       const badge = `${accent(`${this.selected + 1}/${tasks.length}`)} ${accent(currentTask.agent)} · ${status(currentTask)}${duration ? ` · ${dim(duration)}` : ''}`;
       const cancelActionText = cancelActiveHint ? `${cancelActiveHint} · ` : '';
-      const shortcutsText = dim(`${cancelActionText}ctrl+o expand · ctrl+t thinking · `);
+      const shortcutsText = dim(`${cancelActionText}ctrl+t thinking · `);
       const rightHeaderItems = `${shortcutsText}${closeBtn}`;
 
       const rightHeaderVis = this.visibleWidth(rightHeaderItems);
@@ -666,8 +701,7 @@ export class SubagentsHistoryPanel {
 
       // Prepare main view content
       const structuredBody = isValidThreadSnapshot(currentTask.thread_snapshot);
-      const bodyEntries = this.bodyEntriesFor(currentTask, rightWidth);
-      let wrappedEntries = this.wrapWithTaskIds(bodyEntries, rightWidth);
+      let wrappedEntries = this.bodyEntriesFor(currentTask, rightWidth);
       if (splitOverflowLines.length) {
         wrappedEntries = [...splitOverflowLines.map((text) => ({ text, taskId: currentTask.id })), ...wrappedEntries];
       }
@@ -724,7 +758,7 @@ export class SubagentsHistoryPanel {
       const scrollPos = wrappedEntries.length > bodyHeight
         ? `[${this.scroll + 1}-${Math.min(wrappedEntries.length, this.scroll + bodyHeight)}/${wrappedEntries.length}]`
         : '';
-      const shortcuts = dim('←/→ exec · ↑/↓ scroll · ctrl+o expand · ctrl+t thinking');
+      const shortcuts = dim('←/→ exec · ↑/↓ scroll · ctrl+t thinking');
       const scrollBadge = scrollPos ? dim(`${scrollPos} `) : '';
       const bottomItems = `${scrollBadge}${shortcuts}`;
       const bottomVis = this.visibleWidth(bottomItems);
@@ -794,8 +828,7 @@ export class SubagentsHistoryPanel {
 
       // Prepare main view content
       const structuredBody = isValidThreadSnapshot(currentTask.thread_snapshot);
-      const bodyEntries = this.bodyEntriesFor(currentTask, rightWidth);
-      let wrappedEntries = this.wrapWithTaskIds(bodyEntries, rightWidth);
+      let wrappedEntries = this.bodyEntriesFor(currentTask, rightWidth);
       if (stackedOverflowLines.length) {
         wrappedEntries = [...stackedOverflowLines.map((text) => ({ text, taskId: currentTask.id })), ...wrappedEntries];
       }
@@ -900,7 +933,9 @@ export class SubagentsHistoryPanel {
   }
 
   cancelSelectedActiveTask(): void {
-    const task = this.tasks()[this.selected];
+    const tasks = this.tasks();
+    const idx = this.reconcileSelection(tasks);
+    const task = idx >= 0 ? tasks[idx] : undefined;
     if (task && (task.status === 'queued' || task.status === 'running')) this.cancelSelectedTask?.(task.id);
   }
 
@@ -916,12 +951,8 @@ export class SubagentsHistoryPanel {
       return th?.fg?.('dim', text) ?? text;
     }
     if (this.isToolLikeLine(raw)) {
-      const border = (t: string) => themeFg(th, 'accent', t, CYAN);
-      const prefix = border(`${BOX_CHARS.vertical} `);
-      const maxTextWidth = Math.max(0, width - 2);
-      const clipped = this.truncateToWidth(raw, maxTextWidth);
-      const text = th?.fg?.('toolTitle', clipped) ?? clipped;
-      return `${prefix}${text}`;
+      const clipped = this.truncateToWidth(raw, width);
+      return th?.fg?.('toolTitle', clipped) ?? clipped;
     }
     if (raw.startsWith('done') || raw.startsWith('completed')) {
       const clipped = this.truncateToWidth(raw, width);
@@ -954,21 +985,75 @@ export class SubagentsHistoryPanel {
 
   private taskSignature(task: SubagentTask): string {
     const snapshot = task.thread_snapshot;
-    return [task.id, task.status, task.last_activity_at ?? '', task.ended_at ?? '', snapshot?.updated_at ?? '', snapshot?.items?.length ?? 0].join('|');
+    return [
+      task.id,
+      task.status,
+      task.attempt ?? 1,
+      task.last_activity_at ?? '',
+      task.ended_at ?? '',
+      task.last_activity ?? '',
+      task.error ?? '',
+      task.model ?? '',
+      task.effort ?? '',
+      task.usage ? contentRevision(task.usage) : '',
+      snapshot?.updated_at ?? '',
+      snapshot?.items?.length ?? 0,
+    ].join('|');
   }
 
   private resolveTaskForBody(task: SubagentTask): SubagentTask {
     if (task.thread_snapshot || !this.taskResolver) return task;
     const signature = this.taskSignature(task);
     const cached = this.hydratedTasks.get(task.id);
-    if (cached?.signature === signature) return cached.task;
+    if (cached?.signature === signature) {
+      // Touch LRU position without allocating
+      this.hydratedTasks.delete(task.id);
+      this.hydratedTasks.set(task.id, cached);
+      return cached.task;
+    }
     const hydrated = this.taskResolver(task.id) ?? task;
     this.hydratedTasks.set(task.id, { signature, task: hydrated });
+    if (this.hydratedTasks.size > 50) {
+      const oldest = this.hydratedTasks.keys().next().value;
+      if (oldest !== undefined) this.hydratedTasks.delete(oldest);
+    }
     return hydrated;
   }
 
   private bodyCacheKey(task: SubagentTask, width: number): string {
-    return [this.taskSignature(task), JSON.stringify(task.thread_snapshot), width, this.toolOutputExpanded ? 'expanded' : 'collapsed', this.hideThinkingBlock ? 'thinking-hidden' : 'thinking-visible'].join('|');
+    // Content-addressed over every *rendered* body input, not only count/timestamps. The snapshot
+    // revision covers snapshot-driven bodies; the terminal-error suffix and the legacy execution-flow
+    // body read task fields directly, so those fields join the key only when they are actually shown.
+    const snapshot = isValidThreadSnapshot(task.thread_snapshot) ? task.thread_snapshot : undefined;
+    const terminalErrorShown = !snapshot || task.status === 'failed' || task.status === 'cancelled' || task.status === 'interrupted';
+    const extraFields = snapshot
+      ? [task.error, task.error_metadata]
+      : [
+        task.error,
+        task.error_metadata,
+        task.result,
+        task.output_preview,
+        task.transcript,
+        task.prompt,
+        task.continuation_prompt,
+        task.last_activity,
+        task.live_activity,
+        task.attempt,
+        task.model,
+        task.effort,
+        task.usage,
+      ];
+    return [
+      this.taskSignature(task),
+      contentRevision(snapshot),
+      terminalErrorShown ? contentRevision(extraFields) : '',
+      width,
+      this.toolOutputExpanded ? 'expanded' : 'collapsed',
+      this.hideThinkingBlock ? 'thinking-hidden' : 'thinking-visible',
+      this.renderContext.showImages ? 'images' : 'no-images',
+      this.renderContext.imageWidthCells ?? '',
+      getSubagentToolRendererGeneration(),
+    ].join('|');
   }
 
   private resolveTaskIdFromSnapshotItem(item: any, tasks: SubagentTask[]): string | undefined {
@@ -1081,7 +1166,8 @@ export class SubagentsHistoryPanel {
     width: number,
   ): DetailEntry[] {
     const out: DetailEntry[] = [];
-    const isFramedBoxLine = (line: string): boolean => /[┌┐└┘│├┤┬┴┼─╭╰╮╯═║╔╗╚╝╠╣╦╩╬]/.test(line);
+    // Exclude single inline '─' from box-frame preservation so compact inline tool rows wrap cleanly.
+    const isFramedBoxLine = (line: string): boolean => /[┌┐└┘│├┤┬┴┼╭╰╮╯═║╔╗╚╝╠╣╦╩╬]/.test(line);
 
     for (const entry of entries) {
       if (isFramedBoxLine(entry.text) || this.visibleWidth(entry.text) <= width) {
@@ -1109,10 +1195,14 @@ export class SubagentsHistoryPanel {
   private bodyEntriesFor(task: SubagentTask, width: number): DetailEntry[] {
     const activeSnapshot = isValidThreadSnapshot(task.thread_snapshot) ? task.thread_snapshot : undefined;
     const allowCache = !snapshotHasActiveTools(activeSnapshot);
-    const cacheKey = this.bodyCacheKey(task, width);
+    const cacheKey = allowCache ? this.bodyCacheKey(task, width) : '';
     if (allowCache) {
       const cached = this.bodyCache.get(cacheKey);
-      if (cached) return cached;
+      if (cached) {
+        this.bodyCache.delete(cacheKey);
+        this.bodyCache.set(cacheKey, cached);
+        return cached;
+      }
     }
     let entries: DetailEntry[];
     if (activeSnapshot) {
@@ -1148,13 +1238,14 @@ export class SubagentsHistoryPanel {
       this.threadRenderCache.clear();
       entries = this.executionFlowEntriesFor(task);
     }
-    if (!allowCache) return entries;
-    this.bodyCache.set(cacheKey, entries);
+    const wrapped = this.wrapWithTaskIds(entries, width);
+    if (!allowCache) return wrapped;
+    this.bodyCache.set(cacheKey, wrapped);
     if (this.bodyCache.size > 50) {
       const oldest = this.bodyCache.keys().next().value;
       if (oldest !== undefined) this.bodyCache.delete(oldest);
     }
-    return entries;
+    return wrapped;
   }
 
   private bodyLinesFor(task: SubagentTask, width: number): string[] {

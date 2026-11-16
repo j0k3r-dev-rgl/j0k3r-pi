@@ -103,6 +103,7 @@ export async function showSubagentsPanel(input: {
   const cwd = ctx?.cwd ?? process.cwd();
   const sessionId = currentSessionId(ctx);
   let refresh: NodeJS.Timeout | undefined;
+  let activePanel: SubagentsHistoryPanel | undefined;
   setWidgetInputSuspended(true);
   try {
     await ctx.ui.custom(
@@ -112,17 +113,10 @@ export async function showSubagentsPanel(input: {
         const renderLogger = createSubagentsRenderLogger({ cwd, sessionId, config: config.render_debug });
         let nextRenderReason = 'initial';
         let renderCycle = 0;
-        const close = () => {
-          if (refresh) clearInterval(refresh);
-          renderLogger.log({ event: 'panel_disposed' });
-          setMouseTracking(tui, false);
-          done();
-        };
-        const baseMatchesKey = createSubagentsPanelKeyMatcher(_keybindings);
         const panel = new SubagentsHistoryPanel(
           () => manager.listSessionTasks(cwd, sessionId).slice(0, 100),
           theme,
-          close,
+          () => close(),
           (data: string, key: string) => {
             if (key !== 'detailCancel') return baseMatchesKey(data, key);
             const detailShortcut = config.detail_cancel_shortcut ?? 'x';
@@ -154,6 +148,18 @@ export async function showSubagentsPanel(input: {
             contextWindowForTask: (task: SubagentTask) => contextWindowForTask(ctx, task),
           },
         );
+        activePanel = panel;
+        const close = () => {
+          if (refresh) {
+            clearInterval(refresh);
+            refresh = undefined;
+          }
+          panel.invalidate();
+          renderLogger.log({ event: 'panel_disposed' });
+          setMouseTracking(tui, false);
+          done();
+        };
+        const baseMatchesKey = createSubagentsPanelKeyMatcher(_keybindings);
         renderLogger.log({ event: 'panel_created' });
         renderLogger.log({ event: 'render_requested', reason: nextRenderReason });
         setActivePanelCancelSelected(() => () => panel.cancelSelectedActiveTask());
@@ -167,6 +173,7 @@ export async function showSubagentsPanel(input: {
           renderLogger.log({ event: 'render_requested', reason: nextRenderReason });
           tui.requestRender?.();
         }, 1000);
+        refresh.unref?.();
         return {
           render: (width: number) => {
             const reason = nextRenderReason;
@@ -219,6 +226,12 @@ export async function showSubagentsPanel(input: {
       { overlay: true, overlayOptions: { anchor: 'top-left', width: '100%', maxHeight: '100%', margin: 0 } },
     );
   } finally {
+    if (refresh) {
+      clearInterval(refresh);
+      refresh = undefined;
+    }
+    activePanel?.invalidate();
+    activePanel = undefined;
     setActivePanelCancelSelected(undefined);
     setActivePanelRequestRender(undefined);
     setWidgetInputSuspended(false);
