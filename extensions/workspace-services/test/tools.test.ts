@@ -1,7 +1,7 @@
 import { mkdtempSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import workspaceServicesExtension, { isExtensionEnabled, registerWorkspaceServicesTools, WORKSPACE_SERVICE_TOOL_NAMES } from '../index.js';
 import { composeExecutor } from '../src/core/docker-compose.js';
@@ -208,8 +208,20 @@ describe('workspace services extension tools', () => {
   });
 
   it('serializes registered tool content through installed pi-ai convertMessages without details and maps native isError', async () => {
-    const hostAiPath = '/home/j0k3r/.local/share/mise/installs/node/24.19.0/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js';
-    const { convertMessages } = await import(hostAiPath);
+    const piAiApiDir = join(
+      dirname(process.execPath),
+      '..',
+      'lib',
+      'node_modules',
+      '@earendil-works',
+      'pi-coding-agent',
+      'node_modules',
+      '@earendil-works',
+      'pi-ai',
+      'dist',
+      'api',
+    );
+    const { convertMessages } = await import(join(piAiApiDir, 'openai-completions.js'));
     const cwd = await configuredWorkspace();
     const logDir = join(cwd, '.pi', 'workspace-services', 'logs');
     await mkdir(logDir, { recursive: true });
@@ -316,7 +328,7 @@ describe('workspace services extension tools', () => {
     expect(toolMsgs[2].content).not.toContain(sentinel);
 
     // Check installed Anthropic provider is_error mapping on tool_result blocks
-    const hostAnthropicPath = '/home/j0k3r/.local/share/mise/installs/node/24.19.0/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/api/anthropic-messages.js';
+    const hostAnthropicPath = join(piAiApiDir, 'anthropic-messages.js');
     const anthropicSource = await import('node:fs/promises').then((fs) => fs.readFile(hostAnthropicPath, 'utf8'));
     expect(anthropicSource).toContain('is_error: msg.isError');
   });

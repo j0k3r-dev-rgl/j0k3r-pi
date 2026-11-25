@@ -381,8 +381,8 @@ describe('Per-service container status & isolated logs (MINI-003)', () => {
 
     const outcome = await getServiceLogs(cwd, 'web', { lines: 50 });
     expect(outcome.ok).toBe(true);
-    expect(outcome.status).toBe('running');
-    expect(outcome.summary).toContain('Retrieved bounded logs for web');
+    expect(outcome.status).toBe('ok');
+    expect(outcome.summary).toContain('Retrieved 2 recent log line(s) for web');
     expect((outcome.data as any).lines).toBe(2);
     expect((outcome.data as any).text).toContain('GET / HTTP/1.1 200');
 
