@@ -263,19 +263,65 @@ function implementation(receipt, dir, plan) {
   if (JSON.stringify(applyHashes(dir, plan)) !== JSON.stringify(impl.apply)) fail('Implementation summary changed; capture candidate again');
   return impl;
 }
+function unwrapMarkdown(value) {
+  let current = value.trim();
+  for (;;) {
+    const next = current
+      .replace(/^\*\*([^*]+)\*\*$/, '$1')
+      .replace(/^__([^_]+)__$/, '$1')
+      .replace(/^`([^`]+)`$/, '$1')
+      .trim();
+    if (next === current) return current;
+    current = next;
+  }
+}
+function verifyResultPass(text) {
+  const explicit = [...prose(text).matchAll(/^(?:-\s+)?(?:\*\*|__)?Verification Result(?:\*\*|__)?:\s*(.+?)[ \t]*$/gm)]
+    .map((match) => unwrapMarkdown(match[1]));
+  const secLines = section(text, 'Verification Result')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (explicit.length > 0) {
+    if (explicit.length !== 1 || explicit[0] !== 'PASS') return false;
+    const extra = secLines.filter((line) => !/^(?:-\s+)?(?:\*\*|__)?Verification Result(?:\*\*|__)?:/i.test(line));
+    return extra.every((line) => unwrapMarkdown(line.replace(/^-\s+/, '')) === 'PASS');
+  }
+  return secLines.length === 1 && unwrapMarkdown(secLines[0].replace(/^-\s+/, '')) === 'PASS';
+}
+function parseTableCells(line) {
+  const trimmed = line.trim();
+  const parts = trimmed.split('|');
+  const inner = trimmed.endsWith('|') ? parts.slice(1, -1) : parts.slice(1);
+  return inner.map((cell) => cell.trim());
+}
+const isSeparatorRow = (cells) => cells.length > 0 && cells.every((cell) => /^:?-{2,}:?$/.test(cell));
+const nonPassToken = /^(?:FAIL|FAILED|BLOCKED|SKIP|SKIPPED|PENDING|PARTIAL)$/i;
+const mixedPassFail = /^PASS\b.*\b(?:FAIL|FAILED|BLOCKED|SKIP|SKIPPED|PENDING|PARTIAL)\b/i;
+
 function verificationHash(dir, plan) {
   const raw = bytes(join(dir, 'verify.md'));
   const text = raw.toString('utf8');
   ready(text, 'verify.md');
-  const results = [...prose(text).matchAll(/^(?:- )?Verification Result: (\S+)[ \t]*$/gm)];
-  if (results.length !== 1 || results[0][1] !== 'PASS') fail('verify.md needs one unambiguous Verification Result: PASS');
+  if (!verifyResultPass(text)) fail('verify.md needs one unambiguous Verification Result: PASS');
   const matrix = section(text, 'Evidence Matrix');
+  const tableRows = matrix.split(/\r?\n/)
+    .filter((line) => line.trimStart().startsWith('|'))
+    .map(parseTableCells);
+  const sepIndex = tableRows.findIndex(isSeparatorRow);
+  const header = sepIndex > 0 ? tableRows[sepIndex - 1].map((cell) => unwrapMarkdown(cell).toLowerCase()) : [];
+  const resultCol = header.findIndex((cell) => /^(?:result|status|verdict|outcome|pass\b.*)$/.test(cell));
+  const dataRows = tableRows.filter((cells, index) => !isSeparatorRow(cells) && !(sepIndex > 0 && index === sepIndex - 1));
   for (const id of plan.ids) {
-    const rows = matrix.split(/\r?\n/).filter((line) => line.startsWith('|') && line.split('|').some((cell) => cell.trim() === id));
-    if (rows.length !== 1) fail(`verify.md needs one passing evidence row for ${id}`);
-    const row = rows[0];
-    const cells = row?.split('|').slice(1, -1).map((cell) => cell.trim()) ?? [];
-    if (!row || !cells.includes('PASS') || !cells.some((cell) => cell && cell !== id && cell !== 'PASS') || /\b(?:FAIL|BLOCKED|SKIP|PENDING)\b/i.test(row)) fail(`verify.md missing passing evidence for ${id}`);
+    const matches = dataRows.filter((cells) => cells.some((cell) => unwrapMarkdown(cell) === id));
+    if (matches.length !== 1) fail(`verify.md needs one passing evidence row for ${id}`);
+    const normCells = matches[0].map(unwrapMarkdown);
+    const hasPass = resultCol >= 0 && resultCol < normCells.length
+      ? normCells[resultCol] === 'PASS'
+      : normCells.includes('PASS');
+    const hasEvidence = normCells.some((cell, index) => cell && cell !== id && cell !== 'PASS' && index !== resultCol);
+    const hasNonPassCell = normCells.some((cell) => nonPassToken.test(cell) || mixedPassFail.test(cell));
+    if (!hasPass || !hasEvidence || hasNonPassCell) fail(`verify.md missing passing evidence for ${id}`);
   }
   return sha(raw);
 }
@@ -322,6 +368,12 @@ export function checkWorkflow(directory, phase) {
     const receipt = receiptAt(dir);
     authorization(receipt, plan);
     if (phase === 'verify' || phase === 'deliver') implementation(receipt, dir, plan);
+    if (phase === 'verify') {
+      const verifyRaw = bytes(join(dir, 'verify.md'), true);
+      if (verifyRaw && /^- Status: READY\s*$/m.test(section(verifyRaw.toString('utf8'), 'Workflow Status'))) {
+        verificationHash(dir, plan);
+      }
+    }
     if (phase === 'deliver') {
       const verified = receipt.verification;
       if (!verified?.executor || receipt.implementation.executors.includes(verified.executor) || verified.candidate_sha256 !== receipt.implementation.sha256) fail('Missing independent verification receipt');

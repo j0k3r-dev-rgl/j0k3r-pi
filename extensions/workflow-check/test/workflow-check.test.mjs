@@ -290,3 +290,57 @@ test('preserves cancellation instead of reporting a validation failure', async (
   controller.abort();
   await assert.rejects(() => f.run({ change_dir: f.dir, phase: 'plan' }, controller.signal), { name: 'AbortError' });
 });
+
+test('accepts standard Markdown formatting and prose test counts in verify.md while still rejecting non-PASS results', (t) => {
+  const f = fixture(t);
+  const plan = checkWorkflow(f.dir, 'plan');
+  recordWorkflow(f.dir, 'authorize', { author: 'j0k3r', reference: 'approval', plan_sha256: plan.plan_sha256 });
+  const file = join(f.root, 'src/code.js');
+  writeFileSync(file, 'export default 1;');
+  writeFileSync(join(f.dir, 'apply.md'), '## Workflow Status\n- Status: READY\n- Blockers: None\n\n## Implementation Summary\nMINI-001\n');
+  recordWorkflow(f.dir, 'candidate', { executors: ['impl-1'], files: [file] });
+
+  // Before verify.md exists, phase verify passes continuity check.
+  checkWorkflow(f.dir, 'verify');
+
+  // Markdown backticks/bold, section-only PASS, and prose mentioning "0 fail, 0 skip" / "fail-closed" must pass.
+  const passingVerify = [
+    '## Workflow Status',
+    '- Status: READY',
+    '- Blockers: None',
+    '',
+    '## Verification Result',
+    '**PASS**',
+    '',
+    '## Evidence Matrix',
+    '| MINI | Acceptance Checks | Independent Verification Evidence | Result |',
+    '|---|---|---|---|',
+    '| `MINI-001` | Verifies fail-closed error path | `npm test` (45 pass, 0 fail, 0 skip; 1 opt-in live skip; pending: none) | `PASS` |',
+    '',
+  ].join('\n');
+  writeFileSync(join(f.dir, 'verify.md'), passingVerify);
+
+  // Ready verify.md is validated during checkWorkflow(verify) and recordWorkflow(verify).
+  checkWorkflow(f.dir, 'verify');
+  recordWorkflow(f.dir, 'verify', { executor: 'verify-1' });
+  checkWorkflow(f.dir, 'deliver');
+
+  // Invalid Result cells or contradictory Verification Result must still be rejected by both checkWorkflow(verify) and recordWorkflow(verify).
+  for (const [label, mutated, pattern] of [
+    ['FAIL result cell', passingVerify.replace('| `PASS` |', '| FAIL |'), /missing passing evidence/],
+    ['BLOCKED result cell', passingVerify.replace('| `PASS` |', '| BLOCKED |'), /missing passing evidence/],
+    ['SKIP result cell', passingVerify.replace('| `PASS` |', '| SKIP |'), /missing passing evidence/],
+    ['mixed PASS/FAIL result cell', passingVerify.replace('| `PASS` |', '| PASS (1 FAIL) |'), /missing passing evidence/],
+    ['contradictory Verification Result', passingVerify.replace('**PASS**', 'PASS\nFAIL'), /Verification Result: PASS/],
+    ['explicit Verification Result: FAIL', passingVerify.replace('**PASS**', 'Verification Result: FAIL'), /Verification Result: PASS/],
+    ['missing evidence cell', passingVerify.replace('| Verifies fail-closed error path | `npm test` (45 pass, 0 fail, 0 skip; 1 opt-in live skip; pending: none) |', '| | |'), /missing passing evidence/],
+  ]) {
+    writeFileSync(join(f.dir, 'verify.md'), mutated);
+    assert.throws(() => checkWorkflow(f.dir, 'verify'), pattern, `checkWorkflow(verify) should reject ${label}`);
+    assert.throws(() => recordWorkflow(f.dir, 'verify', { executor: 'verify-2' }), pattern, `recordWorkflow(verify) should reject ${label}`);
+  }
+
+  // A prior BLOCKED verify.md must NOT block pre-verify continuity checks when launching a fresh verifier.
+  writeFileSync(join(f.dir, 'verify.md'), '## Workflow Status\n- Status: BLOCKED\n- Blockers: Prior failure\n\n## Verification Result\nFAIL\n');
+  checkWorkflow(f.dir, 'verify');
+});
