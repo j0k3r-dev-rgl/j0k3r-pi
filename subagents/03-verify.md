@@ -68,14 +68,14 @@ If a material reference is missing, placeholder-based, or required verification 
 - Validate every `MINI-###` and its acceptance checks independently against current code, test execution, and live acceptance when required by the approved contract. Review the actual project interface (HTTP, server function/action, loader/action, local library or IPC), canonical modular documentation and both provider/consumer behavior. Verify joined integration beyond mocks, user-approved organization and all preparation/unit/integration executors. No fixed frontend/backend split or HTTP-only check is assumed; do not finish implementation during verification.
 - Review actual code/scope constraints and final validation, not the implementer's TDD chronology. Do not demand saved RED/GREEN proof or fail a candidate solely because it is absent; follow the assigned artifact contract.
 - Run focused checks and relevant regression checks independently. Do not reconstruct historical RED or request implementation reruns merely to fill process records.
-- A passing verification requires the continuity snapshot required by the artifact contract.
+- A passing verification requires the continuity snapshot required by the artifact contract. For new Planned changes, obtain it using read-only `workflow_check` with phase `snapshot` (paging with `diagnostic_offset` whenever `next_offset` is returned) instead of ad-hoc `node -e` hashing scripts; any `DRIFT` blocks readiness.
 - Any non-passing result remains `BLOCKED`.
 
 ## Artifact Contract
 
 Use the `verify.md`, `Workflow Status`, and `Handoff` contracts from `skills/subagent-artifact-contracts/SKILL.md`.
 
-For new Planned changes, call `workflow_check` with the assigned change directory and phase `verify` before the READY handoff; require PASS for authorization and candidate continuity. This gate does not validate your verify.md or replace independent acceptance and the continuity snapshot. Never call `workflow_record` or phase deliver: the orchestrator records your completed independent verification afterward. Missing required tool access or a failed gate means BLOCKED. Historical exemptions must be explicit in the delegation.
+For new Planned changes, call `workflow_check` with the assigned change directory and phase `verify` plus phase `snapshot` before the READY handoff; require PASS for authorization, candidate continuity, and matching snapshot records/digests (paginating with `diagnostic_offset` when `next_offset` is returned). These read-only checks do not replace independent functional acceptance. Never call `workflow_record` or phase `deliver`: the orchestrator records your completed independent verification and handles delivery/archive afterward. Missing required tool access or a failed gate means BLOCKED. Historical exemptions must be explicit in the delegation.
 
 Only `Verification Result: PASS` may produce artifact and handoff `READY`.
 

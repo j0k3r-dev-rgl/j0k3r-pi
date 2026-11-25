@@ -202,7 +202,20 @@ export function createWorkflowRenderResult(toolName?: string): NonNullable<ToolD
             return wrapMarginedLine(`${label} ${sep} ${fg(theme, 'muted', 'Checking workflow…')}`, safeWidth);
           }
 
-          const details = result?.details as { status?: string; phase?: string; action?: string; contract_count?: number; next_offset?: number } | undefined;
+          const details = result?.details as {
+            status?: string;
+            phase?: string;
+            action?: string;
+            contract_count?: number;
+            next_offset?: number;
+            continuity_status?: string;
+            record_count?: number;
+            delta_count?: number;
+            violation_count?: number;
+            baseline_id?: string;
+            file_count?: number;
+            destination?: string;
+          } | undefined;
           const blocks = Array.isArray(result?.content) ? result.content : [];
           const text = blocks
             .filter((block: any) => block?.type === 'text' && typeof block.text === 'string')
@@ -213,7 +226,19 @@ export function createWorkflowRenderResult(toolName?: string): NonNullable<ToolD
           const op = details?.phase ?? details?.action ?? args?.phase ?? args?.action ?? 'workflow';
           const contracts = details?.contract_count === undefined ? '' : ` · ${details.contract_count} contracts`;
           const more = details?.next_offset === undefined ? '' : ' · more diagnostic available';
-          const summaryText = `${status} · ${op}${contracts}${more}`;
+          let detailSuffix = contracts;
+          if (op === 'snapshot' && details?.continuity_status) {
+            const countPart = details.record_count === undefined ? '' : ` · ${details.record_count} records`;
+            detailSuffix = ` · ${details.continuity_status}${countPart}`;
+          } else if (op === 'surface' && details?.delta_count !== undefined) {
+            detailSuffix = ` · ${details.delta_count} deltas · ${details.violation_count ?? 0} violations`;
+          } else if (op === 'baseline' && details?.baseline_id) {
+            const filePart = details.file_count === undefined ? '' : ` · ${details.file_count} files`;
+            detailSuffix = ` · ${details.baseline_id}${filePart}`;
+          } else if (op === 'archive' && typeof details?.destination === 'string' && details.destination.trim()) {
+            detailSuffix = ` · ${inlineText(abbreviateHome(details.destination.trim()))}`;
+          }
+          const summaryText = `${status} · ${op}${detailSuffix}${more}`;
           const color = status === 'PASS' || status === 'RECORDED' ? 'success' : 'error';
           const headerLines = wrapMarginedLine(`${label} ${sep} ${fg(theme, color, summaryText)}`, safeWidth);
 

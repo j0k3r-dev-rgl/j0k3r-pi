@@ -171,6 +171,125 @@ test('Pi-loaded tools execute plan, authorization, candidate, independent verifi
   await run('workflow_check', { phase: 'deliver' });
 });
 
+test('MINI-004: compact TUI rendering shows informative collapsed summaries for snapshot, surface, baseline, and archive across all widths', { skip: !host }, async () => {
+  const { loadExtensions } = await import(pathToFileURL(`${host}/dist/core/extensions/loader.js`).href);
+  const { visibleWidth } = await import(pathToFileURL(`${host}/node_modules/@earendil-works/pi-tui/dist/index.js`).href);
+  const loaded = await loadExtensions([new URL('../index.ts', import.meta.url).pathname], process.cwd());
+  assert.deepEqual(loaded.errors, []);
+  const checkDef = loaded.extensions[0].tools.get('workflow_check').definition;
+  const recordDef = loaded.extensions[0].tools.get('workflow_record').definition;
+  const theme = { fg: (_color, text) => text, bold: (text) => text };
+  const widths = [0, 1, 2, 10, 32, 80];
+
+  const cases = [
+    {
+      def: checkDef,
+      args: { phase: 'snapshot', change_dir: '/tmp/change' },
+      result: { content: [{ type: 'text', text: 'Snapshot details body' }], details: { status: 'PASS', phase: 'snapshot', continuity_status: 'MATCH', record_count: 85 } },
+      expectCollapsed: /PASS · snapshot · MATCH · 85 records/,
+    },
+    {
+      def: checkDef,
+      args: { phase: 'snapshot', change_dir: '/tmp/change' },
+      result: { content: [{ type: 'text', text: 'Drift details body' }], details: { status: 'BLOCKED', phase: 'snapshot', continuity_status: 'DRIFT', record_count: 85 } },
+      expectCollapsed: /BLOCKED · snapshot · DRIFT · 85 records/,
+    },
+    {
+      def: checkDef,
+      args: { phase: 'surface', change_dir: '/tmp/change' },
+      result: { content: [{ type: 'text', text: 'Surface details body' }], details: { status: 'PASS', phase: 'surface', delta_count: 7, violation_count: 0 } },
+      expectCollapsed: /PASS · surface · 7 deltas · 0 violations/,
+    },
+    {
+      def: recordDef,
+      args: { action: 'baseline', change_dir: '/tmp/change' },
+      result: { content: [{ type: 'text', text: 'Baseline details body' }], details: { status: 'PASS', action: 'baseline', baseline_id: 'baseline-1', file_count: 42 } },
+      expectCollapsed: /PASS · baseline · baseline-1 · 42 files/,
+    },
+    {
+      def: recordDef,
+      args: { action: 'archive', change_dir: '/tmp/openspec/changes/x' },
+      result: { content: [{ type: 'text', text: 'Archive details body' }], details: { status: 'PASS', action: 'archive', destination: '/tmp/openspec/archive/2026-11-25/x' } },
+      expectCollapsed: /PASS · archive · \/tmp\/openspec\/archive\/2026-11-25\/x/,
+    },
+  ];
+
+  for (const c of cases) {
+    const collapsed80 = c.def.renderResult(c.result, { expanded: false, isPartial: false }, theme, { args: c.args, state: {} }).render(80);
+    const joined = collapsed80.map((line) => line.replace(/\x1b\[[0-9;]*m/g, '').slice(1)).join(' ');
+    assert.match(joined, c.expectCollapsed);
+    assert.doesNotMatch(collapsed80.join('\n'), /…|app\.tools\.expand|to expand|ctrl\+o|[╭╮╰╯│]/);
+    for (const width of widths) {
+      for (const expanded of [false, true]) {
+        const lines = c.def.renderResult(c.result, { expanded, isPartial: false }, theme, { args: c.args, state: {} }).render(width);
+        if (width <= 0) assert.equal(lines.length, 0);
+        else if (width === 1) assert.deepEqual(lines, [' ']);
+        else assert.ok(lines.length >= 1);
+        for (const line of lines) assert.ok(visibleWidth(line) <= width, `${c.args.phase ?? c.args.action} width ${width} expanded=${expanded}`);
+      }
+    }
+  }
+});
+
+test('MINI-004: real Pi host end-to-end lifecycle executes plan -> authorize -> baseline -> apply -> surface -> candidate -> verify -> snapshot -> verify receipt -> deliver -> archive', { skip: !host }, async (t) => {
+  const { loadExtensions } = await import(pathToFileURL(`${host}/dist/core/extensions/loader.js`).href);
+  const root = mkdtempSync(join(tmpdir(), 'workflow-host-full-e2e-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const dir = join(root, 'openspec', 'changes', 'full-e2e-demo');
+  mkdirSync(dir, { recursive: true });
+  mkdirSync(join(root, 'src'), { recursive: true });
+  const contract = readFileSync(new URL('../../../skills/subagent-artifact-contracts/SKILL.md', import.meta.url), 'utf8');
+  const template = contract.split('### `plan.md`')[1].split('### `apply.md`')[0].match(/```markdown\n([\s\S]*?)\n```/)[1];
+  writeFileSync(join(dir, 'plan.md'), template.replaceAll('/absolute/workspace/root', root));
+  const preExisting = join(root, 'src/existing.js');
+  const toDelete = join(root, 'src/obsolete.js');
+  writeFileSync(preExisting, 'export const keep = true;\n');
+  writeFileSync(toDelete, 'export const remove = true;\n');
+
+  const loaded = await loadExtensions([new URL('../index.ts', import.meta.url).pathname], root);
+  assert.deepEqual(loaded.errors, []);
+  assert.deepEqual([...loaded.extensions[0].tools.keys()], ['workflow_check', 'workflow_record']);
+  const run = async (name, params, targetDir = dir) => {
+    const result = await loaded.extensions[0].tools.get(name).definition.execute('e2e', { change_dir: targetDir, ...params }, undefined, undefined, { cwd: root });
+    assert.equal(result.isError, false, `${name} ${JSON.stringify(params)} failed: ${JSON.stringify(result)}`);
+    return result;
+  };
+
+  const plan = await run('workflow_check', { phase: 'plan' });
+  await run('workflow_record', { action: 'authorize', author: 'fixture-user', reference: 'e2e:apply-ok', plan_sha256: plan.details.plan_sha256 });
+  const base = await run('workflow_record', { action: 'baseline', label: 'e2e-pre-apply' });
+  assert.equal(base.details.baseline_id, 'baseline-1');
+  assert.equal(base.details.file_count, 2);
+  await run('workflow_check', { phase: 'apply' });
+
+  // Apply edits: create + modify + delete
+  const created = join(root, 'src/code.js');
+  writeFileSync(created, 'export const result = 1;\n');
+  writeFileSync(preExisting, 'export const keep = "updated";\n');
+  rmSync(toDelete);
+  const ready = '## Workflow Status\n- Status: READY\n- Blockers: None\n';
+  writeFileSync(join(dir, 'apply.md'), ready + '\n## Implementation Summary\nMINI-001\n');
+
+  const surface = await run('workflow_check', { phase: 'surface', baseline_id: 'e2e-pre-apply' });
+  assert.equal(surface.details.surface_status, 'CLEAN');
+  assert.equal(surface.details.candidate_files.length, 3);
+  await run('workflow_record', { action: 'candidate', executors: ['e2e-implementer'], files: surface.details.candidate_files });
+  await run('workflow_check', { phase: 'verify' });
+
+  const snap = await run('workflow_check', { phase: 'snapshot' });
+  assert.equal(snap.details.continuity_status, 'MATCH');
+  assert.equal(snap.details.record_count, 3);
+
+  writeFileSync(join(dir, 'verify.md'), ready + '\n## Verification Result\nVerification Result: PASS\n## Evidence Matrix\n| MINI-001 | e2e check | PASS |\n');
+  await run('workflow_record', { action: 'verify', executor: 'e2e-reviewer' });
+  await run('workflow_check', { phase: 'deliver' });
+
+  const archived = await run('workflow_record', { action: 'archive', author: 'fixture-user', reference: 'e2e:archive-ok', date: '2026-11-25' });
+  const destDir = join(root, 'openspec', 'archive', '2026-11-25', 'full-e2e-demo');
+  assert.equal(archived.details.destination, destDir);
+  await run('workflow_check', { phase: 'deliver' }, destDir);
+});
+
 test('workflow workers receive only the read-only tool and a phase-specific gate', () => {
   for (const [name, phase] of [['01-planning', 'plan'], ['02-apply', 'apply'], ['03-verify', 'verify']]) {
     const definition = readFileSync(new URL(`../../../subagents/${name}.md`, import.meta.url), 'utf8');
