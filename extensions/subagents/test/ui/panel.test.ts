@@ -3094,11 +3094,21 @@ describe('subagents panel and extension ui', () => {
       expect(stripAnsi(panel.render(120).join('\n'))).toContain('hydrated:step BBB');
       expect(reads).toBe(2);
 
-      // Overlay timer cleanup on close and abnormal rejection.
+      // Overlay timer cleanup on close and abnormal rejection when active tasks exist.
       const { showSubagentsPanel } = await import('../../src/ui/panel-overlay.js');
       const setIntervalSpy = vi.spyOn(global, 'setInterval');
       const clearIntervalSpy = vi.spyOn(global, 'clearInterval');
       try {
+        const activeManager = new SubagentManager(async () => ({ result: 'ok' }));
+        (activeManager as any).tasks.set('active-abort', {
+          id: 'active-abort',
+          agent: 'analyst',
+          mode: 'background',
+          status: 'running',
+          task: 'running task',
+          created_at: '2026-01-01T00:00:01.000Z',
+        });
+        (activeManager as any).taskCwds.set('active-abort', tmp);
         await expect(showSubagentsPanel({
           ctx: {
             cwd: tmp,
@@ -3110,7 +3120,7 @@ describe('subagents panel and extension ui', () => {
             },
           },
           pi: {},
-          manager: new SubagentManager(async () => ({ result: 'ok' })),
+          manager: activeManager,
           setWidgetInputSuspended: () => {},
           setActivePanelCancelSelected: () => {},
           setActivePanelRequestRender: () => {},
@@ -3151,6 +3161,412 @@ describe('subagents panel and extension ui', () => {
       expect(stripAnsi(panel.render(120).join('\n'))).toContain('second step 0');
       expect(hydration.reads).toBe(0);
       resetPiComponentCacheForTests();
+    });
+  });
+
+  describe('lazy windowed metadata, viewport-only thread rendering, and event-driven refresh (MINI-003)', () => {
+    it('loads only an initial lightweight metadata window with 220+ tasks, expands transparently on navigation/scroll, and never hydrates non-selected tasks', () => {
+      const base = Date.parse('2026-01-01T00:00:00.000Z');
+      const activeTasks: SubagentTask[] = [
+        {
+          id: 'subtask_live_1',
+          agent: 'analyst',
+          mode: 'background',
+          status: 'running',
+          task: 'live task 1',
+          created_at: new Date(base + 10_000_000).toISOString(),
+          last_activity_at: new Date(base + 10_000_000).toISOString(),
+          attempt: 1,
+        },
+      ];
+      const persistedTasks: SubagentTask[] = Array.from({ length: 220 }, (_, i) => ({
+        id: `subtask_hist_${String(219 - i).padStart(3, '0')}`,
+        agent: 'analyst',
+        mode: 'background' as const,
+        status: 'completed' as const,
+        task: `persisted task ${219 - i}`,
+        created_at: new Date(base + (219 - i) * 1000).toISOString(),
+        last_activity_at: new Date(base + (219 - i) * 1000).toISOString(),
+        attempt: 1,
+      }));
+      const allTasks = [...activeTasks, ...persistedTasks];
+
+      const requestedLimits: number[] = [];
+      const hydratedIds: string[] = [];
+      const panel = new SubagentsHistoryPanel(
+        () => allTasks,
+        { fg: (_n: string, t: string) => t, bold: (t: string) => t },
+        () => undefined,
+        (data, key) => createSubagentsPanelKeyMatcher()(data, key),
+        (t) => stripAnsi(t).length,
+        (t, w) => (t.length > w ? t.slice(0, w) : t),
+        { cwd: tmp, tui: { requestRender() {} } },
+        24,
+        (id) => {
+          hydratedIds.push(id);
+          const found = allTasks.find((t) => t.id === id);
+          return found ? { ...found, result: `hydrated payload for ${found.task}` } : undefined;
+        },
+        undefined,
+        undefined,
+        'x',
+        {
+          taskWindowLoader: (limit: number) => {
+            requestedLimits.push(limit);
+            const persistedSlice = persistedTasks.slice(0, limit);
+            return {
+              tasks: [...activeTasks, ...persistedSlice],
+              hasMore: limit < persistedTasks.length,
+            };
+          },
+          initialTaskWindow: 30,
+          taskWindowStep: 30,
+        } as any,
+      );
+
+      // Initial open requests only the initial window (30) and hydrates ONLY the selected task (subtask_live_1)
+      const firstFrame = stripAnsi(panel.render(120).join('\n'));
+      expect(requestedLimits[0]).toBe(30);
+      expect(hydratedIds).toEqual(['subtask_live_1']);
+      expect(firstFrame).toContain('hydrated payload for live task 1');
+
+      // Warm frame does not re-hydrate or over-expand
+      panel.render(120);
+      expect(hydratedIds).toEqual(['subtask_live_1']);
+
+      // Navigate right 28 times (nearing end of 31-item window) -> window expands transparently to 60
+      for (let i = 0; i < 28; i += 1) {
+        panel.handleInput('\u001b[C');
+      }
+      panel.render(120);
+      expect(Math.max(...requestedLimits)).toBeGreaterThanOrEqual(60);
+      // Only tasks actually rendered as selected were hydrated; non-selected tasks were NEVER hydrated
+      expect(hydratedIds.length).toBe(2);
+      expect(hydratedIds[1]).toBe('subtask_hist_192');
+
+      // Sidebar wheel scroll down near end of loaded window also expands window transparently
+      for (let i = 0; i < 35; i += 1) {
+        panel.handleMouse({ type: 'wheel', col: 5, row: 5, wheelDelta: 1 });
+      }
+      panel.render(120);
+      expect(Math.max(...requestedLimits)).toBeGreaterThanOrEqual(90);
+      // Still no hydration of scrolled-by non-selected tasks
+      expect(hydratedIds.length).toBe(2);
+    });
+
+    it('renders and caches only visible viewport thread items for a 200-item snapshot on initial open and incremental scroll', async () => {
+      resetPiComponentCacheForTests();
+      const { setPiComponentProviderForSubagentRendering } = await import('../../src/thread-view.js');
+      const counts = { assistantConstructed: 0, assistantRendered: 0, toolConstructed: 0, toolRendered: 0 };
+      setPiComponentProviderForSubagentRendering({
+        getMarkdownTheme: () => ({}),
+        AssistantMessageComponent: class {
+          private text: string;
+          constructor(message: any) {
+            counts.assistantConstructed += 1;
+            this.text = message?.content?.map((p: any) => p.text ?? '').join('') ?? '';
+          }
+          invalidate() {}
+          render() {
+            counts.assistantRendered += 1;
+            return [`assistant:${this.text}`];
+          }
+        },
+        UserMessageComponent: class {
+          constructor(private text: string) {}
+          invalidate() {}
+          render() { return [`user:${this.text}`]; }
+        },
+        ToolExecutionComponent: class {
+          private expanded = false;
+          private resultText = '';
+          constructor(private name: string, _id: string, private args: any) {
+            counts.toolConstructed += 1;
+          }
+          markExecutionStarted() {}
+          setArgsComplete() {}
+          updateResult(res: any) { this.resultText = res?.content?.[0]?.text ?? ''; }
+          setExpanded(v: boolean) { this.expanded = v; }
+          invalidate() {}
+          render() {
+            counts.toolRendered += 1;
+            return this.expanded
+              ? [`tool:${this.name}:${this.args?.path}`, `  body:${this.resultText}`]
+              : [`tool:${this.name}:${this.args?.path}`];
+          }
+        },
+      });
+
+      try {
+        const items: any[] = [{ type: 'user', id: 'u-0', label: 'delegated_task', text: 'big snapshot task' }];
+        for (let i = 0; i < 99; i += 1) {
+          items.push({
+            type: 'assistant',
+            id: `a-${i}`,
+            message: { role: 'assistant', content: [{ type: 'text', text: `step-${i}` }] },
+          });
+          items.push({
+            type: 'tool',
+            id: `t-${i}`,
+            tool_call_id: `tc-${i}`,
+            name: 'read',
+            status: 'completed',
+            arguments: { path: `src/f-${i}.ts` },
+            result: { content: [{ type: 'text', text: `file-body-${i}` }], isError: false },
+          });
+        }
+        const bigTask: SubagentTask = {
+          id: 'subtask_big_thread',
+          agent: 'analyst',
+          mode: 'background',
+          status: 'completed',
+          task: 'big thread',
+          created_at: '2026-01-01T00:00:01.000Z',
+          last_activity_at: '2026-01-01T00:00:01.000Z',
+          attempt: 1,
+          thread_snapshot: { version: 1, source: 'events', created_at: '2026-01-01T00:00:01.000Z', updated_at: '2026-01-01T00:00:01.000Z', items },
+        };
+        const markedReadDef = {
+          name: 'read',
+          compactToolRenderingVersion: 1,
+          compactLeftMargin: 1,
+          renderShell: 'self',
+          renderCall: () => ({ invalidate() {}, render: () => [' read call'] }),
+          renderResult: () => ({ invalidate() {}, render: () => [' read result'] }),
+        };
+
+        const panel = new SubagentsHistoryPanel(
+          () => [bigTask],
+          { fg: (_n: string, t: string) => t, bold: (t: string) => t },
+          () => undefined,
+          (data, key) => createSubagentsPanelKeyMatcher()(data, key),
+          (t) => stripAnsi(t).length,
+          (t, w) => (t.length > w ? t.slice(0, w) : t),
+          { cwd: tmp, tui: { requestRender() {} }, getToolDefinition: (name) => (name === 'read' ? markedReadDef : undefined) },
+          30,
+          undefined,
+          bigTask.id,
+        );
+
+        // Initial open (followTail = true): only bottom viewport items constructed, NOT all 198!
+        const initialLines = panel.render(120);
+        const initialText = stripAnsi(initialLines.join('\n'));
+        expect(initialText).toContain('step-98');
+        expect(initialText).toContain('src/f-98.ts');
+        const initialConstructed = counts.assistantConstructed + counts.toolConstructed;
+        expect(initialConstructed).toBeGreaterThan(0);
+        expect(initialConstructed).toBeLessThan(65);
+
+        // Warm unchanged frame: zero constructions, zero renders
+        const beforeWarm = { ...counts };
+        panel.render(120);
+        expect(counts).toEqual(beforeWarm);
+
+        // Scroll up one page: constructs only newly exposed items above viewport
+        panel.handleInput('\u001b[5~'); // PageUp (12 lines)
+        const afterPageUpText = stripAnsi(panel.render(120).join('\n'));
+        expect(afterPageUpText).not.toContain('src/f-98.ts');
+        const afterPageUpConstructed = counts.assistantConstructed + counts.toolConstructed;
+        expect(afterPageUpConstructed).toBeGreaterThan(initialConstructed);
+        expect(afterPageUpConstructed).toBeLessThan(90);
+
+        // Jump to Home: renders top items without constructing middle items
+        panel.handleInput('\u001b[H'); // Home
+        const topText = stripAnsi(panel.render(120).join('\n'));
+        expect(topText).toContain('big snapshot task');
+        expect(topText).toContain('step-0');
+        const afterHomeConstructed = counts.assistantConstructed + counts.toolConstructed;
+        expect(afterHomeConstructed).toBeLessThan(130);
+
+        // Jump back to End: reuses cached bottom items with zero new constructions
+        const beforeEnd = { ...counts };
+        panel.handleInput('\u001b[F'); // End
+        const endLines = panel.render(120);
+        expect(stripAnsi(endLines.join('\n'))).toContain('src/f-98.ts');
+        expect(counts.assistantConstructed).toBe(beforeEnd.assistantConstructed);
+        expect(counts.toolConstructed).toBe(beforeEnd.toolConstructed);
+
+        // Content-fresh in-place mutation of visible item (same length, same timestamp)
+        items[items.length - 2].message.content[0].text = 'edit-98';
+        expect(stripAnsi(panel.render(120).join('\n'))).toContain('edit-98');
+
+        // Click target on visible tool row expands that exact tool
+        const toolRow = panel.render(120).findIndex((line) => stripAnsi(line).includes('src/f-96.ts'));
+        expect(toolRow).toBeGreaterThan(0);
+        panel.handleMouse({ type: 'click', row: toolRow, col: 45 });
+        expect(stripAnsi(panel.render(120).join('\n'))).toContain('file-body-96');
+      } finally {
+        resetPiComponentCacheForTests();
+      }
+    });
+
+    it('uses event-driven refresh in panel-overlay with zero idle polling ticks and conditional active-task ticking with clean disposal', async () => {
+      vi.useFakeTimers();
+      try {
+        const { showSubagentsPanel } = await import('../../src/ui/panel-overlay.js');
+        const listeners = new Set<() => void>();
+        let currentTasks: SubagentTask[] = [
+          {
+            id: 'done-1',
+            agent: 'analyst',
+            mode: 'background',
+            status: 'completed',
+            task: 'already finished',
+            created_at: '2026-01-01T00:00:01.000Z',
+          },
+        ];
+        const mockManager: any = {
+          listActiveSessionTasks: () => currentTasks.filter((t) => t.status === 'queued' || t.status === 'running' || t.status === 'stopping'),
+          listSessionTasks: () => currentTasks,
+          listSessionTasksWindow: (_cwd: string, _sid: string, opts?: { limit?: number }) => ({
+            tasks: currentTasks.slice(0, opts?.limit ?? 30),
+            hasMore: currentTasks.length > (opts?.limit ?? 30),
+          }),
+          getTask: (id: string) => currentTasks.find((t) => t.id === id),
+          cancel: () => undefined,
+          onTaskUpdate: (fn: () => void) => {
+            listeners.add(fn);
+            return () => { listeners.delete(fn); };
+          },
+        };
+
+        const requestRender = vi.fn();
+        let closeOverlay!: () => void;
+        let overlayComponent: any;
+        const openPromise = showSubagentsPanel({
+          ctx: {
+            cwd: tmp,
+            sessionId: 'sess-event',
+            ui: {
+              custom: (factory: any) => new Promise<void>((resolve) => {
+                closeOverlay = resolve;
+                overlayComponent = factory(
+                  { mode: 'fullscreen', terminal: { rows: 30 }, requestRender },
+                  { fg: (_n: string, t: string) => t, bold: (t: string) => t },
+                  { matches: () => false },
+                  resolve,
+                );
+              }),
+            },
+          },
+          pi: {},
+          manager: mockManager,
+          setWidgetInputSuspended: () => {},
+          setActivePanelCancelSelected: () => {},
+          setActivePanelRequestRender: () => {},
+        });
+
+        overlayComponent.render(120);
+        expect(listeners.size).toBe(1);
+
+        // Idle (all terminal): advancing 10 seconds triggers ZERO periodic requestRender calls
+        vi.advanceTimersByTime(10_000);
+        expect(requestRender).toHaveBeenCalledTimes(0);
+
+        // Manager event fires -> triggers prompt refresh
+        for (const fn of listeners) fn();
+        expect(requestRender).toHaveBeenCalledTimes(1);
+
+        // Active task arrives via manager update -> conditional live ticking activates
+        currentTasks = [
+          {
+            id: 'live-1',
+            agent: 'analyst',
+            mode: 'background',
+            status: 'running',
+            task: 'active work',
+            created_at: '2026-01-01T00:00:02.000Z',
+          },
+          ...currentTasks,
+        ];
+        for (const fn of listeners) fn();
+        expect(requestRender).toHaveBeenCalledTimes(2);
+
+        vi.advanceTimersByTime(2_500);
+        expect(requestRender.mock.calls.length).toBeGreaterThanOrEqual(4);
+
+        // Task becomes terminal -> live ticking stops automatically
+        currentTasks[0] = { ...currentTasks[0]!, status: 'completed' };
+        for (const fn of listeners) fn();
+        const countAfterTerminal = requestRender.mock.calls.length;
+        vi.advanceTimersByTime(10_000);
+        expect(requestRender.mock.calls.length).toBe(countAfterTerminal);
+
+        // Close panel -> releases listener and timers cleanly
+        overlayComponent.handleInput('q');
+        await openPromise;
+        expect(listeners.size).toBe(0);
+        vi.advanceTimersByTime(5_000);
+        expect(requestRender.mock.calls.length).toBe(countAfterTerminal);
+        closeOverlay();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe('wrapped sidebar/list/flow rows and muted fallback styling (MINI-004)', () => {
+    it('wraps long sidebar rows without ellipsis clipping and maps clicks on wrapped continuation rows accurately', () => {
+      const tasks: SubagentTask[] = [
+        {
+          id: 'task-wrap-1',
+          agent: 'analyst',
+          display_name: 'Very Long Sidebar Display Name That Must Wrap Without Ellipsis',
+          mode: 'background',
+          status: 'completed',
+          effort: 'high',
+          task: 'first task',
+          created_at: '2026-01-01T00:00:02.000Z',
+          result: 'plain fallback body line',
+        },
+        {
+          id: 'task-wrap-2',
+          agent: 'reviewer',
+          display_name: 'Second Task Label',
+          mode: 'background',
+          status: 'completed',
+          effort: 'medium',
+          task: 'second task',
+          created_at: '2026-01-01T00:00:01.000Z',
+          result: 'second task body',
+        },
+      ];
+      const theme = {
+        fg: (key: string, text: string) => (key === 'muted' ? `\x1b[38;2;122;167;184m${text}\x1b[0m` : text),
+        bold: (text: string) => text,
+      };
+      const panel = new SubagentsHistoryPanel(
+        () => tasks,
+        theme,
+        () => undefined,
+        () => false,
+        (t) => stripAnsi(t).length,
+        (t, w) => (t.length > w ? `${t.slice(0, Math.max(0, w - 1))}…` : t),
+        { cwd: tmp },
+        24,
+      );
+
+      // Split mode (width 100 -> sidebar width 25)
+      const splitLines = panel.render(100);
+      const sidebarColumn = splitLines.slice(4, -1).map((line) => stripAnsi(line).split('│')[1] ?? '');
+      const sidebarJoined = sidebarColumn.join('\n');
+      expect(sidebarJoined).not.toContain('…');
+      expect(sidebarJoined.replace(/\s+/g, ' ')).toContain('Without Ellipsis:completed');
+      expect(sidebarJoined.replace(/\s+/g, ' ')).toContain('Second Task Label:completed');
+
+      // Find the row where Second Task Label starts (shifted down because task-wrap-1 wrapped to multiple rows)
+      const secondTaskRow = splitLines.findIndex((line, idx) => idx >= 4 && stripAnsi(line).split('│')[1]?.includes('Second Task'));
+      expect(secondTaskRow).toBeGreaterThan(5);
+      panel.handleMouse({ type: 'click', row: secondTaskRow, col: 4 });
+      expect(panel.getRenderDebugState().selectedIndex).toBe(1);
+
+      // Click on a wrapped continuation row of task-wrap-1 (row 5) selects task-wrap-1 again
+      panel.handleMouse({ type: 'click', row: 5, col: 4 });
+      expect(panel.getRenderDebugState().selectedIndex).toBe(0);
+
+      // Fallback plain flow line is styled with muted foreground
+      const plainFlowLine = splitLines.find((line) => stripAnsi(line).includes('plain fallback body line'));
+      expect(plainFlowLine).toContain('\x1b[38;2;122;167;184m');
     });
   });
 

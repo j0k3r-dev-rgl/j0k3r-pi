@@ -2,10 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import browserScreenshotExtension from '../index.js';
 import {
   COMPACT_TOOL_RENDERING,
+  MUTED,
   RED,
+  RESET,
   extractBrowserBadge,
   renderBrowserCall,
   renderBrowserResult,
+  stripAnsi,
   visibleWidth,
 } from '../src/render.js';
 
@@ -278,14 +281,18 @@ describe('browser-screenshot renderers', () => {
       { state: {} },
     ).render(80);
     expect(expanded.every((l) => l.startsWith(' '))).toBe(true);
-    expect(expanded.slice(1)).toContain(' Connection refused to 127.0.0.1:9222');
+    expect(expanded.slice(1)).toContain(` ${MUTED}Connection refused to 127.0.0.1:9222${RESET}`);
   });
 
-  it('stays width-safe at narrow widths and emits no cells at zero width', () => {
+  it('wraps narrow widths without clipping and preserves width 0/1/2 wide-grapheme rules', () => {
     const callLines = renderBrowserCall('browser_cdp_status', {}, mockTheme).render(16);
-    expect(callLines).toHaveLength(1);
-    expect(visibleWidth(callLines[0])).toBeLessThanOrEqual(16);
-    expect(callLines[0]).not.toMatch(FRAME);
+    expect(callLines.length).toBeGreaterThan(1);
+    for (const line of callLines) {
+      expect(line.startsWith(' ')).toBe(true);
+      expect(visibleWidth(line)).toBeLessThanOrEqual(16);
+      expect(line).not.toMatch(FRAME);
+    }
+    expect(callLines.map((l) => stripAnsi(l).slice(1)).join('')).toContain('cdp_status');
 
     for (const width of [1, 2, 10, 23]) {
       const resultLines = renderBrowserResult('browser_cdp_status', {
@@ -296,6 +303,54 @@ describe('browser-screenshot renderers', () => {
     }
 
     expect(renderBrowserResult('browser_cdp_status', { details: {} }, { expanded: false }, mockTheme, { state: {} }).render(0)).toEqual([]);
+    expect(renderBrowserResult('browser_cdp_status', { details: {} }, { expanded: false }, mockTheme, { state: {} }).render(1)).toEqual([' ']);
+
+    const wideRes = {
+      content: [{ type: 'text', text: 'A漢B\nA🚀B' }],
+      details: { status: 'success', data: { cdpUrl: 'http://127.0.0.1:9222', warnings: [] } },
+    };
+    const w2 = renderBrowserResult('browser_cdp_status', wideRes, { expanded: true }, mockTheme, { state: {} }).render(2);
+    for (const line of w2) expect(visibleWidth(line)).toBeLessThanOrEqual(2);
+    const plainW2 = w2.map(stripAnsi);
+    expect(plainW2).toContain(' A');
+    expect(plainW2).toContain('漢');
+    expect(plainW2).toContain(' B');
+    expect(plainW2).toContain('🚀');
+  });
+
+  it('applies muted foreground to plain expanded lines while preserving existing ANSI and native images', () => {
+    const customTheme = {
+      ...mockTheme,
+      fg: (token: string, text: string) => (token === 'muted' ? `\x1b[38;2;7;8;9m${text}\x1b[39m` : text),
+    };
+    const imageBlock = { type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' };
+    const result = {
+      content: [
+        { type: 'text', text: 'plain note\n\x1b[36mhttps://example.com\x1b[0m\n\x1b[33mwarn\x1b[0m' },
+        imageBlock,
+      ],
+      details: {
+        status: 'success',
+        data: {
+          outputPath: '/tmp/shot.png',
+          width: 800,
+          height: 600,
+          outputSizeBytes: 1024,
+          inlineAttached: true,
+          warnings: [],
+        },
+      },
+    };
+    const themed = renderBrowserResult('browser_page_screenshot', result, { expanded: true }, customTheme, { state: {} }).render(100);
+    expect(themed).toContain(' \x1b[38;2;7;8;9mdimensions: 800x600\x1b[39m');
+    expect(themed).toContain(' \x1b[38;2;7;8;9mplain note\x1b[39m');
+    expect(themed).toContain(' \x1b[36mhttps://example.com\x1b[0m');
+    expect(themed).toContain(' \x1b[33mwarn\x1b[0m');
+    expect(result.content[1]).toBe(imageBlock);
+
+    const fallback = renderBrowserResult('browser_page_screenshot', result, { expanded: true }, mockTheme, { state: {} }).render(100);
+    expect(fallback).toContain(` ${MUTED}plain note${RESET}`);
+    expect(fallback).toContain(' \x1b[36mhttps://example.com\x1b[0m');
   });
 
   it('is reachable through the extension entrypoint in an isolated enabled project', async () => {

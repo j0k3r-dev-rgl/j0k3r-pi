@@ -335,11 +335,15 @@ describe("native tool result rendering", () => {
     const collapsed = definition.renderResult!(result, { expanded: false, isPartial: false }, theme, sharedContext as any);
     for (const width of [1, 2, 8, 24, 40, 80, 120]) {
       const lines = collapsed.render(width);
-      expect(lines).toHaveLength(1);
+      expect(lines.length).toBeGreaterThanOrEqual(1);
       for (const line of [...call.render(width), ...lines]) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
       expect(lines.join("\n")).not.toContain("Received arguments");
       expect(lines.join("\n")).not.toContain("full diagnostic payload");
+      expect(lines.join("\n")).not.toContain("…");
     }
+    // Narrow widths wrap the header instead of clipping it away.
+    expect(collapsed.render(8).length).toBeGreaterThan(1);
+    expect(collapsed.render(200)).toHaveLength(1);
     expect(collapsed.render(200).join("\n")).toContain('Validation failed for tool "ask_user_question"');
     expect(collapsed.render(200).join("\n")).not.toMatch(/expand|ctrl\+o/i);
     expect(call.render(80)).toEqual([]);
@@ -349,20 +353,56 @@ describe("native tool result rendering", () => {
     expect(JSON.stringify(result)).toBe(original);
   });
 
-  it("keeps long single-line execution errors compact and handles empty error bodies", () => {
+  it("wraps long execution errors without clipping and handles empty error bodies", () => {
     const definition = tool();
     for (const body of ["Error: 中文 🚀 é ".repeat(100), ""]) {
       const result = { content: [{ type: "text" as const, text: body }], details: undefined, isError: true };
       for (const width of [1, 8, 24, 40, 80]) {
         const lines = definition.renderResult!(result, { expanded: false, isPartial: false }, theme, {} as any).render(width);
-        expect(lines).toHaveLength(1);
-        for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+        expect(lines.length).toBeGreaterThanOrEqual(1);
+        for (const line of lines) {
+          expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+          expect(line).not.toContain("…");
+        }
+      }
+      if (body) {
+        const narrow = definition.renderResult!(result, { expanded: false, isPartial: false }, theme, {} as any).render(24);
+        expect(narrow.length).toBeGreaterThan(1);
+        const joined = narrow.join("").replace(/\s+/g, "");
+        expect(joined).toContain("中文");
+        expect(joined).toContain("🚀");
       }
       if (!body) {
         const expanded = definition.renderResult!(result, { expanded: true, isPartial: false }, theme, {} as any).render(80).join("\n");
         expect(expanded.toLowerCase()).toContain("tool execution failed");
       }
     }
+  });
+
+  it("wraps collapsed headers and renders plain-text expanded answer bodies with the muted token", () => {
+    const definition = tool();
+    const header = "Configuración autorizada 中文 🚀 ".repeat(20);
+    const input = { questions: [{ ...params.questions[0], header }] };
+    const call = definition.renderCall!(input, theme, { state: {} } as any);
+    const narrow = call.render(24);
+    expect(narrow.length).toBeGreaterThan(1);
+    for (const line of narrow) expect(visibleWidth(line)).toBeLessThanOrEqual(24);
+    expect(narrow.join("").replace(/\s+/g, "")).toContain("Configuraciónautorizada");
+
+    const result = {
+      content: [{ type: "text" as const, text: "Question one: Minimal\nQuestion two: Full detail here" }],
+      details: { cancelled: false, answers: [{ questionIndex: 0, question: "Question one", kind: "option", answer: "Minimal" }] },
+    };
+    const mutedTheme = { fg: (color: string, text: string) => (color === "muted" ? `\x1b[38;2;122;167;184m${text}\x1b[0m` : text), bold: (text: string) => text } as Theme;
+    const expanded = definition.renderResult!(result, { expanded: true, isPartial: false }, mutedTheme, {} as any).render(40);
+    const bodyLines = expanded.filter((line) => /Question one|Question two/.test(line));
+    expect(bodyLines.length).toBeGreaterThan(0);
+    for (const line of bodyLines) {
+      expect(line).toContain("\x1b[38;2;122;167;184m");
+      expect(visibleWidth(line)).toBeLessThanOrEqual(40);
+    }
+    const collapsed = definition.renderResult!(result, { expanded: false, isPartial: false }, mutedTheme, {} as any).render(40);
+    expect(collapsed.join("\n")).not.toContain("\x1b[38;2;122;167;184m");
   });
 
   it("keeps call and result lines width-safe with long Unicode content", () => {

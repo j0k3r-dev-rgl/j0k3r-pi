@@ -31,9 +31,18 @@ const { withBuiltInRenderers } = host ? await load("dist/core/tools/renderers/in
 const { ToolExecutionComponent } = host ? await load("dist/modes/interactive/components/tool-execution.js") : {};
 const { CustomMessageComponent } = host ? await load("dist/modes/interactive/components/custom-message.js") : {};
 const { InteractiveMode, SettingsManager, SessionManager } = host ? await load("dist/index.js") : {};
-const { initTheme, setTheme } = host ? await load("dist/modes/interactive/theme/theme.js") : {};
+const { initTheme, setTheme, theme: activeHostTheme } = host ? await load("dist/modes/interactive/theme/theme.js") : {};
 const tui = host ? await load("node_modules/@earendil-works/pi-tui/dist/index.js") : {};
 if (host) initTheme("dark");
+const FALLBACK_MUTED_ANSI = "\x1b[38;2;122;167;184m";
+const getActiveMutedPrefix = () => {
+	const styled = activeHostTheme?.fg?.("muted", "M");
+	if (typeof styled === "string" && styled !== "M") {
+		const idx = styled.indexOf("M");
+		if (idx > 0) return styled.slice(0, idx);
+	}
+	return FALLBACK_MUTED_ANSI;
+};
 
 /**
  * Canonical coverage inventory, split by who supplies the definition:
@@ -483,7 +492,7 @@ test("built-in rows are compact, width-safe and lossless in both views", { skip 
 	}
 });
 
-test("every state renders one inline row (except bash command block): streaming, running, partial, success, error, empty, continuation", { skip }, async () => {
+test("every state wraps inline without clipping (and bash shows orange command block): streaming, running, partial, success, error, empty, continuation", { skip }, async () => {
 	const h = await harness();
 	const states = [
 		{ label: "streaming", phase: "streaming" },
@@ -503,12 +512,20 @@ test("every state renders one inline row (except bash command block): streaming,
 				{ width: 60, phase: state.phase, isPartial: state.isPartial },
 			);
 			const rows = nonEmpty(lines);
+			assertWidthSafe(lines, 60, `${name}/${state.label}`);
+			assertSingleLeftMargin(lines, `${name}/${state.label}`, {
+				hasHostSpacer: true,
+				allowLeadingContentSpaces: name === "bash",
+				totalWidth: 60,
+			});
+			assert.ok(!stripAnsi(lines.join("\n")).includes("…"), `${name}/${state.label}: must wrap without ellipsis`);
 			if (name === "bash" && state.phase !== "streaming") {
 				assert.ok(rows.length >= 2 && rows.some((l) => l.includes("\x1b[1;38;2;255;140;0m")), `bash/${state.label}: orange command visible`);
-			} else if (name === "bash" && state.phase === "streaming") {
-				assert.ok(rows.length >= 1, `bash/${state.label}: renders inline`);
 			} else {
-				assert.equal(rows.length, 1, `${name}/${state.label}: exactly one inline row, got ${JSON.stringify(rows)}`);
+				assert.ok(rows.length >= 1, `${name}/${state.label}: renders at least one inline row`);
+			}
+			if (state.label === "error" && name === "agent_todo") {
+				assert.match(stripAnsi(rows.join(" ")), /Command exited with\s+code 1/, "wrapped error header keeps trailing text");
 			}
 			assertNoGeneratedDecoration(lines, `${name}/${state.label}`);
 		}
@@ -695,6 +712,9 @@ const REAL_OWNER_DIRS = [
 	"orchestrator-supervisor",
 	"subagents",
 	"git-sync-awareness",
+	"git-diff-panel",
+	"j0k3r-model-picker",
+	"tools-manager",
 ];
 const CHILD_INJECTED_TOOLS = new Set(["ask_orchestrator", "report_orchestrator"]);
 const EXPECTED_TOP_LEVEL_OWNER_TOOLS = OWNER_TOOLS.filter((name) => !CHILD_INJECTED_TOOLS.has(name));
@@ -746,7 +766,7 @@ async function realOwnerHarness(reverseOrder = false) {
 	assert.deepEqual(
 		loaded.errors.map((e) => `${e.path}: ${e.error}`),
 		[],
-		"all 18 real owner extensions must load cleanly on the installed host",
+		"all 21 affected real owner extensions must load cleanly on the installed host",
 	);
 
 	const own = new Map();
@@ -793,7 +813,7 @@ test("REAL settled owners register all inventoried top-level tools with compact 
 	for (const name of realRenderTools) {
 		const def = h.resolve(name);
 		assert.equal(def.renderShell, "self", `${name}: resolved renderShell must be self`);
-		for (const width of [0, 1, 2, 23, 40, 80]) {
+		for (const width of [0, 1, 2, 10, 24, 40, 80, 120]) {
 			for (const expanded of [false, true]) {
 				const comp = new ToolExecutionComponent(
 					name,
@@ -820,20 +840,22 @@ test("REAL settled owners register all inventoried top-level tools with compact 
 						allowLeadingContentSpaces: name === "bash",
 						totalWidth: width,
 					});
-					if (!expanded && name !== "bash") {
+					if (width >= 2) {
+						assert.ok(!stripAnsi(lines.join("\n")).includes("…"), `real:${name}@${width}${expanded ? " exp" : ""}: must wrap without ellipsis`);
+					}
+					if (!expanded && name !== "bash" && width >= 2) {
 						const rowCount = nonEmpty(lines).length;
-						if (width >= 3) {
-							assert.equal(rowCount, 1, `real:${name}@${width}: collapsed must be 1 row, got ${JSON.stringify(nonEmpty(lines))}`);
-						} else {
-							assert.ok(rowCount <= 1, `real:${name}@${width}: collapsed must be at most 1 row, got ${JSON.stringify(nonEmpty(lines))}`);
-						}
+						assert.ok(rowCount >= 1, `real:${name}@${width}: collapsed must render at least 1 row`);
 					}
 					if (expanded && width >= 40) {
 						const plain = lines.map(stripAnsi).join("\n");
 						assert.ok(plain.includes("first result block") && plain.includes("second line"), `real:${name}: expanded output must be complete`);
-					} else if (expanded && width >= 3) {
+					} else if (expanded && width >= 10) {
 						const compactPlain = lines.map(stripAnsi).map((l) => l.slice(1)).join("").replace(/\s+/g, "");
 						assert.ok(compactPlain.includes("firstresultblock") && compactPlain.includes("secondline"), `real:${name}: wrapped output complete at width ${width}`);
+					} else if (expanded && width === 2) {
+						const plain2 = lines.slice(1).map(stripAnsi);
+						assert.ok(plain2.includes("漢"), `real:${name}@2: width-2 must retain intact wide grapheme 漢`);
 					}
 				}
 			}
@@ -1072,10 +1094,15 @@ test("REAL bash multiline orange command matrix via ToolExecutionComponent (all 
 		assertWidthSafe(raw, 20, `bash exact-ws exp=${exp}`);
 		assertSingleLeftMargin(raw, `bash exact-ws exp=${exp}`, { hasHostSpacer: true, allowLeadingContentSpaces: true });
 		const plainLines = raw.map(stripAnsi);
-		// Note ToolExecutionComponent adds 1 leading empty spacer line, then header, then command lines
-		const cmdStart = plainLines.findIndex((l) => l.startsWith(" $"));
-		assert.ok(cmdStart >= 0, `expected header starting with " $", got ${JSON.stringify(plainLines)}`);
-		const unmargined = plainLines.slice(cmdStart + 1).map((l) => l.slice(1));
+		// Note ToolExecutionComponent adds 1 leading empty spacer line, then wrapped header lines, then command lines
+		const headerStart = plainLines.findIndex((l) => l.startsWith(" $"));
+		assert.ok(headerStart >= 0, `expected header starting with " $", got ${JSON.stringify(plainLines)}`);
+		const headerEnd = plainLines.findIndex((l, idx) => idx >= headerStart && l.includes("Took"));
+		assert.ok(headerEnd >= headerStart, `expected wrapped header to preserve status "Took", got ${JSON.stringify(plainLines)}`);
+		const wrappedHeader = plainLines.slice(headerStart, headerEnd + 1).join(" ");
+		assert.match(wrappedHeader, /timeout 120s/, "wrapped header preserves timeout");
+		assert.ok(!wrappedHeader.includes("…"), "wrapped header has no ellipsis");
+		const unmargined = plainLines.slice(headerEnd + 1).map((l) => l.slice(1));
 		assert.equal(unmargined[0], "", "leading blank line preserved");
 		assert.ok(unmargined[1].startsWith("    lead_"), `leading spaces preserved on wrap: ${JSON.stringify(unmargined[1])}`);
 		const unwrappedLead = unmargined.slice(1, 4).join("");
@@ -1198,6 +1225,7 @@ test("MINI-008: remapped native app.tools.expand keybinding toggles real host to
 		if (prevAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = prevAgentDir;
 		tui.setKeybindings(new tui.KeybindingsManager({}, {}));
+		setTheme("dark");
 		rmSync(agentDir, { recursive: true, force: true });
 	}
 });
@@ -1278,3 +1306,307 @@ test("REAL bash CR/CRLF retention and width-2 wide-grapheme exception across the
 	const gitPlain2 = gitMsg2.map(stripAnsi);
 	assert.ok(gitPlain2.includes("漢") && gitPlain2.includes("👨‍👩‍👧") && gitPlain2.includes(" A") && gitPlain2.includes(" B"), "git-sync-awareness@2 keeps wide and narrow graphemes");
 });
+
+test("MINI-008 D1: real loaded tools and custom messages style plain-text expanded bodies with muted token while preserving syntax/diff ANSI", { skip }, async () => {
+	const h = await realOwnerHarness();
+	const mutedPrefix = getActiveMutedPrefix();
+	const hasMutedColor = (line) => line.includes(mutedPrefix) || line.includes(FALLBACK_MUTED_ANSI);
+
+	// 1. Plain-text expanded bodies across built-ins, universal fallback, and EVERY registered real owner tool
+	const plainToken = "plain_expanded_body_marker_xyz";
+	const twoLinePlainBody = `summary header line\n${plainToken}`;
+	const allPlainCheckTools = [
+		...h.own.keys(),
+		"powershell",
+		"grep",
+		"find",
+		"ls",
+		"codemode",
+		"tool_search",
+		"unknown_restored_tool",
+	];
+	for (const name of allPlainCheckTools) {
+		const args =
+			name === "read"
+				? { path: "notes.txt" }
+				: name === "write"
+					? { path: "notes.txt", content: twoLinePlainBody }
+					: name === "edit"
+						? { path: "notes.txt", edits: [{ oldText: "a", newText: "b" }] }
+						: { path: "notes.txt", command: "echo ok", query: "q", action: "list", agent: "analyst", task: "check", change_dir: "/tmp/c" };
+		const comp = new ToolExecutionComponent(name, `d1-plain-${name}`, args, { outputPad: 0 }, h.resolve(name), h.ui, h.realRoot);
+		comp.markExecutionStarted();
+		comp.setArgsComplete();
+		comp.updateResult({ content: [{ type: "text", text: twoLinePlainBody }], details: undefined, isError: false }, false);
+		comp.setExpanded(false);
+		const collapsedLineCount = comp.render(120).length;
+		comp.setExpanded(true);
+		const lines = comp.render(120);
+		const bodyLines = lines.slice(collapsedLineCount);
+		const matchingLines = bodyLines.filter((line) => stripAnsi(line).includes(plainToken));
+		assert.ok(matchingLines.length >= 1, `D1 ${name}: expanded plain-text body must contain ${plainToken}`);
+		for (const line of matchingLines) {
+			assert.ok(
+				hasMutedColor(line),
+				`D1 ${name}: plain-text expanded line must use active muted token (${JSON.stringify(mutedPrefix)}) or fallback (${JSON.stringify(FALLBACK_MUTED_ANSI)}), got ${JSON.stringify(line)}`,
+			);
+		}
+	}
+
+	// 2. Syntax-highlighted code (read .ts, write .ts) retains syntax ANSI foregrounds distinct from plain muted
+	const tsCode = 'export function greet(name: string): number {\n  return 42;\n}';
+	for (const name of ["read", "write"]) {
+		const args = name === "read" ? { path: "src/sample.ts" } : { path: "src/sample.ts", content: tsCode };
+		const text = name === "read" ? tsCode : "Successfully wrote to src/sample.ts";
+		const comp = new ToolExecutionComponent(name, `d1-syntax-${name}`, args, { outputPad: 0 }, h.resolve(name), h.ui, h.realRoot);
+		comp.markExecutionStarted();
+		comp.setArgsComplete();
+		comp.updateResult({ content: [{ type: "text", text }], details: undefined, isError: false }, false);
+		comp.setExpanded(true);
+		const lines = comp.render(120);
+		const codeLine = lines.find((line) => stripAnsi(line).includes("export function greet"));
+		assert.ok(codeLine, `D1 ${name}: syntax-highlighted code line must render`);
+		const sgrTokens = codeLine.match(/\x1b\[[0-9;]*m/g) ?? [];
+		const nonResetNonMuted = sgrTokens.filter((tok) => tok !== "\x1b[0m" && tok !== "\x1b[39m" && tok !== mutedPrefix && tok !== FALLBACK_MUTED_ANSI);
+		assert.ok(nonResetNonMuted.length > 0, `D1 ${name}: syntax highlighting ANSI colors must be preserved, got ${JSON.stringify(codeLine)}`);
+	}
+
+	// 3. Diff output (edit with details.diff in Pi's "+N / -N" format) retains diff ANSI colors distinct from plain muted
+	const editComp = new ToolExecutionComponent(
+		"edit",
+		"d1-diff-edit",
+		{ path: "src/sample.ts", edits: [{ oldText: "oldVal", newText: "newVal" }] },
+		{ outputPad: 0 },
+		h.resolve("edit"),
+		h.ui,
+		h.realRoot,
+	);
+	editComp.markExecutionStarted();
+	editComp.setArgsComplete();
+	editComp.updateResult(
+		{
+			content: [{ type: "text", text: "Successfully replaced 1 block(s)." }],
+			details: { diff: "-1 const a = oldVal;\n+1 const a = newVal;\n 2 const kept = true;" },
+			isError: false,
+		},
+		false,
+	);
+	editComp.setExpanded(true);
+	const editLines = editComp.render(120);
+	const removedLine = editLines.find((line) => stripAnsi(line).includes("oldVal"));
+	const addedLine = editLines.find((line) => stripAnsi(line).includes("newVal"));
+	assert.ok(removedLine && addedLine, "D1 edit: diff lines must render");
+	for (const [label, diffLine] of [["removed", removedLine], ["added", addedLine]]) {
+		const sgrTokens = diffLine.match(/\x1b\[[0-9;]*m/g) ?? [];
+		const nonResetNonMuted = sgrTokens.filter((tok) => tok !== "\x1b[0m" && tok !== "\x1b[39m" && tok !== mutedPrefix && tok !== FALLBACK_MUTED_ANSI);
+		assert.ok(nonResetNonMuted.length > 0, `D1 edit ${label}: diff ANSI color must be preserved, got ${JSON.stringify(diffLine)}`);
+	}
+
+	// 4. Approved custom-message bodies (subagent-completion & git-sync-awareness) via real CustomMessageComponent
+	const completionRenderer = h.messageRenderers.get("subagent-completion");
+	const compWidget = new CustomMessageComponent(
+		{
+			type: "custom",
+			customType: "subagent-completion",
+			content: "",
+			display: true,
+			details: {
+				full_result: `${plainToken}\n\x1b[38;2;102;255;102mkept_green_ansi\x1b[0m`,
+				task: { id: "d1-comp", agent: "analyst", status: "completed", model: "m/1", effort: "high", attempt: 1 },
+			},
+		},
+		completionRenderer,
+	);
+	compWidget.setExpanded(true);
+	const compLines = compWidget.render(120);
+	const compPlainLine = compLines.find((line) => stripAnsi(line).includes(plainToken));
+	const compAnsiLine = compLines.find((line) => stripAnsi(line).includes("kept_green_ansi"));
+	assert.ok(compPlainLine && hasMutedColor(compPlainLine), `D1 subagent-completion: plain body must be muted, got ${JSON.stringify(compPlainLine)}`);
+	assert.ok(compAnsiLine && compAnsiLine.includes("\x1b[38;2;102;255;102m"), `D1 subagent-completion: existing ANSI must be preserved, got ${JSON.stringify(compAnsiLine)}`);
+
+	const gitSyncRenderer = h.messageRenderers.get("git-sync-awareness");
+	const gitWidget = new CustomMessageComponent(
+		{
+			type: "custom",
+			customType: "git-sync-awareness",
+			content: `Summary header\n${plainToken}`,
+			display: true,
+		},
+		gitSyncRenderer,
+	);
+	gitWidget.setExpanded(true);
+	const gitLines = gitWidget.render(120);
+	const gitPlainLine = gitLines.find((line) => stripAnsi(line).includes(plainToken));
+	assert.ok(gitPlainLine && hasMutedColor(gitPlainLine), `D1 git-sync-awareness: plain expanded body must be muted, got ${JSON.stringify(gitPlainLine)}`);
+});
+
+test("MINI-008 D2: overflowing collapsed headers, expanded bodies, and custom messages wrap automatically without ellipsis across widths 0/1/2/10/24/40/80/120", { skip }, async () => {
+	const h = await realOwnerHarness();
+	const wrapWidths = [0, 1, 2, 10, 24, 40, 80, 120];
+	const longTail = "END_MARKER_Z9";
+	const longArg = `very/long/nested/directory/segment/alpha/beta/gamma/${longTail}.ts`;
+	const longBody = `body_prefix_${"m".repeat(55)}_${longTail}_A漢B👨‍👩‍👧`;
+
+	const wrapTools = [
+		{ name: "read", args: { path: longArg } },
+		{ name: "bash", args: { command: `echo ${longArg}`, timeout: 45 } },
+		{ name: "powershell", args: { command: `Write-Output ${longArg}` } },
+		{ name: "grep", args: { pattern: `needle_${longTail}`, path: "src" } },
+		{ name: "agent_todo", args: { action: "add", content: `task_${longTail}` } },
+		{ name: "memory_search", args: { query: `query_${longTail}` } },
+		{ name: "workflow_check", args: { change_dir: `/tmp/changes/${longTail}`, phase: "apply" } },
+		{ name: "codegraph_explore", args: { query: `symbol_${longTail}` } },
+		{ name: "web_search", args: { query: `search_${longTail}` } },
+		{ name: "ask_user_question", args: { questions: [{ id: "q1", question: `question_${longTail}` }] } },
+		{ name: "subagent_run", args: { agent: "analyst", display_name: `display_${longTail}`, task: `task_${longTail}` } },
+		{ name: "unknown_restored_tool", args: { path: longArg } },
+	];
+
+	for (const { name, args } of wrapTools) {
+		for (const width of wrapWidths) {
+			for (const expanded of [false, true]) {
+				const comp = new ToolExecutionComponent(name, `d2-${name}-${width}-${expanded}`, args, { outputPad: 0 }, h.resolve(name), h.ui, h.realRoot);
+				comp.markExecutionStarted();
+				comp.setArgsComplete();
+				comp.updateResult({ content: [{ type: "text", text: longBody }], details: undefined, isError: false }, false);
+				comp.setExpanded(expanded);
+				const lines = comp.render(width);
+				const label = `D2 ${name}@${width}${expanded ? " exp" : ""}`;
+				assertWidthSafe(lines, width, label);
+				if (width === 1) {
+					assert.deepEqual(lines, ["", " "], `${label}: width 1 emits blank 1-col row`);
+				}
+				if (width > 0) {
+					assertNoGeneratedDecoration(lines, label);
+					assertSingleLeftMargin(lines, label, {
+						hasHostSpacer: true,
+						allowLeadingContentSpaces: name === "bash",
+						totalWidth: width,
+					});
+				}
+				if (width >= 2) {
+					assert.ok(!stripAnsi(lines.join("\n")).includes("…"), `${label}: zero ellipsis clipping`);
+				}
+				if (!expanded && width === 24) {
+					assert.ok(nonEmpty(lines).length >= 2, `${label}: overflowing collapsed header must wrap across multiple lines at width 24`);
+				}
+				if (expanded && width >= 10) {
+					const compact = lines.slice(1).map((l) => stripAnsi(l).slice(1)).join("").replace(/\s+/g, "");
+					assert.ok(compact.includes(longTail), `${label}: wrapped expanded body preserves trailing marker`);
+					assert.ok(compact.includes("漢") && compact.includes("👨‍👩‍👧"), `${label}: wide graphemes preserved`);
+				}
+				if (expanded && width === 2) {
+					const plain2 = lines.slice(1).map(stripAnsi);
+					assert.ok(plain2.includes("漢") && plain2.includes("👨‍👩‍👧"), `${label}: width-2 preserves intact wide graphemes`);
+				}
+			}
+		}
+	}
+
+	// Approved custom messages wrap without ellipsis across full width matrix
+	const completionRenderer = h.messageRenderers.get("subagent-completion");
+	const gitSyncRenderer = h.messageRenderers.get("git-sync-awareness");
+	const msgCases = [
+		{
+			label: "subagent-completion",
+			renderer: completionRenderer,
+			msg: {
+				type: "custom",
+				customType: "subagent-completion",
+				content: "",
+				display: true,
+				details: {
+					full_result: longBody,
+					task: { id: "d2-msg", agent: "deep-researcher", display_name: `long_display_${longTail}`, status: "completed", model: "provider/very-long-model-name", effort: "high", attempt: 2 },
+				},
+			},
+		},
+		{
+			label: "git-sync-awareness",
+			renderer: gitSyncRenderer,
+			msg: {
+				type: "custom",
+				customType: "git-sync-awareness",
+				content: `Long git sync notification header ${longTail}\n${longBody}`,
+				display: true,
+			},
+		},
+	];
+	for (const { label, renderer, msg } of msgCases) {
+		for (const width of wrapWidths) {
+			for (const expanded of [false, true]) {
+				const widget = new CustomMessageComponent(msg, renderer);
+				widget.setExpanded(expanded);
+				const lines = widget.render(width);
+				const tag = `D2 ${label}@${width}${expanded ? " exp" : ""}`;
+				if (width <= 0) {
+					assert.ok(lines.every((l) => tui.visibleWidth(l) === 0), `${tag}: width 0 emits zero visible cells`);
+					assert.deepEqual(renderer(msg, { expanded }, activeHostTheme).render(width), [], `${tag}: direct renderer emits [] at width 0`);
+					continue;
+				}
+				assertWidthSafe(lines, width, tag);
+				assertNoGeneratedDecoration(lines, tag);
+				assertSingleLeftMargin(lines, tag, { hasHostSpacer: true, totalWidth: width });
+				if (width >= 2) {
+					assert.ok(!stripAnsi(lines.join("\n")).includes("…"), `${tag}: zero ellipsis clipping`);
+				}
+				if (!expanded && width === 24) {
+					assert.ok(nonEmpty(lines).length >= 2, `${tag}: overflowing collapsed header wraps at width 24`);
+					const collapsedJoined = lines.slice(1).map((l) => stripAnsi(l).slice(1)).join("").replace(/\s+/g, "");
+					assert.ok(collapsedJoined.includes(longTail), `${tag}: collapsed wrapped header preserves trailing text`);
+				}
+			}
+		}
+	}
+});
+
+test("MINI-008 D4 Option A: truthful bash and powershell timeout display (explicit, running elapsed/remaining, bash 120s default, powershell no timeout)", { skip }, async () => {
+	const h = await realOwnerHarness();
+	const bashDef = h.resolve("bash");
+	const psDef = h.resolve("powershell");
+
+	const renderShell = (name, def, args, { phase = "completed", isPartial = false } = {}) => {
+		const comp = new ToolExecutionComponent(name, `d4-${name}-${++callId}`, args, { outputPad: 0 }, def, h.ui, h.realRoot);
+		comp.markExecutionStarted();
+		comp.setArgsComplete();
+		if (phase === "running") return stripAnsi(comp.render(120).join("\n"));
+		comp.updateResult({ content: [{ type: "text", text: "ok" }], details: undefined, isError: false }, isPartial);
+		return stripAnsi(comp.render(120).join("\n"));
+	};
+
+	// 1. bash with explicit positive timeout: running shows timeout Xs + elapsed + remaining; completed shows timeout Xs
+	const bashExplicitRunning = renderShell("bash", bashDef, { command: "sleep 1", timeout: 45 }, { phase: "running" });
+	assert.match(bashExplicitRunning, /timeout 45s/, "bash running explicit timeout");
+	assert.match(bashExplicitRunning, /elapsed.*remaining/i, "bash running explicit shows elapsed and remaining");
+	const bashExplicitPartial = renderShell("bash", bashDef, { command: "sleep 1", timeout: 45 }, { phase: "result", isPartial: true });
+	assert.match(bashExplicitPartial, /timeout 45s/, "bash partial explicit timeout");
+	assert.match(bashExplicitPartial, /elapsed.*remaining/i, "bash partial explicit shows elapsed and remaining");
+	const bashExplicitDone = renderShell("bash", bashDef, { command: "echo ok", timeout: 45 });
+	assert.match(bashExplicitDone, /timeout 45s/, "bash completed explicit timeout");
+	assert.doesNotMatch(bashExplicitDone, /\(default\)/, "bash explicit timeout is not labeled default");
+
+	// 2. bash with omitted or non-positive timeout: truthfully displays timeout 120s (default) + elapsed/remaining while running
+	for (const omittedArgs of [{ command: "echo ok" }, { command: "echo ok", timeout: 0 }]) {
+		const running = renderShell("bash", bashDef, omittedArgs, { phase: "running" });
+		assert.match(running, /timeout 120s \(default\)/, "bash omitted timeout displays 120s (default) while running");
+		assert.match(running, /elapsed.*remaining/i, "bash omitted timeout running shows elapsed and remaining");
+		const done = renderShell("bash", bashDef, omittedArgs);
+		assert.match(done, /timeout 120s \(default\)/, "bash omitted timeout displays 120s (default) when completed");
+	}
+
+	// 3. powershell with explicit timeout: timeout Xs + elapsed/remaining while running
+	const psExplicitRunning = renderShell("powershell", psDef, { command: "Get-Date", timeout: 30 }, { phase: "running" });
+	assert.match(psExplicitRunning, /timeout 30s/, "powershell running explicit timeout");
+	assert.match(psExplicitRunning, /elapsed.*remaining/i, "powershell running explicit shows elapsed and remaining");
+	const psExplicitDone = renderShell("powershell", psDef, { command: "Get-Date", timeout: 30 });
+	assert.match(psExplicitDone, /timeout 30s/, "powershell completed explicit timeout");
+
+	// 4. powershell with omitted timeout: truthfully displays no timeout (+ elapsed without remaining while running)
+	const psOmittedRunning = renderShell("powershell", psDef, { command: "Get-Date" }, { phase: "running" });
+	assert.match(psOmittedRunning, /no timeout/, "powershell omitted timeout displays no timeout while running");
+	assert.match(psOmittedRunning, /elapsed/i, "powershell omitted timeout running shows elapsed");
+	assert.doesNotMatch(psOmittedRunning, /remaining/i, "powershell omitted timeout running omits remaining");
+	const psOmittedDone = renderShell("powershell", psDef, { command: "Get-Date" });
+	assert.match(psOmittedDone, /no timeout/, "powershell omitted timeout displays no timeout when completed");
+});
+

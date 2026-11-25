@@ -1,4 +1,11 @@
-import { getSubagentToolRendererGeneration, isValidThreadSnapshot, renderThreadBody, SubagentThreadRenderCache } from '../thread-view.js';
+import {
+  getSubagentToolRendererGeneration,
+  isValidThreadSnapshot,
+  prepareNormalizedThreadSnapshot,
+  renderPreparedThreadItem,
+  renderThreadBody,
+  SubagentThreadRenderCache,
+} from '../thread-view.js';
 import { contentRevision } from '../render/content-revision.js';
 import type { SubagentTask, SubagentThreadRenderContext, SubagentThreadRenderTarget, SubagentThreadSnapshot, UsageStats } from '../types.js';
 import { formatTaskLabel } from '../render/tools/formatting.js';
@@ -9,10 +16,13 @@ import {
   CYAN,
   CYBER_SEPARATOR,
   LIME,
+  MUTED,
   RED,
   VIOLET,
   AMBER,
   electricBorder,
+  hasAnsiEscape,
+  stylePlainMuted,
   themeAccent,
   themeBold,
   themeDim,
@@ -94,6 +104,9 @@ type SubagentsHistoryPanelDisplayOptions = {
   timeoutMs?: number;
   stallTimeoutMs?: number;
   contextWindowForTask?: (task: SubagentTask) => number | undefined;
+  taskWindowLoader?: (limit: number) => { tasks: SubagentTask[]; hasMore: boolean };
+  initialTaskWindow?: number;
+  taskWindowStep?: number;
 };
 
 function fitsWidth(text: string, width: number, visibleWidth: (text: string) => number): boolean {
@@ -158,6 +171,37 @@ function snapshotHasActiveTools(snapshot: SubagentThreadSnapshot | undefined): b
 type DetailTarget = SubagentThreadRenderTarget;
 type DetailEntry = { text: string; taskId?: string; target?: DetailTarget };
 
+type CachedViewportItem = {
+  itemKey: string;
+  itemRevision: string;
+  width: number;
+  contextKey: string;
+  rendererGen: number;
+  expansionSig: string;
+  theme: unknown;
+  hasLiveTool: boolean;
+  entries: DetailEntry[];
+};
+
+type ViewportLayoutState = {
+  taskId: string;
+  attempt: number;
+  itemsByKey: Map<string, CachedViewportItem>;
+  lastSliceKey?: string;
+  lastSliceRevision?: string;
+  lastStartIdx?: number;
+  lastEndIdx?: number;
+  lastHasLiveTool?: boolean;
+  lastTotalLines?: number;
+  lastScroll?: number;
+  lastVisibleEntries?: DetailEntry[];
+  lastTheme?: unknown;
+};
+
+const DEFAULT_INITIAL_TASK_WINDOW = 30;
+const DEFAULT_TASK_WINDOW_STEP = 30;
+const VIEWPORT_OVERSCAN_LINES = 4;
+
 export class SubagentsHistoryPanel {
   private selected = 0;
   private selectedTaskId?: string;
@@ -168,9 +212,15 @@ export class SubagentsHistoryPanel {
   private toolOutputExpanded = false;
   private hideThinkingBlock = true;
   private expansionOverrides = new Map<string, boolean>();
+  private expansionOverridesVersion = 0;
+  private loadedTaskLimit: number;
+  private taskWindowStep: number;
+  private hasMoreTasks = false;
+  private lastLoadedTasks: SubagentTask[] = [];
   private detailRowTargetMap = new Map<number, DetailTarget>();
   private hydratedTasks = new Map<string, { signature: string; task: SubagentTask }>();
   private bodyCache = new Map<string, DetailEntry[]>();
+  private viewportState?: ViewportLayoutState;
   private threadRenderCache = new SubagentThreadRenderCache();
   private rowTaskMap = new Map<number, string>();
   private sidebarRowTaskMap = new Map<number, string>();
@@ -207,16 +257,31 @@ export class SubagentsHistoryPanel {
     private displayOptions: SubagentsHistoryPanelDisplayOptions = {},
   ) {
     this.selectedTaskId = this.initialSelectedTaskId;
+    this.loadedTaskLimit = Math.max(1, Math.floor(displayOptions.initialTaskWindow ?? DEFAULT_INITIAL_TASK_WINDOW));
+    this.taskWindowStep = Math.max(1, Math.floor(displayOptions.taskWindowStep ?? DEFAULT_TASK_WINDOW_STEP));
   }
 
   invalidate(): void {
     this.threadRenderCache.clear();
     this.bodyCache.clear();
+    this.viewportState = undefined;
     this.hydratedTasks.clear();
     this.rowTaskMap.clear();
     this.sidebarRowTaskMap.clear();
     this.detailRowTaskMap.clear();
     this.detailRowTargetMap.clear();
+  }
+
+  hasActiveLoadedTasks(): boolean {
+    return this.lastLoadedTasks.some((task) => task.status === 'queued' || task.status === 'running' || task.status === 'stopping');
+  }
+
+  private expandTaskWindowIfNeeded(targetIndex: number, currentLength: number): boolean {
+    if (!this.displayOptions.taskWindowLoader || !this.hasMoreTasks) return false;
+    const threshold = Math.max(5, Math.min(10, Math.floor(this.taskWindowStep / 3)));
+    if (targetIndex < currentLength - threshold) return false;
+    this.loadedTaskLimit += this.taskWindowStep;
+    return true;
   }
 
   private reconcileSelection(tasks: SubagentTask[]): number {
@@ -340,6 +405,7 @@ export class SubagentsHistoryPanel {
     if (target && col >= 1 && col < this.lastRenderWidth - 1) {
       const defaultExpanded = target.kind === 'tool' ? this.toolOutputExpanded : !this.hideThinkingBlock;
       this.expansionOverrides.set(target.key, !(this.expansionOverrides.get(target.key) ?? defaultExpanded));
+      this.expansionOverridesVersion += 1;
       this.bodyCache.clear();
       this.followTail = false;
       return { handled: true, focus: true, render: true };
@@ -383,8 +449,13 @@ export class SubagentsHistoryPanel {
       return;
     }
     if (this.matchesKey(data, 'right') && tasks.length > 0) {
-      const next = Math.min(tasks.length - 1, this.selected + 1);
-      const nextId = tasks[next]?.id;
+      let currentTasks = tasks;
+      if (this.expandTaskWindowIfNeeded(this.selected + 1, currentTasks.length)) {
+        currentTasks = this.tasks();
+        this.reconcileSelection(currentTasks);
+      }
+      const next = Math.min(currentTasks.length - 1, this.selected + 1);
+      const nextId = currentTasks[next]?.id;
       const changed = nextId !== this.selectedTaskId;
       this.selected = next;
       this.selectedTaskId = nextId;
@@ -434,6 +505,7 @@ export class SubagentsHistoryPanel {
     for (const key of this.expansionOverrides.keys()) {
       if (key.startsWith(`${kind}:`)) this.expansionOverrides.delete(key);
     }
+    this.expansionOverridesVersion += 1;
     this.bodyCache.clear();
   }
 
@@ -450,9 +522,13 @@ export class SubagentsHistoryPanel {
   }
 
   private sidebarScrollBy(delta: number): void {
-    const tasks = this.tasks();
+    let tasks = this.tasks();
     if (!tasks.length) return;
-    this.sidebarScroll = Math.max(0, Math.min(tasks.length - 1, this.sidebarScroll + delta));
+    const tentative = Math.max(0, this.sidebarScroll + delta);
+    if (delta > 0 && this.expandTaskWindowIfNeeded(tentative + Math.max(1, this.lastRenderDebugState?.bodyHeight ?? 10), tasks.length)) {
+      tasks = this.tasks();
+    }
+    this.sidebarScroll = Math.max(0, Math.min(tasks.length - 1, tentative));
   }
 
   getRenderDebugState(): {
@@ -691,25 +767,51 @@ export class SubagentsHistoryPanel {
       const headerCount = rawLines.length;
       const bodyHeight = Math.max(1, maxLines - headerCount - 1);
 
-      // Keep sidebar scroll focused on selected task
+      // Keep sidebar scroll focused on selected task accounting for wrapped visual rows
+      const sidebarItemLabel = (t: SubagentTask, isSelected: boolean): string => {
+        const icon = isSelected ? '●' : '○';
+        const name = t.display_name?.trim() || t.agent;
+        const effortTag = t.effort ? ` effort:${t.effort}` : '';
+        return `${icon} ${name}:${t.status}${effortTag}`;
+      };
+      const sidebarRowCountFor = (idx: number): number =>
+        wrapLineToWidth(sidebarItemLabel(tasks[idx]!, idx === this.selected), Math.max(1, sidebarWidth)).length;
+
       if (this.selected !== this.lastSelectedTaskIdx) {
         if (this.selected < this.sidebarScroll) this.sidebarScroll = this.selected;
-        if (this.selected >= this.sidebarScroll + bodyHeight) this.sidebarScroll = this.selected - bodyHeight + 1;
+        let rowsToSelected = 0;
+        for (let idx = this.sidebarScroll; idx <= this.selected; idx += 1) {
+          rowsToSelected += sidebarRowCountFor(idx);
+        }
+        while (rowsToSelected > bodyHeight && this.sidebarScroll < this.selected) {
+          rowsToSelected -= sidebarRowCountFor(this.sidebarScroll);
+          this.sidebarScroll += 1;
+        }
         this.lastSelectedTaskIdx = this.selected;
       }
-      this.sidebarScroll = Math.max(0, Math.min(Math.max(0, tasks.length - bodyHeight), this.sidebarScroll));
+      this.sidebarScroll = Math.max(0, Math.min(Math.max(0, tasks.length - 1), this.sidebarScroll));
 
-      // Prepare main view content
-      const structuredBody = isValidThreadSnapshot(currentTask.thread_snapshot);
-      let wrappedEntries = this.bodyEntriesFor(currentTask, rightWidth);
-      if (splitOverflowLines.length) {
-        wrappedEntries = [...splitOverflowLines.map((text) => ({ text, taskId: currentTask.id })), ...wrappedEntries];
+      // Build wrapped visual rows for the visible sidebar window (no ellipsis clipping)
+      const sidebarVisualRows: Array<{ taskId: string; text: string }> = [];
+      for (let taskIdx = this.sidebarScroll; taskIdx < tasks.length && sidebarVisualRows.length < bodyHeight; taskIdx += 1) {
+        const t = tasks[taskIdx]!;
+        const isSelected = taskIdx === this.selected;
+        const wrappedLines = wrapLineToWidth(sidebarItemLabel(t, isSelected), Math.max(1, sidebarWidth));
+        for (const wLine of wrappedLines) {
+          if (sidebarVisualRows.length >= bodyHeight) break;
+          sidebarVisualRows.push({
+            taskId: t.id,
+            text: isSelected ? themeFg(th, 'warning', wLine, AMBER) : dim(wLine),
+          });
+        }
       }
-      const maxScroll = Math.max(0, wrappedEntries.length - bodyHeight);
-      if (this.followTail) this.scroll = maxScroll;
-      if (this.scroll > maxScroll) this.scroll = maxScroll;
-      this.lastMaxScroll = maxScroll;
-      const visibleEntries = wrappedEntries.slice(this.scroll, this.scroll + bodyHeight);
+
+      // Prepare main view content (incremental viewport-only for structured snapshots)
+      const structuredBody = isValidThreadSnapshot(currentTask.thread_snapshot);
+      const viewport = this.renderDetailViewport(currentTask, rightWidth, bodyHeight, splitOverflowLines);
+      const visibleEntries = viewport.visibleEntries;
+      const totalBodyLines = viewport.totalLines;
+      this.lastMaxScroll = viewport.maxScroll;
 
       this.rowTaskMap.clear();
       this.sidebarRowTaskMap.clear();
@@ -719,22 +821,13 @@ export class SubagentsHistoryPanel {
       for (let i = 0; i < bodyHeight; i++) {
         const terminalRow = headerCount + i;
 
-        // Sidebar Column Cell
-        const sidebarTaskIdx = this.sidebarScroll + i;
+        // Sidebar Column Cell (wrapped visual row -> owning taskId)
+        const sidebarVisual = sidebarVisualRows[i];
         let leftCellText = '';
-        if (sidebarTaskIdx < tasks.length) {
-          const t = tasks[sidebarTaskIdx]!;
-          const isSelected = sidebarTaskIdx === this.selected;
-          this.sidebarRowTaskMap.set(terminalRow, t.id);
-          this.rowTaskMap.set(terminalRow, t.id);
-
-          const icon = isSelected ? '●' : '○';
-          const statusText = t.status;
-          const name = t.display_name?.trim() || t.agent;
-          const effortTag = t.effort ? ` effort:${t.effort}` : '';
-          const itemLabel = `${icon} ${name}:${statusText}${effortTag}`;
-          const clippedItem = this.truncateToWidth(itemLabel, sidebarWidth);
-          leftCellText = isSelected ? themeFg(th, 'warning', clippedItem, AMBER) : dim(clippedItem);
+        if (sidebarVisual) {
+          this.sidebarRowTaskMap.set(terminalRow, sidebarVisual.taskId);
+          this.rowTaskMap.set(terminalRow, sidebarVisual.taskId);
+          leftCellText = sidebarVisual.text;
         }
         const leftCell = this.padToWidth(leftCellText, sidebarWidth);
 
@@ -755,8 +848,8 @@ export class SubagentsHistoryPanel {
       }
 
       // Bottom Border with Rounded Corners, Scroll position & Shortcuts & close button
-      const scrollPos = wrappedEntries.length > bodyHeight
-        ? `[${this.scroll + 1}-${Math.min(wrappedEntries.length, this.scroll + bodyHeight)}/${wrappedEntries.length}]`
+      const scrollPos = totalBodyLines > bodyHeight
+        ? `[${this.scroll + 1}-${Math.min(totalBodyLines, this.scroll + bodyHeight)}/${totalBodyLines}]`
         : '';
       const shortcuts = dim('←/→ exec · ↑/↓ scroll · ctrl+t thinking');
       const scrollBadge = scrollPos ? dim(`${scrollPos} `) : '';
@@ -818,25 +911,36 @@ export class SubagentsHistoryPanel {
       const listHeight = Math.min(tasks.length, Math.max(1, Math.min(maxLines < 14 ? 2 : 4, Math.floor(availableSpace * 0.35))));
       const detailsHeight = Math.max(1, availableSpace - listHeight);
 
-      // Keep sidebar scroll focused on selected task within listHeight
+      // Keep sidebar scroll focused on selected task within listHeight accounting for wrapped rows
+      const stackedItemLabel = (t: SubagentTask, taskIdx: number, isSelected: boolean): string => {
+        const icon = isSelected ? '●' : '○';
+        const name = t.display_name?.trim() || t.agent;
+        const dur = fmtDuration(t);
+        const durPart = dur ? ` · ${dur}` : '';
+        return `${icon} ${taskIdx + 1}. ${name} · ${t.status}${durPart}`;
+      };
+      const stackedRowCountFor = (idx: number): number =>
+        wrapLineToWidth(stackedItemLabel(tasks[idx]!, idx, idx === this.selected), Math.max(1, rightWidth)).length;
+
       if (this.selected !== this.lastSelectedTaskIdx) {
         if (this.selected < this.sidebarScroll) this.sidebarScroll = this.selected;
-        if (this.selected >= this.sidebarScroll + listHeight) this.sidebarScroll = this.selected - listHeight + 1;
+        let rowsToSelected = 0;
+        for (let idx = this.sidebarScroll; idx <= this.selected; idx += 1) {
+          rowsToSelected += stackedRowCountFor(idx);
+        }
+        while (rowsToSelected > listHeight && this.sidebarScroll < this.selected) {
+          rowsToSelected -= stackedRowCountFor(this.sidebarScroll);
+          this.sidebarScroll += 1;
+        }
         this.lastSelectedTaskIdx = this.selected;
       }
-      this.sidebarScroll = Math.max(0, Math.min(Math.max(0, tasks.length - listHeight), this.sidebarScroll));
+      this.sidebarScroll = Math.max(0, Math.min(Math.max(0, tasks.length - 1), this.sidebarScroll));
 
-      // Prepare main view content
+      // Prepare main view content (incremental viewport-only for structured snapshots)
       const structuredBody = isValidThreadSnapshot(currentTask.thread_snapshot);
-      let wrappedEntries = this.bodyEntriesFor(currentTask, rightWidth);
-      if (stackedOverflowLines.length) {
-        wrappedEntries = [...stackedOverflowLines.map((text) => ({ text, taskId: currentTask.id })), ...wrappedEntries];
-      }
-      const maxScroll = Math.max(0, wrappedEntries.length - detailsHeight);
-      if (this.followTail) this.scroll = maxScroll;
-      if (this.scroll > maxScroll) this.scroll = maxScroll;
-      this.lastMaxScroll = maxScroll;
-      const visibleEntries = wrappedEntries.slice(this.scroll, this.scroll + detailsHeight);
+      const viewport = this.renderDetailViewport(currentTask, rightWidth, detailsHeight, stackedOverflowLines);
+      const visibleEntries = viewport.visibleEntries;
+      this.lastMaxScroll = viewport.maxScroll;
 
       this.rowTaskMap.clear();
       this.sidebarRowTaskMap.clear();
@@ -867,25 +971,29 @@ export class SubagentsHistoryPanel {
       const listDivFill = Math.max(0, w - listLabelVis - 5);
       rawLines.push(`${border(ROUNDED_BOX_CHARS.tRight + ROUNDED_BOX_CHARS.horizontal)} ${dim(listLabel)} ${border(ROUNDED_BOX_CHARS.horizontal.repeat(listDivFill) + ROUNDED_BOX_CHARS.tLeft)}`);
 
-      // Render subagents list rows
+      // Render wrapped subagents list rows (no ellipsis clipping, accurate visual-row hit mapping)
       this.lastListStartRow = rawLines.length;
+      const stackedListVisualRows: Array<{ taskId: string; text: string }> = [];
+      for (let taskIdx = this.sidebarScroll; taskIdx < tasks.length && stackedListVisualRows.length < listHeight; taskIdx += 1) {
+        const t = tasks[taskIdx]!;
+        const isSelected = taskIdx === this.selected;
+        const wrappedLines = wrapLineToWidth(stackedItemLabel(t, taskIdx, isSelected), Math.max(1, rightWidth));
+        for (const wLine of wrappedLines) {
+          if (stackedListVisualRows.length >= listHeight) break;
+          stackedListVisualRows.push({
+            taskId: t.id,
+            text: isSelected ? themeFg(th, 'warning', wLine, AMBER) : dim(wLine),
+          });
+        }
+      }
       for (let i = 0; i < listHeight; i++) {
         const terminalRow = rawLines.length;
-        const taskIdx = this.sidebarScroll + i;
+        const visual = stackedListVisualRows[i];
         let lineContent = '';
-        if (taskIdx < tasks.length) {
-          const t = tasks[taskIdx]!;
-          const isSelected = taskIdx === this.selected;
-          this.sidebarRowTaskMap.set(terminalRow, t.id);
-          this.rowTaskMap.set(terminalRow, t.id);
-
-          const icon = isSelected ? '●' : '○';
-          const name = t.display_name?.trim() || t.agent;
-          const dur = fmtDuration(t);
-          const durPart = dur ? ` · ${dur}` : '';
-          const itemText = `${icon} ${taskIdx + 1}. ${name} · ${t.status}${durPart}`;
-          const clipped = this.truncateToWidth(itemText, rightWidth);
-          lineContent = isSelected ? themeFg(th, 'warning', clipped, AMBER) : dim(clipped);
+        if (visual) {
+          this.sidebarRowTaskMap.set(terminalRow, visual.taskId);
+          this.rowTaskMap.set(terminalRow, visual.taskId);
+          lineContent = visual.text;
         }
         const padded = this.padToWidth(lineContent, rightWidth);
         rawLines.push(`${border(ROUNDED_BOX_CHARS.vertical)} ${padded} ${border(ROUNDED_BOX_CHARS.vertical)}`);
@@ -940,59 +1048,80 @@ export class SubagentsHistoryPanel {
   }
 
   private tasks(): SubagentTask[] {
-    return typeof this.tasksProvider === 'function' ? this.tasksProvider() : this.tasksProvider;
+    if (this.displayOptions.taskWindowLoader) {
+      let windowResult = this.displayOptions.taskWindowLoader(this.loadedTaskLimit);
+      let safetySteps = 0;
+      while (
+        this.selectedTaskId
+        && windowResult.hasMore
+        && !windowResult.tasks.some((task) => task.id === this.selectedTaskId)
+        && safetySteps < 20
+      ) {
+        this.loadedTaskLimit += this.taskWindowStep;
+        windowResult = this.displayOptions.taskWindowLoader(this.loadedTaskLimit);
+        safetySteps += 1;
+      }
+      this.hasMoreTasks = windowResult.hasMore;
+      this.lastLoadedTasks = windowResult.tasks;
+      return windowResult.tasks;
+    }
+    const list = typeof this.tasksProvider === 'function' ? this.tasksProvider() : this.tasksProvider;
+    this.hasMoreTasks = false;
+    this.lastLoadedTasks = list;
+    return list;
   }
 
   private renderFlowLine(raw: string, width: number): string {
     const th = this.theme;
     if (raw.startsWith('Preparing for response') || /^\*\*.+\*\*$/.test(raw)) {
-      const clipped = this.truncateToWidth(raw, width);
-      const text = th?.bold?.(clipped) ?? clipped;
+      const text = th?.bold?.(raw) ?? raw;
       return th?.fg?.('dim', text) ?? text;
     }
     if (this.isToolLikeLine(raw)) {
-      const clipped = this.truncateToWidth(raw, width);
-      return th?.fg?.('toolTitle', clipped) ?? clipped;
+      return th?.fg?.('toolTitle', raw) ?? raw;
     }
     if (raw.startsWith('done') || raw.startsWith('completed')) {
-      const clipped = this.truncateToWidth(raw, width);
-      return th?.fg?.('success', clipped) ?? clipped;
+      return th?.fg?.('success', raw) ?? raw;
     }
     if (raw.startsWith('failed') || raw.startsWith('error')) {
-      const clipped = this.truncateToWidth(raw, width);
-      return th?.fg?.('error', clipped) ?? clipped;
+      return th?.fg?.('error', raw) ?? raw;
     }
     if (raw.startsWith('# ') || raw.startsWith('## ') || raw.startsWith('### ')) {
       const border = (t: string) => themeFg(th, 'accent', t, CYAN);
       const titleText = raw.replace(/^#+\s*/, '');
       const maxTitle = Math.max(4, width - 8);
-      const clippedTitle = this.truncateToWidth(titleText, maxTitle);
-      const heading = th?.bold?.(th?.fg?.('mdHeading', clippedTitle) ?? clippedTitle) ?? clippedTitle;
-      const leftFrame = `${border(BOX_CHARS.topLeft + BOX_CHARS.horizontal + ' ')}${heading} `;
-      const leftVisWidth = this.visibleWidth(leftFrame);
-      const rightCorner = border(BOX_CHARS.topRight);
-      const rightVisWidth = this.visibleWidth(rightCorner);
-      const filler = Math.max(0, width - leftVisWidth - rightVisWidth);
-      const framed = `${leftFrame}${border(BOX_CHARS.horizontal.repeat(filler))}${rightCorner}`;
-      return framed;
+      if (this.visibleWidth(titleText) <= maxTitle) {
+        const heading = th?.bold?.(th?.fg?.('mdHeading', titleText) ?? titleText) ?? titleText;
+        const leftFrame = `${border(BOX_CHARS.topLeft + BOX_CHARS.horizontal + ' ')}${heading} `;
+        const leftVisWidth = this.visibleWidth(leftFrame);
+        const rightCorner = border(BOX_CHARS.topRight);
+        const rightVisWidth = this.visibleWidth(rightCorner);
+        const filler = Math.max(0, width - leftVisWidth - rightVisWidth);
+        return `${leftFrame}${border(BOX_CHARS.horizontal.repeat(filler))}${rightCorner}`;
+      }
+      return th?.bold?.(th?.fg?.('mdHeading', titleText) ?? titleText) ?? titleText;
     }
     if (raw.startsWith('  ')) {
-      const clipped = this.truncateToWidth(raw, width);
-      return th?.fg?.('dim', clipped) ?? clipped;
+      return th?.fg?.('dim', raw) ?? raw;
     }
-    return this.truncateToWidth(raw, width);
+    return hasAnsiEscape(raw) ? raw : stylePlainMuted(th, raw);
   }
 
   private taskSignature(task: SubagentTask): string {
     const snapshot = task.thread_snapshot;
     return [
       task.id,
+      task.display_name ?? '',
       task.status,
       task.attempt ?? 1,
       task.last_activity_at ?? '',
       task.ended_at ?? '',
       task.last_activity ?? '',
+      task.output_preview ?? '',
+      task.pending_message_count ?? '',
+      task.undelivered_message_count ?? '',
       task.error ?? '',
+      task.error_metadata ? contentRevision(task.error_metadata) : '',
       task.model ?? '',
       task.effort ?? '',
       task.usage ? contentRevision(task.usage) : '',
@@ -1190,6 +1319,353 @@ export class SubagentsHistoryPanel {
       const { cleanLine, taskId } = this.resolveTaskIdFromFlowLine(line, tasks);
       return { text: cleanLine, taskId };
     });
+  }
+
+  private renderDetailViewport(
+    task: SubagentTask,
+    width: number,
+    viewportHeight: number,
+    prefixOverflowLines: string[],
+  ): { visibleEntries: DetailEntry[]; totalLines: number; maxScroll: number } {
+    const activeSnapshot = isValidThreadSnapshot(task.thread_snapshot) ? task.thread_snapshot : undefined;
+    if (!activeSnapshot) {
+      this.viewportState = undefined;
+      let wrappedEntries = this.bodyEntriesFor(task, width);
+      if (prefixOverflowLines.length) {
+        wrappedEntries = [...prefixOverflowLines.map((text) => ({ text, taskId: task.id })), ...wrappedEntries];
+      }
+      const maxScroll = Math.max(0, wrappedEntries.length - viewportHeight);
+      if (this.followTail) this.scroll = maxScroll;
+      if (this.scroll > maxScroll) this.scroll = maxScroll;
+      return {
+        visibleEntries: wrappedEntries.slice(this.scroll, this.scroll + viewportHeight),
+        totalLines: wrappedEntries.length,
+        maxScroll,
+      };
+    }
+
+    const prepared = prepareNormalizedThreadSnapshot(activeSnapshot);
+    const prefixEntries: DetailEntry[] = prefixOverflowLines.map((text) => ({ text, taskId: task.id }));
+    const suffixRaw: DetailEntry[] = ((task.status === 'failed' || task.status === 'cancelled') && task.error && !hasEquivalentSnapshotError(activeSnapshot, task.error))
+      ? [{ text: '' }, { text: '# error' }, { text: task.error }]
+      : [];
+    const suffixEntries = suffixRaw.length ? this.wrapWithTaskIds(suffixRaw, width) : [];
+
+    if (!prepared || prepared.items.length === 0) {
+      this.viewportState = undefined;
+      const combined = [...prefixEntries, ...(suffixEntries.length ? suffixEntries : [{ text: '' }])];
+      const maxScroll = Math.max(0, combined.length - viewportHeight);
+      if (this.followTail) this.scroll = maxScroll;
+      if (this.scroll > maxScroll) this.scroll = maxScroll;
+      return {
+        visibleEntries: combined.slice(this.scroll, this.scroll + viewportHeight),
+        totalLines: combined.length,
+        maxScroll,
+      };
+    }
+
+    const items = prepared.items;
+    const attempt = task.attempt ?? 1;
+    const effectiveTheme = this.renderContext.theme ?? this.theme;
+    const cwd = this.renderContext.cwd ?? process.cwd();
+    const rendererGen = getSubagentToolRendererGeneration();
+    const contextKey = [
+      width,
+      this.toolOutputExpanded ? 'tool-expanded' : 'tool-collapsed',
+      this.hideThinkingBlock ? 'thinking-hidden' : 'thinking-visible',
+      this.renderContext.showImages ? 'images' : 'no-images',
+      this.renderContext.imageWidthCells ?? '',
+      cwd,
+    ].join('|');
+
+    if (!this.viewportState || this.viewportState.taskId !== task.id || this.viewportState.attempt !== attempt) {
+      this.viewportState = { taskId: task.id, attempt, itemsByKey: new Map() };
+    }
+    const state = this.viewportState;
+    for (const key of state.itemsByKey.keys()) {
+      if (!prepared.validKeys.has(key)) state.itemsByKey.delete(key);
+    }
+
+    const suffixRev = suffixRaw.length ? contentRevision([task.error, task.error_metadata]) : '';
+    const sliceKey = [
+      items.length,
+      width,
+      viewportHeight,
+      contextKey,
+      rendererGen,
+      this.expansionOverridesVersion,
+      this.followTail ? 'tail' : String(this.scroll),
+      prefixEntries.length,
+      suffixRev,
+    ].join('|');
+
+    // Warm-frame fast path: verify only the visible item slice with one contentRevision call.
+    if (
+      state.lastSliceKey === sliceKey
+      && state.lastTheme === effectiveTheme
+      && !state.lastHasLiveTool
+      && state.lastStartIdx !== undefined
+      && state.lastEndIdx !== undefined
+      && state.lastVisibleEntries !== undefined
+      && state.lastTotalLines !== undefined
+      && state.lastScroll !== undefined
+    ) {
+      const visibleRaw = items.slice(state.lastStartIdx, state.lastEndIdx + 1).map((entry) => entry.rawItem);
+      if (contentRevision(visibleRaw) === state.lastSliceRevision) {
+        this.scroll = state.lastScroll;
+        const maxScroll = Math.max(0, state.lastTotalLines - viewportHeight);
+        return {
+          visibleEntries: state.lastVisibleEntries,
+          totalLines: state.lastTotalLines,
+          maxScroll,
+        };
+      }
+    }
+
+    const knownTasks = this.tasks();
+    const targetFor = (target: DetailTarget): DetailTarget => ({ ...target, key: `${target.kind}:${task.id}:${attempt}:${target.key}` });
+    const baseContext: SubagentThreadRenderContext = {
+      ...this.renderContext,
+      theme: effectiveTheme,
+      cwd,
+      taskId: task.id,
+      visibleWidth: this.renderContext.visibleWidth ?? this.visibleWidth,
+      truncateToWidth: this.renderContext.truncateToWidth ?? this.truncateToWidth,
+      renderWidth: width,
+      toolOutputExpanded: this.toolOutputExpanded,
+      hideThinkingBlock: this.hideThinkingBlock,
+      isExpanded: (target, defaultExpanded) => this.expansionOverrides.get(targetFor(target).key) ?? defaultExpanded,
+    };
+    this.threadRenderCache.beginViewport(baseContext, contextKey);
+    this.threadRenderCache.pruneByItemKeys(prepared.validKeys);
+
+    const expansionSigFor = (itemKey: string): string => {
+      if (this.expansionOverrides.size === 0) return '';
+      const needle = `:${task.id}:${attempt}:${itemKey}`;
+      const parts: string[] = [];
+      for (const [k, v] of this.expansionOverrides.entries()) {
+        if (k.includes(needle)) parts.push(`${k}=${v ? '1' : '0'}`);
+      }
+      return parts.join(';');
+    };
+
+    const isFreshlyMaterialized = (idx: number): boolean => {
+      const prep = items[idx]!;
+      const cached = state.itemsByKey.get(prep.itemKey);
+      if (!cached || cached.hasLiveTool) return false;
+      return cached.width === width
+        && cached.contextKey === contextKey
+        && cached.rendererGen === rendererGen
+        && cached.theme === effectiveTheme
+        && cached.expansionSig === expansionSigFor(prep.itemKey);
+    };
+
+    const frameMaterialized = new Map<number, CachedViewportItem>();
+
+    const materializeIndex = (idx: number): CachedViewportItem => {
+      const inFrame = frameMaterialized.get(idx);
+      if (inFrame) return inFrame;
+      const prep = items[idx]!;
+      const expSig = expansionSigFor(prep.itemKey);
+      const cached = state.itemsByKey.get(prep.itemKey);
+      const itemRev = contentRevision(prep.rawItem);
+      if (
+        cached
+        && !cached.hasLiveTool
+        && cached.width === width
+        && cached.contextKey === contextKey
+        && cached.rendererGen === rendererGen
+        && cached.theme === effectiveTheme
+        && cached.expansionSig === expSig
+        && cached.itemRevision === itemRev
+      ) {
+        frameMaterialized.set(idx, cached);
+        return cached;
+      }
+
+      const rawEntries: DetailEntry[] = [];
+      const itemContext: SubagentThreadRenderContext = {
+        ...baseContext,
+        onItemRendered: (item, lines, target) => {
+          const taskId = this.resolveTaskIdFromSnapshotItem(item, knownTasks);
+          for (const text of lines) {
+            const resolved = taskId ? { cleanLine: text, taskId } : this.resolveTaskIdFromFlowLine(text, knownTasks);
+            rawEntries.push({ text: resolved.cleanLine, taskId: resolved.taskId, target: target ? targetFor(target) : undefined });
+          }
+        },
+      };
+      const result = renderPreparedThreadItem(prep, itemContext, width, this.threadRenderCache, { contentStable: false, contextKey });
+      if (!rawEntries.length && result.lines.length) {
+        for (const text of result.lines) rawEntries.push({ text });
+      }
+      const wrapped = this.wrapWithTaskIds(rawEntries, width);
+      const entry: CachedViewportItem = {
+        itemKey: prep.itemKey,
+        itemRevision: itemRev,
+        width,
+        contextKey,
+        rendererGen,
+        expansionSig: expSig,
+        theme: effectiveTheme,
+        hasLiveTool: result.hasLiveTool,
+        entries: wrapped,
+      };
+      state.itemsByKey.set(prep.itemKey, entry);
+      frameMaterialized.set(idx, entry);
+      return entry;
+    };
+
+    const itemHeight = (idx: number): number => {
+      const cached = state.itemsByKey.get(items[idx]!.itemKey);
+      if (cached && cached.width === width && cached.contextKey === contextKey && cached.theme === effectiveTheme) {
+        return cached.entries.length;
+      }
+      return 1;
+    };
+
+    const computeTotalLines = (): number => {
+      let total = prefixEntries.length + suffixEntries.length;
+      for (let j = 0; j < items.length; j += 1) total += itemHeight(j);
+      return total;
+    };
+
+    const itemStartOffset = (idx: number): number => {
+      let pos = prefixEntries.length;
+      for (let j = 0; j < idx; j += 1) pos += itemHeight(j);
+      return pos;
+    };
+
+    if (this.followTail) {
+      let accumulated = suffixEntries.length;
+      for (let idx = items.length - 1; idx >= 0 && accumulated < viewportHeight + VIEWPORT_OVERSCAN_LINES; idx -= 1) {
+        accumulated += materializeIndex(idx).entries.length;
+      }
+      const totalLines = computeTotalLines();
+      const maxScroll = Math.max(0, totalLines - viewportHeight);
+      this.scroll = maxScroll;
+    } else {
+      // Scroll up: materialize unrendered items above the previous anchor while keeping visual anchor pinned.
+      if (this.scroll > 0 && state.lastScroll !== undefined && this.scroll < state.lastScroll && state.lastStartIdx !== undefined) {
+        const startK = Math.min(items.length - 1, state.lastStartIdx);
+        for (let k = startK; k >= 0; k -= 1) {
+          const startOfK = itemStartOffset(k);
+          const oldH = itemHeight(k);
+          if (startOfK + oldH <= this.scroll - VIEWPORT_OVERSCAN_LINES) break;
+          const wasFresh = isFreshlyMaterialized(k);
+          const mat = materializeIndex(k);
+          if (!wasFresh && k < state.lastStartIdx) {
+            const delta = mat.entries.length - oldH;
+            if (delta !== 0) this.scroll = Math.max(0, this.scroll + delta);
+          }
+        }
+      }
+
+      // Forward sweep: materialize only items overlapping [scroll, scroll + viewportHeight + overscan).
+      let pos = prefixEntries.length;
+      let idx = 0;
+      while (idx < items.length && pos + itemHeight(idx) <= this.scroll) {
+        pos += itemHeight(idx);
+        idx += 1;
+      }
+      while (idx < items.length && pos < this.scroll + viewportHeight + VIEWPORT_OVERSCAN_LINES) {
+        const mat = materializeIndex(idx);
+        pos += mat.entries.length;
+        idx += 1;
+      }
+
+      let totalLines = computeTotalLines();
+      let maxScroll = Math.max(0, totalLines - viewportHeight);
+      if (this.scroll > maxScroll) {
+        this.scroll = maxScroll;
+        let acc = suffixEntries.length;
+        for (let k = items.length - 1; k >= 0 && acc < viewportHeight + VIEWPORT_OVERSCAN_LINES; k -= 1) {
+          acc += materializeIndex(k).entries.length;
+        }
+        totalLines = computeTotalLines();
+        maxScroll = Math.max(0, totalLines - viewportHeight);
+        if (this.scroll > maxScroll) this.scroll = maxScroll;
+      }
+    }
+
+    // Collect the exact visible viewport slice [this.scroll, this.scroll + viewportHeight).
+    const viewStart = this.scroll;
+    const viewEnd = this.scroll + viewportHeight;
+    const visibleEntries: DetailEntry[] = [];
+    let cursor = 0;
+
+    if (prefixEntries.length) {
+      const sliceFrom = Math.max(0, viewStart - cursor);
+      const sliceTo = Math.min(prefixEntries.length, viewEnd - cursor);
+      if (sliceTo > sliceFrom) visibleEntries.push(...prefixEntries.slice(sliceFrom, sliceTo));
+      cursor += prefixEntries.length;
+    }
+
+    let firstVisibleIdx: number | undefined;
+    let lastVisibleIdx: number | undefined;
+    let hasLiveTool = false;
+
+    for (let j = 0; j < items.length; j += 1) {
+      const h = itemHeight(j);
+      if (cursor + h <= viewStart) {
+        cursor += h;
+        continue;
+      }
+      if (cursor >= viewEnd) break;
+      const mat = materializeIndex(j);
+      if (firstVisibleIdx === undefined) firstVisibleIdx = j;
+      lastVisibleIdx = j;
+      if (mat.hasLiveTool) hasLiveTool = true;
+      const len = mat.entries.length;
+      const sliceFrom = Math.max(0, viewStart - cursor);
+      const sliceTo = Math.min(len, viewEnd - cursor);
+      if (sliceTo > sliceFrom) visibleEntries.push(...mat.entries.slice(sliceFrom, sliceTo));
+      cursor += len;
+    }
+
+    if (suffixEntries.length && cursor < viewEnd) {
+      const sliceFrom = Math.max(0, viewStart - cursor);
+      const sliceTo = Math.min(suffixEntries.length, viewEnd - cursor);
+      if (sliceTo > sliceFrom) visibleEntries.push(...suffixEntries.slice(sliceFrom, sliceTo));
+    }
+
+    if (!visibleEntries.length && computeTotalLines() === 0) {
+      visibleEntries.push({ text: '' });
+    }
+
+    const finalTotalLines = Math.max(visibleEntries.length, computeTotalLines());
+    const finalMaxScroll = Math.max(0, finalTotalLines - viewportHeight);
+    if (this.followTail) this.scroll = finalMaxScroll;
+
+    state.lastTheme = effectiveTheme;
+    state.lastStartIdx = firstVisibleIdx;
+    state.lastEndIdx = lastVisibleIdx;
+    state.lastHasLiveTool = hasLiveTool;
+    state.lastTotalLines = finalTotalLines;
+    state.lastScroll = this.scroll;
+    state.lastVisibleEntries = visibleEntries;
+    if (!hasLiveTool && firstVisibleIdx !== undefined && lastVisibleIdx !== undefined) {
+      state.lastSliceKey = [
+        items.length,
+        width,
+        viewportHeight,
+        contextKey,
+        rendererGen,
+        this.expansionOverridesVersion,
+        this.followTail ? 'tail' : String(this.scroll),
+        prefixEntries.length,
+        suffixRev,
+      ].join('|');
+      state.lastSliceRevision = contentRevision(items.slice(firstVisibleIdx, lastVisibleIdx + 1).map((entry) => entry.rawItem));
+    } else {
+      state.lastSliceKey = undefined;
+      state.lastSliceRevision = undefined;
+    }
+
+    return {
+      visibleEntries,
+      totalLines: finalTotalLines,
+      maxScroll: finalMaxScroll,
+    };
   }
 
   private bodyEntriesFor(task: SubagentTask, width: number): DetailEntry[] {

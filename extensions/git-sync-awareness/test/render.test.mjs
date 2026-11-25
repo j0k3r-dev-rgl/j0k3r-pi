@@ -536,3 +536,81 @@ test("MINI-004: Mouse Click handling toggles expansion and requests render", asy
   const collapsedAgain = renderer.render(80);
   assert.equal(collapsedAgain.length, 1, "Should collapse back to 1 line after second click");
 });
+
+test("MINI-005: Collapsed headers wrap without clipping and plain-text expanded bodies render muted", async () => {
+  const render = await import("../src/render.ts");
+  const { createGitSyncMessageRenderer } = render;
+
+  const branch = "feature/supercalifragilisticexpialidocious-rendering-pipeline";
+  const diagnostic = {
+    timestamp: Date.now(),
+    fetchSuccess: true,
+    currentBranch: {
+      branch,
+      upstream: "origin/main",
+      syncStatus: "AHEAD",
+      ahead: 3,
+      behind: 0,
+      incomingCommits: [],
+    },
+    otherLocalBranches: [
+      { branch: "main", upstream: "origin/main", ahead: 0, behind: 0, syncStatus: "UP-TO-DATE" },
+    ],
+    remoteBranches: ["origin/main"],
+    remoteOnlyBranches: [],
+    activeCollaboratorBranches: ["origin/collab/alice-long-collaborator-branch-name"],
+    workingTree: { isClean: true, modifiedCount: 0, untrackedCount: 0, stagedCount: 0, summaryLines: [] },
+    isBranchPolicyCompliant: true,
+    requiresDecision: false,
+    formattedReport: "AHEAD",
+  };
+
+  const collapsed = createGitSyncMessageRenderer(
+    { customType: "git-sync-awareness", content: "AHEAD", details: diagnostic },
+    { expanded: false }
+  );
+
+  // Narrow collapsed header wraps across multiple margined lines without ellipsis clipping.
+  const narrow = collapsed.render(24);
+  assert.ok(narrow.length > 1, "narrow collapsed header must wrap");
+  for (const line of narrow) {
+    assert.ok(render.visibleWidth(line) <= 24, `wrapped line exceeds width: ${JSON.stringify(line)}`);
+    assert.ok(render.stripAnsi(line).startsWith(" "), "1-char left margin required on every wrapped line");
+    assert.doesNotMatch(render.stripAnsi(line), /…/);
+  }
+  const joinedNarrow = render.stripAnsi(narrow.join("")).replace(/\s+/g, "");
+  assert.ok(joinedNarrow.includes("supercalifragilisticexpialidocious"), "branch text must survive wrapping");
+  assert.ok(render.stripAnsi(narrow.join("")).replace(/\s+/g, "").includes("AHEAD[3]"), "badge text must survive wrapping");
+
+  // Wide collapsed header stays a single row.
+  assert.equal(collapsed.render(120).length, 1);
+
+  const expanded = createGitSyncMessageRenderer(
+    { customType: "git-sync-awareness", content: "AHEAD", details: diagnostic },
+    { expanded: true }
+  ).render(60);
+
+  const plainBodyLines = expanded
+    .map((line) => ({ raw: line, plain: render.stripAnsi(line) }))
+    .filter((entry) => /^ (Branch:|Working Tree:|• )/.test(entry.plain));
+  assert.ok(plainBodyLines.length > 0, "expanded output must contain plain-text body lines");
+  for (const entry of plainBodyLines) {
+    assert.ok(entry.raw.includes(render.MUTED), `plain expanded line must use muted foreground: ${JSON.stringify(entry.plain)}`);
+  }
+
+  const expandedText = expanded.join("\n");
+  assert.ok(expandedText.includes(render.BOLD), "branch/heading emphasis preserved");
+  assert.match(render.stripAnsi(expandedText), /AHEAD\s*\[3\]/);
+  assert.doesNotMatch(render.stripAnsi(expandedText), /…/);
+
+  // Fallback expanded body (no structured details) also uses muted plain text.
+  const fallback = createGitSyncMessageRenderer(
+    { customType: "git-sync-awareness", content: "first diagnostic line\nsecond diagnostic line" },
+    { expanded: true }
+  ).render(20);
+  assert.ok(fallback.length > 2);
+  const fallbackContentLines = fallback.filter((line) => /diagnostic/.test(render.stripAnsi(line)));
+  assert.ok(fallbackContentLines.length > 0);
+  for (const line of fallbackContentLines) assert.ok(line.includes(render.MUTED));
+  for (const line of fallback) assert.ok(render.visibleWidth(line) <= 20);
+});

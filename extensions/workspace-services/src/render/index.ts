@@ -25,6 +25,11 @@ export const YELLOW = '\x1b[1;38;2;255;204;0m';
 export const RED = '\x1b[1;38;2;255;77;109m';
 export const DIM = '\x1b[2m';
 export const BOLD = '\x1b[1m';
+const MUTED_FALLBACK = '\x1b[38;2;122;167;184m';
+const FG_RESET = '\x1b[39m';
+const HAS_SGR_RE = /\x1b\[[0-9;]*m/;
+const PURE_FG_SGR_RE = /^\x1b\[(?:3[0-7]|9[0-7]|38;[0-9;]+)m$/;
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
 const ANSI_OSC_APC_RE = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b_[^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]/g;
 
@@ -41,46 +46,112 @@ export function fit(text: string, width: number): string {
   return truncateToWidth(text, width, width >= 4 ? '…' : '');
 }
 
-function renderLineWithMargin(line: string, safeWidth: number): string {
-  if (safeWidth <= 0) return '';
-  if (safeWidth === 1) return ' ';
-  const innerWidth = safeWidth - 1;
-  const fitted = fit(line, innerWidth);
-  if (safeWidth === 2 && visibleWidth(stripAnsi(fitted)) === 0 && visibleWidth(stripAnsi(line)) > 0) {
-    // Conditional width-2 margin exception: omit 1-col margin only when needed for an intact wide grapheme
-    return truncateToWidth(line, 2, '');
+function styleMuted(theme: any, text: string): string {
+  if (!text) return text;
+  if (typeof theme?.fg === 'function') {
+    try {
+      const styled = theme.fg('muted', text);
+      if (typeof styled === 'string' && styled !== text) {
+        return styled;
+      }
+    } catch {
+      // Fall back to arch-electric muted foreground
+    }
   }
-  return ` ${fitted}`;
+  return `${MUTED_FALLBACK}${text}${FG_RESET}`;
 }
 
-function wrapLinesToWidth(lines: string[], safeWidth: number): string[] {
+function mutePlainLine(theme: any, line: string): string {
+  if (!line || HAS_SGR_RE.test(line)) return line;
+  return styleMuted(theme, line);
+}
+
+function matchEscapeAt(str: string, index: number): string | undefined {
+  if (str[index] !== '\x1b') return undefined;
+  const next = str[index + 1];
+  if (next === '[') {
+    const m = str.slice(index).match(/^\x1b\[[0-?]*[ -/]*[@-~]/);
+    return m?.[0];
+  }
+  if (next === ']' || next === '_') {
+    const rest = str.slice(index + 2);
+    const bel = rest.indexOf('\x07');
+    const st = rest.indexOf('\x1b\\');
+    if (bel !== -1 && (st === -1 || bel < st)) return str.slice(index, index + 2 + bel + 1);
+    if (st !== -1) return str.slice(index, index + 2 + st + 2);
+  }
+  return undefined;
+}
+
+function wrapWidth2WithConditionalMargin(line: string): string[] {
+  const normalized = line.replace(/\t/g, '   ');
+  if (!normalized) return [' '];
+
+  let sgr: string[] = [];
+  let osc8 = '';
+  const out: string[] = [];
+  let i = 0;
+
+  while (i < normalized.length) {
+    const seq = matchEscapeAt(normalized, i);
+    if (seq) {
+      if (seq.startsWith('\x1b[') && seq.endsWith('m')) {
+        const params = seq.slice(2, -1);
+        if (params === '' || params.split(';').includes('0')) {
+          sgr = [];
+        } else if (params === '39' && sgr.every((entry) => PURE_FG_SGR_RE.test(entry))) {
+          sgr = [];
+        } else {
+          sgr.push(seq);
+        }
+      } else if (seq.startsWith('\x1b]8;')) {
+        const oscMatch = seq.match(/^\x1b\]8;[^;]*;([^\x07\x1b]*)(?:\x07|\x1b\\)$/);
+        if (oscMatch) osc8 = oscMatch[1] ? seq : '';
+      }
+      i += seq.length;
+      continue;
+    }
+    let end = i + 1;
+    while (end < normalized.length && !matchEscapeAt(normalized, end)) end++;
+    for (const { segment } of graphemeSegmenter.segment(normalized.slice(i, end))) {
+      const w = visibleWidth(segment);
+      if (w === 0) continue;
+      const prefix = sgr.join('') + osc8;
+      const suffix = (osc8 ? '\x1b]8;;\x07' : '') + (sgr.length > 0 ? RESET : '');
+      if (w >= 2) {
+        out.push(`${prefix}${segment}${suffix}`);
+      } else {
+        out.push(` ${prefix}${segment}${suffix}`);
+      }
+    }
+    i = end;
+  }
+
+  return out.length > 0 ? out : [' '];
+}
+
+function wrapMarginedLine(line: string, safeWidth: number): string[] {
   if (safeWidth <= 0) return [];
   if (safeWidth === 1) return [' '];
+  if (safeWidth === 2) return wrapWidth2WithConditionalMargin(line);
   const innerWidth = safeWidth - 1;
+  const normalized = line.replace(/\t/g, '   ');
+  if (normalized.length === 0) return [' '];
+  const wrapped = wrapTextWithAnsi(normalized, innerWidth);
+  return wrapped.map((piece) => {
+    const safePiece = visibleWidth(piece) > innerWidth ? truncateToWidth(piece, innerWidth, '') : piece;
+    return ` ${safePiece}`;
+  });
+}
+
+function wrapMarginedLines(lines: string[], safeWidth: number): string[] {
+  if (safeWidth <= 0) return [];
+  if (safeWidth === 1) return [' '];
   const out: string[] = [];
   for (const raw of lines) {
     const subLines = raw.split(/\r\n|\r|\n/);
     for (const sub of subLines) {
-      const normalized = sub.replace(/\t/g, '   ');
-      if (normalized.length === 0) {
-        out.push(' ');
-        continue;
-      }
-      if (safeWidth === 2) {
-        const probe = truncateToWidth(normalized, 1, '');
-        if (visibleWidth(stripAnsi(probe)) === 0 && visibleWidth(stripAnsi(normalized)) > 0) {
-          const wrappedWide = wrapTextWithAnsi(normalized, 2);
-          for (const piece of wrappedWide) {
-            out.push(visibleWidth(piece) > 2 ? truncateToWidth(piece, 2, '') : piece);
-          }
-          continue;
-        }
-      }
-      const wrapped = wrapTextWithAnsi(normalized, innerWidth);
-      for (const piece of wrapped) {
-        const clamped = visibleWidth(piece) > innerWidth ? truncateToWidth(piece, innerWidth, '') : piece;
-        out.push(` ${clamped}`);
-      }
+      out.push(...wrapMarginedLine(sub, safeWidth));
     }
   }
   return out;
@@ -121,7 +192,6 @@ export function renderWorkspaceServiceCall(
         if (safeWidth <= 0) return [];
         if (context?.state?.hasResult) return [];
         if (safeWidth === 1) return [' '];
-        const innerWidth = safeWidth - 1;
 
         const actionBadge = extractWorkspaceServiceAction(toolName, args);
         const color = context?.isError ? RED : CYAN;
@@ -134,11 +204,11 @@ export function renderWorkspaceServiceCall(
         const row = `${color}${toolName}${RESET}${badgePart} ${DIM}───${RESET} ${color}●${RESET} ${pendingDetail}`;
         cachedWidth = safeWidth;
         cachedColor = color;
-        cachedLine = [` ${fit(row, innerWidth)}`];
+        cachedLine = wrapMarginedLine(row, safeWidth);
         return cachedLine;
       } catch {
         if (safeWidth <= 0) return [];
-        return safeWidth === 1 ? [' '] : [` ${fit(String(toolName || 'workspace_service'), safeWidth - 1)}`];
+        return wrapMarginedLine(String(toolName || 'workspace_service'), safeWidth);
       }
     },
   };
@@ -157,10 +227,6 @@ function resultTextBlocks(result: WorkspaceServiceRenderResult | undefined): str
     .map((part) => part.text as string);
 }
 
-function resultText(result: WorkspaceServiceRenderResult | undefined): string {
-  return resultTextBlocks(result).join('\n');
-}
-
 export function renderWorkspaceServiceResult(
   first: string | WorkspaceServiceRenderResult,
   second?: any,
@@ -171,17 +237,20 @@ export function renderWorkspaceServiceResult(
   let toolName: string;
   let result: WorkspaceServiceRenderResult;
   let options: WorkspaceServiceRenderOptions;
+  let theme: any;
   let context: any;
 
   if (typeof first === 'string') {
     toolName = first;
     result = second ?? {};
     options = third ?? {};
+    theme = fourth;
     context = fifth;
   } else {
     toolName = 'workspace_service';
     result = first ?? {};
     options = second ?? {};
+    theme = third;
     context = fourth;
   }
 
@@ -218,7 +287,6 @@ export function renderWorkspaceServiceResult(
       try {
         if (safeWidth <= 0) return [];
         if (safeWidth === 1) return [' '];
-        const innerWidth = safeWidth - 1;
         if (!options?.isPartial && cachedWidth === safeWidth && cachedLines !== undefined) {
           return cachedLines;
         }
@@ -229,7 +297,7 @@ export function renderWorkspaceServiceResult(
         const isExpanded = Boolean(options?.expanded);
 
         if (options?.isPartial) {
-          return [renderLineWithMargin(`${CYAN}${toolName}${RESET}${badgePart} ${DIM}───${RESET} ${CYAN}●${RESET} running…`, safeWidth)];
+          return wrapMarginedLine(`${CYAN}${toolName}${RESET}${badgePart} ${DIM}───${RESET} ${CYAN}●${RESET} running…`, safeWidth);
         }
 
         const textBlocks = resultTextBlocks(result);
@@ -238,18 +306,25 @@ export function renderWorkspaceServiceResult(
         if (!outcome || typeof outcome.summary !== 'string') {
           const message = stripAnsi(joinedText) || 'workspace service result is missing details.';
           const inlineMsg = inlineText(message);
-          const header = renderLineWithMargin(`${RED}${toolName}${RESET}${badgePart} ${DIM}───${RESET} ${RED}Warning: ${inlineMsg}${RESET}`, safeWidth);
+          const headerLines = wrapMarginedLine(`${RED}${toolName}${RESET}${badgePart} ${DIM}───${RESET} ${RED}Warning: ${inlineMsg}${RESET}`, safeWidth);
           if (!isExpanded) {
-            const out = [header];
             cachedWidth = safeWidth;
-            cachedLines = out;
-            return out;
+            cachedLines = headerLines;
+            return headerLines;
           }
-          const bodyLines = [`${RED}Warning: ${stripAnsi(message)}${RESET}`];
+          const msgLines = stripAnsi(message).split(/\r\n|\r|\n/);
+          const bodyLines = [
+            `${RED}Warning: ${msgLines[0] ?? ''}${RESET}`,
+            ...msgLines.slice(1).map((sub) => mutePlainLine(theme, sub)),
+          ];
           for (const block of textBlocks) {
-            if (block && block !== message) bodyLines.push(block);
+            if (block && block !== message) {
+              for (const sub of block.split(/\r\n|\r|\n/)) {
+                bodyLines.push(mutePlainLine(theme, sub));
+              }
+            }
           }
-          const out = [header, ...wrapLinesToWidth(bodyLines, safeWidth)];
+          const out = [...headerLines, ...wrapMarginedLines(bodyLines, safeWidth)];
           cachedWidth = safeWidth;
           cachedLines = out;
           return out;
@@ -263,17 +338,12 @@ export function renderWorkspaceServiceResult(
         const more = outcome.truncation?.hasMore ? ' · more available' : '';
         const icon = isError ? `${RED}✗${RESET}` : isPartialOutcome ? `${YELLOW}⚠${RESET}` : `${LIME}✓${RESET}`;
         const prefix = `${borderColor}${toolName}${RESET}${badgePart} ${DIM}───${RESET} ${icon} ${servicePart}${statusLabel} · `;
-        const remainingForSummary = innerWidth - visibleWidth(prefix) - visibleWidth(more);
-        const fittedSummary = more && remainingForSummary > 6
-          ? fit(inlineText(summary), remainingForSummary)
-          : inlineText(summary);
-        const header = renderLineWithMargin(`${prefix}${fittedSummary}${more}`, safeWidth);
+        const headerLines = wrapMarginedLine(`${prefix}${inlineText(summary)}${more}`, safeWidth);
 
         if (!isExpanded) {
-          const out = [header];
           cachedWidth = safeWidth;
-          cachedLines = out;
-          return out;
+          cachedLines = headerLines;
+          return headerLines;
         }
 
         const bodyLines: string[] = [];
@@ -288,45 +358,51 @@ export function renderWorkspaceServiceResult(
             if (split[0] === redundantHeaderLine) {
               split.shift();
             }
-            bodyLines.push(...split);
+            for (const sub of split) {
+              bodyLines.push(mutePlainLine(theme, sub));
+            }
           }
         } else {
-          bodyLines.push(summary);
+          for (const sub of summary.split(/\r\n|\r|\n/)) {
+            bodyLines.push(mutePlainLine(theme, sub));
+          }
         }
 
         if (dataText && !joinedText.includes(dataText)) {
-          bodyLines.push(...dataText.split(/\r\n|\r|\n/));
+          for (const sub of dataText.split(/\r\n|\r|\n/)) {
+            bodyLines.push(mutePlainLine(theme, sub));
+          }
         }
 
         if (Array.isArray(outcome.warnings)) {
           for (const warning of outcome.warnings) {
             if (warning && !joinedText.includes(warning)) {
-              bodyLines.push(`warning: ${warning}`);
+              bodyLines.push(mutePlainLine(theme, `warning: ${warning}`));
             }
           }
         }
 
         if (outcome.nextAction && !joinedText.includes(outcome.nextAction)) {
-          bodyLines.push(`next: ${outcome.nextAction}`);
+          bodyLines.push(mutePlainLine(theme, `next: ${outcome.nextAction}`));
         }
 
         if (outcome.truncation) {
           const hasReturnedInfo = joinedText.includes(`returned_lines=${outcome.truncation.returned}`) || joinedText.includes(`returned=${outcome.truncation.returned}`);
           if (!hasReturnedInfo) {
-            bodyLines.push(`returned=${outcome.truncation.returned} hasMore=${String(outcome.truncation.hasMore)}`);
+            bodyLines.push(mutePlainLine(theme, `returned=${outcome.truncation.returned} hasMore=${String(outcome.truncation.hasMore)}`));
           }
           if (outcome.truncation.continuation && !joinedText.includes(outcome.truncation.continuation)) {
-            bodyLines.push(`continue: ${outcome.truncation.continuation}`);
+            bodyLines.push(mutePlainLine(theme, `continue: ${outcome.truncation.continuation}`));
           }
         }
 
-        const out = [header, ...wrapLinesToWidth(bodyLines, safeWidth)];
+        const out = [...headerLines, ...wrapMarginedLines(bodyLines, safeWidth)];
         cachedWidth = safeWidth;
         cachedLines = out;
         return out;
       } catch {
         if (safeWidth <= 0) return [];
-        return safeWidth === 1 ? [' '] : [renderLineWithMargin(String(toolName || 'workspace_service'), safeWidth)];
+        return wrapMarginedLine(String(toolName || 'workspace_service'), safeWidth);
       }
     },
   };

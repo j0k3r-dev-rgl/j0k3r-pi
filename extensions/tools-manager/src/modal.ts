@@ -26,6 +26,57 @@ export interface ModalResult {
 	selected?: Record<string, boolean>;
 }
 
+interface ClickRange {
+	y: number;
+	x1: number;
+	x2: number;
+}
+
+interface ModalLayout {
+	lines: string[];
+	/** Visual line spans (inclusive) owned by each extension item. */
+	itemSpans: Array<{ itemIndex: number; startY: number; endY: number }>;
+	save: ClickRange | undefined;
+	cancel: ClickRange | undefined;
+}
+
+const ANSI_SGR = /\x1b\[[0-9;]*m/;
+
+/**
+ * Wrap ANSI-styled text to a visible width without clipping or ellipsis, closing and
+ * reopening the active SGR state on every broken line.
+ */
+function wrapAnsi(text: string, width: number): string[] {
+	if (width <= 0) return [];
+	if (visibleWidth(text) <= width) return [text];
+	const out: string[] = [];
+	let current = "";
+	let currentWidth = 0;
+	let active = "";
+	const flush = () => {
+		out.push(active && !current.endsWith("\x1b[0m") ? `${current}\x1b[0m` : current);
+		current = active;
+		currentWidth = 0;
+	};
+	for (const part of text.split(/(\x1b\[[0-9;]*m)/)) {
+		if (!part) continue;
+		if (ANSI_SGR.test(part) && part.startsWith("\x1b[")) {
+			current += part;
+			active = part === "\x1b[0m" ? "" : `${active}${part}`;
+			continue;
+		}
+		for (const grapheme of Array.from(part)) {
+			const w = visibleWidth(grapheme);
+			if (w > width) continue;
+			if (currentWidth + w > width && currentWidth > 0) flush();
+			current += grapheme;
+			currentWidth += w;
+		}
+	}
+	if (current !== active || out.length === 0) flush();
+	return out.length > 0 ? out : [""];
+}
+
 export class ToolsManagerModal implements Component {
 	private readonly width = 62;
 	private readonly cwd: string;
@@ -37,12 +88,14 @@ export class ToolsManagerModal implements Component {
 	private focusArea: "list" | "save" | "cancel" = "list";
 
 	private checkedState: Record<string, boolean> = {};
+	private layout: ModalLayout;
 
 	constructor(cwd: string, theme: Theme, done: (result: ModalResult) => void) {
 		this.cwd = cwd;
 		this.theme = theme;
 		this.done = done;
 		this.loadCurrentState();
+		this.layout = this.computeLayout(this.width);
 	}
 
 	private loadCurrentState(): void {
@@ -194,49 +247,49 @@ export class ToolsManagerModal implements Component {
 		const y = event.y;
 		const x = event.x;
 
-		// Filas de las extensiones (cada item ocupa 2 líneas: nombre en 5 + 2*i, desc en 6 + 2*i)
-		const listEnd = 5 + SUPPORTED_EXTENSIONS.length * 2 - 1;
-		if (y >= 5 && y <= listEnd) {
-			const itemIndex = Math.floor((y - 5) / 2);
-			if (itemIndex >= 0 && itemIndex < SUPPORTED_EXTENSIONS.length) {
-				this.selectedIndex = itemIndex;
-				this.focusArea = "list";
-				if (event.type === "click") {
-					const current = SUPPORTED_EXTENSIONS[itemIndex];
-					if (current) {
-						this.checkedState[current.id] = !this.checkedState[current.id];
-					}
+		// Las filas se envuelven: cada item puede ocupar varias líneas visuales.
+		const span = this.layout.itemSpans.find((candidate) => y >= candidate.startY && y <= candidate.endY);
+		if (span) {
+			this.selectedIndex = span.itemIndex;
+			this.focusArea = "list";
+			if (event.type === "click") {
+				const current = SUPPORTED_EXTENSIONS[span.itemIndex];
+				if (current) {
+					this.checkedState[current.id] = !this.checkedState[current.id];
 				}
-				return { handled: true, render: true };
 			}
+			return { handled: true, render: true };
 		}
 
-		// Fila de botones
-		const buttonsRow = 5 + SUPPORTED_EXTENSIONS.length * 2 + 3;
-		if (y === buttonsRow) {
-			// El inner padding respecto a x=0 del componente tiene un borde de 1 char:
-			// Botón Guardar: columnas aproximadas 8 a 28
-			// Botón Cancelar: columnas aproximadas 30 a 54
-			if (x >= 8 && x <= 28) {
-				this.focusArea = "save";
-				if (event.type === "click") {
-					this.saveConfig();
-				}
-				return { handled: true, render: true };
-			} else if (x >= 30 && x <= 54) {
-				this.focusArea = "cancel";
-				if (event.type === "click") {
-					this.done({ action: "cancel" });
-				}
-				return { handled: true, render: true };
+		const inRange = (range: ClickRange | undefined) =>
+			range !== undefined && y === range.y && x >= range.x1 && x <= range.x2;
+
+		if (inRange(this.layout.save)) {
+			this.focusArea = "save";
+			if (event.type === "click") {
+				this.saveConfig();
 			}
+			return { handled: true, render: true };
+		}
+		if (inRange(this.layout.cancel)) {
+			this.focusArea = "cancel";
+			if (event.type === "click") {
+				this.done({ action: "cancel" });
+			}
+			return { handled: true, render: true };
 		}
 
 		return { handled: true };
 	}
 
-	render(_width: number): string[] {
-		const w = this.width;
+	render(width: number): string[] {
+		this.layout = this.computeLayout(width);
+		return this.layout.lines;
+	}
+
+	private computeLayout(width: number): ModalLayout {
+		const requested = Number.isFinite(width) ? Math.floor(width) : this.width;
+		const w = Math.max(20, Math.min(this.width, requested));
 		const th = this.theme;
 		const innerW = w - 2;
 		const lines: string[] = [];
@@ -246,22 +299,23 @@ export class ToolsManagerModal implements Component {
 			return s + " ".repeat(Math.max(0, len - vis));
 		};
 
-		const row = (content: string) => {
-			return th.fg("border", "│") + pad(content, innerW) + th.fg("border", "│");
+		const rowLines = (content: string) => {
+			for (const segment of wrapAnsi(content, innerW)) {
+				lines.push(th.fg("border", "│") + pad(segment, innerW) + th.fg("border", "│"));
+			}
 		};
 
 		// Borde superior
 		lines.push(th.fg("border", `┌${"─".repeat(innerW)}┐`));
 
 		// Título y padding
-		lines.push(row(""));
-		const title = `  ${th.fg("accent", "⚙  TOOLS & EXTENSIONS MANAGER")}`;
-		lines.push(row(title));
-		const subtitle = `  ${th.fg("dim", "Configura extensiones activas (.pi/extensions.json)")}`;
-		lines.push(row(subtitle));
-		lines.push(row(""));
+		rowLines("");
+		rowLines(`  ${th.fg("accent", "⚙  TOOLS & EXTENSIONS MANAGER")}`);
+		rowLines(`  ${th.fg("dim", "Configura extensiones activas (.pi/extensions.json)")}`);
+		rowLines("");
 
-		// Lista de items
+		// Lista de items: cada item puede envolver nombre y descripción en varias líneas.
+		const itemSpans: ModalLayout["itemSpans"] = [];
 		for (let i = 0; i < SUPPORTED_EXTENSIONS.length; i++) {
 			const item = SUPPORTED_EXTENSIONS[i]!;
 			const isFocused = this.focusArea === "list" && i === this.selectedIndex;
@@ -276,19 +330,17 @@ export class ToolsManagerModal implements Component {
 				? th.bold(th.fg("accent", item.name))
 				: th.fg("text", item.name);
 
-			const lineText = `${pointer}${checkbox} ${nameLabel}`;
-			lines.push(row(lineText));
-
-			// Sub-descripción del item
-			const descText = `      ${th.fg("dim", item.description)}`;
-			lines.push(row(descText));
+			const startY = lines.length;
+			rowLines(`${pointer}${checkbox} ${nameLabel}`);
+			rowLines(`      ${th.fg("dim", item.description)}`);
+			itemSpans.push({ itemIndex: i, startY, endY: lines.length - 1 });
 		}
 
-		lines.push(row(""));
-		lines.push(row(`  ${th.fg("border", "─".repeat(innerW - 4))}`));
-		lines.push(row(""));
+		rowLines("");
+		rowLines(`  ${th.fg("border", "─".repeat(Math.max(0, innerW - 4)))}`);
+		rowLines("");
 
-		// Botones de acción
+		// Botones de acción (envueltos en anchos estrechos, con rangos de click por línea).
 		const isSaveFocused = this.focusArea === "save";
 		const isCancelFocused = this.focusArea === "cancel";
 
@@ -300,19 +352,39 @@ export class ToolsManagerModal implements Component {
 			? th.bold(th.fg("error", "[ Cancelar (Esc) ]"))
 			: th.fg("dim", "  Cancelar (Esc)  ");
 
-		const buttonsRow = `          ${saveBtn}      ${cancelBtn}`;
-		lines.push(row(buttonsRow));
+		let save: ClickRange | undefined;
+		let cancel: ClickRange | undefined;
+		let buttonLine = "";
+		let cursorX = 1;
+		let buttonLineStart = lines.length;
+		const place = (segment: string, id?: "save" | "cancel") => {
+			const segW = visibleWidth(segment);
+			if (cursorX + segW > 1 + innerW && buttonLine) {
+				rowLines(buttonLine);
+				buttonLineStart = lines.length;
+				buttonLine = "";
+				cursorX = 1;
+			}
+			if (id === "save") save = { y: buttonLineStart, x1: cursorX, x2: cursorX + segW - 1 };
+			if (id === "cancel") cancel = { y: buttonLineStart, x1: cursorX, x2: cursorX + segW - 1 };
+			buttonLine += segment;
+			cursorX += segW;
+		};
+		place(" ".repeat(10));
+		place(saveBtn, "save");
+		place("      ");
+		place(cancelBtn, "cancel");
+		rowLines(buttonLine);
 
 		// Atajos de ayuda al pie
-		lines.push(row(""));
-		const hints = `  ${th.fg("dim", "↑/↓/j/k: Mover • Espacio: Marcar • s: Guardar • q: Salir")}`;
-		lines.push(row(hints));
-		lines.push(row(""));
+		rowLines("");
+		rowLines(`  ${th.fg("dim", "↑/↓/j/k: Mover • Espacio: Marcar • s: Guardar • q: Salir")}`);
+		rowLines("");
 
 		// Borde inferior
 		lines.push(th.fg("border", `└${"─".repeat(innerW)}┘`));
 
-		return lines;
+		return { lines, itemSpans, save, cancel };
 	}
 
 	invalidate(): void {}

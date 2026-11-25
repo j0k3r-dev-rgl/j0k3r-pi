@@ -103,7 +103,21 @@ export async function showSubagentsPanel(input: {
   const cwd = ctx?.cwd ?? process.cwd();
   const sessionId = currentSessionId(ctx);
   let refresh: NodeJS.Timeout | undefined;
+  let unsubscribeTaskUpdate: (() => void) | undefined;
   let activePanel: SubagentsHistoryPanel | undefined;
+  const isLiveStatus = (status?: string): boolean => status === 'queued' || status === 'running' || status === 'stopping';
+  const stopRefreshTimer = () => {
+    if (refresh) {
+      clearInterval(refresh);
+      refresh = undefined;
+    }
+  };
+  const detachTaskListener = () => {
+    if (unsubscribeTaskUpdate) {
+      try { unsubscribeTaskUpdate(); } catch {}
+      unsubscribeTaskUpdate = undefined;
+    }
+  };
   setWidgetInputSuspended(true);
   try {
     await ctx.ui.custom(
@@ -113,8 +127,19 @@ export async function showSubagentsPanel(input: {
         const renderLogger = createSubagentsRenderLogger({ cwd, sessionId, config: config.render_debug });
         let nextRenderReason = 'initial';
         let renderCycle = 0;
+        let disposed = false;
+        const loadTaskWindow = (limit: number): { tasks: SubagentTask[]; hasMore: boolean } => {
+          if (typeof (manager as any).listSessionTasksWindow === 'function') {
+            return (manager as any).listSessionTasksWindow(cwd, sessionId, { limit });
+          }
+          const all = manager.listSessionTasks(cwd, sessionId);
+          return {
+            tasks: all.slice(0, limit),
+            hasMore: all.length > limit,
+          };
+        };
         const panel = new SubagentsHistoryPanel(
-          () => manager.listSessionTasks(cwd, sessionId).slice(0, 100),
+          () => loadTaskWindow(30).tasks,
           theme,
           () => close(),
           (data: string, key: string) => {
@@ -146,14 +171,49 @@ export async function showSubagentsPanel(input: {
             timeoutMs: config.timeout_ms,
             stallTimeoutMs: config.stall_timeout_ms,
             contextWindowForTask: (task: SubagentTask) => contextWindowForTask(ctx, task),
+            taskWindowLoader: loadTaskWindow,
+            initialTaskWindow: 30,
+            taskWindowStep: 30,
           },
         );
         activePanel = panel;
-        const close = () => {
-          if (refresh) {
-            clearInterval(refresh);
-            refresh = undefined;
+        const hasActiveTasks = (): boolean => {
+          if (typeof (manager as any).listActiveSessionTasks === 'function') {
+            const activeInMem = (manager as any).listActiveSessionTasks(cwd, sessionId) as SubagentTask[];
+            if (activeInMem.some((task) => isLiveStatus(task.status))) return true;
           }
+          if (panel.hasActiveLoadedTasks()) return true;
+          if (typeof (manager as any).listActiveSessionTasks !== 'function') {
+            return loadTaskWindow(30).tasks.some((task) => isLiveStatus(task.status));
+          }
+          return false;
+        };
+        const syncRefreshTimer = () => {
+          if (disposed) {
+            stopRefreshTimer();
+            return;
+          }
+          if (hasActiveTasks()) {
+            if (!refresh) {
+              refresh = setInterval(() => {
+                if (disposed || !hasActiveTasks()) {
+                  stopRefreshTimer();
+                  return;
+                }
+                nextRenderReason = 'interval';
+                renderLogger.log({ event: 'render_requested', reason: nextRenderReason });
+                tui.requestRender?.();
+              }, 1000);
+              refresh.unref?.();
+            }
+          } else {
+            stopRefreshTimer();
+          }
+        };
+        const close = () => {
+          disposed = true;
+          stopRefreshTimer();
+          detachTaskListener();
           panel.invalidate();
           renderLogger.log({ event: 'panel_disposed' });
           setMouseTracking(tui, false);
@@ -164,16 +224,22 @@ export async function showSubagentsPanel(input: {
         renderLogger.log({ event: 'render_requested', reason: nextRenderReason });
         setActivePanelCancelSelected(() => () => panel.cancelSelectedActiveTask());
         setActivePanelRequestRender(() => () => {
+          if (disposed) return;
+          syncRefreshTimer();
           nextRenderReason = 'external';
           renderLogger.log({ event: 'render_requested', reason: nextRenderReason });
           tui.requestRender?.();
         });
-        refresh = setInterval(() => {
-          nextRenderReason = 'interval';
-          renderLogger.log({ event: 'render_requested', reason: nextRenderReason });
-          tui.requestRender?.();
-        }, 1000);
-        refresh.unref?.();
+        if (typeof (manager as any).onTaskUpdate === 'function') {
+          unsubscribeTaskUpdate = (manager as any).onTaskUpdate(() => {
+            if (disposed) return;
+            syncRefreshTimer();
+            nextRenderReason = 'task_update';
+            renderLogger.log({ event: 'render_requested', reason: nextRenderReason });
+            tui.requestRender?.();
+          });
+        }
+        syncRefreshTimer();
         return {
           render: (width: number) => {
             const reason = nextRenderReason;
@@ -191,6 +257,7 @@ export async function showSubagentsPanel(input: {
             const startedAt = process.hrtime.bigint();
             const lines = panel.render(width);
             const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+            syncRefreshTimer();
             renderLogger.log({
               event: 'render_completed',
               reason,
@@ -219,17 +286,15 @@ export async function showSubagentsPanel(input: {
             nextRenderReason = 'input';
             renderLogger.log({ event: 'render_requested', reason: nextRenderReason });
             panel.handleInput(data);
-            tui.requestRender?.();
+            if (!disposed) tui.requestRender?.();
           },
         };
       },
       { overlay: true, overlayOptions: { anchor: 'top-left', width: '100%', maxHeight: '100%', margin: 0 } },
     );
   } finally {
-    if (refresh) {
-      clearInterval(refresh);
-      refresh = undefined;
-    }
+    stopRefreshTimer();
+    detachTaskListener();
     activePanel?.invalidate();
     activePanel = undefined;
     setActivePanelCancelSelected(undefined);

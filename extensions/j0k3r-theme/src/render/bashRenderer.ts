@@ -14,9 +14,13 @@ import {
 	expandedLines,
 	failedStatus,
 	firstLine,
+	mutedExpandedLines,
 	resultText,
 	runningStatus,
 } from "./compact.js";
+
+/** Display-only mirror of `DEFAULT_BASH_TIMEOUT_SECONDS` in `src/tools/index.ts`. */
+const DISPLAY_DEFAULT_BASH_TIMEOUT_SECONDS = 120;
 
 export interface BashArgs {
 	command?: string;
@@ -30,7 +34,7 @@ interface ShellState extends CompactRowState {
 	isError?: boolean;
 }
 
-/** Collapsed command text for non-bash shell tools (`PS>`): a single clipped line. */
+/** Collapsed command text for non-bash shell tools (`PS>`): wrapped automatically by `CompactToolRow`. */
 function commandText(command: string | undefined, prompt: string): string {
 	const single = (command ?? "").replace(/\s+/g, " ").trim();
 	if (!single) return `${electric(ORANGE, prompt)} ${electric(DIM, "...")}`;
@@ -106,8 +110,24 @@ function commandLines(command: string | undefined, width: number, totalWidth = w
 	return lines;
 }
 
-function timeoutText(timeout: number | undefined): string | undefined {
-	return timeout ? electric(DIM, `(timeout ${timeout}s)`) : undefined;
+interface DisplayTimeout {
+	seconds: number;
+	isDefault: boolean;
+}
+
+function resolveDisplayTimeout(timeout: number | undefined, hasDefaultTimeout: boolean): DisplayTimeout | undefined {
+	if (typeof timeout === "number" && Number.isFinite(timeout) && timeout > 0) {
+		return { seconds: timeout, isDefault: false };
+	}
+	if (hasDefaultTimeout) {
+		return { seconds: DISPLAY_DEFAULT_BASH_TIMEOUT_SECONDS, isDefault: true };
+	}
+	return undefined;
+}
+
+function timeoutText(resolved: DisplayTimeout | undefined): string {
+	if (!resolved) return electric(DIM, "no timeout");
+	return electric(DIM, `timeout ${resolved.seconds}s${resolved.isDefault ? " (default)" : ""}`);
 }
 
 /**
@@ -129,11 +149,17 @@ function maintainShellTimer(context: any, state: ShellState, isPartial: boolean)
 	state.interval.unref?.();
 }
 
-function elapsedText(state: ShellState, isRunning: boolean): string {
+function elapsedText(state: ShellState, isRunning: boolean, timeoutSeconds?: number): string {
 	const start = state.startedAt ?? Date.now();
-	const end = state.endedAt ?? start;
-	const elapsed = formatDuration(Math.max(0, end - start));
-	return isRunning ? `Running... (${elapsed})` : `Took ${elapsed}`;
+	const now = isRunning ? Date.now() : (state.endedAt ?? start);
+	const elapsedMs = Math.max(0, now - start);
+	const elapsed = formatDuration(elapsedMs);
+	if (!isRunning) return `Took ${elapsed}`;
+	if (timeoutSeconds !== undefined) {
+		const remainingMs = Math.max(0, timeoutSeconds * 1000 - elapsedMs);
+		return `Running... (${elapsed} elapsed · ${formatDuration(remainingMs)} remaining)`;
+	}
+	return `Running... (${elapsed} elapsed)`;
 }
 
 function isShellFailure(output: string, isError: boolean): boolean {
@@ -166,6 +192,7 @@ function outputWarnings(result: AgentToolResult<BashToolDetails | undefined>): s
  */
 export function createShellRenderers(prompt: string) {
 	const multilineCommand = prompt === "$";
+	const hasDefaultTimeout = prompt === "$";
 
 	return {
 		[COMPACT_TOOL_RENDERING_KEY]: COMPACT_TOOL_RENDERING_VERSION,
@@ -175,6 +202,7 @@ export function createShellRenderers(prompt: string) {
 		renderCall(args: BashArgs, _theme: Theme, context: any): Component {
 			const state: ShellState = context.state ?? {};
 			maintainShellTimer(context, state, true);
+			const resolvedTimeout = resolveDisplayTimeout(args?.timeout, hasDefaultTimeout);
 			return new CompactToolRow(
 				() =>
 					compactHeader([
@@ -183,8 +211,8 @@ export function createShellRenderers(prompt: string) {
 								? electric(ORANGE, prompt)
 								: `${electric(ORANGE, prompt)} ${electric(DIM, "...")}`
 							: commandText(args?.command, prompt),
-						timeoutText(args?.timeout),
-						runningStatus(ORANGE, elapsedText(state, true)),
+						timeoutText(resolvedTimeout),
+						runningStatus(ORANGE, elapsedText(state, true, resolvedTimeout?.seconds)),
 					]),
 				{
 					state,
@@ -197,7 +225,7 @@ export function createShellRenderers(prompt: string) {
 		renderResult(
 			result: AgentToolResult<BashToolDetails | undefined>,
 			options: ToolRenderResultOptions,
-			_theme: Theme,
+			theme: Theme,
 			context: any,
 		): Component {
 			const state: ShellState = context.state ?? {};
@@ -206,8 +234,9 @@ export function createShellRenderers(prompt: string) {
 			const trimmed = output.trim();
 			const isCancelled = (result?.details as any)?.cancelled === true;
 			state.isError = isShellFailure(trimmed, Boolean(context.isError) || isCancelled);
-			maintainShellTimer(context, state, options.isPartial);
-			const isRunning = options.isPartial && state.endedAt === undefined;
+			maintainShellTimer(context, state, options.isPartial && !state.isError);
+			const isRunning = options.isPartial && !state.isError && state.endedAt === undefined;
+			const resolvedTimeout = resolveDisplayTimeout(context.args?.timeout, hasDefaultTimeout);
 
 			return new CompactToolRow(
 				() =>
@@ -217,11 +246,11 @@ export function createShellRenderers(prompt: string) {
 								? electric(ORANGE, prompt)
 								: `${electric(ORANGE, prompt)} ${electric(DIM, "...")}`
 							: commandText(context.args?.command, prompt),
-						timeoutText(context.args?.timeout),
+						timeoutText(resolvedTimeout),
 						state.isError
 							? failedStatus(firstLine(trimmed) || (isCancelled ? "cancelled" : "failed"))
 							: isRunning
-								? runningStatus(ORANGE, elapsedText(state, true))
+								? runningStatus(ORANGE, elapsedText(state, true, resolvedTimeout?.seconds))
 								: completedStatus(ORANGE, trimmed === "" ? `no output · ${elapsedText(state, false)}` : elapsedText(state, false)),
 					]),
 				{
@@ -230,8 +259,15 @@ export function createShellRenderers(prompt: string) {
 					body: (width, totalWidth) => {
 						const cmd = multilineCommand ? commandLines(context.args?.command, width, totalWidth) : [];
 						if (!options.expanded) return cmd;
-						const lines = trimmed === "" ? [electric(DIM, "(no output)")] : expandedLines(output, width, totalWidth);
-						for (const warning of outputWarnings(result)) lines.push(electric(AMBER, `[${warning}]`));
+						const lines =
+							trimmed === ""
+								? expandedLines("(no output)", width, totalWidth).map((line) => (line === "" ? "" : electric(DIM, line)))
+								: mutedExpandedLines(output, width, totalWidth, theme);
+						for (const warning of outputWarnings(result)) {
+							for (const line of expandedLines(`[${warning}]`, width, totalWidth)) {
+								lines.push(line === "" ? "" : electric(AMBER, line));
+							}
+						}
 						return [...cmd, ...lines];
 					},
 				},

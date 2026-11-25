@@ -15,7 +15,10 @@ import {
 	RED,
 	type CodeGraphRowState,
 	electric,
+	formatMarginedLine,
+	hasAnsi,
 	rowLine,
+	styleMuted,
 	textLines,
 } from "./theme.js";
 
@@ -49,7 +52,7 @@ function metadata(parts: Array<string | undefined>): string | undefined {
 	return body ? electric(DIM, body) : undefined;
 }
 
-/** A single inline row that hides itself once the result row is painted. */
+/** A compact inline header that hides itself once the result row is painted. */
 function inlineRow(getParts: () => Array<string | undefined>, state: CodeGraphRowState): Component & { compactLeftMargin: number } {
 	return {
 		compactLeftMargin: 1,
@@ -59,7 +62,7 @@ function inlineRow(getParts: () => Array<string | undefined>, state: CodeGraphRo
 			const safeWidth = Number.isFinite(width) ? Math.floor(width) : 0;
 			if (safeWidth <= 0) return [];
 			if (safeWidth === 1) return [" "];
-			return rowLine(getParts(), safeWidth - 1).map((line) => ` ${line}`);
+			return rowLine(getParts(), safeWidth - 1, safeWidth).map((line) => formatMarginedLine(line, safeWidth));
 		},
 	};
 }
@@ -68,6 +71,7 @@ function expandedRow(
 	getSummary: () => Array<string | undefined>,
 	getBody: () => string[],
 	state: CodeGraphRowState,
+	theme?: any,
 ): Component & { compactLeftMargin: number } {
 	state.hasResult = true;
 	return {
@@ -78,7 +82,7 @@ function expandedRow(
 			if (safeWidth <= 0) return [];
 			if (safeWidth === 1) return [" "];
 			const innerWidth = safeWidth - 1;
-			const head = rowLine(getSummary(), innerWidth).map((line) => ` ${line}`);
+			const head = rowLine(getSummary(), innerWidth, safeWidth).map((line) => formatMarginedLine(line, safeWidth));
 			if (!state.expanded) return head;
 			const body: string[] = [];
 			for (const line of getBody()) {
@@ -86,7 +90,11 @@ function expandedRow(
 					body.push(" ");
 					continue;
 				}
-				for (const wrapped of textLines(line, innerWidth)) body.push(` ${wrapped}`);
+				const preStyled = hasAnsi(line);
+				for (const wrapped of textLines(line, innerWidth, safeWidth)) {
+					const styled = preStyled || wrapped === "" ? wrapped : styleMuted(theme, wrapped);
+					body.push(formatMarginedLine(styled, safeWidth));
+				}
 			}
 			return [...head, ...body];
 		},
@@ -108,7 +116,7 @@ export function renderExploreCall(
 	return inlineRow(() => [title("codegraph_explore"), target, electric(DIM, "exploring…")], state);
 }
 
-export function renderExploreResult(result: any, options: any, _theme: any, context: any) {
+export function renderExploreResult(result: any, options: any, theme: any, context: any) {
 	const state: CodeGraphRowState = (context.state ??= {});
 	state.isError = Boolean(context.isError);
 	state.isPartial = Boolean(options.isPartial);
@@ -139,6 +147,7 @@ export function renderExploreResult(result: any, options: any, _theme: any, cont
 			return lines;
 		},
 		state,
+		theme,
 	);
 }
 
@@ -150,7 +159,7 @@ export function renderStatusCall(args: { path?: string }, _theme: any, context: 
 	);
 }
 
-export function renderStatusResult(result: any, options: any, _theme: any, context: any) {
+export function renderStatusResult(result: any, options: any, theme: any, context: any) {
 	const state: CodeGraphRowState = (context.state ??= {});
 	state.isError = Boolean(context.isError);
 	state.isPartial = Boolean(options.isPartial);
@@ -171,6 +180,7 @@ export function renderStatusResult(result: any, options: any, _theme: any, conte
 		},
 		() => (state.isPartial ? [] : contentBody(result, "CodeGraph status unavailable.")),
 		state,
+		theme,
 	);
 }
 
@@ -180,7 +190,7 @@ export function renderManageCall(args: { action: string; path?: string }, _theme
 	return inlineRow(() => [title("codegraph_manage"), target, electric(DIM, "running…")], state);
 }
 
-export function renderManageResult(result: any, options: any, _theme: any, context: any) {
+export function renderManageResult(result: any, options: any, theme: any, context: any) {
 	const state: CodeGraphRowState = (context.state ??= {});
 	state.isError = Boolean(context.isError);
 	state.isPartial = Boolean(options.isPartial);
@@ -200,6 +210,7 @@ export function renderManageResult(result: any, options: any, _theme: any, conte
 		},
 		() => (state.isPartial ? [] : contentBody(result, `CodeGraph ${action} returned no output.`)),
 		state,
+		theme,
 	);
 }
 
@@ -211,7 +222,7 @@ export function renderSyncCall(args: { path?: string }, _theme: any, context: an
 	);
 }
 
-export function renderSyncResult(result: any, options: any, _theme: any, context: any) {
+export function renderSyncResult(result: any, options: any, theme: any, context: any) {
 	const state: CodeGraphRowState = (context.state ??= {});
 	state.isError = Boolean(context.isError);
 	state.isPartial = Boolean(options.isPartial);
@@ -234,6 +245,7 @@ export function renderSyncResult(result: any, options: any, _theme: any, context
 		},
 		() => (state.isPartial ? [] : contentBody(result, "CodeGraph sync completed.")),
 		state,
+		theme,
 	);
 }
 
@@ -247,7 +259,7 @@ export function renderNodeCall(
 	return inlineRow(() => [title("codegraph_node"), target, electric(DIM, "inspecting…")], state);
 }
 
-export function renderNodeResult(result: any, options: any, _theme: any, context: any) {
+export function renderNodeResult(result: any, options: any, theme: any, context: any) {
 	const state: CodeGraphRowState = (context.state ??= {});
 	state.isError = Boolean(context.isError);
 	state.isPartial = Boolean(options.isPartial);
@@ -268,6 +280,7 @@ export function renderNodeResult(result: any, options: any, _theme: any, context
 		},
 		() => (state.isPartial ? [] : contentBody(result, "CodeGraph returned no output.")),
 		state,
+		theme,
 	);
 }
 
@@ -281,7 +294,7 @@ export function renderImpactCall(
 	return inlineRow(() => [title("codegraph_impact"), target, electric(DIM, "analyzing…")], state);
 }
 
-export function renderImpactResult(result: any, options: any, _theme: any, context: any) {
+export function renderImpactResult(result: any, options: any, theme: any, context: any) {
 	const state: CodeGraphRowState = (context.state ??= {});
 	state.isError = Boolean(context.isError);
 	state.isPartial = Boolean(options.isPartial);
@@ -302,5 +315,6 @@ export function renderImpactResult(result: any, options: any, _theme: any, conte
 		},
 		() => (state.isPartial ? [] : contentBody(result, "CodeGraph returned no output.")),
 		state,
+		theme,
 	);
 }

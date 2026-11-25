@@ -10,6 +10,8 @@ export const VIOLET = '\x1b[1;38;2;153;92;255m';
 export const DIM = '\x1b[2m';
 export const BOLD = '\x1b[1m';
 export const RESET = '\x1b[0m';
+/** arch-electric muted foreground (#7aa7b8) used by plain-text expanded bodies. */
+export const MUTED = '\x1b[38;2;122;167;184m';
 
 const GRAPHEME_SEGMENTER = new Intl.Segmenter('en', { granularity: 'grapheme' });
 const ANSI_TOKEN_RE = /(\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[ -/]*[@-~])/g;
@@ -297,6 +299,13 @@ export interface GitSyncMessageRenderer {
 }
 
 /**
+ * Plain-text expanded body styling: muted foreground, preserving ANSI-colored badges.
+ */
+function muted(text: string): string {
+  return text ? `${MUTED}${text}${RESET}` : text;
+}
+
+/**
  * Message renderer factory for git-sync-awareness.
  *
  * Compact, transparent, unboxed and hint-free: single inline status row when collapsed,
@@ -328,10 +337,13 @@ export function createGitSyncMessageRenderer(
         const rawContent = extractMessageContent(message) || 'No git diagnostic report available';
         if (!isExpanded) {
           const firstLine = rawContent.split('\n')[0] || '';
-          return [` ${fit(`${RED}●${RESET} ${firstLine}`, innerWidth)}`];
+          return wrapLines([`${RED}●${RESET} ${firstLine}`], innerWidth, targetWidth);
         }
         return wrapLines(
-          [`${AMBER}git-sync${RESET} ${DIM}─ notice${RESET}`, ...rawContent.split('\n')],
+          [
+            `${AMBER}git-sync${RESET} ${DIM}─ notice${RESET}`,
+            ...rawContent.split('\n').map((line) => muted(line)),
+          ],
           innerWidth,
           targetWidth
         );
@@ -356,7 +368,7 @@ export function createGitSyncMessageRenderer(
         );
         const wtBadge = formatWorkingTreeBadge(diagnostic.workingTree);
         const sep = `${DIM}─${RESET}`;
-        return [` ${fit(`${dot} ${branch} ${sep} ${syncBadge} ${sep} ${wtBadge}`, innerWidth)}`];
+        return wrapLines([`${dot} ${branch} ${sep} ${syncBadge} ${sep} ${wtBadge}`], innerWidth, targetWidth);
       }
 
       // Expanded mode: complete unboxed, background-free sections without preview limits
@@ -374,7 +386,7 @@ export function createGitSyncMessageRenderer(
         diagnostic.currentBranch.behind
       );
       lines.push(
-        `Branch: ${BOLD}${diagnostic.currentBranch.branch}${RESET}  Upstream: ${upstreamText}  Status: ${syncBadge}`
+        `${muted('Branch:')} ${BOLD}${diagnostic.currentBranch.branch}${RESET}${muted('  Upstream:')} ${upstreamText}${muted('  Status:')} ${syncBadge}`
       );
 
       if (
@@ -384,12 +396,12 @@ export function createGitSyncMessageRenderer(
         lines.push('');
         lines.push(`${PINK}${BOLD}Incoming Remote Commits (${diagnostic.currentBranch.incomingCommits.length}):${RESET}`);
         for (const commit of diagnostic.currentBranch.incomingCommits) {
-          lines.push(`  ${DIM}↓${RESET} ${commit}`);
+          lines.push(`  ${DIM}↓${RESET} ${muted(commit)}`);
         }
       }
 
       lines.push('');
-      lines.push(`Working Tree: ${formatWorkingTreeBadge(diagnostic.workingTree)}`);
+      lines.push(`${muted('Working Tree:')} ${formatWorkingTreeBadge(diagnostic.workingTree)}`);
       if (!diagnostic.workingTree.isClean && diagnostic.workingTree.summaryLines?.length > 0) {
         for (const sLine of diagnostic.workingTree.summaryLines) {
           lines.push(`  ${DIM}${sLine}${RESET}`);
@@ -409,7 +421,9 @@ export function createGitSyncMessageRenderer(
           const tagStr = tags.length > 0 ? ` ${tags.join(' ')}` : '';
           const headAbbr = wt.head ? ` [HEAD ${wt.head.slice(0, 7)}]` : '';
           const displayPath = abbreviateHome(wt.path);
-          lines.push(`  • ${displayPath}: branch ${BOLD}${wt.branch || 'detached'}${RESET}${headAbbr}${tagStr}`);
+          lines.push(
+            `  ${muted('•')} ${muted(displayPath)}${muted(': branch ')}${BOLD}${wt.branch || 'detached'}${RESET}${muted(headAbbr)}${tagStr}`
+          );
         }
       }
 
@@ -434,7 +448,7 @@ export function createGitSyncMessageRenderer(
             }
             extra = ` ${DIM}(${relDesc})${RESET}`;
           }
-          lines.push(`  • ${BOLD}${b.branch}${RESET}: ${badge}${extra}`);
+          lines.push(`  ${muted('•')} ${BOLD}${b.branch}${RESET}${muted(':')} ${badge}${extra}`);
         }
       }
 
@@ -445,7 +459,7 @@ export function createGitSyncMessageRenderer(
         lines.push('');
         lines.push(`${CYAN}${BOLD}Collaborator Branches (${diagnostic.activeCollaboratorBranches.length}):${RESET}`);
         for (const cBranch of diagnostic.activeCollaboratorBranches) {
-          lines.push(`  • ${cBranch}`);
+          lines.push(`  ${muted('•')} ${muted(cBranch)}`);
         }
       }
 
@@ -461,7 +475,7 @@ export function createGitSyncMessageRenderer(
             : (diagnostic.remoteOnlyBranches || []).includes(remote)
               ? `${AMBER}remote-only${RESET}`
               : `${DIM}tracking${RESET}`;
-          lines.push(`  • ${remote}: ${relation}`);
+          lines.push(`  ${muted('•')} ${muted(`${remote}:`)} ${relation}`);
         }
       }
 

@@ -1,7 +1,7 @@
 import { safeErrorMetadataDetails } from '../error-metadata.js';
 import { appendSubagentResumeGuidance, formatTaskLabel, formatUsage } from './tools/formatting.js';
-import { needsWidth2MarginOmission, wrapLineToWidth } from './text-width.js';
-import { ARCH_ICON, BOX_CHARS, CYAN, LIME, RED, electricBorder, padToWidth, themeAccent, themeBg, themeBold, themeDim, themeError, themeFg, themeStatus, themeSuccess, themeTitle, themeWarning, truncateToWidth, visibleWidth } from '../ui/theme.js';
+import { formatMarginedLine, needsWidth2MarginOmission, wrapLineToWidth } from './text-width.js';
+import { ARCH_ICON, BOX_CHARS, CYAN, hasAnsiEscape, LIME, MUTED, RED, electricBorder, padToWidth, themeAccent, themeBg, themeBold, themeDim, themeError, themeFg, themeMuted, themeStatus, themeSuccess, themeTitle, themeWarning, truncateToWidth, visibleWidth } from '../ui/theme.js';
 
 function formatErrorMetadataLines(task: any): string[] {
   if (!task?.error_metadata) return [];
@@ -34,7 +34,9 @@ export {
   ARCH_ICON,
   BOX_CHARS,
   CYAN,
+  hasAnsiEscape,
   LIME,
+  MUTED,
   RED,
   electricBorder,
   padToWidth,
@@ -44,6 +46,7 @@ export {
   themeDim,
   themeError,
   themeFg,
+  themeMuted,
   themeStatus,
   themeSuccess,
   themeTitle,
@@ -223,11 +226,11 @@ export function renderSubagentCompletionMessage(message: any, options: any, them
     }
   }
 
-  const styleLine = (style: 'dim' | 'body' | 'heading', text: string) => {
+  const styleLine = (style: 'dim' | 'body' | 'heading', text: string, alreadyAnsi = false) => {
     if (text === '') return '';
     if (style === 'dim') return themeDim(theme, text);
     if (style === 'heading') return themeTitle(theme, text);
-    if (style === 'body') return themeFg(theme, 'customMessageText', text);
+    if (style === 'body') return alreadyAnsi ? text : themeFg(theme, 'muted', text, MUTED);
     return text;
   };
 
@@ -239,10 +242,12 @@ export function renderSubagentCompletionMessage(message: any, options: any, them
       if (safeWidth === 1) return [' '];
 
       const innerWidth = safeWidth - 1;
-      const headerLine = ` ${fitToWidth(header, innerWidth)}`;
-      if (!expanded) return [headerLine];
+      const lines: string[] = [];
+      for (const wrappedHeader of wrapLineToWidth(header, innerWidth, safeWidth)) {
+        lines.push(formatMarginedLine(wrappedHeader, safeWidth));
+      }
+      if (!expanded) return lines;
 
-      const lines = [headerLine];
       for (const entry of bodyEntries) {
         if (entry.text === '__DIVIDER__') {
           lines.push(` ${styleLine('dim', BOX_CHARS.horizontal.repeat(Math.min(24, innerWidth)))}`);
@@ -252,13 +257,14 @@ export function renderSubagentCompletionMessage(message: any, options: any, them
           lines.push(' ');
           continue;
         }
+        const alreadyAnsi = entry.style === 'body' && hasAnsiEscape(entry.text);
         for (const wrapped of wrapLineToWidth(entry.text, innerWidth, safeWidth)) {
           if (needsWidth2MarginOmission(wrapped, safeWidth)) {
-            lines.push(styleLine(entry.style, wrapped));
+            lines.push(styleLine(entry.style, wrapped, alreadyAnsi));
             continue;
           }
           const fitted = visibleWidth(wrapped) <= innerWidth ? wrapped : truncateToWidth(wrapped, innerWidth, '');
-          lines.push(` ${styleLine(entry.style, fitted)}`);
+          lines.push(` ${styleLine(entry.style, fitted, alreadyAnsi)}`);
         }
       }
       return lines;

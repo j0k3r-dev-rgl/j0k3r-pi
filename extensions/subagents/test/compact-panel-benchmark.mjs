@@ -24,8 +24,10 @@ const jiti = createJiti(new URL('../package.json', import.meta.url).pathname, { 
 
 const threadView = jiti(new URL('../src/thread-view.ts', import.meta.url).pathname);
 const panelModule = jiti(new URL('../src/ui/subagents-history-panel.ts', import.meta.url).pathname);
+const overlayModule = jiti(new URL('../src/ui/panel-overlay.ts', import.meta.url).pathname);
 
 const { SubagentsHistoryPanel } = panelModule;
+const { showSubagentsPanel } = overlayModule;
 const { setPiComponentProviderForSubagentRendering, resetPiComponentCacheForTests } = threadView;
 
 const ITERATIONS = Number(process.env.PI_COMPACT_BENCH_ITERATIONS ?? 25);
@@ -550,7 +552,274 @@ function runFreshnessChecks() {
   return checks;
 }
 
-function main() {
+function runManySubagentsLargeSnapshotScenario() {
+  const lookup = makeToolDefLookup(markedToolDefinitions);
+  const base = Date.parse('2026-01-01T00:00:00.000Z');
+  const activeTasks = Array.from({ length: 2 }, (_, idx) => makeTask({
+    id: `subtask_many_active_${idx}`,
+    status: 'running',
+    items: snapshotItems(99, `many-active-${idx}`),
+    createdAt: new Date(base + (500 - idx) * 1000).toISOString(),
+    updatedAt: new Date(base + (500 - idx) * 1000).toISOString(),
+  }));
+  const persistedFull = Array.from({ length: 220 }, (_, idx) => makeTask({
+    id: `subtask_many_hist_${String(219 - idx).padStart(3, '0')}`,
+    status: 'completed',
+    items: snapshotItems(99, `many-hist-${219 - idx}`),
+    createdAt: new Date(base + (219 - idx) * 1000).toISOString(),
+    updatedAt: new Date(base + (219 - idx) * 1000).toISOString(),
+  }));
+  const persistedMetadata = persistedFull.map(({ thread_snapshot: _snap, ...meta }) => meta);
+
+  let maxWindowRequested = 0;
+  let hydrationReads = 0;
+  resetCounters();
+  const panel = new SubagentsHistoryPanel(
+    () => [...activeTasks, ...persistedMetadata.slice(0, 30)],
+    theme,
+    () => {},
+    (data, key) => {
+      if (key === 'pageUp') return data === '\u001b[5~';
+      if (key === 'right') return data === '\u001b[C';
+      return false;
+    },
+    (text) => text.length,
+    (text, width) => (text.length > width ? text.slice(0, width) : text),
+    {
+      cwd: process.cwd(),
+      tui: { requestRender() {} },
+      getToolDefinition: lookup,
+    },
+    42,
+    (id) => {
+      hydrationReads += 1;
+      return persistedFull.find((t) => t.id === id) ?? activeTasks.find((t) => t.id === id);
+    },
+    persistedMetadata[0]?.id,
+    () => {},
+    'x',
+    {
+      taskWindowLoader: (limit) => {
+        maxWindowRequested = Math.max(maxWindowRequested, limit);
+        return {
+          tasks: [...activeTasks, ...persistedMetadata.slice(0, limit)],
+          hasMore: limit < persistedMetadata.length,
+        };
+      },
+      initialTaskWindow: 30,
+      taskWindowStep: 30,
+    },
+  );
+
+  // Cold open on a 200-item snapshot (1 user + 99 assistant + 99 tool = 199 items) with 222 total tasks
+  const cold = measure(panel, WIDTH);
+  const coldCounters = {
+    totalTasks: activeTasks.length + persistedMetadata.length,
+    snapshotItemCount: persistedFull[0].thread_snapshot.items.length,
+    windowLimitLoaded: maxWindowRequested,
+    hydrationReads,
+    ...countersSnapshot(),
+  };
+
+  // Warm frames on the 200-item snapshot
+  resetCounters();
+  const warmHydrationBefore = hydrationReads;
+  const warmRun = measureSeries(panel, () => WIDTH);
+  const warm = {
+    timing: stats(warmRun.samples),
+    stringifyCalls: warmRun.stringifyCalls,
+    stringifyChars: warmRun.stringifyChars,
+    counters: {
+      hydrationReads: hydrationReads - warmHydrationBefore,
+      ...countersSnapshot(),
+    },
+  };
+
+  // Incremental viewport scroll up (5 PageUps)
+  resetCounters();
+  const scrollSamples = [];
+  for (let step = 0; step < 5; step += 1) {
+    panel.handleInput('\u001b[5~');
+    const res = measure(panel, WIDTH);
+    scrollSamples.push(res.elapsed);
+  }
+  const viewportScrollUp = {
+    timing: stats(scrollSamples),
+    counters: countersSnapshot(),
+  };
+
+  // Navigate down past initial window (30) to trigger transparent window expansion
+  const hydrationBeforeNav = hydrationReads;
+  for (let step = 0; step < 28; step += 1) {
+    panel.handleInput('\u001b[C');
+  }
+  const navResult = measure(panel, WIDTH);
+  const windowExpansion = {
+    elapsedMs: Number(navResult.elapsed.toFixed(3)),
+    windowLimitLoaded: maxWindowRequested,
+    hydrationReadsDelta: hydrationReads - hydrationBeforeNav,
+  };
+
+  panel.invalidate();
+  return {
+    coldOpen: {
+      elapsedMs: Number(cold.elapsed.toFixed(3)),
+      stringifyCalls: cold.stringifyCalls,
+      stringifyChars: cold.stringifyChars,
+      counters: coldCounters,
+    },
+    warmFrame: warm,
+    viewportScrollUp,
+    windowExpansion,
+  };
+}
+
+async function runIdleRefreshScenario() {
+  const base = Date.parse('2026-01-01T00:00:00.000Z');
+  const terminalTasks = Array.from({ length: 50 }, (_, idx) => makeTask({
+    id: `subtask_idle_${String(49 - idx).padStart(2, '0')}`,
+    status: 'completed',
+    items: snapshotItems(10, `idle-${49 - idx}`),
+    createdAt: new Date(base + (49 - idx) * 1000).toISOString(),
+    updatedAt: new Date(base + (49 - idx) * 1000).toISOString(),
+  }));
+
+  let activeTasks = [];
+  const listeners = new Set();
+  let listenerUnsubscribed = false;
+  let hydrationReads = 0;
+
+  const mockManager = {
+    listSessionTasks: () => [...activeTasks, ...terminalTasks],
+    listSessionTasksWindow: (_cwd, _sessionId, { limit = 30 } = {}) => ({
+      tasks: [...activeTasks, ...terminalTasks.slice(0, limit)],
+      hasMore: limit < terminalTasks.length,
+    }),
+    listActiveSessionTasks: () => activeTasks,
+    getTask: (id) => {
+      hydrationReads += 1;
+      return activeTasks.find((t) => t.id === id) ?? terminalTasks.find((t) => t.id === id);
+    },
+    onTaskUpdate: (fn) => {
+      listeners.add(fn);
+      return () => {
+        listeners.delete(fn);
+        listenerUnsubscribed = true;
+      };
+    },
+    cancel: () => false,
+  };
+
+  const origSetInterval = globalThis.setInterval;
+  const origClearInterval = globalThis.clearInterval;
+  const intervals = [];
+  let intervalsCreated = 0;
+  let intervalsCleared = 0;
+
+  globalThis.setInterval = (fn, ms) => {
+    intervalsCreated += 1;
+    const handle = { id: intervalsCreated, fn, ms, cleared: false, unref() {} };
+    intervals.push(handle);
+    return handle;
+  };
+  globalThis.clearInterval = (handle) => {
+    if (handle && !handle.cleared) {
+      handle.cleared = true;
+      intervalsCleared += 1;
+    }
+  };
+
+  let requestRenderCount = 0;
+  let idleOpenMs = 0;
+  let idleIntervalsCreated = 0;
+  let idleRequestRenderCount = 0;
+  let eventRefreshMs = 0;
+  let eventRequestRenderCount = 0;
+  let activeIntervalsCreated = 0;
+  let activeTickRequestRenderCount = 0;
+  let activeCloseMs = 0;
+
+  try {
+    await showSubagentsPanel({
+      ctx: {
+        cwd: '/tmp/subagents-bench-synthetic-idle',
+        sessionId: 'bench-idle-session',
+        ui: {
+          custom: async (factory) => {
+            let doneCalled = false;
+            const tui = {
+              mode: 'fullscreen',
+              terminal: { rows: 42 },
+              requestRender() { requestRenderCount += 1; },
+            };
+            const openStart = process.hrtime.bigint();
+            const component = factory(tui, theme, { matches: () => false }, () => { doneCalled = true; });
+            component.render(WIDTH);
+            idleOpenMs = Number(process.hrtime.bigint() - openStart) / 1e6;
+            idleIntervalsCreated = intervalsCreated;
+            idleRequestRenderCount = requestRenderCount;
+
+            // Event-driven refresh on task update while terminal
+            const beforeEvent = requestRenderCount;
+            const eventStart = process.hrtime.bigint();
+            for (const listener of listeners) listener(terminalTasks[0]);
+            component.render(WIDTH);
+            eventRefreshMs = Number(process.hrtime.bigint() - eventStart) / 1e6;
+            eventRequestRenderCount = requestRenderCount - beforeEvent;
+
+            // Transition to active task -> conditional live timer starts
+            activeTasks = [makeTask({
+              id: 'subtask_idle_live',
+              status: 'running',
+              items: snapshotItems(10, 'idle-live'),
+              createdAt: new Date(base + 100000).toISOString(),
+              updatedAt: new Date(base + 100000).toISOString(),
+            })];
+            for (const listener of listeners) listener(activeTasks[0]);
+            component.render(WIDTH);
+            activeIntervalsCreated = intervalsCreated - idleIntervalsCreated;
+
+            // Simulate one live timer tick while active task runs
+            const beforeTick = requestRenderCount;
+            const activeHandle = intervals.find((h) => !h.cleared);
+            if (activeHandle) activeHandle.fn();
+            activeTickRequestRenderCount = requestRenderCount - beforeTick;
+
+            // Close overlay via Escape -> timer & listener disposed cleanly
+            const closeStart = process.hrtime.bigint();
+            component.handleInput('\u001b');
+            activeCloseMs = Number(process.hrtime.bigint() - closeStart) / 1e6;
+            if (!doneCalled) component.invalidate();
+          },
+        },
+      },
+      pi: {},
+      manager: mockManager,
+      setWidgetInputSuspended: () => {},
+      setActivePanelCancelSelected: () => {},
+      setActivePanelRequestRender: () => {},
+    });
+  } finally {
+    globalThis.setInterval = origSetInterval;
+    globalThis.clearInterval = origClearInterval;
+  }
+
+  return {
+    idleOpenMs: Number(idleOpenMs.toFixed(3)),
+    idleIntervalsCreated,
+    idleRequestRenderCount,
+    eventRefreshMs: Number(eventRefreshMs.toFixed(3)),
+    eventRequestRenderCount,
+    activeIntervalsCreated,
+    activeTickRequestRenderCount,
+    activeIntervalsCleared: intervalsCleared,
+    activeCloseMs: Number(activeCloseMs.toFixed(3)),
+    listenerUnsubscribed,
+    hydrationReads,
+  };
+}
+
+async function main() {
   installCountingComponents();
   const results = {};
   for (const activeCount of [1, 2, 3]) {
@@ -560,10 +829,12 @@ function main() {
   results.active3LiveToolMarked = runScenario(3, { liveTool: true });
   results.active2Fallback = runScenario(2, { fallbackMode: true });
   results.active2LiveToolFallback = runScenario(2, { liveTool: true, fallbackMode: true });
+  results.manySubagentsLargeSnapshot = runManySubagentsLargeSnapshotScenario();
+  results.idleRefresh = await runIdleRefreshScenario();
   const freshness = runFreshnessChecks();
   const report = {
     fixture: 'compact-panel-benchmark',
-    version: 1,
+    version: 2,
     runtime: {
       node: process.version,
       platform: `${process.platform}/${process.arch}`,
@@ -578,4 +849,4 @@ function main() {
   console.log(JSON.stringify(report, null, 2));
 }
 
-main();
+await main();

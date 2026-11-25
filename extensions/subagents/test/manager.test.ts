@@ -2191,4 +2191,68 @@ describe('manager and history integration', () => {
     await manager.cancel(thirdId, 'test cleanup');
   });
 
+  it('loads windowed session metadata incrementally on demand while preserving active-first ordering', () => {
+    const store = new SubagentHistoryStore();
+    const base = Date.parse('2026-01-01T00:00:00.000Z');
+    for (let i = 0; i < 220; i += 1) {
+      store.upsertTask(tmp, {
+        id: `subtask_persisted_${String(i).padStart(3, '0')}`,
+        agent: 'analyst',
+        mode: 'background',
+        status: 'completed',
+        task: `persisted ${i}`,
+        session_id: 'sess-win',
+        created_at: new Date(base + i * 1000).toISOString(),
+        attempt: 1,
+        result: `heavy result ${i}`,
+      });
+    }
+
+    const listSpy = vi.spyOn(store, 'listSessionTaskMetadata');
+    const manager = new SubagentManager(mockRunner(), store);
+    // Inject one active in-memory task for the same session
+    const activeTask: SubagentTask = {
+      id: 'subtask_active_live',
+      agent: 'analyst',
+      mode: 'background',
+      status: 'running',
+      task: 'live task',
+      session_id: 'sess-win',
+      created_at: new Date(base - 10000).toISOString(),
+      attempt: 1,
+    };
+    (manager as any).tasks.set(activeTask.id, activeTask);
+    (manager as any).taskCwds.set(activeTask.id, tmp);
+
+    // Initial lightweight window: 30 persisted + active
+    const first = (manager as any).listSessionTasksWindow(tmp, 'sess-win', { limit: 30 });
+    expect(first.hasMore).toBe(true);
+    expect(first.tasks).toHaveLength(31);
+    expect(first.tasks[0]?.id).toBe('subtask_active_live');
+    expect(first.tasks[1]?.id).toBe('subtask_persisted_219');
+    expect(first.tasks[30]?.id).toBe('subtask_persisted_190');
+    expect(listSpy).toHaveBeenCalledTimes(1);
+    expect(listSpy).toHaveBeenLastCalledWith(tmp, 'sess-win', 31, 0);
+
+    // Same window hits cache with zero extra SQLite queries
+    const cached = (manager as any).listSessionTasksWindow(tmp, 'sess-win', { limit: 30 });
+    expect(cached.tasks).toHaveLength(31);
+    expect(listSpy).toHaveBeenCalledTimes(1);
+
+    // Expanding to 60 fetches only the incremental delta (offset 30, limit 31)
+    const second = (manager as any).listSessionTasksWindow(tmp, 'sess-win', { limit: 60 });
+    expect(second.hasMore).toBe(true);
+    expect(second.tasks).toHaveLength(61);
+    expect(second.tasks[0]?.id).toBe('subtask_active_live');
+    expect(second.tasks[31]?.id).toBe('subtask_persisted_189');
+    expect(second.tasks[60]?.id).toBe('subtask_persisted_160');
+    expect(listSpy).toHaveBeenCalledTimes(2);
+    expect(listSpy).toHaveBeenLastCalledWith(tmp, 'sess-win', 31, 30);
+
+    // Expanding past 220 reports hasMore: false
+    const all = (manager as any).listSessionTasksWindow(tmp, 'sess-win', { limit: 250 });
+    expect(all.hasMore).toBe(false);
+    expect(all.tasks).toHaveLength(221);
+  });
+
 });

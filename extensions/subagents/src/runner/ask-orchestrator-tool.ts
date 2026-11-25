@@ -19,8 +19,7 @@ function themeFg(theme: any, key: string, text: string): string {
 }
 
 function questionSummary(args: any): string {
-  const question = typeof args?.question === 'string' ? args.question.replace(/\s+/g, ' ').trim() : '';
-  return question.length > 80 ? `${question.slice(0, 79)}…` : question;
+  return typeof args?.question === 'string' ? args.question.replace(/\s+/g, ' ').trim() : '';
 }
 
 /** Compact inline row for the injected child tool; no frame, background or expansion instruction. */
@@ -33,9 +32,9 @@ function renderAskCall(args: any, theme: any, context?: any) {
       themeFg(theme, 'muted', 'asking'),
       question ? themeFg(theme, 'muted', question) : undefined,
     ].filter(Boolean).join(SEPARATOR);
-    return inlineComponent({ header, body: [], expanded: false, state: context?.state, isCallSlot: true });
+    return inlineComponent({ header, body: [], expanded: false, theme, state: context?.state, isCallSlot: true });
   } catch {
-    return inlineComponent({ header: `${ASK_ORCHESTRATOR_TOOL}${SEPARATOR}asking`, body: [], expanded: false, state: context?.state, isCallSlot: true });
+    return inlineComponent({ header: `${ASK_ORCHESTRATOR_TOOL}${SEPARATOR}asking`, body: [], expanded: false, theme, state: context?.state, isCallSlot: true });
   }
 }
 
@@ -51,13 +50,19 @@ function renderAskResult(result: any, options: any, theme: any, context?: any) {
       themeFg(theme, isPartial ? 'muted' : answered ? 'success' : 'error', state),
     ].filter(Boolean).join(SEPARATOR);
     const text = (result?.content ?? []).filter((part: any) => part?.type === 'text').map((part: any) => part.text).join('\n');
-    return inlineComponent({ header, body: text ? text.split('\n') : [], expanded });
+    return inlineComponent({
+      header,
+      body: text ? text.split('\n').map((line: string) => ({ text: line, muted: true })) : [],
+      expanded,
+      theme,
+    });
   } catch {
     const text = (result?.content ?? []).filter((part: any) => part?.type === 'text').map((part: any) => part.text).join('\n');
     return inlineComponent({
       header: `${ASK_ORCHESTRATOR_TOOL}${SEPARATOR}${result?.isError ? 'no answer' : 'answered'}`,
-      body: text ? text.split('\n') : [],
+      body: text ? text.split('\n').map((line: string) => ({ text: line, muted: true })) : [],
       expanded: options?.expanded === true,
+      theme,
     });
   }
 }

@@ -232,13 +232,16 @@ describe('diagnostics and debug logging', () => {
       expect(events).toContain('render_completed');
       expect(events).toContain('input_received');
       expect(events).toContain('panel_disposed');
-      expect(records.filter((record) => record.event === 'render_requested').map((record) => record.reason)).toEqual(expect.arrayContaining(['initial', 'interval', 'input']));
+      const requestedReasons = records.filter((record) => record.event === 'render_requested').map((record) => record.reason);
+      expect(requestedReasons).toEqual(expect.arrayContaining(['initial', 'input']));
+      // Event-driven refresh (MINI-003): no active tasks means zero blind interval polling ticks
+      expect(requestedReasons).not.toContain('interval');
       expect(records.filter((record) => record.event === 'input_received').map((record) => record.input)).toEqual([{ category: 'navigation', action: 'down' }, { category: 'lifecycle', action: 'close' }]);
       expect(records.filter((record) => record.event === 'render_completed').every((record) => typeof record.duration_ms === 'number' && record.duration_ms >= 0)).toBe(true);
       expect(serialized).not.toContain('\u001b[B');
       expect(serialized).not.toContain('No subagent tasks recorded in this session yet.');
       expect(serialized).not.toContain('session execution flow');
-      expect(requestRender).toHaveBeenCalledTimes(3);
+      expect(requestRender).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }

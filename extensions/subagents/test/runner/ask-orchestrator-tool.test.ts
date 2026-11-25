@@ -53,4 +53,24 @@ describe('ask_orchestrator tool', () => {
     expect(collapsed).not.toMatch(/to expand|ctrl\+o/i);
     expect(plain(tool.renderResult(result, { expanded: true }, theme).render(80))).toContain('task cancelled');
   });
+
+  it('wraps overflowing call headers without ellipsis and styles plain expanded answer body in muted foreground preserving ANSI (MINI-004)', async () => {
+    const tool: any = createAskOrchestratorTool(async () => 'plain answer line\n\x1b[36mcyan detail\x1b[0m');
+    const theme = {
+      fg: (key: string, text: string) => (key === 'muted' ? `\x1b[38;2;122;167;184m${text}\x1b[0m` : text),
+    };
+    const longQuestion = 'Should we proceed with the full deployment pipeline across all staging and production environments right now?';
+    const callLines = tool.renderCall({ question: longQuestion }, theme).render(30);
+    expect(callLines.length).toBeGreaterThan(1);
+    expect(callLines.join('\n')).not.toContain('…');
+    expect(callLines.join(' ').replace(/\x1b\[[0-9;]*m/g, '').replace(/\s+/g, ' ')).toContain('production environments right now?');
+
+    const result: any = await tool.execute('call-2', { question: longQuestion });
+    const expLines = tool.renderResult(result, { expanded: true }, theme).render(80);
+    const plainLine = expLines.find((l: string) => l.includes('plain answer line'));
+    const cyanLine = expLines.find((l: string) => l.includes('cyan detail'));
+    expect(plainLine).toContain('\x1b[38;2;122;167;184m');
+    expect(cyanLine).toContain('\x1b[36mcyan detail\x1b[0m');
+    expect(cyanLine).not.toContain('\x1b[38;2;122;167;184m');
+  });
 });

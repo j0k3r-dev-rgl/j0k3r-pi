@@ -268,6 +268,9 @@ export type SubagentBashItem = {
   id?: string;
   tool_call_id?: string;
   command: string;
+  timeout?: number;
+  started_at?: string;
+  ended_at?: string;
   output?: string;
   exitCode?: number;
   cancelled?: boolean;

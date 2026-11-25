@@ -10,5 +10,9 @@
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "@types/node": "24.10.1"
   }
 }

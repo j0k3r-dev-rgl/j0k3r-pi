@@ -1,6 +1,6 @@
 import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { AMBER, CYAN, DIM, LIME, RED, electric } from "./borders.js";
+import { AMBER, CYAN, DIM, LIME, RED, electric, mutedText } from "./borders.js";
 
 /** Presentation-only conformance marker. Never changes schema, execution or result data. */
 export const COMPACT_TOOL_RENDERING_VERSION = 1;
@@ -27,6 +27,7 @@ export function hasLeftMargin(value: unknown): boolean {
 }
 
 const ANSI_TOKEN_RE = /(\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[ -/]*[@-~])/g;
+const ANSI_SGR_RE = /\x1b\[[0-9;]*m/;
 const GRAPHEME_SEGMENTER = new Intl.Segmenter("en", { granularity: "grapheme" });
 
 function stripAnsiTokens(text: string): string {
@@ -82,7 +83,18 @@ export function wrapLeftMarginComponent(component: any): any {
 			const innerWidth = safeWidth - 1;
 			const lines = component.render(innerWidth);
 			if (!Array.isArray(lines) || lines.length === 0) return [];
-			return lines.map((line) => formatMarginedLine(String(line), safeWidth));
+			const out: string[] = [];
+			for (const raw of lines) {
+				const line = String(raw);
+				if (visibleWidth(line) <= innerWidth || needsWidth2MarginOmission(line, safeWidth)) {
+					out.push(formatMarginedLine(line, safeWidth));
+				} else {
+					for (const chunk of expandedLines(line, innerWidth, safeWidth)) {
+						out.push(formatMarginedLine(chunk, safeWidth));
+					}
+				}
+			}
+			return out;
 		},
 	};
 	if (typeof component.handleMouse === "function") {
@@ -142,7 +154,7 @@ export function abbreviateHome(value: string, home: string = process.env.HOME ??
 
 function clip(text: string, max: number): string {
 	if (max <= 0) return "";
-	return visibleWidth(text) <= max ? text : truncateToWidth(text, max, "…");
+	return visibleWidth(text) <= max ? text : truncateToWidth(text, max, "");
 }
 
 /**
@@ -259,12 +271,24 @@ export function expandedLines(text: string, width: number, totalWidth?: number):
 	return lines;
 }
 
+/**
+ * Plain-text expanded lines styled with the active theme's muted foreground (`#7aa7b8` fallback),
+ * while preserving existing ANSI SGR foreground colors on lines that already carry them.
+ */
+export function mutedExpandedLines(text: string, width: number, totalWidth?: number, theme?: any): string[] {
+	return expandedLines(text, width, totalWidth).map((line) => {
+		if (line === "" || ANSI_SGR_RE.test(line)) return line;
+		return mutedText(theme, line);
+	});
+}
+
 export interface CompactRowState {
 	hasResult?: boolean;
 }
 
 /**
- * One compact inline row. Collapsed it is a single line; expanded it adds the lossless body. The call
+ * One compact inline row. Collapsed headers wrap automatically ANSI-aware across margined lines on
+ * width overflow without ellipsis clipping; expanded rows append the lossless wrapped body. The call
  * slot renders nothing once a result exists, so a call/result pair never shows two rows. Pi owns
  * expansion state, click routing and key bindings; this component only lays out text.
  */
@@ -295,7 +319,19 @@ export class CompactToolRow implements Component {
 		const key = `${safeWidth}\u0000${header}\u0000${body.join("\u0001")}`;
 		if (this.cachedLines && this.cachedKey === key && this.cachedWidth === safeWidth) return this.cachedLines;
 
-		const lines = [formatMarginedLine(header, safeWidth), ...body.map((line) => formatMarginedLine(line, safeWidth))];
+		const headerLines = expandedLines(header, innerWidth, safeWidth);
+		const bodyLines: string[] = [];
+		for (const line of body) {
+			if (visibleWidth(line) <= innerWidth || needsWidth2MarginOmission(line, safeWidth)) {
+				bodyLines.push(line);
+			} else {
+				bodyLines.push(...expandedLines(line, innerWidth, safeWidth));
+			}
+		}
+		const lines = [
+			...headerLines.map((line) => formatMarginedLine(line, safeWidth)),
+			...bodyLines.map((line) => formatMarginedLine(line, safeWidth)),
+		];
 		this.cachedKey = key;
 		this.cachedWidth = safeWidth;
 		this.cachedLines = lines;
@@ -348,7 +384,7 @@ export function createFallbackRenderers(toolName: string): CompactRenderers & { 
 				{ state, isCallSlot: true },
 			);
 		},
-		renderResult(result: any, options: any, _theme: any, context: any): Component {
+		renderResult(result: any, options: any, theme: any, context: any): Component {
 			const state: CompactRowState = context.state ?? {};
 			state.hasResult = true;
 			const text = resultText(result);
@@ -371,10 +407,12 @@ export function createFallbackRenderers(toolName: string): CompactRenderers & { 
 					isCallSlot: false,
 					body: (width, totalWidth) => {
 						if (!options.expanded || text.length === 0) return [];
-						const lines = expandedLines(text, width, totalWidth);
+						const lines = mutedExpandedLines(text, width, totalWidth, theme);
 						const continuation = result?.details?.nextCursor ?? result?.details?.continuation;
 						if (typeof continuation === "string" && continuation !== "") {
-							lines.push(electric(AMBER, `[continues: ${continuation}]`));
+							for (const line of expandedLines(`[continues: ${continuation}]`, width, totalWidth)) {
+								lines.push(line === "" ? "" : electric(AMBER, line));
+							}
 						}
 						return lines;
 					},

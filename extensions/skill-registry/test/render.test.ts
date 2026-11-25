@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   COMPACT_TOOL_RENDERING,
+  MUTED,
   RED,
+  RESET,
   extractSkillRegistryAction,
   renderSkillRegistryCall,
   renderSkillRegistryResult,
+  stripAnsi,
   visibleWidth,
 } from '../src/render.js';
 import { registerSkillRegistryTools } from '../src/tools.js';
@@ -185,14 +188,18 @@ describe('skill-registry renderers', () => {
 
     const expanded = renderSkillRegistryResult('skill_registry_generate', errResult, { expanded: true }, mockTheme, { state: {} }).render(80);
     expect(expanded.every((l) => l.startsWith(' '))).toBe(true);
-    expect(expanded.slice(1)).toContain(' Error details');
+    expect(expanded.slice(1)).toContain(` ${MUTED}Error details${RESET}`);
   });
 
-  it('stays width-safe at narrow widths and emits no cells at zero width', () => {
+  it('wraps narrow widths without clipping and preserves width 0/1/2 wide-grapheme rules', () => {
     const callLines = renderSkillRegistryCall('skill_registry_generate', { write: true }, mockTheme).render(15);
-    expect(callLines).toHaveLength(1);
-    expect(visibleWidth(callLines[0])).toBeLessThanOrEqual(15);
-    expect(callLines[0]).not.toMatch(FRAME);
+    expect(callLines.length).toBeGreaterThan(1);
+    for (const line of callLines) {
+      expect(line.startsWith(' ')).toBe(true);
+      expect(visibleWidth(line)).toBeLessThanOrEqual(15);
+      expect(line).not.toMatch(FRAME);
+    }
+    expect(callLines.map((l) => stripAnsi(l).slice(1)).join('')).toContain('generate');
 
     for (const width of [1, 2, 10, 23]) {
       const resultLines = renderSkillRegistryResult('skill_registry_resolve', {
@@ -207,5 +214,45 @@ describe('skill-registry renderers', () => {
     }
 
     expect(renderSkillRegistryResult('skill_registry_generate', { details: {} }, { expanded: false }, mockTheme, { state: {} }).render(0)).toEqual([]);
+    expect(renderSkillRegistryResult('skill_registry_generate', { details: {} }, { expanded: false }, mockTheme, { state: {} }).render(1)).toEqual([' ']);
+
+    const wideRes = {
+      content: [{ type: 'text', text: 'A漢B\nA🚀B' }],
+      details: { registry: { skill_count: 1, warnings: [] } },
+    };
+    const w2 = renderSkillRegistryResult('skill_registry_generate', wideRes, { expanded: true }, mockTheme, { state: {} }).render(2);
+    for (const line of w2) expect(visibleWidth(line)).toBeLessThanOrEqual(2);
+    const plainW2 = w2.map(stripAnsi);
+    expect(plainW2).toContain(' A');
+    expect(plainW2).toContain('漢');
+    expect(plainW2).toContain(' B');
+    expect(plainW2).toContain('🚀');
+  });
+
+  it('applies theme.fg("muted", ...) with #7aa7b8 fallback while preserving existing ANSI in expanded bodies', () => {
+    const customTheme = {
+      ...mockTheme,
+      fg: (token: string, text: string) => (token === 'muted' ? `\x1b[38;2;31;32;33m${text}\x1b[39m` : text),
+    };
+    const res = {
+      content: [{ type: 'text', text: 'plain registry body\n\x1b[32msyntax\x1b[0m\n\x1b[36mhttps://docs.test\x1b[0m' }],
+      details: {
+        query: { paths: ['src/app.ts'] },
+        registry_status: { source: 'project', cache: 'valid', live_hash: '1234567890abcdef' },
+        matches: [],
+        related_matches: [],
+        guidance: [],
+        warnings: [],
+      },
+    };
+    const themed = renderSkillRegistryResult('skill_registry_resolve', res, { expanded: true }, customTheme, { state: {} }).render(100);
+    expect(themed).toContain(' \x1b[38;2;31;32;33mpaths: src/app.ts\x1b[39m');
+    expect(themed).toContain(' \x1b[38;2;31;32;33mplain registry body\x1b[39m');
+    expect(themed).toContain(' \x1b[32msyntax\x1b[0m');
+    expect(themed).toContain(' \x1b[36mhttps://docs.test\x1b[0m');
+
+    const fallback = renderSkillRegistryResult('skill_registry_resolve', res, { expanded: true }, mockTheme, { state: {} }).render(100);
+    expect(fallback).toContain(` ${MUTED}plain registry body${RESET}`);
+    expect(fallback).toContain(' \x1b[32msyntax\x1b[0m');
   });
 });

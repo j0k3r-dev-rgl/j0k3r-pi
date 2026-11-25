@@ -113,9 +113,72 @@ test('supervisor_rotate handles partial, error, empty, width bounds (0..120), wi
     for (const line of wideComp.render(width)) {
       assert.ok(measureWidth(line) <= width, `width ${width}: ${measureWidth(line)}`);
     }
-    assert.equal(tool.renderCall({ memory_id: 7 }, theme, {}).render(width).length, 1);
+    const callLines = tool.renderCall({ memory_id: 7 }, theme, {}).render(width);
+    if (width === 1) assert.deepEqual(callLines, [' ']);
+    else assert.ok(callLines.length >= 1);
+    for (const line of callLines) {
+      assert.ok(measureWidth(line) <= width, `call width ${width}: ${measureWidth(line)}`);
+    }
   }
 
   assert.doesNotThrow(() => tool.renderCall(null, undefined, undefined).render(80));
   assert.doesNotThrow(() => tool.renderResult(null, undefined, undefined, undefined).render(80));
+});
+
+test('supervisor_rotate wraps overflowing collapsed headers without ellipsis clipping', () => {
+  const tool = registerRotateTool();
+  const theme = { fg: (_name: string, text: string) => text, bold: (text: string) => text };
+
+  const resLines = tool.renderResult(
+    {
+      content: [{ type: 'text', text: 'Rotation completed cleanly with END_MARKER' }],
+      details: { scheduled: true, memoryId: 4242, dispatched: true },
+    },
+    { expanded: false, isPartial: false },
+    theme,
+    { args: { memory_id: 4242, continue_task: true }, state: {} },
+  ).render(32);
+
+  assert.ok(resLines.length > 1, 'overflowing collapsed header must wrap');
+  assert.doesNotMatch(stripControl(resLines.join('\n')), /…/);
+  assert.match(resLines.map((line) => stripControl(line).slice(1)).join(' '), /dispatched/);
+  for (const line of resLines) {
+    assert.ok(measureWidth(line) <= 32);
+    assert.ok(stripControl(line).startsWith(' '));
+  }
+});
+
+test('supervisor_rotate applies muted foreground to plain-text expanded body preserving ANSI and width-2 wide graphemes', () => {
+  const tool = registerRotateTool();
+  const customTheme = {
+    fg: (token: string, text: string) => (token === 'muted' ? `\x1b[38;2;10;20;30m${text}\x1b[39m` : text),
+  };
+  const result = {
+    content: [{ type: 'text', text: 'Plain checkpoint handoff note\n\x1b[33mAmber supervisor warning\x1b[0m' }],
+    details: { scheduled: true, memoryId: 12, dispatched: true },
+  };
+
+  const themed = tool.renderResult(result, { expanded: true, isPartial: false }, customTheme, { args: { memory_id: 12 }, state: {} }).render(80).join('\n');
+  assert.ok(themed.includes('\x1b[38;2;10;20;30mPlain checkpoint handoff note\x1b[39m'));
+  assert.ok(themed.includes('\x1b[33mAmber supervisor warning\x1b[0m'));
+  assert.ok(!themed.includes('\x1b[38;2;10;20;30m\x1b[33m'));
+
+  const fallback = tool.renderResult(result, { expanded: true, isPartial: false }, undefined, { args: { memory_id: 12 }, state: {} }).render(80).join('\n');
+  assert.ok(fallback.includes('\x1b[38;2;122;167;184mPlain checkpoint handoff note\x1b[39m'));
+  assert.ok(fallback.includes('\x1b[33mAmber supervisor warning\x1b[0m'));
+
+  const wideComp = tool.renderResult(
+    { content: [{ type: 'text', text: 'A漢B' }], details: { scheduled: true, memoryId: 1 } },
+    { expanded: true, isPartial: false },
+    customTheme,
+    { args: { memory_id: 1 }, state: {} },
+  );
+  assert.deepEqual(wideComp.render(0), []);
+  assert.deepEqual(wideComp.render(1), [' ']);
+  const w2 = wideComp.render(2);
+  const plainW2 = w2.map(stripControl);
+  assert.ok(plainW2.includes(' A'));
+  assert.ok(plainW2.includes('漢'));
+  assert.ok(plainW2.includes(' B'));
+  for (const line of w2) assert.ok(measureWidth(line) <= 2);
 });

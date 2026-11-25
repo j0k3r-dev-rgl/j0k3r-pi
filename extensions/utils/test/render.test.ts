@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   COMPACT_TOOL_RENDERING,
+  MUTED,
   RED,
+  RESET,
   extractMarkdownToAudioBadge,
   extractScreenshotBadge,
   renderMarkdownToAudioCall,
   renderMarkdownToAudioResult,
   renderScreenshotCall,
   renderScreenshotResult,
+  stripAnsi,
   visibleWidth,
 } from '../src/render.js';
 import { registerUtilsTools } from './helpers-enabled.js';
@@ -181,7 +184,7 @@ describe('utils renderers', () => {
 
       const expanded = renderScreenshotResult(errResult, { expanded: true }, mockTheme, { state: {} }).render(80);
       expect(expanded.every((l) => l.startsWith(' '))).toBe(true);
-      expect(expanded.slice(1)).toContain(' install grim to capture screenshots');
+      expect(expanded.slice(1)).toContain(` ${MUTED}install grim to capture screenshots${RESET}`);
     });
   });
 
@@ -292,7 +295,7 @@ describe('utils renderers', () => {
 
       const expanded = renderMarkdownToAudioResult(errResult, { expanded: true }, mockTheme, { state: {} }).render(80);
       expect(expanded.every((l) => l.startsWith(' '))).toBe(true);
-      expect(expanded.slice(1)).toContain(' install piper-tts or espeak-ng');
+      expect(expanded.slice(1)).toContain(` ${MUTED}install piper-tts or espeak-ng${RESET}`);
     });
   });
 
@@ -316,11 +319,20 @@ describe('utils renderers', () => {
     for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(2);
   });
 
-  it('stays width-safe at narrow widths and emits no cells at zero width', () => {
+  it('wraps narrow widths without clipping and preserves width 0/1/2 wide-grapheme rules', () => {
     const callLines = renderScreenshotCall({ target: 'screen' }, mockTheme).render(18);
-    expect(callLines).toHaveLength(1);
-    expect(visibleWidth(callLines[0])).toBeLessThanOrEqual(18);
-    expect(callLines[0]).not.toMatch(FRAME);
+    expect(callLines.length).toBeGreaterThan(1);
+    for (const line of callLines) {
+      expect(line.startsWith(' ')).toBe(true);
+      expect(visibleWidth(line)).toBeLessThanOrEqual(18);
+      expect(line).not.toMatch(FRAME);
+    }
+    expect(callLines.map((l) => stripAnsi(l).slice(1)).join(' ')).toContain('capture [screen]');
+
+    const audioNarrow = renderMarkdownToAudioCall({ path: 'notes/very-long-guide-END_TTS.md' }, mockTheme).render(20);
+    expect(audioNarrow.length).toBeGreaterThan(1);
+    for (const line of audioNarrow) expect(visibleWidth(line)).toBeLessThanOrEqual(20);
+    expect(audioNarrow.map((l) => stripAnsi(l).slice(1)).join('')).toContain('END_TTS.md');
 
     for (const width of [1, 2, 10, 23]) {
       const resultLines = renderScreenshotResult(
@@ -336,5 +348,49 @@ describe('utils renderers', () => {
     expect(
       renderScreenshotResult({ details: { status: 'success', data: {} } }, { expanded: false }, mockTheme, { state: {} }).render(0),
     ).toEqual([]);
+    expect(
+      renderScreenshotResult({ details: { status: 'success', data: {} } }, { expanded: false }, mockTheme, { state: {} }).render(1),
+    ).toEqual([' ']);
+
+    const wideRes = {
+      content: [{ type: 'text', text: 'A漢B\nA🚀B' }],
+      details: { status: 'success', data: { action: 'capture', target: 'screen' } },
+    };
+    const w2 = renderScreenshotResult(wideRes, { expanded: true }, mockTheme, { state: {} }).render(2);
+    for (const line of w2) expect(visibleWidth(line)).toBeLessThanOrEqual(2);
+    const plainW2 = w2.map(stripAnsi);
+    expect(plainW2).toContain(' A');
+    expect(plainW2).toContain('漢');
+    expect(plainW2).toContain(' B');
+    expect(plainW2).toContain('🚀');
+  });
+
+  it('applies muted foreground on plain expanded bodies while preserving existing ANSI and native images', () => {
+    const customTheme = {
+      ...mockTheme,
+      fg: (token: string, text: string) => (token === 'muted' ? `\x1b[38;2;15;25;35m${text}\x1b[39m` : text),
+    };
+    const imageBlock = { type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' };
+    const screenshotRes = {
+      content: [
+        { type: 'text', text: 'plain line\n\x1b[32mhighlighted\x1b[0m\n\x1b[33mwarn\x1b[0m' },
+        imageBlock,
+      ],
+      details: { status: 'success', data: { action: 'capture', target: 'screen', outputPath: '/tmp/s.png' } },
+    };
+    const styledShot = renderScreenshotResult(screenshotRes, { expanded: true }, customTheme, { state: {} }).render(100);
+    expect(styledShot).toContain(' \x1b[38;2;15;25;35mtarget: screen\x1b[39m');
+    expect(styledShot).toContain(' \x1b[38;2;15;25;35mplain line\x1b[39m');
+    expect(styledShot).toContain(' \x1b[32mhighlighted\x1b[0m');
+    expect(styledShot).toContain(' \x1b[33mwarn\x1b[0m');
+    expect(screenshotRes.content[1]).toBe(imageBlock);
+
+    const audioRes = {
+      content: [{ type: 'text', text: 'plain audio\n\x1b[36mhttps://local.test\x1b[0m' }],
+      details: { status: 'success', data: { engine: 'piper', outputPath: 'out.wav' } },
+    };
+    const fallbackAudio = renderMarkdownToAudioResult(audioRes, { expanded: true }, mockTheme, { state: {} }).render(100);
+    expect(fallbackAudio).toContain(` ${MUTED}plain audio${RESET}`);
+    expect(fallbackAudio).toContain(' \x1b[36mhttps://local.test\x1b[0m');
   });
 });

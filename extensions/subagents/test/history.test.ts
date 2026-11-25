@@ -200,4 +200,101 @@ describe('subagent history persistence and display_name compatibility', () => {
     expect(legacyFromList?.display_name).toBeUndefined();
     expect(newFromList?.display_name).toBe('Post Migration Task');
   });
+
+  it('creates composite index idx_subagent_tasks_cwd_session_created and uses it in EXPLAIN QUERY PLAN without full scan or temp B-tree', () => {
+    const store = new SubagentHistoryStore();
+    const base = Date.parse('2026-01-01T00:00:00.000Z');
+    for (let i = 0; i < 60; i += 1) {
+      const sessionId = i % 3 === 0 ? 'sess-target' : `sess-other-${i % 3}`;
+      store.upsertTask(tmp, {
+        id: `subtask_idx_${String(i).padStart(3, '0')}`,
+        agent: 'analyst',
+        mode: 'background',
+        status: 'completed',
+        task: `task ${i}`,
+        session_id: sessionId,
+        created_at: new Date(base + i * 1000).toISOString(),
+        attempt: 1,
+        result: `full result ${i}`,
+      });
+    }
+
+    // Re-opening store is idempotent
+    const store2 = new SubagentHistoryStore();
+    expect(store2.listSessionTaskMetadata(tmp, 'sess-target', 10)).toHaveLength(10);
+
+    const { DatabaseSync } = require('node:sqlite');
+    const db = new DatabaseSync(process.env.PI_SUBAGENTS_HISTORY_DB_PATH!);
+    try {
+      const indexes = db.prepare("PRAGMA index_list('subagent_tasks')").all() as Array<{ name: string }>;
+      expect(indexes.some((row) => row.name === 'idx_subagent_tasks_cwd_session_created')).toBe(true);
+
+      const planRows = db.prepare(`
+        EXPLAIN QUERY PLAN
+        SELECT id, created_at FROM subagent_tasks
+        WHERE cwd = ? AND session_id = ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT ? OFFSET ?
+      `).all(tmp, 'sess-target', 30, 0) as Array<{ detail?: string }>;
+      const planText = planRows.map((row) => String(row.detail ?? '')).join('\n');
+      expect(planText).toContain('idx_subagent_tasks_cwd_session_created');
+      expect(planText).not.toMatch(/\bSCAN\b/i);
+      expect(planText).not.toMatch(/TEMP B-TREE/i);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('loads windowed lightweight session task metadata with offset and omits heavy payloads across 220 tasks', () => {
+    const store = new SubagentHistoryStore();
+    const base = Date.parse('2026-01-01T00:00:00.000Z');
+    for (let i = 0; i < 220; i += 1) {
+      store.upsertTask(tmp, {
+        id: `subtask_win_${String(i).padStart(3, '0')}`,
+        agent: 'analyst',
+        mode: 'background',
+        status: 'completed',
+        task: `windowed task ${i}`,
+        session_id: 'sess-window',
+        created_at: new Date(base + i * 1000).toISOString(),
+        attempt: 1,
+        prompt: `heavy prompt ${i}`,
+        transcript: `heavy transcript ${i}`,
+        result: `heavy result ${i}`,
+        thread_snapshot: {
+          version: 1,
+          source: 'events',
+          items: [{ type: 'status', text: `status ${i}` }],
+        },
+      });
+    }
+    // Add unrelated session tasks to verify filtering
+    for (let i = 0; i < 25; i += 1) {
+      store.upsertTask(tmp, {
+        id: `subtask_other_${String(i).padStart(3, '0')}`,
+        agent: 'analyst',
+        mode: 'background',
+        status: 'completed',
+        task: `other ${i}`,
+        session_id: 'sess-other',
+        created_at: new Date(base + (500 + i) * 1000).toISOString(),
+        attempt: 1,
+      });
+    }
+
+    const page1 = store.listSessionTaskMetadata(tmp, 'sess-window', 30, 0);
+    const page2 = store.listSessionTaskMetadata(tmp, 'sess-window', 30, 30);
+    expect(page1).toHaveLength(30);
+    expect(page2).toHaveLength(30);
+    expect(page1[0]?.id).toBe('subtask_win_219');
+    expect(page1[29]?.id).toBe('subtask_win_190');
+    expect(page2[0]?.id).toBe('subtask_win_189');
+    expect(page2[29]?.id).toBe('subtask_win_160');
+    for (const row of [...page1, ...page2]) {
+      expect(row.thread_snapshot).toBeUndefined();
+      expect(row.transcript).toBeUndefined();
+      expect(row.prompt).toBeUndefined();
+      expect(row.result).toBeUndefined();
+    }
+  });
 });

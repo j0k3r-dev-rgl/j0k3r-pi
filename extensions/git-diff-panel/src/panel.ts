@@ -1,15 +1,109 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { matchesKey, truncateToWidth, visibleWidth, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
+import { matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { readFileDiff, readGitSnapshot, type GitChangedFile, type GitSnapshot, type GitWorktree, type GitWorktreeSnapshot } from "./git.js";
 import { buildMultiWorktreeTreeRows, buildTreeRows, nearestFileIndex, type TreeRow } from "./tree.js";
 
 const CYAN = "accent";
+
+/** Minimum rendering surface shared by the panel and its exported row builders. */
+export type PanelTheme = Pick<Theme, "fg" | "bold">;
 
 type FocusPane = "tree" | "diff";
 
 type TuiLike = { requestRender(): void };
 
 type Done = (value: undefined) => void;
+
+/**
+ * Wrap one logical line to `width` visible columns, preserving ANSI colors across the
+ * break without ellipsis clipping. Blank lines stay blank.
+ */
+export function wrapPanelLine(text: string, width: number): string[] {
+	if (width <= 0) return [];
+	if (text === "") return [""];
+	const wrapped = wrapTextWithAnsi(text, width);
+	const lines = wrapped.length > 0 ? wrapped : [""];
+	return lines.map((line) => (visibleWidth(line) <= width ? line : truncateToWidth(line, width, "")));
+}
+
+/** Map a rendered visual line back to the logical row that owns it. */
+export function rowAtVisualLine(owners: number[], visualLine: number): number | undefined {
+	if (visualLine < 0 || visualLine >= owners.length) return undefined;
+	return owners[visualLine];
+}
+
+function fileChangeStyle(file: GitChangedFile | undefined): { label: string; color: Parameters<Theme["fg"]>[0] } {
+	if (!file) return { label: "", color: "text" };
+	const raw = file.untracked ? "A" : file.status || "M";
+	if (raw.includes("D")) return { label: "D", color: "error" };
+	if (raw.includes("R")) return { label: "R", color: "warning" };
+	if (raw.includes("C")) return { label: "C", color: "warning" };
+	if (raw.includes("A") || file.untracked) return { label: "A", color: "success" };
+	if (raw.includes("M")) return { label: "M", color: "accent" };
+	return { label: raw.trim() || "M", color: "text" };
+}
+
+/**
+ * Build the file-tree visual rows: every logical row wraps to the pane width and each
+ * rendered line records its owning row index for scroll and mouse mapping.
+ */
+export function buildTreeVisualRows(
+	rows: TreeRow[],
+	width: number,
+	theme: PanelTheme,
+	selectedIndex = -1,
+): { lines: string[]; owners: number[] } {
+	const lines: string[] = [];
+	const owners: number[] = [];
+	rows.forEach((row, index) => {
+		const selected = index === selectedIndex;
+		const prefix = selected ? theme.fg("accent", "▶ ") : "  ";
+		const indent = "  ".repeat(row.depth);
+		let text: string;
+
+		if (row.kind === "worktree") {
+			const wt = row.worktree!;
+			const isCurrent = wt.isCurrent ? "*" : "";
+			const expandIcon = row.expanded ? "▾" : "▸";
+			const branchText = theme.fg(selected ? "accent" : "warning", `${expandIcon} ⎇ ${row.name}${isCurrent}`);
+			const rel = theme.fg("dim", `(${relCwd(wt.path)})`);
+			const stat = row.stats?.fileCount === 0
+				? theme.fg("success", "clean")
+				: theme.fg("success", `+${row.stats?.additions ?? 0}`) + theme.fg("muted", "/") + theme.fg("error", `-${row.stats?.deletions ?? 0}`) + theme.fg("dim", ` (${row.stats?.fileCount})`);
+			text = `${prefix}${indent}${branchText} ${rel} ${stat}`;
+		} else if (row.kind === "dir") {
+			text = theme.fg(row.expanded ? "accent" : "muted", `${prefix}${indent}${row.expanded ? "▾" : "▸"} ${row.name}`);
+		} else {
+			const style = fileChangeStyle(row.file);
+			const stat = row.file ? theme.fg("success", `+${row.file.additions ?? 0}`) + theme.fg("muted", "/") + theme.fg("error", `-${row.file.deletions ?? 0}`) : "";
+			text = `${prefix}${indent}${theme.fg(style.color, style.label.padEnd(2))} ${theme.fg(style.color, row.name)} ${stat}`;
+		}
+
+		for (const line of wrapPanelLine(text, width)) {
+			lines.push(line);
+			owners.push(index);
+		}
+	});
+	return { lines, owners };
+}
+
+/** Color one diff line by kind (header, hunk, addition, deletion, context). */
+export function colorDiffLine(line: string, theme: PanelTheme): string {
+	if (line.startsWith("+++ ") || line.startsWith("--- ") || line.startsWith("diff --git")) return theme.fg("accent", line);
+	if (line.startsWith("@@")) return theme.fg("warning", line);
+	if (line.startsWith("+")) return theme.fg("success", line);
+	if (line.startsWith("-")) return theme.fg("error", line);
+	return theme.fg("muted", line);
+}
+
+/** Build wrapped, colored diff visual rows for one pane width. */
+export function buildDiffVisualRows(diff: string, width: number, theme: PanelTheme): string[] {
+	const lines: string[] = [];
+	for (const line of diff.split("\n")) {
+		for (const wrapped of wrapPanelLine(colorDiffLine(line, theme), width)) lines.push(wrapped);
+	}
+	return lines;
+}
 
 function pad(text: string, width: number): string {
 	if (width <= 0) return "";
@@ -42,13 +136,18 @@ export class GitDiffPanel {
 	private loading = false;
 	private error: string | undefined;
 
-	constructor(
-		private readonly cwd: string,
-		private readonly tui: TuiLike,
-		private readonly theme: Theme,
-		private readonly done: Done,
-		private readonly initialWorktree?: string,
-	) {
+	private readonly cwd: string;
+	private readonly tui: TuiLike;
+	private readonly theme: Theme;
+	private readonly done: Done;
+	private readonly initialWorktree: string | undefined;
+
+	constructor(cwd: string, tui: TuiLike, theme: Theme, done: Done, initialWorktree?: string) {
+		this.cwd = cwd;
+		this.tui = tui;
+		this.theme = theme;
+		this.done = done;
+		this.initialWorktree = initialWorktree;
 		void this.refresh();
 	}
 
@@ -223,7 +322,7 @@ export class GitDiffPanel {
 		}
 		if (data === "G") {
 			if (this.focus === "tree") this.move(this.rows.length);
-			else this.diffScroll = Math.max(0, this.diffLines().length - 1);
+			else this.diffScroll = Math.max(0, this.diffLineCount() - 1);
 			this.tui.requestRender();
 			return;
 		}
@@ -254,8 +353,8 @@ export class GitDiffPanel {
 		}
 
 		if (event.type === "press" && event.button === "left") {
-			// Click on worktree bar line
-			if (hasWtBar && event.y === 2) {
+			// Click on the rendered worktree bar line
+			if (hasWtBar && this.lastFrame.wtBarY !== undefined && event.y === this.lastFrame.wtBarY) {
 				this.cycleWorktree(1);
 				this.tui.requestRender();
 				return { handled: true };
@@ -266,10 +365,11 @@ export class GitDiffPanel {
 			const overTree = event.x <= treeWidth + 1;
 			this.focus = overTree ? "tree" : "diff";
 
-			const treeStartRow = hasWtBar ? 4 : 3;
-			if (overTree && event.y >= treeStartRow) {
-				const rowIdx = this.treeScroll + (event.y - treeStartRow);
-				if (rowIdx >= 0 && rowIdx < this.rows.length) {
+			// Rows wrap, so the click y maps through rendered visual lines, not item indexes.
+			const visualLine = this.treeScroll + (event.y - this.lastFrame.treeStartY);
+			if (overTree && event.y >= this.lastFrame.treeStartY) {
+				const rowIdx = rowAtVisualLine(this.lastFrame.treeOwners, visualLine);
+				if (rowIdx !== undefined && rowIdx >= 0 && rowIdx < this.rows.length) {
 					const row = this.rows[rowIdx];
 					this.selected = rowIdx;
 					if (row?.kind === "worktree" || row?.kind === "dir") {
@@ -297,12 +397,24 @@ export class GitDiffPanel {
 	}
 
 	private scrollDiff(delta: number): void {
-		this.diffScroll = Math.max(0, Math.min(Math.max(0, this.diffLines().length - 1), this.diffScroll + delta));
+		this.diffScroll = Math.max(0, Math.min(Math.max(0, this.diffLineCount() - 1), this.diffScroll + delta));
+	}
+
+	/** Visual diff row count from the last render (wrapping depends on pane width). */
+	private diffLineCount(): number {
+		return this.lastFrame.diffLineCount || this.diffLines().length;
 	}
 
 	private diffLines(): string[] {
 		return this.diff.split("\n");
 	}
+
+	private lastFrame: {
+		treeStartY: number;
+		wtBarY: number | undefined;
+		treeOwners: number[];
+		diffLineCount: number;
+	} = { treeStartY: 4, wtBarY: undefined, treeOwners: [], diffLineCount: 0 };
 
 	render(width: number): string[] {
 		if (width <= 0) return [];
@@ -315,7 +427,14 @@ export class GitDiffPanel {
 		const height = Math.min(targetHeight, Math.max(20, termRows - 2));
 
 		const hasWtBar = this.worktrees.length > 1;
-		const bodyHeight = height - (hasWtBar ? 6 : 5);
+		const summaryLines = wrapPanelLine(this.summary(), inner - 2);
+		const wtBarLines = hasWtBar ? this.renderWorktreeBarLines(inner - 2) : [];
+		const helpText = hasWtBar
+			? "j/k move · ctrl+j/k scroll · h/l focus · w/W worktree · g/G ends · r refresh · q close"
+			: "j/k move · ctrl+j/k scroll · h/l focus · g/G ends · r refresh · q close";
+		const helpLines = wrapPanelLine(this.theme.fg("dim", helpText), inner - 2);
+		const fixedRows = 1 + summaryLines.length + wtBarLines.length + 2 + helpLines.length + 1;
+		const bodyHeight = Math.max(1, height - fixedRows);
 
 		const title = ` git changes `;
 		const top = `${this.theme.fg(CYAN, "╭")}${this.theme.fg(CYAN, "─".repeat(5))}${this.theme.fg("success", title)}${this.theme.fg(CYAN, "─".repeat(Math.max(0, inner - visibleWidth(title) - 5)))}${this.theme.fg(CYAN, "╮")}`;
@@ -323,37 +442,63 @@ export class GitDiffPanel {
 		const bottomSep = `${this.theme.fg(CYAN, "├")}${this.theme.fg(CYAN, "─".repeat(treeWidth))}${this.theme.fg(CYAN, "┴")}${this.theme.fg(CYAN, "─".repeat(diffWidth))}${this.theme.fg(CYAN, "┤")}`;
 		const bottom = `${this.theme.fg(CYAN, "╰")}${this.theme.fg(CYAN, "─".repeat(inner))}${this.theme.fg(CYAN, "╯")}`;
 
-		const summary = this.summary();
-		const lines = [top, this.fullRow(summary, inner)];
-
-		if (hasWtBar) {
-			const wtBar = this.renderWorktreeBar(inner - 2);
-			lines.push(this.fullRow(wtBar, inner));
-		}
-
+		const lines: string[] = [top, ...summaryLines.map((line) => this.fullRow(line, inner))];
+		const wtBarY = hasWtBar ? lines.length : undefined;
+		for (const line of wtBarLines) lines.push(this.fullRow(line, inner));
 		lines.push(sep);
 
-		const treeRows = this.renderTree(bodyHeight, treeWidth - 2);
-		const diffRows = this.renderDiff(bodyHeight, diffWidth - 2);
+		const treeHeader = wrapPanelLine(this.paneHeader("tree", "files", treeWidth - 2), treeWidth - 2);
+		const treeBody = this.rows.length === 0
+			? { lines: wrapPanelLine(this.theme.fg("success", "clean working tree"), treeWidth - 2), owners: [] as number[] }
+			: buildTreeVisualRows(this.rows, treeWidth - 2, this.theme, this.selected);
+		const diffRows = buildDiffVisualRows(this.diff, diffWidth - 2, this.theme);
+		const diffHeader = wrapPanelLine(this.diffHeaderText(diffWidth - 2), diffWidth - 2);
+
+		this.lastFrame = {
+			treeStartY: lines.length + treeHeader.length,
+			wtBarY,
+			treeOwners: treeBody.owners,
+			diffLineCount: diffRows.length,
+		};
+
+		const treeRowsAvailable = Math.max(0, bodyHeight - treeHeader.length);
+		this.clampTreeScroll(treeBody.owners, treeRowsAvailable);
+		this.diffScroll = Math.max(0, Math.min(Math.max(0, diffRows.length - 1), this.diffScroll));
+
+		const treeSlice = treeBody.lines.slice(this.treeScroll, this.treeScroll + treeRowsAvailable);
+		const diffAvailable = Math.max(0, bodyHeight - diffHeader.length);
+		const diffSlice = diffRows.slice(this.diffScroll, this.diffScroll + diffAvailable);
+		const treePane = [...treeHeader, ...treeSlice];
+		const diffPane = [...diffHeader, ...diffSlice];
 
 		for (let i = 0; i < bodyHeight; i++) {
-			lines.push(`${this.theme.fg(CYAN, "│")} ${pad(treeRows[i] ?? "", treeWidth - 2)} ${this.theme.fg(CYAN, "│")} ${pad(diffRows[i] ?? "", diffWidth - 2)} ${this.theme.fg(CYAN, "│")}`);
+			lines.push(`${this.theme.fg(CYAN, "│")} ${pad(treePane[i] ?? "", treeWidth - 2)} ${this.theme.fg(CYAN, "│")} ${pad(diffPane[i] ?? "", diffWidth - 2)} ${this.theme.fg(CYAN, "│")}`);
 		}
 
 		lines.push(bottomSep);
-		const helpText = hasWtBar
-			? "j/k move · ctrl+j/k scroll · h/l focus · w/W worktree · g/G ends · r refresh · q close"
-			: "j/k move · ctrl+j/k scroll · h/l focus · g/G ends · r refresh · q close";
-		lines.push(this.fullRow(this.theme.fg("dim", helpText), inner));
+		for (const line of helpLines) lines.push(this.fullRow(line, inner));
 		lines.push(bottom);
 		return lines;
+	}
+
+	/** Keep the selected tree row fully visible using rendered visual line counts. */
+	private clampTreeScroll(owners: number[], visibleRows: number): void {
+		const maxScroll = Math.max(0, owners.length - Math.max(1, visibleRows));
+		this.treeScroll = Math.max(0, Math.min(this.treeScroll, maxScroll));
+		const start = owners.indexOf(this.selected);
+		if (start < 0) return;
+		const end = owners.lastIndexOf(this.selected);
+		if (start < this.treeScroll) this.treeScroll = start;
+		else if (end >= this.treeScroll + visibleRows) this.treeScroll = Math.max(0, end - visibleRows + 1);
+		this.treeScroll = Math.max(0, Math.min(this.treeScroll, maxScroll));
 	}
 
 	private fullRow(content: string, inner: number): string {
 		return `${this.theme.fg(CYAN, "│")} ${pad(content, inner - 2)} ${this.theme.fg(CYAN, "│")}`;
 	}
 
-	private renderWorktreeBar(width: number): string {
+	/** Worktree tabs wrap across lines instead of being clipped with an ellipsis. */
+	private renderWorktreeBarLines(width: number): string[] {
 		const label = `${this.theme.fg("muted", "worktrees:")} `;
 		const tabs: string[] = [];
 
@@ -387,17 +532,17 @@ export class GitDiffPanel {
 		}
 
 		const hint = this.theme.fg("dim", "(w: switch)");
-		const tabsJoined = tabs.join(" ");
-		const availableForTabs = width - visibleWidth(label) - visibleWidth(hint) - 2;
+		const tabLines = wrapPanelLine(`${label}${tabs.join(" ")}`, width);
+		const last = tabLines[tabLines.length - 1] ?? "";
+		const lastWidth = visibleWidth(last);
+		const hintWidth = visibleWidth(hint);
 
-		if (visibleWidth(tabsJoined) <= availableForTabs) {
-			const gap = Math.max(1, width - visibleWidth(label) - visibleWidth(tabsJoined) - visibleWidth(hint));
-			return `${label}${tabsJoined}${" ".repeat(gap)}${hint}`;
+		if (lastWidth + 1 + hintWidth <= width) {
+			tabLines[tabLines.length - 1] = `${last}${" ".repeat(Math.max(1, width - lastWidth - hintWidth))}${hint}`;
+		} else {
+			tabLines.push(`${" ".repeat(Math.max(0, width - hintWidth))}${hint}`);
 		}
-
-		const truncatedTabs = truncateToWidth(tabsJoined, Math.max(10, width - visibleWidth(label) - visibleWidth(hint) - 2), "…");
-		const gap = Math.max(1, width - visibleWidth(label) - visibleWidth(truncatedTabs) - visibleWidth(hint));
-		return `${label}${truncatedTabs}${" ".repeat(gap)}${hint}`;
+		return tabLines;
 	}
 
 	private summary(): string {
@@ -451,69 +596,17 @@ export class GitDiffPanel {
 		].filter(Boolean).join(this.theme.fg("muted", " · "));
 	}
 
-	private fileChangeStyle(file: GitChangedFile | undefined): { label: string; color: Parameters<Theme["fg"]>[0] } {
-		if (!file) return { label: "", color: "text" };
-		const raw = file.untracked ? "A" : file.status || "M";
-		if (raw.includes("D")) return { label: "D", color: "error" };
-		if (raw.includes("R")) return { label: "R", color: "warning" };
-		if (raw.includes("C")) return { label: "C", color: "warning" };
-		if (raw.includes("A") || file.untracked) return { label: "A", color: "success" };
-		if (raw.includes("M")) return { label: "M", color: "accent" };
-		return { label: raw.trim() || "M", color: "text" };
+	private diffHeaderText(width: number): string {
+		const file = this.activeFile ?? this.selectedFile();
+		return `${this.paneHeader("diff", "diff", width)} ${file ? this.theme.fg("accent", file.path) : this.theme.fg("muted", "no file selected")}`;
 	}
 
-	private renderTree(height: number, width: number): string[] {
-		const header = this.paneHeader("tree", "files");
-		const listHeight = Math.max(0, height - 1);
-		if (this.rows.length === 0) return [header, this.theme.fg("success", "clean working tree")];
-		if (this.selected < this.treeScroll) this.treeScroll = this.selected;
-		if (this.selected >= this.treeScroll + listHeight) this.treeScroll = this.selected - listHeight + 1;
-
-		return [header, ...this.rows.slice(this.treeScroll, this.treeScroll + listHeight).map((row, offset) => {
-			const index = this.treeScroll + offset;
-			const selected = index === this.selected;
-			const prefix = selected ? this.theme.fg("accent", "▶ ") : "  ";
-			const indent = "  ".repeat(row.depth);
-
-			if (row.kind === "worktree") {
-				const wt = row.worktree!;
-				const isCurrent = wt.isCurrent ? "*" : "";
-				const expandIcon = row.expanded ? "▾" : "▸";
-				const branchText = this.theme.fg(selected ? "accent" : "warning", `${expandIcon} ⎇ ${row.name}${isCurrent}`);
-				const rel = this.theme.fg("dim", `(${relCwd(wt.path)})`);
-				const stat = row.stats?.fileCount === 0
-					? this.theme.fg("success", "clean")
-					: this.theme.fg("success", `+${row.stats?.additions ?? 0}`) + this.theme.fg("muted", "/") + this.theme.fg("error", `-${row.stats?.deletions ?? 0}`) + this.theme.fg("dim", ` (${row.stats?.fileCount})`);
-				return `${prefix}${indent}${branchText} ${rel} ${stat}`;
-			}
-
-			if (row.kind === "dir") return this.theme.fg(row.expanded ? "accent" : "muted", `${prefix}${indent}${row.expanded ? "▾" : "▸"} ${row.name}`);
-			const style = this.fileChangeStyle(row.file);
-			const stat = row.file ? this.theme.fg("success", `+${row.file.additions ?? 0}`) + this.theme.fg("muted", "/") + this.theme.fg("error", `-${row.file.deletions ?? 0}`) : "";
-			return `${prefix}${indent}${this.theme.fg(style.color, style.label.padEnd(2))} ${this.theme.fg(style.color, row.name)} ${stat}`;
-		})];
-	}
-
-	private paneHeader(pane: FocusPane, label: string): string {
+	private paneHeader(pane: FocusPane, label: string, width: number): string {
 		const active = this.focus === pane;
 		const marker = active ? this.theme.fg("success", "●") : this.theme.fg("muted", "○");
 		const text = active ? this.theme.fg("accent", label.toUpperCase()) : this.theme.fg("muted", label);
-		return `${marker} ${text} ${this.theme.fg("muted", "─".repeat(24))}`;
-	}
-
-	private renderDiff(height: number, width: number): string[] {
-		const file = this.activeFile ?? this.selectedFile();
-		const header = `${this.paneHeader("diff", "diff")} ${file ? this.theme.fg("accent", file.path) : this.theme.fg("muted", "no file selected")}`;
-		const diff = this.diffLines().slice(this.diffScroll, this.diffScroll + Math.max(0, height - 1)).map((line) => this.colorDiffLine(line));
-		return [header, ...diff].slice(0, height).map((line) => truncateToWidth(line, width, ""));
-	}
-
-	private colorDiffLine(line: string): string {
-		if (line.startsWith("+++ ") || line.startsWith("--- ") || line.startsWith("diff --git")) return this.theme.fg("accent", line);
-		if (line.startsWith("@@")) return this.theme.fg("warning", line);
-		if (line.startsWith("+")) return this.theme.fg("success", line);
-		if (line.startsWith("-")) return this.theme.fg("error", line);
-		return this.theme.fg("muted", line);
+		const used = visibleWidth(marker) + 1 + visibleWidth(label) + 1;
+		return `${marker} ${text} ${this.theme.fg("muted", "─".repeat(Math.max(0, width - used)))}`;
 	}
 
 	invalidate(): void {}

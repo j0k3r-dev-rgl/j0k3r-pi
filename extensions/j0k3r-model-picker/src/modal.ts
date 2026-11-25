@@ -45,6 +45,10 @@ export type PickerDeps = {
 };
 
 const ANSI_PATTERN = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?(\x07|\x1b\\)|\x1b[()][AB012]|\x1b./g;
+const ANSI_TOKEN = /(\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\))/g;
+const GRAPHEME_SEGMENTER = new Intl.Segmenter("en", { granularity: "grapheme" });
+const ZERO_WIDTH_GRAPHEME = /^[\p{Mn}\p{Me}\p{Cf}\p{Cc}]+$/u;
+const WIDE_GRAPHEME = /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u200D|\uFE0F/u;
 
 const PADDING = 2;
 const VERTICAL_PADDING = 1;
@@ -101,8 +105,74 @@ function stripAnsi(text: string): string {
     return text.replace(ANSI_PATTERN, "");
 }
 
+function isWideCodePoint(cp: number): boolean {
+    return (
+        (cp >= 0x1100 && cp <= 0x115f) ||
+        (cp >= 0x2e80 && cp <= 0x303e) ||
+        (cp >= 0x3041 && cp <= 0x33ff) ||
+        (cp >= 0x3400 && cp <= 0x4dbf) ||
+        (cp >= 0x4e00 && cp <= 0x9fff) ||
+        (cp >= 0xa000 && cp <= 0xa4cf) ||
+        (cp >= 0xac00 && cp <= 0xd7ff) ||
+        (cp >= 0xf900 && cp <= 0xfaff) ||
+        (cp >= 0xfe30 && cp <= 0xfe6f) ||
+        (cp >= 0xff01 && cp <= 0xff60) ||
+        (cp >= 0xffe0 && cp <= 0xffe6) ||
+        (cp >= 0x1f300 && cp <= 0x1faff) ||
+        (cp >= 0x20000 && cp <= 0x3fffd)
+    );
+}
+
+function graphemeWidth(grapheme: string): number {
+    if (!grapheme || ZERO_WIDTH_GRAPHEME.test(grapheme)) return 0;
+    if (WIDE_GRAPHEME.test(grapheme)) return 2;
+    const cp = grapheme.codePointAt(0);
+    if (cp === undefined) return 0;
+    if (cp < 0x20 || (cp >= 0x7f && cp <= 0x9f)) return 0;
+    return isWideCodePoint(cp) ? 2 : 1;
+}
+
 function visibleWidth(text: string): number {
-    return stripAnsi(text).length;
+    const plain = stripAnsi(text);
+    if (!plain) return 0;
+    let width = 0;
+    for (const { segment } of GRAPHEME_SEGMENTER.segment(plain)) width += graphemeWidth(segment);
+    return width;
+}
+
+/**
+ * Break an ANSI-styled line into rows that fit `width` terminal cells without clipping
+ * or ellipsis, keeping the active SGR state across the break.
+ */
+function wrapLine(text: string, width: number): string[] {
+    if (width <= 0) return [];
+    if (visibleWidth(text) <= width) return [text];
+    const out: string[] = [];
+    let current = "";
+    let currentWidth = 0;
+    let active = "";
+    const flush = () => {
+        out.push(active && !current.endsWith("\x1b[0m") ? `${current}\x1b[0m` : current);
+        current = active;
+        currentWidth = 0;
+    };
+    for (const part of text.split(ANSI_TOKEN)) {
+        if (!part) continue;
+        if (part.startsWith("\x1b")) {
+            current += part;
+            active = part === "\x1b[0m" ? "" : `${active}${part}`;
+            continue;
+        }
+        for (const { segment } of GRAPHEME_SEGMENTER.segment(part)) {
+            const w = graphemeWidth(segment);
+            if (w > width) continue;
+            if (currentWidth + w > width && currentWidth > 0) flush();
+            current += segment;
+            currentWidth += w;
+        }
+    }
+    if (current !== active || out.length === 0) flush();
+    return out.length > 0 ? out : [""];
 }
 
 function truncateToWidth(text: string, width: number, ellipsis = "…"): string {
@@ -141,6 +211,11 @@ function padLine(line: string, innerWidth: number): string {
 
 function innerWidth(width: number): number {
     return Math.max(4, width - 2 - PADDING * 2);
+}
+
+/** Visual line index of the first entry pushed into the frame body. */
+function bodyOffset(): number {
+    return 3 + VERTICAL_PADDING;
 }
 
 function fg(theme: ModalTheme, color: string, text: string): string {
@@ -571,32 +646,36 @@ export class ModelPickerModal extends Container implements Focusable {
 
         const title = bold(this.deps.theme, fg(this.deps.theme, "accent", "Selector de modelo"));
         const lines: string[] = [];
+        /** Push a generated row, wrapping it to the inner width without clipping. */
+        const push = (text: string) => {
+            for (const segment of wrapLine(text, iw)) lines.push(segment);
+        };
 
         if (this.loading && !this.catalog) {
-            lines.push(fg(this.deps.theme, "muted", "Cargando catálogo de modelos…"));
+            push(fg(this.deps.theme, "muted", "Cargando catálogo de modelos…"));
             lines.push("");
-            this.pushButtons(lines, 1 + VERTICAL_PADDING + lines.length, iw);
+            this.pushButtons(lines, bodyOffset() + lines.length, iw);
             return this.frame(title, lines, available, iw);
         }
 
         if (this.error && !this.catalog) {
-            lines.push(bold(this.deps.theme, fg(this.deps.theme, "error", "No se pudo cargar el catálogo")));
-            lines.push(fg(this.deps.theme, "muted", this.error));
+            push(bold(this.deps.theme, fg(this.deps.theme, "error", "No se pudo cargar el catálogo")));
+            push(fg(this.deps.theme, "muted", this.error));
             lines.push("");
-            this.pushButtons(lines, 1 + VERTICAL_PADDING + lines.length, iw, true);
+            this.pushButtons(lines, bodyOffset() + lines.length, iw, true);
             return this.frame(title, lines, available, iw);
         }
 
         // Header: current model + counts.
         const current = this.deps.currentModel;
-        lines.push(
+        push(
             current
                 ? `${fg(this.deps.theme, "dim", "actual:")} ${fg(this.deps.theme, "text", `${current.provider}/${current.id}`)}`
                 : fg(this.deps.theme, "dim", "actual: ninguno"),
         );
         const providerCount = this.catalog?.providers.length ?? 0;
         const accountCount = this.catalog?.providers.reduce((sum, p) => sum + p.accounts.length, 0) ?? 0;
-        lines.push(
+        push(
             fg(
                 this.deps.theme,
                 "dim",
@@ -610,7 +689,7 @@ export class ModelPickerModal extends Container implements Focusable {
         const queryText = this.query
             ? fg(this.deps.theme, "text", this.query)
             : fg(this.deps.theme, "dim", "filtrar (escribe para buscar)");
-        lines.push(`${queryLabel} ${queryText}${fg(this.deps.theme, "accent", this.focused ? "▌" : "")}`);
+        push(`${queryLabel} ${queryText}${fg(this.deps.theme, "accent", this.focused ? "▌" : "")}`);
         lines.push("");
 
         // Body. The viewport is derived from real available height.
@@ -620,7 +699,7 @@ export class ModelPickerModal extends Container implements Focusable {
         this.viewportRows = Math.max(3, Math.min(12, availableRows - chromeRows));
 
         if (this.rows.length === 0) {
-            lines.push(
+            push(
                 fg(
                     this.deps.theme,
                     "muted",
@@ -630,10 +709,13 @@ export class ModelPickerModal extends Container implements Focusable {
         } else {
             this.clampScroll();
             const visible = this.rows.slice(this.scroll, this.scroll + this.viewportRows);
+            let visualOffset = 0;
             for (const [offset, row] of visible.entries()) {
                 const index = this.scroll + offset;
-                const y = 1 + VERTICAL_PADDING + bodyStart + offset;
-                lines.push(this.renderRow(row, index, y, iw));
+                const y = bodyOffset() + bodyStart + visualOffset;
+                const rowLines = this.renderRow(row, index, y, iw);
+                for (const rowLine of rowLines) lines.push(rowLine);
+                visualOffset += rowLines.length;
             }
         }
 
@@ -643,33 +725,45 @@ export class ModelPickerModal extends Container implements Focusable {
             const up = scroll.above ? fg(this.deps.theme, "accent", "▲") : fg(this.deps.theme, "borderMuted", "·");
             const down = scroll.below ? fg(this.deps.theme, "accent", "▼") : fg(this.deps.theme, "borderMuted", "·");
             const range = fg(this.deps.theme, "dim", `${scroll.start}-${scroll.end} de ${this.rows.length}`);
-            lines.push(`${up} ${down} ${range}`);
+            push(`${up} ${down} ${range}`);
         }
 
         // Status line.
         lines.push("");
         if (this.status) {
             const color = this.status.kind === "error" ? "error" : "success";
-            lines.push(fg(this.deps.theme, color, this.status.text));
+            push(fg(this.deps.theme, color, this.status.text));
         } else if (this.loading) {
-            lines.push(fg(this.deps.theme, "muted", "Refrescando…"));
+            push(fg(this.deps.theme, "muted", "Refrescando…"));
         } else {
-            lines.push(fg(this.deps.theme, "dim", "enter elige/expande · espacio colapsa todo · r refresca · Esc cierra"));
+            push(fg(this.deps.theme, "dim", "enter elige/expande · espacio colapsa todo · r refresca · Esc cierra"));
         }
 
         lines.push("");
-        this.pushButtons(lines, 1 + VERTICAL_PADDING + lines.length, iw);
+        this.pushButtons(lines, bodyOffset() + lines.length, iw);
 
         return this.frame(title, lines, available, iw);
     }
 
-    private renderRow(row: Row, index: number, y: number, iw: number): string {
+    /**
+     * Rows may wrap across several visual lines; every produced line emits a click
+     * region so hover, selection, and clicks stay aligned with what is rendered.
+     */
+    private renderRow(row: Row, index: number, y: number, iw: number): string[] {
         if (row.kind === "provider") return this.renderProviderRow(row, index, y, iw);
         if (row.kind === "account") return this.renderAccountRow(row, index, y, iw);
         return this.renderModelRow(row, index, y, iw);
     }
 
-    private renderProviderRow(row: Row, index: number, y: number, iw: number): string {
+    private rowLines(region: RegionSeed, text: string, indent: string, iw: number): string[] {
+        const wrapped = wrapLine(text, iw);
+        wrapped.forEach((line, offset) => {
+            this.pushRegion({ ...region, y: region.y + offset }, line, indent, iw);
+        });
+        return wrapped;
+    }
+
+    private renderProviderRow(row: Row, index: number, y: number, iw: number): string[] {
         const theme = this.deps.theme;
         const provider = row.provider;
         const selected = index === this.cursor;
@@ -689,11 +783,10 @@ export class ModelPickerModal extends Container implements Focusable {
         const authLabel = provider.auth.label ? fg(theme, "dim", ` · ${provider.auth.label}`) : "";
 
         const text = `${marker}${fg(theme, "accent", arrow)} ${auth} ${label} ${meta}${authLabel}`;
-        this.pushRegion({ id: `row-${index}`, kind: "toggle", y, index }, text, "", iw);
-        return text;
+        return this.rowLines({ id: `row-${index}`, kind: "toggle", y, index }, text, "", iw);
     }
 
-    private renderAccountRow(row: Row, index: number, y: number, iw: number): string {
+    private renderAccountRow(row: Row, index: number, y: number, iw: number): string[] {
         const theme = this.deps.theme;
         const account = row.account!;
         const selected = index === this.cursor;
@@ -708,11 +801,10 @@ export class ModelPickerModal extends Container implements Focusable {
         const meta = fg(theme, "dim", `${account.models.length} modelo${account.models.length === 1 ? "" : "s"}`);
 
         const text = `  ${marker}${fg(theme, "accent", arrow)} ${label} ${meta}`;
-        this.pushRegion({ id: `row-${index}`, kind: "toggle", y, index }, text, "  ", iw);
-        return text;
+        return this.rowLines({ id: `row-${index}`, kind: "toggle", y, index }, text, "  ", iw);
     }
 
-    private renderModelRow(row: Row, index: number, y: number, iw: number): string {
+    private renderModelRow(row: Row, index: number, y: number, iw: number): string[] {
         const theme = this.deps.theme;
         const model = row.model!;
         const selected = index === this.cursor;
@@ -735,8 +827,7 @@ export class ModelPickerModal extends Container implements Focusable {
 
         const indent = row.depth >= 2 ? "    " : "  ";
         const text = `${indent}${marker}${dot} ${label} ${fg(theme, "dim", "·")} ${ctx} ${fg(theme, "dim", "·")} ${cost}${badgeText}`;
-        this.pushRegion({ id: `row-${index}`, kind: "select", y, index }, text, indent, iw);
-        return text;
+        return this.rowLines({ id: `row-${index}`, kind: "select", y, index }, text, indent, iw);
     }
 
     private pushRegion(region: RegionSeed, text: string, indent: string, iw: number): void {
@@ -747,29 +838,58 @@ export class ModelPickerModal extends Container implements Focusable {
 
     private pushButtons(lines: string[], y: number, iw: number, withRetry = false): void {
         const theme = this.deps.theme;
-        let x = 1 + PADDING;
-        const parts: string[] = [];
-
         const refreshLabel = "⟳ Refrescar";
         const refresh = this.hoveredId === "refresh" ? bold(theme, fg(theme, "accent", `[ ${refreshLabel} ]`)) : fg(theme, "accent", `[ ${refreshLabel} ]`);
-        parts.push(refresh);
-        this.clickRegions.push({ id: "refresh", kind: "refresh", x1: x, x2: x + visibleWidth(refresh) - 1, y });
-        x += visibleWidth(refresh) + 2;
+        const parts: Array<{ text: string; id?: string; kind?: "refresh" | "close" }> = [
+            { text: refresh, id: "refresh", kind: "refresh" },
+        ];
 
         if (withRetry) {
             const retryLabel = "⟳ Reintentar";
             const retry = this.hoveredId === "retry" ? bold(theme, fg(theme, "accent", `[ ${retryLabel} ]`)) : fg(theme, "accent", `[ ${retryLabel} ]`);
-            parts.push(retry);
-            this.clickRegions.push({ id: "retry", kind: "refresh", x1: x, x2: x + visibleWidth(retry) - 1, y });
-            x += visibleWidth(retry) + 2;
+            parts.push({ text: "  " }, { text: retry, id: "retry", kind: "refresh" });
         }
 
         const closeLabel = "✕ Cerrar";
         const close = this.hoveredId === "close" ? bold(theme, fg(theme, "error", `[ ${closeLabel} ]`)) : fg(theme, "error", `[ ${closeLabel} ]`);
-        parts.push(close);
-        this.clickRegions.push({ id: "close", kind: "close", x1: x, x2: x + visibleWidth(close) - 1, y });
+        parts.push({ text: "  " }, { text: close, id: "close", kind: "close" });
+        parts.push({ text: ` ${fg(theme, "dim", "(r refrescar · Esc cerrar)")}` });
 
-        lines.push(`${parts.join("  ")} ${fg(theme, "dim", "(r refrescar · Esc cerrar)")}`);
+        // Buttons and long hints wrap onto extra lines on narrow terminals; each rendered
+        // line keeps its own click region so hover/press stays aligned with the visible row.
+        const wrappedParts: typeof parts = [];
+        for (const part of parts) {
+            if (visibleWidth(part.text) > iw) {
+                for (const segment of wrapLine(part.text, iw)) wrappedParts.push({ text: segment });
+            } else {
+                wrappedParts.push(part);
+            }
+        }
+
+        let current = "";
+        let cursorX = 1 + PADDING;
+        let lineIndex = 0;
+        for (const part of wrappedParts) {
+            const width = visibleWidth(part.text);
+            if (current !== "" && cursorX + width > 1 + PADDING + iw) {
+                lines.push(current);
+                current = "";
+                cursorX = 1 + PADDING;
+                lineIndex += 1;
+            }
+            if (part.id && part.kind) {
+                this.clickRegions.push({
+                    id: part.id,
+                    kind: part.kind,
+                    x1: cursorX,
+                    x2: cursorX + width - 1,
+                    y: y + lineIndex,
+                });
+            }
+            current += part.text;
+            cursorX += width;
+        }
+        lines.push(current);
     }
 
     private frame(title: string, lines: string[], width: number, iw: number): string[] {

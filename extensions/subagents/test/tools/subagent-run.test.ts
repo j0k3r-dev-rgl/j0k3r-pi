@@ -251,10 +251,11 @@ describe('subagent_run tool', () => {
     expect(result.content[0].text).not.toContain('## optional resume');
     expect(result.details.results[0].result).toBe(rawResponse);
 
-    // Compact contract: one unboxed inline row, no card frame and no generated expansion hint.
+    // Compact contract: unboxed auto-wrapped inline row (no ellipsis clipping), no card frame and no generated expansion hint.
     const collapsedLines = runTool.renderResult(result, { expanded: false, isPartial: false }, { fg: (_name: string, text: string) => text }).render(90);
     const collapsedResult = collapsedLines.join('\n');
-    expect(collapsedLines).toHaveLength(1);
+    expect(collapsedLines.length).toBeGreaterThanOrEqual(1);
+    expect(collapsedResult).not.toContain('…');
     expect(collapsedResult).toContain('analyst');
     expect(collapsedResult).toContain('status: completed');
     expect(collapsedResult).not.toContain('Subagent response');

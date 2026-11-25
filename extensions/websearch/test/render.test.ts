@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { registerWebsearchTools, WEBSEARCH_TOOL_NAMES } from '../src/tools.js';
 import {
+  MUTED,
   RED,
+  RESET,
   renderWebsearchToolCall,
   renderWebsearchToolResult,
   toolActionBadge,
+  visibleWidth,
 } from '../src/render/index.js';
 import { createMockPi, execute } from './helpers.js';
 
@@ -130,10 +133,10 @@ describe('websearch TUI rendering', () => {
 
     const expandedLines = renderWebsearchToolResult('web_search', result, { expanded: true }, theme, { state: {} }).render(80);
     expect(expandedLines.every((l) => l.startsWith(' '))).toBe(true);
-    expect(expandedLines.slice(1)).toContain(' failed');
+    expect(expandedLines.slice(1)).toContain(` ${MUTED}failed${RESET}`);
   });
 
-  it('keeps compact search result lines within the requested visible width for CJK titles', () => {
+  it('wraps compact search result lines within the requested visible width for CJK titles without ellipsis clipping', () => {
     const pi = createMockPi();
     registerWebsearchTools(pi, { env: {}, fetch: vi.fn<typeof fetch>() });
     const tool = pi.tools.find((entry) => entry.name === 'web_search')!;
@@ -157,8 +160,12 @@ describe('websearch TUI rendering', () => {
 
     expect(tool.renderResult).toBeTypeOf('function');
     const lines = tool.renderResult!(result, { expanded: false, isPartial: false }, theme, {}).render(126);
+    const joined = lines.map((line) => line.replace(ANSI_RE, '').slice(1)).join('');
 
-    expect(lines.some((line) => line.includes('日本のアニメ総合データベース'))).toBe(true);
+    expect(lines.length).toBeGreaterThan(1);
+    expect(joined).toContain('日本のアニメ総合データベース');
+    expect(joined).toContain('最新巻刊行も決定！');
+    expect(joined).not.toContain('…');
     for (const line of lines) expect(visibleTestWidth(line)).toBeLessThanOrEqual(126);
   });
 
@@ -216,16 +223,65 @@ describe('websearch TUI rendering', () => {
 
     const compact = renderLines(tool, result, false);
     const expanded = renderLines(tool, result, true);
+    const compactLines = compact.split('\n');
+    const expandedLines = expanded.split('\n');
 
     expect(compact).toContain('discussion_get');
     expect(compact).toContain('Long issue detail');
     expect(compact).not.toMatch(/ctrl\+o|to expand/i);
     expect(compact).not.toContain('WEBSEARCH_RENDER_FULL_BODY_END');
-    expect(compact.split('\n')).toHaveLength(1);
+    expect(compact).not.toContain('…');
     expect(expanded).toContain('discussion_get');
     expect(expanded).not.toMatch(/ctrl\+o|to collapse/i);
     expect(expanded).toContain('WEBSEARCH_RENDER_FULL_BODY_END');
-    // Expansion prefix is the identical single header row.
-    expect(expanded.split('\n')[0]).toBe(compact);
+    // Expansion prefix is the identical wrapped header rows.
+    expect(expandedLines.slice(0, compactLines.length)).toEqual(compactLines);
+  });
+
+  it('applies muted foreground to plain expanded bodies, preserves existing ANSI, and handles narrow/width-2 wrapping', () => {
+    const strip = (s: string) => s.replace(ANSI_RE, '');
+    const customTheme = {
+      ...theme,
+      fg: (token: string, text: string) => (token === 'muted' ? `\x1b[38;2;12;34;56m${text}\x1b[39m` : text),
+    };
+    const body = 'plain snippet\n\x1b[32mconst ok = true;\x1b[0m\n\x1b[36mhttps://vitest.dev\x1b[0m\n\x1b[33mwarn\x1b[0m';
+    const result = {
+      details: { status: 'success', data: { items: [{ title: 'Guide' }] } },
+      content: [{ type: 'text', text: body }],
+    };
+    const styled = renderWebsearchToolResult('web_search', result, { expanded: true }, customTheme, { state: {} }).render(100);
+    expect(styled[1]).toBe(' \x1b[38;2;12;34;56mplain snippet\x1b[39m');
+    expect(styled[2]).toBe(' \x1b[32mconst ok = true;\x1b[0m');
+    expect(styled[3]).toBe(' \x1b[36mhttps://vitest.dev\x1b[0m');
+    expect(styled[4]).toBe(' \x1b[33mwarn\x1b[0m');
+
+    // Absent/mocked theme falls back to #7aa7b8 MUTED
+    const fallback = renderWebsearchToolResult('web_search', result, { expanded: true }, theme, { state: {} }).render(100);
+    expect(fallback[1]).toBe(` ${MUTED}plain snippet${RESET}`);
+    expect(fallback[2]).toBe(' \x1b[32mconst ok = true;\x1b[0m');
+
+    // Narrow call header wraps cleanly without ellipsis or trailing loss
+    const narrowCall = renderWebsearchToolCall('web_search', { query: 'long query with TAIL_OK' }, theme, { state: {} }).render(20);
+    expect(narrowCall.length).toBeGreaterThan(1);
+    for (const line of narrowCall) {
+      expect(line.startsWith(' ')).toBe(true);
+      expect(visibleWidth(line)).toBeLessThanOrEqual(20);
+    }
+    expect(narrowCall.map((l) => strip(l).slice(1)).join(' ')).toContain('TAIL_OK');
+
+    // Width 0, 1, and width 2 wide-grapheme retention
+    const wideRes = {
+      details: { status: 'success', data: { items: [] } },
+      content: [{ type: 'text', text: 'A漢B\nA🚀B' }],
+    };
+    expect(renderWebsearchToolResult('web_search', wideRes, { expanded: true }, theme, { state: {} }).render(0)).toEqual([]);
+    expect(renderWebsearchToolResult('web_search', wideRes, { expanded: true }, theme, { state: {} }).render(1)).toEqual([' ']);
+    const w2 = renderWebsearchToolResult('web_search', wideRes, { expanded: true }, theme, { state: {} }).render(2);
+    for (const line of w2) expect(visibleWidth(line)).toBeLessThanOrEqual(2);
+    const plainW2 = w2.map(strip);
+    expect(plainW2).toContain(' A');
+    expect(plainW2).toContain('漢');
+    expect(plainW2).toContain(' B');
+    expect(plainW2).toContain('🚀');
   });
 });

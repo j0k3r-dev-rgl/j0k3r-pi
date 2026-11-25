@@ -246,16 +246,81 @@ test('All ten memory tools carry compactToolRenderingVersion: 1 and use one tran
   }
 });
 
-test('Inline calls stay one line when arguments contain newlines or long Unicode text', () => {
+test('Overflowing inline calls and collapsed headers wrap automatically without ellipsis clipping', () => {
   const tool = createMemoryTools().find((tool) => tool.name === 'memory_search')!;
   const comp = new ToolExecutionComponent(tool.name, 'long-call',
-    { query: 'First line\nSecond line 🚀 測試文本 '.repeat(20) }, {}, tool as any,
+    { query: 'First line\nSecond line 🚀 測試文本 END_QUERY_MARKER' }, {}, tool as any,
     { requestRender() {} } as any, process.cwd());
   for (const width of [1, 2, 20, 80]) {
     const lines = comp.render(width);
-    assert.ok(plainLines(lines).length <= 1);
     for (const line of lines) assert.ok(visibleWidth(line) <= width, `Width ${width}: ${visibleWidth(line)}`);
     assertTransparentAndUnboxed(lines);
+  }
+  const narrowCall = tool.renderCall!({ query: 'long query text without clipping END_QUERY_MARKER', mode: 'hybrid' }, {} as any, { state: {} } as any).render(30);
+  assert.ok(narrowCall.length > 1, 'Overflowing call header must wrap onto multiple lines');
+  assert.doesNotMatch(narrowCall.join('\n').replace(/\x1b\[[0-9;]*m/g, ''), /…(?=.*END_QUERY_MARKER)/);
+  assert.match(narrowCall.map((line) => line.replace(/\x1b\[[0-9;]*m/g, '').slice(1)).join(' ').replace(/\s+/g, ' '), /END_QUERY_MARKER/);
+  for (const line of narrowCall) {
+    assert.ok(visibleWidth(line) <= 30);
+    assert.ok(line.startsWith(' '));
+  }
+
+  const narrowResult = tool.renderResult!(
+    { content: [{ type: 'text', text: 'body' }], details: { count: 7, has_more: true }, isError: false },
+    { expanded: false, isPartial: false },
+    {} as any,
+    { args: { query: 'long query text END_RES_MARKER', mode: 'hybrid' }, state: {} } as any,
+  ).render(32);
+  assert.ok(narrowResult.length > 1, 'Overflowing collapsed result header must wrap');
+  assert.doesNotMatch(narrowResult.join('\n'), /…/);
+  assert.match(narrowResult.map((line) => line.replace(/\x1b\[[0-9;]*m/g, '').slice(1)).join(' ').replace(/\s+/g, ' '), /more available/);
+  for (const line of narrowResult) {
+    assert.ok(visibleWidth(line) <= 32);
+    assert.ok(line.startsWith(' '));
+  }
+});
+
+test('Expanded plain-text bodies use theme muted foreground with #7aa7b8 fallback while preserving existing ANSI colors', () => {
+  const tool = createMemoryTools().find((t) => t.name === 'memory_get')!;
+  const customTheme = {
+    fg: (token: string, text: string) => (token === 'muted' ? `\x1b[38;2;10;20;30m${text}\x1b[39m` : text),
+  };
+  const payload = {
+    content: [{ type: 'text' as const, text: 'Plain memory content\n\x1b[33mAmber diagnostic line\x1b[0m' }],
+    details: { id: 7 },
+    isError: false,
+  };
+
+  const withTheme = tool.renderResult!(payload, { expanded: true, isPartial: false }, customTheme as any, { state: {} } as any).render(80);
+  const joinedTheme = withTheme.join('\n');
+  assert.ok(joinedTheme.includes('\x1b[38;2;10;20;30mPlain memory content\x1b[39m'));
+  assert.ok(joinedTheme.includes('\x1b[33mAmber diagnostic line\x1b[0m'));
+  assert.ok(!joinedTheme.includes('\x1b[38;2;10;20;30m\x1b[33m'));
+
+  const fallback = tool.renderResult!(payload, { expanded: true, isPartial: false }, undefined as any, { state: {} } as any).render(80);
+  const joinedFallback = fallback.join('\n');
+  assert.ok(joinedFallback.includes('\x1b[38;2;122;167;184mPlain memory content\x1b[39m'));
+  assert.ok(joinedFallback.includes('\x1b[33mAmber diagnostic line\x1b[0m'));
+});
+
+test('Width 1 emits blank column and width 2 preserves intact wide graphemes (A漢B) via conditional margin omission', () => {
+  const tool = createMemoryTools().find((t) => t.name === 'memory_get')!;
+  const comp = tool.renderResult!(
+    { content: [{ type: 'text', text: 'A漢B' }], details: { id: 1 }, isError: false },
+    { expanded: true, isPartial: false },
+    {} as any,
+    { state: {} } as any,
+  );
+  assert.deepEqual(comp.render(0), []);
+  assert.deepEqual(comp.render(1), [' ']);
+
+  const w2 = comp.render(2);
+  const stripped = w2.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ''));
+  assert.ok(stripped.includes(' A'));
+  assert.ok(stripped.includes('漢'));
+  assert.ok(stripped.includes(' B'));
+  for (const line of w2) {
+    assert.ok(visibleWidth(line) <= 2, `width 2 exceeded: ${visibleWidth(line)}`);
   }
 });
 

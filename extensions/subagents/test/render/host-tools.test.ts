@@ -18,7 +18,7 @@ import {
 } from '../../src/thread-view.js';
 import { installSubagentTestEnv } from '../helpers/subagent-test-helpers.js';
 
-const DEFAULT_INSTALLED_HOST = '/home/j0k3r/.local/share/mise/installs/node/24.19.0/lib/node_modules/@earendil-works/pi-coding-agent';
+const DEFAULT_INSTALLED_HOST = path.resolve(path.dirname(process.execPath), '..', 'lib', 'node_modules', '@earendil-works', 'pi-coding-agent');
 const HOST_ROOT = process.env.PI_SUBAGENTS_TEST_HOST || process.env.PI_COMPACT_TEST_HOST || DEFAULT_INSTALLED_HOST;
 const HAS_HOST = fs.existsSync(path.join(HOST_ROOT, 'dist', 'index.js'));
 
@@ -34,8 +34,7 @@ function hasBackgroundEscape(lines: string[]): boolean {
   return /\u001b\[(?:4[0-79]|10[0-7]|48;)/.test(lines.join('\n'));
 }
 
-function assertCompactLines(lines: string[], width: number, { allowMultipleLines = false } = {}): void {
-  const nonEmpty = lines.filter((line) => stripSgrAndOsc(line).length > 0);
+function assertCompactLines(lines: string[], width: number): void {
   if (width <= 0) {
     for (const line of lines) expect(visibleWidth(line)).toBe(0);
     return;
@@ -47,9 +46,9 @@ function assertCompactLines(lines: string[], width: number, { allowMultipleLines
     }
     return;
   }
-  if (!allowMultipleLines) expect(nonEmpty.length).toBeLessThanOrEqual(1);
   const joined = lines.join('\n');
   expect(hasBackgroundEscape(lines)).toBe(false);
+  expect(stripSgrAndOsc(joined)).not.toContain('…');
   expect(stripSgrAndOsc(joined)).not.toMatch(/[╭╮╰╯│┌┐└┘]/);
   expect(stripSgrAndOsc(joined)).not.toMatch(/to expand|app\.tools\.expand|ctrl\+o|click to view/i);
   for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
@@ -146,12 +145,12 @@ describe.runIf(HAS_HOST)('installed Pi host ToolExecutionComponent conformance (
       const clickResult = comp.handleMouse({ type: 'click', button: 'left', y: 1, x: 2, width: 80, height: collapsed.length });
       expect(clickResult?.handled).toBe(true);
       const expanded = comp.render(80);
-      assertCompactLines(expanded, 80, { allowMultipleLines: true });
+      assertCompactLines(expanded, 80);
       expect(expanded.join('\n')).toContain(entry.expectedExpanded);
 
       // Narrow width & zero width safety on real ToolExecutionComponent.
-      assertCompactLines(comp.render(24), 24, { allowMultipleLines: true });
-      assertCompactLines(comp.render(0), 0, { allowMultipleLines: true });
+      assertCompactLines(comp.render(24), 24);
+      assertCompactLines(comp.render(0), 0);
     }
 
     expect(openedPanels).toEqual([]);

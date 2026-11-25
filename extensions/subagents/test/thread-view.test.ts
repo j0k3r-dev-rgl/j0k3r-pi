@@ -781,21 +781,23 @@ describe('thread view and render', () => {
     expect(text).toContain('after malformed still visible');
   });
 
-  it('uses bounded body widths for long non-bash rendered rows', () => {
-    const widths: number[] = [];
-    const text = renderText({
+  it('wraps long non-bash tool headers within bounded width without ellipsis clipping', () => {
+    const lines = renderThreadBody({
       version: 1,
       source: 'events',
-      items: [{ type: 'tool', name: 'custom_long_tool', status: 'completed', arguments: { target: `path/${'x'.repeat(180)}` } }],
+      items: [{ type: 'tool', name: 'custom_long_tool', status: 'completed', arguments: { target: `path/${'x'.repeat(80)}` } }],
     } as any, {
-      truncateToWidth: (line, width) => {
-        widths.push(width);
-        return line.length > 72 ? `${line.slice(0, 71)}…` : line;
-      },
+      cwd: tmp,
+      renderWidth: 36,
+      visibleWidth: (s) => stripAnsi(s).length,
+      truncateToWidth: (s, w) => s.slice(0, w),
     });
 
-    expect(Math.max(...widths)).toBeLessThanOrEqual(100);
-    expect(text).toContain('…');
+    expect(lines.length).toBeGreaterThan(1);
+    for (const line of lines) expect(stripAnsi(line).length).toBeLessThanOrEqual(36);
+    const joined = stripAnsi(lines.map((l) => l.slice(1)).join(''));
+    expect(joined).toContain('custom_long_tool');
+    expect(joined).not.toContain('…');
   });
 
   it('renders nested replay bash rows and fallback with full multiline orange commands, 1-col left margin, and no clipping', () => {
@@ -824,8 +826,9 @@ describe('thread view and render', () => {
     expect(collapsedPlain).not.toContain('…');
     expect(collapsedLines.some((l) => stripAnsi(l) === ' ')).toBe(true);
     for (const line of collapsedLines) expect(stripAnsi(line).length).toBeLessThanOrEqual(28);
-    // Powershell stays single-line collapsed (clipped at innerWidth 27)
-    expect(collapsedPlain).toContain('powershell completed ─ Writ');
+    // Powershell wraps cleanly without ellipsis clipping
+    expect(collapsedPlain).toContain('powershell completed');
+    expect(collapsedPlain).toContain('Write-Output 1');
     expect(collapsedPlain).not.toContain('Write-Output 2');
 
     // Width <= 0 emits empty array; width === 1 emits [' '] per tool row without overflow
@@ -851,12 +854,14 @@ describe('thread view and render', () => {
       expect(stripAnsi(l).startsWith(' ')).toBe(true);
     }
     const wsUnmargined = wsLines.map((l) => stripAnsi(l).slice(1));
-    expect(wsUnmargined[1]).toBe('');
-    expect(wsUnmargined[2]?.startsWith('    lead_')).toBe(true);
-    expect(wsUnmargined.slice(2, 5).join('')).toBe(`    lead_${'k'.repeat(30)}   `);
-    expect(wsUnmargined.slice(5, 7).join('')).toBe(`   quote "a'b" \\\\ 'x\\ny'`);
-    expect(wsUnmargined[7]).toBe('');
-    expect(wsUnmargined[8]).toBe('  end   ');
+    const cmdStart = wsUnmargined.findIndex((line) => line === '');
+    expect(cmdStart).toBeGreaterThanOrEqual(1);
+    expect(wsUnmargined[cmdStart]).toBe('');
+    expect(wsUnmargined[cmdStart + 1]?.startsWith('    lead_')).toBe(true);
+    expect(wsUnmargined.slice(cmdStart + 1, cmdStart + 4).join('')).toBe(`    lead_${'k'.repeat(30)}   `);
+    expect(wsUnmargined.slice(cmdStart + 4, cmdStart + 6).join('')).toBe(`   quote "a'b" \\\\ 'x\\ny'`);
+    expect(wsUnmargined[cmdStart + 6]).toBe('');
+    expect(wsUnmargined[cmdStart + 7]).toBe('  end   ');
   });
 
   it('retains authored CR/CRLF verbatim in nested bash replay and preserves wide graphemes with width-2 margin exception', () => {
@@ -872,7 +877,9 @@ describe('thread view and render', () => {
 
     const crLines4 = renderThreadBody(crSnapshot as any, { cwd: tmp, renderWidth: 4, visibleWidth, truncateToWidth: (s, w) => s.slice(0, w) });
     for (const l of crLines4) expect(stripAnsi(l).startsWith(' ')).toBe(true);
-    expect(crLines4.slice(1).map((l) => stripAnsi(l).slice(1)).join('')).toBe(crCmd.replace(/\n/g, ''));
+    const crCmdStart4 = crLines4.findIndex((l) => stripAnsi(l).slice(1).startsWith('A\r'));
+    expect(crCmdStart4).toBeGreaterThanOrEqual(1);
+    expect(crLines4.slice(crCmdStart4).map((l) => stripAnsi(l).slice(1)).join('')).toBe(crCmd.replace(/\n/g, ''));
 
     // Width 2: A漢B👨‍👩‍👧é keeps wide graphemes intact without margin while narrow graphemes retain 1-col margin
     const wideInput = 'A漢B👨‍👩‍👧e\u0301';
@@ -952,5 +959,91 @@ describe('thread view and render', () => {
     const reconstructed = thinkingLines.join(' ').replace(/^thinking:\s*/, '');
     expect(reconstructed).toContain('Analysis reveals a significant shift in review activity.');
     expect(reconstructed).toContain('Examining the documentation confirms the contract requires exact preservation');
+  });
+
+  it('displays truthful bash timeout status (explicit, running elapsed/remaining, and no timeout when omitted) and muted expanded fallback bodies preserving ANSI (MINI-004)', () => {
+    const now = Date.now();
+    const startedAt = new Date(now - 12_000).toISOString();
+    const runningItem: any = {
+      type: 'tool',
+      id: 'b-run',
+      tool_call_id: 'bc-run',
+      name: 'bash',
+      status: 'running',
+      started_at: startedAt,
+      arguments: { command: 'sleep 30', timeout: 45 },
+    };
+    const completedExplicit: any = {
+      type: 'tool',
+      id: 'b-exp',
+      tool_call_id: 'bc-exp',
+      name: 'bash',
+      status: 'completed',
+      arguments: { command: 'echo ok', timeout: 30 },
+      result: {
+        isError: false,
+        content: [{ type: 'text', text: 'plain bash output\n\x1b[32mgreen ansi output\x1b[0m' }],
+      },
+    };
+    const omittedTimeout: any = {
+      type: 'tool',
+      id: 'b-none',
+      tool_call_id: 'bc-none',
+      name: 'bash',
+      status: 'completed',
+      arguments: { command: 'echo no-timeout' },
+    };
+    const legacyWithTimeout: any = {
+      type: 'bash',
+      id: 'b-legacy-1',
+      command: 'echo legacy-timeout',
+      timeout: 25,
+      status: 'completed',
+    };
+    const legacyNoTimeout: any = {
+      type: 'bash',
+      id: 'b-legacy-2',
+      command: 'echo legacy-none',
+      status: 'completed',
+    };
+
+    const snapshotCopyBefore = JSON.stringify([runningItem, completedExplicit, omittedTimeout, legacyWithTimeout, legacyNoTimeout]);
+    const theme = {
+      fg: (key: string, text: string) => (key === 'muted' ? `\x1b[38;2;122;167;184m${text}\x1b[0m` : text),
+      bold: (text: string) => text,
+    };
+
+    const lines = renderThreadBody({
+      version: 1,
+      source: 'events',
+      items: [runningItem, completedExplicit, omittedTimeout, legacyWithTimeout, legacyNoTimeout],
+    }, {
+      cwd: tmp,
+      theme,
+      renderWidth: 80,
+      toolOutputExpanded: true,
+      visibleWidth: (s) => stripAnsi(s).length,
+      truncateToWidth: (s, w) => s.slice(0, w),
+    });
+
+    const plain = stripAnsi(lines.join('\n'));
+    // Running bash with explicit timeout + started_at shows timeout Xs + elapsed + remaining
+    expect(plain).toMatch(/bash running.*timeout 45s.*elapsed.*remaining/i);
+    // Completed explicit timeout shows timeout 30s
+    expect(plain).toContain('timeout 30s');
+    // Omitted timeout truthfully shows no timeout
+    expect(plain).toContain('no timeout');
+    // Legacy SubagentBashItem shows timeout 25s when present and no timeout when omitted
+    expect(plain).toContain('timeout 25s');
+
+    // Muted plain expanded body vs preserved ANSI
+    const plainOutLine = lines.find((l) => stripAnsi(l).includes('plain bash output'));
+    const ansiOutLine = lines.find((l) => stripAnsi(l).includes('green ansi output'));
+    expect(plainOutLine).toContain('\x1b[38;2;122;167;184m');
+    expect(ansiOutLine).toContain('\x1b[32mgreen ansi output\x1b[0m');
+    expect(ansiOutLine).not.toContain('\x1b[38;2;122;167;184m');
+
+    // Display-only: zero mutation of snapshot items/arguments
+    expect(JSON.stringify([runningItem, completedExplicit, omittedTimeout, legacyWithTimeout, legacyNoTimeout])).toBe(snapshotCopyBefore);
   });
 });

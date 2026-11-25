@@ -336,7 +336,7 @@ export class SubagentManager {
   private limiters = new Map<string, ReturnType<typeof createLimiter>>();
   private pendingRecords = new Map<string, PendingRecord>();
   private pendingUpdates = new Map<string, NodeJS.Timeout>();
-  private sessionTaskCache = new Map<string, { expiresAt: number; tasks: SubagentTask[] }>();
+  private sessionTaskCache = new Map<string, { expiresAt: number; tasks: SubagentTask[]; hasMore: boolean }>();
   private runnerSettlements = new Map<string, Promise<void>>();
   private stopDispositions = new Map<string, StopDisposition>();
   private liveStates = new Map<string, LiveTaskState>();
@@ -513,12 +513,21 @@ export class SubagentManager {
       .sort(compareTasksActiveFirst);
   }
 
-  listSessionTasks(cwd?: string, sessionId?: string) {
+  listSessionTasksWindow(cwd?: string, sessionId?: string, options?: { limit?: number }): { tasks: SubagentTask[]; hasMore: boolean } {
+    const limit = Math.max(0, Math.floor(options?.limit ?? 30));
     const active = this.listActiveSessionTasks(cwd, sessionId);
-    if (!cwd || !sessionId) return active;
+    if (!cwd || !sessionId) return { tasks: active, hasMore: false };
     const activeIds = new Set(active.map((task) => task.id));
-    const persisted = this.cachedPersistedSessionTasks(cwd, sessionId).filter((task) => !activeIds.has(task.id));
-    return [...active, ...persisted].sort(compareTasksActiveFirst);
+    const window = this.cachedPersistedSessionTasksWindow(cwd, sessionId, limit);
+    const persisted = window.tasks.filter((task) => !activeIds.has(task.id));
+    return {
+      tasks: [...active, ...persisted].sort(compareTasksActiveFirst),
+      hasMore: window.hasMore,
+    };
+  }
+
+  listSessionTasks(cwd?: string, sessionId?: string) {
+    return this.listSessionTasksWindow(cwd, sessionId, { limit: 100 }).tasks;
   }
 
   onTaskUpdate(listener: () => void): () => void {
@@ -1442,19 +1451,63 @@ export class SubagentManager {
     await pending.catch(() => undefined);
   }
 
-  private cachedPersistedSessionTasks(cwd: string, sessionId: string): SubagentTask[] {
+  private cachedPersistedSessionTasksWindow(cwd: string, sessionId: string, requestedLimit = 100): { tasks: SubagentTask[]; hasMore: boolean } {
+    const targetLimit = Math.max(0, Math.floor(requestedLimit));
     const key = `${cwd}\0${sessionId}`;
+    const now = Date.now();
     const cached = this.sessionTaskCache.get(key);
-    if (cached && cached.expiresAt > Date.now()) return cached.tasks;
+    const listMetadata = (this.history as any).listSessionTaskMetadata as ((cwd: string, sessionId: string, limit?: number, offset?: number) => SubagentTask[]) | undefined;
+    const canOffset = typeof listMetadata === 'function';
+
+    if (cached && cached.expiresAt > now) {
+      if (cached.tasks.length >= targetLimit || !cached.hasMore) {
+        return {
+          tasks: cached.tasks.slice(0, targetLimit),
+          hasMore: cached.hasMore || cached.tasks.length > targetLimit,
+        };
+      }
+      if (canOffset) {
+        try {
+          const offset = cached.tasks.length;
+          const delta = targetLimit - offset;
+          const batch = listMetadata.call(this.history, cwd, sessionId, delta + 1, offset);
+          const moreAvailable = batch.length > delta;
+          const appended = moreAvailable ? batch.slice(0, delta) : batch;
+          const seenIds = new Set(cached.tasks.map((task) => task.id));
+          for (const task of appended) {
+            if (!seenIds.has(task.id)) {
+              seenIds.add(task.id);
+              cached.tasks.push(task);
+            }
+          }
+          cached.hasMore = moreAvailable;
+          cached.expiresAt = now + SESSION_TASK_CACHE_MS;
+          return {
+            tasks: cached.tasks.slice(0, targetLimit),
+            hasMore: cached.hasMore || cached.tasks.length > targetLimit,
+          };
+        } catch (error) {
+          if (isSqliteBusyError(error)) {
+            return { tasks: cached.tasks.slice(0, targetLimit), hasMore: cached.hasMore };
+          }
+          throw error;
+        }
+      }
+    }
+
     try {
-      const listMetadata = (this.history as any).listSessionTaskMetadata as ((cwd: string, sessionId: string, limit?: number) => SubagentTask[]) | undefined;
-      const tasks = typeof listMetadata === 'function'
-        ? listMetadata.call(this.history, cwd, sessionId, 100)
-        : this.history.listSessionTasks(cwd, sessionId, 100, { includeSnapshots: false });
-      this.sessionTaskCache.set(key, { expiresAt: Date.now() + SESSION_TASK_CACHE_MS, tasks });
-      return tasks;
+      const fetchLimit = targetLimit + 1;
+      const rows = canOffset
+        ? listMetadata.call(this.history, cwd, sessionId, fetchLimit, 0)
+        : this.history.listSessionTasks(cwd, sessionId, fetchLimit, { includeSnapshots: false });
+      const hasMore = rows.length > targetLimit;
+      const tasks = hasMore ? rows.slice(0, targetLimit) : rows;
+      this.sessionTaskCache.set(key, { expiresAt: now + SESSION_TASK_CACHE_MS, tasks, hasMore });
+      return { tasks, hasMore };
     } catch (error) {
-      if (isSqliteBusyError(error)) return cached?.tasks ?? [];
+      if (isSqliteBusyError(error)) {
+        return { tasks: cached?.tasks.slice(0, targetLimit) ?? [], hasMore: cached?.hasMore ?? false };
+      }
       throw error;
     }
   }

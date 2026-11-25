@@ -3,7 +3,9 @@ import { visibleWidth } from '@earendil-works/pi-tui';
 import {
   CYAN,
   LIME,
+  MUTED,
   RED,
+  RESET,
   context7ToolRenderers,
   renderContext7ToolCall,
   renderContext7ToolResult,
@@ -38,28 +40,33 @@ function result(content: string, details: Record<string, unknown>) {
 describe('Context7 compact inline tool rendering', () => {
   const FRAME = /[╭╮╰╯│]/;
 
-  it('renders one compact inline call row with the action badge', () => {
-    const query = `focused-${'query-'.repeat(80)}`;
+  it('wraps overflowing inline call headers without ellipsis clipping or trailing character loss', () => {
+    const query = `focused-${'query-'.repeat(40)}TAIL_MARKER`;
     const component = renderContext7ToolCall('context7_get_context', {
       libraryId: '/facebook/react',
       query,
       type: 'json',
     }, theme);
-    const lines = component.render(160);
+    const lines = component.render(48);
     const output = lines.join('\n');
+    const strip = (s: string) => s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '');
 
-    expect(lines).toHaveLength(1);
+    expect(lines.length).toBeGreaterThan(1);
+    for (const line of lines) {
+      expect(line.startsWith(' ')).toBe(true);
+      expect(visibleWidth(line)).toBeLessThanOrEqual(48);
+    }
     expect(output).toContain('context7_get_context');
     expect(output).toContain('/facebook/react');
     expect(output).toContain('focused-');
-    expect(output).not.toContain(query);
+    expect(lines.map((l) => strip(l).slice(1)).join('')).toContain('TAIL_MARKER');
     expect(output).toContain(CYAN);
     expect(output).toContain('─');
     expect(output).not.toMatch(FRAME);
     expect(output).not.toMatch(/to expand|ctrl\+o/i);
   });
 
-  it('keeps documentation compact while collapsed and shows all current content when expanded', () => {
+  it('keeps documentation compact while collapsed and shows all current content muted when expanded', () => {
     const fullContent = 'FULL DOCUMENTATION\nline two\nline three';
     const toolResult = result(fullContent, {
       request: { libraryId: '/facebook/react', query: 'hooks', type: 'json' },
@@ -93,7 +100,9 @@ describe('Context7 compact inline tool rendering', () => {
     expect(expanded).toContain('FULL DOCUMENTATION');
     expect(expanded).toContain('line two');
     expect(expanded).toContain('line three');
-    expect(expanded).toBe(`${collapsed}\n FULL DOCUMENTATION\n line two\n line three`);
+    expect(expanded).toBe(
+      `${collapsed}\n ${MUTED}FULL DOCUMENTATION${RESET}\n ${MUTED}line two${RESET}\n ${MUTED}line three${RESET}`,
+    );
   });
 
   it.each([
@@ -204,7 +213,58 @@ describe('Context7 compact inline tool rendering', () => {
     ).render(80);
     expect(expanded[0]).toContain('Rate limit');
     expect(expanded[0].startsWith(' ')).toBe(true);
-    expect(expanded.slice(1)).toContain(' API rate limit exceeded');
+    expect(expanded.slice(1)).toContain(` ${MUTED}API rate limit exceeded${RESET}`);
+  });
+
+  it('uses theme.fg("muted", ...) with #7aa7b8 fallback, preserves existing ANSI, and handles narrow/width-2 wrapping', () => {
+    const strip = (s: string) => s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '');
+    const styledTheme = {
+      fg: (name: string, text: string) => (name === 'muted' ? `\x1b[38;2;10;20;30m${text}\x1b[39m` : text),
+    } as any;
+    const body = 'plain line\n\x1b[32mconst code = 42;\x1b[0m\n\x1b[36mhttps://react.dev/docs\x1b[0m\n\x1b[33mwarn\x1b[0m';
+    const expanded = renderContext7ToolResult(
+      'context7_get_context',
+      result(body, { request: { libraryId: '/facebook/react', query: 'hooks' }, documentation: { type: 'txt', text: body } }),
+      { expanded: true },
+      styledTheme,
+    ).render(100);
+    expect(expanded[1]).toBe(' \x1b[38;2;10;20;30mplain line\x1b[39m');
+    expect(expanded[2]).toBe(' \x1b[32mconst code = 42;\x1b[0m');
+    expect(expanded[3]).toBe(' \x1b[36mhttps://react.dev/docs\x1b[0m');
+    expect(expanded[4]).toBe(' \x1b[33mwarn\x1b[0m');
+
+    // Collapsed narrow wrap without ellipsis or trailing character loss
+    const collapsedNarrow = renderContext7ToolResult(
+      'context7_get_context',
+      result('body', {
+        request: { libraryId: '/facebook/react', query: 'deeply-nested-query-HEADER_END' },
+        documentation: { libraryId: '/facebook/react', type: 'json', snippets: [{ title: 't', content: 'c' }], sources: [] },
+        cache: { enabled: true, hit: true },
+      }),
+      { expanded: false },
+      theme,
+    ).render(24);
+    expect(collapsedNarrow.length).toBeGreaterThan(1);
+    for (const line of collapsedNarrow) {
+      expect(line.startsWith(' ')).toBe(true);
+      expect(visibleWidth(line)).toBeLessThanOrEqual(24);
+    }
+    const joined = collapsedNarrow.map((l) => strip(l).slice(1)).join('');
+    expect(joined).toContain('HEADER_END');
+    expect(joined).toContain('cache hit');
+    expect(joined).not.toContain('…');
+
+    // Width 0, 1, and width 2 wide-grapheme retention
+    const wideRes = result('A漢B\nA🚀B', { request: { libraryId: '/a/b', query: 'q' } });
+    expect(renderContext7ToolResult('context7_get_context', wideRes, { expanded: true }, undefined).render(0)).toEqual([]);
+    expect(renderContext7ToolResult('context7_get_context', wideRes, { expanded: true }, undefined).render(1)).toEqual([' ']);
+    const w2 = renderContext7ToolResult('context7_get_context', wideRes, { expanded: true }, undefined).render(2);
+    for (const line of w2) expect(visibleWidth(line)).toBeLessThanOrEqual(2);
+    const plainW2 = w2.map(strip);
+    expect(plainW2).toContain(' A');
+    expect(plainW2).toContain('漢');
+    expect(plainW2).toContain(' B');
+    expect(plainW2).toContain('🚀');
   });
 
   it('registers the compact marker, renderShell self, and both safe slots on all 4 Context7 tools', () => {

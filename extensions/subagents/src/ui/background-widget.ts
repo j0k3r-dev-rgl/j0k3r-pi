@@ -1,4 +1,4 @@
-import { truncateToWidth } from '../render/text-width.js';
+import { wrapLineToWidth } from '../render/text-width.js';
 import type { SubagentTask } from '../types.js';
 import { ARCH_ICON, getArchNeonWorkingIcon, themeBold, themeWarning } from './theme.js';
 
@@ -111,6 +111,7 @@ export function renderClaudeBackgroundWidgetLines(
 export class ClaudeBackgroundWidgetState {
   private selectedKey = 'main';
   private navigationActive = false;
+  private renderedRowKeys: string[] = [];
 
   constructor(
     private getTasks: () => SubagentTask[],
@@ -118,6 +119,14 @@ export class ClaudeBackgroundWidgetState {
     private onAction?: (action: ClaudeBackgroundTerminalAction) => void,
     private options: { archIndicator?: boolean; neonRunning?: boolean; frame?: number } = {},
   ) {}
+
+  setRenderedRowKeys(keys: string[]): void {
+    this.renderedRowKeys = keys;
+  }
+
+  getEntries(): ClaudeBackgroundWidgetEntry[] {
+    return buildClaudeBackgroundWidgetEntries(this.getTasks());
+  }
 
   getSelectedKey(): string {
     this.selectedKey = coerceClaudeBackgroundSelection(buildClaudeBackgroundWidgetEntries(this.getTasks()), this.selectedKey);
@@ -141,16 +150,24 @@ export class ClaudeBackgroundWidgetState {
     if (!tasks.length) return undefined;
 
     const entries = buildClaudeBackgroundWidgetEntries(this.getTasks());
+    const validKeys = new Set(entries.map((entry) => entry.key));
     const row = event.row ?? event.y;
 
     let targetKey: string | undefined;
-    if (typeof row === 'number' && Number.isFinite(row) && row >= 0 && row < entries.length) {
-      targetKey = entries[row]?.key;
-    } else if (tasks.length === 1) {
-      targetKey = tasks[0]?.id;
-    } else {
-      const running = tasks.find((t) => t.status === 'running');
-      targetKey = running?.id ?? tasks[0]?.id;
+    if (typeof row === 'number' && Number.isFinite(row) && row >= 0) {
+      if (row < this.renderedRowKeys.length && validKeys.has(this.renderedRowKeys[row]!)) {
+        targetKey = this.renderedRowKeys[row];
+      } else if (row < entries.length) {
+        targetKey = entries[row]?.key;
+      }
+    }
+    if (!targetKey) {
+      if (tasks.length === 1) {
+        targetKey = tasks[0]?.id;
+      } else {
+        const running = tasks.find((t) => t.status === 'running');
+        targetKey = running?.id ?? tasks[0]?.id;
+      }
     }
 
     if (!targetKey) return undefined;
@@ -244,7 +261,11 @@ export class ClaudeBackgroundWidget {
   invalidate(): void {}
 
   render(width: number): string[] {
-    if (width <= 0) return [];
+    const safeWidth = Number.isFinite(width) ? Math.floor(width) : 0;
+    if (safeWidth <= 0) {
+      this.state.setRenderedRowKeys([]);
+      return [];
+    }
 
     const isNeon = Boolean(
       this.options.archIndicator ||
@@ -256,12 +277,28 @@ export class ClaudeBackgroundWidget {
       ? { archIndicator: true, neonRunning: true, ...this.options }
       : this.options;
 
+    const entries = this.state.getEntries();
     const lines = isNeon
       ? this.state.renderLines(renderOptions)
       : this.state.renderLines();
 
-    if (!lines) return [];
-    return lines.map((line) => truncateToWidth(this.decorate(line), width));
+    if (!lines || !lines.length) {
+      this.state.setRenderedRowKeys([]);
+      return [];
+    }
+    const out: string[] = [];
+    const rowKeys: string[] = [];
+    for (let i = 0; i < lines.length; i += 1) {
+      const decorated = this.decorate(lines[i]!);
+      const wrapped = wrapLineToWidth(decorated, safeWidth);
+      const entryKey = entries[i]?.key ?? 'main';
+      for (const wrappedLine of wrapped) {
+        out.push(wrappedLine);
+        rowKeys.push(entryKey);
+      }
+    }
+    this.state.setRenderedRowKeys(rowKeys);
+    return out;
   }
 
   handleInput(data: string): void {

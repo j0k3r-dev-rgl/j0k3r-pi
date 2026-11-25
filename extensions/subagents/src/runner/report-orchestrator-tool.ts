@@ -18,8 +18,7 @@ function themeFg(theme: any, key: string, text: string): string {
 }
 
 function reportSummary(args: any): string {
-  const report = typeof args?.report === 'string' ? args.report.replace(/\s+/g, ' ').trim() : '';
-  return report.length > 80 ? `${report.slice(0, 79)}…` : report;
+  return typeof args?.report === 'string' ? args.report.replace(/\s+/g, ' ').trim() : '';
 }
 
 /** Compact inline row for the injected child tool; no frame, background or expansion instruction. */
@@ -32,9 +31,9 @@ function renderReportCall(args: any, theme: any, context?: any) {
       themeFg(theme, 'muted', 'reporting'),
       summary ? themeFg(theme, 'muted', summary) : undefined,
     ].filter(Boolean).join(SEPARATOR);
-    return inlineComponent({ header, body: [], expanded: false, state: context?.state, isCallSlot: true });
+    return inlineComponent({ header, body: [], expanded: false, theme, state: context?.state, isCallSlot: true });
   } catch {
-    return inlineComponent({ header: `${REPORT_ORCHESTRATOR_TOOL}${SEPARATOR}reporting`, body: [], expanded: false, state: context?.state, isCallSlot: true });
+    return inlineComponent({ header: `${REPORT_ORCHESTRATOR_TOOL}${SEPARATOR}reporting`, body: [], expanded: false, theme, state: context?.state, isCallSlot: true });
   }
 }
 
@@ -50,13 +49,19 @@ function renderReportResult(result: any, options: any, theme: any, context?: any
       themeFg(theme, isPartial ? 'muted' : delivered ? 'success' : 'error', state),
     ].filter(Boolean).join(SEPARATOR);
     const text = (result?.content ?? []).filter((part: any) => part?.type === 'text').map((part: any) => part.text).join('\n');
-    return inlineComponent({ header, body: text ? text.split('\n') : [], expanded });
+    return inlineComponent({
+      header,
+      body: text ? text.split('\n').map((line: string) => ({ text: line, muted: true })) : [],
+      expanded,
+      theme,
+    });
   } catch {
     const text = (result?.content ?? []).filter((part: any) => part?.type === 'text').map((part: any) => part.text).join('\n');
     return inlineComponent({
       header: `${REPORT_ORCHESTRATOR_TOOL}${SEPARATOR}${result?.details?.sent ? 'sent' : 'not delivered'}`,
-      body: text ? text.split('\n') : [],
+      body: text ? text.split('\n').map((line: string) => ({ text: line, muted: true })) : [],
       expanded: options?.expanded === true,
+      theme,
     });
   }
 }

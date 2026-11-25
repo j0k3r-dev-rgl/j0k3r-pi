@@ -1,7 +1,7 @@
 import { readSubagentsConfig } from '../config.js';
 import type { SubagentTask } from '../types.js';
-import { emptyComponent, inlineComponent } from './components.js';
-import { clip, formatTaskLabel, formatUsage, hasAgentResponse, taskResponseText } from './formatting.js';
+import { emptyComponent, inlineComponent, type InlineBodyLine } from './components.js';
+import { formatTaskLabel, formatUsage, hasAgentResponse, taskResponseText } from './formatting.js';
 import { progressText } from './progress.js';
 import { taskFromDetails } from '../result-details.js';
 import { ARCH_ICON, themeAccent, themeDim, themeError, themeStatus, themeSuccess, themeTitle, themeWarning } from '../completion-message.js';
@@ -61,6 +61,14 @@ export function renderSubagentRunCall(_args: any, _theme: any, _context?: any) {
   return emptyComponent();
 }
 
+function normalizeInlineText(text: string | undefined): string {
+  return text ? text.replace(/\s+/g, ' ').trim() : '';
+}
+
+function mutedLines(text: string): InlineBodyLine[] {
+  return text.split('\n').map((line) => ({ text: line, muted: true }));
+}
+
 function messageRow(result: any, { expanded, isPartial }: any, theme: any) {
   const details = result?.details ?? {};
   const status = details.status ?? (result?.isError ? 'rejected' : 'queued');
@@ -76,14 +84,14 @@ function messageRow(result: any, { expanded, isPartial }: any, theme: any) {
     styledStatus,
     details.pending_message_count !== undefined ? themeDim(theme, `pending ${details.pending_message_count}`) : undefined,
   ])}`;
-  const body = isPartial
+  const body: InlineBodyLine[] = isPartial
     ? [themeDim(theme, 'sending…')]
     : [
       ...(details.pending_message_count !== undefined ? [themeDim(theme, `pending messages: ${details.pending_message_count}`)] : []),
       ...(details.reason ? [themeDim(theme, `reason: ${details.reason}`)] : []),
-      ...(acknowledgement ? acknowledgement.split('\n') : []),
+      ...(acknowledgement ? mutedLines(acknowledgement) : []),
     ];
-  return inlineComponent({ header, body, expanded: expanded === true });
+  return inlineComponent({ header, body, expanded: expanded === true, theme });
 }
 
 function partialRow(result: any, { expanded }: any, theme: any, task?: SubagentTask) {
@@ -105,20 +113,20 @@ function partialRow(result: any, { expanded }: any, theme: any, task?: SubagentT
     themeTitle(theme, `${spinner} subagent · ${agentOrName}`),
     themeWarning(theme, task?.status ?? 'running'),
     isBg ? themeDim(theme, 'background') : undefined,
-    currentActivity ? clip(currentActivity, 48) : undefined,
+    currentActivity ? normalizeInlineText(currentActivity) : undefined,
     backgroundable ? themeDim(theme, `${bgShortcut} to send to background`) : undefined,
     themeDim(theme, `model: ${formatRenderedModel(task)}`),
     themeDim(theme, `effort: ${task?.effort ?? 'default/current'}`),
     themeDim(theme, `attempt: ${task?.attempt ?? 1}`),
   ])}`;
 
-  if (expanded !== true) return inlineComponent({ header, body: [], expanded: false });
+  if (expanded !== true) return inlineComponent({ header, body: [], expanded: false, theme });
 
   // Expanded partial: full live activity trail without duplicating the header status/model row.
-  const trailLines = progress
+  const trailLines: InlineBodyLine[] = progress
     .slice(2)
-    .map((line) => (line.startsWith('↳') ? themeDim(theme, line) : line));
-  return inlineComponent({ header, body: trailLines, expanded: true });
+    .map((line) => (line.startsWith('↳') ? themeDim(theme, line) : { text: line, muted: true }));
+  return inlineComponent({ header, body: trailLines, expanded: true, theme });
 }
 
 function terminalRow(result: any, { expanded }: any, theme: any, context: any, task?: SubagentTask) {
@@ -128,9 +136,6 @@ function terminalRow(result: any, { expanded }: any, theme: any, context: any, t
   const hasResp = hasAgentResponse(task, result);
   const responseText = taskResponseText(task, result);
   const usage = task ? formatUsage(task) : '';
-  // One row is clipped to the viewport, so ordering is priority: identity, state, model, then the
-  // secondary effort/attempt/background/usage metadata. The prompt snippet and full agent label stay
-  // in the expanded body instead of crowding every live frame.
   const label = task?.display_name?.trim() || task?.agent || 'subagent';
   const identity = hasResp && !isRunning ? `subagent result · ${label}` : `subagent · ${label}`;
 
@@ -139,7 +144,7 @@ function terminalRow(result: any, { expanded }: any, theme: any, context: any, t
   // A failure without a resolved task (pre-launch rejection) still needs its reason visible in the
   // collapsed row; that text is the only information the row has.
   const preLaunchFailure = !task && failed
-    ? clip((result?.content ?? []).filter((part: any) => part?.type === 'text').map((part: any) => part.text).join(' '), 96)
+    ? normalizeInlineText((result?.content ?? []).filter((part: any) => part?.type === 'text').map((part: any) => part.text).join(' '))
     : '';
 
   const header = `${themeAccent(theme, ARCH_ICON)} ${segments(theme, [
@@ -154,9 +159,9 @@ function terminalRow(result: any, { expanded }: any, theme: any, context: any, t
     usage ? themeDim(theme, `usage: ${usage}`) : undefined,
   ])}`;
 
-  if (expanded !== true) return inlineComponent({ header, body: [], expanded: false });
+  if (expanded !== true) return inlineComponent({ header, body: [], expanded: false, theme });
 
-  const body: string[] = [];
+  const body: InlineBodyLine[] = [];
   if (task) {
     body.push(themeDim(theme, `task_id: ${task.id}`));
     body.push(themeDim(theme, `agent: ${task.agent} · mode: ${task.effective_mode ?? task.mode ?? 'task'}${isBg ? ' (background)' : ''}`));
@@ -165,16 +170,16 @@ function terminalRow(result: any, { expanded }: any, theme: any, context: any, t
   }
   body.push(themeDim(theme, `history: ${resolveHistoryRoute(task, result, context)}`));
   if (hasResp && responseText) {
-    body.push(themeTitle(theme, 'Subagent response'), ...responseText.split('\n'));
+    body.push(themeTitle(theme, 'Subagent response'), ...mutedLines(responseText));
   } else if (failed) {
     const errorText = task?.error
       ?? (result?.content ?? []).filter((part: any) => part.type === 'text').map((part: any) => part.text).join('\n');
-    if (errorText) body.push(themeError(theme, 'Subagent error'), ...errorText.split('\n'));
+    if (errorText) body.push(themeError(theme, 'Subagent error'), ...mutedLines(errorText));
   } else if (!task) {
     const text = (result?.content ?? []).filter((part: any) => part.type === 'text').map((part: any) => part.text).join('\n');
-    if (text) body.push(...text.split('\n'));
+    if (text) body.push(...mutedLines(text));
   }
-  return inlineComponent({ header, body, expanded: true });
+  return inlineComponent({ header, body, expanded: true, theme });
 }
 
 /** Expanded rows still surface the existing manual history route; no tool-row click hijack. */
@@ -198,8 +203,9 @@ export function createSubagentRunComponent(
     const text = (result?.content ?? []).filter((part: any) => part?.type === 'text').map((part: any) => part.text).join('\n');
     return inlineComponent({
       header: `${ARCH_ICON} subagent_run ─ ${result?.isError ? 'failed' : options?.isPartial ? 'running' : 'done'}`,
-      body: text ? text.split('\n') : [],
+      body: text ? mutedLines(text) : [],
       expanded: options?.expanded === true,
+      theme,
     });
   }
 }

@@ -19,26 +19,86 @@ export async function resolve(specifier, context, nextResolve) {
           setText(t) { this.text = t; }
           render() { return [this.text]; }
         }
-        export function visibleWidth(str) { return str.replace(/\\\\x1b\\\\[[0-9;]*m/g, "").length; }
-        export function truncateToWidth(str, width, ellipsis = "") {
-          const vis = str.replace(/\\\\x1b\\\\[[0-9;]*m/g, "");
-          if (vis.length <= width) return str;
-          return vis.slice(0, width) + ellipsis;
+        const graphemeSegmenter = new Intl.Segmenter("en", { granularity: "grapheme" });
+        const ansiRe = /\\\\x1b\\\\][^\\\\x07\\\\x1b]*(?:\\\\x07|\\\\x1b\\\\\\\\)|\\\\x1b\\\\[[0-9;?]*[ -/]*[@-~]/g;
+        const ansiSplitRe = /(\\\\x1b\\\\][^\\\\x07\\\\x1b]*(?:\\\\x07|\\\\x1b\\\\\\\\)|\\\\x1b\\\\[[0-9;?]*[ -/]*[@-~])/g;
+        const zeroWidthRe = /^(?:\\\\p{Default_Ignorable_Code_Point}|\\\\p{Control}|\\\\p{Mark})+$/u;
+        const emojiPresRe = /^\\\\p{Emoji_Presentation}/u;
+        function isWideCp(cp) {
+          return (cp >= 0x1100 && cp <= 0x115f)
+            || (cp >= 0x2e80 && cp <= 0xa4cf && cp !== 0x303f)
+            || (cp >= 0xac00 && cp <= 0xd7a3)
+            || (cp >= 0xf900 && cp <= 0xfaff)
+            || (cp >= 0xfe10 && cp <= 0xfe19)
+            || (cp >= 0xfe30 && cp <= 0xfe6f)
+            || (cp >= 0xff00 && cp <= 0xff60)
+            || (cp >= 0xffe0 && cp <= 0xffe6)
+            || (cp >= 0x1f1e6 && cp <= 0x1f1ff)
+            || (cp >= 0x1f300 && cp <= 0x1fbff)
+            || (cp >= 0x20000 && cp <= 0x3fffd);
         }
-        export function wrapTextWithAnsi(str, width) {
-          const words = str.split(" ");
-          const lines = [];
-          let cur = "";
-          for (const w of words) {
-            if ((cur + " " + w).trim().length > width) {
-              if (cur) lines.push(cur);
-              cur = w;
-            } else {
-              cur = cur ? cur + " " + w : w;
+        function segWidth(seg) {
+          if (seg === "\\\\t") return 3;
+          if (zeroWidthRe.test(seg)) return 0;
+          if (emojiPresRe.test(seg) || seg.includes("\\\\uFE0F") || seg.includes("\\\\u200D")) return 2;
+          const cp = seg.codePointAt(0);
+          if (cp === undefined) return 0;
+          return isWideCp(cp) ? 2 : 1;
+        }
+        export function visibleWidth(str) {
+          let w = 0;
+          for (const { segment } of graphemeSegmenter.segment(str.replace(ansiRe, ""))) w += segWidth(segment);
+          return w;
+        }
+        export function truncateToWidth(str, width, ellipsis = "") {
+          if (width <= 0) return "";
+          if (visibleWidth(str) <= width) return str;
+          const limit = Math.max(0, width - visibleWidth(ellipsis));
+          let out = "";
+          let cur = 0;
+          for (const part of str.split(ansiSplitRe)) {
+            if (!part) continue;
+            if (part.startsWith("\\\\x1b")) { out += part; continue; }
+            for (const { segment } of graphemeSegmenter.segment(part)) {
+              const sw = segWidth(segment);
+              if (cur + sw > limit) return out + ellipsis;
+              out += segment;
+              cur += sw;
             }
           }
-          if (cur) lines.push(cur);
-          return lines.length ? lines : [str];
+          return out + ellipsis;
+        }
+        export function wrapTextWithAnsi(str, width) {
+          if (width <= 0) return [];
+          if (str === "" || visibleWidth(str) <= width) return [str];
+          const lines = [];
+          let cur = "";
+          let curW = 0;
+          let activeSgr = "";
+          const flush = () => {
+            lines.push(activeSgr && !cur.endsWith("\\\\x1b[0m") ? cur + "\\\\x1b[0m" : cur);
+            cur = activeSgr;
+            curW = 0;
+          };
+          for (const part of str.split(ansiSplitRe)) {
+            if (!part) continue;
+            if (part.startsWith("\\\\x1b")) {
+              cur += part;
+              if (part === "\\\\x1b[0m" || part === "\\\\x1b[m") activeSgr = "";
+              else if (part.startsWith("\\\\x1b[") && part.endsWith("m")) activeSgr += part;
+              continue;
+            }
+            for (const { segment } of graphemeSegmenter.segment(part)) {
+              const sw = segWidth(segment);
+              if (curW > 0 && curW + sw > width) flush();
+              cur += segment;
+              curW += sw;
+            }
+          }
+          if (cur !== activeSgr || lines.length === 0) {
+            lines.push(activeSgr && !cur.endsWith("\\\\x1b[0m") ? cur + "\\\\x1b[0m" : cur);
+          }
+          return lines;
         }
       \`)
     };
@@ -287,6 +347,7 @@ test("MINI-004: every codegraph tool renders one compact unboxed inline row", as
 
 test("MINI-004: codegraph expanded output keeps every returned text block and continuation path", async () => {
   const { renderExploreResult } = await import("../src/render/index.ts");
+  const { MUTED, RESET, DIM } = await import("../src/render/theme.ts");
   const multiline = "line one\n\nline three\nline four";
   const ctx = { state: {} };
   const lines = renderExploreResult(
@@ -295,7 +356,12 @@ test("MINI-004: codegraph expanded output keeps every returned text block and co
     {},
     ctx,
   ).render(120);
-  assert.deepEqual(lines.slice(1), [" line one", " ", " line three", " line four"]);
+  assert.deepEqual(lines.slice(1), [
+    ` ${MUTED}line one${RESET}`,
+    " ",
+    ` ${MUTED}line three${RESET}`,
+    ` ${MUTED}line four${RESET}`,
+  ]);
   assert.ok(lines[0].startsWith(" "));
 
   const truncated = renderExploreResult(
@@ -307,7 +373,93 @@ test("MINI-004: codegraph expanded output keeps every returned text block and co
     {},
     { state: {} },
   ).render(120);
-  assert.ok(truncated.some((line) => line.includes("/tmp/pi-codegraph-x/output.md")));
+  const metaLine = truncated.find((line) => line.includes("/tmp/pi-codegraph-x/output.md"));
+  assert.ok(metaLine);
+  assert.ok(metaLine.includes(DIM), "existing DIM metadata ANSI preserved without muted overwrite");
+  assert.ok(!metaLine.includes(MUTED));
+});
+
+test("MINI-007: codegraph applies muted foreground on plain expanded bodies while preserving existing ANSI and wrapping headers/bodies cleanly", async () => {
+  const { renderExploreCall, renderExploreResult } = await import("../src/render/index.ts");
+  const { MUTED, RESET, visible } = await import("../src/render/theme.ts");
+  const strip = (s) => s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
+
+  // 1. Uses theme.fg("muted", ...) when theme supplies muted color
+  const customTheme = {
+    fg: (token, text) => (token === "muted" ? `\x1b[38;2;1;2;3m${text}\x1b[39m` : text),
+  };
+  const themedLines = renderExploreResult(
+    {
+      content: [{
+        type: "text",
+        text: "plain body text\n\x1b[32mconst syntax = 1;\x1b[0m\n\x1b[36mhttps://example.com\x1b[0m\n\x1b[33mwarning!\x1b[0m\n\x1b[31merror!\x1b[0m",
+      }],
+      details: { path: "src", query: "q" },
+    },
+    { expanded: true, isPartial: false },
+    customTheme,
+    { state: {} },
+  ).render(100);
+  assert.equal(themedLines[1], " \x1b[38;2;1;2;3mplain body text\x1b[39m");
+  assert.equal(themedLines[2], " \x1b[32mconst syntax = 1;\x1b[0m");
+  assert.equal(themedLines[3], " \x1b[36mhttps://example.com\x1b[0m");
+  assert.equal(themedLines[4], " \x1b[33mwarning!\x1b[0m");
+  assert.equal(themedLines[5], " \x1b[31merror!\x1b[0m");
+
+  // 2. Falls back to #7aa7b8 MUTED when theme is absent or mocked no-op
+  const noopTheme = { fg: (_token, text) => text };
+  const fallbackLines = renderExploreResult(
+    { content: [{ type: "text", text: "plain fallback" }], details: { path: "src", query: "q" } },
+    { expanded: true, isPartial: false },
+    noopTheme,
+    { state: {} },
+  ).render(100);
+  assert.equal(fallbackLines[1], ` ${MUTED}plain fallback${RESET}`);
+
+  // 3. Overflowing collapsed headers wrap without ellipsis clipping or trailing character loss
+  const longQuery = "veryLongArchitectureQueryIdentifierWithTailMarker_END_HEADER";
+  const wrappedCall = renderExploreCall({ query: longQuery, path: "packages/core/src" }, {}, { state: {} }).render(24);
+  assert.ok(wrappedCall.length > 1, "overflowing call header wraps across multiple lines");
+  for (const line of wrappedCall) {
+    assert.ok(line.startsWith(" "), "keeps 1-column left margin");
+    assert.ok(visible(line) <= 24, `call line fits width 24: ${line}`);
+  }
+  const joinedCall = wrappedCall.map((l) => strip(l).slice(1)).join("");
+  assert.ok(joinedCall.includes("END_HEADER"), "no trailing character loss in wrapped call header");
+  assert.ok(joinedCall.includes("packages/core/src"), "full path preserved in wrapped call header");
+
+  const wrappedCollapsed = renderExploreResult(
+    { content: [{ type: "text", text: "hidden" }], details: { path: "src", query: "q", truncated: true } },
+    { expanded: false, isPartial: false },
+    {},
+    { state: {} },
+  ).render(16);
+  assert.ok(wrappedCollapsed.length > 1, "overflowing collapsed result header wraps");
+  for (const line of wrappedCollapsed) {
+    assert.ok(line.startsWith(" "));
+    assert.ok(visible(line) <= 16);
+  }
+  const joinedCollapsed = wrappedCollapsed.map((l) => strip(l).slice(1)).join("");
+  assert.ok(joinedCollapsed.includes("full output saved") || joinedCollapsed.replace(/\s+/g, "").includes("fulloutputsaved"));
+  assert.ok(!joinedCollapsed.includes("…"), "no ellipsis clipping on wrapped collapsed header");
+
+  // 4. Width boundary rules: width <= 0 -> [], width === 1 -> [" "], width === 2 preserves wide graphemes
+  assert.deepEqual(renderExploreResult({ content: [{ type: "text", text: "A漢B" }], details: {} }, { expanded: true }, {}, { state: {} }).render(0), []);
+  assert.deepEqual(renderExploreResult({ content: [{ type: "text", text: "A漢B" }], details: {} }, { expanded: true }, {}, { state: {} }).render(1), [" "]);
+  const width2Lines = renderExploreResult(
+    { content: [{ type: "text", text: "A漢B\nA🚀B" }], details: { path: "src", query: "q" } },
+    { expanded: true, isPartial: false },
+    {},
+    { state: {} },
+  ).render(2);
+  for (const line of width2Lines) {
+    assert.ok(visible(line) <= 2, `width 2 line fits: ${JSON.stringify(line)}`);
+  }
+  const plainWidth2 = width2Lines.map(strip);
+  assert.ok(plainWidth2.includes(" A"), "narrow char retains 1-col margin at width 2");
+  assert.ok(plainWidth2.includes("漢"), "wide CJK grapheme preserved intact via margin omission at width 2");
+  assert.ok(plainWidth2.includes(" B"), "narrow trailing char retains 1-col margin at width 2");
+  assert.ok(plainWidth2.includes("🚀"), "wide emoji grapheme preserved intact via margin omission at width 2");
 });
 
 test("MINI-001: codegraph_sync tool execution states, concurrency, and debounce", async () => {
@@ -422,6 +574,7 @@ test("MINI-004: codegraph_sync states stay in one inline row", async () => {
   ).render(60);
   assert.ok(cached[0].includes("cached"));
 
+  const { MUTED, RESET } = await import("../src/render/theme.ts");
   const expanded = renderSyncResult(
     { content: [{ type: "text", text: "Synced 5 files" }], details: { path: "/project/test", executed: true, durationMs: 42 } },
     { expanded: true, isPartial: false },
@@ -429,7 +582,7 @@ test("MINI-004: codegraph_sync states stay in one inline row", async () => {
     { state: {} },
   ).render(60);
   assert.ok(expanded[0].includes("42ms"), "duration stays in the compact status row");
-  assert.deepEqual(expanded.slice(1), [" Synced 5 files"], "expanded output is the returned text with 1-col left margin, unwrapped when it fits");
+  assert.deepEqual(expanded.slice(1), [` ${MUTED}Synced 5 files${RESET}`], "expanded output is muted returned text with 1-col left margin");
   assert.ok(!/to collapse|ctrl\+o/i.test(expanded.join("\n")));
 
   for (const [result, token] of [

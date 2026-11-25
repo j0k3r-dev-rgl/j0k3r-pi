@@ -273,9 +273,19 @@ describe('completion message render', () => {
 
     for (const width of [1, 2, 10, 23, 24, 40, 80, 120]) {
       const collapsed = renderSubagentCompletionMessage(baseMsg, { expanded: false }, theme).render(width);
-      expect(collapsed).toHaveLength(1);
-      expect(visibleWidth(collapsed[0]!)).toBeLessThanOrEqual(width);
-      expect(env.stripAnsi(collapsed[0]!).startsWith(' ')).toBe(true);
+      expect(collapsed.length).toBeGreaterThanOrEqual(1);
+      for (const line of collapsed) {
+        expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+        const plain = env.stripAnsi(line);
+        if (width === 2 && !plain.startsWith(' ')) {
+          expect(visibleWidth(plain)).toBe(2);
+        } else {
+          expect(plain.startsWith(' ')).toBe(true);
+        }
+      }
+      if (width >= 2) {
+        expect(env.stripAnsi(collapsed.join('\n'))).not.toContain('…');
+      }
       if (width >= 4) expect(env.stripAnsi(collapsed[0]!).startsWith('  ')).toBe(false);
 
       const expanded = renderSubagentCompletionMessage(baseMsg, { expanded: true }, theme).render(width);
@@ -605,5 +615,54 @@ describe('subagent question delivery', () => {
     expect(message.content).toContain('task_id: subtask_q_1');
     expect(message.content).toContain('Which port?');
     expect(message.content).toContain('action=message');
+  });
+
+  it('uses muted foreground for plain expanded completion bodies preserving ANSI and wraps narrow headers without ellipsis (MINI-004)', async () => {
+    const { renderSubagentCompletionMessage, visibleWidth } = await import('../../src/render/completion-message.js');
+    const fgKeys: Array<{ key: string; text: string }> = [];
+    const theme = {
+      fg: (key: string, text: string) => {
+        fgKeys.push({ key, text });
+        if (key === 'muted') return `\x1b[38;2;122;167;184m${text}\x1b[0m`;
+        return text;
+      },
+      bold: (text: string) => text,
+    };
+    const msg = {
+      customType: 'subagent-completion',
+      content: 'fallback',
+      details: {
+        full_result: 'plain completion body\n\x1b[35mcolored syntax line\x1b[0m',
+        task: {
+          id: 'subtask_muted_cmp',
+          agent: 'analyst',
+          display_name: 'Long Completion Display Name',
+          status: 'completed',
+          model: 'cliproxy/model-long',
+          effort: 'high',
+          attempt: 2,
+          result: 'plain completion body\n\x1b[35mcolored syntax line\x1b[0m',
+        },
+      },
+    };
+
+    const narrow = renderSubagentCompletionMessage(msg, { expanded: false }, theme).render(24);
+    expect(narrow.length).toBeGreaterThan(1);
+    for (const line of narrow) expect(visibleWidth(line)).toBeLessThanOrEqual(24);
+    expect(env.stripAnsi(narrow.join('\n'))).not.toContain('…');
+    expect(env.stripAnsi(narrow.join(' ')).replace(/\s+/g, ' ')).toContain('attempt: 2');
+
+    const expanded = renderSubagentCompletionMessage(msg, { expanded: true }, theme).render(80);
+    const plainLine = expanded.find((l) => env.stripAnsi(l).includes('plain completion body'));
+    const ansiLine = expanded.find((l) => env.stripAnsi(l).includes('colored syntax line'));
+    expect(plainLine).toContain('\x1b[38;2;122;167;184m');
+    expect(fgKeys.some((e) => e.key === 'muted' && e.text.includes('plain completion body'))).toBe(true);
+    expect(fgKeys.some((e) => e.key === 'customMessageText')).toBe(false);
+    expect(ansiLine).toContain('\x1b[35mcolored syntax line\x1b[0m');
+    expect(ansiLine).not.toContain('\x1b[38;2;122;167;184m');
+
+    // Absent theme falls back to #7aa7b8 ANSI muted
+    const noTheme = renderSubagentCompletionMessage(msg, { expanded: true }, undefined).render(80);
+    expect(noTheme.find((l) => env.stripAnsi(l).includes('plain completion body'))).toContain('\x1b[38;2;122;167;184m');
   });
 });

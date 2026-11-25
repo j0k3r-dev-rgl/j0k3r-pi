@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   COMPACT_TOOL_RENDERING,
+  MUTED,
+  RESET,
   renderYoutubeToolCall,
   renderYoutubeToolResult,
   extractYoutubeAction,
+  stripAnsi,
   visibleWidth,
 } from '../src/render.js';
 import { registerYoutubeResearchTools } from '../src/tools.js';
@@ -38,12 +41,14 @@ describe('youtube-research custom renderer', () => {
     expect(compact).not.toMatch(/ctrl\+o|to expand/i);
     expect(compact).not.toContain('transcript:\nUno dos tres');
 
+    const collapsedAt40 = renderYoutubeToolResult('youtube_transcript_get', result, { expanded: false }).render(40);
     const expandedLines = renderYoutubeToolResult('youtube_transcript_get', result, { expanded: true }).render(40);
     const expanded = expandedLines.join('\n');
-    // Same header row at the same width; only the clipped tail differs from the 100-cell row.
-    expect(expandedLines[0]).toBe(
-      renderYoutubeToolResult('youtube_transcript_get', result, { expanded: false }).render(40)[0],
-    );
+    // Same wrapped header rows at the same width; overflowing headers wrap without ellipsis clipping.
+    expect(collapsedAt40.length).toBeGreaterThan(1);
+    expect(expandedLines.slice(0, collapsedAt40.length)).toEqual(collapsedAt40);
+    expect(collapsedAt40.map((l) => stripAnsi(l).slice(1)).join(' ')).toContain('https://youtu.be/x');
+    expect(collapsedAt40.join('\n')).not.toContain('…');
     expect(expanded).not.toMatch(FRAME);
     expect(expanded).not.toMatch(/ctrl\+o|to collapse/i);
     expect(expanded).toContain('transcript:');
@@ -159,7 +164,7 @@ describe('youtube-research custom renderer', () => {
       { state: {} },
     ).render(80);
     expect(expanded.every((l) => l.startsWith(' '))).toBe(true);
-    expect(expanded.slice(1)).toContain(' Captions are disabled for this video.');
+    expect(expanded.slice(1)).toContain(` ${MUTED}Captions are disabled for this video.${RESET}`);
   });
 
   it('extracts youtube actions correctly across all tool types', () => {
@@ -170,11 +175,15 @@ describe('youtube-research custom renderer', () => {
     expect(extractYoutubeAction('youtube_playlist_get', { playlist_ref: 'PL12345' })).toBe('PL12345');
   });
 
-  it('fits narrow widths and emits no cells at zero width', () => {
-    const callComponent = renderYoutubeToolCall('youtube_search', { query: 'piano' }, {}, {});
+  it('wraps narrow widths without clipping and preserves width 0/1/2 wide-grapheme rules', () => {
+    const callComponent = renderYoutubeToolCall('youtube_search', { query: 'piano TAIL_END' }, {}, {});
     const lines = callComponent.render(20);
-    expect(lines).toHaveLength(1);
-    expect(visibleWidth(lines[0])).toBeLessThanOrEqual(20);
+    expect(lines.length).toBeGreaterThan(1);
+    for (const line of lines) {
+      expect(line.startsWith(' ')).toBe(true);
+      expect(visibleWidth(line)).toBeLessThanOrEqual(20);
+    }
+    expect(lines.map((l) => stripAnsi(l).slice(1)).join(' ')).toContain('TAIL_END');
 
     const result = {
       content: [{ type: 'text', text: 'a\n\nb' }],
@@ -185,6 +194,42 @@ describe('youtube-research custom renderer', () => {
       for (const line of rendered) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
     }
     expect(renderYoutubeToolResult('youtube_search', result, { expanded: true }).render(0)).toEqual([]);
+    expect(renderYoutubeToolResult('youtube_search', result, { expanded: true }).render(1)).toEqual([' ']);
+
+    // Width 2 wide-grapheme retention
+    const wideRes = {
+      content: [{ type: 'text', text: 'A漢B\nA🚀B' }],
+      details: { status: 'success', data: {} },
+    };
+    const w2 = renderYoutubeToolResult('youtube_search', wideRes, { expanded: true }).render(2);
+    for (const line of w2) expect(visibleWidth(line)).toBeLessThanOrEqual(2);
+    const plainW2 = w2.map(stripAnsi);
+    expect(plainW2).toContain(' A');
+    expect(plainW2).toContain('漢');
+    expect(plainW2).toContain(' B');
+    expect(plainW2).toContain('🚀');
+  });
+
+  it('applies theme.fg("muted", ...) with #7aa7b8 fallback while preserving existing ANSI in expanded bodies', () => {
+    const customTheme = {
+      fg: (token: string, text: string) => (token === 'muted' ? `\x1b[38;2;4;5;6m${text}\x1b[39m` : text),
+    };
+    const result = {
+      content: [{
+        type: 'text',
+        text: 'plain transcript\n\x1b[32msyntax\x1b[0m\n\x1b[36mhttps://youtu.be/abc\x1b[0m\n\x1b[33mwarn\x1b[0m',
+      }],
+      details: { status: 'success', data: {} },
+    };
+    const themed = renderYoutubeToolResult('youtube_search', result, { expanded: true }, customTheme).render(100);
+    expect(themed[1]).toBe(' \x1b[38;2;4;5;6mplain transcript\x1b[39m');
+    expect(themed[2]).toBe(' \x1b[32msyntax\x1b[0m');
+    expect(themed[3]).toBe(' \x1b[36mhttps://youtu.be/abc\x1b[0m');
+    expect(themed[4]).toBe(' \x1b[33mwarn\x1b[0m');
+
+    const fallback = renderYoutubeToolResult('youtube_search', result, { expanded: true }, {}).render(100);
+    expect(fallback[1]).toBe(` ${MUTED}plain transcript${RESET}`);
+    expect(fallback[2]).toBe(' \x1b[32msyntax\x1b[0m');
   });
 
   it('keeps every returned text block reachable when expanded', () => {

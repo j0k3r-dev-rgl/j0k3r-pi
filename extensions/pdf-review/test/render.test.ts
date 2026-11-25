@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   COMPACT_TOOL_RENDERING,
+  MUTED,
   RED,
+  RESET,
   extractPdfBadge,
   renderPdfExtractCall,
   renderPdfExtractResult,
+  stripAnsi,
   visibleWidth,
 } from '../src/render.js';
 import { registerPdfReviewTools } from '../src/tools.js';
@@ -171,14 +174,18 @@ describe('pdf-review renderers', () => {
 
     const expanded = renderPdfExtractResult(errResult, { expanded: true }, mockTheme, { state: {} }).render(80);
     expect(expanded.every((l) => l.startsWith(' '))).toBe(true);
-    expect(expanded.slice(1)).toContain(' pdf_extract failed: File is not a valid PDF');
+    expect(expanded.slice(1)).toContain(` ${MUTED}pdf_extract failed: File is not a valid PDF${RESET}`);
   });
 
-  it('stays width-safe at narrow widths and emits no cells at zero width', () => {
-    const callLines = renderPdfExtractCall({ path: 'doc.pdf' }, mockTheme).render(16);
-    expect(callLines).toHaveLength(1);
-    expect(visibleWidth(callLines[0])).toBeLessThanOrEqual(16);
-    expect(callLines[0]).not.toMatch(FRAME);
+  it('wraps narrow widths without clipping and preserves width 0/1/2 wide-grapheme rules', () => {
+    const callLines = renderPdfExtractCall({ path: 'docs/report-TAIL.pdf' }, mockTheme).render(16);
+    expect(callLines.length).toBeGreaterThan(1);
+    for (const line of callLines) {
+      expect(line.startsWith(' ')).toBe(true);
+      expect(visibleWidth(line)).toBeLessThanOrEqual(16);
+      expect(line).not.toMatch(FRAME);
+    }
+    expect(callLines.map((l) => stripAnsi(l).slice(1)).join('')).toContain('report-TAIL.pdf');
 
     for (const width of [1, 2, 10, 23]) {
       const resultLines = renderPdfExtractResult(
@@ -198,5 +205,38 @@ describe('pdf-review renderers', () => {
     }
 
     expect(renderPdfExtractResult({ details: { status: 'success', data: {} } }, { expanded: false }, mockTheme, { state: {} }).render(0)).toEqual([]);
+    expect(renderPdfExtractResult({ details: { status: 'success', data: {} } }, { expanded: false }, mockTheme, { state: {} }).render(1)).toEqual([' ']);
+
+    const wideRes = {
+      details: { status: 'success', data: { file: { path: 'a.pdf' }, pageCount: 1, textCharCount: 6, textSource: 'pdf-text-layer' } },
+      content: [{ type: 'text', text: 'A漢B\nA🚀B' }],
+    };
+    const w2 = renderPdfExtractResult(wideRes, { expanded: true }, mockTheme, { state: {} }).render(2);
+    for (const line of w2) expect(visibleWidth(line)).toBeLessThanOrEqual(2);
+    const plainW2 = w2.map(stripAnsi);
+    expect(plainW2).toContain(' A');
+    expect(plainW2).toContain('漢');
+    expect(plainW2).toContain(' B');
+    expect(plainW2).toContain('🚀');
+  });
+
+  it('applies theme.fg("muted", ...) with #7aa7b8 fallback while preserving existing ANSI in expanded bodies', () => {
+    const customTheme = {
+      ...mockTheme,
+      fg: (token: string, text: string) => (token === 'muted' ? `\x1b[38;2;21;22;23m${text}\x1b[39m` : text),
+    };
+    const res = {
+      details: { status: 'success', data: { file: { path: 'doc.pdf' }, pageCount: 2, textCharCount: 40, textSource: 'pdf-text-layer' } },
+      content: [{ type: 'text', text: 'plain extracted\n\x1b[32msyntax\x1b[0m\n\x1b[33mwarn\x1b[0m' }],
+    };
+    const themed = renderPdfExtractResult(res, { expanded: true }, customTheme, { state: {} }).render(100);
+    expect(themed).toContain(' \x1b[38;2;21;22;23mfile: doc.pdf\x1b[39m');
+    expect(themed).toContain(' \x1b[38;2;21;22;23mplain extracted\x1b[39m');
+    expect(themed).toContain(' \x1b[32msyntax\x1b[0m');
+    expect(themed).toContain(' \x1b[33mwarn\x1b[0m');
+
+    const fallback = renderPdfExtractResult(res, { expanded: true }, mockTheme, { state: {} }).render(100);
+    expect(fallback).toContain(` ${MUTED}plain extracted${RESET}`);
+    expect(fallback).toContain(' \x1b[32msyntax\x1b[0m');
   });
 });

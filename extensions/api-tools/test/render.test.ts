@@ -215,6 +215,83 @@ describe('api-tools compact rendering', () => {
     }
   });
 
+  it('wraps overflowing collapsed headers without ellipsis clipping and preserves 1-col margin', () => {
+    const longPath = '/api/v2/organizations/acme/deployments/production/healthcheck/END_MARKER';
+    const callLines = renderApiToolCall('api_rest_request', { method: 'GET', path: longPath }, {}, { state: {} }).render(40);
+    expect(callLines.length).toBeGreaterThan(1);
+    expect(stripAnsi(callLines.join('\n'))).not.toContain('…');
+    expect(stripAnsi(callLines.join(' '))).toContain('END_MARKER');
+    for (const line of callLines) {
+      expect(visibleWidth(line)).toBeLessThanOrEqual(40);
+      expect(stripAnsi(line).startsWith(' ')).toBe(true);
+    }
+
+    const resLines = renderApiToolResult(
+      'api_rest_request',
+      {
+        content: [{ type: 'text', text: 'ok' }],
+        details: { status: 'success', action: 'request', identity: '200 OK · long-response-identity-END_RES' } as any,
+      },
+      { expanded: false },
+      {},
+      { args: { method: 'GET', path: longPath }, state: {} },
+    ).render(40);
+    expect(resLines.length).toBeGreaterThan(1);
+    expect(stripAnsi(resLines.join('\n'))).not.toContain('…');
+    expect(stripAnsi(resLines.join(' '))).toContain('END_RES');
+    for (const line of resLines) {
+      expect(visibleWidth(line)).toBeLessThanOrEqual(40);
+      expect(stripAnsi(line).startsWith(' ')).toBe(true);
+    }
+  });
+
+  it('applies muted foreground to plain-text expanded bodies while preserving existing ANSI colors', () => {
+    const customTheme = {
+      fg: (token: string, text: string) => (token === 'muted' ? `\x1b[38;2;10;20;30m${text}\x1b[39m` : text),
+    };
+    const result: any = {
+      content: [{ type: 'text', text: 'Plain JSON response line\n\x1b[33mAmber warning line\x1b[0m' }],
+      details: {
+        contract_version: 2,
+        status: 'success',
+        action: 'request',
+        render: { authorization_state: 'declared' },
+      },
+    };
+
+    const withTheme = renderApiToolResult('api_rest_request', result, { expanded: true }, customTheme, { state: {} }).render(80);
+    const joined = withTheme.join('\n');
+    expect(joined).toContain('\x1b[38;2;10;20;30mauthorization: declared\x1b[39m');
+    expect(joined).toContain('\x1b[38;2;10;20;30mPlain JSON response line\x1b[39m');
+    expect(joined).toContain('\x1b[33mAmber warning line\x1b[0m');
+    expect(joined).not.toContain('\x1b[38;2;10;20;30m\x1b[33m');
+
+    const fallback = renderApiToolResult('api_rest_request', result, { expanded: true }, undefined, { state: {} }).render(80);
+    expect(fallback.join('\n')).toContain('\x1b[38;2;122;167;184mPlain JSON response line\x1b[39m');
+    expect(fallback.join('\n')).toContain('\x1b[33mAmber warning line\x1b[0m');
+  });
+
+  it('handles width 1 as blank column and width 2 wide graphemes via conditional margin omission', () => {
+    const comp = renderApiToolResult(
+      'api_status',
+      { content: [{ type: 'text', text: 'A漢B' }], details: { status: 'success' } as any },
+      { expanded: true },
+      {},
+      { state: {} },
+    );
+    expect(comp.render(0)).toEqual([]);
+    expect(comp.render(1)).toEqual([' ']);
+
+    const w2 = comp.render(2);
+    const plainW2 = w2.map(stripAnsi);
+    expect(plainW2).toContain(' A');
+    expect(plainW2).toContain('漢');
+    expect(plainW2).toContain(' B');
+    for (const line of w2) {
+      expect(visibleWidth(line)).toBeLessThanOrEqual(2);
+    }
+  });
+
   it('never throws on malformed args, result, or context', () => {
     expect(() => renderApiToolCall('api_status', null, undefined, undefined).render(80)).not.toThrow();
     expect(() => renderApiToolResult('api_status', null as any, undefined, undefined, undefined).render(80)).not.toThrow();

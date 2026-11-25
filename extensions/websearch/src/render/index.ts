@@ -13,15 +13,19 @@ export const CYAN = '\x1b[1;38;2;0;229;255m';
 export const LIME = '\x1b[1;38;2;102;255;102m';
 export const RED = '\x1b[1;38;2;255;77;109m';
 export const DIM = '\x1b[2m';
+export const MUTED = '\x1b[38;2;122;167;184m';
 
 /** Short inline row separator; not a card frame. */
 export const ROW_SEPARATOR = ' ─ ';
 
-/** Presentation-only marker: declares compact, unboxed, single-row compliance with 1-col margin. */
+/** Presentation-only marker: declares compact, unboxed, wrapped compliance with 1-col margin. */
 export const COMPACT_TOOL_RENDERING = { compactToolRenderingVersion: 1, compactLeftMargin: 1 } as const;
 
 const ANSI_RE = /\u001b\][^\u001b\u0007]*(?:\u001b\\|\u0007)|\u001b\[[0-?]*[ -/]*[@-~]/g;
-const ANSI_TOKEN_RE = /(?:\u001b\][^\u001b\u0007]*(?:\u001b\\|\u0007)|\u001b\[[0-?]*[ -/]*[@-~])/g;
+const ANSI_TOKEN_RE = /(\u001b\][^\u001b\u0007]*(?:\u001b\\|\u0007)|\u001b\[[0-?]*[ -/]*[@-~])/g;
+const ANSI_ESCAPE_RE = /\u001b(?:\[|\])/;
+const ZERO_WIDTH_CLUSTER_RE = /^(?:\p{Default_Ignorable_Code_Point}|\p{Control}|\p{Mark})+$/u;
+const EMOJI_PRESENTATION_RE = /^\p{Emoji_Presentation}/u;
 const graphemeSegmenter = typeof Intl !== 'undefined' && 'Segmenter' in Intl
   ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
   : undefined;
@@ -31,65 +35,53 @@ function segmentText(text: string): string[] {
   return [...graphemeSegmenter.segment(text)].map((entry) => entry.segment);
 }
 
-function appendTextSegments(tokens: string[], text: string): void {
-  for (const segment of segmentText(text)) tokens.push(segment);
-}
-
-function tokenize(text: string): string[] {
-  const tokens: string[] = [];
-  let lastIndex = 0;
-  for (const match of text.matchAll(ANSI_TOKEN_RE)) {
-    const index = match.index ?? 0;
-    if (index > lastIndex) appendTextSegments(tokens, text.slice(lastIndex, index));
-    tokens.push(match[0]);
-    lastIndex = index + match[0].length;
+function isPrintableAscii(text: string): boolean {
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code < 0x20 || code > 0x7e) return false;
   }
-  if (lastIndex < text.length) appendTextSegments(tokens, text.slice(lastIndex));
-  return tokens;
-}
-
-function isAnsi(token: string): boolean {
-  return token.startsWith('\u001b');
+  return true;
 }
 
 export function stripAnsi(text: string): string {
   return text.replace(ANSI_RE, '');
 }
 
-function isZeroWidthCodePoint(codePoint: number): boolean {
-  return codePoint === 0x00ad
-    || codePoint === 0x034f
-    || codePoint === 0x061c
-    || codePoint === 0x180e
-    || codePoint === 0x200b
-    || codePoint === 0x200c
-    || codePoint === 0x200d
-    || codePoint === 0x2060
-    || codePoint === 0xfeff
-    || (codePoint >= 0x0000 && codePoint <= 0x001f)
-    || (codePoint >= 0x007f && codePoint <= 0x009f)
-    || (codePoint >= 0x0300 && codePoint <= 0x036f)
-    || (codePoint >= 0x0483 && codePoint <= 0x0489)
-    || (codePoint >= 0x0591 && codePoint <= 0x05bd)
-    || codePoint === 0x05bf
-    || (codePoint >= 0x05c1 && codePoint <= 0x05c2)
-    || (codePoint >= 0x05c4 && codePoint <= 0x05c5)
-    || codePoint === 0x05c7
-    || (codePoint >= 0x0610 && codePoint <= 0x061a)
-    || (codePoint >= 0x064b && codePoint <= 0x065f)
-    || codePoint === 0x0670
-    || (codePoint >= 0x06d6 && codePoint <= 0x06dc)
-    || (codePoint >= 0x06df && codePoint <= 0x06e4)
-    || (codePoint >= 0x06e7 && codePoint <= 0x06e8)
-    || (codePoint >= 0x06ea && codePoint <= 0x06ed)
-    || (codePoint >= 0xfe00 && codePoint <= 0xfe0f);
+function hasAnsi(text: string): boolean {
+  return ANSI_ESCAPE_RE.test(text);
+}
+
+function styleMuted(theme: Theme | undefined, text: string): string {
+  if (!text) return text;
+  if (typeof theme?.fg === 'function') {
+    const styled = theme.fg('muted', text);
+    if (typeof styled === 'string' && styled !== text) return styled;
+  }
+  return `${MUTED}${text}${RESET}`;
 }
 
 function isFullWidthCodePoint(codePoint: number): boolean {
   return codePoint >= 0x1100 && (
     codePoint <= 0x115f
-    || codePoint === 0x2329
-    || codePoint === 0x232a
+    || codePoint === 0x231a || codePoint === 0x231b
+    || codePoint === 0x2329 || codePoint === 0x232a
+    || (codePoint >= 0x23e9 && codePoint <= 0x23ec)
+    || codePoint === 0x23f0 || codePoint === 0x23f3
+    || (codePoint >= 0x25fd && codePoint <= 0x25fe)
+    || (codePoint >= 0x2614 && codePoint <= 0x2615)
+    || (codePoint >= 0x2648 && codePoint <= 0x2653)
+    || codePoint === 0x267f || codePoint === 0x2693 || codePoint === 0x26a1
+    || (codePoint >= 0x26aa && codePoint <= 0x26ab)
+    || (codePoint >= 0x26bd && codePoint <= 0x26be)
+    || (codePoint >= 0x26c4 && codePoint <= 0x26c5)
+    || codePoint === 0x26ce || codePoint === 0x26d4 || codePoint === 0x26ea
+    || (codePoint >= 0x26f2 && codePoint <= 0x26f3)
+    || codePoint === 0x26f5 || codePoint === 0x26fa || codePoint === 0x26fd
+    || codePoint === 0x2705 || (codePoint >= 0x270a && codePoint <= 0x270b)
+    || codePoint === 0x2728 || codePoint === 0x274c || codePoint === 0x274e
+    || (codePoint >= 0x2753 && codePoint <= 0x2755) || codePoint === 0x2757
+    || (codePoint >= 0x2795 && codePoint <= 0x2797) || codePoint === 0x27b0 || codePoint === 0x27bf
+    || (codePoint >= 0x2b1b && codePoint <= 0x2b1c) || codePoint === 0x2b50 || codePoint === 0x2b55
     || (codePoint >= 0x2e80 && codePoint <= 0xa4cf && codePoint !== 0x303f)
     || (codePoint >= 0xac00 && codePoint <= 0xd7a3)
     || (codePoint >= 0xf900 && codePoint <= 0xfaff)
@@ -97,143 +89,364 @@ function isFullWidthCodePoint(codePoint: number): boolean {
     || (codePoint >= 0xfe30 && codePoint <= 0xfe6f)
     || (codePoint >= 0xff00 && codePoint <= 0xff60)
     || (codePoint >= 0xffe0 && codePoint <= 0xffe6)
-    || (codePoint >= 0x1f300 && codePoint <= 0x1f64f)
-    || (codePoint >= 0x1f900 && codePoint <= 0x1f9ff)
+    || codePoint === 0x1f004 || codePoint === 0x1f0cf
+    || (codePoint >= 0x1f1e6 && codePoint <= 0x1f1ff)
+    || (codePoint >= 0x1f300 && codePoint <= 0x1fbff)
     || (codePoint >= 0x20000 && codePoint <= 0x3fffd)
   );
 }
 
 function graphemeWidth(segment: string): number {
   if (segment === '\t') return 3;
-  let width = 0;
-  for (const char of segment) {
-    const codePoint = char.codePointAt(0);
-    if (codePoint === undefined || isZeroWidthCodePoint(codePoint)) continue;
-    width += isFullWidthCodePoint(codePoint) ? 2 : 1;
-  }
-  return width;
+  if (ZERO_WIDTH_CLUSTER_RE.test(segment)) return 0;
+  if (EMOJI_PRESENTATION_RE.test(segment) || segment.includes('\uFE0F') || segment.includes('\u200D')) return 2;
+  const codePoint = segment.codePointAt(0);
+  if (codePoint === undefined) return 0;
+  return isFullWidthCodePoint(codePoint) ? 2 : 1;
 }
 
 function lineWidth(text: string): number {
-  return segmentText(stripAnsi(text).replace(/\t/g, '   ')).reduce((width, segment) => width + graphemeWidth(segment), 0);
+  if (!text) return 0;
+  if (isPrintableAscii(text)) return text.length;
+  const clean = stripAnsi(text);
+  if (isPrintableAscii(clean)) return clean.length;
+  let width = 0;
+  for (const segment of segmentText(clean)) width += graphemeWidth(segment);
+  return width;
 }
 
 export function visibleWidth(text: string): number {
   return lineWidth(text);
 }
 
-function truncate(text: string, width: number): string {
+function firstPrintingGraphemeWidth(plain: string): number {
+  for (const segment of segmentText(plain)) {
+    const w = graphemeWidth(segment);
+    if (w > 0) return w;
+  }
+  return 0;
+}
+
+function needsWidth2MarginOmission(line: string, totalWidth: number): boolean {
+  if (totalWidth !== 2) return false;
+  const plain = stripAnsi(line);
+  if (plain === '') return false;
+  return lineWidth(plain) === 2 && firstPrintingGraphemeWidth(plain) === 2;
+}
+
+function formatMarginedLine(line: string, totalWidth: number): string {
+  if (totalWidth <= 0) return '';
+  if (totalWidth === 1) return ' ';
+  if (needsWidth2MarginOmission(line, totalWidth)) return line;
+  return ` ${line}`;
+}
+
+function sliceToWidth(text: string, width: number): string {
   if (width <= 0) return '';
   if (lineWidth(text) <= width) return text;
-  if (width === 1) return '…';
-
-  const targetWidth = width - lineWidth('…');
   let visible = 0;
   let output = '';
+  let hadAnsi = false;
 
-  for (const token of tokenize(text)) {
-    if (isAnsi(token)) {
-      output += token;
+  for (const part of text.split(ANSI_TOKEN_RE)) {
+    if (!part) continue;
+    if (part.startsWith('\u001b')) {
+      output += part;
+      hadAnsi = true;
       continue;
     }
-    const tokenWidth = graphemeWidth(token);
-    if (visible + tokenWidth > targetWidth) break;
-    output += token;
-    visible += tokenWidth;
+    for (const segment of segmentText(part)) {
+      const tokenWidth = graphemeWidth(segment);
+      if (visible + tokenWidth > width) {
+        return hadAnsi ? `${output}${RESET}` : output;
+      }
+      output += segment;
+      visible += tokenWidth;
+    }
   }
-
-  return `${output}…`;
+  return hadAnsi ? `${output}${RESET}` : output;
 }
 
 export function fit(text: string, width: number): string {
-  return truncate(text, Math.max(0, width));
+  return sliceToWidth(text, Math.max(0, width));
 }
 
-function hardWrap(text: string, width: number): string[] {
+function wrapAnsiForWidth2(rawLine: string): string[] {
+  if (rawLine === '') return [''];
+  if (lineWidth(rawLine) <= 1) return [rawLine];
+  const out: string[] = [];
+  let current = '';
+  let currentWidth = 0;
+  let chunkLimit = 1;
+  let activeSgr = '';
+  let pendingAnsi = '';
+
+  const flush = () => {
+    const terminated = activeSgr && !current.endsWith(RESET) ? `${current}${RESET}` : current;
+    out.push(terminated);
+    current = activeSgr;
+    currentWidth = 0;
+    chunkLimit = 1;
+  };
+
+  const applyPending = () => {
+    if (!pendingAnsi) return;
+    current += pendingAnsi;
+    pendingAnsi = '';
+  };
+
+  for (const part of rawLine.split(ANSI_TOKEN_RE)) {
+    if (!part) continue;
+    if (part.startsWith('\u001b[')) {
+      if (part === RESET || part === '\u001b[m') {
+        if (pendingAnsi) {
+          current += pendingAnsi;
+          pendingAnsi = '';
+        }
+        current += part;
+        activeSgr = '';
+      } else {
+        pendingAnsi += part;
+        if (part.endsWith('m')) activeSgr += part;
+      }
+      continue;
+    }
+    if (part.startsWith('\u001b]')) {
+      pendingAnsi += part;
+      continue;
+    }
+    for (const segment of segmentText(part)) {
+      const expanded = segment === '\t' ? [' ', ' ', ' '] : [segment];
+      for (const piece of expanded) {
+        const gw = graphemeWidth(piece);
+        if (gw === 0) {
+          applyPending();
+          current += piece;
+          continue;
+        }
+        if (gw > 1 && gw <= 2) {
+          if (currentWidth > 0) flush();
+          applyPending();
+          chunkLimit = 2;
+          current += piece;
+          currentWidth = gw;
+          continue;
+        }
+        if (currentWidth > 0 && currentWidth + gw > chunkLimit) {
+          flush();
+        }
+        applyPending();
+        current += piece;
+        currentWidth += gw;
+      }
+    }
+  }
+  if (pendingAnsi) {
+    current += pendingAnsi;
+    pendingAnsi = '';
+  }
+  if (current !== activeSgr || out.length === 0) {
+    const terminated = activeSgr && !current.endsWith(RESET) ? `${current}${RESET}` : current;
+    out.push(terminated);
+  }
+  return out;
+}
+
+type WrapAtom = { ansi?: string; text?: string; width: number };
+type WrapUnit = { isSpace: boolean; parts: WrapAtom[]; width: number };
+
+function tokenizeWrapUnits(rawLine: string): WrapUnit[] {
+  const units: WrapUnit[] = [];
+  let current: WrapUnit | undefined;
+  let pendingAnsi: WrapAtom[] = [];
+
+  const pushAtom = (isSpace: boolean, atom: WrapAtom) => {
+    if (!current || current.isSpace !== isSpace) {
+      current = { isSpace, parts: [], width: 0 };
+      units.push(current);
+    }
+    if (pendingAnsi.length > 0) {
+      current.parts.push(...pendingAnsi);
+      pendingAnsi = [];
+    }
+    current.parts.push(atom);
+    current.width += atom.width;
+  };
+
+  for (const part of rawLine.split(ANSI_TOKEN_RE)) {
+    if (!part) continue;
+    if (part.startsWith('\u001b')) {
+      if ((part === RESET || part === '\u001b[m') && current) {
+        current.parts.push({ ansi: part, width: 0 });
+      } else {
+        pendingAnsi.push({ ansi: part, width: 0 });
+      }
+      continue;
+    }
+    for (const segment of segmentText(part)) {
+      if (segment === ' ') {
+        pushAtom(true, { text: ' ', width: 1 });
+      } else if (segment === '\t') {
+        pushAtom(true, { text: '   ', width: 3 });
+      } else {
+        pushAtom(false, { text: segment, width: graphemeWidth(segment) });
+      }
+    }
+  }
+
+  if (pendingAnsi.length > 0) {
+    if (current) current.parts.push(...pendingAnsi);
+    else units.push({ isSpace: false, parts: pendingAnsi, width: 0 });
+  }
+  return units;
+}
+
+function wrapSingleLine(rawLine: string, width: number, allowWidth2Wide = false): string[] {
+  if (width <= 0) return [];
+  if (rawLine === '') return [''];
+  if (lineWidth(rawLine) <= width) return [rawLine];
+  if (isPrintableAscii(rawLine) && !rawLine.includes(' ')) {
+    const chunks: string[] = [];
+    for (let i = 0; i < rawLine.length; i += width) chunks.push(rawLine.slice(i, i + width));
+    return chunks;
+  }
+  if (allowWidth2Wide && width === 1) return wrapAnsiForWidth2(rawLine);
+
+  const units = tokenizeWrapUnits(rawLine);
   const lines: string[] = [];
   let current = '';
   let currentWidth = 0;
+  let activeSgr = '';
+  let lineHasContent = false;
+  let pendingSpace: WrapUnit | undefined;
 
-  for (const token of tokenize(text)) {
-    if (isAnsi(token)) {
-      current += token;
-      continue;
-    }
-    const tokenWidth = graphemeWidth(token);
-    if (currentWidth > 0 && currentWidth + tokenWidth > width) {
-      lines.push(current);
-      current = '';
-      currentWidth = 0;
-    }
-    if (tokenWidth <= width) {
-      current += token;
-      currentWidth += tokenWidth;
-    }
-  }
+  const updateSgr = (code: string) => {
+    if (code === RESET || code === '\u001b[m') activeSgr = '';
+    else if (code.startsWith('\u001b[') && code.endsWith('m')) activeSgr += code;
+  };
 
-  if (current || lines.length === 0) lines.push(current);
-  return lines;
-}
-
-function wrapLine(text: string, width: number): string[] {
-  if (!text) return [''];
-  if (width <= 0) return [''];
-  if (lineWidth(text) <= width) return [text];
-  const words = text.split(/\s+/).filter(Boolean);
-  const lines: string[] = [];
-  let current = '';
-  for (const word of words) {
-    if (lineWidth(word) > width) {
-      if (current) {
-        lines.push(current);
-        current = '';
+  const applyParts = (parts: WrapAtom[]) => {
+    for (const part of parts) {
+      if (part.ansi !== undefined) {
+        updateSgr(part.ansi);
+        current += part.ansi;
+      } else if (part.text !== undefined) {
+        current += part.text;
+        currentWidth += part.width;
+        lineHasContent = true;
       }
-      lines.push(...hardWrap(word, width));
+    }
+  };
+
+  const applyAnsiOnly = (parts: WrapAtom[]) => {
+    for (const part of parts) {
+      if (part.ansi !== undefined) updateSgr(part.ansi);
+    }
+  };
+
+  const flush = () => {
+    const terminated = activeSgr && !current.endsWith(RESET) ? `${current}${RESET}` : current;
+    lines.push(terminated);
+    current = activeSgr;
+    currentWidth = 0;
+    lineHasContent = false;
+  };
+
+  for (const unit of units) {
+    if (unit.isSpace) {
+      if (currentWidth === 0 && lines.length === 0) {
+        if (unit.width <= width) applyParts(unit.parts);
+        else applyAnsiOnly(unit.parts);
+      } else if (currentWidth > 0) {
+        pendingSpace = unit;
+      } else {
+        applyAnsiOnly(unit.parts);
+        current = activeSgr;
+      }
       continue;
     }
-    if (!current) {
-      current = word;
+
+    const spaceWidth = pendingSpace ? pendingSpace.width : 0;
+    if (currentWidth + spaceWidth + unit.width <= width) {
+      if (pendingSpace) {
+        applyParts(pendingSpace.parts);
+        pendingSpace = undefined;
+      }
+      applyParts(unit.parts);
       continue;
     }
-    const candidate = `${current} ${word}`;
-    if (lineWidth(candidate) <= width) current = candidate;
-    else {
-      lines.push(current);
-      current = word;
+
+    if (currentWidth > 0) flush();
+    if (pendingSpace) {
+      applyAnsiOnly(pendingSpace.parts);
+      current = activeSgr;
+      pendingSpace = undefined;
+    }
+
+    if (unit.width <= width) {
+      applyParts(unit.parts);
+      continue;
+    }
+
+    for (const part of unit.parts) {
+      if (part.ansi !== undefined) {
+        if (part.ansi === RESET || part.ansi === '\u001b[m') {
+          current += part.ansi;
+          activeSgr = '';
+        } else {
+          updateSgr(part.ansi);
+          current += part.ansi;
+        }
+      } else if (part.text !== undefined) {
+        if (currentWidth > 0 && currentWidth + part.width > width) flush();
+        current += part.text;
+        currentWidth += part.width;
+        lineHasContent = true;
+      }
     }
   }
-  if (current) lines.push(current);
+
+  if (lineHasContent || lines.length === 0) {
+    const terminated = activeSgr && !current.endsWith(RESET) ? `${current}${RESET}` : current;
+    lines.push(terminated);
+  }
   return lines;
 }
 
-/** One compact inline row, composed of non-empty parts and clipped to width. */
-export function rowLine(parts: Array<string | undefined | null>, width: number): string[] {
+/** Compact inline header wrapped ANSI-aware without ellipsis clipping. */
+export function rowLine(parts: Array<string | undefined | null>, width: number, totalWidth?: number): string[] {
   if (width <= 0) return [];
   const line = parts
     .filter((part): part is string => Boolean(part && part.trim()))
     .map((part) => part.replace(/[\r\n]+/g, ' '))
     .join(ROW_SEPARATOR);
-  return [truncate(line, width)];
+  if (!line) return [];
+  return wrapSingleLine(line, width, totalWidth === 2);
 }
 
 /** Wrap expanded content losslessly, preserving blank-line meaning. */
-export function expandedLines(text: string, width: number): string[] {
+export function expandedLines(text: string, width: number, totalWidth?: number): string[] {
   if (width <= 0) return [];
+  const allowWidth2Wide = totalWidth === 2;
   const out: string[] = [];
   for (const raw of text.split(/\r?\n/)) {
     if (raw === '') {
       out.push('');
       continue;
     }
-    out.push(...wrapLine(raw, width).map((line) => truncate(line, width)));
+    out.push(...wrapSingleLine(raw, width, allowWidth2Wide));
   }
   return out;
 }
 
-function clip(text: unknown, limit: number): string {
-  const normalized = String(text ?? '').replace(/\s+/g, ' ').trim();
+function normalizeInline(text: unknown): string {
+  return String(text ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function boundPreview(text: unknown, limit: number): string {
+  const normalized = normalizeInline(text);
   if (!normalized) return '';
-  return truncate(normalized, limit);
+  return sliceToWidth(normalized, limit).trimEnd();
 }
 
 function resultText(result: any): string {
@@ -281,7 +494,7 @@ function compactSearchData(toolName: string, value: any, theme: Theme): Array<st
   const items = Array.isArray(value?.items) ? value.items : [];
   const errors = Array.isArray(value?.source_errors) ? value.source_errors : [];
   const source = value?.selected_source ? String(value.selected_source) : undefined;
-  const top = items.length > 0 ? clip(itemLabel(items[0]), 200) : undefined;
+  const top = items.length > 0 ? normalizeInline(itemLabel(items[0])) : undefined;
   return [
     boldTitle(theme, toolName),
     `${items.length} result${items.length === 1 ? '' : 's'}`,
@@ -293,19 +506,19 @@ function compactSearchData(toolName: string, value: any, theme: Theme): Array<st
 
 /** Specialized collapsed summary for single-document detail payloads. */
 function compactDetailData(toolName: string, value: any, result: any, theme: Theme): Array<string | undefined> {
-  const main = titleForData(value) || resultText(result).split('\n').find(Boolean) || toolName;
-  const url = urlForData(value);
+  const main = normalizeInline(titleForData(value) || resultText(result).split('\n').find(Boolean) || toolName);
+  const url = normalizeInline(urlForData(value));
   const counts = [
     Array.isArray(value?.comments) ? `${value.comments.length} comments` : undefined,
     Array.isArray(value?.review_comments) ? `${value.review_comments.length} review comments` : undefined,
     Array.isArray(value?.items) ? `${value.items.length} items` : undefined,
   ].filter(Boolean) as string[];
-  const preview = clip(value?.summary ?? value?.snippet ?? value?.body ?? value?.abstract ?? value?.text ?? resultText(result), 220);
+  const preview = boundPreview(value?.summary ?? value?.snippet ?? value?.body ?? value?.abstract ?? value?.text ?? resultText(result), 220);
   return [
     boldTitle(theme, toolName),
     status(result),
-    clip(main, 180),
-    url ? clip(url, 180) : undefined,
+    main,
+    url || undefined,
     counts.length ? counts.join(' · ') : undefined,
     preview && preview !== main ? `preview: ${preview}` : undefined,
   ];
@@ -369,7 +582,9 @@ export function renderWebsearchToolCall(
       const safeWidth = Number.isFinite(width) ? Math.floor(width) : 0;
       if (safeWidth <= 0) return [];
       if (safeWidth === 1) return [' '];
-      return rowLine([paint(theme, 'toolTitle', toolName), badge, `${DIM}running…${RESET}`], safeWidth - 1).map((line) => ` ${line}`);
+      return rowLine([paint(theme, 'toolTitle', toolName), badge, `${DIM}running…${RESET}`], safeWidth - 1, safeWidth).map((line) =>
+        formatMarginedLine(line, safeWidth),
+      );
     },
   };
 }
@@ -411,17 +626,29 @@ export function renderWebsearchToolResult(
         head = [boldTitle(theme, toolName), badge, `${DIM}running…${RESET}`];
       } else if (isError) {
         const errorMsg = result?.details?.error?.message ?? result?.details?.error ?? resultText(result) ?? 'tool failed';
-        head = [paint(theme, 'error', toolName), paint(theme, 'error', `error · ${clip(stripAnsi(String(errorMsg)), 140)}`)];
+        head = [paint(theme, 'error', toolName), paint(theme, 'error', `error · ${normalizeInline(stripAnsi(String(errorMsg)))}`)];
       } else {
         head = compactResult(toolName, result, theme);
       }
 
-      const lines = rowLine(head, innerWidth).map((line) => ` ${line}`);
+      const lines = rowLine(head, innerWidth, safeWidth).map((line) => formatMarginedLine(line, safeWidth));
       if (!state.expanded || state.isPartial) return lines;
 
       const body = resultText(result);
       if (!body) return lines;
-      return [...lines, ...expandedLines(body, innerWidth).map((line) => ` ${line}`)];
+      const bodyLines: string[] = [];
+      for (const raw of body.split(/\r?\n/)) {
+        if (raw === '') {
+          bodyLines.push(' ');
+          continue;
+        }
+        const preStyled = hasAnsi(raw);
+        for (const wrapped of wrapSingleLine(raw, innerWidth, safeWidth === 2)) {
+          const styled = preStyled || wrapped === '' ? wrapped : styleMuted(theme, wrapped);
+          bodyLines.push(formatMarginedLine(styled, safeWidth));
+        }
+      }
+      return [...lines, ...bodyLines];
     },
   };
 }

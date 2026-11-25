@@ -14,6 +14,7 @@ export const LIME = '\x1b[1;38;2;102;255;102m';     // Neon Lime (#66ff66)
 export const AMBER = '\x1b[1;38;2;255;184;77m';     // Electric Amber (#ffb84d)
 export const ORANGE = '\x1b[1;38;2;255;140;0m';     // Neon Orange (#ff8c00)
 export const RED = '\x1b[1;38;2;255;77;109m';       // Cyber Red (#ff4d6d)
+export const MUTED = '\x1b[38;2;122;167;184m';      // Arch-electric muted (#7aa7b8)
 
 // Arch Linux icon token:
 export const ARCH_ICON = '󰣇';
@@ -136,6 +137,21 @@ export function themeAccent(theme: any, text: string): string {
 
 export function themeDim(theme: any, text: string): string {
   return themeFg(theme, 'dim', text, DIM);
+}
+
+export function themeMuted(theme: any, text: string): string {
+  return themeFg(theme, 'muted', text, MUTED);
+}
+
+const ANSI_ESCAPE_RE = /\x1b(?:\[|\])/;
+
+export function hasAnsiEscape(text: string): boolean {
+  return ANSI_ESCAPE_RE.test(text);
+}
+
+export function stylePlainMuted(theme: any, text: string): string {
+  if (!text || hasAnsiEscape(text)) return text;
+  return themeFg(theme, 'muted', text, MUTED);
 }
 
 export function themeSuccess(theme: any, text: string): string {

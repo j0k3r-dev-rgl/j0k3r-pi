@@ -75,4 +75,21 @@ describe('report_orchestrator tool', () => {
       }
     }
   });
+
+  it('wraps overflowing report headers without ellipsis and styles plain expanded acknowledgement in muted foreground preserving ANSI (MINI-004)', async () => {
+    const tool: any = createReportOrchestratorTool(() => {});
+    const theme = {
+      fg: (key: string, text: string) => (key === 'muted' ? `\x1b[38;2;122;167;184m${text}\x1b[0m` : text),
+    };
+    const longReport = 'Completed database index creation, verified EXPLAIN QUERY PLAN, and moving on to viewport caching implementation now.';
+    const callLines = tool.renderCall({ report: longReport }, theme).render(30);
+    expect(callLines.length).toBeGreaterThan(1);
+    expect(callLines.join('\n')).not.toContain('…');
+    expect(callLines.join(' ').replace(/\x1b\[[0-9;]*m/g, '').replace(/\s+/g, ' ')).toContain('viewport caching implementation now.');
+
+    const result = await tool.execute('report-2', { report: longReport });
+    const expLines = tool.renderResult(result, { expanded: true }, theme).render(80);
+    const ackLine = expLines.find((l: string) => l.includes('Report sent to the parent session'));
+    expect(ackLine).toContain('\x1b[38;2;122;167;184m');
+  });
 });

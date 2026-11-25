@@ -253,6 +253,113 @@ describe('agent todo compact tool renderers', () => {
     }
   });
 
+  it('wraps overflowing collapsed headers without ellipsis clipping and preserves 1-col margin', () => {
+    const longTitle = 'Deploy multi-region rollout pipeline with canary verification END_MARKER';
+    const callLines = renderAgentTodoCall({ action: 'create', title: longTitle }, theme).render(36);
+    expect(callLines.length).toBeGreaterThan(1);
+    expect(stripAnsi(callLines.join('\n'))).not.toContain('…');
+    expect(stripAnsi(callLines.join(' '))).toContain('END_MARKER');
+    for (const line of callLines) {
+      expect(visibleWidth(line)).toBeLessThanOrEqual(36);
+      expect(stripAnsi(line).startsWith(' ')).toBe(true);
+    }
+
+    const resLines = renderAgentTodoResult({
+      details: {
+        agent_todo: {
+          version: 1,
+          action: 'show',
+          ok: true,
+          state: { active_todo: { ...activeTodoFixture, title: longTitle }, current_todo: null },
+        },
+      },
+      content: [{ type: 'text', text: 'ok' }],
+    }, { expanded: false }, theme, { args: { action: 'show' }, state: {} }).render(36);
+    expect(resLines.length).toBeGreaterThan(1);
+    expect(stripAnsi(resLines.join('\n'))).not.toContain('…');
+    expect(stripAnsi(resLines.join(' '))).toContain('2 open');
+    for (const line of resLines) {
+      expect(visibleWidth(line)).toBeLessThanOrEqual(36);
+      expect(stripAnsi(line).startsWith(' ')).toBe(true);
+    }
+  });
+
+  it('applies muted foreground to plain-text expanded bodies while preserving existing ANSI colors', () => {
+    const customTheme = {
+      fg: (token: string, text: string) => (token === 'muted' ? `\x1b[38;2;10;20;30m${text}\x1b[39m` : text),
+    };
+    const res = {
+      details: {
+        agent_todo: {
+          version: 1 as const,
+          action: 'show' as const,
+          ok: true,
+          state: { active_todo: { ...activeTodoFixture, body: 'Plain note body' }, current_todo: null },
+        },
+      },
+      content: [
+        { type: 'text' as const, text: 'Plain returned block\n\x1b[33mAmber warning line\x1b[0m' },
+      ],
+    };
+
+    const withTheme = renderAgentTodoResult(res, { expanded: true }, customTheme, { args: { action: 'show' }, state: {} }).render(80);
+    const joinedTheme = withTheme.join('\n');
+    expect(joinedTheme).toContain('\x1b[38;2;10;20;30mPlain note body\x1b[39m');
+    expect(joinedTheme).toContain('\x1b[38;2;10;20;30mPlain returned block\x1b[39m');
+    expect(joinedTheme).toContain('\x1b[38;2;10;20;30mWrite tests\x1b[39m');
+    expect(joinedTheme).toContain(LIME);
+    expect(joinedTheme).toContain(CYAN);
+    expect(joinedTheme).toContain('\x1b[33mAmber warning line\x1b[0m');
+    expect(joinedTheme).not.toContain('\x1b[38;2;10;20;30m\x1b[33m');
+
+    // Absent / passthrough theme falls back to #7aa7b8 muted ANSI
+    const fallbackLines = renderAgentTodoResult(res, { expanded: true }, undefined, { args: { action: 'show' }, state: {} }).render(80);
+    expect(fallbackLines.join('\n')).toContain('\x1b[38;2;122;167;184mPlain returned block\x1b[39m');
+    expect(fallbackLines.join('\n')).toContain('\x1b[33mAmber warning line\x1b[0m');
+
+    // Error body preserves RED
+    const errLines = renderAgentTodoResult({
+      details: {
+        agent_todo: {
+          version: 1 as const,
+          action: 'create' as const,
+          ok: false,
+          error: { code: 'active_todo_exists' as const, message: 'Conflict' },
+          state: { active_todo: activeTodoFixture, current_todo: null },
+        },
+      },
+      content: [{ type: 'text' as const, text: 'Plain error detail' }],
+    }, { expanded: true }, customTheme).render(80);
+    expect(errLines.join('\n')).toContain(`${RED}Error: Conflict${'\x1b[0m'}`);
+    expect(errLines.join('\n')).toContain('\x1b[38;2;10;20;30mPlain error detail\x1b[39m');
+  });
+
+  it('handles width 1 as single blank column and preserves intact wide graphemes at width 2 via conditional margin omission', () => {
+    const res = {
+      details: {
+        agent_todo: {
+          version: 1 as const,
+          action: 'show' as const,
+          ok: true,
+          state: { active_todo: null, current_todo: null },
+        },
+      },
+      content: [{ type: 'text' as const, text: 'A漢B' }],
+    };
+    const comp = renderAgentTodoResult(res, { expanded: true }, theme);
+    expect(comp.render(0)).toEqual([]);
+    expect(comp.render(1)).toEqual([' ']);
+
+    const w2 = comp.render(2);
+    const plainW2 = w2.map(stripAnsi);
+    expect(plainW2).toContain(' A');
+    expect(plainW2).toContain('漢');
+    expect(plainW2).toContain(' B');
+    for (const line of w2) {
+      expect(visibleWidth(line)).toBeLessThanOrEqual(2);
+    }
+  });
+
   it('never throws on malformed args, result, or context', () => {
     expect(() => renderAgentTodoCall(null, undefined, undefined).render(80)).not.toThrow();
     expect(() => renderAgentTodoResult(null as any, undefined, undefined, undefined).render(80)).not.toThrow();

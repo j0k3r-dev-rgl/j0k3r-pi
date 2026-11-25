@@ -32,9 +32,9 @@ describe('tool render helpers', () => {
     expect(unresolved).not.toContain('default/current');
   });
 
-  it('inlineComponent clips only the header, wraps expanded body and never intercepts input', () => {
+  it('inlineComponent wraps overflowing headers and expanded bodies without ellipsis, applies muted body color, and never intercepts input', () => {
     const comp: any = inlineComponent({
-      header: 'a very long compact header that must be clipped to the viewport width',
+      header: 'a very long compact header that must wrap cleanly without ellipsis clipping',
       body: ['expanded body line with enough words to require wrapping at narrow width'],
       expanded: true,
     });
@@ -42,10 +42,12 @@ describe('tool render helpers', () => {
     expect(comp.handleInput).toBeUndefined();
 
     const narrow = comp.render(24);
-    expect(visibleWidth(narrow[0]!)).toBeLessThanOrEqual(24);
-    expect(narrow.length).toBeGreaterThan(1);
+    expect(narrow.length).toBeGreaterThan(2);
     for (const line of narrow) expect(visibleWidth(line)).toBeLessThanOrEqual(24);
-    expect(narrow.join('\n')).toContain('expanded body line');
+    const narrowPlain = narrow.map(env.stripAnsi).join('\n');
+    expect(narrowPlain).not.toContain('…');
+    expect(narrowPlain.replace(/\s+/g, ' ')).toContain('without ellipsis clipping');
+    expect(narrowPlain.replace(/\s+/g, ' ')).toContain('expanded body line');
 
     const collapsed = inlineComponent({ header: 'header only', body: ['hidden body'], expanded: false }).render(40);
     expect(collapsed).toEqual([' header only']);
@@ -53,7 +55,7 @@ describe('tool render helpers', () => {
     expect(inlineComponent({ header: 'x', expanded: true }).render(0)).toEqual([]);
     expect(inlineComponent({ header: 'x', expanded: true }).render(1)).toEqual([' ']);
 
-    const wide2 = inlineComponent({ header: 'h', body: ['A漢B👨‍👩‍👧e\u0301'], expanded: true }).render(2);
+    const wide2 = inlineComponent({ header: 'A漢B', body: ['A漢B👨‍👩‍👧e\u0301'], expanded: true }).render(2);
     for (const line of wide2) expect(visibleWidth(line)).toBeLessThanOrEqual(2);
     expect(wide2).toContain(' A');
     expect(wide2).toContain('漢');
@@ -232,10 +234,12 @@ describe('tool render helpers', () => {
     }, { isPartial: true }, { fg: (_name: string, text: string) => text, bold: (text: string) => text }).render(40);
     const plain = lines.map(env.stripAnsi).join('\n');
 
-    // Collapsed: exactly one compact inline row (identity/status/current activity), no card frame.
-    expect(lines).toHaveLength(1);
+    // Collapsed: wraps automatically without ellipsis clipping or card frame.
+    expect(lines.length).toBeGreaterThanOrEqual(1);
     expect(plain).toContain('analyst');
     expect(plain).toContain('running');
+    expect(plain).not.toContain('…');
+    expect(plain.replace(/\s+/g, '')).toContain(longToolName);
     expect(plain).not.toMatch(/[╭╮╰╯│┌┐└┘]/);
     expect(plain).not.toMatch(/to expand|ctrl\+o/i);
     for (const line of lines.map(env.stripAnsi)) expect(visibleWidth(line)).toBeLessThanOrEqual(40);
@@ -954,5 +958,58 @@ describe('tool render helpers', () => {
     // Trigger session shutdown
     if (shutdownHandler) shutdownHandler();
     expect((manager as any).taskUpdateListeners.size).toBe(initialListeners);
+  });
+
+  it('styles plain-text expanded bodies with muted color while preserving existing ANSI and wrapping headers without ellipsis (MINI-004)', () => {
+    const manager = new SubagentManager(env.mockRunner());
+    let runTool: any;
+    registerSubagentTools({ registerTool: (tool: any) => { if (tool.name === 'subagent_run') runTool = tool; } }, manager);
+
+    const mutedCalls: string[] = [];
+    const ansiTheme = {
+      fg: (key: string, text: string) => {
+        if (key === 'muted') {
+          mutedCalls.push(text);
+          return `\x1b[38;2;122;167;184m${text}\x1b[0m`;
+        }
+        return text;
+      },
+      bold: (text: string) => text,
+    };
+
+    const dummyResult = {
+      content: [{ type: 'text', text: 'plain response text\n\x1b[32mhighlighted code line\x1b[0m' }],
+      details: {
+        task: {
+          id: 'task-muted-1',
+          agent: 'analyst',
+          display_name: 'Very Long Descriptive Task Name That Wraps Cleanly',
+          status: 'completed',
+          attempt: 1,
+          model: 'provider/very-long-model-name',
+          effort: 'high',
+          result: 'plain response text\n\x1b[32mhighlighted code line\x1b[0m',
+        },
+      },
+    };
+
+    const collapsedNarrow = runTool.renderResult(dummyResult, { expanded: false }, ansiTheme).render(28);
+    expect(collapsedNarrow.length).toBeGreaterThan(1);
+    for (const line of collapsedNarrow) expect(visibleWidth(line)).toBeLessThanOrEqual(28);
+    expect(env.stripAnsi(collapsedNarrow.join('\n'))).not.toContain('…');
+    expect(env.stripAnsi(collapsedNarrow.join(' '))).toContain('effort: high');
+
+    const expandedLines = runTool.renderResult(dummyResult, { expanded: true }, ansiTheme).render(80);
+    const plainBodyLine = expandedLines.find((line: string) => env.stripAnsi(line).includes('plain response text'));
+    const ansiBodyLine = expandedLines.find((line: string) => env.stripAnsi(line).includes('highlighted code line'));
+    expect(plainBodyLine).toContain('\x1b[38;2;122;167;184m');
+    expect(mutedCalls.some((t) => t.includes('plain response text'))).toBe(true);
+    expect(ansiBodyLine).toContain('\x1b[32mhighlighted code line\x1b[0m');
+    expect(ansiBodyLine).not.toContain('\x1b[38;2;122;167;184m');
+
+    // Absent theme falls back to #7aa7b8 ANSI muted foreground
+    const fallbackLines = runTool.renderResult(dummyResult, { expanded: true }, undefined).render(80);
+    const fallbackPlain = fallbackLines.find((line: string) => env.stripAnsi(line).includes('plain response text'));
+    expect(fallbackPlain).toContain('\x1b[38;2;122;167;184m');
   });
 });

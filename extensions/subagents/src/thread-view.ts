@@ -11,7 +11,7 @@ import {
   wrapLineToWidth,
 } from './render/text-width.js';
 import { contentRevision } from './render/content-revision.js';
-import { ORANGE, electric } from './ui/theme.js';
+import { DIM, hasAnsiEscape, MUTED, ORANGE, electric, themeFg } from './ui/theme.js';
 
 import type {
   SubagentAssistantItem,
@@ -75,6 +75,9 @@ function isToolResultItem(item: Record<string, unknown>): item is SubagentToolRe
 
 function isBashItem(item: Record<string, unknown>): item is SubagentBashItem {
   return typeof item.command === 'string'
+    && (item.timeout === undefined || typeof item.timeout === 'number')
+    && isOptionalString(item.started_at)
+    && isOptionalString(item.ended_at)
     && isOptionalString(item.output)
     && (item.exitCode === undefined || typeof item.exitCode === 'number')
     && (item.status === undefined || ['running', 'completed', 'failed', 'cancelled'].includes(String(item.status)));
@@ -184,7 +187,7 @@ function payloadText(payload: SubagentToolResultPayload): string {
   return contentText || payload.preview || '';
 }
 
-function summarizeUnknownArgs(args: unknown, maxEntries = 3, maxValue = 60): string {
+function summarizeUnknownArgs(args: unknown, maxEntries = 3, maxValue = 200): string {
   if (args === undefined || args === null) return '';
   if (typeof args !== 'object') return boundText(String(args).replace(/\s+/g, ' ').trim(), maxValue) ?? '';
   if (Array.isArray(args)) return `[${args.length} items]`;
@@ -501,9 +504,15 @@ function safeTruncate(context: SubagentThreadRenderContext, text: string, width 
   }
 }
 
-function truncateLines(context: SubagentThreadRenderContext, lines: string[], width = DEFAULT_RENDER_WIDTH): string[] {
+function wrapLinesToWidth(context: SubagentThreadRenderContext, lines: string[], width = DEFAULT_RENDER_WIDTH): string[] {
   const out: string[] = [];
-  for (const line of lines) out.push(fitsWidth(context, line, width) ? line : context.truncateToWidth(line, width));
+  for (const line of lines) {
+    if (fitsWidth(context, line, width)) {
+      out.push(line);
+    } else {
+      out.push(...wrapLineToWidth(line, width, width));
+    }
+  }
   return out;
 }
 
@@ -788,12 +797,16 @@ function safeCompliantDefinition(definition: Record<string, any>): Record<string
         const name = definition.name || 'tool';
         if (name === 'bash') {
           const cmd = isRecord(args) && typeof args.command === 'string' ? args.command : undefined;
-          const header = `${electric(ORANGE, 'bash')} ${ctx?.executionStarted ? 'running' : 'preparing'}`;
-          return [` ${terminalTruncateToWidth(header, innerWidth)}`, ...orangeCommandLines(cmd, innerWidth, safeWidth).map((l) => formatMarginedLine(l, safeWidth, terminalVisibleWidth, terminalTruncateToWidth))];
+          const timeoutStatus = formatBashTimeoutFromArgs(args, Boolean(ctx?.executionStarted), undefined);
+          const header = `${electric(ORANGE, 'bash')} ${ctx?.executionStarted ? 'running' : 'preparing'} ─ ${themeFg(theme, 'dim', timeoutStatus, DIM)}`;
+          return [
+            ...wrapBodyLineForWidth(header, innerWidth, safeWidth).map((l) => formatMarginedLine(l, safeWidth, terminalVisibleWidth, terminalTruncateToWidth)),
+            ...orangeCommandLines(cmd, innerWidth, safeWidth).map((l) => formatMarginedLine(l, safeWidth, terminalVisibleWidth, terminalTruncateToWidth)),
+          ];
         }
         const summary = toolArgumentSummary(name, args);
         const line = `${name} ${ctx?.executionStarted ? 'running' : 'preparing'}${summary ? ` ─ ${summary}` : ''}`;
-        return [` ${terminalTruncateToWidth(line, innerWidth)}`];
+        return wrapBodyLineForWidth(line, innerWidth, safeWidth).map((l) => formatMarginedLine(l, safeWidth, terminalVisibleWidth, terminalTruncateToWidth));
       };
       try {
         const comp = definition.renderCall(args, theme, ctx);
@@ -974,13 +987,52 @@ function wrapBodyLineForWidth(rawLine: string, innerWidth: number, safeWidth: nu
   return wrapLineToWidth(rawLine, innerWidth, safeWidth);
 }
 
+function formatSecondsShort(seconds: number): string {
+  const rounded = Number.isInteger(seconds) ? seconds : Number(seconds.toFixed(1));
+  return `${rounded}s`;
+}
+
+function formatBashTimeoutFromArgs(args: unknown, isRunning: boolean, startedAt?: string, nowMs = Date.now()): string {
+  const rawTimeout = isRecord(args) ? args.timeout : undefined;
+  if (typeof rawTimeout === 'number' && Number.isFinite(rawTimeout) && rawTimeout > 0) {
+    const label = `timeout ${formatSecondsShort(rawTimeout)}`;
+    if (isRunning && startedAt) {
+      const startedMs = Date.parse(startedAt);
+      if (Number.isFinite(startedMs)) {
+        const elapsedSec = Math.max(0, Math.floor((nowMs - startedMs) / 1000));
+        const remainingSec = Math.max(0, Math.ceil(rawTimeout - elapsedSec));
+        return `${label} (${elapsedSec}s elapsed, ${remainingSec}s remaining)`;
+      }
+    }
+    return label;
+  }
+  return 'no timeout';
+}
+
+function appendMutedWrappedLines(
+  lines: string[],
+  text: string,
+  innerWidth: number,
+  safeWidth: number,
+  theme: any,
+): void {
+  for (const rawLine of text.split('\n')) {
+    const alreadyAnsi = hasAnsiEscape(rawLine);
+    for (const wrapped of wrapBodyLineForWidth(rawLine, innerWidth, safeWidth)) {
+      const styled = !alreadyAnsi && wrapped.length > 0 ? themeFg(theme, 'muted', wrapped, MUTED) : wrapped;
+      lines.push(formatMarginedLine(styled, safeWidth, terminalVisibleWidth, terminalTruncateToWidth));
+    }
+  }
+}
+
 /**
- * Local compact fallback for replay rows: one inline identity/state/target row, 1-column left
- * margin (`width - 1`, `width <= 0 -> []`, `width === 1 -> [' ']`, omitting margin only where
- * necessary at total width 2 to fit an intact wide grapheme), no frame, no background fill
- * and no generated expansion instruction. For `bash` specifically (per MINI-009), the full command
- * is rendered verbatim with real newlines and blank lines in ORANGE and soft-wrapped to `width - 1`
- * (or width 2 for intact wide graphemes) in both collapsed and expanded views.
+ * Local compact fallback for replay rows: automatic ANSI-aware wrapping without ellipsis clipping,
+ * 1-column left margin (`width - 1`, `width <= 0 -> []`, `width === 1 -> [' ']`, omitting margin
+ * only where necessary at total width 2 to fit an intact wide grapheme), muted plain-text expanded
+ * body preserving existing ANSI, no frame, no background fill, and no generated expansion hint.
+ * For `bash` specifically, renders the full command verbatim with real newlines and blank lines in
+ * ORANGE and always displays truthful bash timeout status (`timeout Xs` with elapsed/remaining
+ * while running, or `no timeout` when omitted).
  */
 function compactToolRow(item: SubagentToolItem, context: SubagentThreadRenderContext, width = DEFAULT_RENDER_WIDTH): string[] {
   const safeWidth = Number.isFinite(width) ? Math.floor(width) : 0;
@@ -989,53 +1041,42 @@ function compactToolRow(item: SubagentToolItem, context: SubagentThreadRenderCon
   const innerWidth = safeWidth - 1;
   const details = item.result && isRecord(item.result.details) ? item.result.details : undefined;
   const state = details?.cancelled === true ? 'cancelled' : (item.result?.isError ? 'failed' : item.status);
+  const isRunning = state === 'running' || state === 'pending' || state === 'partial';
   if (item.name === 'bash') {
     const command = isRecord(item.arguments) && typeof item.arguments.command === 'string' ? item.arguments.command : undefined;
-    const header = safeTruncate(context, `${electric(ORANGE, 'bash')} ${state}`, innerWidth);
-    const lines = [` ${header}`, ...orangeCommandLines(command, innerWidth, safeWidth).map((l) => formatMarginedLine(l, safeWidth, terminalVisibleWidth, terminalTruncateToWidth))];
+    const timeoutText = formatBashTimeoutFromArgs(item.arguments, isRunning, item.started_at);
+    const headerRaw = `${electric(ORANGE, 'bash')} ${state} ─ ${themeFg(context.theme, 'dim', timeoutText, DIM)}`;
+    const lines = [
+      ...wrapBodyLineForWidth(headerRaw, innerWidth, safeWidth).map((l) => formatMarginedLine(l, safeWidth, terminalVisibleWidth, terminalTruncateToWidth)),
+      ...orangeCommandLines(command, innerWidth, safeWidth).map((l) => formatMarginedLine(l, safeWidth, terminalVisibleWidth, terminalTruncateToWidth)),
+    ];
     if (!context.toolOutputExpanded) return lines;
     if (item.result) {
       const text = payloadText(item.result);
-      if (text) {
-        for (const rawLine of text.split('\n')) {
-          for (const wrapped of wrapBodyLineForWidth(rawLine, innerWidth, safeWidth)) {
-            lines.push(formatMarginedLine(wrapped, safeWidth, terminalVisibleWidth, terminalTruncateToWidth));
-          }
-        }
-      }
+      if (text) appendMutedWrappedLines(lines, text, innerWidth, safeWidth, context.theme);
       const diff = typeof details?.diff === 'string' ? details.diff : undefined;
       if (diff?.trim()) {
-        lines.push(` ${safeTruncate(context, 'diff:', innerWidth)}`);
-        for (const rawLine of diff.split('\n')) {
-          for (const wrapped of wrapBodyLineForWidth(rawLine, innerWidth, safeWidth)) {
-            lines.push(formatMarginedLine(wrapped, safeWidth, terminalVisibleWidth, terminalTruncateToWidth));
-          }
-        }
+        lines.push(` ${themeFg(context.theme, 'dim', 'diff:', DIM)}`);
+        appendMutedWrappedLines(lines, diff, innerWidth, safeWidth, context.theme);
       }
     }
     return lines;
   }
   const args = toolArgumentSummary(item.name, item.arguments);
-  const header = `${item.name} ${state}${args ? ` ─ ${args}` : ''}`.trim();
-  const lines = [` ${safeTruncate(context, header, innerWidth)}`];
+  const timeoutSuffix = item.name === 'powershell'
+    ? ` ─ ${themeFg(context.theme, 'dim', formatBashTimeoutFromArgs(item.arguments, isRunning, item.started_at), DIM)}`
+    : '';
+  const header = `${item.name} ${state}${args ? ` ─ ${args}` : ''}${timeoutSuffix}`.trim();
+  const lines = wrapBodyLineForWidth(header, innerWidth, safeWidth)
+    .map((l) => formatMarginedLine(l, safeWidth, terminalVisibleWidth, terminalTruncateToWidth));
   if (!context.toolOutputExpanded) return lines;
   if (item.result) {
     const text = payloadText(item.result);
-    if (text) {
-      for (const rawLine of text.split('\n')) {
-        for (const wrapped of wrapBodyLineForWidth(rawLine, innerWidth, safeWidth)) {
-          lines.push(formatMarginedLine(wrapped, safeWidth, terminalVisibleWidth, terminalTruncateToWidth));
-        }
-      }
-    }
+    if (text) appendMutedWrappedLines(lines, text, innerWidth, safeWidth, context.theme);
     const diff = typeof details?.diff === 'string' ? details.diff : undefined;
     if (diff?.trim()) {
-      lines.push(` ${safeTruncate(context, 'diff:', innerWidth)}`);
-      for (const rawLine of diff.split('\n')) {
-        for (const wrapped of wrapBodyLineForWidth(rawLine, innerWidth, safeWidth)) {
-          lines.push(formatMarginedLine(wrapped, safeWidth, terminalVisibleWidth, terminalTruncateToWidth));
-        }
-      }
+      lines.push(` ${themeFg(context.theme, 'dim', 'diff:', DIM)}`);
+      appendMutedWrappedLines(lines, diff, innerWidth, safeWidth, context.theme);
     }
   }
   return lines;
@@ -1049,16 +1090,11 @@ function compactToolResultRow(item: SubagentToolResultItem, context: SubagentThr
   const innerWidth = safeWidth - 1;
   const state = item.result.isError ? 'failed' : 'completed';
   const header = `tool result${item.name ? ` ${item.name}` : ''} ─ ${state}`;
-  const lines = [` ${safeTruncate(context, header, innerWidth)}`];
+  const lines = wrapBodyLineForWidth(header, innerWidth, safeWidth)
+    .map((l) => formatMarginedLine(l, safeWidth, terminalVisibleWidth, terminalTruncateToWidth));
   if (!context.toolOutputExpanded) return lines;
   const text = payloadText(item.result);
-  if (text) {
-    for (const rawLine of text.split('\n')) {
-      for (const wrapped of wrapBodyLineForWidth(rawLine, innerWidth, safeWidth)) {
-        lines.push(formatMarginedLine(wrapped, safeWidth, terminalVisibleWidth, terminalTruncateToWidth));
-      }
-    }
-  }
+  if (text) appendMutedWrappedLines(lines, text, innerWidth, safeWidth, context.theme);
   return lines;
 }
 
@@ -1069,7 +1105,9 @@ function renderBashItem(item: SubagentBashItem, context: SubagentThreadRenderCon
     id: item.id,
     tool_call_id: item.tool_call_id,
     name: 'bash',
-    arguments: { command: item.command },
+    arguments: { command: item.command, ...(item.timeout !== undefined ? { timeout: item.timeout } : {}) },
+    started_at: item.started_at,
+    ended_at: item.ended_at,
     status: status === 'cancelled' ? 'failed' : status === 'running' ? 'running' : status === 'failed' ? 'failed' : 'completed',
     result: item.output || item.exitCode !== undefined || item.fullOutputPath || item.truncated
       ? {
@@ -1208,6 +1246,39 @@ type ThreadRenderCacheState = {
 // invalidate on renderer changes without re-resolving every definition to compare identities.
 let toolRendererGeneration = 0;
 
+export type PreparedThreadItem = {
+  index: number;
+  rawItem: unknown;
+  attempt: number;
+  itemKey: string;
+};
+
+export type PreparedThreadSnapshot = {
+  items: PreparedThreadItem[];
+  validKeys: Set<string>;
+};
+
+export function prepareNormalizedThreadSnapshot(snapshot: unknown): PreparedThreadSnapshot | undefined {
+  if (!isRenderableSnapshotRoot(snapshot)) return undefined;
+  const rawItems = normalizeAttemptItems(snapshot.items as SubagentThreadItem[]).slice(0, DEFAULT_MAX_ITEMS);
+  const items: PreparedThreadItem[] = [];
+  const validKeys = new Set<string>();
+  let attempt = 1;
+  for (let index = 0; index < rawItems.length; index += 1) {
+    const rawItem: unknown = rawItems[index];
+    if (isRecord(rawItem) && rawItem.type === 'attempt' && Number.isInteger(rawItem.attempt) && Number(rawItem.attempt) > 0) {
+      attempt = Number(rawItem.attempt);
+    }
+    const itemId = isRecord(rawItem) && typeof rawItem.tool_call_id === 'string' && rawItem.tool_call_id
+      ? rawItem.tool_call_id
+      : (isRecord(rawItem) && typeof rawItem.id === 'string' && rawItem.id ? rawItem.id : `item-${index}`);
+    const itemKey = `attempt-${attempt}:${itemId}`;
+    validKeys.add(itemKey);
+    items.push({ index, rawItem, attempt, itemKey });
+  }
+  return { items, validKeys };
+}
+
 // Owned by one panel, not by the task history. Retain only the selected bounded thread.
 export class SubagentThreadRenderCache {
   private entries = new Map<string, ThreadRenderEntry>();
@@ -1237,6 +1308,15 @@ export class SubagentThreadRenderCache {
     return this.state;
   }
 
+  beginViewport(context: SubagentThreadRenderContext, contextKey: string): ThreadRenderCacheState {
+    const identity = [context.taskId, context.cwd, context.theme, context.tui, loadPiComponents(), context.showImages, context.imageWidthCells];
+    if (identity.some((value, index) => value !== this.identity[index])) this.clear();
+    this.identity = identity;
+    this.revision = undefined;
+    this.state = { contentStable: false, contextKey, rendererGeneration: toolRendererGeneration };
+    return this.state;
+  }
+
   entry(key: string): ThreadRenderEntry {
     let entry = this.entries.get(key);
     if (!entry) {
@@ -1248,6 +1328,15 @@ export class SubagentThreadRenderCache {
 
   prune(keys: Set<string>): void {
     for (const key of this.entries.keys()) if (!keys.has(key)) this.entries.delete(key);
+  }
+
+  pruneByItemKeys(validItemKeys: Set<string>): void {
+    for (const key of this.entries.keys()) {
+      const sep1 = key.indexOf(':');
+      const sep2 = sep1 >= 0 ? key.indexOf(':', sep1 + 1) : -1;
+      const itemKey = sep2 >= 0 ? key.slice(0, sep2) : key;
+      if (!validItemKeys.has(itemKey)) this.entries.delete(key);
+    }
   }
 
   get size(): number {
@@ -1263,16 +1352,112 @@ export function bumpSubagentToolRendererGeneration(): void {
   toolRendererGeneration += 1;
 }
 
+export function renderPreparedThreadItem(
+  prepared: PreparedThreadItem,
+  context: SubagentThreadRenderContext,
+  width: number,
+  cache?: SubagentThreadRenderCache,
+  options?: { contentStable?: boolean; contextKey?: string },
+): { lines: string[]; hasLiveTool: boolean; renderedKeys: string[] } {
+  const lines: string[] = [];
+  const renderedKeys: string[] = [];
+  let hasLiveTool = false;
+  const stableFrame = Boolean(options?.contentStable);
+  const rawItem = prepared.rawItem;
+  const key = prepared.itemKey;
+  frameDebugEnabled = undefined;
+
+  try {
+    if (!isThreadItem(rawItem)) {
+      lines.push(safeTruncate(context, malformedItemText(rawItem), width));
+      return { lines, hasLiveTool, renderedKeys };
+    }
+    const item = boundItem(rawItem, DEFAULT_TEXT_LIMIT);
+    let slot = 0;
+    const emitItem = (displayItem: SubagentThreadItem, target?: SubagentThreadRenderTarget) => {
+      const itemContext = target ? {
+        ...context,
+        ...(target.kind === 'tool'
+          ? { toolOutputExpanded: context.isExpanded?.(target, context.toolOutputExpanded ?? false) ?? context.toolOutputExpanded }
+          : { hideThinkingBlock: !(context.isExpanded?.(target, !(context.hideThinkingBlock ?? false)) ?? !(context.hideThinkingBlock ?? false)) }),
+      } : context;
+      const cacheKey = `${key}:${item.type}:${slot++}`;
+      renderedKeys.push(cacheKey);
+      const cached = cache?.entry(cacheKey);
+      const nativeTool = displayItem.type === 'tool' || displayItem.type === 'bash';
+      const isLiveTool = (displayItem.type === 'tool' && (displayItem.status === 'running' || displayItem.status === 'partial' || displayItem.status === 'pending'))
+        || (displayItem.type === 'bash' && (displayItem.status === undefined || displayItem.status === 'running'));
+      const reusableLines = !isLiveTool && displayItem.type !== 'custom';
+      if (!reusableLines) hasLiveTool = true;
+      const signature = [
+        displayItem.type === 'assistant' && displayItem.message.content.some((part) => part.type === 'thinking') ? String(itemContext.hideThinkingBlock) : '',
+        nativeTool ? String(itemContext.toolOutputExpanded) : '',
+      ].join('|');
+      const toolName = displayItem.type === 'bash' ? 'bash' : (displayItem.type === 'tool' ? displayItem.name : undefined);
+      const currentDef = nativeTool && toolName ? renderableToolDefinition(toolName, [
+        itemContext.getToolDefinition?.(toolName),
+        externalToolDefinitions.get(toolName),
+        runtimeToolDefinition(itemContext.taskId, toolName),
+      ], itemContext.cwd) : undefined;
+      const canReuseByFrame = stableFrame && Boolean(cached?.lines) && cached!.width === width;
+      const itemRevision = !cache ? '' : canReuseByFrame ? cached!.itemRevision : contentRevision(displayItem);
+      const staleContent = !canReuseByFrame && Boolean(cached) && cached!.itemRevision !== itemRevision;
+      const rendererChanged = Boolean(cached) && nativeTool && cached!.toolDefinition !== currentDef;
+      if (cached && (staleContent || rendererChanged || cached.signature !== signature)) {
+        cached.lines = undefined;
+        if (!nativeTool || rendererChanged) cached.component = undefined;
+        cached.signature = signature;
+      }
+      if (cached) cached.toolDefinition = currentDef;
+      const rendered = reusableLines && cached?.lines && cached.width === width
+        && (canReuseByFrame || cached.itemRevision === itemRevision)
+        ? cached.lines
+        : wrapLinesToWidth(itemContext, renderItem(displayItem, itemContext, width, cached), width);
+      if (cached && reusableLines) {
+        cached.width = width;
+        cached.itemRevision = itemRevision;
+        cached.lines = rendered;
+      }
+      lines.push(...rendered);
+      context.onItemRendered?.(item, rendered, target);
+    };
+    if (item.type === 'assistant' && context.onItemRendered) {
+      let run: typeof item.message.content = [];
+      let runKind: string | undefined;
+      let runIndex = 0;
+      const flush = () => {
+        if (!run.length) return;
+        emitItem({ ...item, message: { ...item.message, content: run, errorMessage: undefined } },
+          runKind === 'thinking' ? { kind: 'thinking', key: `${key}:thinking-${runIndex}` } : undefined);
+        run = [];
+        runIndex++;
+      };
+      for (const part of item.message.content) {
+        if (part.type === 'toolCall') { flush(); runKind = undefined; continue; }
+        if (runKind !== part.type) flush();
+        runKind = part.type;
+        run.push(part);
+      }
+      flush();
+      if (item.message.errorMessage) emitItem({ ...item, message: { ...item.message, content: [] } });
+    } else {
+      emitItem(item, item.type === 'tool' || item.type === 'bash' || item.type === 'custom' ? { kind: 'tool', key } : undefined);
+    }
+  } catch {
+    lines.push(safeTruncate(context, 'thread item unavailable', width));
+  }
+  return { lines, hasLiveTool, renderedKeys };
+}
+
 export function renderThreadBody(snapshot: unknown, context: SubagentThreadRenderContext, cache?: SubagentThreadRenderCache): string[] {
-  if (!isRenderableSnapshotRoot(snapshot)) { cache?.clear(); return []; }
+  const prepared = prepareNormalizedThreadSnapshot(snapshot);
+  if (!prepared) { cache?.clear(); return []; }
   if (context.renderWidth !== undefined && context.renderWidth <= 0) return [];
   const width = Math.max(1, Math.floor(context.renderWidth ?? DEFAULT_RENDER_WIDTH));
   const lines: string[] = [];
   const renderedKeys = new Set<string>();
-  const items = normalizeAttemptItems(snapshot.items as SubagentThreadItem[]).slice(0, DEFAULT_MAX_ITEMS);
   frameDebugEnabled = undefined;
-  // One content revision per frame when a cache is active.
-  const revision = cache ? contentRevision(items) : '';
+  const revision = cache ? contentRevision(prepared.items.map((entry) => entry.rawItem)) : '';
   const contextKey = [
     width,
     context.toolOutputExpanded ? 'tool-expanded' : 'tool-collapsed',
@@ -1282,103 +1467,11 @@ export function renderThreadBody(snapshot: unknown, context: SubagentThreadRende
     context.cwd,
   ].join('|');
   const cacheState = cache?.begin(context, revision, contextKey);
-  let attempt = 1;
-  for (const [index, rawItem] of items.entries()) {
-    try {
-      if (!isThreadItem(rawItem)) {
-        lines.push(safeTruncate(context, malformedItemText(rawItem), width));
-        continue;
-      }
-      const item = boundItem(rawItem, DEFAULT_TEXT_LIMIT);
-      if (item.type === 'attempt') attempt = item.attempt;
-      const itemId = 'tool_call_id' in item && item.tool_call_id ? item.tool_call_id : ('id' in item && item.id ? item.id : `item-${index}`);
-      const key = `attempt-${attempt}:${itemId}`;
-      let slot = 0;
-      const emitItem = (displayItem: SubagentThreadItem, target?: SubagentThreadRenderTarget) => {
-        const itemContext = target ? {
-          ...context,
-          ...(target.kind === 'tool'
-            ? { toolOutputExpanded: context.isExpanded?.(target, context.toolOutputExpanded ?? false) ?? context.toolOutputExpanded }
-            : { hideThinkingBlock: !(context.isExpanded?.(target, !(context.hideThinkingBlock ?? false)) ?? !(context.hideThinkingBlock ?? false)) }),
-        } : context;
-        const cacheKey = `${key}:${item.type}:${slot++}`;
-        renderedKeys.add(cacheKey);
-        const cached = cache?.entry(cacheKey);
-        const nativeTool = displayItem.type === 'tool' || displayItem.type === 'bash';
-        const isLiveTool = (displayItem.type === 'tool' && (displayItem.status === 'running' || displayItem.status === 'partial' || displayItem.status === 'pending'))
-          || (displayItem.type === 'bash' && displayItem.status === 'running');
-        const reusableLines = !isLiveTool && displayItem.type !== 'custom';
-        // Per-item state can move independently of the whole-thread revision (an individually
-        // toggled row), so the item's own identity participates; the item content itself is already
-        // covered by the shared frame revision.
-        const signature = [
-          displayItem.type === 'assistant' && displayItem.message.content.some((part) => part.type === 'thinking') ? String(itemContext.hideThinkingBlock) : '',
-          nativeTool ? String(itemContext.toolOutputExpanded) : '',
-        ].join('|');
-        const toolName = displayItem.type === 'bash' ? 'bash' : (displayItem.type === 'tool' ? displayItem.name : undefined);
-        const stableFrame = Boolean(cacheState?.contentStable) && cacheState?.contextKey === contextKey;
-        // Always resolve so a renderer change invalidates this row; the lookup is a few map reads,
-        // while the work avoided below is the per-item content encoding and re-render.
-        const currentDef = nativeTool && toolName ? renderableToolDefinition(toolName, [
-          itemContext.getToolDefinition?.(toolName),
-          externalToolDefinitions.get(toolName),
-          runtimeToolDefinition(itemContext.taskId, toolName),
-        ], itemContext.cwd) : undefined;
-        // Unchanged frames reuse previously rendered lines with no per-item encoding at all. A
-        // changed frame encodes each item once to learn which rows actually changed, then reuses the
-        // rest: only genuinely changed terminal items are re-rendered.
-        const canReuseByFrame = stableFrame && Boolean(cached?.lines) && cached!.width === width;
-        const itemRevision = !cache ? '' : canReuseByFrame ? cached!.itemRevision : contentRevision(displayItem);
-        const staleContent = !canReuseByFrame && Boolean(cached) && cached!.itemRevision !== itemRevision;
-        const rendererChanged = Boolean(cached) && nativeTool && cached!.toolDefinition !== currentDef;
-        if (cached && (staleContent || rendererChanged || cached.signature !== signature)) {
-          cached.lines = undefined;
-          // Native tool components receive new arguments/results through their own setters, so they
-          // stay reusable. Message components bind their content in the constructor, so changed
-          // content must rebuild them instead of re-rendering stale data.
-          if (!nativeTool || rendererChanged) cached.component = undefined;
-          cached.signature = signature;
-        }
-        if (cached) cached.toolDefinition = currentDef;
-        // Active tools still render on each frame: native loaders and asynchronous image updates stay
-        // live. Terminal items reuse their rendered lines while their content revision matches.
-        const rendered = reusableLines && cached?.lines && cached.width === width
-          && (canReuseByFrame || cached.itemRevision === itemRevision)
-          ? cached.lines
-          : truncateLines(itemContext, renderItem(displayItem, itemContext, width, cached), width);
-        if (cached && reusableLines) {
-          cached.width = width;
-          cached.itemRevision = itemRevision;
-          cached.lines = rendered;
-        }
-        lines.push(...rendered);
-        context.onItemRendered?.(item, rendered, target);
-      };
-      if (item.type === 'assistant' && context.onItemRendered) {
-        let run: typeof item.message.content = [];
-        let runKind: string | undefined;
-        let runIndex = 0;
-        const flush = () => {
-          if (!run.length) return;
-          emitItem({ ...item, message: { ...item.message, content: run, errorMessage: undefined } },
-            runKind === 'thinking' ? { kind: 'thinking', key: `${key}:thinking-${runIndex}` } : undefined);
-          run = [];
-          runIndex++;
-        };
-        for (const part of item.message.content) {
-          if (part.type === 'toolCall') { flush(); runKind = undefined; continue; }
-          if (runKind !== part.type) flush();
-          runKind = part.type;
-          run.push(part);
-        }
-        flush();
-        if (item.message.errorMessage) emitItem({ ...item, message: { ...item.message, content: [] } });
-      } else {
-        emitItem(item, item.type === 'tool' || item.type === 'bash' || item.type === 'custom' ? { kind: 'tool', key } : undefined);
-      }
-    } catch {
-      lines.push(safeTruncate(context, 'thread item unavailable', width));
-    }
+  const stableFrame = Boolean(cacheState?.contentStable) && cacheState?.contextKey === contextKey;
+  for (const entry of prepared.items) {
+    const result = renderPreparedThreadItem(entry, context, width, cache, { contentStable: stableFrame, contextKey });
+    lines.push(...result.lines);
+    for (const k of result.renderedKeys) renderedKeys.add(k);
   }
   cache?.prune(renderedKeys);
   return lines;

@@ -25,7 +25,7 @@ if (!host) {
 }
 
 const ITERATIONS = Number(process.env.PI_COMPACT_BENCH_ITERATIONS ?? 120);
-const WIDTHS = [23, 40, 80, 120];
+const WIDTHS = [10, 24, 40, 80, 120];
 
 const { loadExtensions } = await import(pathToFileURL(`${host}/dist/core/extensions/loader.js`).href);
 const { createExtensionRuntime, ExtensionRunner } = await import(
@@ -94,9 +94,11 @@ const LONG_OUTPUT = Array.from({ length: 40 }, (_, index) => `line ${index + 1} 
 const CASES = [
   { name: "read", args: { path: "/home/j0k3r/.pi/agent/extensions/j0k3r-theme/src/render/compact.ts" }, text: LONG_OUTPUT, details: { truncation: { truncated: true, outputLines: 40, totalLines: 90 } } },
   { name: "bash", args: { command: "node --test test/*.test.mjs", timeout: 120 }, text: LONG_OUTPUT, details: undefined },
+  { name: "bash", args: { command: "echo default-timeout" }, text: LONG_OUTPUT, details: undefined },
   { name: "bash", args: { command: "echo 'multiline step 1'\n\necho 'multiline step 2' && " + "x".repeat(90), timeout: 120 }, text: LONG_OUTPUT, details: undefined },
   { name: "bash", args: { command: "false", timeout: 120 }, text: "Command exited with code 1", details: undefined, isError: true },
   { name: "powershell", args: { command: "Get-ChildItem -Recurse", timeout: 120 }, text: LONG_OUTPUT, details: undefined },
+  { name: "powershell", args: { command: "Get-Date" }, text: LONG_OUTPUT, details: undefined },
   { name: "edit", args: { path: "/home/j0k3r/.pi/agent/extensions/j0k3r-theme/src/render/compact.ts", edits: [{ oldText: "a", newText: "b" }] }, text: "Successfully replaced 1 block(s).", details: { diff: "--- a/x.ts\n+++ b/x.ts\n@@ -1 +1 @@\n-a\n+b\n" } },
   { name: "write", args: { path: "/home/j0k3r/.pi/agent/extensions/j0k3r-theme/src/render/compact.ts", content: "export const x = 1;\n".repeat(12) }, text: "Successfully wrote to src/render/compact.ts", details: undefined },
   { name: "grep", args: { pattern: "registerToolRenderer", path: "/home/j0k3r/.pi/agent/extensions" }, text: LONG_OUTPUT, details: undefined },
@@ -116,6 +118,7 @@ const CASES = [
 
 const escapeBytes = (lines) => lines.reduce((total, line) => total + (line.match(/\x1b\[/g)?.length ?? 0), 0);
 const cells = (lines) => lines.reduce((total, line) => total + tui.visibleWidth(line), 0);
+const ellipsisCount = (lines) => lines.reduce((total, line) => total + (line.includes("…") ? 1 : 0), 0);
 
 const ui = { requestRender() {} };
 let toolCallId = 0;
@@ -163,6 +166,7 @@ function measure(width) {
         cells: cells(frame.lines),
         ansiSequences: escapeBytes(frame.lines),
         overflow: frame.lines.filter((line) => tui.visibleWidth(line) > width).length,
+        ellipsis: ellipsisCount(frame.lines),
       });
     }
   }
@@ -190,8 +194,9 @@ const totals = measurements.reduce(
     cells: accumulator.cells + row.cells,
     ansiSequences: accumulator.ansiSequences + row.ansiSequences,
     overflow: accumulator.overflow + row.overflow,
+    ellipsis: accumulator.ellipsis + row.ellipsis,
   }),
-  { rows: 0, cells: 0, ansiSequences: 0, overflow: 0 },
+  { rows: 0, cells: 0, ansiSequences: 0, overflow: 0, ellipsis: 0 },
 );
 
 const perTool = new Map();
@@ -205,7 +210,7 @@ for (const row of measurements) {
 
 console.log("compact-tool-rendering benchmark");
 console.log(`frames=${measurements.length} widths=${WIDTHS.join(",")} cases=${CASES.length} iterations=${ITERATIONS}`);
-console.log(`totals rows=${totals.rows} cells=${totals.cells} ansi=${totals.ansiSequences} overflow=${totals.overflow}`);
+console.log(`totals rows=${totals.rows} cells=${totals.cells} ansi=${totals.ansiSequences} overflow=${totals.overflow} ellipsis=${totals.ellipsis}`);
 console.log(`timing median=${median.toFixed(2)}ms p95=${tail.toFixed(2)}ms settle=${settleMs.toFixed(2)}ms heap=${(heap / 1048576).toFixed(1)}MB`);
 console.log("per-tool rows (sum of six frames per width):");
 for (const [key, value] of [...perTool.entries()].sort()) console.log(`  ${key} rows=${value.rows} cells=${value.cells}`);

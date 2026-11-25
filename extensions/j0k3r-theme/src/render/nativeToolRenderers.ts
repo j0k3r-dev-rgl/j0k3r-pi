@@ -23,6 +23,7 @@ import {
 	expandedLines,
 	failedStatus,
 	firstLine,
+	mutedExpandedLines,
 	resultText,
 	runningStatus,
 } from "./compact.js";
@@ -36,10 +37,10 @@ function countOf(text: string, unit: string): string {
 	return `${lines} ${unit}${lines === 1 ? "" : "s"}`;
 }
 
-/** Highlighted code as width-safe lines; plain text when no language is known for the path. */
-function codeLines(text: string, path: string, width: number, totalWidth?: number): string[] {
+/** Highlighted code as width-safe lines; muted plain text when no language is known for the path. */
+function codeLines(text: string, path: string, width: number, totalWidth?: number, theme?: Theme): string[] {
 	const language = path ? getLanguageFromPath(path) : undefined;
-	if (!language) return expandedLines(text, width, totalWidth);
+	if (!language) return mutedExpandedLines(text, width, totalWidth, theme);
 	return expandedLines(highlightCode(text, language).join("\n"), width, totalWidth);
 }
 
@@ -47,9 +48,13 @@ function diffLines(diff: string, path: string, width: number, totalWidth?: numbe
 	return expandedLines(renderDiff(diff, { filePath: path }).replace(/\n+$/, ""), width, totalWidth);
 }
 
-/** Collapsed failure body: the first line only. Expanded failures stay complete. */
-function failureBody(text: string, width: number, totalWidth?: number): string[] {
-	return expandedLines(text === "" ? "failed" : text, width, totalWidth);
+/** Collapsed failure body: the first line only. Expanded failures stay complete in muted foreground. */
+function failureBody(text: string, width: number, totalWidth?: number, theme?: Theme): string[] {
+	return mutedExpandedLines(text === "" ? "failed" : text, width, totalWidth, theme);
+}
+
+function dimNoticeLines(text: string, width: number, totalWidth?: number): string[] {
+	return expandedLines(text, width, totalWidth).map((line) => (line === "" ? "" : electric(DIM, line)));
 }
 
 // ---------------------------------------------------------------------------
@@ -83,7 +88,7 @@ export const readRenderers = {
 		);
 	},
 
-	renderResult(result: AgentToolResult<any>, options: ToolRenderResultOptions, _theme: Theme, context: any): Component {
+	renderResult(result: AgentToolResult<any>, options: ToolRenderResultOptions, theme: Theme, context: any): Component {
 		const state: NativeState = context.state ?? {};
 		state.hasResult = true;
 		const text = resultText(result);
@@ -105,12 +110,12 @@ export const readRenderers = {
 				isCallSlot: false,
 				body: (width, totalWidth) => {
 					if (!options.expanded) return [];
-					if (isError) return failureBody(text, width, totalWidth);
-					const lines = codeLines(text, context.args?.path ?? context.args?.file_path ?? "", width, totalWidth);
+					if (isError) return failureBody(text, width, totalWidth, theme);
+					const lines = codeLines(text, context.args?.path ?? context.args?.file_path ?? "", width, totalWidth, theme);
 					const truncation = result?.details?.truncation;
 					if (truncation?.truncated) {
 						for (const line of expandedLines(`[Truncated: showing ${truncation.outputLines} of ${truncation.totalLines} lines]`, width, totalWidth)) {
-							lines.push(electric(AMBER, line));
+							lines.push(line === "" ? "" : electric(AMBER, line));
 						}
 					}
 					return lines;
@@ -147,7 +152,7 @@ export const editRenderers = {
 		);
 	},
 
-	renderResult(result: AgentToolResult<any>, options: ToolRenderResultOptions, _theme: Theme, context: any): Component {
+	renderResult(result: AgentToolResult<any>, options: ToolRenderResultOptions, theme: Theme, context: any): Component {
 		const state: NativeState = context.state ?? {};
 		state.hasResult = true;
 		const text = resultText(result);
@@ -170,10 +175,10 @@ export const editRenderers = {
 				isCallSlot: false,
 				body: (width, totalWidth) => {
 					if (!options.expanded) return [];
-					if (isError) return failureBody(text, width, totalWidth);
+					if (isError) return failureBody(text, width, totalWidth, theme);
 					const diff = result?.details?.diff;
 					if (typeof diff === "string" && diff !== "") return diffLines(diff, editTarget(context.args), width, totalWidth);
-					return text ? expandedLines(text, width, totalWidth) : [electric(DIM, "(no diff output)")];
+					return text ? mutedExpandedLines(text, width, totalWidth, theme) : dimNoticeLines("(no diff output)", width, totalWidth);
 				},
 			},
 		);
@@ -210,7 +215,7 @@ export const writeRenderers = {
 		);
 	},
 
-	renderResult(result: AgentToolResult<any>, options: ToolRenderResultOptions, _theme: Theme, context: any): Component {
+	renderResult(result: AgentToolResult<any>, options: ToolRenderResultOptions, theme: Theme, context: any): Component {
 		const state: NativeState = context.state ?? {};
 		state.hasResult = true;
 		const text = resultText(result);
@@ -231,14 +236,14 @@ export const writeRenderers = {
 			{
 				state,
 				isCallSlot: false,
-					body: (width, totalWidth) => {
+				body: (width, totalWidth) => {
 					if (!options.expanded) return [];
-					if (isError) return failureBody(text, width, totalWidth);
-					const lines = codeLines(content, writeTarget(context.args), width, totalWidth);
+					if (isError) return failureBody(text, width, totalWidth, theme);
+					const lines = content !== "" ? codeLines(content, writeTarget(context.args), width, totalWidth, theme) : [];
 					if (text !== "") {
-						for (const line of expandedLines(text, width, totalWidth)) lines.push(line === "" ? "" : electric(DIM, line));
+						lines.push(...mutedExpandedLines(text, width, totalWidth, theme));
 					}
-					return lines.length > 0 ? lines : [electric(DIM, "(empty file)")];
+					return lines.length > 0 ? lines : dimNoticeLines("(empty file)", width, totalWidth);
 				},
 			},
 		);
@@ -297,7 +302,7 @@ function createSearchRenderers(tool: string, limitKey: string, limitLabel: strin
 			);
 		},
 
-		renderResult(result: AgentToolResult<any>, options: ToolRenderResultOptions, _theme: Theme, context: any): Component {
+		renderResult(result: AgentToolResult<any>, options: ToolRenderResultOptions, theme: Theme, context: any): Component {
 			const state: NativeState = context.state ?? {};
 			state.hasResult = true;
 			const text = resultText(result);
@@ -320,9 +325,14 @@ function createSearchRenderers(tool: string, limitKey: string, limitLabel: strin
 					isCallSlot: false,
 					body: (width, totalWidth) => {
 						if (!options.expanded) return [];
-						const body = expandedLines(trimmed === "" ? "(no output)" : text, width, totalWidth);
+						const body =
+							trimmed === ""
+								? dimNoticeLines("(no output)", width, totalWidth)
+								: mutedExpandedLines(text, width, totalWidth, theme);
 						for (const warning of searchWarnings(result?.details, limitKey, limitLabel)) {
-							body.push(electric(AMBER, `[Truncated: ${warning}]`));
+							for (const line of expandedLines(`[Truncated: ${warning}]`, width, totalWidth)) {
+								body.push(line === "" ? "" : electric(AMBER, line));
+							}
 						}
 						return body;
 					},

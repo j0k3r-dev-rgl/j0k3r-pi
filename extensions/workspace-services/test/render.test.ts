@@ -32,12 +32,18 @@ describe('workspace service compact rendering', () => {
       },
     };
     const compactLines = renderWorkspaceServiceResult('workspace_service_logs', result, { expanded: false, isPartial: false }, theme, { args: { service: 'svc' }, state: {} }).render(80);
-    expect(compactLines).toHaveLength(1);
-    const compact = stripAnsi(compactLines[0]);
+    expect(compactLines.length).toBeGreaterThanOrEqual(1);
+    const compact = stripAnsi(compactLines.join(' '));
     expect(compact).toContain('workspace_service_logs');
     expect(compact).toContain('───');
+    expect(compact).toContain('Needs reconciliation.');
     expect(compact).toContain('more available');
-    expect(stripAnsi(renderWorkspaceServiceResult('workspace_service_logs', result, { expanded: false, isPartial: false }, theme, { args: { service: 'svc' }, state: {} }).render(100)[0])).toContain('Needs reconciliation.');
+    expect(compact).not.toContain('…');
+    for (const line of compactLines) {
+      expect(visibleWidth(line)).toBeLessThanOrEqual(80);
+      expect(stripAnsi(line).startsWith(' ')).toBe(true);
+    }
+    expect(renderWorkspaceServiceResult('workspace_service_logs', result, { expanded: false, isPartial: false }, theme, { args: { service: 'svc' }, state: {} }).render(120)).toHaveLength(1);
     assertUnboxedAndNoHints(compactLines);
 
     const expandedLines = renderWorkspaceServiceResult('workspace_service_logs', result, { expanded: true, isPartial: false }, theme, { args: { service: 'svc' }, state: {} }).render(80);
@@ -243,6 +249,53 @@ describe('workspace service compact rendering', () => {
     assertUnboxedAndNoHints(expanded);
   });
 
+  it('wraps overflowing collapsed call and result headers without ellipsis clipping', () => {
+    const callLines = renderWorkspaceServiceCall(
+      'workspace_service_restart',
+      { service: 'very-long-workspace-service-name-END_CALL' },
+      theme,
+      { state: {} },
+    ).render(36);
+    expect(callLines.length).toBeGreaterThan(1);
+    expect(stripAnsi(callLines.join('\n'))).not.toContain('…');
+    expect(callLines.map((line) => stripAnsi(line).slice(1)).join('')).toContain('END_CALL');
+    for (const line of callLines) {
+      expect(visibleWidth(line)).toBeLessThanOrEqual(36);
+      expect(stripAnsi(line).startsWith(' ')).toBe(true);
+    }
+  });
+
+  it('applies muted foreground to plain-text expanded bodies while preserving existing ANSI colors', () => {
+    const customTheme = {
+      fg: (token: string, text: string) => (token === 'muted' ? `\x1b[38;2;10;20;30m${text}\x1b[39m` : text),
+    };
+    const result = {
+      content: [{ type: 'text', text: 'Plain log entry\n\x1b[33mAmber log warning\x1b[0m' }],
+      details: {
+        ok: true,
+        status: 'ok' as const,
+        summary: 'Logs fetched',
+        nextAction: 'Tail next chunk',
+        data: { service: 'svc' },
+      },
+    };
+
+    const withTheme = renderWorkspaceServiceResult('workspace_service_logs', result, { expanded: true }, customTheme, { args: { service: 'svc' }, state: {} }).render(80);
+    const joinedTheme = withTheme.join('\n');
+    expect(joinedTheme).toContain('\x1b[38;2;10;20;30mPlain log entry\x1b[39m');
+    expect(joinedTheme).toContain('\x1b[38;2;10;20;30mnext: Tail next chunk\x1b[39m');
+    expect(joinedTheme).toContain('\x1b[33mAmber log warning\x1b[0m');
+    expect(joinedTheme).not.toContain('\x1b[38;2;10;20;30m\x1b[33m');
+
+    const fallback = renderWorkspaceServiceResult('workspace_service_logs', result, { expanded: true }, undefined, { args: { service: 'svc' }, state: {} }).render(80);
+    expect(fallback.join('\n')).toContain('\x1b[38;2;122;167;184mPlain log entry\x1b[39m');
+    expect(fallback.join('\n')).toContain('\x1b[33mAmber log warning\x1b[0m');
+
+    // Missing details error body preserves RED Warning line
+    const missingDetails = renderWorkspaceServiceResult('workspace_service_start', { content: [{ type: 'text', text: 'Boom' }], details: undefined, isError: true }, { expanded: true }, customTheme).render(80);
+    expect(missingDetails.join('\n')).toContain(`${RED}Warning: Boom${'\x1b[0m'}`);
+  });
+
   it('preserves 1-column left margin at normal widths and omits margin at width 2 only when needed for an intact wide grapheme', () => {
     const asciiResult = {
       content: [{ type: 'text', text: 'abcd' }],
@@ -254,19 +307,25 @@ describe('workspace service compact rendering', () => {
       if (stripAnsi(line).trim().length > 0) expect(stripAnsi(line).startsWith(' ')).toBe(true);
     }
 
-    const wideResult = {
-      content: [{ type: 'text', text: '漢\n🚀' }],
-      details: { ok: true, status: 'ok' as const, summary: '漢', data: {} },
+    const mixedResult = {
+      content: [{ type: 'text', text: 'A漢B\n🚀' }],
+      details: { ok: true, status: 'ok' as const, summary: 'A漢B', data: {} },
     };
-    const wideW2 = renderWorkspaceServiceResult('workspace_services_list', wideResult, { expanded: true }, theme).render(2);
-    const widePlain = wideW2.map(stripAnsi).join('\n');
-    expect(widePlain).toContain('漢');
-    expect(widePlain).toContain('🚀');
+    const mixedComp = renderWorkspaceServiceResult('workspace_services_list', mixedResult, { expanded: true }, theme);
+    expect(mixedComp.render(0)).toEqual([]);
+    expect(mixedComp.render(1)).toEqual([' ']);
+
+    const wideW2 = mixedComp.render(2);
+    const widePlainLines = wideW2.map(stripAnsi);
+    expect(widePlainLines).toContain(' A');
+    expect(widePlainLines).toContain('漢');
+    expect(widePlainLines).toContain(' B');
+    expect(widePlainLines).toContain('🚀');
     for (const line of wideW2) {
       expect(visibleWidth(line)).toBeLessThanOrEqual(2);
     }
 
-    const wideW20 = renderWorkspaceServiceResult('workspace_services_list', wideResult, { expanded: true }, theme).render(20);
+    const wideW20 = mixedComp.render(20);
     for (const line of wideW20) {
       expect(visibleWidth(line)).toBeLessThanOrEqual(20);
       expect(stripAnsi(line).startsWith(' ')).toBe(true);

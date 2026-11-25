@@ -406,6 +406,7 @@ export class SubagentHistoryStore {
     ensureColumn(db, 'subagent_tasks', 'pi_retry_attempts', 'INTEGER');
     ensureColumn(db, 'subagent_tasks', 'pending_message_count', 'INTEGER');
     ensureColumn(db, 'subagent_tasks', 'undelivered_message_count', 'INTEGER');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_subagent_tasks_cwd_session_created ON subagent_tasks(cwd, session_id, created_at DESC, id DESC);');
     ensureAttemptColumns(db);
     ensureColumn(db, 'subagent_events', 'attempt', 'INTEGER');
     this.dbs.set(file, db);
@@ -448,13 +449,16 @@ export class SubagentHistoryStore {
     `).all(cwd, sessionId, limit).map((row) => rowToTask(row, options));
   }
 
-  listSessionTaskMetadata(cwd: string, sessionId: string, limit = 100): SubagentTask[] {
+  listSessionTaskMetadata(cwd: string, sessionId: string, limit = 100, offset = 0): SubagentTask[] {
+    const safeLimit = Math.max(0, Math.floor(limit));
+    const safeOffset = Math.max(0, Math.floor(offset));
+    if (safeLimit === 0) return [];
     return this.db(cwd).prepare(`
       SELECT ${SESSION_TASK_METADATA_COLUMNS}
       FROM subagent_tasks WHERE cwd = ? AND session_id = ?
       ORDER BY created_at DESC, id DESC
-      LIMIT ?
-    `).all(cwd, sessionId, limit).map((row) => rowToTask(row, { includeSnapshots: false }));
+      LIMIT ? OFFSET ?
+    `).all(cwd, sessionId, safeLimit, safeOffset).map((row) => rowToTask(row, { includeSnapshots: false }));
   }
 
   listTasksByStatus(cwd: string, statuses: SubagentTask['status'][], options: HistoryReadOptions = {}): SubagentTask[] {

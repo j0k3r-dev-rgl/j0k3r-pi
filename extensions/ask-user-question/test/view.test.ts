@@ -528,3 +528,21 @@ test("every rendered line fits the width across 1-6 questions with five options 
 		}
 	}
 });
+
+test("wrapped option rows keep mouse line ownership on every visual line", () => {
+	const label = "Beta-supercalifragilisticexpialidocious-option-label-that-wraps";
+	const { view, completed } = viewWithResult([question("Proceed?", [option("Alpha"), option(label)])], undefined);
+	const lines = view.render(20);
+	for (const line of lines) assert.ok(visibleWidth(line) <= 20, `line exceeds width: ${JSON.stringify(line)}`);
+
+	const matching = lines
+		.map((line, index) => ({ index, plain: plain(line) }))
+		.filter((entry) => entry.plain.includes("Beta-") || entry.plain.includes("expialidocious"));
+	assert.ok(matching.length > 1, "long option label must wrap across multiple visual lines");
+
+	// Clicking a continuation line still owns the same option row and commits it.
+	const continuation = matching[matching.length - 1]!;
+	assert.equal(view.handleMouse(mouseEvent(lines, continuation.index, "click"))?.handled, true);
+	assert.equal(completed.length, 1);
+	assert.equal(view.getResult().answers[0]?.answer, label);
+});

@@ -225,7 +225,7 @@ describe('background widget', () => {
     expect(bold).toHaveBeenCalledWith('● tool-smoke Running sleep 15.');
   });
 
-  it('renders one clipped current background activity and never a trail', () => {
+  it('wraps current background activity without ellipsis clipping and never shows a trail (MINI-004)', () => {
     const now = new Date().toISOString();
     const state = new ClaudeBackgroundWidgetState(
       () => [{
@@ -248,8 +248,9 @@ describe('background widget', () => {
     const widget = new ClaudeBackgroundWidget(state, { fg: (_name: string, text: string) => `\u001b[33m${text}\u001b[39m`, bold: (text: string) => `\u001b[1m${text}\u001b[22m` });
 
     const rendered = widget.render(24).map((line) => line.replace(/\u001b\[[0-9;]*m/g, ''));
-    expect(rendered.length).toBe(2);
-    expect(rendered[1]).toContain('running to…');
+    expect(rendered.length).toBeGreaterThan(2);
+    expect(rendered.join('\n')).not.toContain('…');
+    expect(rendered.join('').replace(/\s+/g, '')).toContain('workspace_graph_status_with_a_very_long_public_name');
     expect(rendered.every((line) => line.length <= 24)).toBe(true);
 
     const wide = widget.render(120).map((line) => line.replace(/\u001b\[[0-9;]*m/g, ''));
@@ -276,7 +277,7 @@ describe('background widget', () => {
     expect(state.handleTerminalInput('\r')).toEqual({ consume: true, action: { type: 'focus-editor' } });
   });
 
-  describe('responsive single-line clipping and 1:1 hit testing (MINI-001)', () => {
+  describe('automatic wrapping without ellipsis and wrapped visual-row hit testing (MINI-004)', () => {
     it('returns empty array when width <= 0', () => {
       const now = new Date().toISOString();
       const state = new ClaudeBackgroundWidgetState(
@@ -289,53 +290,58 @@ describe('background widget', () => {
       expect(widget.render(-10)).toEqual([]);
     });
 
-    it('returns exactly one line per active entry across all positive widths including tiny widths', () => {
+    it('wraps overflowing entries cleanly across positive widths without ellipsis clipping', () => {
       const now = new Date().toISOString();
       const state = new ClaudeBackgroundWidgetState(
         () => [
-          { id: 'task-1', agent: 'tool-smoke', mode: 'background', status: 'running', task: 'long running task description that wraps across multiple lines if wrapped', created_at: now },
+          { id: 'task-1', agent: 'tool-smoke', mode: 'background', status: 'running', task: 'long running task description that wraps across multiple lines cleanly', created_at: now },
           { id: 'task-2', agent: 'worker-2', mode: 'background', status: 'queued', task: 'another task', created_at: now },
         ] as any,
       );
       const widget = new ClaudeBackgroundWidget(state, {});
-      // Active entries = main (1) + task-1 (1) + task-2 (1) = 3 total lines
-      const testWidths = [1, 20, 30, 50, 100];
-      for (const w of testWidths) {
+      for (const w of [1, 20, 30, 50, 100]) {
         const lines = widget.render(w);
-        expect(lines.length).toBe(3);
+        expect(lines.length).toBeGreaterThanOrEqual(3);
         for (const line of lines) {
           expect(stripAnsi(line).length).toBeLessThanOrEqual(w);
         }
+        expect(lines.map(stripAnsi).join('\n')).not.toContain('…');
       }
+      const narrow = widget.render(20);
+      expect(narrow.length).toBeGreaterThan(3);
+      expect(narrow.map(stripAnsi).join(' ')).toContain('multiple lines cleanly');
     });
 
-    it('maps handleMouseClick on row k 1:1 to entry k reliably without wrapping displacement', () => {
+    it('maps handleMouseClick through wrapped visual rows accurately to the owning entry', () => {
       const now = new Date().toISOString();
       let lastAction: any;
       const state = new ClaudeBackgroundWidgetState(
         () => [
-          { id: 'task-1', agent: 'tool-smoke', mode: 'background', status: 'running', task: 'very long description line 1 that could wrap and displace row clicks', created_at: now },
-          { id: 'task-2', agent: 'worker-2', mode: 'background', status: 'running', task: 'very long description line 2 that could wrap and displace row clicks', created_at: now },
+          { id: 'task-1', agent: 'tool-smoke', mode: 'background', status: 'running', task: 'very long description line 1 that wraps across multiple rows', created_at: now },
+          { id: 'task-2', agent: 'worker-2', mode: 'background', status: 'running', task: 'second task description', created_at: now },
         ] as any,
       );
       const widget = new ClaudeBackgroundWidget(state, {}, {}, (action) => {
         lastAction = action;
       });
 
-      // Render at narrow width (e.g. 20)
       const lines = widget.render(20);
-      expect(lines.length).toBe(3); // row 0: main, row 1: task-1, row 2: task-2
+      expect(lines.length).toBeGreaterThan(3);
 
-      // Click row 0 -> focus editor
+      // Row 0: main -> focus editor
       widget.handleMouse({ type: 'click', row: 0 });
       expect(lastAction).toEqual({ type: 'focus-editor' });
 
-      // Click row 1 -> open task-1
+      // Row 1 and wrapped continuation row 2: both belong to task-1
       widget.handleMouse({ type: 'click', row: 1 });
       expect(lastAction).toEqual({ type: 'open-task', taskId: 'task-1' });
-
-      // Click row 2 -> open task-2
       widget.handleMouse({ type: 'click', row: 2 });
+      expect(lastAction).toEqual({ type: 'open-task', taskId: 'task-1' });
+
+      // Visual row where worker-2 begins -> opens task-2 despite wrapping displacement
+      const task2Row = lines.findIndex((line) => stripAnsi(line).includes('worker-2'));
+      expect(task2Row).toBeGreaterThan(2);
+      widget.handleMouse({ type: 'click', row: task2Row });
       expect(lastAction).toEqual({ type: 'open-task', taskId: 'task-2' });
     });
   });

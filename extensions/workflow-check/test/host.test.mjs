@@ -37,10 +37,25 @@ test('Pi loads both tools and compact rendering preserves expanded content witho
     const coordResult = tool.renderResult(result, { expanded: false, isPartial: false }, theme, { ...context, state: rowState });
     assert.deepEqual(coordCall.render(80), []);
     const collapsed = coordResult.render(80);
-    assert.equal(collapsed.length, 1);
-    assert.match(collapsed[0], /BLOCKED/);
-    assert.match(collapsed[0], /───/);
-    assert.doesNotMatch(collapsed.join('\n'), /app\.tools\.expand|to expand|ctrl\+o|[╭╮╰╯│]/);
+    assert.ok(collapsed.length >= 1);
+    const collapsedJoined = collapsed.map((line) => line.replace(/\x1b\[[0-9;]*m/g, '').slice(1)).join(' ');
+    assert.match(collapsedJoined, /BLOCKED/);
+    assert.match(collapsedJoined, /───/);
+    assert.match(collapsedJoined, /3 contracts/);
+    assert.doesNotMatch(collapsed.join('\n'), /…|app\.tools\.expand|to expand|ctrl\+o|[╭╮╰╯│]/);
+    for (const line of collapsed) {
+      assert.ok(visibleWidth(line) <= 80);
+      assert.ok(line.startsWith(' '));
+    }
+
+    const narrowCollapsed = tool.renderResult(result, { expanded: false, isPartial: false }, theme, { ...context, state: {} }).render(32);
+    assert.ok(narrowCollapsed.length > 1, 'overflowing collapsed header must wrap');
+    assert.doesNotMatch(narrowCollapsed.join('\n'), /…/);
+    assert.match(narrowCollapsed.map((line) => line.replace(/\x1b\[[0-9;]*m/g, '').slice(1)).join(' '), /3 contracts/);
+    for (const line of narrowCollapsed) {
+      assert.ok(visibleWidth(line) <= 32);
+      assert.ok(line.startsWith(' '));
+    }
 
     const expanded = tool.renderResult(result, { expanded: true, isPartial: false }, theme, { ...context, state: {} }).render(30);
     assert.match(expanded.join('\n'), /Second line 漢字/);
@@ -49,8 +64,40 @@ test('Pi loads both tools and compact rendering preserves expanded content witho
       for (const line of tool.renderResult(result, { expanded: true, isPartial: false }, theme, { ...context, state: {} }).render(width)) {
         assert.ok(visibleWidth(line) <= width, `width ${width}`);
       }
-      assert.equal(tool.renderResult(result, { expanded: false, isPartial: false }, theme, { ...context, state: {} }).render(width).length, width <= 0 ? 0 : 1);
+      const collapsedAtWidth = tool.renderResult(result, { expanded: false, isPartial: false }, theme, { ...context, state: {} }).render(width);
+      for (const line of collapsedAtWidth) {
+        assert.ok(visibleWidth(line) <= width, `collapsed width ${width}`);
+      }
+      if (width <= 0) assert.equal(collapsedAtWidth.length, 0);
+      else if (width === 1) assert.deepEqual(collapsedAtWidth, [' ']);
+      else assert.ok(collapsedAtWidth.length >= 1);
     }
+
+    // Muted foreground on plain-text expanded body preserving existing ANSI
+    const customTheme = {
+      fg: (token, text) => (token === 'muted' ? `\x1b[38;2;10;20;30m${text}\x1b[39m` : text),
+    };
+    const styledResult = {
+      content: [{ type: 'text', text: 'Plain diagnostic line\n\x1b[33mAmber diagnostic warning\x1b[0m' }],
+      details: { status: 'PASS', phase: 'plan' },
+    };
+    const themedExpanded = tool.renderResult(styledResult, { expanded: true, isPartial: false }, customTheme, { ...context, state: {} }).render(80).join('\n');
+    assert.ok(themedExpanded.includes('\x1b[38;2;10;20;30mPlain diagnostic line\x1b[39m'));
+    assert.ok(themedExpanded.includes('\x1b[33mAmber diagnostic warning\x1b[0m'));
+    assert.ok(!themedExpanded.includes('\x1b[38;2;10;20;30m\x1b[33m'));
+
+    const fallbackExpanded = tool.renderResult(styledResult, { expanded: true, isPartial: false }, undefined, { ...context, state: {} }).render(80).join('\n');
+    assert.ok(fallbackExpanded.includes('\x1b[38;2;122;167;184mPlain diagnostic line\x1b[39m'));
+    assert.ok(fallbackExpanded.includes('\x1b[33mAmber diagnostic warning\x1b[0m'));
+
+    // Width 2 preserves intact wide graphemes (A漢B) via conditional margin omission
+    const wideResult = { content: [{ type: 'text', text: 'A漢B' }], details: { status: 'PASS', phase: 'plan' } };
+    const wideW2 = tool.renderResult(wideResult, { expanded: true, isPartial: false }, theme, { ...context, state: {} }).render(2);
+    const wideStripped = wideW2.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ''));
+    assert.ok(wideStripped.includes(' A'));
+    assert.ok(wideStripped.includes('漢'));
+    assert.ok(wideStripped.includes(' B'));
+    for (const line of wideW2) assert.ok(visibleWidth(line) <= 2);
 
     const partial = tool.renderResult(result, { expanded: false, isPartial: true }, theme, { ...context, state: {} }).render(80);
     assert.equal(partial.length, 1);

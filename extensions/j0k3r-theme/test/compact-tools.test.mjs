@@ -10,7 +10,10 @@ import assert from "node:assert/strict";
 import { registerHooks, stripTypeScriptTypes } from "node:module";
 import { existsSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { initTheme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
+
+initTheme("dark");
 
 // Test-harness-only correction: transform mode plus the repo's `.js` -> `.ts` convention keeps this
 // extension's TypeScript loadable under `node --test` strip-only mode, without touching manifests,
@@ -47,14 +50,30 @@ const {
 	isSelfRendered,
 	resultText,
 	summarizeArgs,
+	wrapLeftMarginComponent,
 } = await import("../src/render/compact.ts");
 const { registerCompactToolRenderer } = await import("../src/render/resolver.ts");
 const { DEFAULT_BASH_TIMEOUT_SECONDS, applyBashTimeout, registerNativeToolOverrides, resolveBashTimeout } = await import(
 	"../src/tools/index.ts",
 );
-const { bashRenderers, createShellRenderers } = await import("../src/render/bashRenderer.ts");
+const { bashRenderers, createShellRenderers, powershellRenderers } = await import("../src/render/bashRenderer.ts");
+const {
+	editRenderers,
+	findRenderers,
+	grepRenderers,
+	lsRenderers,
+	readRenderers,
+	writeRenderers,
+} = await import("../src/render/nativeToolRenderers.ts");
 
 const theme = { fg: (_color, text) => text, bg: (_color, text) => text, bold: (text) => text };
+const CUSTOM_MUTED_ANSI = "\x1b[38;2;111;122;133m";
+const customTheme = {
+	fg: (color, text) => (color === "muted" ? `${CUSTOM_MUTED_ANSI}${text}\x1b[39m` : text),
+	bg: (_color, text) => text,
+	bold: (text) => text,
+};
+const ARCH_MUTED_ANSI = "\x1b[38;2;122;167;184m";
 const strip = (lines) => lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
 
 function context(overrides = {}) {
@@ -215,14 +234,18 @@ test("bash preserves exact leading/trailing spaces, tabs, blank lines, quotes, b
 		}
 		// Strip ONLY the 1 leading display margin column to recover exact authored command
 		const unmargined = strip(raw20).map((l) => l.slice(1));
-		assert.equal(unmargined[1], "", "leading blank line preserved");
-		assert.ok(unmargined[2].startsWith("    indented_long_"), `leading spaces preserved on soft-wrap, got ${JSON.stringify(unmargined[2])}`);
-		const unwrappedLead = unmargined.slice(2, 5).join("");
+		// Find command start immediately after the wrapped header (command begins with leading blank line "")
+		const cmdStart = unmargined.indexOf("");
+		assert.ok(cmdStart >= 1, `wrapped header must precede leading blank command line, got ${JSON.stringify(unmargined)}`);
+		const cmdSlice = unmargined.slice(cmdStart);
+		assert.equal(cmdSlice[0], "", "leading blank line preserved");
+		assert.ok(cmdSlice[1].startsWith("    indented_long_"), `leading spaces preserved on soft-wrap, got ${JSON.stringify(cmdSlice[1])}`);
+		const unwrappedLead = cmdSlice.slice(1, 4).join("");
 		assert.equal(unwrappedLead, "    indented_long_" + "k".repeat(30) + "   ", "trailing spaces preserved across soft-wrap");
-		const unwrappedTab = unmargined.slice(5, 7).join("");
+		const unwrappedTab = cmdSlice.slice(4, 6).join("");
 		assert.equal(unwrappedTab, "      echo \"a'b\" \\\\ 'x\\ny'", "tabs, quotes, backslashes, and literal \\n preserved");
-		assert.equal(unmargined[7], "", "internal blank line preserved");
-		assert.equal(unmargined[8], "  trailing   ", "short line leading/trailing spaces preserved verbatim");
+		assert.equal(cmdSlice[6], "", "internal blank line preserved");
+		assert.equal(cmdSlice[7], "  trailing   ", "short line leading/trailing spaces preserved verbatim");
 	}
 	assert.equal(exactCmd, snapshotCmd, "command string never mutated");
 });
@@ -382,8 +405,20 @@ test("bash retains standalone CR and CRLF verbatim without normalization across 
 				assert.ok(visibleWidth(l) <= 4);
 				assert.ok(l.startsWith(" "), "width 4 keeps 1-col left margin");
 			}
+			// Determine wrapped header line count using a single-char command render at the same timestamp
+			const now = Date.now();
+			const headerProbe =
+				comp === callComp
+					? bashRenderers.renderCall({ command: "x", timeout: 120 }, theme, context({ state: { startedAt: now } }))
+					: bashRenderers.renderResult(
+							{ content: [{ type: "text", text: "ok" }], details: undefined },
+							{ expanded: false, isPartial: false },
+							theme,
+							context({ args: { command: "x", timeout: 120 }, state: { startedAt: now, endedAt: now } }),
+						);
+			const headerLen4 = strip(headerProbe.render(4)).length - 1;
 			// Undo soft-wraps across physical lines emitted by each logical split
-			const combined4 = lines4.slice(1).map((l) => l.slice(1)).join("");
+			const combined4 = lines4.slice(headerLen4).map((l) => l.slice(1)).join("");
 			assert.equal(combined4, cmd.replace(/\n/g, ""), `width 4 keeps all authored CR characters for ${JSON.stringify(cmd)}`);
 		}
 	}
@@ -411,9 +446,12 @@ test("width 2 omits left margin only on lines needing an intact wide grapheme an
 	assert.ok(plain2.includes(" X") && plain2.includes(" Y"), "expanded output narrow chars retain margin");
 
 	// Reconstruct command portion cleanly by stripping margin only where present
-	const headerIdx = 0;
+	const cmdStart = plain2.indexOf(" A");
 	const outStart = plain2.indexOf(" X");
-	const cmdReconstructed = plain2.slice(headerIdx + 1, outStart).map((l) => (l.startsWith(" ") ? l.slice(1) : l)).join("");
+	assert.ok(cmdStart >= 1 && outStart > cmdStart, "wrapped header precedes command and expanded output");
+	const headerPlain2 = plain2.slice(0, cmdStart).map((l) => (l.startsWith(" ") ? l.slice(1) : l)).join("");
+	assert.ok(headerPlain2.includes("timeout120s(default)") || headerPlain2.includes("timeout 120s (default)"), `wrapped width-2 header keeps timeout status: ${headerPlain2}`);
+	const cmdReconstructed = plain2.slice(cmdStart, outStart).map((l) => (l.startsWith(" ") ? l.slice(1) : l)).join("");
 	assert.equal(cmdReconstructed, wideCmd);
 
 	// Normal widths >= 3 always retain 1-col margin even on wide graphemes
@@ -421,5 +459,399 @@ test("width 2 omits left margin only on lines needing an intact wide grapheme an
 		for (const line of strip(comp.render(w))) {
 			assert.ok(line.startsWith(" "), `width ${w} must retain 1-col margin on ${JSON.stringify(line)}`);
 		}
+	}
+});
+
+test("D1: plain-text expanded tool bodies use theme muted foreground with #7aa7b8 fallback while preserving syntax/diff/warning/dim ANSI", () => {
+	// 1. Custom active theme muted token is used across all plain-text expanded tool bodies
+	const plainCases = [
+		[
+			"read (unhighlighted)",
+			readRenderers.renderResult(
+				{ content: [{ type: "text", text: "plain notes line" }], details: undefined },
+				{ expanded: true, isPartial: false },
+				customTheme,
+				context({ args: { path: "LICENSE" } }),
+			),
+			"plain notes line",
+		],
+		[
+			"read (error)",
+			readRenderers.renderResult(
+				{ content: [{ type: "text", text: "ENOENT missing file" }], details: undefined },
+				{ expanded: true, isPartial: false },
+				customTheme,
+				context({ args: { path: "missing.ts" }, isError: true }),
+			),
+			"ENOENT missing file",
+		],
+		[
+			"write (unhighlighted + result text)",
+			writeRenderers.renderResult(
+				{ content: [{ type: "text", text: "Successfully wrote plain file" }], details: undefined },
+				{ expanded: true, isPartial: false },
+				customTheme,
+				context({ args: { path: "NOTES", content: "written plain body" } }),
+			),
+			"written plain body",
+		],
+		[
+			"edit (plain fallback)",
+			editRenderers.renderResult(
+				{ content: [{ type: "text", text: "Applied plain edit" }], details: undefined },
+				{ expanded: true, isPartial: false },
+				customTheme,
+				context({ args: { path: "NOTES" } }),
+			),
+			"Applied plain edit",
+		],
+		[
+			"edit (error)",
+			editRenderers.renderResult(
+				{ content: [{ type: "text", text: "oldText not found" }], details: undefined },
+				{ expanded: true, isPartial: false },
+				customTheme,
+				context({ args: { path: "src/app.ts" }, isError: true }),
+			),
+			"oldText not found",
+		],
+		[
+			"grep",
+			grepRenderers.renderResult(
+				{ content: [{ type: "text", text: "src/a.ts:1:match" }], details: undefined },
+				{ expanded: true, isPartial: false },
+				customTheme,
+				context({ args: { pattern: "match", path: "src" } }),
+			),
+			"src/a.ts:1:match",
+		],
+		[
+			"find",
+			findRenderers.renderResult(
+				{ content: [{ type: "text", text: "src/a.ts" }], details: undefined },
+				{ expanded: true, isPartial: false },
+				customTheme,
+				context({ args: { pattern: "*.ts", path: "src" } }),
+			),
+			"src/a.ts",
+		],
+		[
+			"ls",
+			lsRenderers.renderResult(
+				{ content: [{ type: "text", text: "index.ts" }], details: undefined },
+				{ expanded: true, isPartial: false },
+				customTheme,
+				context({ args: { path: "src" } }),
+			),
+			"index.ts",
+		],
+		[
+			"bash output",
+			bashRenderers.renderResult(
+				{ content: [{ type: "text", text: "stdout plain line" }], details: undefined },
+				{ expanded: true, isPartial: false },
+				customTheme,
+				context({ args: { command: "echo hi" } }),
+			),
+			"stdout plain line",
+		],
+		[
+			"powershell output",
+			powershellRenderers.renderResult(
+				{ content: [{ type: "text", text: "ps stdout plain line" }], details: undefined },
+				{ expanded: true, isPartial: false },
+				customTheme,
+				context({ args: { command: "Write-Output hi" } }),
+			),
+			"ps stdout plain line",
+		],
+		[
+			"fallback",
+			createFallbackRenderers("custom_tool").renderResult(
+				{ content: [{ type: "text", text: "fallback body text" }], details: undefined },
+				{ expanded: true, isPartial: false },
+				customTheme,
+				context({ args: { key: "val" } }),
+			),
+			"fallback body text",
+		],
+	];
+
+	for (const [label, comp, needle] of plainCases) {
+		const raw = comp.render(80);
+		const bodyOnly = raw.slice(1);
+		const target = bodyOnly.find((l) => strip([l])[0].includes(needle));
+		assert.ok(target, `${label}: body line containing ${JSON.stringify(needle)} must exist`);
+		assert.ok(target.includes(CUSTOM_MUTED_ANSI), `${label}: must apply active theme muted ANSI, got ${JSON.stringify(target)}`);
+	}
+
+	// write result text must also use theme muted foreground
+	const writeRaw = plainCases[2][1].render(80);
+	const writeResultLine = writeRaw.slice(1).find((l) => strip([l])[0].includes("Successfully wrote plain file"));
+	assert.ok(writeResultLine?.includes(CUSTOM_MUTED_ANSI), `write result text must use theme muted ANSI, got ${JSON.stringify(writeResultLine)}`);
+
+	// 2. Absent and no-op mock theme fall back to arch-electric #7aa7b8 muted ANSI
+	for (const [label, fallbackTheme] of [
+		["absent theme", undefined],
+		["no-op mock theme", theme],
+	]) {
+		const comp = grepRenderers.renderResult(
+			{ content: [{ type: "text", text: "fallback muted line" }], details: undefined },
+			{ expanded: true, isPartial: false },
+			fallbackTheme,
+			context({ args: { pattern: "x", path: "src" } }),
+		);
+		const target = comp.render(80).find((l) => strip([l])[0].includes("fallback muted line"));
+		assert.ok(target?.includes(ARCH_MUTED_ANSI), `${label}: must fall back to #7aa7b8 ANSI, got ${JSON.stringify(target)}`);
+	}
+
+	// 3. Syntax-highlighted code, diffs, amber warnings, dim empty notices, and existing ANSI output are preserved
+	const readCodeRaw = readRenderers
+		.renderResult(
+			{
+				content: [{ type: "text", text: "export const answer = 42;" }],
+				details: { truncation: { truncated: true, outputLines: 1, totalLines: 5 } },
+			},
+			{ expanded: true, isPartial: false },
+			customTheme,
+			context({ args: { path: "src/example.ts" } }),
+		)
+		.render(80);
+	const codeLine = readCodeRaw.find((l) => strip([l])[0].includes("export"));
+	assert.ok(codeLine, "highlighted read code line present");
+	assert.ok(/\x1b\[[0-9;]*m/.test(codeLine), `highlighted code retains syntax ANSI: ${JSON.stringify(codeLine)}`);
+	assert.ok(!codeLine.includes(CUSTOM_MUTED_ANSI) && !codeLine.includes(ARCH_MUTED_ANSI), `highlighted code must not be overwritten with muted: ${JSON.stringify(codeLine)}`);
+	const amberWarningLine = readCodeRaw.find((l) => strip([l])[0].includes("[Truncated:"));
+	assert.ok(amberWarningLine?.includes("\x1b[1;38;2;255;184;77m"), "amber truncation warning preserved");
+
+	const editDiffRaw = editRenderers
+		.renderResult(
+			{
+				content: [{ type: "text", text: "ok" }],
+				details: { diff: "--- a/x.ts\n+++ b/x.ts\n@@ -1 +1 @@\n-const a = 1;\n+const a = 2;\n" },
+			},
+			{ expanded: true, isPartial: false },
+			customTheme,
+			context({ args: { path: "x.ts" } }),
+		)
+		.render(80);
+	const diffBodyLines = editDiffRaw.slice(1);
+	assert.ok(diffBodyLines.length > 0, "diff lines rendered");
+	assert.ok(diffBodyLines.some((dl) => /\x1b\[[0-9;]*m/.test(dl)), "diff retains ANSI foreground styling");
+	for (const dl of diffBodyLines) {
+		assert.ok(!dl.includes(CUSTOM_MUTED_ANSI), `diff ANSI must not be overwritten with custom muted: ${JSON.stringify(dl)}`);
+	}
+
+	// Dim empty notices preserved across bash, edit, write, and grep
+	for (const [label, comp, expectedNotice] of [
+		[
+			"bash empty",
+			bashRenderers.renderResult({ content: [{ type: "text", text: "" }], details: undefined }, { expanded: true, isPartial: false }, customTheme, context({ args: { command: "true" } })),
+			"(no output)",
+		],
+		[
+			"edit empty",
+			editRenderers.renderResult({ content: [{ type: "text", text: "" }], details: undefined }, { expanded: true, isPartial: false }, customTheme, context({ args: { path: "x.ts" } })),
+			"(no diff output)",
+		],
+		[
+			"write empty",
+			writeRenderers.renderResult({ content: [{ type: "text", text: "" }], details: undefined }, { expanded: true, isPartial: false }, customTheme, context({ args: { path: "x.txt", content: "" } })),
+			"(empty file)",
+		],
+		[
+			"grep empty",
+			grepRenderers.renderResult({ content: [{ type: "text", text: "" }], details: undefined }, { expanded: true, isPartial: false }, customTheme, context({ args: { pattern: "missing", path: "src" } })),
+			"(no output)",
+		],
+	]) {
+		const raw = comp.render(80);
+		const noticeLine = raw.slice(1).find((l) => strip([l])[0].includes(expectedNotice));
+		assert.ok(noticeLine?.includes("\x1b[2m"), `${label}: dim empty notice preserved`);
+		assert.ok(!noticeLine?.includes(CUSTOM_MUTED_ANSI), `${label}: dim empty notice not overwritten with muted`);
+	}
+
+	// Existing ANSI in bash stdout preserved while plain sibling lines get muted
+	const mixedBashRaw = bashRenderers
+		.renderResult(
+			{ content: [{ type: "text", text: "plain line\n\x1b[32mGREEN_PASS\x1b[0m" }], details: undefined },
+			{ expanded: true, isPartial: false },
+			customTheme,
+			context({ args: { command: "test" } }),
+		)
+		.render(80);
+	const plainOut = mixedBashRaw.find((l) => strip([l])[0].includes("plain line"));
+	const greenOut = mixedBashRaw.find((l) => strip([l])[0].includes("GREEN_PASS"));
+	assert.ok(plainOut?.includes(CUSTOM_MUTED_ANSI), "plain bash output line is muted");
+	assert.ok(greenOut?.includes("\x1b[32m") && !greenOut?.includes(CUSTOM_MUTED_ANSI), "existing ANSI in bash output is preserved");
+});
+
+test("D2: collapsed headers and bodies wrap automatically across widths without ellipsis clipping or trailing loss", () => {
+	const longHeader = "read ─ a/very/long/path/that/exceeds/the/narrow/terminal/width/end_marker.ts ─ ✓ 42 lines";
+	const row = new CompactToolRow(() => longHeader);
+	assert.deepEqual(row.render(0), [], "width 0 emits []");
+	assert.deepEqual(row.render(1), [" "], "width 1 emits [' ']");
+
+	for (const width of [10, 24, 40]) {
+		const raw = row.render(width);
+		assert.ok(raw.length > 1, `width ${width} must wrap overflowing header across multiple lines`);
+		for (const line of raw) {
+			assert.ok(visibleWidth(line) <= width, `width ${width} overflow: ${JSON.stringify(line)}`);
+			assert.ok(line.startsWith(" "), `width ${width} keeps 1-col left margin`);
+		}
+		const joined = raw.map((l) => l.slice(1)).join(" ");
+		assert.ok(!joined.includes("…"), `width ${width} must not clip with ellipsis`);
+		assert.ok(joined.includes("end_marker.ts") || raw.map((l) => l.slice(1)).join("").includes("end_marker.ts"), `width ${width} keeps trailing path`);
+		assert.ok(raw.map((l) => l.slice(1)).join("").includes("42 lines") || joined.includes("42 lines"), `width ${width} keeps trailing status`);
+	}
+
+	// Width 2 preserves intact wide graphemes in headers via conditional margin omission
+	const wideHeaderRow = new CompactToolRow(() => "A漢B👨‍👩‍👧");
+	const wide2 = wideHeaderRow.render(2);
+	for (const line of wide2) assert.ok(visibleWidth(line) <= 2, `header width 2 overflow: ${JSON.stringify(line)}`);
+	assert.ok(wide2.includes(" A") && wide2.includes("漢") && wide2.includes(" B") && wide2.includes("👨‍👩‍👧"), `width 2 header wide graphemes intact: ${JSON.stringify(wide2)}`);
+
+	// Native and fallback collapsed headers wrap without ellipsis clipping
+	const renderersToCheck = [
+		["read", readRenderers.renderResult({ content: [{ type: "text", text: "ok" }], details: undefined }, { expanded: false, isPartial: false }, customTheme, context({ args: { path: "src/very/deep/nested/directory/final_file_name.ts" } }))],
+		["grep", grepRenderers.renderResult({ content: [{ type: "text", text: "a\nb" }], details: undefined }, { expanded: false, isPartial: false }, customTheme, context({ args: { pattern: "superLongSearchPatternToken", path: "packages/sub/dir" } }))],
+		["powershell", powershellRenderers.renderCall({ command: "Get-ChildItem -Path C:\\very\\long\\directory\\name -Recurse", timeout: 45 }, customTheme, context())],
+		["fallback", createFallbackRenderers("very_long_custom_tool_name").renderResult({ content: [{ type: "text", text: "x" }], details: undefined }, { expanded: false, isPartial: false }, customTheme, context({ args: { target: "long-value-tail-marker" } }))],
+	];
+	for (const [label, comp] of renderersToCheck) {
+		const raw = comp.render(24);
+		assert.ok(raw.length > 1, `${label}@24: overflowing collapsed header must wrap`);
+		for (const line of raw) {
+			assert.ok(visibleWidth(line) <= 24, `${label}@24 overflow: ${JSON.stringify(line)}`);
+			assert.ok(strip([line])[0].startsWith(" "), `${label}@24 1-col margin`);
+		}
+		const flat = strip(raw).map((l) => l.slice(1)).join("");
+		assert.ok(!flat.includes("…"), `${label}@24 must not emit ellipsis: ${flat}`);
+	}
+
+	// wrapLeftMarginComponent also wraps overflowing lines from non-margined owner components
+	const overflowingOwner = { render: () => ["owner_prefix_1234567890_trailing_suffix"], invalidate() {} };
+	const margined = wrapLeftMarginComponent(overflowingOwner);
+	const wrappedOwner = margined.render(16);
+	assert.ok(wrappedOwner.length > 1, "wrapLeftMarginComponent wraps overflowing lines");
+	for (const line of wrappedOwner) {
+		assert.ok(visibleWidth(line) <= 16);
+		assert.ok(line.startsWith(" "));
+	}
+	assert.equal(wrappedOwner.map((l) => l.slice(1)).join(""), "owner_prefix_1234567890_trailing_suffix");
+});
+
+test("D4: bash and powershell display truthful timeout status and live elapsed/remaining while running", () => {
+	const realNow = Date.now;
+	let fakeNow = 1_000_000;
+	Date.now = () => fakeNow;
+	try {
+		// 1. Explicit positive timeout on bash: running elapsed + remaining, then completed
+		const bashExplicitState = {};
+		const bashExplicitCall = bashRenderers.renderCall({ command: "sleep 10", timeout: 30 }, customTheme, context({ state: bashExplicitState }));
+		const bashCall0 = strip(bashExplicitCall.render(120))[0];
+		assert.match(bashCall0, /timeout 30s/, "bash explicit call shows timeout 30s");
+		assert.doesNotMatch(bashCall0, /\(default\)/, "explicit timeout is not labeled default");
+		assert.match(bashCall0, /0\.0s elapsed/, "bash explicit call shows live elapsed");
+		assert.match(bashCall0, /30\.0s remaining/, "bash explicit call shows live remaining");
+
+		// Advance clock 10s while still running
+		fakeNow += 10_000;
+		const bashCall10 = strip(bashExplicitCall.render(120))[0];
+		assert.match(bashCall10, /10\.0s elapsed/, "elapsed advances live while running");
+		assert.match(bashCall10, /20\.0s remaining/, "remaining counts down live while running");
+
+		// Partial result keeps elapsed/remaining live
+		const bashPartial = bashRenderers.renderResult(
+			{ content: [{ type: "text", text: "working..." }], details: undefined },
+			{ expanded: false, isPartial: true },
+			customTheme,
+			context({ args: { command: "sleep 10", timeout: 30 }, state: bashExplicitState }),
+		);
+		fakeNow += 5_000;
+		const bashPartial15 = strip(bashPartial.render(120))[0];
+		assert.match(bashPartial15, /timeout 30s/, "bash partial result shows timeout 30s");
+		assert.match(bashPartial15, /15\.0s elapsed/, "bash partial result shows live elapsed");
+		assert.match(bashPartial15, /15\.0s remaining/, "bash partial result shows live remaining");
+
+		// Advance past timeout: remaining clamps cleanly at 0.0s
+		fakeNow += 25_000;
+		const bashPartialOver = strip(bashPartial.render(120))[0];
+		assert.match(bashPartialOver, /40\.0s elapsed/, "elapsed keeps advancing past timeout");
+		assert.match(bashPartialOver, /0\.0s remaining/, "remaining clamps cleanly at 0.0s");
+
+		// Completed result shows timeout 30s + Took duration and clears interval
+		const bashDone = bashRenderers.renderResult(
+			{ content: [{ type: "text", text: "done" }], details: undefined },
+			{ expanded: false, isPartial: false },
+			customTheme,
+			context({ args: { command: "sleep 10", timeout: 30 }, state: bashExplicitState }),
+		);
+		const bashDoneLine = strip(bashDone.render(120))[0];
+		assert.match(bashDoneLine, /timeout 30s/, "bash completed result keeps timeout 30s");
+		assert.match(bashDoneLine, /Took 40\.0s/, "bash completed result shows final elapsed");
+		assert.equal(bashExplicitState.interval, undefined, "timer cleared on completion");
+
+		// 2. Omitted / non-positive timeout on bash: displays timeout 120s (default) + live elapsed/remaining
+		for (const omitted of [undefined, 0, -10]) {
+			const st = {};
+			const call = bashRenderers.renderCall({ command: "echo default", timeout: omitted }, customTheme, context({ state: st }));
+			const line0 = strip(call.render(120))[0];
+			assert.match(line0, /timeout 120s \(default\)/, `bash timeout=${omitted} call shows timeout 120s (default)`);
+			assert.match(line0, /0\.0s elapsed/, `bash timeout=${omitted} call shows elapsed`);
+			assert.match(line0, /2m 0s remaining/, `bash timeout=${omitted} call shows 120s remaining`);
+
+			fakeNow += 20_000;
+			const line20 = strip(call.render(120))[0];
+			assert.match(line20, /20\.0s elapsed/, `bash timeout=${omitted} elapsed advances`);
+			assert.match(line20, /1m 40s remaining/, `bash timeout=${omitted} remaining counts down`);
+
+			const done = bashRenderers.renderResult(
+				{ content: [{ type: "text", text: "ok" }], details: undefined },
+				{ expanded: false, isPartial: false },
+				customTheme,
+				context({ args: { command: "echo default", timeout: omitted }, state: st }),
+			);
+			const doneLine = strip(done.render(120))[0];
+			assert.match(doneLine, /timeout 120s \(default\)/, `bash timeout=${omitted} result keeps timeout 120s (default)`);
+		}
+
+		// 3. Powershell: explicit timeout shows timeout Xs + elapsed/remaining; omitted/non-positive shows no timeout
+		const psExplicitState = {};
+		const psExplicitCall = powershellRenderers.renderCall({ command: "Start-Sleep 5", timeout: 45 }, customTheme, context({ state: psExplicitState }));
+		fakeNow += 5_000;
+		const psExplicitLine = strip(psExplicitCall.render(120))[0];
+		assert.match(psExplicitLine, /timeout 45s/, "powershell explicit call shows timeout 45s");
+		assert.match(psExplicitLine, /5\.0s elapsed/, "powershell explicit call shows elapsed");
+		assert.match(psExplicitLine, /40\.0s remaining/, "powershell explicit call shows remaining");
+		// Clean up interval
+		powershellRenderers.renderResult(
+			{ content: [{ type: "text", text: "ok" }], details: undefined },
+			{ expanded: false, isPartial: false },
+			customTheme,
+			context({ args: { command: "Start-Sleep 5", timeout: 45 }, state: psExplicitState }),
+		);
+
+		for (const omitted of [undefined, 0, -3]) {
+			const psState = {};
+			const psCall = powershellRenderers.renderCall({ command: "echo ps", timeout: omitted }, customTheme, context({ state: psState }));
+			fakeNow += 3_000;
+			const psCallLine = strip(psCall.render(120))[0];
+			assert.match(psCallLine, /no timeout/, `powershell timeout=${omitted} call shows no timeout`);
+			assert.doesNotMatch(psCallLine, /120s/, `powershell timeout=${omitted} must not claim 120s default`);
+			assert.match(psCallLine, /3\.0s elapsed/, `powershell timeout=${omitted} shows live elapsed`);
+			assert.doesNotMatch(psCallLine, /remaining/, `powershell timeout=${omitted} has no remaining countdown`);
+
+			const psDone = powershellRenderers.renderResult(
+				{ content: [{ type: "text", text: "ok" }], details: undefined },
+				{ expanded: false, isPartial: false },
+				customTheme,
+				context({ args: { command: "echo ps", timeout: omitted }, state: psState }),
+			);
+			const psDoneLine = strip(psDone.render(120))[0];
+			assert.match(psDoneLine, /no timeout/, `powershell timeout=${omitted} result keeps no timeout`);
+		}
+	} finally {
+		Date.now = realNow;
 	}
 });
