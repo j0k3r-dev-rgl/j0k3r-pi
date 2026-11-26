@@ -5,7 +5,7 @@
 `orchestrator-supervisor` is a unified autonomous in-process supervisor for the Pi coding agent. It consolidates orchestrator resilience (dual-window quota failover, stream disconnect recovery, 90% context rotation, and durable Write-Ahead Logging) and subagent model allocation into a single cohesive service with a centered two-tab overlay configuration dashboard.
 
 ### Core Principles
-1. **Unified Configuration Surface:** Managed exclusively through the `/supervisor` panel switch. Activation can be scoped to **Project** (`<project>/.pi/orchestrator-supervisor/`) or **Global** (`~/.pi/agent/orchestrator-supervisor/`), falling back to `Existing (unchanged)` legacy defaults when unconfigured. It is decoupled from `tools-manager`.
+1. **Unified Configuration Surface:** Managed exclusively through the `/supervisor` panel switch. Activation can be scoped to **Project** (`<project>/.pi/orchestrator-supervisor/`) or **Global** (`~/.pi/agent/orchestrator-supervisor/`), falling back to legacy scope (`scope: 'legacy'` under `.runtime/<flowIdentity>/<kind>.json`, where orchestrator runtime defaults to enabled and subagent allocation defaults to disabled) when unconfigured. It is decoupled from `tools-manager`.
 2. **Centered Overlay Modal Dashboard:** Running `/supervisor` opens an interactive two-tab modal framed with unicode box borders (`┌`, `─`, `┐`, `│`, `└`, `┘`) and responsive sizing positioned at the terminal center via Pi's overlay manager (`overlayOptions: { anchor: "center" }`).
 3. **In-Process Subagent Model Allocation:** Replaces legacy child RPC process hooks with subscriptions to local in-process Pi events: `subagents:task:allocate` with `event.claimModel` and `subagents:task:terminal` with `event.registerCleanup`.
 4. **Programmatic Persistent Memory Bridge:** Session continuation checkpoints are stored and verified using the `memory:supervisor:checkpoint:v1` request/reply event channel (`saveMemoryCheckpoint` and `getMemoryCheckpoint`), guaranteeing disk commitment and readback verification before session rotation.
@@ -20,7 +20,7 @@
   - **Master Enable Switch:** Turns supervisor runtime on or off for the project.
   - **Capability Switches:** Independent switches for `Auto rotation` and `Auto model switch`.
   - **Model Count Stepper (2–10):** Adjusts the active routing pool size without discarding hidden candidates.
-  - **Priority Model Slots:** Interactive slot assignment pickers with a two-stage reasoning effort selection dialog (`Default` and host-proven levels).
+  - **Priority Model Slots:** Interactive slot assignment pickers with a two-stage reasoning effort selection dialog (`Default` and host-proven levels). Pressing `d` clears the highlighted slot.
   - **Threshold Steppers:** `Rotation threshold` (default 90%), `Codex quota threshold` (default 95%), `Retries` (1–10, default 3), `Cooldown` (1–1440 min, default 15m), and `Poll interval` (5–3600 s, default 60s).
   - **Runtime State Display:** Live status, active model, pending/saved checkpoint IDs, and uncertain effect counters.
 - **[Subagents] Tab:**
@@ -61,7 +61,7 @@ dependencies on the HUD extension are needed; the listener is removed at shutdow
 
 ### 3. Quota Management & Hierarchical Failover (`src/quota-manager.ts`)
 - **Account Discovery:** Discovers available CLIProxyAPI credentials via `/v0/management/auth-files` and merges them with host-registered models.
-- **OpenAI Codex Dual-Window Monitoring (Wham):** Evaluates usage across 5-hour primary (`18,000s`) and 7-day secondary (`604,800s`) windows. If either window reaches the policy threshold (`codexQuotaThresholdPercent >= 95%`), the candidate is marked ineligible.
+- **OpenAI Codex Dual-Window Monitoring (Wham):** Evaluates usage across 5-hour primary (`18,000s`) and 7-day secondary (`604,800s`) windows. If either window's usage reaches `>= codexQuotaThresholdPercent` (default `95%`, range `1–100`), the candidate is marked ineligible.
 - **Google Gemini Quota:** Tracks remaining quota fractions across resource buckets.
 - **Reset-Return Engine:** Detects when an exhausted primary account's `reset_at` has expired and automatically routes back to it.
 - **Error Classifier:**
@@ -73,8 +73,8 @@ dependencies on the HUD extension are needed; the listener is removed at shutdow
 
 ### 4. Context Guard & Clean Session Rotation (`src/context-guard.ts`, `src/bridge.ts`)
 - **Strict 90% Boundary:** Context tokens are evaluated strictly against reported usage; tools execute without speculative batch inflation.
-- **Whitelisted Tools:** `memory_*`, `mem_*`, and `supervisor_rotate` tools are never blocked by context ceilings.
-- **Checkpoint Request:** When context reaches $\ge 90\%$, the supervisor injects a structured checkpoint prompt instructing the model to call `supervisor_rotate` with a concise 150–250-word continuity summary.
+- **Whitelisted Tools:** `memory_*`, `supervisor_rotate`, and `subagent_run` are never blocked by context ceilings.
+- **Checkpoint Request & `supervisor_rotate` Tool:** When context reaches $\ge 90\%$, the supervisor injects a structured checkpoint prompt instructing the model to call `supervisor_rotate` (`summary`: 1–12,000 chars, or `memory_id`: positive integer, plus optional `continue_task` boolean defaulting to `false`). The tool uses compact inline rendering (`compactToolRenderingVersion = 1`, `compactLeftMargin = 1`, `renderShell = 'self'`, muted expanded fallback `#7aa7b8`).
 - **Verified Preflight:** Saves the summary via `memory:supervisor:checkpoint:v1` and verifies readback before initiating rotation.
 - **Session Handover:** Issues an internal `/supervisor-rotate <token>` command, opens a fresh session with `ctx.newSession()`, and sends the continuity checkpoint once through the replacement context's `sendUserMessage()`. This starts the normal first-user-message lifecycle (including memory activation), without command/template expansion or a second custom-message turn. The checkpoint remains explicitly historical context, not new consent; `continue_task` determines whether to resume already-authorized work or report and wait.
 
@@ -93,9 +93,9 @@ dependencies on the HUD extension are needed; the listener is removed at shutdow
 |---|---|
 | `PI_SUPERVISOR_DISABLED` | Set to `'1'` to disable supervisor runtime initialization. |
 | `PI_SUPERVISOR_RUNTIME_DIR` | Custom directory path for supervisor state, journals, locks, and subagent pool leases (defaults to `.runtime/`). |
+| `PI_CODING_AGENT_DIR` | Optional agent directory override used when resolving global configuration scope (`<agentDir>/orchestrator-supervisor/`). |
+| `CLIPROXYAPI_BASE_URL` | Base URL for CLIProxyAPI management/quota endpoints (defaults to `http://127.0.0.1:8317`). |
 | `PI_NTFY_URL` | Optional ntfy push notification endpoint for session rotations, model failovers, and critical supervisor alerts. |
-
-Backward compatibility aliases `GENTLE_SUPERVISOR_DISABLED` and `GENTLE_SUPERVISOR_RUNTIME_DIR` are respected if their `PI_*` counterparts are unset.
 
 ---
 

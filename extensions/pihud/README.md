@@ -6,7 +6,7 @@ Controla el HUD de j0k3r (`j0k3r-pi-hud`) desde Pi, sin compilar herdr.
 
 | Comando | Efecto |
 | --- | --- |
-| `/hud open` | Divide el panel de Pi a la derecha (~20 %) sin robar foco y arranca el HUD. Idempotente. |
+| `/hud` o `/hud open` | Divide el panel de Pi a la derecha (~20 %) sin robar foco y arranca el HUD. Idempotente (`/hud` sin argumentos equivale a `/hud open`). |
 | `/hud close` | Cierra solo el panel del HUD y recuerda que quedó cerrado. |
 
 Al iniciar con `j0k3r-pi` dentro de herdr el HUD se abre solo
@@ -32,7 +32,7 @@ y `HERDR_SOCKET_PATH`).
 
 ## Estado
 
-Un archivo por panel de Pi en `~/.cache/j0k3r-pihud/<sha256>.json`:
+Un archivo por panel de Pi en `${XDG_CACHE_HOME:-~/.cache}/j0k3r-pihud/<sha256>.json`:
 
 ```json
 {"piPane":"w1:p1","hudPane":"w1:p2","terminalId":"term_…","visible":true}
@@ -130,8 +130,9 @@ No se alteran ajustes ni se eliminan entradas anteriores del historial.
 | --- | --- |
 | `HERDR_ENV`, `HERDR_PANE_ID`, `HERDR_SOCKET_PATH` | Los inyecta herdr. Sin ellos la extensión no hace nada. |
 | `PIHUD_AUTO` | Solo `1` activa la apertura automática. Lo define `j0k3r-pi`; sin la variable, Pi no abre el HUD solo. |
-| `PIHUD_BIN` | Binario del HUD. Por defecto `~/.local/bin/j0k3r-pi-hud`. |
-| `PIHUD_RATIO` | Proporción del panel de Pi. Por defecto `0.80`. |
+| `PIHUD_BIN` | Binario externo del HUD (`j0k3r-pi-hud`). Por defecto `~/.local/bin/j0k3r-pi-hud`. |
+| `PIHUD_RATIO` | Proporción del panel de Pi (`0 < ratio < 1`). Por defecto `0.80`. |
+| `XDG_CACHE_HOME` | Directorio base de caché (por defecto `~/.cache`, guarda estado en `<cache>/j0k3r-pihud/`). |
 
 ## Archivos
 
@@ -150,6 +151,14 @@ live.test.ts          publicación de estado, deduplicación en reposo y reempla
 
 ## Validar
 
+Desde `extensions/pihud`:
+
 ```sh
-node --test extension/*.test.ts
+node --test *.test.ts
+```
+
+O desde la raíz del repositorio:
+
+```sh
+node --test extensions/pihud/*.test.ts
 ```

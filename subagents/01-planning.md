@@ -22,9 +22,6 @@ tools:
   - codegraph_explore
   - codegraph_node
   - codegraph_impact
-  - typesafe_circuit_breaker
-  - typesafe_check_overengineering
-  - typesafe_evaluate
 ---
 
 # 01 — Planning Subagent

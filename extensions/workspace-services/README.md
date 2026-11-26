@@ -4,7 +4,8 @@ Pi extension for Linux-only management of declared local services and Docker Com
 
 ## Configuration
 
-Create a project-local config file at `.pi/workspace-services.json`:
+1. Enable `"workspace-services": true` in `<cwd>/.pi/extensions.json` (toggleable via `/extension` or `/tools-manager`); without it, the extension does not register its tools.
+2. Create a project-local config file at `.pi/workspace-services.json`:
 
 ```json
 {

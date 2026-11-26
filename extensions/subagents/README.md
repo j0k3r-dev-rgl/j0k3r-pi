@@ -98,7 +98,7 @@ El render de herramientas (`subagent_run`, tools inyectadas `ask_orchestrator`/`
 
 ## Compact Tool Rendering & Panel Contracts (v1)
 
-Pinned owner contract for `compact-tool-rendering` (`MINI-001`) as amended by `tui-rendering-and-subagents-lazy-load` (`MINI-001`: decisions D1, D2, D3, and D4 Option A), using installed Pi `1.5.2` `ToolRenderContext` and `ToolRenderResultOptions` directly without sibling extension imports.
+Pinned owner contract for `compact-tool-rendering` (`MINI-001`) as amended by `tui-rendering-and-subagents-lazy-load` (`MINI-001`: decisions D1, D2, D3, and D4 Option A), using Pi's `ToolRenderContext` and `ToolRenderResultOptions` directly without sibling extension imports (package `engines.node >= 22.19.0`).
 
 ### Tool & Nested Replay Conformance
 - **Marker & Slots**: `subagent_run`, child-injected `ask_orchestrator`/`report_orchestrator`, and compliant external/nested definitions declare `compactToolRenderingVersion: 1` (presentation metadata only) with `renderShell: "self"` and exception-safe `renderCall` + `renderResult` slots, plus `compactLeftMargin: 1` on `subagent_run`, `ask_orchestrator`, and `report_orchestrator` (and their rendered components) so the 1-character left margin is emitted once without doubling in host or nested replay.
@@ -126,7 +126,7 @@ Pinned owner contract for `compact-tool-rendering` (`MINI-001`) as amended by `t
 - **Lazy Selected-Task Hydration & Bounded LRU Cache**: Non-selected tasks are never eagerly hydrated via `getTask`; selecting/displaying a task hydrates its full record and thread snapshot on demand, caches it in a bounded LRU map, and invalidates cleanly on task updates, attempt changes, or panel close. Sidebar list metadata and elapsed-duration ticks never hydrate or reconstruct unrelated threads.
 - **Incremental Viewport-Only Thread Rendering & Content-Fresh Caching**: Opening or scrolling a task with a large thread snapshot (e.g., 150–200 items) constructs and renders only the items needed for the active viewport window (including follow-tail bottom window and incremental expansion on scroll up/down or page jump) rather than eagerly building all items up front. Rendered item lines are cached and reused across unchanged frames while cache keys cover all visible body inputs (content, tool arguments/results/errors, metadata, attempt, theme, width, image settings, expansion/thinking state, live active tools, resolved renderer)—not item count or timestamps alone—so same-length and equal-timestamp mutations invalidate immediately while preserving click targets and `task_id` resolution.
 - **Event-Driven Refresh (Zero Idle Polling)**: `panel-overlay.ts` replaces unconditional 1-second `setInterval` polling with `manager.onTaskUpdate` subscription plus conditional live ticking only while active (`queued`, `running`, `stopping`) tasks exist. When all visible/session tasks are terminal and no task update or user input arrives, `panel-overlay` triggers zero periodic `tui.requestRender()` calls; when an active task exists or `manager.onTaskUpdate` fires, the panel refreshes promptly and releases all listeners and timers on close or reload.
-- **Test & Baseline Scope**: Existing tests asserting single-line clipped headers or ellipsis truncation on tool rows, `subagent-completion`, `subagents-history-panel`, or `background-widget` (or plain-white expanded bodies) are updated under `UNIT-SUBAGENTS` (`MINI-003`, `MINI-004`) while retaining payload/delivery, continuation, safe-error, redaction, width-fit, margin, width-2 wide-grapheme, and verbatim bash CR/CRLF regressions. Pre-apply baseline under Node `v24.22.3`: `npm run typecheck` passes (`tsc --noEmit`) and `node --experimental-strip-types test/compact-panel-benchmark.mjs` completes all 7 scenarios and 5 freshness checks (`active1Marked` coldOpen median `2.103ms` / 30 assistant + 30 tool constructions; warmFrame median `0.329ms`; zero non-selected hydration reads); `MINI-003` and `MINI-008` extend the benchmark with many-subagents / large-snapshot viewport and idle-refresh measurements.
+- **Test & Benchmark Validation**: Run `npm run check` (`tsc --noEmit` + test suite) and `node --experimental-strip-types test/compact-panel-benchmark.mjs` to validate panel cold/warm frame performance, lazy hydration, viewport rendering, and zero idle refresh ticks alongside payload/delivery, continuation, safe-error, redaction, width-fit, margin, and verbatim bash CR/CRLF regressions.
 
 El modelo no tiene tools separadas de consulta, resultados ni cancelación. El usuario conserva el historial y la cancelación en `/subagents`; los entregables persistidos pueden leerse con `read`. Tras compactar contexto, no se garantiza recuperación programática de resultados históricos arbitrarios sin un artefacto o una continuación habilitada; continuar ejecuta un nuevo intento y no equivale a leer un resultado almacenado.
 
@@ -148,24 +148,32 @@ subagent_mode: background
 Lee únicamente el alcance asignado y documenta la evidencia.
 ```
 
-`tools` es una allowlist y acepta comodines sobre herramientas activas del padre. Las herramientas `subagent_*` están bloqueadas en las sesiones anidadas: los subagentes no pueden delegar entre sí. Las modificaciones Markdown se leen en la siguiente ejecución.
+`tools` es una allowlist y acepta comodines sobre herramientas activas del padre; si se omite `tools:`, aplica `default_tools` (`['read', 'memory_context', 'memory_search', 'memory_get']`). Mezclar `tools:` inline separado por comas con lista YAML multilínea bloquea la carga de esa definición con advertencia. El frontmatter también acepta `model` y `effort` (o `thinking_level` / `thinkingLevel`). Las herramientas `subagent_*` están bloqueadas en las sesiones anidadas: los subagentes no pueden delegar entre sí. Las modificaciones Markdown se leen en la siguiente ejecución.
 
 ## Configuración
 
-La configuración de `.pi/subagents.json` del proyecto sobrescribe los campos presentes en `$PI_CODING_AGENT_DIR/subagents.json` o `~/.pi/agent/subagents.json`. Los campos ausentes heredan el valor global y luego el default built-in. La extensión actual lee la configuración local sin una comprobación adicional de confianza; úsala solo en proyectos confiables.
+La configuración de `.pi/subagents.json` del proyecto sobrescribe los campos presentes en `$PI_CODING_AGENT_DIR/subagents.json` o `~/.pi/agent/subagents.json`. Los campos ausentes heredan el valor global y luego el default built-in (se aceptan también alias `camelCase` equivalentes como `enableContinue`, `sessionResources`, `backgroundHandoffShortcut`, `historyPanelShortcut`, `detailCancelShortcut`, `renderDebug`). La extensión actual lee la configuración local sin una comprobación adicional de confianza; úsala solo en proyectos confiables.
 
 | Campo | Default built-in | Propósito |
 |---|---|---|
 | `default_mode` | `"task"` | Modo cuando no lo especifican llamada o definición. |
 | `enable_continue` | `false` | Habilita únicamente `action: "continue"`; no bloquea `message`. |
+| `default_model` | *(heredado)* | Modelo por defecto (`"provider/id"` u objeto `ModelRef`) cuando no hay asignador ni modelo en frontmatter. |
+| `default_effort` | *(heredado)* | Nivel de esfuerzo por defecto (alias `default_thinking_level`, `thinkingLevel`). |
+| `model_profiles` | `{}` | Mapa por nombre de subagente con overrides `{ model, effort }`. |
+| `default_tools` | `["read", "memory_context", "memory_search", "memory_get"]` | Allowlist aplicada si un subagente omite `tools:`. |
 | `timeout_ms` | `1200000` | Tiempo máximo por tarea. |
-| `stall_timeout_ms` | `240000` | Límite de inactividad. |
+| `stall_timeout_ms` | `240000` | Límite de inactividad general. |
+| `tool_stall_timeout_ms` | `1800000` | Límite de inactividad (30 min) mientras una tool está ejecutando. |
 | `max_concurrency` | `5` | Ejecuciones simultáneas máximas. |
 | `session_resources` | `"lean"` | Aislamiento del prompt de la sesión anidada. |
 | `debug` | `false` | Logs en `.pi/subagents-debug.log` del workspace ejecutor. |
+| `render_debug` | `{ enabled: false }` | Registro JSONL de diagnóstico de render (default `os.tmpdir()/pi-subagents-render.jsonl`). |
 | `history_panel_shortcut` | `"ctrl+,"` | Abrir historial. |
-| `detail_cancel_shortcut` | `"x"` | Cancelar la tarea seleccionada. |
+| `detail_cancel_shortcut` | `"x"` | Cancelar la tarea seleccionada dentro de `/subagents` (solo se registra como atajo global de Pi si empieza por `ctrl+`). |
 | `background_handoff_shortcut` | `"ctrl+h"` | Enviar primer plano a background. |
+
+**Variables de entorno del índice SQLite (`src/history.ts`):** `PI_SUBAGENTS_HISTORY_DB_PATH` (ruta exacta del `.sqlite`), `PI_SUBAGENTS_HISTORY_HOME` o `XDG_DATA_HOME` (default `~/.local/share/pi/subagents/subagents-history.sqlite`).
 
 El modo lean carga herramientas permitidas y hooks de seguridad, sin inyectar contexto o skills globales. No se necesitan credenciales adicionales para esta herramienta: se utilizan los proveedores del runtime padre. No publiques secretos en definiciones, instrucciones ni logs.
 

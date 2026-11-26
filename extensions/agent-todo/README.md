@@ -13,7 +13,7 @@ Pi extension that gives the agent a single active task checklist for the current
 - `ctrl+space` shortcut to expand/collapse only the above-chat todo widget.
 - Optional provider data for other extensions, such as the Sidebar extension.
 - Branch-aware reconstruction from prior `agent_todo` tool results on session start/tree navigation.
-- Low-noise tool rendering: mutation results show compact summaries instead of the full checklist every time.
+- Low-noise compact tool rendering (`compactToolRenderingVersion = 1`, `compactLeftMargin = 1`, `renderShell = 'self'`, ANSI-aware wrapping without ellipsis clipping, muted expanded body with `#7aa7b8` fallback): mutation results show compact summaries instead of the full checklist every time.
 
 ### Tool
 
@@ -78,11 +78,11 @@ The extension renders the active todo above the chat/editor with `ctx.ui.setWidg
 - Collapsed view is the default: dim compact summary, for example:
 
 ```text
-Agent Todo: implement feature · 2/5 complete · 3 open
+----- agent-todo implement feature ----- 2/5 complete 3 open
 ctrl+space to expand
 ```
 
-- Expanded view: title, progress, step list, and `ctrl+space to collapse` hint.
+- Expanded view: title, progress, step list arranged in columns of 5 (`TASKS_PER_COLUMN = 5`), and `ctrl+space to collapse` hint.
 
 Shortcut:
 
@@ -115,7 +115,7 @@ The provider name is `agent-todo.activeTodo`. At runtime the compatible provider
 
 Consumers can read the active todo without parsing tool output. The Sidebar extension uses this to render its Todo section and should fail closed if no provider/active todo exists.
 
-Provider payload shape:
+Provider payload shape when an active todo exists:
 
 ```ts
 {
@@ -127,18 +127,18 @@ Provider payload shape:
     body?: string;
     steps: Array<{ id: string; text: string; status: string }>;
     updated_at: string;
-  } | null;
+  };
 }
 ```
 
-When there is no active todo, `active_todo` is `null`.
+When there is no active todo, `getActiveTodo()` returns `null` directly.
 
 ### Runtime behavior
 
 - One active todo is allowed at a time.
 - Completing the final open step closes the active todo.
 - `complete_all` closes the active todo in one action.
-- `complete_range` accepts an inclusive numeric range (`2-4`) or start/end step ids.
+- `complete_range` accepts an inclusive numeric range (`2-4`) or start/end step ids (falling back to `step_id` if range/start/end are omitted).
 - `reopen_step` can reopen a step on the current active or completed todo, including an already-open step; after `clear`, there is no todo to reopen.
 - On session start or tree navigation, state is reconstructed from the current branch's prior successful version-1 `agent_todo` tool results.
 - On shutdown, the above-chat widget and provider are cleaned up.
@@ -179,7 +179,7 @@ Extensión de Pi que le da al agente una única checklist activa para la rama de
 - Atajo `ctrl+space` para expandir/colapsar solo el widget de todo arriba del chat.
 - Datos opcionales de provider para otras extensiones, como Sidebar.
 - Reconstrucción consciente de ramas a partir de resultados previos exitosos de `agent_todo` al iniciar sesión o navegar el árbol.
-- Renderizado de baja señal/ruido: los resultados de mutación muestran resúmenes compactos en vez de repetir toda la checklist cada vez.
+- Renderizado compacto de baja señal/ruido (`compactToolRenderingVersion = 1`, `compactLeftMargin = 1`, `renderShell = 'self'`, wrapping ANSI-aware sin elipsis, cuerpo expandido atenuado con fallback `#7aa7b8`): los resultados de mutación muestran resúmenes compactos en vez de repetir toda la checklist cada vez.
 
 ### Tool
 
@@ -244,11 +244,11 @@ La extensión renderiza el todo activo arriba del chat/editor con `ctx.ui.setWid
 - La vista colapsada es el default: resumen compacto tenue, por ejemplo:
 
 ```text
-Agent Todo: implement feature · 2/5 complete · 3 open
+----- agent-todo implement feature ----- 2/5 complete 3 open
 ctrl+space to expand
 ```
 
-- Vista expandida: título, progreso, lista de pasos y pista `ctrl+space to collapse`.
+- Vista expandida: título, progreso, lista de pasos distribuida en columnas de 5 (`TASKS_PER_COLUMN = 5`) y pista `ctrl+space to collapse`.
 
 Atajo:
 
@@ -281,7 +281,7 @@ El nombre del provider es `agent-todo.activeTodo`. En runtime el provider compat
 
 Los consumidores pueden leer el todo activo sin parsear salida de tools. La extensión Sidebar usa esto para renderizar su sección Todo y debe fallar de forma cerrada si no existe provider/todo activo.
 
-Forma del payload del provider:
+Forma del payload del provider cuando existe un todo activo:
 
 ```ts
 {
@@ -293,18 +293,18 @@ Forma del payload del provider:
     body?: string;
     steps: Array<{ id: string; text: string; status: string }>;
     updated_at: string;
-  } | null;
+  };
 }
 ```
 
-Cuando no hay todo activo, `active_todo` es `null`.
+Cuando no hay todo activo, `getActiveTodo()` devuelve `null` directamente.
 
 ### Comportamiento runtime
 
 - Se permite un único todo activo a la vez.
 - Completar el último paso abierto cierra el todo activo.
 - `complete_all` cierra el todo activo en una sola acción.
-- `complete_range` acepta un rango numérico inclusivo (`2-4`) o ids de paso inicio/fin.
+- `complete_range` acepta un rango numérico inclusivo (`2-4`) o ids de paso inicio/fin (con fallback a `step_id` si se omiten).
 - `reopen_step` puede reabrir un paso en el todo activo o completado actual, incluso si el paso ya está abierto; después de `clear`, no hay todo para reabrir.
 - Al iniciar sesión o navegar el árbol, el estado se reconstruye a partir de resultados previos exitosos versión 1 de `agent_todo` en la rama actual.
 - Al cerrar, se limpian el widget arriba del chat y el provider.

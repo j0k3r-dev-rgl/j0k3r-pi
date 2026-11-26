@@ -8,8 +8,8 @@ Project-local Pi extension for bounded REST, Swagger, and GraphQL API tools.
 - `api_auth_status`
 - `api_login`
 - `api_rest_request`
-- `api_swagger`
-- `api_graphql`
+- `api_swagger` *(registered conditionally only when `swagger.enabled === true` and valid)*
+- `api_graphql` *(registered conditionally only when `graphql.enabled === true` and valid)*
 
 Legacy GraphQL tools remain removed:
 
@@ -19,12 +19,13 @@ Legacy GraphQL tools remain removed:
 
 ## Enablement
 
-The extension reads exactly `<ctx.cwd>/.pi/api.json`.
-
-- no parent lookup
-- no global lookup
-- `enabled` must be exactly `true`
-- `graphql_url` alone never enables GraphQL
+1. **Workspace extension gate:** Enable `"api-tools": true` in `<ctx.cwd>/.pi/extensions.json` (toggleable via `/extension` or `/tools-manager`). Without it, only tool renderers are registered for history replay and no execution tools are registered.
+2. **API contract config:** Reads exactly `<ctx.cwd>/.pi/api.json`:
+   - no parent lookup
+   - no global lookup
+   - `enabled` must be exactly `true`
+   - `graphql_url` alone never enables GraphQL
+   - `swagger.framework` and `graphql.framework` accept `"spring"` or `"node"`; top-level `port` and `headers` are also supported.
 
 ## Example config
 

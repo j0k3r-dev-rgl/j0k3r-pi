@@ -7,7 +7,7 @@ Global Pi extension providing structured calls for every operation of the Planne
 | Tool | Caller | Purpose |
 |---|---|---|
 | `workflow_check({ change_dir, phase, baseline_id?, diagnostic_offset? })` | Orchestrator and authorized workers | Read-only boundary check, continuity snapshot, and Surface Check attribution; phases: `plan`, `apply`, `verify`, `deliver`, `snapshot`, `surface`. |
-| `workflow_record({ change_dir, action, ... })` | Orchestrator only | Update the change directory's `flow.json` or atomically archive a verified change; actions: `authorize`, `baseline`, `candidate`, `verify`, `archive`. |
+| `workflow_record({ change_dir, action, ..., diagnostic_offset? })` | Orchestrator only | Update the change directory's `flow.json` or atomically archive a verified change; actions: `authorize`, `baseline`, `candidate`, `verify`, `archive` (`diagnostic_offset` pages failed diagnostics only). |
 
 The planner uses `check`/`plan`, implementer `check`/`apply`, and independent verifier `check`/`verify` plus `check`/`snapshot` before READY. Workers must not have `workflow_record` in their allowlists. All tools return the next permitted action; none advances phases, delegates, implements, runs tests, or infers user consent automatically. Role separation is through caller permissions/worker allowlists, not an authenticated role claim in arguments or an OS sandbox.
 

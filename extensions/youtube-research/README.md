@@ -6,6 +6,17 @@
 
 A standalone Pi extension that adds five focused YouTube research tools.
 
+### Activation
+This extension is opt-in per project via `<cwd>/.pi/extensions.json` (toggleable through `/extension` or `/tools-manager`):
+
+```json
+{
+  "youtube-research": true
+}
+```
+
+Without `"youtube-research": true`, the five tools are not registered.
+
 ### Required runtime dependency
 - `yt-dlp` must be installed and available on `PATH` before using any tool.
 - If missing, tools return a `yt_dlp_missing` error with installation guidance.
@@ -66,6 +77,18 @@ Run from `extensions/youtube-research`:
 ## Español
 
 Extensión standalone de Pi que agrega cinco herramientas enfocadas para investigación en YouTube.
+
+### Activación
+
+Esta extensión es opt-in por proyecto mediante `<cwd>/.pi/extensions.json` (activable con `/extension` o `/tools-manager`):
+
+```json
+{
+  "youtube-research": true
+}
+```
+
+Sin `"youtube-research": true`, las cinco herramientas no se registran.
 
 ### Dependencia runtime requerida
 

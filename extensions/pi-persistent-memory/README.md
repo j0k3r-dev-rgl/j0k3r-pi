@@ -12,7 +12,7 @@ Status: **MINI-001–MINI-006 completed and validated; user message history enab
 
 The extension is global to this agent directory and uses Pi's native resource controls (`pi config`), not `.pi/extensions.json` opt-in flags. Project identity configuration is read only from trusted `.pi/memory.json`; otherwise the existing remote/folder fallback applies. No prior database is imported or deleted automatically.
 
-Semantic indexing/search uses E5 at `http://127.0.0.1:8000`. If unavailable, saved text remains pending and hybrid/semantic search falls back visibly to FTS5; `memory_search` with `mode: fts5` avoids E5 entirely. Use `memory_save` for both new records and same-topic updates within approved scope. Session summaries remain explicit-user-request only.
+Semantic indexing/search uses E5 at `http://127.0.0.1:8000` (overridable via `BASE_URL_EMBEDING`). If unavailable, saved text remains pending and hybrid/semantic search falls back visibly to FTS5; `memory_search` with `mode: fts5` avoids E5 entirely. Use `memory_save` for both new records and same-topic updates within approved scope. Session summaries remain explicit-user-request only.
 
 ## Optional human-only HUD bridge
 
@@ -41,8 +41,8 @@ The extension exposes a dedicated request-reply channel on Pi's shared `EventBus
   * Guarantees: Automatically activates scope and session in SQLite, executes the official 3-phase pipeline (`saveAndIndexMemory`), and performs immediate readback verification via `readMemoryDetail` before replying.
   * Reply: `{ ok: boolean, id?, committed?, indexed?, indexing_status?, topic_key?, content_version?, readbackVerified?, error? }`.
 - **Action `get`**:
-  * Input: `{ action: "get", cwd, sessionId?, id, global?, cursor?, respond }`.
-  * Guarantees: Performs scoped retrieval via `readMemoryDetail` and extracts topic key metadata.
+  * Input: `{ action: "get", cwd, sessionId?, id, global?, cursor?, readAll?, respond }`.
+  * Guarantees: Performs scoped retrieval via `readMemoryDetail` (optionally reading all pages when `readAll: true`) and extracts topic key metadata.
   * Reply: `{ ok: boolean, id?, title?, content?, type?, topic_key?, content_version?, has_more?, next_cursor?, error? }`.
 
 
@@ -150,14 +150,14 @@ Graph entity IDs are strings from `memory_entity`, not integer memory IDs. Entit
 ## Architecture and Scope (MINI-001)
 
 - **Storage Foundation**: Single shared SQLite database at `~/.memory/memories.db` (directory mode `0700`, file mode `0600`), accessed on demand via `withDatabase` (`node:sqlite` DatabaseSync) with WAL journal mode, `foreign_keys = ON`, `busy_timeout = 5000`, and `sqlite-vec 0.1.9` loaded natively and locked down.
-- **Schema v1**: Versioned metadata (`schema_meta`), `sessions`, `memories` with unconditional `topic_key` uniqueness, `chunks`, `memory_vectors` (vec0 float[384] cosine embedding with partition key), `memory_fts` (FTS5 lexical index), `entities`, `relations`, and `memory_entity_links`.
+- **Schema v2**: Versioned metadata (`schema_meta`, `SCHEMA_VERSION = 2` with automatic v1→v2 migration), `sessions`, `memories` with unconditional `topic_key` uniqueness, `chunks`, `memory_vectors` (vec0 float[384] cosine embedding with partition key), `memory_fts` (FTS5 lexical index), `entities`, `relations`, `memory_entity_links`, plus project-isolated user prompt history tables `user_messages` and `user_messages_fts`.
 - **Project Identity**: Exact home directory resolves to global scope (`["global"]`); descendant directories resolve via trusted `.pi/memory.json` (actionable error if invalid or empty), name-ordered normalized git remote (standard SSH/HTTPS only, unsupported remotes reject explicitly), or folder name fallback.
 - **Session Lifecycle**: Normal sessions activate only on first user message (`message_start` where role is user), never on load/start/selection. Normal shutdown (`new`, `quit`, `resume`, `fork`) closes activated sessions. Reload preserves parent session state.
 - **Subagent Invocation Lease Protocol**: Optional runtime-local lease rendezvous (`memory:invocation:bind:v1`) over child EventBus. Immutable per-attempt identity, activation on first user message, in-flight operation fencing, terminal child session cleanup (empty sessions deleted; sessions with retained active or soft-deleted knowledge preserved closed). Reload coordinates clean runner drain and lease termination without timeouts or deadlocks.
 
 ## Architecture and Scope (MINI-002)
 
-- **E5 HTTP Contract Client**: Package-local `E5Client` consuming the local English E5 service at `http://127.0.0.1:8000` via Node built-in `fetch`. Enforces single total 120s embedding deadline and 3s health deadline across headers and body read, zero retries, and caller/lease cancellation precedence. Validates canonical metadata (`intfloat/e5-small-v2`, revision `ffb93f3bd4047442299a41ebb6fa998a38507c52`, 384 dimensions, L2 normalization within 1e-4, 512 max input tokens). Enforces Unicode code point spans (`Array.from(source)`), contiguous coverage, ordered chunk indices, token count <= 512, query exactly 1 chunk, bounded response body ceiling (4 MiB), and client-side preflight body byte check (<= 1 MiB). Errors classified into `unavailable`, `input_error`, `integration_error`, and `cancelled`.
+- **E5 HTTP Contract Client**: Package-local `E5Client` consuming the local English E5 service at `http://127.0.0.1:8000` (or `BASE_URL_EMBEDING`) via Node built-in `fetch`. Enforces single total 120s embedding deadline and 3s health deadline across headers and body read, zero retries, and caller/lease cancellation precedence. Validates canonical metadata (`intfloat/e5-small-v2`, revision `ffb93f3bd4047442299a41ebb6fa998a38507c52`, 384 dimensions, L2 normalization within 1e-4, 512 max input tokens). Enforces Unicode code point spans (`Array.from(source)`), contiguous coverage, ordered chunk indices, token count <= 512, query exactly 1 chunk, bounded response body ceiling (4 MiB), and client-side preflight body byte check (<= 1 MiB). Errors classified into `unavailable`, `input_error`, `integration_error`, and `cancelled`.
 - **Passage Input Mapping**: Composed source for passage embeddings is strictly `title + '\n' + content`. Original title and content are stored separately in `memories`, while chunk text and spans refer to this composed text.
 - **Save & Publication Pipeline**: Internal `saveAndIndexMemory` prevalidates targets (`target_not_found`, `target_deleted` requiring explicit restore, `target_conflict`) and commits text and FTS5 in a single atomic `BEGIN IMMEDIATE` transaction; POSTs to E5 outside any database connection; publishes validated chunks and vec0 rows in a fresh short transaction conditional on unchanged `content_version`, owner, and active state. In-flight generation failures leave text and FTS intact with status `pending` (not `failed`) and conditional sanitized `pending_reason` so diagnostics and recovery find them.
 - **Sequential Recovery & Continuation**: Internal `reindexMemories` supports explicit ID targeting, current scope pending, or all-project pending with explicit `explicitAllProjects: true`. Processes at most 5 memories strictly sequentially per invocation, committing each before proceeding. Unavailability stops batch immediately. Output envelopes <= 6 KiB UTF-8, counts include earlier failed records, and continuation cursor binds scope, operation, high-water ID, last ID, and a SHA-256 dataset fingerprint that invalidates if records are modified externally. No automatic traversal.
@@ -225,16 +225,16 @@ Graph entity IDs are strings from `memory_entity`, not integer memory IDs. Entit
   - Normal sessions require first user message activation; calls before first message fail with `session_not_active` without touching SQLite.
   - Shutdown or reload aborts active operation signals and marks generation unusable.
 - **Inline Memory Rendering (`src/render/`)**:
-  - Transparent self shell (`renderShell: 'self'`) with no background, card, or border; rows start collapsed.
+  - Transparent self shell (`compactToolRenderingVersion = 1`, `compactLeftMargin = 1`, `renderShell = 'self'`) with no background, card, or border; rows start collapsed.
   - Native `ToolExecutionComponent` and `MouseRegion` handle primary click expand/collapse in fullscreen TUI mode; terminal scrollback preserved in regular mode.
-  - Collapsed view is one light-blue/cyan line (`#87cefa`): 🧠, actual tool name, concise arguments, status/counts, continuation notice when needed, and native `app.tools.expand` key hint. Long call previews are visually truncated to terminal width without changing tool output.
-  - Expanded view shows only the complete returned text blocks in cyan, wrapped to terminal width, without a repeated header or appended details. Pagination information remains in the returned text.
+  - Collapsed view wraps width-safely (with 1-column left margin, exception at width 2) showing 🧠, actual tool name, concise arguments, status/counts, and continuation notice when needed — without truncating headers or generating an `app.tools.expand` key hint.
+  - Expanded view shows the complete returned text blocks in muted styling (`theme.fg('muted', ...)` with `#7aa7b8` fallback), wrapped to terminal width, without a repeated header or appended details. Pagination information remains in the returned text.
   - Pure visual toggle: expansion never triggers database queries, model calls, or network requests.
 - **Output Budget Ceiling**: Complete serialized `AgentToolResult` (`content` + `details` + `isError`) strictly bounded <= 6144 bytes UTF-8 across all tools.
 
 ## Final Integrated Validation (MINI-006)
 
-- Real isolated Pi SDK calls exercise all nine public tools together: save/index/detail/context/search/graph/delete/deleted-list/restore/reindex/update, every approved relation type, foreign-scope denials, explicit global reads, and data-preserving graph links.
+- Real isolated Pi SDK calls exercise all ten public tools together: save/index/detail/context/search/history/graph/delete/deleted-list/restore/reindex/update, every approved relation type, foreign-scope denials, explicit global reads, and data-preserving graph links.
 - Actual child EventBus binding and lean-filtered tools preserve the native child ID and parent attribution across continuation, close retained child records and remove empty ones. Simultaneous project saves and registered shutdown handlers cover scope isolation and no extra reload requests. These SDK handler tests complement prior runner/manager regression; they do not modify a user's session or settings.
 - Public `memory_relation` schemas derive their enum from the graph vocabulary. Cancelled, invalid-input and integration-failed embeddings return an error with committed text/pending state explicitly retained. Availability failures still preserve a successful text save with indexing pending.
 - Normal test fixtures inject a deterministic `OfflineE5Client`; loopback HTTP fixtures test transport behavior. An optional test preload rejects real E5 and external fetch calls during offline regression:

@@ -6,6 +6,18 @@
 
 Pi extension for reading local PDF files as agent context.
 
+### Activation
+
+This extension is opt-in per project via `<cwd>/.pi/extensions.json` (toggleable through `/extension` or `/tools-manager`):
+
+```json
+{
+  "pdf-review": true
+}
+```
+
+Without `"pdf-review": true`, `pdf_extract` is not registered.
+
 ### Tools
 
 #### `pdf_extract`
@@ -41,6 +53,18 @@ npm run typecheck
 ## Español
 
 Extensión de Pi para leer archivos PDF locales como contexto del agente.
+
+### Activación
+
+Esta extensión es opt-in por proyecto mediante `<cwd>/.pi/extensions.json` (activable con `/extension` o `/tools-manager`):
+
+```json
+{
+  "pdf-review": true
+}
+```
+
+Sin `"pdf-review": true`, `pdf_extract` no se registra.
 
 ### Herramientas
 

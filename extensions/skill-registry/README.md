@@ -22,11 +22,11 @@ Agent-dir development version of a future Pi skill registry extension. It genera
   - `.pi/skill-registry.json`
   - `.pi/skill-registry.md`
 - Adds generated registry files to an existing `.gitignore` when missing; it does not create `.gitignore` if none exists.
-- Exposes an LLM-callable tool and human slash command.
+- Exposes two LLM-callable tools (`skill_registry_generate`, `skill_registry_resolve`) and the `/skill-registry` slash command.
 
 #### Enable gate
 
-The extension only registers when `.pi/skill-registry.config.json` exists with `{"enabled": true}` in project scope. Missing or invalid config defaults to disabled.
+The extension searches upward from `process.cwd()` through ancestor directories for `.pi/skill-registry.config.json` and only registers when that file exists with `{"enabled": true}`. Missing or invalid config defaults to disabled.
 
 Example config:
 
@@ -88,7 +88,7 @@ Behavior:
   - no `SKILL.md` content is included,
   - read only selected `SKILL.md` files before applying their instructions; candidates are not mandatory loads.
 - A missing or stale cache does not block live routing or require a refresh. Reserve cache writes for authorized maintenance.
-- Interactive TUI rendering is one compact inline row without card frames or generated expansion hints: the detailed routing result stays in tool content/details, and Pi's native `app.tools.expand` action reveals every match, reason, guidance and warning.
+- Interactive TUI rendering uses Pi's compact self-shell (`compactToolRenderingVersion = 1`, `compactLeftMargin = 1`, `renderShell = 'self'`) with ANSI-aware wrapping across narrow viewports (no card frames or generated expansion hints) and muted expanded body text (`#7aa7b8` fallback): the detailed routing result stays in tool content/details, and Pi's native `app.tools.expand` action reveals every match, reason, guidance and warning.
 
 Response shape includes:
 
@@ -108,6 +108,7 @@ Response shape includes:
     live_hash: string,
     cached_hash?: string,
     cache_path: string,
+    error?: string,
   },
   matches: Array<{
     name: string,
@@ -129,6 +130,7 @@ Response shape includes:
     name: string,
     path: string,
     scope: 'project' | 'global',
+    priority: number,
     routing: Record<string, unknown>,
     read_before_acting: string,
     related_from: string[],
@@ -235,11 +237,11 @@ Versión de desarrollo en agent-dir de una futura extensión de skill registry p
   - `.pi/skill-registry.json`
   - `.pi/skill-registry.md`
 - Agrega archivos de registry generados a un `.gitignore` existente cuando faltan; no crea `.gitignore` si no existe.
-- Expone una tool invocable por LLM y un comando slash humano.
+- Expone dos tools invocables por LLM (`skill_registry_generate`, `skill_registry_resolve`) y el comando slash `/skill-registry`.
 
 #### Gate de activación
 
-La extensión solo se registra cuando `.pi/skill-registry.config.json` existe con `{"enabled": true}` en scope de proyecto. Config faltante o inválida queda deshabilitada por defecto.
+La extensión busca en forma ascendente desde `process.cwd()` por directorios ancestros hasta encontrar `.pi/skill-registry.config.json` y solo se registra cuando existe con `{"enabled": true}`. Config faltante o inválida queda deshabilitada por defecto.
 
 Ejemplo de config:
 
@@ -301,7 +303,7 @@ Comportamiento:
   - no incluye contenido de `SKILL.md`,
   - lee solo los `SKILL.md` seleccionados antes de aplicar sus instrucciones; los candidatos no son cargas obligatorias.
 - Una caché faltante o desactualizada no bloquea el routing vivo ni requiere refrescarla. Reserva las escrituras de caché para mantenimiento autorizado.
-- El render TUI interactivo es una sola fila inline compacta, sin marcos de tarjeta ni indicaciones de expansión generadas: el resultado detallado de routing queda en content/details de la tool y la acción nativa `app.tools.expand` de Pi revela cada match, razón, guía y advertencia.
+- El render TUI interactivo usa el contrato compacto de Pi (`compactToolRenderingVersion = 1`, `compactLeftMargin = 1`, `renderShell = 'self'`) con wrapping ANSI-aware en anchos estrechos (sin marcos de tarjeta ni indicaciones de expansión generadas) y texto expandido atenuado (`#7aa7b8` fallback): el resultado detallado de routing queda en content/details de la tool y la acción nativa `app.tools.expand` de Pi revela cada match, razón, guía y advertencia.
 
 La forma de respuesta incluye:
 
@@ -321,6 +323,7 @@ La forma de respuesta incluye:
     live_hash: string,
     cached_hash?: string,
     cache_path: string,
+    error?: string,
   },
   matches: Array<{
     name: string,
@@ -342,6 +345,7 @@ La forma de respuesta incluye:
     name: string,
     path: string,
     scope: 'project' | 'global',
+    priority: number,
     routing: Record<string, unknown>,
     read_before_acting: string,
     related_from: string[],
@@ -375,10 +379,13 @@ Comportamiento del comando:
 
 ### Comportamiento del registry
 
+El esquema v2 del registry usa `workflow_phases`; las llamadas de `resolve` usan `workflow_phase`. Regenera los archivos derivados tras actualizar y recarga Pi antes de invocar el parámetro renombrado. Los artefactos y sesiones históricas existentes no se reescriben.
+
 - La salida del registry se ordena por priority descendente y luego nombre de skill ascendente.
 - Una skill con metadata `registry:` válida se indexa para routing.
 - Una skill sin un mapa `registry:` válido se ignora silenciosamente; su frontmatter nativo de Pi sigue siendo válido e independiente.
 - Nombres de skill duplicados entre las skills indexadas producen un warning; duplicados posteriores se ignoran.
+- El generador también advierte sobre metadata débil de routing: categorías desconocidas, entradas `related` autorreferenciales y `phases` no vacías en skills que no pertenecen a categorías `workflow`, `transversal`, `quality` o `security`.
 - La metadata fuente del registry vive en el frontmatter del SKILL bajo un mapa opcional `registry:` de un nivel.
 
 ### Convención de metadata de registry
@@ -406,10 +413,11 @@ registry:
 
 Reglas de normalización del registry:
 
-- `category`: string escalar.
+- `category`: string escalar. Preferir valores de: `workflow`, `transversal`, `quality`, `security`, `base`, `runtime`, `product`, `domain`, `helper`.
 - `domains`, `paths`, `keywords`, `phases`, `related`: escalares separados por comas que se normalizan a arrays de strings trimmeados.
+- Reservar `phases` no vacías para owners de workflow y guardrails transversales reales (`workflow`, `transversal`, `quality`, `security`). La mayoría de skills de dominio/helper deben dejar `phases` vacío y basarse en intención + rutas.
 - `priority`: escalar numérico normalizado al número de prioridad de routing existente.
-- Omite campos opcionales vacíos en lugar de dejarlos en blanco.
+- Omite campos opcionales vacíos en lugar de dejarlos en blanco, y omite todo el mapa `registry:` si la skill no debe participar en el routing.
 
 Usa `templates/skill-template.md` desde esta extensión mientras sea local al agent-dir. Más adelante esta extensión y sus templates pueden moverse a la configuración global del agente Pi o a un paquete.
 

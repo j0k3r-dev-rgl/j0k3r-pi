@@ -4,7 +4,7 @@ Pi TUI extension that opens a themed split overlay for reviewing local Git chang
 
 ## Usage
 
-- Command: `/git-diff [worktree]`
+- Command: `/git-diff [worktree]` — pass `all` (case-insensitive) to open the `ALL` worktrees view, or any substring matching a worktree branch or path.
 - Shortcut: `alt+g`
 
 ## UI
@@ -20,8 +20,8 @@ Pi TUI extension that opens a themed split overlay for reviewing local Git chang
 - `W`: cycle to previous worktree tab.
 - `j` / `down`: move down in tree, or scroll 1 line down in diff.
 - `k` / `up`: move up in tree, or scroll 1 line up in diff.
-- `ctrl+j`: scroll 15 lines down in diff (nvim style).
-- `ctrl+k`: scroll 15 lines up in diff (nvim style).
+- `ctrl+j` / `pageDown` / `ctrl+d`: scroll 15 lines down in diff.
+- `ctrl+k` / `pageUp` / `ctrl+u`: scroll 15 lines up in diff.
 - `h` / `left`: focus tree, or collapse selected folder/worktree while tree is focused.
 - `l` / `right`: focus diff, or expand selected folder/worktree while tree is focused.
 - `enter` / `space`: toggle folder/worktree expand/collapse, or focus diff on file.
@@ -35,4 +35,13 @@ Pi TUI extension that opens a themed split overlay for reviewing local Git chang
 
 ## Notes
 
-The extension shells out to local `git` only. It does not use `gh` and does not send output to the model. The overlay is TUI-only and requires an active Pi interactive session.
+The extension shells out to local `git` only. It does not use `gh` and does not send output to the model. The overlay is TUI-only and requires an active Pi interactive session. Modified files show combined staged (`--cached`) and unstaged diffs; untracked files are read directly from disk with binary detection (first 8,000 bytes) and synthetic diff truncation at 2,000 lines.
+
+## Validation
+
+Run from `extensions/git-diff-panel`:
+
+```bash
+npm run typecheck
+node --test test/panel.test.ts
+```

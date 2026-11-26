@@ -2,12 +2,24 @@
 
 Native Pi extension for controlling an already-running Chrome through the Chrome DevTools Protocol (CDP).
 
+## Activation
+
+This extension is opt-in per project via `<cwd>/.pi/extensions.json` (toggleable through `/extension` or `/tools-manager`):
+
+```json
+{
+  "browser-screenshot": true
+}
+```
+
+If `"browser-screenshot": true` is not present, the extension does not register its tools.
+
 ## Tools
 
-- `browser_cdp_status` — check the local CDP endpoint.
-- `browser_tabs_list` — list existing page targets without exposing debugger websocket URLs.
+- `browser_cdp_status` — check the local CDP endpoint (default `cdpUrl`: `http://127.0.0.1:9222`).
+- `browser_tabs_list` — list existing page targets without exposing debugger websocket URLs (`limit`: `1..50`, default `20`).
 - `go_to_page` — navigate one existing page target and wait for `Page.loadEventFired`.
-- `browser_page_screenshot` — save a full-page PNG and optionally attach it inline.
+- `browser_page_screenshot` — save a full-page PNG and optionally attach it inline (`maxInlineBytes`: `1024..52428800`, default `5 MiB`).
 
 ### `go_to_page`
 
@@ -27,4 +39,13 @@ Then:
 {"targetId":"<target id returned by go_to_page>"}
 ```
 
-The extension returns bounded summaries and never exposes credentials, raw CDP payloads, or `webSocketDebuggerUrl`. Local/private HTTP(S) destinations remain allowed because navigation controls an existing user browser; no new private-network policy is introduced. Default screenshots are saved under `.pi/browser-screenshots/` in the current workspace. Tool rows use one compact inline identity/summary row without card frames or expansion hints; Pi's native expansion reveals CDP details, tab lists, navigation timing and screenshot metadata, and inline images keep Pi's native image handling.
+The extension returns bounded summaries and never exposes credentials, raw CDP payloads, or `webSocketDebuggerUrl`. Local/private HTTP(S) destinations remain allowed because navigation controls an existing user browser; no new private-network policy is introduced. Default screenshots are saved under `.pi/browser-screenshots/` in the current workspace, and the extension automatically adds `.pi/browser-screenshots/` to `.git/info/exclude` when inside a Git repository. Tool rows use Pi's compact self-shell (`compactToolRenderingVersion = 1`, `compactLeftMargin = 1`, `renderShell = 'self'`) with ANSI-aware wrapping and no card frames or expansion hints; Pi's native expansion reveals CDP details, tab lists, navigation timing and screenshot metadata, and inline images keep Pi's native image handling.
+
+## Validation
+
+Run from `extensions/browser-screenshot`:
+
+```bash
+npm test
+npm run typecheck
+```

@@ -155,12 +155,17 @@ Picker-specific bindings are not reserved by Pi's extension conflict check. For 
 | Extension | Shortcut | Command / action | Status |
 |---|---:|---|---|
 | `agent-todo` | `ctrl+space` | Toggle the above-chat todo widget expanded/collapsed | Active |
-| `git-diff-panel` | `alt+g` | `/git-diff [worktree]` — Open split overlay for reviewing Git changes and worktrees | Active |
-| `cpamc-usage` | none | `/usage` — Open CLIProxyAPI quota and usage modal | Active command |
-| `j0k3r-model-picker` | none | `/model-select [ref]`, `/ms` — Open model selector modal | Active command |
-| `skill-registry` | none | `/skill-registry generate` — Generate skill registry files | Active command |
+| `git-diff-panel` | `alt+g` | `/git-diff [worktree\|all]` — Open split overlay for reviewing Git changes and worktrees | Active |
+| `tools-manager` | `alt+e` | `/extension`, `/tools-manager` — Open TUI modal to toggle project opt-in extensions in `.pi/extensions.json` | Active |
+| `cpamc-usage` | none | `/usage [--text]` — Open CLIProxyAPI quota and usage modal (or print text report) | Active command |
+| `google-tts` | none | `/tts [config\|on\|off\|stream\|play\|pause\|resume\|stop\|model\|speed\|voice\|style\|speak]` — Control Gemini speech and settings | Active command |
+| `j0k3r-model-picker` | none | `/model-select [ref]`, `/ms [ref]` — Open model selector modal | Active command |
+| `j0k3r-theme` | none | `/banner [default\|mustache\|cat\|oni]` — Switch and persist the startup welcome banner | Active command |
+| `orchestrator-supervisor` | none | `/supervisor` — Open two-tab orchestrator and subagent pool supervisor dashboard | Active command |
+| `pihud` | none | `/hud [open\|close]` — Open or close the live companion HUD pane inside Herdr | Active command |
+| `skill-registry` | none | `/skill-registry [generate\|refresh\|write\|status\|list]` — Manage skill registry files | Active command |
 | `subagents` | `ctrl+,` | `/subagents` — Open the subagent history panel | Active |
-| `subagents` | `ctrl+h` | Send the running Claude-mode subagent task to background | Active default; configurable via `subagents.json` |
+| `subagents` | `ctrl+h` | Send the running foreground subagent task to background | Active default; configurable via `subagents.json` |
 | `subagents` | `ctrl+o` | Expand/collapse rendered tool output inside the subagent history panel | Panel-local; uses Pi `app.tools.expand` binding |
 
 ## Control-key candidates for subagents

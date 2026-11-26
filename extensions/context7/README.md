@@ -32,7 +32,7 @@ When copied into a project-local Pi setup, the equivalent path is:
 .pi/extensions/context7/index.ts
 ```
 
-Pi auto-discovers project-local extensions from `.pi/extensions/*/index.ts` once the project is trusted. Use `/reload` after changing extension code during an interactive session.
+Pi auto-discovers project-local extensions from `.pi/extensions/*/index.ts` once the project is trusted, and tool registration additionally requires `"context7": true` in `<cwd>/.pi/extensions.json` (toggleable via `/extension` or `/tools-manager`). Use `/reload` after changing extension code or `.pi/extensions.json` during an interactive session.
 
 ### Required environment
 
@@ -305,7 +305,7 @@ Cuando se copia a una configuración Pi local de proyecto, la ruta equivalente e
 .pi/extensions/context7/index.ts
 ```
 
-Pi autodetecta extensiones locales de proyecto desde `.pi/extensions/*/index.ts` una vez que el proyecto es confiable. Usa `/reload` después de cambiar código de extensión durante una sesión interactiva.
+Pi autodetecta extensiones locales de proyecto desde `.pi/extensions/*/index.ts` una vez que el proyecto es confiable, y el registro de tools requiere además `"context7": true` en `<cwd>/.pi/extensions.json` (activable vía `/extension` o `/tools-manager`). Usa `/reload` después de cambiar código de extensión o `.pi/extensions.json` durante una sesión interactiva.
 
 ### Entorno requerido
 

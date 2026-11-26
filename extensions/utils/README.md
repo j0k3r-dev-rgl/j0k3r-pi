@@ -6,6 +6,18 @@
 
 General-purpose Pi utility tools.
 
+### Activation
+
+This extension is opt-in per project via `<cwd>/.pi/extensions.json` (toggleable through `/extension` or `/tools-manager`):
+
+```json
+{
+  "utils": true
+}
+```
+
+If `"utils": true` is not present, the extension loads without registering `screenshot` or `markdown_to_audio`. Tool rows use Pi's compact self-shell (`compactToolRenderingVersion = 1`, `compactLeftMargin = 1`, `renderShell = 'self'`, width-safe ANSI wrapping, muted expanded body with `#7aa7b8` fallback).
+
 ### Tools
 
 #### `screenshot`
@@ -32,7 +44,7 @@ Parameters:
 - `windowTitle` — optional title to match when `target` is `window` and `windowId` is not provided.
 - `match` — optional `windowTitle` match mode: `exact`, `contains`, or `regex`. Defaults to `contains`.
 - `outputPath` — optional PNG output path, relative to the workspace or absolute. Defaults to a temporary `.png` file. Ignored for `action: "list-windows"`.
-- `maxInlineBytes` — optional maximum PNG size to attach inline. Defaults to 5 MiB. Ignored for `action: "list-windows"`.
+- `maxInlineBytes` — optional maximum PNG size to attach inline (`1024` to `50 MiB`). Defaults to 5 MiB. Ignored for `action: "list-windows"`.
 
 Runtime requirements:
 
@@ -88,11 +100,11 @@ Parameters:
 - `language` — optional language/voice code, such as `es`, `es_ES`, `es_MX`, or `en_US`. Defaults to `es`.
 - `voiceModel` — optional Piper `.onnx` model path. If omitted, the tool searches `/usr/share/piper-voices`.
 - `voiceQuality` — optional Piper voice quality preference: `auto`, `high`, `medium`, or `low`. `auto` prefers `medium`, then `low`, then `high` to balance quality and generation time.
-- `speed` — optional speech speed. Values from `0.25` to `4` are relative multipliers where `1` is normal. For `espeak-ng`, values above `4` are treated as words per minute. For Piper, this maps to Piper `--length-scale` as `1 / speed`.
-- `sentenceSilence` — Piper-only seconds of silence after each sentence. Useful for more natural narration pacing.
-- `noiseScale` — Piper-only generator noise scale. Piper default is usually `0.667`.
-- `noiseW` — Piper-only phoneme-width variation. Piper default is usually `0.8`.
-- `mp3BitrateKbps` — optional MP3 bitrate in kbps when `outputPath` ends in `.mp3`. Defaults to `64`, which is compact and usually enough for spoken-word audio.
+- `speed` — optional speech speed (`0.25` to `450`). Values from `0.25` to `4` are relative multipliers where `1` is normal. For `espeak-ng`, values above `4` are treated as words per minute. For Piper, this maps to Piper `--length-scale` as `1 / speed`.
+- `sentenceSilence` — Piper-only seconds of silence after each sentence (`0` to `5`). Useful for more natural narration pacing.
+- `noiseScale` — Piper-only generator noise scale (`0` to `2`). Piper default is usually `0.667`.
+- `noiseW` — Piper-only phoneme-width variation (`0` to `2`). Piper default is usually `0.8`.
+- `mp3BitrateKbps` — optional MP3 bitrate in kbps (`16` to `320`) when `outputPath` ends in `.mp3`. Defaults to `64`, which is compact and usually enough for spoken-word audio.
 
 ### Runtime requirements
 
@@ -237,6 +249,18 @@ npm run typecheck
 
 Herramientas utilitarias generales para Pi.
 
+### Activación
+
+Esta extensión es opt-in por proyecto mediante `<cwd>/.pi/extensions.json` (activable con `/extension` o `/tools-manager`):
+
+```json
+{
+  "utils": true
+}
+```
+
+Si `"utils": true` no está presente, la extensión no registra `screenshot` ni `markdown_to_audio`. Las filas de tool usan render compacto (`compactToolRenderingVersion = 1`, `compactLeftMargin = 1`, `renderShell = 'self'`, wrapping ANSI-aware y cuerpo expandido atenuado con fallback `#7aa7b8`).
+
 ### Herramientas
 
 #### `screenshot`
@@ -263,7 +287,7 @@ Parámetros:
 - `windowTitle` — título opcional para hacer match cuando `target` es `window` y no se pasa `windowId`.
 - `match` — modo opcional de match para `windowTitle`: `exact`, `contains` o `regex`. Por defecto es `contains`.
 - `outputPath` — ruta opcional de salida PNG, relativa al workspace o absoluta. Por defecto usa un `.png` temporal. Se ignora con `action: "list-windows"`.
-- `maxInlineBytes` — tamaño máximo opcional del PNG para adjuntar inline. Por defecto 5 MiB. Se ignora con `action: "list-windows"`.
+- `maxInlineBytes` — tamaño máximo opcional del PNG para adjuntar inline (`1024` a `50 MiB`). Por defecto 5 MiB. Se ignora con `action: "list-windows"`.
 
 Requisitos runtime:
 
@@ -319,11 +343,11 @@ Parámetros:
 - `language` — código opcional de idioma/voz, como `es`, `es_ES`, `es_MX` o `en_US`. Por defecto `es`.
 - `voiceModel` — ruta opcional a modelo Piper `.onnx`. Si se omite, la herramienta busca en `/usr/share/piper-voices`.
 - `voiceQuality` — preferencia opcional de calidad de voz Piper: `auto`, `high`, `medium` o `low`. `auto` prefiere `medium`, luego `low`, luego `high` para balancear calidad y tiempo de generación.
-- `speed` — velocidad opcional de habla. Valores de `0.25` a `4` son multiplicadores relativos donde `1` es normal. Para `espeak-ng`, valores mayores a `4` se tratan como palabras por minuto. Para Piper, esto mapea a `--length-scale` como `1 / speed`.
-- `sentenceSilence` — segundos de silencio después de cada oración, solo Piper. Útil para pacing de narración más natural.
-- `noiseScale` — escala de ruido del generador, solo Piper. El default de Piper suele ser `0.667`.
-- `noiseW` — variación de ancho de fonemas, solo Piper. El default de Piper suele ser `0.8`.
-- `mp3BitrateKbps` — bitrate MP3 opcional en kbps cuando `outputPath` termina en `.mp3`. Por defecto `64`, compacto y normalmente suficiente para audio hablado.
+- `speed` — velocidad opcional de habla (`0.25` a `450`). Valores de `0.25` a `4` son multiplicadores relativos donde `1` es normal. Para `espeak-ng`, valores mayores a `4` se tratan como palabras por minuto. Para Piper, esto mapea a `--length-scale` como `1 / speed`.
+- `sentenceSilence` — segundos de silencio después de cada oración (`0` a `5`), solo Piper. Útil para pacing de narración más natural.
+- `noiseScale` — escala de ruido del generador (`0` a `2`), solo Piper. El default de Piper suele ser `0.667`.
+- `noiseW` — variación de ancho de fonemas (`0` a `2`), solo Piper. El default de Piper suele ser `0.8`.
+- `mp3BitrateKbps` — bitrate MP3 opcional en kbps (`16` a `320`) cuando `outputPath` termina en `.mp3`. Por defecto `64`, compacto y normalmente suficiente para audio hablado.
 
 ### Requisitos runtime
 

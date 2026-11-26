@@ -6,6 +6,18 @@
 
 Read-only Pi extension for bounded web, community, GitHub, and research search.
 
+### Activation
+
+This extension is opt-in per project via `<cwd>/.pi/extensions.json` (toggleable through `/extension` or `/tools-manager`):
+
+```json
+{
+  "websearch": true
+}
+```
+
+Without `"websearch": true`, the public search tools are not registered.
+
 The extension intentionally exposes a small public tool surface. Provider/source-specific implementations remain internal and testable, while agents interact through parent search tools and grouped detail routers.
 
 ### Public tool surface
@@ -371,6 +383,18 @@ npm test -- registration.test.ts tool-consolidation.test.ts
 ## Español
 
 Extensión read-only de Pi para búsquedas acotadas en web, comunidades, GitHub e investigación.
+
+### Activación
+
+Esta extensión es opt-in por proyecto mediante `<cwd>/.pi/extensions.json` (activable con `/extension` o `/tools-manager`):
+
+```json
+{
+  "websearch": true
+}
+```
+
+Sin `"websearch": true`, las herramientas públicas de búsqueda no se registran.
 
 La extensión expone intencionalmente una superficie pública pequeña. Las implementaciones específicas de provider/fuente permanecen internas y testeables, mientras los agentes interactúan mediante tools parent de búsqueda y routers agrupados de detalle.
 
