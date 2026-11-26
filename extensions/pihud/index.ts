@@ -2,7 +2,6 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createController } from "./src/controller.ts";
-import { createFocusGuard } from "./src/guard.ts";
 import { registerLiveEvents } from "./src/events.ts";
 
 const ACTIONS = ["open", "close"];
@@ -38,9 +37,6 @@ export default function pihud(pi: ExtensionAPI) {
   const controller = createController({ pane, socket, bin, ratio, exec });
   const live = registerLiveEvents(pi, { pane, socket });
   let context: ExtensionContext | undefined;
-  let guard: ReturnType<typeof createFocusGuard> | undefined;
-  let guardPane = "";
-  let warned = false;
   let visible = false;
   let presenceTimer: ReturnType<typeof setInterval> | undefined;
   let checkingPresence = false;
@@ -57,35 +53,22 @@ export default function pihud(pi: ExtensionAPI) {
     context?.ui.notify(message, kind);
   }
 
-  function watch(hudPane: string) {
-    if (guard && guardPane === hudPane) {
-      publishPresence(true);
-      return;
-    }
-    guard?.stop();
-    guardPane = hudPane;
-    warned = false;
-    guard = createFocusGuard({
-      piPane: pane,
-      hudPane,
-      socket,
-      onError: (error) => {
-        if (warned) return;
-        warned = true;
-        notify(`HUD: no pude devolver el foco a Pi (${failure(error)})`, "warning");
-      },
-    });
-    guard.start();
+  function watch() {
     publishPresence(true);
     if (!presenceTimer) {
-      presenceTimer = setInterval(async () => {
+      const timer = setInterval(async () => {
         if (checkingPresence) return;
         checkingPresence = true;
         try {
-          if (!await controller.isOpen()) { unwatch(); publishPresence(false); }
+          if (!await controller.isOpen()) {
+            if (presenceTimer !== timer) return;
+            unwatch();
+            publishPresence(false);
+          }
         } catch { /* Transient transport failures do not prove the HUD closed. */ }
         finally { checkingPresence = false; }
       }, 2000);
+      presenceTimer = timer;
       presenceTimer.unref?.();
     }
   }
@@ -93,9 +76,6 @@ export default function pihud(pi: ExtensionAPI) {
   function unwatch() {
     if (presenceTimer) clearInterval(presenceTimer);
     presenceTimer = undefined;
-    guard?.stop();
-    guard = undefined;
-    guardPane = "";
   }
 
   async function open(cwd: string): Promise<string> {
@@ -106,7 +86,7 @@ export default function pihud(pi: ExtensionAPI) {
       publishPresence(false);
       return result;
     }
-    if (state?.hudPane) watch(state.hudPane);
+    if (state?.hudPane) watch();
     return result;
   }
 

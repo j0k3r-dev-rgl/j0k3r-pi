@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { createLiveWriter, summarizeArgs, type LiveState } from "./live.ts";
+import { createLiveWriter, livePayloadKey, summarizeArgs, type LiveSnapshot, type LiveState } from "./live.ts";
 import { readMetrics, parseTokenSpeed } from "./metrics.ts";
 import { readPanels, type Panels } from './panels.ts';
 
@@ -16,6 +16,7 @@ export function registerLiveEvents(pi: ExtensionAPI, options: { pane: string; so
   let pending: Promise<void> = Promise.resolve();
   let panels: Panels | undefined;
   let panelTimer: ReturnType<typeof setInterval> | undefined;
+  let lastPublishedKey: string | undefined;
 
   function updatePanels(ctx: ExtensionContext) {
     panels = readPanels(pi, ctx);
@@ -34,20 +35,25 @@ export function registerLiveEvents(pi: ExtensionAPI, options: { pane: string; so
     context = ctx;
     state = next ?? state;
     last = { kind, label, detail };
+    const snapshot: LiveSnapshot = {
+      sessionPath: ctx.sessionManager.getSessionFile() ?? "",
+      sessionId: ctx.sessionManager.getSessionId?.() ?? '',
+      panels,
+      cwd: ctx.cwd,
+      model: ctx.model?.id ?? "",
+      provider: ctx.model?.provider ?? "",
+      thinking: ctx.thinkingLevel,
+      ...readMetrics(ctx),
+      ...(hasPiSpeed ? { tps, tpsSource: "pi" as const } : {}),
+    };
+    const key = livePayloadKey(kind, label, detail, state, snapshot);
+    if (key === lastPublishedKey) return;
+    lastPublishedKey = key;
     try {
-      pending = live.push(kind, label, detail, state, {
-        sessionPath: ctx.sessionManager.getSessionFile() ?? "",
-        sessionId: ctx.sessionManager.getSessionId?.() ?? '',
-        panels,
-        cwd: ctx.cwd,
-        model: ctx.model?.id ?? "",
-        provider: ctx.model?.provider ?? "",
-        thinking: ctx.thinkingLevel,
-        ...readMetrics(ctx),
-        ...(hasPiSpeed ? { tps, tpsSource: "pi" as const } : {}),
-      });
+      pending = live.push(kind, label, detail, state, snapshot);
       await pending;
     } catch (error) {
+      if (lastPublishedKey === key) lastPublishedKey = undefined;
       if (warned) return;
       warned = true;
       ctx.ui.notify(`HUD: no pude publicar el estado (${error instanceof Error ? error.message : String(error)})`, "warning");
@@ -74,6 +80,7 @@ export function registerLiveEvents(pi: ExtensionAPI, options: { pane: string; so
   pi.on("session_start", (_event, ctx) => {
     if (panelTimer) clearInterval(panelTimer);
     panels = undefined;
+    lastPublishedKey = undefined;
     if (ctx.mode === 'tui') {
       panelTimer = setInterval(() => { void updatePanels(ctx); }, 700);
       panelTimer.unref?.();
@@ -119,6 +126,7 @@ export function registerLiveEvents(pi: ExtensionAPI, options: { pane: string; so
         streamTimer = undefined;
         if (context) await publish(context, last.kind, last.label, last.detail);
       }
+      lastPublishedKey = undefined;
       context = undefined;
       await pending.catch(() => undefined);
       await live.flush();

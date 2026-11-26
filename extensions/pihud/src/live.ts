@@ -60,6 +60,35 @@ export function summarizeArgs(tool: string, args: unknown): string {
   }
 }
 
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      const item = (value as Record<string, unknown>)[key];
+      if (item !== undefined) out[key] = canonicalize(item);
+    }
+    return out;
+  }
+  return value;
+}
+
+export function livePayloadKey(
+  kind: string,
+  label: string,
+  detail = "",
+  state: LiveState = "working",
+  snapshot?: LiveSnapshot,
+): string {
+  return JSON.stringify(canonicalize({
+    ...snapshot,
+    kind,
+    label: clean(label, 60),
+    detail: clean(detail),
+    state,
+  }));
+}
+
 export function createLiveWriter(options: { pane: string; socket: string; root?: string; now?: () => Date }) {
   const file = livePath(options.pane, options.socket, options.root);
   const now = options.now ?? (() => new Date());

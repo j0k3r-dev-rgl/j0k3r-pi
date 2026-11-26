@@ -6,7 +6,7 @@ Controla el HUD de j0k3r (`j0k3r-pi-hud`) desde Pi, sin compilar herdr.
 
 | Comando | Efecto |
 | --- | --- |
-| `/hud open` | Divide el panel de Pi a la derecha (~20 %), arranca el HUD y fija el foco en Pi. Idempotente. |
+| `/hud open` | Divide el panel de Pi a la derecha (~20 %) sin robar foco y arranca el HUD. Idempotente. |
 | `/hud close` | Cierra solo el panel del HUD y recuerda que quedó cerrado. |
 
 Al iniciar con `j0k3r-pi` dentro de herdr el HUD se abre solo
@@ -17,15 +17,18 @@ Al salir de Pi
 
 ## Foco
 
-herdr 0.9.5 no permite marcar un panel como “no enfocable”. Esta extensión
-escucha `pane.focused` por el socket de herdr y, si el foco cae en el HUD, lo
-devuelve a Pi de inmediato. Los clics y la rueda siguen llegando al HUD, pero
-el teclado vuelve siempre a Pi.
+Al abrir el HUD, la extensión usa `--no-focus` para que el foco inicial
+permanezca en Pi, y ya no escucha `pane.focused` ni emite `pane.focus`. Al
+hacer clic o usar la rueda sobre el HUD se acepta el foco nativo de herdr, sin
+ningún retorno automático por ratón ni por inactividad.
 
-Queda una ventana de décimas de segundo entre el clic y la devolución del foco;
-se reduce porque el propio HUD también devuelve el foco al recibir cualquier
-clic o tecla. El HUD descarta todas las teclas, así que ninguna tecla perdida en
-esa ventana puede cerrarlo ni ejecutar nada.
+Si el HUD tiene el foco y recibe entrada de teclado (cualquier tecla que no sea
+un evento de ratón), el binario Go del HUD reenvía los bytes de forma literal a
+Pi mediante `pane.send_text` seguido de `pane.focus` en orden estricto FIFO
+sobre `HERDR_SOCKET_PATH`. La entrada de teclado nunca cierra el HUD (`/hud
+close` o salir de Pi siguen siendo el único cierre de ciclo de vida). Este
+reenvío requiere un panel objetivo de Pi y un socket de herdr válidos (`--pane`
+y `HERDR_SOCKET_PATH`).
 
 ## Estado
 
@@ -36,8 +39,14 @@ Un archivo por panel de Pi en `~/.cache/j0k3r-pihud/<sha256>.json`:
 ```
 
 El archivo `<sha256>.live.json` publica la sesión activa, cwd, modelo,
-esfuerzo, contexto y último evento de Pi. Se actualiza desde `session_start`,
-cambios de modelo/esfuerzo y eventos del agente, herramientas y diálogos.
+esfuerzo, contexto, paneles opcionales y último evento de Pi. Se actualiza desde
+`session_start`, cambios de modelo/esfuerzo y eventos del agente, herramientas y
+diálogos, pero de forma deduplicada: antes de escribir compara de manera
+determinista el estado significativo (excluyendo `seq` y `at`) y omite
+completamente la escritura si nada ha cambiado, evitando reescrituras y churn
+en reposo. El estado de deduplicación se reinicia en `session_start` y
+`session_shutdown` para que cada nueva sesión o recarga publique siempre su
+snapshot inicial.
 El HUD usa esa vinculación antes que la detección de herdr. Contexto, límite
 efectivo y porcentaje salen de `ctx.getContextUsage()`; los tokens in/out,
 caché y coste se suman desde los asistentes de la rama activa, igual que el
@@ -64,7 +73,11 @@ hasta 160, sin controles de terminal), pero main no muestra actividad ni archivo
 
 `src/panels.ts` consulta los canales `pihud:main:read:v1`, `pihud:quota:read:v1`,
 `pihud:mem:read:v1`, `pihud:sup:read:v1` y `pihud:todo:read:v1` cada 700 ms desde la sesión TUI
-confiable. Incluye cwd e ID de sesión; sin extensión proveedora muestra un aviso.
+confiable para propagar actualizaciones en segundo plano (como cachés de cuota/E5
+o cambios de TODO) incluso con Pi en reposo; gracias a la deduplicación, solo
+reescribe `.live.json` cuando cambia algún dato real del estado o de los paneles,
+con cero escrituras en reposo cuando no hay cambios. Incluye cwd e ID de sesión;
+sin extensión proveedora muestra un aviso.
 No hay imports entre extensiones ni resultados enviados al modelo. Los datos se
 incluyen en el archivo privado `.live.json` para la TUI y se excluyen de la salida
 `--once --json` del binario. No compartas la caché: puede contener cuentas y memorias.
@@ -104,7 +117,7 @@ el HUD reaparezca solo tras un `/reload` o un cambio de sesión. Al iniciar
 un nuevo proceso iniciado con `j0k3r-pi` vuelve a abrirse (`PIHUD_AUTO=1`). Antes de
 cerrar, la extensión verifica que el panel siga siendo el suyo (mismo
 `terminal_id`); nunca cierra el panel de Pi. En cualquier cierre del runtime
-se detiene la guardia de foco y se esperan las escrituras pendientes; solo
+se detiene el monitor de presencia y se esperan las escrituras pendientes; solo
 `quit` cierra también el HUD.
 
 Los comandos automáticos llevan un espacio inicial para respetar
@@ -123,17 +136,16 @@ No se alteran ajustes ni se eliminan entradas anteriores del historial.
 ## Archivos
 
 ```text
-index.ts              registro de /hud y eventos de sesión
+index.ts              registro de /hud, monitor de presencia y eventos de sesión
 src/controller.ts     abrir/cerrar, estado y verificación del panel
-src/guard.ts          guardia de foco por eventos de herdr
 src/herdr.ts          socket: líneas JSON y envío puntual
-src/events.ts         eventos de Pi y snapshot de la sesión activa
-src/live.ts           escritura atómica del último evento
+src/events.ts         eventos de Pi y publicación deduplicada del snapshot activo
+src/live.ts           escritura atómica y clave determinista del último evento
 src/metrics.ts        métricas de rama activa y lectura del TPS opcional
 src/panels.ts         puentes opcionales de solo lectura para main/quota/mem/sup/todo
 controller.test.ts    ciclo de vida y protección del panel de Pi
-guard.test.ts         suscripción, corrección, dedupe y reconexión
-live.test.ts          publicación de estado y reemplazo de sesión
+index.test.ts         presencia, ciclo de vida y ausencia de guardia de foco
+live.test.ts          publicación de estado, deduplicación en reposo y reemplazo de sesión
 ```
 
 ## Validar

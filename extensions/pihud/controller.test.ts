@@ -63,7 +63,7 @@ test("open never focuses, quotes commands, and is idempotent", async (t) => {
   assert.equal(split[split.indexOf("--cwd") + 1], "/tmp/cwd ' spaces");
   assert.equal(split[split.indexOf("--ratio") + 1], "0.8");
   const run = f.calls.find((c) => c[1] === "run")!;
-  assert.match(run[3], /^exec '/);
+  assert.match(run[3], /^ exec '/, "automatic commands must use the shell's ignore-space history contract");
   assert.ok(run[3].includes("'\\''"));
   assert.match(run[3], /--pane 'w1:p1'/);
   assert.equal(await f.controller.open("/elsewhere"), "already-open");
@@ -119,6 +119,19 @@ test("concurrent opens split once; a missing HUD reopens", async (t) => {
   f.panes.delete("w1:p2");
   assert.equal(await f.controller.open("/tmp"), "opened");
   assert.equal(f.calls.filter((c) => c[1] === "split").length, 2);
+});
+
+test("live presence detects external close and reused terminals without changing cached ownership", async (t) => {
+  const f = await fixture(t);
+  await f.controller.open("/tmp");
+  assert.equal(await f.controller.isOpen(), true);
+  f.panes.get("w1:p2")!.terminal_id = "replacement";
+  assert.equal(await f.controller.isOpen(), false);
+  f.panes.delete("w1:p2");
+  assert.equal(await f.controller.isOpen(), false);
+  assert.equal((await f.controller.status())?.hudPane, "w1:p2");
+  f.control.failSnapshot = true;
+  await assert.rejects(f.controller.isOpen(), /socket unavailable/);
 });
 
 test("failed launch cleans up its own pane", async (t) => {
