@@ -4,13 +4,13 @@ description: "guide test-driven development (TDD) and regression strategy. Use f
 license: Apache-2.0
 metadata:
   author: j0k3r
-  version: "3.3"
+  version: "3.4"
 registry:
   category: "quality"
   domains: "tdd, testing, regression-testing"
   paths: "src/**, lib/**, app/**, packages/*/src/**, tests/**, test/**, spec/**, **/__tests__/**, **/*.test.*, **/*.spec.*"
   keywords: "tdd, red green refactor, regression test, failing test, characterization test, test layer, bug fix test, feature removal test"
-  phases: "apply, verify"
+  phases: "apply"
   related: "workflow-triage"
   priority: 90
 ---
@@ -39,6 +39,7 @@ It does not own workflow choice, repository-wide reorganization, dependency inst
 - Reuse the established test framework and layer from repository evidence.
 - Inspect existing tests before creating a new test file.
 - Prefer adapting the closest owning test file.
+- Keep production code and tests in separate directories (`src/` and `test/`, or the repository's existing separate test root such as `tests/`). Never create new colocated test files inside production source directories (`src/`, `lib/`, `app/`, etc.), unless the language or toolchain strictly requires same-directory test files (for example, Go `*_test.go` package tests) or the user explicitly instructs otherwise. Mirror the source structure under the dedicated test directory when creating new test files; default to `test/` when no separate test root exists yet.
 - Do not create duplicate test files, scenarios, fixtures, or helpers.
 - Run the narrowest useful baseline before changing existing behavior when the environment allows it.
 - Separate pre-existing failures from regressions introduced by the task.
@@ -47,15 +48,20 @@ It does not own workflow choice, repository-wide reorganization, dependency inst
 - For feature removal, delete obsolete tests and keep only coverage for supported behavior.
 - For security or safety-sensitive behavior, include tests for the prohibited outcome.
 - Execute TDD for behavior changes: observe the expected behavior fail before implementing the fix, then make the test pass and refactor as needed. Compilation failures and broken mocks are not behavior RED.
-- Follow `AGENTS.md`'s distinction between mandatory TDD execution and optional history: do not save cycle-by-cycle proof or reconstruct an earlier RED. Do not weaken production behavior or tests to manufacture a pass.
+- Follow `AGENTS.md`'s distinction between mandatory TDD execution and compact final reporting: do not save cycle-by-cycle proof or reconstruct an earlier RED. Do not weaken production behavior or tests to manufacture a pass.
 
 ## Validation Methods
 
 - **Behavior change or bug fix** → RED → GREEN → REFACTOR.
+- **Verification remediation (defects from failed `verify.md`)** → treat each behavioral defect as a bug fix: reproduce it with a failing regression test (RED) before fixing production code (GREEN).
 - **Behavior-preserving refactor** → BASELINE → REFACTOR → REGRESSION.
 - **Mechanical/generated change** → BASELINE → CHANGE → DIFF/REGRESSION.
 - **Documentation/config only** → structural validation.
 - **Pure removal with no observable absence contract** → remove obsolete tests, then run relevant regression coverage.
+- **Staged / parallel apply (`Preparation` / `Parallel Units` / `Integration`)**:
+  - `Preparation` (shared contracts/types/schemas): structural, type, or schema validation (plus contract tests when behavior exists).
+  - `Parallel Unit`: execute RED → GREEN → REFACTOR with focused tests inside the unit's own writable and validation scope against pinned Project Contracts or local doubles as needed; do not run repo-wide or shared-resource suites owned by Integration.
+  - `Integration`: validate real joined provider/consumer behavior beyond mocks (using RED → GREEN for integration gaps) and run the planned integrated regression command once.
 
 ## Decision Gates
 
@@ -63,9 +69,9 @@ Stop and trigger the decision protocol when:
 
 - no usable test framework or environment exists;
 - multiple frameworks plausibly own the same layer;
-- the necessary baseline cannot run because of unrelated failures;
+- unrelated failures prevent running even the narrow baseline for the touched area;
 - the correct test layer is unavailable;
-- relevant tests are colocated and migration is undecided;
+- existing relevant tests are colocated inside production directories and migrating them to the separate test directory is undecided (never create new colocated tests or silently migrate existing ones);
 - the right existing file needs a structural split first; or
 - the behavior needed for the current test-first change cannot be reproduced or tested.
 
@@ -80,7 +86,7 @@ These gates concern actual execution and validation, not missing records from ea
 1. Classify the change type.
 2. Detect the existing test framework, commands, roots, and candidate owner files.
 3. Run the narrowest baseline when needed.
-4. Select the owning test file or justify a new one.
+4. Select the owning test file in the separate test directory (`test/` or the repository's existing separate test root) or justify a new one there mirroring source structure; stop if writable scope omits the separate test root.
 5. Execute the matching validation method; confirm behavior RED during the work, without recording a TDD chronology.
 6. Run focused validation, then relevant broader regression checks.
 7. Report only final validation commands/results and unresolved risks in the normal task artifact or response.

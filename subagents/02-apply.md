@@ -46,7 +46,7 @@ The delegated prompt must provide the seven standard fields in order and must ex
 - the exact assigned apply summary path (`apply.md`, `apply-<UNIT-ID>.md`, `apply-preparation.md` or `apply-integration.md`);
 - exact authority artifact path or paths;
 - the scope-source artifact path that contains `## Execution Scope`;
-- exact assigned `SKILL.md` paths, including `skills/subagent-artifact-contracts/SKILL.md`; and
+- exact assigned `SKILL.md` paths, including `skills/subagent-artifact-contracts/SKILL.md` and, for code or test changes, `skills/tdd/SKILL.md`; and
 - the approved directory work area, referenced from Execution Scope rather than repeated as an inventory. Do not require predicted files or child-directory lists.
 
 If any required reference is missing, placeholder-based, contradictory, or outside scope, stop and use the Circuit Breaker below; never invent authority.
@@ -60,7 +60,8 @@ The authorization may be supplied in prose, but it must contain all required fac
 - **Parallel Unit mode**: when the prompt assigns a `UNIT-ID`, implement only that unit's MINI items, write only inside that unit's Writable Paths and the assigned `apply-<UNIT-ID>.md`, and run only that unit's validation. Other workers edit sibling units concurrently: never touch, revert, format, or stage files outside your unit, and never run repo-wide fixers, formatters, or `git` mutations. If your unit needs a file outside its surface, stop and name the file through the Circuit Breaker; only applicable approval relayed by the orchestrator can expand scope.
 - **Preparation/Integration mode**: Implement only the assigned stage MINI subset and approved surface. Preparation materializes/validates project contracts and records exact identities before consumers start. Integration starts only after prerequisite writers settle; implement assigned integration work and run the integrated command when owned. Never treat passing mocks as real provider/consumer integration or leave implementation for the verifier.
 - Treat shared contracts as read-only during unit execution. Report discrepancies through ask_orchestrator and wait when available; never silently revise a contract, organization decision, authorization boundary or another worker's surface. The parent supplies known facts or asks the user. Only affected/dependent work pauses; no authority to cancel independent siblings or invent a runtime channel.
-- Read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating the assigned summary.
+- Read `skills/tdd/SKILL.md` (when assigned) before modifying any implementation or test file, and read `skills/subagent-artifact-contracts/SKILL.md` before writing or updating the assigned summary.
+- Keep production code and tests in separate directories (`src/` and `test/`, or the repository's existing separate test root such as `tests/`) per `skills/tdd/SKILL.md`; never create new colocated test files inside `src/` or other production directories unless the language/toolchain strictly requires it or the user explicitly instructed otherwise. If `Writable Paths` omits the separate test root and would force colocation, stop and ask through the Circuit Breaker.
 - Use ready `plan.md` as the sole implementation contract, plus exact assigned skills and referenced discovery evidence when relevant.
 - Configuration Lock: never change configuration, dependencies, tooling, or environment as an incidental fix. Such changes require explicit user authorization, even inside writable paths.
 - Read only exact assigned skills.
@@ -69,26 +70,29 @@ The authorization may be supplied in prose, but it must contain all required fac
 - Resolve material scope, product, architecture, or authority gaps through the Circuit Breaker above; keep dependent work stopped until resolved.
 - Do not commit or push without explicit user approval.
 
-## Validation Rules
+## Execution Order & Validation Rules
 
-Execute the assigned `tdd` method and the validation required for the change type. Write only the compact implementation/authorization summary, actual changed files, final validation commands/results, and blockers defined by the assigned artifact contract. Do not record RED/GREEN histories, per-cycle logs, or retrospective proof. Do not invent extra validation or weaken production behavior to accommodate broken tests.
+1. **Gate first (new Planned changes):** Call `workflow_check` with the assigned change directory and phase `apply` before editing project files, requiring PASS for the current plan/authorization gate. Missing required tool access or a failed gate means `BLOCKED`. Never call `workflow_record`; candidate capture belongs to the orchestrator after the Surface Check. Historical exemptions must be explicit in the delegation.
+2. **Load contracts & skills:** Read `plan.md`, relevant Project Contracts, `skills/tdd/SKILL.md` (when assigned), and `skills/subagent-artifact-contracts/SKILL.md`.
+3. **Run narrow baseline:** Classify each assigned `MINI-###` by change type and run the narrowest useful baseline permitted by `Allowed Bash` before changing existing behavior.
+4. **Implement per MINI with TDD:** Execute the assigned `tdd` method for each assigned `MINI-###`. For behavior changes, bug fixes, and behavioral defects from a failed `verify.md`, write or adapt the test in the separate test directory first, observe real behavioral RED (not compile/setup/mock failures), implement the minimal change for GREEN, and refactor while staying green. In Parallel Unit mode, stay inside the unit's writable and isolated validation scope against pinned Project Contracts without running repo-wide/shared-resource suites owned by Integration. In Integration mode, prove real joined provider/consumer behavior beyond mocks and run the planned integrated validation once.
+5. **Final validation & compact summary:** Run the required final apply-phase validation and write only the compact implementation/authorization summary, actual changed files, final validation commands/results, and blockers defined by the assigned artifact contract. Do not record RED/GREEN histories, per-cycle logs, or retrospective proof, and never invent extra validation or weaken production behavior or tests to accommodate broken tests.
 
 ## Artifact Contract
 
 Use the `apply.md`, `Workflow Status`, and `Handoff` contracts from `skills/subagent-artifact-contracts/SKILL.md`.
 
-`READY` means implementation is complete and independently verifiable. Passing tests or typecheck is not sufficient by itself.
-
-For new Planned changes, call `workflow_check` with the assigned change directory and phase `apply` before returning READY; require PASS for the current plan/authorization gate. This does not validate your implementation or apply artifact: the tests and checks below still govern completion. Missing required tool access or a failed gate means BLOCKED. Never call `workflow_record`; candidate capture belongs to the orchestrator after the Surface Check. Historical exemptions must be explicit in the delegation.
+`READY` means implementation is complete and independently verifiable. Passing `workflow_check` (`phase: "apply"`) validates only the plan/authorization gate, not your implementation; the tests and checks below still govern completion.
 
 Before returning `READY`, check that:
 
+- the `workflow_check` phase `apply` gate passed for the current plan/receipt (recheck if any workflow input changed);
 - every assigned `MINI-###` is implemented or explicitly not applicable with user-approved authority (unit/stage workers never claim other workers' MINI items);
 - required apply-phase tests and regression checks have passed, with a compact final outcome summary;
 - no known defect or acceptance gap from prior verification remains unresolved; and
 - any checks assigned to later HTTP acceptance or independent verification are clearly pending, not claimed as completed.
 
-If required implementation behavior or apply-phase validation is incomplete, return `BLOCKED` and name the unmet requirement or command. Missing TDD-history records alone never block readiness or require rerunning completed work. Acceptance-level proof belongs to the independent verifier and applicable live acceptance, not a per-scenario matrix in apply.
+If required implementation behavior or apply-phase validation is incomplete, return `BLOCKED` and name the unmet requirement or command. Acceptance-level proof belongs to the independent verifier and applicable live acceptance, not a per-scenario matrix in apply.
 
 ## Handoff
 
